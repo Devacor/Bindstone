@@ -125,6 +125,20 @@ eng-&gt;add_variadic_function(&quot;sum_all&quot;, [&amp;eng](const std::vector&
 });
 eng-&gt;execute(&quot;sum_all(1, 2, 3, 4)&quot;).as_int();   // 10</code></pre></div>
 <p>Registering the same name twice with different signatures creates an <strong>overload set</strong> resolved by argument types at the call site. Use <code>add_variadic_function</code> for <code>print</code>-shaped functions and optional parameters.</p>
+<h3 id="host-direct-entries">A direct entry for a hot host function<a class="hlink" href="#host-direct-entries" aria-label="link">&#8203;</a></h3>
+<p>A typed <code>add_function</code> binding over plain values already has a fast call path. A variadic function goes through its <code>std::function</code> with an argument vector on every call. For one that scripts call in tight loops, give the engine an entry over the arguments where they are: <code>add_host_direct(name, arity, invoke, target)</code>. A VM call site whose callee is the function the name binds then calls <code>invoke(target, args, arity)</code> for a call of exactly <code>arity</code> arguments, none of them a reference. Every other call (another argument count, a reference argument, the interpreter, a name the host registers again or a script rebinds) calls the function, so <code>invoke</code> must return what the function returns for those arguments. Sharing one body between the two keeps them equal:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// one body for both: the function and its direct entry
+static jai::checked_result&lt;jai::script_value&gt; label_of(const void* target, const jai::script_value* args, size_t count) {
+    auto* eng = static_cast&lt;jai::engine*&gt;(const_cast&lt;void*&gt;(target));
+    if (count != 1) return jai::script_value(std::string(&quot;?&quot;), eng);
+    return jai::script_value(std::string(args[0].is_int() ? &quot;int&quot; : args[0].is_float() ? &quot;float&quot; : &quot;other&quot;), eng);
+}
+
+eng-&gt;add_variadic_function(&quot;label&quot;, [e = eng.get()](const std::vector&lt;jai::script_value&gt;&amp; args) {
+    return label_of(e, args.data(), args.size());
+});
+eng-&gt;add_host_direct(&quot;label&quot;, 1, &amp;label_of, eng.get());   // after the function: it keys on the function &quot;label&quot; binds now
+eng-&gt;execute(&quot;label(2.5)&quot;).as_string();                  // &quot;float&quot;</code></pre></div>
 <p>Every <code>script_value</code> you construct yourself needs the engine pointer: <code>jai::script_value(3.14159, eng.get())</code>, or use the convenience factories <code>eng-&gt;make_value(v)</code> / <code>eng-&gt;make_null()</code> / <code>eng-&gt;make_array()</code> / <code>eng-&gt;make_map()</code>.</p>
 <h2 id="globals-copies-vs-live-bindings">Globals: copies vs live bindings<a class="hlink" href="#globals-copies-vs-live-bindings" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_global(&quot;PI&quot;, jai::script_value(3.14159, eng.get()));   // copied in

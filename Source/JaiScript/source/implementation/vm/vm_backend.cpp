@@ -12676,9 +12676,20 @@ op_status vm_backend::exec_const_guard(frame& f, const vm_instruction& ins) {
 
 // the program-scope names a graft's argument proofs read still hold the kinds the checker proved them (their declaring unit may have run
 // again with another type): re-checked once per definition epoch; a name that resolves to anything else keeps the call
-bool vm_backend::inline_globals_hold(const chunk::inline_site& site) {
+bool vm_backend::inline_globals_hold(const frame& f, const chunk::inline_site& site) {
 	const uint64_t epoch = engine_->definition_epoch();
 	if (site.globals_epoch == epoch) return true;
+	uint64_t* worker_epoch = nullptr;   // a worker validates once per epoch in its own table (the shared site's epoch is the main thread's)
+	if (parallel_worker_) {
+		const size_t i = static_cast<size_t>(&site - f.code->inline_sites.data());
+		if (i < f.code->inline_sites.size()) {
+			if (worker_chunk_env_cache* rec = worker_chunk_record(f.code)) {
+				if (rec->site_epochs.size() < f.code->inline_sites.size()) { rec->site_epochs.resize(f.code->inline_sites.size(), 0); }
+				worker_epoch = &rec->site_epochs[i];
+				if (*worker_epoch == epoch) return true;
+			}
+		}
+	}
 	for (const proof_global& g : site.proof_globals) {
 		const uint64_t sym = g.symbol;
 		const uint16_t kind = g.kind;
@@ -12713,7 +12724,7 @@ bool vm_backend::inline_globals_hold(const chunk::inline_site& site) {
 		}
 	}
 	if (!site.forward_callees.empty() && !inline_forward_callees_hold(site)) return false;
-	if (!parallel_worker_) { site.globals_epoch = epoch; }
+	if (!parallel_worker_) { site.globals_epoch = epoch; } else if (worker_epoch) { *worker_epoch = epoch; }
 	return true;
 }
 // a forwarded parameter's callees: each name still binds the program-scope function whose parameters the forwarding read
@@ -12732,7 +12743,7 @@ JAI_NOINLINE bool vm_backend::inline_forward_callees_hold(const chunk::inline_si
 bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
 	if (debug_hook_ || (site.plain_numeric && has_custom_numeric_ops_)) return false;
 	if (current_call_depth_ >= limits_->vm_depth_gate) [[unlikely]] return false;   // the fallback call passes the gate (the cap raises there, a frame-storage charge runs)
-	if (site.epoch_checked && !inline_globals_hold(site)) return false;
+	if (site.epoch_checked && !inline_globals_hold(f, site)) return false;
 	if (site.method) return inline_method_holds(f, site);
 	if (site.env_reads && f.locals && !f.top_level) {
 		ensure_frame_member_scope(f, environment_.get());

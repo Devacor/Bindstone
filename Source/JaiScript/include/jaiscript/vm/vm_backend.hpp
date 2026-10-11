@@ -441,6 +441,7 @@ namespace jai::vm {
             // in a region shares this node instead of allocating per evaluation, and the
             // main engine's node is never touched from the worker thread
             std::vector<script_value> string_constants;
+            std::vector<uint64_t> site_epochs;   // per inline site: the definition epoch this worker last validated its globals and callees at
         };
         std::vector<worker_chunk_env_cache> worker_env_caches_;
         worker_chunk_env_cache* worker_chunk_record(const chunk* code);
@@ -2060,7 +2061,7 @@ namespace jai::vm {
         __declspec(noinline)
 #endif
         bool inline_site_holds(frame& f, const chunk::inline_site& site);
-        bool inline_globals_hold(const chunk::inline_site& site);
+        bool inline_globals_hold(const frame& f, const chunk::inline_site& site);
         bool inline_forward_callees_hold(const chunk::inline_site& site);
         bool math_alias_holds(frame& f, const chunk::cell_loop::math_alias_site& site);
         bool call_typed_land(frame& caller, const script_value& v);   // op_call_typed's landing (the caller's ip on the call)

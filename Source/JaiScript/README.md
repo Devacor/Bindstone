@@ -142,8 +142,8 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target jaiscript_tests jaiscript_runner
 ```
 
-Binaries land in `build/bin/`. With the Visual Studio generator, drop `-G Ninja`, pass
-`--config Release` to the build step, and look in `build/bin/Release/`.
+Binaries land in `build/bin/`. With the Visual Studio generator, drop `-G Ninja` and pass
+`--config Release` to the build step; the binaries land in `build/bin/` too.
 
 Debug links in seconds; Release links with LTCG and takes minutes. Iterate in Debug, then do a
 Release pass.

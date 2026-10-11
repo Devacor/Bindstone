@@ -54,12 +54,12 @@ build/bin/jai_gloom
 ```
 
 With a multi-configuration generator (Visual Studio, Xcode) the configuration is chosen at
-build time, not configure time, and the binaries sit one level deeper:
+build time, not configure time; the binaries land in the same `build/bin/`:
 
 ```bash
 cmake -S . -B build
 cmake --build build --config Release --target jaiscript_tests
-build/bin/Release/jaiscript_tests
+build/bin/jaiscript_tests
 ```
 
 The example games copy their scripts next to the binary (`gloom_scripts/`, `crawler_scripts/`,

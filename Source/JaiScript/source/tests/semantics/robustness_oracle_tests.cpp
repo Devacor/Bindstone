@@ -1,5 +1,5 @@
-// Spec oracles for the robustness pass: every expected value comes from the specification (CLAUDE.md, docs/, C++ where
-// the docs name it), never from a backend. Every row runs on the interpreter and the VM, proofs on and off, VM passes off,
+// Spec oracles for the robustness pass: every expected value comes from the specification (docs/, the guide under
+// docs/site/guide/, C++ where the docs name it), never from a backend. Every row runs on the interpreter and the VM, proofs on and off, VM passes off,
 // the copy elisions off, and with injected cell misses when the build defines JAISCRIPT_MISS_INJECTION.
 
 #include <jaiscript/testing/foundry.hpp>
@@ -107,7 +107,7 @@ private:
 		return "";
 	}
 
-	// CLAUDE.md "One conversion table for every typed slot": a by-value parameter runs the assignment table; a lone method
+	// docs/static_checking.md rule table, docs/site/guide/07-classes.html "Choosing an overload": a by-value parameter runs the assignment table; a lone method
 	// converts like a lone free function, among overloads the scorer takes the table's rows and a string never makes a bool
 	// parameter viable; the strict checker agrees at load
 	void method_conversions() {
@@ -512,7 +512,7 @@ private:
 		});
 	}
 
-	// CLAUDE.md "Program-scope redeclarations shadow by unit": an import re-runs only the module whose closure changed (its
+	// docs/site/guide/10-modules.html "import: cached module declaration" and "A file's own reload hook": an import re-runs only the module whose closure changed (its
 	// importer does not), a vanished module raises once and then waits, a returning one re-runs, a group applies all or
 	// nothing, and a unit's reload hook sees its variables as they were
 	void import_trees() {

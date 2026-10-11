@@ -322,7 +322,7 @@ namespace jai {
         // per-script-function accounting here, so what the process prints at exit covers
         // the window from this call on. No effect in ordinary builds.
         void vm_profile_reset();
-        // === EXECUTION COVERAGE (a diagnostic build: JAISCRIPT_VM_COVERAGE; vm/coverage.hpp, docs/review-2026-10-01) ===
+        // === EXECUTION COVERAGE (a diagnostic build: JAISCRIPT_VM_COVERAGE; vm/coverage.hpp) ===
         // The vm counts every instruction where it runs (a cell block, the general form typed or untyped) and, for the
         // general form, the reason the compiler left it there, attributed to the function and the source line; the
         // parallel workers' backends count too. vm_coverage_report ranks the reasons by executed operations with their top

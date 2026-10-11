@@ -466,12 +466,11 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
    slot-based locals). ~~Interpreter: `++x` on an enclosing-scope local inside a
    for body throws `Undefined variable 'x'`~~ (VM fine; `x = x + 1` fine on both).
 
-4. **FIXED for locals** (typed declarations and slot stores convert
-   like assignment — `int d = 4.7` truncates to 4). Typed *fields* remain dynamic
-   (declared field types are discarded at runtime; both backends agree) — pinned
-   by `typed_field_assignment_stays_dynamic_parity`. The
-   host still exposes `itrunc()`/`ifloor()`; script has no explicit float→int
-   cast expression.
+4. **FIXED** (typed declarations, slot stores and typed fields convert
+   like assignment — `int d = 4.7` truncates to 4, and a declared field type is
+   enforced on every store, on both backends). `cast<int>(x)` is the explicit
+   float→int conversion; the host's `itrunc()`/`ifloor()` remain for the scenes
+   that use them.
 
 5. **FIXED** (overload matching derefs lvalue reference arguments).
    ~~Raw element / nested-field arguments misresolve against typed parameters~~ —
@@ -500,9 +499,8 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
 9. **Host-callable poisoning NO LONGER REPRODUCES at HEAD** (fixed by
    reentrant execute isolation — saved call/value stacks, no mid-run
    pool reset); pinned by `coroutine_in_host_callable_no_state_leak`. Coroutine
-   *methods* remain a parse error — that is a missing feature (the class-member
-   parser never accepts `coroutine`), not a bug.
-   The finale still drives its sequence off scene time (works fine).
+   *methods* work (`coroutine` prefixes a method or static method like a free
+   function); the finale drives its sequence off scene time.
 
 10. **NEW (interpreter only).** Plain
     *assignment* of a bare array-element read into an int-typed local throws
@@ -533,7 +531,7 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
 
 **Paper cuts:** error text reaching the host keeps `{0}` placeholders and drops
 script context; `override` is required to redefine a base method (good check,
-surprising the first time); no script-side float→int cast.
+surprising the first time).
 
 **Perf lesson (PIPEDREAM):** a script *method call* costs on the
 order of tens of microseconds — an empty-bodied helper invoked ~1,500x per frame

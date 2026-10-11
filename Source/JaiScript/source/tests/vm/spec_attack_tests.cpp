@@ -301,7 +301,7 @@ private:
 		});
 	}
 
-	// CLAUDE.md "functions/classes always replace in place (hot reload)"; docs/typed_regions_design.md grafts: a rebind or a
+	// docs/global_shadowing.md: functions and classes always replace in place (hot reload); docs/typed_regions_design.md grafts: a rebind or a
 	// reload takes the fallback call
 	void rebinding_and_reload_mid_loop() {
 		test("a_leaf_redefined_by_a_host_callback_mid_loop_is_called_with_its_new_body", [this]() {
@@ -338,7 +338,7 @@ private:
 			)", "3018");
 		});
 		test("a_local_or_parameter_named_like_a_math_alias_shadows_it", [this]() {
-			// CLAUDE.md name lookup: locals before globals; docs/diagnostics.md family B callee text
+			// docs/site/guide/07-classes.html "Name resolution in methods": locals before globals; docs/diagnostics.md family B callee text
 			expect("alias shadow", R"(
 				function f(int x) -> float { var sqrt = [](float v) { return -v; }; return sqrt(x * 1.0) + sqrt(x); }
 				function g(var sqrt) -> string { try { return "" + sqrt(4.0); } catch (e) { return "E:" + e; } }
@@ -347,7 +347,7 @@ private:
 			)", "-8.0,E:Cannot call 'sqrt': it is a float, not a function,303.0,4.0");
 		});
 		test("a_class_reloaded_mid_loop_takes_effect_at_the_member_site", [this]() {
-			// CLAUDE.md user accessors: adding an accessor on hot reload takes effect for existing instances
+			// docs/site/guide/07-classes.html "Accessors" and "Hot reload": adding an accessor on hot reload takes effect for existing instances
 			every_config("reload member", "606|153", [](engine& e) {
 				engine* raw = &e;
 				e.add_function("host_reload", [raw](script_int i) { if (i == 2) { raw->execute("class P { int x = 3; P() {} P(int v) { x = v; } int _get_x() { return x * 100; } }"); } });
@@ -449,7 +449,7 @@ private:
 		});
 	}
 
-	// docs/integer_semantics.md shifts; CLAUDE.md / docs/EXCEPTION_DESIGN.md addendum: a budget overrun is terminal
+	// docs/integer_semantics.md shifts; docs/EXCEPTION_DESIGN.md addendum: a budget overrun is terminal
 	void shifts_and_budget() {
 		test("shift_counts_out_of_range_raise_inside_a_counted_loop", [this]() {
 			expect("shifts", R"(
@@ -478,8 +478,8 @@ private:
 		});
 	}
 
-	// CLAUDE.md "Both backends debug identically (breakpoints/stepping/locals)"; docs/typed_regions_design.md: a block takes the
-	// general back edge while a session is armed
+	// docs/site/embedding/12-debugging.html: both backends debug identically (breakpoints/stepping/locals);
+	// docs/typed_regions_design.md: a block takes the general back edge while a session is armed
 	void debugger_armed_mid_run() {
 		test("a_breakpoint_inside_a_closed_loop_fires_every_iteration", [this]() {
 			for (const auto& c : attack::configs()) {

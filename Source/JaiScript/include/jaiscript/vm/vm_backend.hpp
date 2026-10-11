@@ -2061,6 +2061,7 @@ namespace jai::vm {
 #endif
         bool inline_site_holds(frame& f, const chunk::inline_site& site);
         bool inline_globals_hold(const chunk::inline_site& site);
+        bool inline_forward_callees_hold(const chunk::inline_site& site);
         bool math_alias_holds(frame& f, const chunk::cell_loop::math_alias_site& site);
         bool call_typed_land(frame& caller, const script_value& v);   // op_call_typed's landing (the caller's ip on the call)
         bool inline_method_holds(frame& f, const chunk::inline_site& site);   // the identity, read without running a getter

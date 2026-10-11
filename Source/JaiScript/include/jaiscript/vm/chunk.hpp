@@ -632,6 +632,10 @@ namespace jai::vm {
             // the program-scope names the call's argument proofs read (call_expr::proof_globals: symbol id, kind): the guard holds only
             // while each still holds its kind, re-checked when a run moved engine::definition_epoch past globals_epoch
             std::vector<proof_global> proof_globals;
+            // the program-scope functions the parameter forwarding read (symbol id, body): a by-value parameter renamed to the caller's
+            // variable because each callee it is passed to takes it by value; re-checked with the proof globals
+            std::vector<std::pair<uint64_t, const statement*>> forward_callees;
+            bool epoch_checked = false;   // proof_globals or forward_callees non-empty: the guard asks inline_globals_hold
             mutable uint64_t globals_epoch = 0;
         };
         std::vector<inline_site> inline_sites;

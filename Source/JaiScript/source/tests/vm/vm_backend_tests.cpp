@@ -4186,6 +4186,60 @@ public:
 			check_eq(i1, v1, "handle and field reference argument parity");
 		});
 
+		test("a_forwarded_graft_parameter_follows_its_callees_definitions", [this]() {
+			// a scalar parameter passed on by value to another script function is a renaming of the caller's variable (no move); a
+			// redefinition of that callee to take it by reference and write it makes the outer graft's guard fail, so the write lands in
+			// the parameter's own copy: between runs, and in the middle of the loop through a module re-run (both backends)
+			const auto dir = jai::foundry::test_temp_directory();
+			int tick = 0;
+			auto write_module = [&](const std::string& body) {
+				const auto path = dir / "fwd_mod.jai";
+				{ std::ofstream(path, std::ios::binary | std::ios::trunc) << body; }
+				std::error_code ec;
+				std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+			};
+			const std::string by_value = "function in_box(int w, int x, int y) -> bool { return x >= 0 && y >= 0 && x < w && y < w; }\n";
+			const std::string by_reference = "function in_box(int w, int& x, int y) -> bool { x = 100 + x; return y >= 0; }\n";
+			const char* program = R"(
+				import "fwd_mod.jai";
+				function cell(int w, int x, int y) -> int { return y * w + x; }
+				function walk(int w, int x, int y, int tx, int ty) -> bool { if (!in_box(w, x, y)) { return false; } return cell(w, x, y) % 3 != 0 || (x == tx && y == ty); }
+				function run(int swap_at) -> int {
+					int s = 0;
+					int w = 9;
+					for (int i = 0; i < 81; ++i) {
+						if (i == swap_at) { swap_module(); import("fwd_mod.jai", jai::force); }
+						int nx = i % 9;
+						int ny = i / 9 - 1;
+						if (walk(w, nx, ny, 4, 4)) { s += nx * 10 + ny; }
+						s += nx;
+					}
+					return s;
+				}
+				string a = to_string(run(-1)) + " " + to_string(run(-1));
+				a;
+			)";
+			std::string out[2][3];
+			for (int use_vm = 0; use_vm < 2; ++use_vm) {
+				write_module(by_value);
+				auto e = make_engine();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				stdlib::register_all(*e);
+				e->add_include_path(dir.string());
+				e->add_function("swap_module", [&]() { write_module(by_reference); });
+				try {
+					out[use_vm][0] = e->execute(program).to_string();
+					write_module(by_reference);
+					e->execute("import(\"fwd_mod.jai\", jai::force);");
+					out[use_vm][1] = e->execute("to_string(run(-1));").to_string();
+					write_module(by_value);
+					e->execute("import(\"fwd_mod.jai\", jai::force);");
+					out[use_vm][2] = e->execute("to_string(run(-1)) + \" \" + to_string(run(40));").to_string();
+				} catch (const std::exception& ex) { out[use_vm][0] = std::string("ERROR: ") + ex.what(); }
+			}
+			for (int k = 0; k < 3; ++k) { check_eq(out[0][k], out[1][k], "forwarded parameter parity, step " + std::to_string(k)); }
+			check_true(out[0][0].find("ERROR") == std::string::npos, "the interpreter runs the program: " + out[0][0]);
+		});
 		test("a_callee_replaced_while_its_cached_calls_run_stays_alive", [this]() {
 			// a cached call borrows its site's pin of the callee. The module defining the callee re-runs in the middle of the callee's
 			// own recursion (its old program is released), the site refills with the new definition, and the old frames finish on the

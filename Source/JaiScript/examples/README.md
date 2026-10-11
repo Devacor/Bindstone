@@ -3,7 +3,7 @@
 Every example runs from the JaiScript source root. Build the runner once:
 
 ```bash
-cmake -S . -B build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --target jaiscript_runner
 ```
 

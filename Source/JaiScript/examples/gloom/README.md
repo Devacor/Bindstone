@@ -26,7 +26,7 @@ the new `:spec` formats) build the HUD.
 From the JaiScript source root, build the runner once:
 
 ```bash
-cmake -S . -B build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --target jaiscript_runner
 ```
 
@@ -62,7 +62,7 @@ impacts, blood, gibs, smoke, hexmotes.
 Part of the normal JaiScript CMake build (`JAISCRIPT_BUILD_EXAMPLES=ON`).
 
 ```bash
-cmake -S . -B build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --target jai_gloom   # PLAY THIS ONE
 cmake --build build --config Debug --target jai_gloom     # debug iteration
 ```

@@ -42,7 +42,7 @@ are pixels from a 5x7 font (`FONT5`), typed in with a shine sweeping across.
 From the JaiScript source root, build the runner once:
 
 ```bash
-cmake -S . -B build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --target jaiscript_runner
 ```
 
@@ -60,7 +60,7 @@ build/bin/jaiscript examples/demoreel/demoreel.jai
 Part of the JaiScript CMake tree (target `jai_demoreel`):
 
 ```
-cmake -S . -B build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --target jai_demoreel
 ```
 

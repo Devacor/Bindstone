@@ -386,6 +386,8 @@ struct engine::implementation {
 
     std::array<engine::math_alias_row, engine::k_math_alias_rows> math_alias_rows_{};
     std::unordered_map<uint64_t, uint8_t> math_alias_symbols_;
+    std::vector<engine::host_direct_row> host_direct_rows_;
+    const uint64_t host_direct_generation_ = 0;
 
     // Current parameter storage for function calls (replaces thread_local)
     detail::parameter_storage* current_parameter_storage = nullptr;
@@ -4382,6 +4384,33 @@ uint8_t engine::math_alias_fn(uint64_t symbol) const {
 
 const engine::math_alias_row* engine::math_alias_rows() const {
     return impl->math_alias_rows_.data();
+}
+
+void engine::add_host_direct(std::string_view name, size_t arity, host_direct_invoke invoke, const void* target) {
+    if (!invoke || arity == 0 || arity > 8) { return; }
+    script_value* global = impl->global_environment_->get_value_ptr(impl->string_symbolizer_.intern(name));
+    if (!global || global->raw_storage_index() != script_value::TYPEID_FUNCTION) { return; }
+    const void* identity = &global->unchecked_as_function();
+    for (auto& row : impl->host_direct_rows_) {
+        if (row.identity == identity) { row.invoke = invoke; row.target = target; row.arity = arity; return; }
+    }
+    host_direct_row& row = impl->host_direct_rows_.emplace_back();
+    row.value = *global;
+    row.identity = &row.value.unchecked_as_function();
+    row.invoke = invoke;
+    row.target = target;
+    row.arity = arity;
+}
+
+const engine::host_direct_row* engine::host_direct_for(const void* identity) const {
+    for (const auto& row : impl->host_direct_rows_) {
+        if (row.identity == identity) { return &row; }
+    }
+    return nullptr;
+}
+
+const uint64_t* engine::host_direct_generation() const {
+    return &impl->host_direct_generation_;
 }
 
 script_value engine::make_parallel_host_function_copy(const std::string& name) {

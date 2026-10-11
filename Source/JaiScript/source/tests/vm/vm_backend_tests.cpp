@@ -4033,6 +4033,33 @@ public:
 			check_eq(std::string("0 1 host host "), run(false, rebound, true), "re-registered (interpreter)");
 			check_eq(run(false, rebound, true), run(true, rebound, true), "re-registered (parity)");
 		});
+		test("a_host_direct_entry_runs_for_its_function_and_arity_only", [this]() {
+			// the embedding guide's add_host_direct sample: one body behind the variadic function and its direct entry; another
+			// argument count, a reference argument and a script rebinding call the function
+			auto run = [](bool use_vm, const char* program) -> std::string {
+				auto e = jai::engine::make();
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				e->execution_budget(0);
+				stdlib::register_all(*e);
+				static constexpr jai::engine::host_direct_invoke label_of = [](const void* target, const jai::script_value* args, size_t count) -> jai::checked_result<jai::script_value> {
+					auto* eng = static_cast<jai::engine*>(const_cast<void*>(target));
+					if (count != 1) { return jai::script_value(std::string("?"), eng); }
+					return jai::script_value(std::string(args[0].is_int() ? "int" : args[0].is_float() ? "float" : "other"), eng);
+				};
+				e->add_variadic_function("label", [eng = e.get()](const std::vector<jai::script_value>& args) {
+					return label_of(eng, args.data(), args.size());
+				});
+				e->add_host_direct("label", 1, label_of, e.get());
+				try { return e->execute(program).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+			};
+			const char* program =
+				"string out = \"\"; float f = 2.5;\n"
+				"for (int i = 0; i < 3; ++i) { out += label(i) + label(f) + label(\"s\") + label() + label(1, 2) + \" \"; }\n"
+				"array<float> fs = [1.5]; for (auto& r : fs) { out += label(r); }\n"
+				"out;";
+			check_eq(std::string("intfloatother?? intfloatother?? intfloatother?? float"), run(false, program), "interpreter");
+			check_eq(run(false, program), run(true, program), "parity");
+		});
 		test("map_stores_borrow_their_key_and_element_reads_write_back_only_through_mutators", [this]() {
 			// a map store takes its key where it is (a range-for alias, a value read from the same map), and a string method called
 			// through a typed element alias writes the element back only when the registry lists it as a mutator

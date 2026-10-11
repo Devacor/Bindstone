@@ -360,15 +360,20 @@ namespace stdlib {
         
         // Register as variadic to bypass type matching issues
         // a class's own to_string() speaks for its instances, as in string + value
-        eng_ref.add_variadic_function("to_string", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        constexpr engine::host_direct_invoke to_string_of = [](const void* target, const script_value* args, size_t) -> checked_result<script_value> {
+            engine* e = static_cast<engine*>(const_cast<void*>(target));
+            auto text = e->text_of(args[0]);
+            if (!text) { return text.error_value(); }
+            if (e->backend_unwinding()) { return script_value(std::monostate{}, e); }
+            return script_value(std::move(text.value()), e);
+        };
+        eng_ref.add_variadic_function("to_string", [eng, to_string_of](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 1) {
                 throw runtime_error("to_string expects exactly 1 argument, got " + std::to_string(args.size()));
             }
-            auto text = eng->text_of(args[0]);
-            if (!text) { return text.error_value(); }
-            if (eng->backend_unwinding()) { return script_value(std::monostate{}, eng); }
-            return script_value(std::move(text.value()), eng);
+            return to_string_of(eng, args.data(), 1);
         });
+        eng_ref.add_host_direct("to_string", 1, to_string_of, eng);
 
         // Opaque host pointers (make_value(T*) on an UNREGISTERED
         // type) are non-null/truthy to script but the engine cannot name them — this

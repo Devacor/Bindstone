@@ -517,6 +517,22 @@ namespace jai {
         uint8_t math_alias_fn(uint64_t symbol) const;   // 0xFF: not an alias
         const math_alias_row* math_alias_rows() const;
 
+        // A host function's entry over its arguments where they are, beside the function `name` binds now: a VM call site whose
+        // callee is that function runs `invoke(target, args, arity)` for a call of `arity` arguments, none of them a reference,
+        // instead of the function (no argument vector, no std::function). `invoke` must return what the function returns for
+        // those arguments; a re-registration or a rebinding of the name is another function, which the site calls as before.
+        using host_direct_invoke = checked_result<script_value> (*)(const void*, const script_value*, size_t);
+        struct host_direct_row {
+            const void* identity = nullptr;   // &value.unchecked_as_function()
+            script_value value{std::monostate{}, nullptr};   // pins the node: a freed function's address never matches later
+            host_direct_invoke invoke = nullptr;
+            const void* target = nullptr;
+            size_t arity = 0;
+        };
+        void add_host_direct(std::string_view name, size_t arity, host_direct_invoke invoke, const void* target);
+        const host_direct_row* host_direct_for(const void* identity) const;
+        const uint64_t* host_direct_generation() const;   // never moves: a row holds for as long as its function is the callee
+
         using stack_frame = ::jai::stack_frame;
         std::vector<stack_frame> last_stack_trace() const;
         std::string format_stack_trace() const;

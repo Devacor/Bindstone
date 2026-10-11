@@ -3999,6 +3999,40 @@ public:
 			check_eq(std::string("400 510"), run(false, refilled_while_parked), "a site refilled while parked (interpreter)");
 			check_eq(run(false, refilled_while_parked), run(true, refilled_while_parked), "a site refilled while parked (parity)");
 		});
+		test("to_string_runs_its_direct_entry_where_the_name_binds_it", [this]() {
+			// a call site whose callee is the registered to_string runs its direct entry on the argument where it is; a reference
+			// argument, a class's own to_string, a throwing one, a script overload and a host re-registration read as the function does
+			auto run = [](bool use_vm, const char* program, bool reregister) -> std::string {
+				auto e = jai::engine::make();
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				e->execution_budget(0);
+				stdlib::register_all(*e);
+				jai::engine* raw = e.get();
+				e->add_function("rereg", [raw, reregister]() -> jai::script_int {
+					if (reregister) { raw->add_variadic_function("to_string", [raw](const std::vector<jai::script_value>&) -> jai::checked_result<jai::script_value> { return jai::script_value(std::string("host"), raw); }); }
+					return 0;
+				});
+				try { return e->execute(program).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+			};
+			const char* kinds =
+				"class P { int x = 3; string to_string() { return \"P\" + x; } }\n"
+				"class Bad { string to_string() { throw \"no text\"; } }\n"
+				"array<float> fs = [1.5, 2.25]; string out = \"\";\n"
+				"for (int i = 0; i < 3; ++i) { for (float f : fs) { out += to_string(f) + \",\"; } out += to_string(i) + to_string(true) + to_string('c') + to_string(\"s\") + to_string(null) + \";\"; }\n"
+				"for (auto& f : fs) { out += to_string(f); }\n"
+				"P p; out += to_string(p) + to_string([1, 2]);\n"
+				"try { to_string(Bad()); } catch (e) { out += \" caught \" + e; }\n"
+				"var g = to_string; out += \" \" + g(7);\n"
+				"out;";
+			const char* rebound =
+				"string out = \"\";\n"
+				"for (int i = 0; i < 4; ++i) { if (i == 2) { rereg(); } out += to_string(i) + \" \"; }\n"
+				"out;";
+			check_eq(std::string("1.5,2.25,0truecsnull;1.5,2.25,1truecsnull;1.5,2.25,2truecsnull;1.52.25P3[array] caught no text 7"), run(false, kinds, false), "kinds (interpreter)");
+			check_eq(run(false, kinds, false), run(true, kinds, false), "kinds (parity)");
+			check_eq(std::string("0 1 host host "), run(false, rebound, true), "re-registered (interpreter)");
+			check_eq(run(false, rebound, true), run(true, rebound, true), "re-registered (parity)");
+		});
 		test("map_stores_borrow_their_key_and_element_reads_write_back_only_through_mutators", [this]() {
 			// a map store takes its key where it is (a range-for alias, a value read from the same map), and a string method called
 			// through a typed element alias writes the element back only when the registry lists it as a mutator

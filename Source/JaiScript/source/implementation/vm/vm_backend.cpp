@@ -13317,7 +13317,9 @@ JAI_NOINLINE bool vm_backend::call_host_site(const call_site& site, size_t argc,
 	if (argc != site.ic_host_argc || *site.ic_host_gen != site.ic_host_at) { return false; }
 	const size_t base = stack_.size() - argc;
 	const script_value* args = stack_.data() + base;
-	for (size_t i = 0; i < argc; ++i) { if (args[i].deref().type() != site.ic_host_kinds[i]) { return false; } }
+	for (size_t i = 0; i < argc; ++i) {   // an any-kind parameter (a host direct row) takes every argument but a reference
+		if (site.ic_host_kinds[i] == script_value_type::jai_any_type ? args[i].is_reference() : args[i].deref().type() != site.ic_host_kinds[i]) { return false; }
+	}
 	struct running { uint32_t& n; explicit running(uint32_t& c) : n(c) { ++n; } ~running() { --n; } } run{host_site_calls_};
 	checked_result<script_value> out = site.ic_host_invoke(site.ic_host_target, args, argc);
 	stack_.truncate(base);
@@ -13331,8 +13333,20 @@ JAI_NOINLINE void vm_backend::fill_host_site(const call_site& site, const script
 	site.ic_host_checked = true;
 	if (site.ic_fn || callee.raw_storage_index() != script_value::TYPEID_FUNCTION) { return; }
 	const auto* od = callee.unchecked_as_function().target<engine::overload_dispatch>();
+	if (!od) {   // a host function the engine keeps a direct row for
+		const engine::host_direct_row* row = engine_->host_direct_for(&callee.unchecked_as_function());
+		if (!row) { return; }
+		site.ic_host_owner = *row->value.get_storage().get_if<script_value::TYPEID_FUNCTION>();
+		site.ic_host_argc = static_cast<uint32_t>(row->arity);
+		std::fill(std::begin(site.ic_host_kinds), std::end(site.ic_host_kinds), script_value_type::jai_any_type);
+		site.ic_host_gen = engine_->host_direct_generation();
+		site.ic_host_at = 0;
+		site.ic_host_invoke = row->invoke;
+		site.ic_host_target = row->target ? row->target : static_cast<const void*>(engine_);
+		return;
+	}
 	engine::overload_dispatch::direct_snapshot snap;
-	if (!od || !od->direct_entry(snap)) { return; }
+	if (!od->direct_entry(snap)) { return; }
 	site.ic_host_owner = *snap.owner.get_storage().get_if<script_value::TYPEID_FUNCTION>();
 	site.ic_host_argc = static_cast<uint32_t>(snap.argc);
 	std::copy(std::begin(snap.kinds), std::end(snap.kinds), site.ic_host_kinds);

@@ -347,7 +347,7 @@ private:
 			)", "-8.0,E:Cannot call 'sqrt': it is a float, not a function,303.0,4.0");
 		});
 		test("a_class_reloaded_mid_loop_takes_effect_at_the_member_site", [this]() {
-			// docs/site/guide/07-classes.html "Accessors" and "Hot reload": adding an accessor on hot reload takes effect for existing instances
+			// docs/site/guide/07-classes.html "Hot reload": an accessor a reload adds applies to existing instances
 			every_config("reload member", "606|153", [](engine& e) {
 				engine* raw = &e;
 				e.add_function("host_reload", [raw](script_int i) { if (i == 2) { raw->execute("class P { int x = 3; P() {} P(int v) { x = v; } int _get_x() { return x * 100; } }"); } });

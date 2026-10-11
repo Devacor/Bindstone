@@ -582,6 +582,31 @@ public:
             }
         });
 
+        // A destructor class's instance shares one allocation with its control block: a weak handle held past its death
+        // keeps that memory, reads expired, and a death the release stack defers still runs its body over live fields
+        test("weak_handles_outlive_a_destructor_class_death_at_every_limit", [this]() {
+            const std::string program = R"(
+                class P { int id = 0; array<int> xs = [1, 2, 3]; shared_ptr<P> next = null; ~P() { LOG = LOG + "d" + to_string(id) + ":" + to_string(xs.size()); } }
+                array<weak_ptr<P>> KEEP = [];
+                function run() -> void {
+                    shared_ptr<P> head = null;
+                    for (int i = 0; i < 6; i++) { shared_ptr<P> n = new P(); n.id = i; n.next = head; head = n; weak_ptr<P> w = n; KEEP.push(w); }
+                    head = null;
+                }
+                run();
+                int alive = 0;
+                for (auto& w : KEEP) { if (!w.expired()) { alive = alive + 1; } }
+                LOG + "|" + to_string(alive);
+            )";
+            for (uint32_t limit : {1000000u, 0u, 1u, 3u}) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(eng);
+                eng->release_recursion_limit(limit);
+                check_eq(std::string("d5:3d4:3d3:3d2:3d1:3d0:3|0"), eng->execute("string LOG = \"\";" + program).as_string(),
+                         "limit " + std::to_string(limit));
+            }
+        });
+
         // The release stack keeps C++ order exactly: every limit, the stack always (0) to never in practice, logs alike
         test("the_release_stack_keeps_destruction_order", [this]() {
             const std::string shapes = R"(

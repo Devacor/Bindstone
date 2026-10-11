@@ -23807,7 +23807,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 
 	frame f;
 	f.code = body_chunk.get();
-	f.pin = body_chunk;
+	f.pin = std::move(body_chunk);
 	f.ip = 0;
 	f.locals = &locals;
 	f.entry_env = environment_;
@@ -23845,7 +23845,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	};
 
 	{
-		auto bind_result = bind_parameters(function.parameters(), args, first, argc, f, *body_chunk,
+		auto bind_result = bind_parameters(function.parameters(), args, first, argc, f, *f.code,
 	                                   previousEnv, site, caller_frame, caller_code,
 	                                   site_arg_proofs(site, caller_code, function.body.get(), function.parameters().size(), argc), &function, caller_unit);
 		if (bind_result == op_status::failed) {
@@ -23855,7 +23855,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	}
 	// Body slots exist behind window_live so operand temps start above the full window
 	{
-		const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
+		const size_t window_slots = std::max(function.local_count, static_cast<size_t>(f.code->local_count));
 		stack_.fill_null_to(f.window_base + window_slots, engine_);
 	}
 

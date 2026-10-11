@@ -474,6 +474,7 @@ public:
     // deleter holds its definition, a method's scope holds the program environment): dropping them lets it die
     void release_values_for_teardown() noexcept {
         methods_.clear();
+        ++method_epoch_;
         static_methods_.clear();
         field_defaults_.clear();
         static_field_values_.clear();
@@ -1095,6 +1096,16 @@ public:
     uint64_t destructor_id(engine& eng) const {
         if (destructor_id_ == 0) { destructor_id_ = eng.symbolize("~" + name_); }
         return destructor_id_;
+    }
+
+    // This level's own destructor body, null when it declares none (a pointer into methods_, valid while method_epoch_ holds)
+    const script_value* destructor_body(engine& eng) const {
+        if (dtor_body_epoch_ != method_epoch_) {
+            auto it = methods_.find(destructor_id(eng));
+            dtor_body_ = it != methods_.end() ? &it->second : nullptr;
+            dtor_body_epoch_ = method_epoch_;
+        }
+        return dtor_body_;
     }
 
     // A class without its own destructor still runs its bases' (C++'s implicit destructor)
@@ -2456,6 +2467,8 @@ private:
 
     // Destructor probe memo (see create_instance): valid while dtor_memo_epoch_
     // matches method_epoch_. mutable: create_instance is the hot mint path.
+    mutable uint64_t dtor_body_epoch_ = 0;
+    mutable const script_value* dtor_body_ = nullptr;
     mutable uint64_t dtor_memo_epoch_ = 0;   // method_epoch_ starts at 1 => first mint fills
     mutable bool has_script_dtor_ = false;
 

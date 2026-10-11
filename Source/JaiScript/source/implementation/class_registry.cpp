@@ -136,9 +136,7 @@ void class_definition::expand_destroy_level(class_instance* instance, const clas
                                             std::vector<detail::release_action>& actions) const {
     if (!level || (kept && (kept == level || kept->derives_from(level)))) { return; }
     if (engine_) {
-        const uint64_t id = level->destructor_id(*engine_);
-        auto it = id != 0 ? level->methods_.find(id) : level->methods_.end();
-        if (it != level->methods_.end()) { run_destructor_body(instance, level, it->second); }
+        if (const script_value* body = level->destructor_body(*engine_)) { run_destructor_body(instance, level, *body); }
     }
     for (const auto& parent : level->parent_classes_) {
         if (parent) { actions.push_back({parent.get(), 0}); }

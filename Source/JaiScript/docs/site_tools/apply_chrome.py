@@ -382,8 +382,8 @@ def main():
         if rel == "reference/api.html":
             out = out.replace("</body>", '<script src="../assets/api-reference.js"></script>\n</body>')
             out = re.sub(r'<p class="foot-note">.*?</p>', '<p class="foot-note">Source-audited API reference</p>', out)
-            newline = "\r\n" if "\r\n" in src else "\n"
-            out = out.replace("\r\n", "\n").replace("\n", newline)
+        newline = "\r\n" if "\r\n" in src else "\n"   # the page edits above add bare newlines; a CRLF checkout keeps CRLF
+        out = out.replace("\r\n", "\n").replace("\n", newline)
         if out != src:
             drifted.append(rel)
             if not args.check:

@@ -1,12 +1,14 @@
 @echo off
-rem Gator Quest launcher: finds jaiscript.exe beside this file (the shipped demo) or in the build tree.
+rem Gator Quest launcher: finds jaiscript.exe in the build tree (build\bin) or beside this file (the shipped demo).
 setlocal
 cd /d "%~dp0"
-set "EXE=%~dp0jaiscript.exe"
-if not exist "%EXE%" set "EXE=%~dp0..\..\out\build\x64-Release BENCHMARKS\bin\jaiscript.exe"
+set "EXE=%~dp0..\..\build\bin\jaiscript.exe"
+if not exist "%EXE%" set "EXE=%~dp0jaiscript.exe"
 if not exist "%EXE%" (
-	echo Could not find jaiscript.exe. Copy it next to play.bat, or build the runner:
-	echo   cmake --build "out/build/x64-Release BENCHMARKS" --target jaiscript_runner
+	echo Could not find jaiscript.exe. Build the runner from the JaiScript source root:
+	echo   cmake -S . -B build
+	echo   cmake --build build --config Release --target jaiscript_runner
+	echo or copy jaiscript.exe next to play.bat.
 	pause
 	exit /b 1
 )

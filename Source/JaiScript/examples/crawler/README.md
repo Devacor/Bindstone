@@ -44,15 +44,33 @@ New for the crawler: `view.jai` (the raycaster), `ui.jai` (log, character, compa
 modals), `game.jai` (facing movement, crawler turn loop, saves, autopilot),
 `main.jai`, and the adapted host `main.cpp`.
 
+## Run it
+
+From the JaiScript source root, build the runner once:
+
+```bash
+cmake -S . -B build
+cmake --build build --config Release --target jaiscript_runner
+```
+
+then:
+
+```bash
+build/bin/jaiscript examples/crawler/scripts/crawler.jai
+```
+
+(On Windows the runner is `buildin\jaiscript.exe`.) The native host is the `jai_crawler` target: `cmake --build build --config Release --target jai_crawler`, then
+`build/bin/jai_crawler`.
+
 ## Build
 
 Part of the normal JaiScript CMake build (`JAISCRIPT_BUILD_EXAMPLES=ON` by
 default):
 
 ```bash
-# from Source/JaiScript (VsDevCmd + Ninja, same as the test builds)
-cmake --build "out/build/x64-Release BENCHMARKS" --target jai_crawler   # PLAY THIS ONE
-cmake --build out/build/x64-Debug --target jai_crawler                  # --dev iteration
+cmake -S . -B build
+cmake --build build --config Release --target jai_crawler   # PLAY THIS ONE
+cmake --build build --config Debug --target jai_crawler     # --dev iteration
 ```
 
 **Play the Release exe** — the view casts a ray per column and shades every pixel
@@ -83,13 +101,13 @@ fits 80x28.
 ### No build at all: the standalone-runner shim
 
 `scripts/crawler.jai` replays the whole C++ host in pure JaiScript — drag it onto the
-standalone runner (`out/build/x64-Release BENCHMARKS/bin/jaiscript.exe`) and GRUBWELL
+standalone runner (`build/bin/jaiscript`) and GRUBWELL
 runs with zero example-specific C++. It captures the runner's non-blocking `read_key`
 into a blocking wrapper, re-creates `draw`/`clear_screen`/`chr`/`host_log`,
 the flag globals, and a **bit-exact script-side `Rng`** (xorshift64\* in 16/32-bit
 limbs under checked int64 — same hashes as the C++ host: seed 99's pilot still dies
 on floor 4, turn 341, to the same Grublin Slinger). Flags ride after `--`, dashes
-optional; the save default is `crawler_save.json` in the cwd:
+optional; the save is `crawler_save.json` beside `scripts/`, whatever the working directory:
 
 ```bash
 jaiscript.exe crawler.jai                                  # interactive, seed 1337

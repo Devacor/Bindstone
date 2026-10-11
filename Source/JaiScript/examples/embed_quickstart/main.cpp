@@ -1,6 +1,6 @@
 // embed_quickstart: a small host that uses JaiScript the way a game would.
-//   cmake -S . -B out/build/x64-Debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
-//   cmake --build out/build/x64-Debug
+//   cmake -S . -B build
+//   cmake --build build --config Release
 //
 //   embed_quickstart               run every section and exit 0 when all checks hold
 //   embed_quickstart --debug       also listen for VS Code (DAP) on 127.0.0.1:52472

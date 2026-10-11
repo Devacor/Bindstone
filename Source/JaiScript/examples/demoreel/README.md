@@ -37,13 +37,31 @@ Text stays crisp on top: the HUD, the scene handle under each title card and
 the finale's credits are ordinary glyph rows; the big title letters themselves
 are pixels from a 5x7 font (`FONT5`), typed in with a shine sweeping across.
 
+## Run it
+
+From the JaiScript source root, build the runner once:
+
+```bash
+cmake -S . -B build
+cmake --build build --config Release --target jaiscript_runner
+```
+
+then:
+
+```bash
+build/bin/jaiscript examples/demoreel/demoreel.jai
+```
+
+(On Windows the runner is `buildin\jaiscript.exe`.) The native host is the `jai_demoreel` target: `cmake --build build --config Release --target jai_demoreel`, then
+`build/bin/jai_demoreel`.
+
 ## Build
 
 Part of the JaiScript CMake tree (target `jai_demoreel`):
 
 ```
-cmake --build out/build/x64-Debug --target jai_demoreel
-cmake --build "out/build/x64-Release BENCHMARKS" --target jai_demoreel
+cmake -S . -B build
+cmake --build build --config Release --target jai_demoreel
 ```
 
 The exe prefers the source `scenes/` dir (so hot reload edits the real files),
@@ -132,7 +150,7 @@ scene.
 
 ## Measured numbers
 
-Standalone runner (`x64-Release BENCHMARKS` `jaiscript.exe`), 100x40 cells =
+Standalone runner (Release `jaiscript`), 100x40 cells =
 100x80 = 8,000 pixels per frame, seed 20260705, fixed dt 1/30, the whole
 16-scene reel incl. transitions (`-- frames 1700`, smoke durations of 3 s per
 scene), two runs each. "render" is `demo_frame` alone (update + render +

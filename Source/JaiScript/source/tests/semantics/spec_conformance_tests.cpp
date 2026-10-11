@@ -1007,8 +1007,8 @@ private:
 		});
 	}
 
-	// utf8_string counts characters (docs/site/guide/09-containers-strings.html "utf8_string: text by character"); its
-	// character caches clear on every write, so no write path ever sees a stale count or position
+	// docs/site/guide/09-containers-strings.html "utf8_string: text by character": characters are counted, and the
+	// character caches clear on every write, so no read sees a stale count or position
 	void utf8_caches() {
 		test("utf8_caches_follow_writes_through_references_parameters_fields_and_copies", [this]() {
 			// e = e-acute, j = the two CJK characters, o = omega, u = u-umlaut
@@ -1177,7 +1177,8 @@ private:
 		});
 	}
 
-	// docs/thin_value_spec.md invariants: <=> is a strict weak ordering incl. NaN; complex keys order by held-pointer identity
+	// docs/site/guide/09-containers-strings.html "Key types": one total key order incl. NaN, equivalent keys hash alike;
+	// complex keys order and hash by the identity of the object they hold
 	void map_key_edges() {
 		test("a_nan_key_is_storable_and_findable", [this]() {
 			every_config("nan key", "12", [](engine& e) {

@@ -1,8 +1,8 @@
 # Spec conformance
 
 This ledger maps every claim the specification makes to the Foundry tests that pin it. The
-specification is `Source/JaiScript/CLAUDE.md` ("Language features" and the rules around it), the
-documents under `docs/` (diagnostics, static checking, reference model, namespaces, global
+specification is the public documentation: the user guide under `docs/site/guide/`, the stability page
+(`docs/site/stability.html`), the embedding chapters under `docs/site/embedding/`, the documents under `docs/` (diagnostics, static checking, reference model, namespaces, global
 shadowing, char and integer semantics, exceptions, closures, parallel design, invariants, typed
 regions and arrays, grammar), the user guide under `docs/site/guide/`, and C++ where those
 documents say C++ semantics apply.
@@ -32,9 +32,9 @@ and no test pins a reading of it.
   containers, increments, parallel locals, grammar and operators, chars, scopes and units,
   references, exceptions, closures, diagnostic texts, script the runtime calls, user `operator=`,
   error texts, checker verdicts, instance-variable overlays, file locations, privilege order,
-  guide examples, parallel contracts, native exceptions, access control, and the rulings on
-  lambda captures of globals, the order of a compound or subscript store, `auto`'s static type and
-  call arguments, and the rulings of 2026-09-28).
+  guide examples, parallel contracts, native exceptions, access control, lambda captures of
+  globals, the order of a compound or subscript store, `auto`'s static type and call arguments,
+  `library_and_edge_rules` and `comparisons_host_routes_and_class_scope`).
 - `source/tests/vm/spec_attack_tests.cpp`, suite "Spec Attacks": the VM's fast paths under
   pressure (raises inside cell blocks and grafts, coroutines over fast paths, host callbacks
   re-entering mid-loop, redefinition and hot reload mid-loop and mid-recursion, callees that
@@ -64,15 +64,15 @@ One row per claim a specification document makes. BEFORE counts only pins outsid
 
 | Section | Claims | BEFORE pinned | BEFORE thin | BEFORE none | BEFORE contradicted | AFTER pinned | AFTER thin | AFTER none | AFTER contradicted |
 |---|---|---|---|---|---|---|---|---|---|
-| 1. CLAUDE.md language rules, integer_semantics.md, char_semantics.md (C-) | 372 | 331 | 24 | 16 | 1 | 356 | 13 | 2 | 1 |
+| 1. Language rules, integer_semantics.md, char_semantics.md (C-) | 372 | 331 | 24 | 16 | 1 | 356 | 13 | 2 | 1 |
 | 2. diagnostics.md, static_checking.md, type_proofs_design.md (D-, S-, P-) | 530 | 375 | 49 | 101 | 5 | 423 | 38 | 64 | 5 |
 | 3. reference_model, namespaces, global_shadowing, EXCEPTION_DESIGN, closures, LOCAL_VARIABLES, script_extensible (R, N, G, E, L, V, X) | 315 | 246 | 20 | 47 | 2 | 289 | 10 | 15 | 1 |
 | 4. parallel_design, parallel_prove_or_serial, invariants, typed_regions_design, typed_array_design (PD-, PS-, I-, TR-, TA-) | 177 | 134 | 28 | 10 | 5 | 139 | 23 | 10 | 5 |
 | 5. User guide chapters 1-13, reference page, grammar.md (Gnn-, RF-, GR-) | 1114 | 871 | 153 | 74 | 16 | 911 | 134 | 53 | 16 |
 | 6. Script the runtime calls, user operator=, error texts, throw expressions, sort, range-for (CB-) | 38 | 2 | 6 | 30 | 0 | 32 | 5 | 1 | 0 |
 | 7. Access control (AC-) | 14 | 3 | 2 | 7 | 2 | 13 | 1 | 0 | 0 |
-| 8. The rulings of 2026-09-27: captures of globals, assignment order, `auto`'s static type, call arguments; host exceptions (RL-) | 18 | 3 | 1 | 11 | 3 | 18 | 0 | 0 | 0 |
-| 9. The rulings of 2026-09-28 (RL2-) | 30 | 0 | 0 | 29 | 1 | 30 | 0 | 0 | 0 |
+| 8. Captures of globals, assignment order, `auto`'s static type, call arguments; host exceptions (RL-) | 18 | 3 | 1 | 11 | 3 | 18 | 0 | 0 | 0 |
+| 9. Library and edge rules (RL2-) | 30 | 0 | 0 | 29 | 1 | 30 | 0 | 0 | 0 |
 | **Total** | **2608** | **1965** | **283** | **325** | **35** | **2211** | **224** | **145** | **28** |
 
 ## Script the runtime calls
@@ -105,7 +105,7 @@ error through `engine::report_script_error` and returns a default, and the membe
 
 ## Known deviations
 
-None. Every derived expectation holds on both backends; the rulings of 2026-09-28 (section 9) settled the last two
+None. Every derived expectation holds on both backends; section 9 settles the last two
 (a callee of a top-level block, a typed range-for variable).
 
 ## Execution census
@@ -149,7 +149,7 @@ of `as_block` (the parser wraps every loop body).
 
 ## Open questions
 
-Dev ruled on every open question on 2026-09-28; section 9 pins each ruling on both backends.
+None: every question has a stated rule, and section 9 pins each one on both backends.
 
 **Rows marked contradicted in the ledger.** Registered tests pin the other reading of these claims; each row
 names the tests: C-326, D-164, D-221, S-207, S-218, S-283, R33, PD-2, PD-26, PD-40, PD-49, PD-50,
@@ -158,9 +158,9 @@ RF-043, GR-087, GR-089, GR-090.
 
 # Ledger
 
-## 1. CLAUDE.md language rules, integer_semantics.md, char_semantics.md
+## 1. Language rules, integer_semantics.md, char_semantics.md
 
-Source codes: CL = `Source/JaiScript/CLAUDE.md`, IS = `docs/integer_semantics.md`, CS = `docs/char_semantics.md`.
+Source codes: CL = the language rules as the guide (`docs/site/guide/`) and the stability page (`docs/site/stability.html`) state them, named by topic, IS = `docs/integer_semantics.md`, CS = `docs/char_semantics.md`.
 
 | ID | Claim | Source | Pinned by | Fuzzer | Verdict |
 |---|---|---|---|---|---|
@@ -1380,7 +1380,7 @@ The ID prefix names the document; the Source column names its section. R = `docs
 | X43 | A boxed local returned is a copy; the closure's cell is kept | 6.5 | language/review_regression_tests.cpp:return_boxed_local_copies | no | pinned |
 | X44 | A reference-returning call returned by value copies its target | 6.5 | language/review_regression_tests.cpp:return_ref_call_from_value_function_copies | no | pinned |
 | X45 | `shared_ptr` handles returned by value share | 6.5 | semantics/spec_conformance_tests.cpp:a_by_value_return_of_an_aggregate_shares_its_shared_ptr_members; language/review_regression_tests.cpp:return_shared_ptr_shares | no | pinned |
-| X46 | An aggregate returned by value copies value members and shares `shared_ptr` members | 6.5 + CLAUDE.md | semantics/spec_conformance_tests.cpp:a_by_value_return_of_an_aggregate_shares_its_shared_ptr_members | no | pinned |
+| X46 | An aggregate returned by value copies value members and shares `shared_ptr` members | 6.5 + stability page "Value semantics" | semantics/spec_conformance_tests.cpp:a_by_value_return_of_an_aggregate_shares_its_shared_ptr_members | no | pinned |
 | X47 | Coroutine handles returned by value share | 6.5 | semantics/spec_conformance_tests.cpp:coroutine_handles_returned_by_value_share | no | pinned |
 | X48 | The callee's own local moves out: one object, no destructor on return | 6.5 | semantics/spec_conformance_tests.cpp:returning_an_own_local_moves_it_without_an_extra_destructor; language/review_regression_tests.cpp:return_local_is_nrvo | no | pinned |
 | X49 | A by-value parameter returns by move, with no second copy | 6.5 | language/review_regression_tests.cpp:return_param_moves | no | pinned |
@@ -2751,7 +2751,7 @@ IDs Gnn- belong to guide chapter nn (the Source column gives the chapter number 
 
 ## 6. Callback errors, user operator=, error texts, throw expressions
 
-Source codes: diag = `docs/diagnostics.md` ("Errors in script the runtime calls" and the catalog intro), sc = `docs/static_checking.md` (rule table), CL = `Source/JaiScript/CLAUDE.md`, gr = `docs/grammar.md`. Pins are relative to `Source/JaiScript/source/tests`.
+Source codes: diag = `docs/diagnostics.md` ("Errors in script the runtime calls" and the catalog intro), sc = `docs/static_checking.md` (rule table), CL = the language rules (the guide and the stability page), gr = `docs/grammar.md`. Pins are relative to `Source/JaiScript/source/tests`.
 
 | ID | Claim | Source | Pinned by | Fuzzer | Verdict |
 |---|---|---|---|---|---|
@@ -2796,7 +2796,7 @@ Source codes: diag = `docs/diagnostics.md` ("Errors in script the runtime calls"
 
 ## 7. Access control
 
-Source codes: ruling = Dev's ruling 2026-09-27 (two levels, as simple as possible), 07 = guide chapter 7 "Access
+Source codes: ruling = the access rule (two levels: public, and private for the class family), 07 = guide chapter 7 "Access
 control", gr = `docs/grammar.md` note 12, sc = `docs/static_checking.md` "Access". Pins are relative to
 `Source/JaiScript/source/tests`; `spec:` is `semantics/spec_conformance_tests.cpp`.
 
@@ -2817,14 +2817,14 @@ control", gr = `docs/grammar.md` note 12, sc = `docs/static_checking.md` "Access
 | AC-13 | Constructors are exempt from the labels; the host C++ API (`get_field`/`set_field`, serialization, reflection reads) is unrestricted | gr | stdlib/reflection_tests.cpp:get_set_invoke_read_write_like_direct_syntax (reads; constructor exemption not asserted) | no | thin |
 | AC-14 | A lambda defined inside a method has its class's access | gr | language/script_class_tests.cpp:member_access_enforcement_matrix | no | pinned |
 
-## 8. The rulings of 2026-09-27: captures of globals, assignment order, `auto`'s static type, call arguments; host exceptions
+## 8. Captures of globals, assignment order, `auto`'s static type, call arguments; host exceptions
 
-Source codes: ruling = Dev's rulings 2026-09-27, cc = `docs/closures_and_captures.md`, gr = `docs/grammar.md`,
+Source codes: ruling = the rule the row states, cc = `docs/closures_and_captures.md`, gr = `docs/grammar.md`,
 diag = `docs/diagnostics.md` "Order of errors in an assignment", inv = `docs/invariants.md` (sections 10, 12, 13, 14),
 sc = `docs/static_checking.md` (rule table), exc = `docs/EXCEPTION_DESIGN.md`, 02/04/05/06 = guide chapters. Pins are relative to
 `Source/JaiScript/source/tests`; `spec:` is `semantics/spec_conformance_tests.cpp`. BEFORE is the verdict the
-ledger gave the claim's old reading: the three contradicted rows had registered tests pinning the opposite, which
-now pin the ruling.
+ledger gave the claim's other reading: the three contradicted rows had registered tests pinning the opposite, which
+pin the rule.
 
 | ID | Claim | Source | Pinned by | Fuzzer | Verdict |
 |---|---|---|---|---|---|
@@ -2847,9 +2847,9 @@ now pin the ruling.
 | RL-17 | A by-value argument takes its value when it is evaluated: a later argument that writes the element, map entry or nested element it read does not change what the callee receives (untyped and typed parameters, a method, a constructor, inside a counted loop) | ruling; inv 13; 04 | spec:by_value_arguments_capture_their_values_left_to_right; the suite `Call Argument Capture` | partial | pinned |
 | RL-18 | A bound host setter, getter, method or operator that throws raises the catchable runtime error with its text where it is called (top-level `try`, a function's own `try`, a compound store, an operand the operator cannot take), and the store leaves the member unchanged | exc addendum; 05 | spec:a_bound_accessor_method_or_operator_that_throws_is_catchable_where_it_is_called | no | pinned |
 
-## 9. The rulings of 2026-09-28
+## 9. Library and edge rules (`library_and_edge_rules`)
 
-Source codes: ruling Qn = Dev's ruling on open question n (2026-09-28), gr = `docs/grammar.md`, cc = `docs/closures_and_captures.md`,
+Source codes: ruling Qn = the rule for question n, gr = `docs/grammar.md`, cc = `docs/closures_and_captures.md`,
 diag = `docs/diagnostics.md`, exc = `docs/EXCEPTION_DESIGN.md`, ref = `docs/reference_model.md`, ns = `docs/namespaces.md`,
 gs = `docs/global_shadowing.md`, sc = `docs/static_checking.md`, ta = `docs/typed_array_design.md`, embedding 08 = the serialization
 chapter, 02/04/05/07/09 = guide chapters. Pins are relative to `Source/JaiScript/source/tests`; `spec:` is
@@ -2894,7 +2894,7 @@ chapter, 02/04/05/07/09 = guide chapters. Pins are relative to `Source/JaiScript
 | RL2-35 | A store through a field reference (plain and compound) runs the field's table and text | Dev ruling 2026-09-30 (R-q7); simplification audit F-4 | spec:a_store_through_a_field_reference_runs_the_fields_table | no | pinned |
 | RL2-36 | Ordinary NaN comparisons follow IEEE; public `<=>` groups NaNs last and signed zeros equivalent; a map finds a NaN key again | Builtin-order consistency, 2026-10-02 (supersedes R-q8 spaceship restriction) | spec:nan_relations_are_ieee_and_spaceship_has_a_total_order | no | pinned |
 
-## 10. The rulings of 2026-10-01
+## 10. Comparisons, host call routes and class scope (`comparisons_host_routes_and_class_scope`)
 
 Pins are relative to `Source/JaiScript/source/tests`; `spec:` is `semantics/spec_conformance_tests.cpp`. Every row runs on the
 interpreter and the VM, with type proofs on and off.

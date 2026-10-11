@@ -3338,7 +3338,7 @@ checked_result<script_value> vm_backend::enforce_type_compatibility_named(script
 		}
 		case verdict::handle_target:
 			// shared_ptr<T> / weak_ptr<T> `=`: a same-kind tag stores as-is when a shared handle's judged class is T or a
-			// subclass (R-q6); a shared handle downgrades into a weak_ptr<T> slot exactly as the declaration form does (outside the table)
+			// subclass; a shared handle downgrades into a weak_ptr<T> slot exactly as the declaration form does (outside the table)
 			if (value.type() == target_type->base_type &&
 			    (target_type->base_type != script_value_type::jai_shared_ptr_type || detail::shared_handle_admits(value, target_type, engine_))) {
 				return std::move(value);
@@ -3436,7 +3436,7 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 			if (source_type_info && source_type_info->base_type == script_value_type::jai_shared_ptr_type &&
 			    target_base_type == script_value_type::jai_shared_ptr_type &&
 			    detail::shared_handle_admits(derefed_arg, target_type, engine_)) {
-				// R-q6: the parameter or return value has the declared static type (KEEP BYTE-PARALLEL with the interpreter)
+				// handle admission: the parameter or return value has the declared static type (KEEP BYTE-PARALLEL with the interpreter)
 				if (arg.is_reference() || source_type_info.get() == target_type.get()) { return arg; }
 				script_value bound = arg;
 				detail::keep_handle_slot_type(bound, target_type);
@@ -4130,7 +4130,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 					}
 					VM_TRY(store_back(std::move(value)));
 				} else {
-					// R-q6: a typed source by its static pointee, a var-held one by its object's class
+					// handle admission: a typed source by its static pointee, a var-held one by its object's class
 					// (KEEP BYTE-PARALLEL with the interpreter's environment row)
 					if (!detail::shared_handle_admits(value, ptr_type_info, engine_)) {
 						uint64_t expected_id = expected_type ? expected_type->id : 0;
@@ -12305,7 +12305,7 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 				value.set_type_info(inferred);
 				return define_decl_value(f, decl, std::move(value), decl->ref_escaping);
 			}
-			// Typed shared_ptr declarations enforce their pointee class (R-q6: a typed source by its
+			// Typed shared_ptr declarations enforce their pointee class (handle admission: a typed source by its
 			// static pointee, a var-held one by its object's class; detail::shared_handle_admits)
 			// (KEEP BYTE-PARALLEL with interpreter::visit_variable_decl)
 			if (!detail::shared_handle_admits(value, decl->type, engine_)) {
@@ -20733,7 +20733,7 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_typed_land_[9]);
 		fprintf(stderr, "[vm-profile] typed temp misses (measured span): no live slot %llu | wrong payload or reference %llu | other stamp %llu\n",
 			(unsigned long long)profile_temp_miss_[0], (unsigned long long)profile_temp_miss_[1], (unsigned long long)profile_temp_miss_[2]);
-		fprintf(stderr, "[vm-profile] typed store and move landings (measured span): store in-place %llu | move in-place %llu (lane removed in row 93) | move assign %llu | move fallback %llu\n",
+		fprintf(stderr, "[vm-profile] typed store and move landings (measured span): store in-place %llu | move in-place %llu (no in-place move lane: stays 0) | move assign %llu | move fallback %llu\n",
 			(unsigned long long)profile_typed_inplace_[0], (unsigned long long)profile_typed_inplace_[1], (unsigned long long)profile_typed_inplace_[2], (unsigned long long)profile_typed_inplace_[3]);
 		fprintf(stderr, "[vm-profile] cell loops (measured span): entries %llu | refused %llu (by a container site %llu) | cell iterations %llu | unboxes %llu | exit events %llu | miss events %llu | misses %llu (cmp %llu arith %llu load %llu store %llu after a call %llu) | calls from a block %llu (landings missed %llu, by the result's kind %llu) | cell instructions %llu (head compares plus body ops; entry and back edge excluded) | cells flushed in place %llu, fully replaced %llu | raw area: records %llu, largest %llu bytes (8 payload + 1 kind per cell, capacity; the boxed slots stay allocated)\n",
 			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[10], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],

@@ -4205,7 +4205,7 @@ private:
 			}
 			ctype recv;
 			const ctype read_type = infer_member(m, /*writing=*/true, &typed_field, &recv, &hit, &fp);
-			// a shared_ptr<T> namespace variable admits a handle by R-q6 at load; other namespace stores
+			// a shared_ptr<T> namespace variable admits a handle by its static pointee at load; other namespace stores
 			// stay run-time checks under strict (spec: a_typed_namespace_store_is_checked_at_run_time_under_strict)
 			std::string qualified;
 			if (!typed_field && m->is_static) {

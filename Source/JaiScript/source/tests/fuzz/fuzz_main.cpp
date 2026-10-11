@@ -659,7 +659,7 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	std::cout << "\n===== campaign summary =====\n";
+	std::cout << "\n===== run summary =====\n";
 	std::cout << "seeds:          " << begin << ".." << (end - 1) << " (" << (end - begin) << " programs)\n";
 	std::cout << "parse-valid:    " << parse_valid << " (" << (100.0 * parse_valid / (end - begin)) << "%)\n";
 	std::cout << "agree:          " << agree << "\n";

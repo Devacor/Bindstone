@@ -678,8 +678,8 @@ uint32_t vm_compiler::add_node(std::shared_ptr<ast_node> node) {
 	return static_cast<uint32_t>(chunk_->nodes.size() - 1);
 }
 
-void vm_compiler::emit_unsupported(const char* construct, const char* stage) {
-	std::string msg = std::string("vm backend: ") + construct + " not implemented yet (stage " + stage + ")";
+void vm_compiler::emit_unsupported(const char* construct) {
+	std::string msg = std::string("vm backend: cannot compile ") + construct;
 	emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::unsupported_operation),
 	     add_message(std::move(msg)), k_invalid_u32);
 	// Keep the value-stack shape consistent for expression positions
@@ -1339,7 +1339,7 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 		return;
 	case node_type::case_stmt:
 	case node_type::default_stmt:
-		emit_unsupported("switch", "B3");
+		emit_unsupported("a case label outside a switch");
 		emit(opcode::op_pop);
 		return;
 	default:
@@ -1347,7 +1347,7 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 			compile_declaration(decl, false);
 			return;
 		}
-		emit_unsupported("statement", "B2");
+		emit_unsupported("this statement");
 		emit(opcode::op_pop);
 		return;
 	}
@@ -2433,7 +2433,7 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 		return;
 	}
 	default:
-		emit_unsupported("expression", "B2");
+		emit_unsupported("this expression");
 		return;
 	}
 }
@@ -6388,7 +6388,7 @@ bool vm_compiler::try_emit_fused_index_shape(binary_expr* expr, uint32_t flags) 
 				vm_instruction& last = chunk_->code.back();
 				if (last.op != opcode::op_binary_fused) {
 					// unreachable by construction (binary_lands_fused mirrors compile_binary's decisions); the index is on the stack
-					emit_unsupported("an index tree that did not land fused", "row 110");
+					emit_unsupported("an index tree that did not land fused");
 					temp_next_ = temp_mark;
 					return true;
 				}
@@ -6968,7 +6968,7 @@ bool vm_compiler::try_emit_fused_index_store_shape(binary_expr* sub, const expre
 		compile_expression(sub->right);
 		vm_instruction& last = chunk_->code.back();
 		if (last.op != opcode::op_binary_fused) {
-			emit_unsupported("an index tree that did not land fused", "row 110");   // unreachable by construction, as at the read site
+			emit_unsupported("an index tree that did not land fused");   // unreachable by construction, as at the read site
 			temp_next_ = temp_mark;
 			return true;
 		}

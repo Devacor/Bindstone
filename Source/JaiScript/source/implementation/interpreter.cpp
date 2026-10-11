@@ -6116,7 +6116,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             }
                             JAISCRIPT_TRY(store_back(std::move(value)));
                         } else {
-                            // R-q6: a typed source by its static pointee, a var-held one by its object's class
+                            // handle admission: a typed source by its static pointee, a var-held one by its object's class
                             // (KEEP BYTE-PARALLEL with vm_backend::store_popped_value's environment row)
                             if (!detail::shared_handle_admits(value, ptr_type_info, engine_)) {
                                 uint64_t expected_id = expected_type ? expected_type->id : 0;
@@ -6972,7 +6972,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                     JAISCRIPT_TRY(define_variable(std::move(value)));
                     return {};
                 }
-                // Typed shared_ptr declarations enforce their pointee class (R-q6: a typed source by its
+                // Typed shared_ptr declarations enforce their pointee class (handle admission: a typed source by its
                 // static pointee, a var-held one by its object's class; detail::shared_handle_admits)
                 // (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
                 if (!detail::shared_handle_admits(value, decl->type, engine_)) {
@@ -7386,7 +7386,7 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
         }
         case verdict::handle_target:
             // shared_ptr<T> / weak_ptr<T> `=`: a same-kind tag stores as-is when a shared handle's judged class is T or a
-            // subclass (R-q6); a shared handle downgrades into a weak_ptr<T> slot exactly as the declaration form does (outside the table)
+            // subclass; a shared handle downgrades into a weak_ptr<T> slot exactly as the declaration form does (outside the table)
             if (value.type() == target_type->base_type &&
                 (target_type->base_type != script_value_type::jai_shared_ptr_type || detail::shared_handle_admits(value, target_type, engine_))) {
                 return std::move(value);
@@ -15421,7 +15421,7 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
             if (source_type_info && source_type_info->base_type == script_value_type::jai_shared_ptr_type &&
                 target_base_type == script_value_type::jai_shared_ptr_type &&
                 detail::shared_handle_admits(derefed_arg, target_type, engine_)) {
-                // R-q6: the parameter or return value has the declared static type (KEEP BYTE-PARALLEL with vm_backend)
+                // handle admission: the parameter or return value has the declared static type (KEEP BYTE-PARALLEL with vm_backend)
                 if (arg.is_reference() || source_type_info.get() == target_type.get()) { return arg; }
                 script_value bound = arg;
                 detail::keep_handle_slot_type(bound, target_type);

@@ -1,5 +1,5 @@
-// Spec conformance: every expected value below is derived from the specification (Source/JaiScript/CLAUDE.md
-// "Language features", docs/*.md, the guide, and C++ where the docs say C++ semantics), never from running
+// Spec conformance: every expected value below is derived from the specification (docs/*.md, the guide
+// under docs/site/guide/, docs/site/stability.html, and C++ where the docs say C++ semantics), never from running
 // a backend. docs/spec_conformance.md lists each claim, its source and the tests that pin it.
 // Every row runs on the interpreter and the VM, with proofs on and off and the VM's passes off (and, in a
 // build that defines JAISCRIPT_MISS_INJECTION, with injected cell misses), against one expected string.
@@ -491,8 +491,8 @@ public:
 		auto_static_type();
 		call_argument_capture();
 		simplification_audit_fixes();
-		rulings_2026_09_28();
-		rulings_2026_10_01();
+		library_and_edge_rules();
+		comparisons_host_routes_and_class_scope();
 		handle_field_admission();
 		reentrant_destructors_and_operand_order();
 		handle_admission();
@@ -503,7 +503,7 @@ public:
 	}
 
 private:
-	// CLAUDE.md "An assignment expression's value is the destination's stored value"
+	// docs/site/stability.html "Statements and expressions": an assignment expression's value is the value the destination stored
 	void assignment_expression_values() {
 		test("assignment_value_is_the_stored_value_for_every_destination_kind", [this]() {
 			expect("stored value", R"(
@@ -587,8 +587,8 @@ private:
 		});
 	}
 
-	// CLAUDE.md "Declarations without an initializer" and "Constructor exits", crossed with
-	// coroutines and delegating constructors
+	// docs/site/guide/02-type-ladder.html "Declarations without an initializer" and docs/site/guide/07-classes.html
+	// "Constructor exits and destructors", crossed with coroutines and delegating constructors
 	void declarations_and_constructors() {
 		test("defaulted_declarations_inside_a_coroutine_re_default_on_every_execution", [this]() {
 			expect("coroutine decls", R"(
@@ -655,7 +655,8 @@ private:
 		});
 	}
 
-	// CLAUDE.md "By-value returns copy, own locals move" (docs/script_extensible.md 6.5) and "Aggregate copies are C++ copies"
+	// By-value returns copy, own locals move (docs/script_extensible.md 6.5); aggregate copies copy values and share handles
+	// (docs/site/stability.html "Value semantics")
 	void by_value_returns_and_copies() {
 		test("by_value_returns_never_alias_what_the_callee_could_name", [this]() {
 			expect("returns", R"(
@@ -720,7 +721,7 @@ private:
 		});
 	}
 
-	// CLAUDE.md "== is memberwise on heavy values"
+	// docs/site/guide/04-operators.html "Equality": == is memberwise on heavy values
 	void memberwise_equality() {
 		test("memberwise_equality_with_user_operators_at_every_depth", [this]() {
 			expect("memberwise", R"(
@@ -787,7 +788,7 @@ private:
 		});
 	}
 
-	// CLAUDE.md "Map key types"; texts from docs/diagnostics.md "element / key boundary"
+	// docs/site/guide/09-containers-strings.html "Key types"; texts from docs/diagnostics.md "element / key boundary"
 	void map_keys() {
 		test("map_key_types_are_enforced_and_auto_keys_infer", [this]() {
 			expect("keys", R"(
@@ -842,7 +843,7 @@ private:
 		});
 	}
 
-	// CLAUDE.md "cast<T>(e) / cast<T&>(e) / cast<shared_ptr<T>>(e)"
+	// docs/site/guide/02-type-ladder.html "cast<T>(e): the explicit boundary" (cast<T>, cast<T&>, cast<shared_ptr<T>>)
 	void casts() {
 		test("cast_reference_member_stores_through_a_base_typed_receiver", [this]() {
 			expect("cast ref", R"(
@@ -883,7 +884,7 @@ private:
 	}
 
 	// docs/EXCEPTION_DESIGN.md addendum (the catch variable is a block-scoped local; coroutines park the exception trio)
-	// and CLAUDE.md "switch/case/default (break-by-default; explicit fallthrough;)"
+	// and docs/site/guide/05-control-flow.html "switch: break by default, explicit fallthrough"
 	void catch_variables_and_switch() {
 		test("catch_variables_inside_switch_cases_with_fallthrough", [this]() {
 			expect("switch catch", R"(
@@ -1006,7 +1007,8 @@ private:
 		});
 	}
 
-	// CLAUDE.md "utf8_string": caches clear on every write
+	// utf8_string counts characters (docs/site/guide/09-containers-strings.html "utf8_string: text by character"); its
+	// character caches clear on every write, so no write path ever sees a stale count or position
 	void utf8_caches() {
 		test("utf8_caches_follow_writes_through_references_parameters_fields_and_copies", [this]() {
 			// e = e-acute, j = the two CJK characters, o = omega, u = u-umlaut
@@ -1043,7 +1045,8 @@ private:
 		});
 	}
 
-	// CLAUDE.md "Array representation follows the declared type", "Handle-typed elements take null", "Element conversions"
+	// docs/site/guide/09-containers-strings.html "Typed containers" (representation follows the declared type, element
+	// conversions); handle-typed elements take null (docs/site/stability.html "Typed containers")
 	void typed_containers() {
 		test("element_boundaries_on_every_typed_container", [this]() {
 			expect("elements", R"(
@@ -1070,7 +1073,7 @@ private:
 		});
 	}
 
-	// CLAUDE.md "++/-- work on every lvalue"
+	// docs/site/reference/index.html "Operators": ++/-- work on every lvalue
 	void increments() {
 		test("increments_on_members_elements_map_entries_and_nested_lvalues", [this]() {
 			expect("incdec", R"(
@@ -1085,7 +1088,7 @@ private:
 		});
 	}
 
-	// CLAUDE.md "Parallel bodies see the enclosing function's locals" (docs/parallel_design.md section 13)
+	// docs/parallel_design.md section 13: parallel bodies see the enclosing function's locals
 	void parallel_locals() {
 		test("a_parallel_body_reads_the_enclosing_frames_local_over_a_same_named_global", [this]() {
 			expect("parallel locals", R"(
@@ -1102,7 +1105,7 @@ private:
 		});
 	}
 
-	// docs/grammar.md forStatement, CLAUDE.md operators ("and compound assigns"), docs/integer_semantics.md
+	// docs/grammar.md forStatement and Operators (compound assigns), docs/integer_semantics.md
 	void grammar_and_operators() {
 		test("a_for_initializer_may_be_an_expression", [this]() {
 			// docs/grammar.md: forStatement = "for" "(" (variableDeclaration | expression)? ";" ...
@@ -1174,7 +1177,7 @@ private:
 		});
 	}
 
-	// CLAUDE.md code guidelines: <=> is a strict weak ordering incl. NaN; complex keys order by held-pointer identity
+	// docs/thin_value_spec.md invariants: <=> is a strict weak ordering incl. NaN; complex keys order by held-pointer identity
 	void map_key_edges() {
 		test("a_nan_key_is_storable_and_findable", [this]() {
 			every_config("nan key", "12", [](engine& e) {
@@ -1194,7 +1197,7 @@ private:
 		});
 	}
 
-	// docs/global_shadowing.md, CLAUDE.md "Program-scope redeclarations shadow by unit" and "{} blocks scope as in C++"
+	// docs/global_shadowing.md: program-scope redeclarations shadow by unit and {} blocks scope as in C++
 	void scopes_and_units() {
 		test("block_scopes_in_loops_tries_and_bare_blocks", [this]() {
 			expect("blocks", R"(
@@ -1768,8 +1771,9 @@ private:
 		});
 
 		test("a_default_sort_of_instances_orders_by_the_languages_less_than", [this]() {
-			// CLAUDE.md: ordering stays off containers and instances - an instance sorts by its user operator< (C++ std::sort's
-			// operator<), and an element with no order raises the < operator's rejection instead of sorting by address or a rank assigned to its type
+			// docs/site/guide/04-operators.html "Equality": sort() orders through the language's < - an instance by its user operator<
+			// (C++ std::sort's operator<), arrays lexicographically, and an element with no order raises the < operator's rejection
+			// instead of sorting by address or a rank assigned to its type
 			expect("default sort", R"(
 				class K { int v = 0; K(int x) { v = x; } }
 				class L { int v = 0; L(int x) { v = x; } bool operator<(L o) { return v < o.v; } }
@@ -1795,8 +1799,8 @@ private:
 
 	// docs/static_checking.md rule table: on plain assignment an object slot takes a source through a user operator= of its
 	// class (C++ assignment: the operator runs on the held instance, exact match ahead of a converting constructor); the
-	// expression's value is the destination's (CLAUDE.md assignment-expression values); container elements need the exact
-	// type (CLAUDE.md element conversions), so an element store never dispatches it
+	// expression's value is the destination's (docs/site/stability.html "Statements and expressions"); container elements
+	// need the exact type (docs/site/guide/09-containers-strings.html "Typed containers"), so an element store never dispatches it
 	void user_assignment_operator() {
 		const char* OK = R"(
 			class OK2 { int v = 1; function operator=(int x) -> OK2 { v = x * 10; return this; } }
@@ -1972,7 +1976,7 @@ private:
 		});
 	}
 
-	// CLAUDE.md "Files and locations"
+	// docs/site/guide/10-modules.html "Where files are"
 	void file_locations() {
 		test("file_name_is_lexical_and_parent_dir_canonicalizes", [this]() {
 			expect("locations", R"(
@@ -2004,7 +2008,7 @@ private:
 		});
 	}
 
-	// CLAUDE.md "Custom permissions": the first missing built-in, then custom names in registration order
+	// docs/reflection.md "Enabled privileges", docs/site/embedding/05-safety-rails.html: the first missing built-in, then custom names in registration order
 	void privilege_order() {
 		test("a_denial_names_the_first_missing_permission_in_registration_order", [this]() {
 			every_config("denial order", "Insufficient privilege: app.b.|Insufficient privilege: filesystem.", [](engine& e) {
@@ -2799,7 +2803,7 @@ private:
 	}
 
 	// docs/spec_conformance.md section 9
-	void rulings_2026_09_28() {
+	void library_and_edge_rules() {
 		test("a_bare_throw_with_nothing_active_is_a_catchable_runtime_error", [this]() {
 			expect("bare throw", R"(
 				string r = "none"; try { throw; } catch (e) { r = "top:" + e; }
@@ -2822,27 +2826,27 @@ private:
 			every_config("own try", "own:lv too big:1|top:lv too big|caller:lv too big",
 				[&](engine& e) { spec::bind_boundary_probe(e); return spec::render(e.execute(src)); }, check_mode::off);
 		});
-		ruling_switch_equality();
-		ruling_membership_equality();
-		ruling_compound_operand_text();
-		ruling_this_capture();
-		ruling_to_string_builtin();
-		ruling_host_callbacks();
-		ruling_signed_zero_keys();
-		ruling_typed_slice();
-		ruling_missing_key_compound();
-		ruling_constructorless_call_text();
-		ruling_typed_reference_parameters();
+		switch_equality();
+		membership_equality();
+		compound_operand_text();
+		this_capture();
+		to_string_builtin();
+		host_callbacks();
+		signed_zero_keys();
+		typed_slice();
+		missing_key_compound();
+		constructorless_call_text();
+		typed_reference_parameters();
 		static_members_bind_references();
-		ruling_reference_store_types();
-		ruling_typed_range_for();
-		ruling_auto_fields();
-		ruling_numeric_ternary_auto();
-		ruling_from_json_constructor_errors();
-		ruling_json_tagged_values();
-		ruling_base_slots_keep_the_class();
-		ruling_block_callees();
-		ruling_var_typed_arrays();
+		reference_store_types();
+		typed_range_for();
+		auto_fields();
+		numeric_ternary_auto();
+		from_json_constructor_errors();
+		json_tagged_values();
+		base_slots_keep_the_class();
+		block_callees();
+		var_typed_arrays();
 		constructor_overloads_rank_like_calls();
 		compound_operators_have_one_table();
 		script_class_operator_overloads();
@@ -2853,7 +2857,7 @@ private:
 	}
 
 	// Comparison rewriting, <=> everywhere, host call failure routes, host-bound references and class scope
-	void rulings_2026_10_01() {
+	void comparisons_host_routes_and_class_scope() {
 		comparison_rewriting();
 		host_call_failure_routes();
 		host_global_references();
@@ -3530,7 +3534,7 @@ private:
 		});
 	}
 
-	void ruling_var_typed_arrays() {
+	void var_typed_arrays() {
 		test("a_var_holding_a_copy_of_a_typed_array_keeps_the_typed_representation", [this]() {
 			// the array keeps its element type (every element boundary), the variable stays a var ('=' takes any value)
 			expect("var typed array", R"(
@@ -3550,7 +3554,7 @@ private:
 		});
 	}
 
-	void ruling_block_callees() {
+	void block_callees() {
 		test("a_callee_of_a_top_level_block_sees_the_outer_binding", [this]() {
 			// docs/global_shadowing.md: a function called from inside a block sees the binding of the scope it was declared in
 			// (a {} block, an if body, a for body, a range-for body, a catch body, a nested block); a function declared inside
@@ -3571,7 +3575,7 @@ private:
 		});
 	}
 
-	void ruling_base_slots_keep_the_class() {
+	void base_slots_keep_the_class() {
 		test("a_derived_value_in_a_base_typed_slot_keeps_its_class", [this]() {
 			// a deliberate deviation from C++ slicing: the slot's static type is the base, the value stays whole
 			expect("no slicing", R"(
@@ -3583,7 +3587,7 @@ private:
 		});
 	}
 
-	void ruling_json_tagged_values() {
+	void json_tagged_values() {
 		test("a_json_round_trip_keeps_chars_and_non_string_map_keys", [this]() {
 			// {"$char": n} and {"$map": [[k, v], ...]} carry what a JSON object cannot; any other shape of those keys stays a map
 			expect("json tags", R"(
@@ -3598,7 +3602,7 @@ private:
 		});
 	}
 
-	void ruling_auto_fields() {
+	void auto_fields() {
 		test("an_auto_field_takes_its_initializers_static_type", [this]() {
 			// auto = static type, for class fields: an int-initialized auto field is an int field, an auto without a static
 			// type is a var
@@ -3614,7 +3618,7 @@ private:
 		});
 	}
 
-	void ruling_numeric_ternary_auto() {
+	void numeric_ternary_auto() {
 		test("an_auto_initialized_from_an_int_float_ternary_is_float", [this]() {
 			// C++'s common type of int and float is float: the chosen arm converts; any other mixed ternary has no static type
 			expect("numeric ternary", R"(
@@ -3634,7 +3638,7 @@ private:
 		});
 	}
 
-	void ruling_from_json_constructor_errors() {
+	void from_json_constructor_errors() {
 		test("from_json_propagates_a_raising_constructor", [this]() {
 			// the load constructs the class as Name() would; that call's throw or error is the load's
 			expect("from_json ctor", R"(
@@ -3647,7 +3651,7 @@ private:
 		});
 	}
 
-	void ruling_typed_range_for() {
+	void typed_range_for() {
 		test("a_typed_range_for_variable_takes_each_element_as_its_declaration_would", [this]() {
 			// by value: T x = element; by reference: an element that holds a T; auto over elements without a static type is a var
 			expect("typed range-for", R"(
@@ -3670,7 +3674,7 @@ private:
 		});
 	}
 
-	void ruling_reference_store_types() {
+	void reference_store_types() {
 		test("a_store_through_a_reference_obeys_the_variables_declared_type", [this]() {
 			expect("ref store", R"(
 				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = e; } return r; }
@@ -3711,7 +3715,7 @@ private:
 		});
 	}
 
-	void ruling_typed_reference_parameters() {
+	void typed_reference_parameters() {
 		test("a_typed_reference_parameter_binds_only_its_own_type", [this]() {
 			expect("int& binding", R"(
 				class A { int v = 1; } class B : A { }
@@ -3731,7 +3735,7 @@ private:
 		});
 	}
 
-	void ruling_constructorless_call_text() {
+	void constructorless_call_text() {
 		test("a_constructorless_class_called_with_arguments_has_one_text", [this]() {
 			// an aggregate takes at most one initializer per field; a class with a private field is no aggregate
 			expect("runtime text", R"(
@@ -3759,7 +3763,7 @@ private:
 		});
 	}
 
-	void ruling_typed_slice() {
+	void typed_slice() {
 		test("a_slice_of_a_typed_array_keeps_its_element_type", [this]() {
 			expect("typed slice", R"(
 				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = "raised:" + e; } return r; }
@@ -3772,7 +3776,7 @@ private:
 		});
 	}
 
-	void ruling_missing_key_compound() {
+	void missing_key_compound() {
 		test("a_compound_on_a_missing_key_starts_from_the_value_types_default", [this]() {
 			// C++ operator[] value-initializes the entry; a var-valued map has no default, so its entry meets null
 			expect("missing key compound", R"(
@@ -3787,7 +3791,7 @@ private:
 		});
 	}
 
-	void ruling_signed_zero_keys() {
+	void signed_zero_keys() {
 		test("zero_and_negative_zero_are_one_map_key", [this]() {
 			expect("signed zero", R"(
 				var m = {}; m[0.0] = 1; m[-0.0] = 2;
@@ -3799,7 +3803,7 @@ private:
 		});
 	}
 
-	void ruling_to_string_builtin() {
+	void to_string_builtin() {
 		test("the_to_string_builtin_uses_a_classs_own_to_string", [this]() {
 			expect("to_string(x)", R"(
 				class T { int n = 3; string to_string() { return "t" + n; } }
@@ -3813,7 +3817,7 @@ private:
 		});
 	}
 
-	void ruling_host_callbacks() {
+	void host_callbacks() {
 		test("a_script_callback_behind_a_host_function_propagates_its_error", [this]() {
 			every_config("host callback", "raised:Division by zero|raised:boom|7", [](engine& e) {
 				e.add_function("apply", [](script_value cb) -> script_int { return convert_script_function<script_int(script_int)>(cb)(3); });
@@ -3834,7 +3838,7 @@ private:
 		});
 	}
 
-	void ruling_this_capture() {
+	void this_capture() {
 		test("a_this_capture_is_the_instance_itself", [this]() {
 			expect("[this]", R"(
 				class C {
@@ -3851,7 +3855,7 @@ private:
 		});
 	}
 
-	void ruling_compound_operand_text() {
+	void compound_operand_text() {
 		test("a_compound_operand_error_has_one_text_at_every_destination", [this]() {
 			// docs/diagnostics.md compound assignment: Cannot apply 'op=' to <target> and <operand>, a variable, a field, a static,
 			// an element and a map entry alike
@@ -3868,7 +3872,7 @@ private:
 		});
 	}
 
-	void ruling_membership_equality() {
+	void membership_equality() {
 		test("contains_index_of_and_has_use_the_languages_equality", [this]() {
 			expect("membership ==", R"(
 				class E { int v = 0; E(int x) { v = x; } bool operator==(E o) { return v == o.v; } }
@@ -3886,7 +3890,7 @@ private:
 		});
 	}
 
-	void ruling_switch_equality() {
+	void switch_equality() {
 		test("a_switch_case_matches_when_the_languages_equality_holds", [this]() {
 			expect("switch ==", R"(
 				class E { int v = 0; E(int x) { v = x; } bool operator==(E o) { return v == o.v; } }
@@ -3931,8 +3935,8 @@ private:
 		});
 	}
 
-	// A shared_ptr<T> field holds T or a subclass, the rule a shared_ptr<T> declaration enforces (CLAUDE.md: a shared_ptr<T>
-	// element takes a live instance of T or a subclass the way a shared_ptr<T> variable does)
+	// A shared_ptr<T> field holds T or a subclass, the rule a shared_ptr<T> declaration enforces (docs/static_checking.md
+	// rule table, shared_ptr<T> row: one rule at a declaration, a field, a parameter, a return and a container element)
 	void handle_field_admission() {
 		test("a_shared_ptr_field_rejects_a_handle_holding_an_unrelated_class", [this]() {
 			expect("field handle", R"(

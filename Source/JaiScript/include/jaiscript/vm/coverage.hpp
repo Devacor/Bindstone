@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_VM_COVERAGE_HPP__
 #define __JAISCRIPT_VM_COVERAGE_HPP__
 
-// The execution-coverage census (a diagnostic build: JAISCRIPT_VM_COVERAGE; docs/review-2026-10-01/COVERAGE_CENSUS.md).
+// The execution-coverage census (a diagnostic build: JAISCRIPT_VM_COVERAGE).
 // Every instruction the vm executes is counted where it runs: in a cell block (a closed loop, a straight-line region,
 // a frame program) or on the general form, typed (op_t_*) or untyped. A chunk is classified once, when it first runs:
 // each general instruction's region (the closed loop whose general form it is, the refused loop and the refusal the

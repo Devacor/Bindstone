@@ -165,6 +165,29 @@ namespace jai::detail {
 		m->ref_field_slot = def->field_slot(member_id);
 	}
 
+	// The reference a T& binds to a plain script field of `plain` (the instance behind `receiver`, whose class the site's verdict
+	// holds for): the cell's own reference when it holds one, else a field reference over the slot the site remembers
+	inline checked_result<script_value> plain_field_reference(const script_value& receiver, class_instance* plain, const member_expr* m,
+	                                                          uint64_t member_id, engine* eng) {
+		const uint32_t slot = m->ref_field_slot;
+		script_value* field_value = slot != class_definition::k_no_field_slot ? plain->field_slot_value(slot) : plain->find_field_value(member_id);
+		if (!field_value) {
+			return ref_non_lvalue_error();
+		}
+		if (field_value->is_reference()) {
+			if (!field_value->get_reference_holder()) {
+				return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+			}
+			return script_value(*field_value);
+		}
+		type_info_ptr tag = m->ref_field_declared ? type_info_ptr{m->ref_field_declared} : field_value->get_type_info();
+		type_info_ptr constraint = nullptr;
+		if (tag && tag->base_type != script_value_type::jai_any_type && tag->base_type != script_value_type::jai_null_type) {
+			constraint = tag;
+		}
+		return script_value::make_field_reference(receiver.unchecked_object_handle(), plain, member_id, eng, std::move(constraint), *field_value, slot);
+	}
+
 	// Mirrors script_value::deref() with checked errors instead of throws (bind-time
 	// resolution must never throw). Returns a shallow copy of the dereferenced value.
 	inline checked_result<script_value> ref_checked_deref(const script_value& v) {
@@ -464,6 +487,11 @@ namespace jai::detail {
 				const auto* m = static_cast<const member_expr*>(step);
 				const uint64_t member_id = m->member_id != UINT64_MAX ? m->member_id : symbolizer->intern(m->member);
 				if (class_instance* plain = ref_plain_script_field(cur, m, symbolizer)) {
+					if (is_final) {
+						auto ref = plain_field_reference(cur, plain, m, member_id, eng);
+						if (!ref) { return ref; }
+						return rooted(std::move(ref.value()));
+					}
 					// the site's slot for this class (ref_plain_script_field proved the class and its epochs), with find_field_value's
 					// ladder kept for a field outside the slots
 					const uint32_t slot = m->ref_field_slot;
@@ -471,24 +499,10 @@ namespace jai::detail {
 					if (!field_value) {
 						return ref_non_lvalue_error();
 					}
-					if (!is_final) {
-						auto derefed = ref_checked_deref(*field_value);
-						if (!derefed) { return derefed; }
-						cur = std::move(derefed.value());
-						continue;
-					}
-					if (field_value->is_reference()) {
-						if (!field_value->get_reference_holder()) {
-							return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-						}
-						return script_value(*field_value);
-					}
-					type_info_ptr tag = m->ref_field_declared ? type_info_ptr{m->ref_field_declared} : field_value->get_type_info();
-					type_info_ptr constraint = nullptr;
-					if (tag && tag->base_type != script_value_type::jai_any_type && tag->base_type != script_value_type::jai_null_type) {
-						constraint = tag;
-					}
-					return rooted(script_value::make_field_reference(cur.unchecked_object_handle(), plain, member_id, eng, std::move(constraint), *field_value, slot));
+					auto derefed = ref_checked_deref(*field_value);
+					if (!derefed) { return derefed; }
+					cur = std::move(derefed.value());
+					continue;
 				}
 				// Binder .property() members bind on every receiver kind (a same-named
 				// script field shadows: getter_id 0 keeps the FIELD path below); a

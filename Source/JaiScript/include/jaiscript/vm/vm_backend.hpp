@@ -2376,6 +2376,7 @@ namespace jai::vm {
         __declspec(noinline)
 #endif
         op_status capture_arg(frame& f, const vm_instruction& ins);   // cold: the value may still share storage, or a place binds (op_capture_arg)
+        op_status exec_place_arg(frame& f, const vm_instruction& ins);
         op_status exec_call_from_scratch(frame& f, const vm_instruction& ins);
         op_status exec_call_from_scratch_general(frame& f, const vm_instruction& ins);
         op_status call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function> pin);

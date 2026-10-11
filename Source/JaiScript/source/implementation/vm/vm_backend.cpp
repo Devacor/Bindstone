@@ -13601,6 +13601,8 @@ bool vm_backend::bind_plain_references(const script_defined_function& function, 
 			if (!lean_slot_takes(p, a)) { return false; }
 			continue;
 		}
+		if (i < site.arg_lvalue_nodes.size() && site.arg_lvalue_nodes[i] != k_invalid_u32 && a.is_reference() && a.get_reference_holder() &&
+		    !detail::deferred_argument(a)) { continue; }   // a place argument evaluated to its reference (op_place_arg)
 		if (i >= site.arg_symbols.size() || i >= site.arg_slots.size() || site.arg_symbols[i] == UINT64_MAX || site.arg_slots[i] == k_invalid_u32 ||
 		    detail::deferred_argument(a)) { return false; }
 		script_value* local = frame_slot(caller, site.arg_slots[i]);
@@ -15275,11 +15277,38 @@ op_status vm_backend::fused_member_container(frame& f, size_t site, const script
 	return {};
 }
 
+// A field argument at its evaluation: the reference the pending callee's T& parameter binds (the binding takes it as evaluated), else
+// the value op_get_member reads. A callee other than one parked script function (an overload set, a host callable, a default
+// window), or a place the resolver declines, reads the value, and the binding resolves it as before
+JAI_NOINLINE op_status vm_backend::exec_place_arg(frame& f, const vm_instruction& ins) {
+	if (!pending_callees_.empty()) {
+		const script_defined_function* fn = pending_callees_.back().fn;
+		if (fn && ins.c < fn->parameters().size() && fn->parameters()[ins.c].is_reference) {
+			const auto* m = static_cast<const member_expr*>(f.code->nodes[ins.a].get());
+			const uint64_t member_id = m->member_id != UINT64_MAX ? m->member_id : symbolizer_->intern(m->member);
+			if (const script_value* base = frame_slot(f, ins.b - 1)) {
+				if (class_instance* plain = detail::ref_plain_script_field(*base, m, symbolizer_)) {
+					if (auto ref = detail::plain_field_reference(*base, plain, m, member_id, engine_)) {
+						stack_.push_back(std::move(ref.value()));
+						return {};
+					}
+				}
+			}
+			ensure_frame_member_scope(f, environment_.get());
+			if (auto resolved = detail::resolve_ref_lvalue(m, caller_view(&f), environment_.get(), engine_, symbolizer_)) {
+				stack_.push_back(std::move(resolved.value()));
+				return {};
+			}
+		}
+	}
+	return exec_get_member(f, ins);
+}
+
 op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 	auto* expr = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value object{std::monostate{}, nullptr};
 	const script_value* receiver = &object;
-	if (ins.op == opcode::op_get_member && ins.b != 0) {
+	if ((ins.op == opcode::op_get_member || ins.op == opcode::op_place_arg) && ins.b != 0) {
 		if (const script_value* base = frame_slot(f, ins.b - 1)) { receiver = &base->deref(); }
 		else { object = make_null(); }
 	} else {
@@ -19842,6 +19871,8 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_capture_arg:
 			if ((ins.c >> capture_place_shift) != 0 || detail::capture_candidate(stack_.back(), static_cast<uint8_t>(ins.c & 3))) { return capture_arg(f, ins); }
 			return {};
+		case opcode::op_place_arg:
+			return exec_place_arg(f, ins);
 		default: return {};
 	}
 }
@@ -21235,6 +21266,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_cast:
 			case opcode::op_return_convert:
 			case opcode::op_capture_arg:
+			case opcode::op_place_arg:
 			case opcode::op_take_temp:
 			case opcode::op_const_guard:
 				VM_TRY_OP(exec_extended(f, ins));
@@ -23424,7 +23456,10 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 			// unit, entered by the record push ahead of the binding, resumes once this parameter is bound
 			unit_sync_scope unitSync{ this };   // the callee's unit again once the argument is bound
 			enter_unit(caller_unit);
-			if (site) {
+			if (site && i < site->arg_lvalue_nodes.size() && site->arg_lvalue_nodes[i] != k_invalid_u32 && arg.is_reference() && arg.get_reference_holder()) {
+				// a place argument that evaluated to a reference (op_place_arg, an element read): the reference its evaluation bound
+				frame_slot_set(callee, param.slot_index, script_value(arg));
+			} else if (site) {
 				script_value site_ref = make_null();
 				bool bound = false;
 				VM_TRY(bind_site_reference(i, *site, caller_frame, caller_code, caller_env, site_ref, bound));

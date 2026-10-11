@@ -21,6 +21,10 @@ endif()
 
 # Output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
+foreach(config Debug Release RelWithDebInfo MinSizeRel)   # a multi-config generator puts every configuration's programs in bin/ too
+    string(TOUPPER ${config} config_upper)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config_upper} ${PROJECT_BINARY_DIR}/bin)
+endforeach()
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 

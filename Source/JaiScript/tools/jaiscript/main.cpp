@@ -4,7 +4,7 @@
 // output). The host is deliberately thin: engine + stdlib + file IO + a console; every
 // engine call in here is the canonical shape from docs/site/embedding.
 
-#include "../../examples/gloom/ports/profile_capture.hpp"
+#include "profile_capture.hpp"
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>

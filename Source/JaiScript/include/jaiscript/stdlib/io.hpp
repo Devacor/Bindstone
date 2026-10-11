@@ -362,6 +362,7 @@ namespace stdlib {
         // a class's own to_string() speaks for its instances, as in string + value
         constexpr engine::host_direct_invoke to_string_of = [](const void* target, const script_value* args, size_t) -> checked_result<script_value> {
             engine* e = static_cast<engine*>(const_cast<void*>(target));
+            if (args[0].type() != script_value_type::jai_object_type) { return script_value(args[0].to_string(), e); }   // only an object's class speaks for it
             auto text = e->text_of(args[0]);
             if (!text) { return text.error_value(); }
             if (e->backend_unwinding()) { return script_value(std::monostate{}, e); }

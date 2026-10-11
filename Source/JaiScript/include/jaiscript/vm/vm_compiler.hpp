@@ -295,6 +295,7 @@ namespace jai::vm {
         void compile_unary(const std::shared_ptr<unary_expr>& expr);
         void compile_assignment(const std::shared_ptr<assignment_expr>& expr, bool as_statement);
         void record_argument_source(call_site& site, const expression_ptr& arg, size_t argc);
+        uint32_t place_argument_base(const expression* arg);
         void compile_call(const std::shared_ptr<call_expr>& expr);
         void compile_member(const std::shared_ptr<member_expr>& expr);
         void member_tail_into_temp(const expression* e);

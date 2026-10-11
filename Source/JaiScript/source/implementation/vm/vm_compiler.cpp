@@ -120,6 +120,7 @@ namespace {
 			case opcode::op_to_bool:
 			case opcode::op_deref_top:
 			case opcode::op_capture_arg:
+			case opcode::op_place_arg:
 			case opcode::op_load:
 			case opcode::op_store:
 			case opcode::op_compound_store:
@@ -336,6 +337,7 @@ namespace {
 			case opcode::op_to_bool:
 			case opcode::op_deref_top:
 			case opcode::op_capture_arg:
+			case opcode::op_place_arg:
 			case opcode::op_load:
 			case opcode::op_store:
 			case opcode::op_compound_store:
@@ -7264,6 +7266,16 @@ bool vm_compiler::try_emit_fused_push(const std::shared_ptr<call_expr>& expr) {
 	return true;
 }
 
+// A field argument a frame-slot local names (`o.left`), read where op_get_member's slot form would read it: its base slot, else
+// k_invalid_u32 (any other shape compiles as its value)
+uint32_t vm_compiler::place_argument_base(const expression* arg) {
+	if (!arg || arg->get_type() != node_type::member_expr) return k_invalid_u32;
+	const auto* m = static_cast<const member_expr*>(arg);
+	if (m->is_static || m->null_safe || m->is_arrow || m->component_lvalue || m->enum_constant || jai::detail::math::any_component_name(m->member) ||
+	    !m->object || m->object->get_type() != node_type::identifier_expr || velem_operand(m)) return k_invalid_u32;
+	return member_base_slot(m);
+}
+
 void vm_compiler::record_argument_source(call_site& site, const expression_ptr& arg, size_t argc) {
 	const size_t index = site.arg_symbols.size();
 	if (arg->get_type() == node_type::identifier_expr && !graft_value(arg.get())) {
@@ -7497,7 +7509,11 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 		const auto& arg = expr->arguments[k];
 		record_argument_source(site, arg, expr->arguments.size());
 		if (k < staged_args) { emit(opcode::op_take_temp, staged_slots[k]); continue; }
-		compile_expression(arg);
+		if (const uint32_t base = probe_callee ? place_argument_base(arg.get()) : k_invalid_u32; base != k_invalid_u32) {
+			emit(opcode::op_place_arg, add_node(arg), base + 1, static_cast<uint32_t>(k));
+		} else {
+			compile_expression(arg);
+		}
 		emit_arg_capture(captures, k, arg, probe_callee ? static_cast<uint32_t>(probe_ip) : static_cast<uint32_t>(expr->arguments.size()),
 			probe_callee ? capture_form_probe : capture_form_stack);
 	}

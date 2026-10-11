@@ -4308,6 +4308,71 @@ public:
 			check_eq(i2, v2, "reference alias store parity");
 		});
 
+		test("field_argument_place_binding_parity", [this, run_both_backends_stdlib]() {
+			// a field argument a frame-slot local names binds where it is evaluated: by reference when the callee's parameter is a
+			// T&, by value otherwise, through a rebound callee, an overload set, a typed parameter, a field holding a reference, a null
+			// receiver and a private field, in functions, recursion and the plain frame
+			auto [i2, v2] = run_both_backends_stdlib(R"(
+				class O { var x = 1; int n = 2; var left = null; }
+				class P { private: int secret = 3; public: int open = 4; }
+				string log = "";
+				void bump(var& r) { r = r + 10; }
+				void bump_int(int& r) { r = r + 100; }
+				int read(var v) { return v; }
+				void two(var& a, var& b) { a = 7; b = 8; }
+				function chain(var o, int depth) { if (depth == 0) { return 0; } bump(o.x); return chain(o, depth - 1); }
+				void run() {
+					var o = new O();
+					bump(o.x); bump_int(o.n);
+					log = log + o.x + "," + o.n + "," + read(o.x);
+					var g = bump; g(o.x);
+					g = read; log = log + "|" + g(o.x) + "," + o.x;
+					var p = new O(); p.left = new O();
+					two(p.x, p.left);
+					log = log + "|" + p.x + "," + p.left;
+					var c = new O(); chain(c, 3); log = log + "|" + c.x;
+					var none = null; string err = "";
+					try { bump(none.x); } catch (e) { err = e; }
+					log = log + "|" + (err != "");
+					var q = new P(); string perr = "";
+					try { bump(q.secret); } catch (e) { perr = e; }
+					bump(q.open);
+					log = log + "|" + (perr != "") + "," + q.open;
+				}
+				run();
+				class S { void mix(var& r, string s) { r = 50; } void mix(var r, int n) { r = 60; } }
+				var s = S(); var t = new O();
+				s.mix(t.x, "a"); log = log + "|" + t.x;
+				log;
+			)");
+			check_eq(std::string("11,102,11|21,21|7,8|31|true|true,14|50"), i2, "interp: field argument binding");
+			check_eq(i2, v2, "field argument binding parity");
+		});
+
+		test("field_argument_place_binding_follows_a_redefined_callee", [this]() {
+			// the same call site, its callee redefined between runs from a T& parameter to a value parameter and back, then to an
+			// overload set: each call binds as the callee it reaches does (both backends)
+			std::string out[2];
+			int idx = 0;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				stdlib::register_all(*e);
+				e->execute("extern function f; class O { var x = 1; } var o = new O(); string log = \"\"; void step() { var p = o; f(p.x); log = log + o.x + \",\"; }");
+				e->execute("void f(var& r) { r = r + 1; }");
+				e->execute("step(); step();");
+				e->execute("void f(var r) { r = r + 1; }");
+				e->execute("step();");
+				e->execute("void f(var& r) { r = r * 10; }");
+				e->execute("step();");
+				e->execute("void f(var& r, int k) { r = k; }");
+				e->execute("step();");
+				out[idx++] = e->execute("log;").to_string();
+			}
+			check_eq(std::string("2,3,3,30,300,"), out[0], "interp: a redefined callee");
+			check_eq(out[0], out[1], "a redefined callee parity");
+		});
+
 		test("reference_argument_binds_at_evaluation_parity", [this, run_both_backends_stdlib]() {
 			// A reference argument binds when it is evaluated, left to right, as in C++: a later argument that
 			// reassigns the receiver, moves the index, or replaces a nested receiver leaves the binding where evaluation put it, for

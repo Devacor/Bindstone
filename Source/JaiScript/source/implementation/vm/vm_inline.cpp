@@ -1443,6 +1443,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	};
 	// a scalar value parameter the body never writes, its argument a private local of the parameter's declared type that no other argument
 	// writes or binds by reference: the copy is unobservable, so the parameter is a renaming too (no move into the callee's slot)
+	std::vector<std::pair<uint64_t, const statement*>> forward_callees;
 	auto forwards = [&](size_t i) -> bool {
 		const parameter& p = fn->parameters[i];
 		const expression_ptr& a = call->arguments[i];
@@ -1458,8 +1459,23 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		}
 		std::vector<parameter> as_reference = fn->parameters;
 		as_reference[i].is_reference = true;
-		detail::ref_write_analysis writes([](const identifier_expr&, std::vector<detail::ref_write_callee>&) { return false; });   // every callee unseen: an argument use counts as a write
-		return !writes.analyze(detail::ref_write_callee{&as_reference, fn->body.get(), {}, false, false}, i).writes;
+		// a program-scope script function the body calls answers through its own parameters (a by-value one copies); the guard re-checks
+		// each one read when a definition changes (forward_callees), any other callee is unseen and an argument use counts as a write
+		std::vector<std::pair<uint64_t, const statement*>> read;
+		detail::ref_write_analysis writes([&](const identifier_expr& id, std::vector<detail::ref_write_callee>& out) -> bool {
+			if (!engine_ || id.global_qualified || id.slot_index != SIZE_MAX || id.symbol_id == UINT64_MAX) return false;
+			const auto env = engine_->get_global_environment();
+			const script_value* v = env ? env->get_value_ptr(id.symbol_id) : nullptr;
+			if (!v || !v->deref().is_function()) return false;
+			const auto* thunk = v->deref().as_function().target<script_callable_thunk>();
+			if (!thunk || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn || thunk->payload.fn->closure_env || !thunk->payload.fn->body) return false;
+			out.push_back(detail::ref_write_callee{&thunk->payload.fn->parameters(), thunk->payload.fn->body.get(), thunk->payload.fn->name, false, false});
+			read.emplace_back(id.symbol_id, thunk->payload.fn->body.get());
+			return true;
+		});
+		if (writes.analyze(detail::ref_write_callee{&as_reference, fn->body.get(), {}, false, false}, i).writes) return false;
+		for (const auto& r : read) { if (std::find(forward_callees.begin(), forward_callees.end(), r) == forward_callees.end()) { forward_callees.push_back(r); } }
+		return true;
 	};
 	std::vector<uint8_t> forwarded(fn->parameters.size(), 0);
 	for (size_t i = 0; i < fn->parameters.size() && i < call->arguments.size(); ++i) { forwarded[i] = forwards(i) ? 1 : 0; }
@@ -1615,6 +1631,8 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	site.decl = plan.fn;
 	site.proof_globals = call->proof_globals;
 	for (const auto& g : plan.receiver_globals) { if (std::find(site.proof_globals.begin(), site.proof_globals.end(), g) == site.proof_globals.end()) { site.proof_globals.push_back(g); } }
+	site.forward_callees = forward_callees;
+	site.epoch_checked = !site.proof_globals.empty() || !site.forward_callees.empty();
 	site.plain_numeric = plan.plain_numeric;
 	site.call_stmt = current_stmt_;
 	site.result_slot = result ? static_cast<uint32_t>(result->slot_index) : k_invalid_u32;

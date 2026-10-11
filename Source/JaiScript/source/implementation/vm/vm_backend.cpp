@@ -12712,14 +12712,27 @@ bool vm_backend::inline_globals_hold(const chunk::inline_site& site) {
 			if (v->raw_storage_index() != want) return false;
 		}
 	}
+	if (!site.forward_callees.empty() && !inline_forward_callees_hold(site)) return false;
 	if (!parallel_worker_) { site.globals_epoch = epoch; }
+	return true;
+}
+// a forwarded parameter's callees: each name still binds the program-scope function whose parameters the forwarding read
+JAI_NOINLINE bool vm_backend::inline_forward_callees_hold(const chunk::inline_site& site) {
+	for (const auto& [sym, body] : site.forward_callees) {
+		const script_value* v = environment_ ? environment_->get_value_ptr(sym) : nullptr;
+		if (!v) return false;
+		if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*v)) return false; v = &v->deref(); }
+		if (v->raw_storage_index() != script_value::TYPEID_FUNCTION) return false;
+		const auto* thunk = v->unchecked_as_function().target<script_callable_thunk>();
+		if (!thunk || thunk->eng != engine_ || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn || thunk->payload.fn->body.get() != body) return false;
+	}
 	return true;
 }
 
 bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
 	if (debug_hook_ || (site.plain_numeric && has_custom_numeric_ops_)) return false;
 	if (current_call_depth_ >= limits_->vm_depth_gate) [[unlikely]] return false;   // the fallback call passes the gate (the cap raises there, a frame-storage charge runs)
-	if (!site.proof_globals.empty() && !inline_globals_hold(site)) return false;
+	if (site.epoch_checked && !inline_globals_hold(site)) return false;
 	if (site.method) return inline_method_holds(f, site);
 	if (site.env_reads && f.locals && !f.top_level) {
 		ensure_frame_member_scope(f, environment_.get());

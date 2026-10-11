@@ -21,6 +21,24 @@ language work: **`parallel_transform`** drives the wall rays and the particle po
 `new`/`shared_ptr` holds the world and its registries, and template strings (with
 the new `:spec` formats) build the HUD.
 
+## Run it
+
+From the JaiScript source root, build the runner once:
+
+```bash
+cmake -S . -B build
+cmake --build build --config Release --target jaiscript_runner
+```
+
+then:
+
+```bash
+build/bin/jaiscript examples/gloom/gloom.jai
+```
+
+(On Windows the runner is `buildin\jaiscript.exe`.) The native host is the `jai_gloom` target: `cmake --build build --config Release --target jai_gloom`, then
+`build/bin/jai_gloom`.
+
 ## The look (doom-cli's trick, in script)
 
 The view is a truecolor pixel grid blitted through **sub-cell block glyphs**:
@@ -44,8 +62,9 @@ impacts, blood, gibs, smoke, hexmotes.
 Part of the normal JaiScript CMake build (`JAISCRIPT_BUILD_EXAMPLES=ON`).
 
 ```bash
-cmake --build "out/build/x64-Release BENCHMARKS" --target jai_gloom   # PLAY THIS ONE
-cmake --build out/build/x64-Debug --target jai_gloom                  # debug iteration
+cmake -S . -B build
+cmake --build build --config Release --target jai_gloom   # PLAY THIS ONE
+cmake --build build --config Debug --target jai_gloom     # debug iteration
 ```
 
 Play the Release exe in **Windows Terminal** (truecolor + fast VT). The exe

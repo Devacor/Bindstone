@@ -54,6 +54,27 @@ namespace detail {
         template <class U> bool operator==(const trailing_allocator<U>&) const noexcept { return true; }
         template <class U> bool operator!=(const trailing_allocator<U>&) const noexcept { return false; }
     };
+
+    // A destructor class's instance (a shared_ptr with its deleter) keeps its control block in the first `reserve` bytes of
+    // its own allocation: the deleter only destroys the instance, the allocation goes when the control block does
+    template <class T>
+    struct block_head_allocator {
+        using value_type = T;
+        static constexpr size_t reserve = 64;
+        std::byte* block = nullptr;
+        explicit block_head_allocator(std::byte* b) noexcept : block(b) {}
+        template <class U> block_head_allocator(const block_head_allocator<U>& o) noexcept : block(o.block) {}
+        T* allocate(size_t n) {
+            if (n * sizeof(T) <= reserve && alignof(T) <= 16) { return reinterpret_cast<T*>(block); }
+            return static_cast<T*>(::operator new(n * sizeof(T)));
+        }
+        void deallocate(T* p, size_t) noexcept {
+            if (reinterpret_cast<std::byte*>(p) != block) { ::operator delete(p); }
+            ::operator delete(block);
+        }
+        template <class U> bool operator==(const block_head_allocator<U>& o) const noexcept { return block == o.block; }
+        template <class U> bool operator!=(const block_head_allocator<U>& o) const noexcept { return block != o.block; }
+    };
 }
 
 namespace detail {
@@ -104,11 +125,9 @@ public:
             arena_cells_ = trailing.slots;
         }
     }
-    // An instance placed in its own raw allocation (a destructor class's, allocate_instance) dies through this
-    static void free_allocation(class_instance* instance) noexcept {
-        instance->~class_instance();
-        ::operator delete(static_cast<void*>(instance));
-    }
+    // An instance placed in its own raw allocation (a destructor class's, allocate_instance) dies through this; the
+    // allocation goes with its control block (detail::block_head_allocator)
+    static void free_allocation(class_instance* instance) noexcept { instance->~class_instance(); }
 
     ~class_instance();
 
@@ -876,6 +895,7 @@ public:
     void expand_destroy_level(class_instance* instance, const class_definition* level, const class_definition* kept,
                               std::vector<detail::release_action>& actions) const;
     script_value take_field_for_destroy(class_instance* instance, uint64_t field) const;
+    void run_destructor_body(class_instance* instance, const class_definition* level, const script_value& body) const;
     // The same question for a declared type (null, var and unknown kinds can hold anything)
     bool type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
 
@@ -1272,13 +1292,15 @@ public:
         class_instance::trailing_cells trailing{nullptr, field_slot_count()};
         const size_t extra = class_instance::trailing_bytes(trailing.slots);
         if (has_script_dtor_) {
+            constexpr size_t control = detail::block_head_allocator<class_instance>::reserve;
             constexpr size_t head = (sizeof(class_instance) + 15) & ~size_t{15};
-            auto* memory = static_cast<std::byte*>(::operator new(head + extra));
-            trailing.memory = memory + head;
-            auto* raw_instance = new (memory) class_instance(class_instance::interned_name_t{}, interned_name(), engine_, trailing);
+            auto* memory = static_cast<std::byte*>(::operator new(control + head + extra));
+            trailing.memory = memory + control + head;
+            auto* raw_instance = new (memory + control) class_instance(class_instance::interned_name_t{}, interned_name(), engine_, trailing);
             raw_instance->note_destructor_armed();
             if (engine_ && !engine_->destructors_armed()) { engine_->note_destructors_armed(); }
-            instance = std::shared_ptr<class_instance>(raw_instance, detail::instance_deleter{shared_from_this()});
+            instance = std::shared_ptr<class_instance>(raw_instance, detail::instance_deleter{shared_from_this()},
+                                                       detail::block_head_allocator<class_instance>(memory));
         } else {
             // control block, instance, slot table and cells: one allocation
             instance = std::allocate_shared<class_instance>(detail::trailing_allocator<class_instance>(&trailing.memory, extra),

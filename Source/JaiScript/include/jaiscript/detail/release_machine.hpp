@@ -30,6 +30,7 @@ struct release_action {
 struct release_frame {
     class_instance* instance = nullptr;
     std::shared_ptr<class_definition> owner;   // the allocation's class (its deleter's capture)
+    std::weak_ptr<class_instance> allocation;  // keeps the instance's memory (it goes with its control block) until the frame ends
     const class_definition* root = nullptr;    // the level destroy_levels started from
     const class_definition* kept = nullptr;
     std::vector<release_action> actions;       // back = next
@@ -45,6 +46,9 @@ struct release_machine {
     std::vector<entry> stack;
     std::vector<release_frame> frames;
     std::vector<uint32_t> free_frames;
+    // destroy_levels' action lists and destructor-call argument lists, kept with their capacity (each nested destruction takes its own)
+    std::vector<std::vector<release_action>> spare_actions;
+    std::vector<std::vector<script_value>> spare_arguments;
     size_t step_mark = 0;
     uint32_t depth = 0;
     uint32_t depth_limit = 64;

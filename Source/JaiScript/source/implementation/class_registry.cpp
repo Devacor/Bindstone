@@ -112,22 +112,33 @@ bool class_definition::value_tree_runs_destructor_impl(std::vector<const class_d
     return runs;
 }
 
+void class_definition::run_destructor_body(class_instance* instance, const class_definition* level, const script_value& body) const {
+    detail::release_machine* m = engine_->release_machine_here();
+    std::vector<script_value> arguments;
+    if (m && !m->spare_arguments.empty()) {
+        arguments = std::move(m->spare_arguments.back());
+        m->spare_arguments.pop_back();
+    }
+    try {
+        std::shared_ptr<class_instance> self = instance->weak_from_this().lock();   // a living instance (a re-class) keeps its owner
+        if (!self) { self = std::shared_ptr<class_instance>(instance, [](class_instance*) {}); }
+        arguments.push_back(script_value::make_class_object(*level, self, engine_));
+        auto ran = body.as_function()(arguments);
+        arguments.clear();
+        if (!ran) { engine_->report_script_error(format_error(ran, *engine_->get_symbolizer()), ran.error()); }   // reported, never propagated
+    } catch (...) {
+        arguments.clear();
+    }
+    if (m && m->spare_arguments.size() < 8) { m->spare_arguments.push_back(std::move(arguments)); }
+}
+
 void class_definition::expand_destroy_level(class_instance* instance, const class_definition* level, const class_definition* kept,
                                             std::vector<detail::release_action>& actions) const {
     if (!level || (kept && (kept == level || kept->derives_from(level)))) { return; }
     if (engine_) {
         const uint64_t id = level->destructor_id(*engine_);
         auto it = id != 0 ? level->methods_.find(id) : level->methods_.end();
-        if (it != level->methods_.end()) {
-            try {
-                std::shared_ptr<class_instance> self = instance->weak_from_this().lock();   // a living instance (a re-class) keeps its owner
-                if (!self) { self = std::shared_ptr<class_instance>(instance, [](class_instance*) {}); }
-                const script_function& body = it->second.as_function();
-                auto ran = body({script_value::make_object(level->name_, self, engine_)});
-                if (!ran) { engine_->report_script_error(format_error(ran, *engine_->get_symbolizer()), ran.error()); }   // reported, never propagated
-            } catch (...) {
-            }
-        }
+        if (it != level->methods_.end()) { run_destructor_body(instance, level, it->second); }
     }
     for (const auto& parent : level->parent_classes_) {
         if (parent) { actions.push_back({parent.get(), 0}); }
@@ -144,7 +155,13 @@ script_value class_definition::take_field_for_destroy(class_instance* instance, 
 void class_definition::destroy_levels(class_instance* instance, const class_definition* level, const class_definition* kept) const {
     if (!level) { return; }
     detail::release_sync sync(engine_);
-    std::vector<detail::release_action> actions{{level, 0}};
+    detail::release_machine* m = engine_ ? engine_->release_machine_here() : nullptr;
+    std::vector<detail::release_action> actions;
+    if (m && !m->spare_actions.empty()) {
+        actions = std::move(m->spare_actions.back());
+        m->spare_actions.pop_back();
+    }
+    actions.push_back({level, 0});
     while (!actions.empty()) {
         const detail::release_action action = actions.back();
         actions.pop_back();
@@ -154,6 +171,7 @@ void class_definition::destroy_levels(class_instance* instance, const class_defi
             script_value dying = take_field_for_destroy(instance, action.field);
         }
     }
+    if (m && m->spare_actions.size() < 8) { m->spare_actions.push_back(std::move(actions)); }
 }
 
 void class_instance::release_fields() noexcept {
@@ -272,6 +290,7 @@ void release_instance_frame(engine& eng, release_machine& m, class_instance* ins
     const class_definition* now = instance->get_class_definition();
     frame.instance = instance;
     frame.owner = std::move(owner);
+    frame.allocation = instance->weak_from_this();
     frame.root = now ? now : frame.owner.get();
     frame.kept = nullptr;
     frame.actions.clear();
@@ -297,6 +316,7 @@ void release_drive(engine& eng, release_machine& m, size_t mark) {
             m.stack.pop_back();
             const bool del = frame.delete_at_end;
             std::shared_ptr<class_definition> owner = std::move(frame.owner);
+            std::weak_ptr<class_instance> allocation = std::move(frame.allocation);
             frame.instance = nullptr;
             m.free_frames.push_back(index);
             if (del) { release_step(m, [&] { class_instance::free_allocation(instance); }); }

@@ -352,7 +352,10 @@ argument may run user code:
   (`hold_minted_reference`, `argument_capture_storage::minted`) and the binding takes it as it is
   (`early_bound_reference`: the parameter binding in both binders, a host `T&` through `host_reference_argument`). An
   unstamped argument binds at the call as before, which is the same place: nothing runs between its evaluation and the
-  binding. Interpreter: `capture_call_argument` in every call path (math intrinsic, string builtin, direct method,
+  binding. On the VM a probed call's field argument a frame-slot local names (`o.left`) compiles to `op_place_arg`: when the
+  parked callee is one script function whose parameter is a `T&`, the reference is minted in place of the member read (the
+  same plain-field step, `detail::plain_field_reference`), else the read runs as `op_get_member`; a place argument that
+  evaluated to a reference is bound as it is (`bind_parameters`, `bind_plain_references`). Interpreter: `capture_call_argument` in every call path (math intrinsic, string builtin, direct method,
   generic) and both `new` loops; VM: `op_capture_arg` with the callee's form (pending register, stack callee, method
   receiver, `new` class, builtin).
 - A binding conversion that may run user code (`binding_may_run_code`) captures the later arguments first, and binds

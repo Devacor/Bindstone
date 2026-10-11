@@ -49,7 +49,7 @@ modals), `game.jai` (facing movement, crawler turn loop, saves, autopilot),
 From the JaiScript source root, build the runner once:
 
 ```bash
-cmake -S . -B build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --target jaiscript_runner
 ```
 
@@ -68,7 +68,7 @@ Part of the normal JaiScript CMake build (`JAISCRIPT_BUILD_EXAMPLES=ON` by
 default):
 
 ```bash
-cmake -S . -B build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --target jai_crawler   # PLAY THIS ONE
 cmake --build build --config Debug --target jai_crawler     # --dev iteration
 ```

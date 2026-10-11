@@ -10,7 +10,7 @@ checks every section and exits 0 when all of them hold.
 From the JaiScript source root:
 
 ```bash
-cmake -S examples/embed_quickstart -B build/quickstart
+cmake -S examples/embed_quickstart -B build/quickstart -DCMAKE_BUILD_TYPE=Release
 cmake --build build/quickstart --config Release
 cd build/quickstart && ./embed_quickstart
 ```

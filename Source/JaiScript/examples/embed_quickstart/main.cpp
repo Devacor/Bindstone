@@ -1,5 +1,5 @@
 // embed_quickstart: a small host that uses JaiScript the way a game would.
-//   cmake -S . -B build
+//   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 //   cmake --build build --config Release
 //
 //   embed_quickstart               run every section and exit 0 when all checks hold

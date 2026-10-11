@@ -5,5 +5,5 @@ for cand in "$here/../../build/bin/jaiscript" "$here/../../build/bin/jaiscript.e
 	if [ -x "$cand" ]; then exec "$cand" --no-debug --no-pause "$here/scripts/gatorquest.jai" -- "$@"; fi
 done
 echo "jaiscript runner not found. Build it from the JaiScript source root:" >&2
-echo "  cmake -S . -B build && cmake --build build --config Release --target jaiscript_runner" >&2
+echo "  cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release --target jaiscript_runner" >&2
 exit 1

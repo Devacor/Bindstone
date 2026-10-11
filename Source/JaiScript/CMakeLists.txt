@@ -1,6 +1,13 @@
 # JaiScript - High-performance scripting language
 cmake_minimum_required(VERSION 3.20)
 
+# A single-configuration build configured without a type is a Release build, whatever the compiler (CMake seeds Debug for MSVC)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES
+   AND NOT CMAKE_GENERATOR MATCHES "^(Visual Studio|Xcode)|Multi-Config$")
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build.")
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release MinSizeRel RelWithDebInfo)
+endif()
+
 project(JaiScript
     VERSION 0.1.0
     DESCRIPTION "High-performance scripting language with C++ syntax for game engines"
@@ -77,12 +84,6 @@ if(MSVC)
     message(STATUS "JaiScript: MSVC optimizations configured for Release and RelWithDebInfo")
     message(STATUS "  Select 'Release' in Visual Studio dropdown for maximum performance")
 else()
-    # Single-configuration generators (Ninja, Make, etc.)
-    if(NOT CMAKE_BUILD_TYPE AND JAISCRIPT_IS_TOP_LEVEL)
-        set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
-        set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
-    endif()
-
     # Clang (and GCC outside ISO modes) fuse a*b+c into FMA by default, which changes float results per target;
     # MSVC's /fp:precise never contracts, so every build computes the same bits
     add_compile_options(-ffp-contract=off)

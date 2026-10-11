@@ -36,7 +36,9 @@ add_custom_command(TARGET jai_demoreel POST_BUILD
 )
 
 # --- demoreel_lua: Lua 5.4 + sol2 port (opt-in; builds Lua from source) ---
-option(DEMOREEL_PORT_LUA "Build demoreel_lua, the Lua/sol2 port of the demoreel" OFF)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/demoreel_adapter_lua.cpp")
+    option(DEMOREEL_PORT_LUA "Build demoreel_lua, the Lua/sol2 port of the demoreel" OFF)
+endif()
 if(DEMOREEL_PORT_LUA)
     set(DEMOREEL_LUA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../lua" CACHE PATH "Lua 5.4 source root")
     set(DEMOREEL_SOL2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../sol2" CACHE PATH "sol2 source root")
@@ -72,7 +74,9 @@ if(DEMOREEL_PORT_LUA)
 endif()
 
 # --- demoreel_squirrel: Squirrel 3.2 port (opt-in; builds the runtime from source) ---
-option(DEMOREEL_PORT_SQUIRREL "Build demoreel_squirrel, the Squirrel port of the demoreel" OFF)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/demoreel_adapter_squirrel.cpp")
+    option(DEMOREEL_PORT_SQUIRREL "Build demoreel_squirrel, the Squirrel port of the demoreel" OFF)
+endif()
 set(DEMOREEL_SQUIRREL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../squirrel" CACHE PATH "Squirrel 3.2 source root")
 if(DEMOREEL_PORT_SQUIRREL)
     if(NOT EXISTS "${DEMOREEL_SQUIRREL_ROOT}/include/squirrel.h")

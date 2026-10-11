@@ -10,7 +10,7 @@
 //   --bench runs the real loop on autopilot and reports the sim/draw split.
 
 #include "gloom_host.hpp"
-#include "ports/profile_capture.hpp"
+#include "../../tools/jaiscript/profile_capture.hpp"
 
 #include <chrono>
 #include <cstdio>

@@ -6604,6 +6604,7 @@ op_status vm_backend::exec_cfor_prep(frame& f, const vm_instruction& ins) {
 	if (cfor_compare(st.cmp, i, end)) {
 		cfor_states_.push_back(st);
 		f.ip = p.body_ip;
+		if (ins.b != 0) { return cells_counted_head_entry(f, ins.b - 1); }
 	} else {
 		f.ip = p.exit_ip;
 	}
@@ -8132,6 +8133,20 @@ op_status vm_backend::exec_cells_cfor_back(frame& f, const vm_instruction& ins) 
 	cs.dirty.reset(loop.cells.size());
 	JAI_CELLS_COUNT(0);
 	f.ip = loop.copy_head + 1;   // the copy's head slot is a placeholder: a counted loop's block starts at its body
+	return cells_run(f, loop);
+}
+
+// a counted loop's entry at its CFOR_PREP, the first compare passed: the first iteration runs in the block when the cells admit it, else the general
+// body runs it and the back edge tries again
+op_status vm_backend::cells_counted_head_entry(frame& f, uint32_t li) {
+	const chunk::cell_loop& loop = f.code->cell_loops[li];
+	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (li < 64 && ((f.cells->refused_loops >> li) & 1)) || !cells_enter(f, loop)) { JAI_COVERAGE_ENTRY(f, li, false); return {}; }
+	JAI_COVERAGE_ENTRY(f, li, true);
+	cell_state& cs = *f.cells;
+	cs.loop = li;
+	cs.dirty.reset(loop.cells.size());
+	JAI_CELLS_COUNT(0);
+	f.ip = loop.copy_head + 1;
 	return cells_run(f, loop);
 }
 
@@ -21121,7 +21136,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_unary_temp: VM_TRY_OP_SHARED(exec_unary_temp(f, ins)); break;
 
 			// Both always retarget f.ip
-			case opcode::op_cfor_prep: VM_TRY_OP_SHARED(exec_cfor_prep(f, ins)); continue;
+			case opcode::op_cfor_prep:
+				VM_TRY_OP_SHARED(exec_cfor_prep(f, ins));
+				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }   // the block its entry ran made a call
+				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
+				continue;
 			case opcode::op_cfor_back: JAI_OP_LABEL(op_cfor_back) VM_TRY_OP_SHARED(exec_cfor_back(f, ins)); JAI_DISPATCH_HERE();
 
 			// Retargets f.ip on success; on script unwinding (custom comparison threw)

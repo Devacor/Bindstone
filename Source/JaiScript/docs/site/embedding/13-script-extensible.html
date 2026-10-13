@@ -41,7 +41,7 @@ The host constructs and owns its objects exactly as before; a script hands one o
 fields, overrides, methods), no matter which road brings it back into script. This chapter covers the script
 surface, the one-line host surface, who owns what, and how it serializes. The host-side examples below are
 taken from <code>source/tests/serialization/polymorphic_serialization_tests.cpp</code> and run on
-<strong>both backends</strong>; the mechanism is specified in <a href="https://github.com/Devacor/JaiScript/blob/master/docs/script_extensible.md"><code>docs/script_extensible.md</code></a>.</p>
+<strong>both backends</strong>.</p>
 
 <h2 id="one-object-one-identity">One object, one identity<a class="hlink" href="#one-object-one-identity" aria-label="link">&#8203;</a></h2>
 <div class="callout cpp"><p>A base pointer to a derived object is the derived object, as in C++: once extended, the object reaches script as its script class through every <code>shared_ptr&lt;Base&gt;</code>, never as a sliced base.</p></div>

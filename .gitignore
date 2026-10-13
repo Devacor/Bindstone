@@ -69,6 +69,9 @@ Source/JaiScript/squirrel
 *.obj
 
 Source/JaiScript/out/
+# Status, ledger and plan notes: kept on disk, never tracked (design notes agents need live in Source/JaiScript/internal/)
+/.internal/
+Source/JaiScript/.internal/
 Tools/LocalServer/pgsql/
 Tools/LocalServer/pgdata/
 Tools/LocalServer/pg.log

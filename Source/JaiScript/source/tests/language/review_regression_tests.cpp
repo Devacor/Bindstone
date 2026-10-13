@@ -3492,6 +3492,33 @@ public:
             check_eq((int64_t)915, r.as_int());
         });
 
+        // A by-value int/float/bool/char return converts its value: the returned element is a copy, a reference return
+        // still names the element, and a heavy element read by a var return still copies
+        test("scalar_return_of_element", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                array<int> a = [10, 20, 30];
+                var f = [1.75, "s"];
+                var nested = [[1, 2]];
+                int at(int i) { return a[i]; }
+                int floor_at(int i) { return f[i]; }
+                int& slot(int i) { return a[i]; }
+                var row(int i) { return nested[i]; }
+                auto pick = [](int i) -> float { return a[i]; };
+                int before = at(2);
+                a[2] = 7;
+                slot(0) = 99;
+                var copy = row(0);
+                copy[0] = 5;
+                string err = "";
+                try { floor_at(1); } catch (e) { err = "raised"; }
+                to_string(before) + "|" + to_string(at(2)) + "|" + to_string(a[0]) + "|" + to_string(floor_at(0)) + "|" +
+                    to_string(pick(1)) + "|" + to_string(nested[0][0]) + "|" + err;
+            )");
+            check_eq(std::string("30|7|99|1|20.0|1|raised"), r.as_string());
+        });
+
         test("map_transient_read_never_inserts", [this]() {
             auto e = make_engine();
             jai::stdlib::register_all(*e);

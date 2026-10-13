@@ -533,7 +533,7 @@ private:
 		// art.pix can't bind to an auto& DECLARATION (member expression), but it
 		// IS a valid lvalue ARGUMENT — hence the blit helper. (A naive inline
 		// with chained art.pix[...] reads measured the same within noise at
-		// GLOOM's billboard load — see IDIOMATIC_COST.md §4.)
+		// GLOOM's billboard load.)
 		blit_sprite(art.pix, lut, aw, ah, depth, x0, top, pw, ph, cx0, cx1, cy0, cy1);
 	}
 

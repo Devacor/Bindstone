@@ -1,4 +1,4 @@
--- Generated from tex.jai by tools/transpile.py; see PORTING.md.
+-- Generated from tex.jai by tools/transpile.py; see internal/examples/jaidoom/ports/PORTING.md.
 require("wad")
 require("vid")
 DPAL = _j_array({})

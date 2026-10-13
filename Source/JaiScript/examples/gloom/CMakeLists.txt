@@ -1,7 +1,7 @@
 # jai_gloom - GLOOM, a terminal 2.5D raycast shooter written in JaiScript.
 # The C++ host is a shared, script-runtime-agnostic core (gloom_host) driven
 # through a small adapter interface (gloom_host.hpp) so the same game can be
-# ported to other embedded languages for comparison (see PORTING.md).
+# ported to other embedded languages for comparison (see ports/README.md).
 #
 # jai_gloom ALWAYS builds with zero extra dependencies. The comparison ports
 # are opt-in (OFF by default) and each requires its runtime to be checked out:

@@ -1,5 +1,5 @@
 // demoreel shared host: the language-agnostic console shell for the cross-language
-// comparison. PORTING.md is the adapter contract. The host owns the VT console and
+// comparison. README.md, Porting is the adapter contract. The host owns the VT console and
 // its output filter, key polling, frame timing/pacing, the xorshift64* Rng, every
 // command-line flag, and the harnesses (--smoke parity table with the FNV-1a
 // frame-stream hash, --perf per-scene timing, --bench, --capture, --reload-test).

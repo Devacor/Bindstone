@@ -1,10 +1,10 @@
 // PURE parallel bodies — UNCHANGED from the canonical version, deliberately.
-// The parallel admission walk (docs/parallel_design.md) rejects methods and
-// member access outright: a parallel body may touch ONLY its one element
-// parameter and locals — no globals, no member access, no host calls beyond
-// the math whitelist. So this file CANNOT be made class-based; it is the
-// idiomatic rewrite's hard boundary, and that is itself a finding (see
-// ../IDIOMATIC_COST.md). The same functions run serially when
+// The parallel admission walk (docs/site/guide/09-containers-strings.html,
+// "Parallel loops") rejects methods and member access outright: a parallel body
+// may touch ONLY its one element parameter and locals — no globals, no member
+// access, no host calls beyond the math whitelist. So this file CANNOT be made
+// class-based; it is the idiomatic rewrite's hard boundary, and that is itself a
+// finding. The same functions run serially when
 // HOST_WORKERS == 0, which is the 1-vs-N determinism check by construction.
 
 // A CHUNK of wall rays over a PERSISTENT pair workspace (parallel_for v1, SAFE

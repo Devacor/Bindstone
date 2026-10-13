@@ -2,7 +2,7 @@
 // then calls gloom_boot(w, h) once and gloom_frame(dt, key, fps, ms_sim,
 // ms_draw) per frame; --smoke additionally calls gloom_state_hash() /
 // gloom_summary(). Same contract, same tick structure as canonical — only the
-// internal style differs (see ../IDIOMATIC_COST.md).
+// internal style differs.
 
 import "state.jai";
 import "util.jai";

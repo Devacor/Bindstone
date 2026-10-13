@@ -66,7 +66,7 @@ end
 -- raycast snapshot: per-cell RENDER kinds (secret -> wall kind 1, red/blue
 -- doors -> 7/8). The reference bit-packs this 15-per-int64 for its pure-value
 -- parallel contract; a Lua port has no such constraint, so it's a flat array
--- (REFERENCE.md 4.2 explicitly permits this).
+-- (reference/README.md 4.2 explicitly permits this).
 TILE_TO_KIND = {0, 1, 2, 3, 4, 5, 6, 1, 7, 8}   -- indexed [tile + 1]
 
 function rebuild_mapstr()

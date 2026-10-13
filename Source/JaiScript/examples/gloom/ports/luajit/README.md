@@ -13,5 +13,6 @@ Other modules are loaded from the common Lua port.
 - The JIT stays enabled with its default optimization settings. No game kernel
   is moved into a native helper.
 
-The JIT is a technique ceiling for comparison, not a Bindstone iOS target.
-Versions, measured hashes and placement controls are in ../RESULTS.md.
+The JIT is a technique ceiling for comparison, not a shipping target for
+platforms that forbid runtime code generation (iOS). The comparison runner and
+its placement controls are described in [../README.md](../README.md).

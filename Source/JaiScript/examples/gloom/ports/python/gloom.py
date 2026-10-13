@@ -6,7 +6,7 @@ gloom_host.cpp faithfully — the xorshift64* Rng, the VT console (alt screen,
 truecolor, UTF-8), held-key + edge-key input, frame timing/pacing, the flags,
 and the --smoke / --bench harnesses with the same hashes and report formats.
 Everything below gloom_frame lives in the game modules, a transliteration of
-the reference per REFERENCE.md.
+the reference per reference/README.md.
 
 Timing protocol: the shared C++ host times session->frame() (sim + full frame
 string build, no console write) for --smoke, and reports the sim/draw split

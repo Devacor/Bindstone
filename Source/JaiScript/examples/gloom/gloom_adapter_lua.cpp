@@ -1,5 +1,5 @@
 // Lua 5.4, Lua 5.5 and LuaJIT JIT / sol2 adapter for the GLOOM shared host. Binds the host
-// API (REFERENCE.md section 2) into a sol::state — the shared gloom_rng as a
+// API (reference/README.md section 2) into a sol::state — the shared gloom_rng as a
 // usertype (int64 passthrough via lua_Integer, no double round-trip), host
 // services as free functions, HOST_* flags as globals — loads the Lua game
 // from ports/lua/scripts, and forwards the six gloom_* entry points.

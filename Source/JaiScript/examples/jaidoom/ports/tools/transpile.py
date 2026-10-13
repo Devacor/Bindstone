@@ -432,7 +432,7 @@ class Port:
 		result={}
 		for mod,nodes in self.modules.items():
 			self.env={};self.owner=None;self.decltypes={};self.ret=U;self.lines=[];self.indent=0;self.serial=0;self.loops=[]
-			self.emit("-- Generated from "+mod+".jai by tools/transpile.py; see PORTING.md.")
+			self.emit("-- Generated from "+mod+".jai by tools/transpile.py; see internal/examples/jaidoom/ports/PORTING.md.")
 			for n in nodes:self.stmt(n,True)
 			result[mod]="\n".join(self.lines)+"\n"
 		return result

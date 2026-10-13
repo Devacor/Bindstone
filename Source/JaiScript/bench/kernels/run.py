@@ -13,7 +13,7 @@ import argparse, datetime, os, re, statistics, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 BIN = os.path.join(HERE, "bin")
-RUNNER = os.path.join(ROOT, "out", "build", "x64-Release BENCHMARKS", "bin", "jaiscript.exe")
+RUNNER = os.path.join(os.environ.get("JAI_BUILD") or os.path.join(ROOT, "build"), "bin", "jaiscript.exe")
 HOST = os.path.join(BIN, "jai_kernel_host.exe")
 LUA = os.path.join(BIN, "lua_kernel_host.exe")
 LUAJIT = os.path.join(BIN, "luajit.exe")

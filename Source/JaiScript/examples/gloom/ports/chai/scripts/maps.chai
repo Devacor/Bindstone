@@ -1,5 +1,5 @@
 // The episode: hand-authored maps + parser + boot-time validation.
-// Map chars / tile ints per REFERENCE.md section 1.9/1.11 (same as the
+// Map chars / tile ints per reference/README.md section 1.9/1.11 (same as the
 // JaiScript reference; the four rows blocks are normative content).
 
 global MAPS = [
@@ -200,7 +200,7 @@ def load_map(mi) {
 // raycast snapshot: flat RENDER-KIND grid, rebuilt only when a tile changes.
 // Kind 0 floor/open, 1-4 walls, 5 door, 6 exit, 7 red, 8 blue; secrets render
 // as wall kind 1 (that is the point of a secret). Ports read the flat array
-// directly — REFERENCE.md 4.2: the reference's int64 packing exists for its
+// directly — reference/README.md 4.2: the reference's int64 packing exists for its
 // parallel contract, not the game.
 global TILE_TO_KIND = [0, 1, 2, 3, 4, 5, 6, 1, 7, 8]
 global RKIND = []

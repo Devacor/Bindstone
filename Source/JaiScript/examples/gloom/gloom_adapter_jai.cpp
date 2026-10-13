@@ -1,5 +1,5 @@
 // jai_gloom: the JaiScript adapter for the GLOOM shared host — the reference
-// implementation of the PORTING.md contract. Binds the host API into a
+// implementation of the ports/README.md contract. Binds the host API into a
 // jai::engine, imports scripts/main.jai, and forwards the six gloom_* entry
 // points. --smoke runs both engine backends (interpreter, vm) and the shared
 // host byte-compares their frame streams + STATE_HASH.

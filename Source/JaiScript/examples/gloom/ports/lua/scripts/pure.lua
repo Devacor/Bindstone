@@ -1,4 +1,4 @@
--- The reference's PURE parallel bodies, as plain serial Lua (PORTING.md:
+-- The reference's PURE parallel bodies, as plain serial Lua (ports/README.md:
 -- ports always run the serial-equivalent loops; outputs are defined
 -- identical). The DDA math is a line-for-line transliteration so the float
 -- stream is bit-exact; the renderer inlines its own copy of the same walk.

@@ -1,4 +1,4 @@
--- Generated from p7_bench.jai by tools/transpile.py; see PORTING.md.
+-- Generated from p7_bench.jai by tools/transpile.py; see internal/examples/jaidoom/ports/PORTING.md.
 require("wad")
 require("map")
 require("vid")

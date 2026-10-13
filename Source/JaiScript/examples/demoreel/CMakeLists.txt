@@ -1,7 +1,7 @@
 # jai_demoreel - demoscene tech reel: every effect is script, C++ is a thin console host.
 # The host is a shared, script-runtime-agnostic core (demoreel_host) driven through a
 # small adapter interface (demoreel_host.hpp) so the same reel can be ported to other
-# embedded languages for comparison (see PORTING.md). jai_demoreel always builds; the
+# embedded languages for comparison (see README.md, Porting). jai_demoreel always builds; the
 # comparison ports are opt-in (OFF by default) and need their runtime checked out.
 
 function(demoreel_msvc_settings target)

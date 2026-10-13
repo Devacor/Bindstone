@@ -4,7 +4,7 @@
 //   quad (--pix quad): 2x2 px/cell, quadrant glyphs, 2 colors by luminosity
 //   sext (--pix sext): 2x3 px/cell, sextant glyphs (needs a Unicode-13 font)
 // The reference computes wall columns through parallel_transform; ports run
-// the serial-equivalent loop (REFERENCE.md 4.2) — one cast_wall_ray per cell
+// the serial-equivalent loop (reference/README.md 4.2) — one cast_wall_ray per cell
 // column, identical DDA math, identical bytes.
 
 global PIXW = 2        // pixels per cell horizontally (set by gloom_boot)

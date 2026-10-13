@@ -8140,7 +8140,7 @@ op_status vm_backend::exec_cells_cfor_back(frame& f, const vm_instruction& ins) 
 // body runs it and the back edge tries again
 op_status vm_backend::cells_counted_head_entry(frame& f, uint32_t li) {
 	const chunk::cell_loop& loop = f.code->cell_loops[li];
-	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (li < 64 && ((f.cells->refused_loops >> li) & 1)) || !cells_enter(f, loop)) { JAI_COVERAGE_ENTRY(f, li, false); return {}; }
+	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (li < 64 && ((f.cells->refused_loops >> li) & 1)) || !cells_enter(f, loop, true)) { JAI_COVERAGE_ENTRY(f, li, false); return {}; }
 	JAI_COVERAGE_ENTRY(f, li, true);
 	cell_state& cs = *f.cells;
 	cs.loop = li;
@@ -8181,7 +8181,7 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_cells_enter(frame& f, const vm_instruction& ins) {
 	JAI_COARSE(coarse_blocks_, coarse_block_runs_)
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
-	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { JAI_COVERAGE_ENTRY(f, ins.a, false); f.ip = ins.b; return {}; }
+	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop, !loop.straight && !loop.frame_program)) { JAI_COVERAGE_ENTRY(f, ins.a, false); f.ip = ins.b; return {}; }
 	JAI_COVERAGE_ENTRY(f, ins.a, true);
 	cell_state& cs = *f.cells;
 	cs.loop = ins.a;
@@ -8735,7 +8735,7 @@ const script_value* vm_backend::env_operand_value(frame& f, const chunk::cell_lo
 	return &it->second;
 }
 // the entry: every cell's guard, the container sites resolved once, the unboxing; false = the general form runs
-bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
+bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) {
 	JAI_CELL_COST(1)
 	JAI_COARSE(coarse_enter_, coarse_enters_)
 #ifdef JAISCRIPT_MISS_INJECTION
@@ -8843,13 +8843,13 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 #ifdef JAISCRIPT_VM_COARSE_PROFILE
 	{ const uint64_t t1 = __rdtsc(); coarse_ecells_ += t1 - ct0; ct0 = t1; }
 #endif
-	if (!loop.sites.empty() && !(env_reuse && cells_sites_reenter(f, loop)) && !cells_resolve_sites(f, loop)) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); refuse_container_site(f, loop); return false; }
+	if (!loop.sites.empty() && !(env_reuse && cells_sites_reenter(f, loop)) && !cells_resolve_sites(f, loop)) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); if (!head) { refuse_container_site(f, loop); } return false; }
 #ifdef JAISCRIPT_VM_COARSE_PROFILE
 	{ const uint64_t t1 = __rdtsc(); coarse_esites_ += t1 - ct0; ct0 = t1; }
 	struct guard_span { uint64_t& acc; uint64_t t0; ~guard_span() { acc += __rdtsc() - t0; } } guard_span_{coarse_eguards_, ct0};
 #endif
-	if (!loop.inline_sites.empty()) for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) { JAI_CELLS_COUNT(1); refuse_container_site(f, loop); return false; } }   // an inlined leaf's callee rebound: the general form's guard takes the fallback
-	for (const auto& ms : loop.math_alias_sites) { if (!math_alias_holds(f, ms)) { JAI_CELLS_COUNT(1); refuse_container_site(f, loop); return false; } }   // a stdlib alias's name rebound: the general form makes the real call
+	if (!loop.inline_sites.empty()) for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) { JAI_CELLS_COUNT(1); if (!head) { refuse_container_site(f, loop); } return false; } }   // an inlined leaf's callee rebound: the general form's guard takes the fallback
+	for (const auto& ms : loop.math_alias_sites) { if (!math_alias_holds(f, ms)) { JAI_CELLS_COUNT(1); if (!head) { refuse_container_site(f, loop); } return false; } }   // a stdlib alias's name rebound: the general form makes the real call
 	++cells_counters_.entries;
 	cs.env_loop = &loop;
 	return true;

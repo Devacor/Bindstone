@@ -2089,7 +2089,7 @@ namespace jai::vm {
         op_status assign_math_component(frame& f, uint32_t node, script_value& base, member_expr* member, const script_value& value, script_value& out);   // `base.x = v` on a math value
         op_status exec_cells_cfor_back(frame& f, const vm_instruction& ins);   // a counted loop's back edge: the general step and compare, then the block entry
         op_status cells_counted_head_entry(frame& f, uint32_t li);             // a counted loop's entry at its CFOR_PREP after the first compare
-        bool cells_enter(frame& f, const chunk::cell_loop& loop);              // the guards, the container sites and the unboxing; false = the general form runs
+        bool cells_enter(frame& f, const chunk::cell_loop& loop, bool head = false);   // the guards, the container sites and the unboxing; false = the general form runs (a loop's head entry refuses softly: the back edge tries again)
         op_status cells_run(frame& f, const chunk::cell_loop& loop);           // the copy as one block until an exit, a miss or a raise
         // the block loop's registers: the cells' payloads, kinds and dirty bytes, the chunk's constants, the copy's code and
         // the loop, read once per run; every executor on the hot switch reads through them instead of re-deriving frame -> cells -> vectors

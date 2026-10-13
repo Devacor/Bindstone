@@ -3930,11 +3930,77 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 					check_eq(uint64_t{0}, c1.misses - c0.misses, std::string(sh.call) + ": nothing misses");
 				}
 			}
+			{
+				// nested counted loops with continues, inlined leaves and a class local the body copies from an element (its member sites have no
+				// instance before the first iteration): the same answer on both backends, and every call after the first enters a block
+				const std::string defs =
+					"class TileDef { int res = 0; int station = 0; }\n"
+					"array<TileDef> TILES_DEF = [];\n"
+					"for (int i = 0; i < 4; i++) { TileDef t; t.res = i; t.station = 3 - i; TILES_DEF.push(t); }\n"
+					"array<int> MOB_X = [20]; array<int> MOB_Y = [20]; array<int> MOB_WORLD = [0];\n"
+					"array<int> GRID = []; for (int i = 0; i < 64 * 64; i++) { GRID.push(0); } GRID[29 * 64 + 26] = 2;\n"
+					"int iabs(int v) { return v < 0 ? -v : v; }\n"
+					"bool in_world(int w, int x, int y) { return x >= 0 && y >= 0 && x < 64 && y < 64; }\n"
+					"int tile_now(int w, int x, int y) { return GRID[y * 64 + x]; }\n"
+					"array<int> find_tile_near(int m, int res, int station, int maxr) {\n"
+					"	int w = MOB_WORLD[m];\n"
+					"	for (int r = 1; r <= maxr; ++r) {\n"
+					"		for (int dy = -r; dy <= r; ++dy) {\n"
+					"			for (int dx = -r; dx <= r; ++dx) {\n"
+					"				if (iabs(dx) != r && iabs(dy) != r) { continue; }\n"
+					"				int x = MOB_X[m] + dx;\n"
+					"				int y = MOB_Y[m] + dy;\n"
+					"				if (!in_world(w, x, y)) { continue; }\n"
+					"				TileDef td = TILES_DEF[tile_now(w, x, y)];\n"
+					"				if ((res > 0 && td.res == res) || (station > 0 && td.station == station)) { return [x, y]; }\n"
+					"			}\n"
+					"		}\n"
+					"	}\n"
+					"	return [-1, -1];\n"
+					"}\n";
+				const std::string call = "auto p = find_tile_near(0, 2, 0, 12); auto q = find_tile_near(0, 3, 0, 5); to_string(p[0]) + \",\" + to_string(p[1]) + \"|\" + to_string(q[0]);";
+				both(defs + call, "26,29|-1", "a member site on a body-declared local");
+				auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+				e->execute(defs);
+				e->execute("find_tile_near(0, 2, 0, 12);");
+				for (int k = 0; k < 3; ++k) {
+					const cell_counters c0 = e->cells_counters();
+					e->execute("find_tile_near(0, 2, 0, 12);");
+					const cell_counters c1 = e->cells_counters();
+					check_true(c1.entries - c0.entries >= 1, "call " + std::to_string(k) + " enters a block: entries " + std::to_string(c1.entries - c0.entries));
+					check_eq(uint64_t{0}, c1.misses - c0.misses, "call " + std::to_string(k) + ": nothing misses");
+				}
+			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
 				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "counted loops entered at their prep under an injected miss at every " + std::to_string(every));
+			}
+		});
+		test("a_head_entry_refusal_leaves_the_loop_to_its_back_edge", [this]() {
+			// a member site on a class local the body declares (a boundary statement): at the CFOR_PREP the local holds no instance, so the
+			// head entry refuses; the first iteration assigns it and the back edge enters, once per call (a head refusal does not refuse the
+			// loop for the call). Both backends answer the same
+			const std::string defs =
+				"class TD { int res = 0; int station = 0; }\n"
+				"array<TD> DEFS = [];\n"
+				"for (int i = 0; i < 6; i++) { TD t; t.res = i % 3; t.station = i; DEFS.push(t); }\n"
+				"int walk(int n) { int s = 0; for (int i = 0; i < n; ++i) { TD td = DEFS[i % 6]; int a = i * 3 + 1; int b = a * a + i; int c = b - a * 2; int d = c * 5 - b; int e = d + a * c; s = s + td.res * 3 + td.station + e % 7; } return s; }\n";
+			both(defs + "to_string(walk(8)) + \"|\" + to_string(walk(1)) + \"|\" + to_string(walk(0));", "51|0|0", "a member site on a body-declared local");
+			const std::string l = listing_run(defs + "walk(8);");
+			const size_t at = l.find("== walk ");
+			const std::string part = at == std::string::npos ? l : l.substr(at, l.find("\n== ", at + 1) - at);
+			check_true(part.find("-- cell loop") != std::string::npos && part.find("C_MLOAD") != std::string::npos && part.find("(boundaries") != std::string::npos, "walk's loop closes with a member site and a boundary\n" + part);
+			auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+			e->execute(defs);
+			e->execute("walk(8);");
+			for (int k = 0; k < 3; ++k) {
+				const cell_counters c0 = e->cells_counters();
+				e->execute("walk(8);");
+				const cell_counters c1 = e->cells_counters();
+				check_eq(uint64_t{1}, c1.entries - c0.entries, "call " + std::to_string(k) + ": the back edge enters once");
+				check_eq(uint64_t{0}, c1.misses - c0.misses, "call " + std::to_string(k) + ": nothing misses");
 			}
 		});
 		test("a_range_for_is_entered_at_its_iter_next", [this]() {

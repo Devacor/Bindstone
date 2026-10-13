@@ -1022,7 +1022,7 @@ private:
 				"array<int> a = [null];",
 				"array<string> a = [null];",
 				"class C {} array<weak_ptr<C>> a = [C()];",
-				"class C {} shared_ptr<C> p = C(); array<weak_ptr<C>> a = []; a.push(p);"
+				"class C {} class D {} shared_ptr<D> d = D(); array<weak_ptr<C>> a = []; a.push(d);"
 			}) {
 				auto eng = make_engine();
 				check_true(eng->check(source).has_errors(), source);

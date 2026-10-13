@@ -5887,6 +5887,14 @@ bool shared_element_admits(const script_value& v, const type_info_ptr& element_t
     return shared_handle_admits(v, element_type, eng);
 }
 
+bool weak_element_takes_shared(const script_value& v, const type_info_ptr& element_type, engine* eng) {
+    return weak_slot_takes_shared(v, element_type, eng);
+}
+
+checked_result<script_value> weak_element_from_shared(const script_value& v, engine* eng) {
+    return script_value::make_weak_ptr(v, eng);
+}
+
 type_info_ptr object_element_own_tag(const script_value& v, engine* eng) {
     auto view = resolve_slot_class(v, eng);
     return view.def ? view.def->get_type_info() : nullptr;

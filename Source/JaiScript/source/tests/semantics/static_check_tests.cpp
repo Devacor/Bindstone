@@ -1787,6 +1787,19 @@ public:
             std::filesystem::remove_all(dir);
         });
 
+        // a weak_ptr<T> element takes a shared handle of T or a subclass like a weak_ptr<T> declaration (C++: vector<weak_ptr>
+        // push_back(shared_ptr)); an unrelated handle is named in full
+        test("checker_weak_elements_take_shared_handles", [this]() {
+            auto e = make_engine();
+            const std::string classes = "class P { int id = 0; }\nclass D : P { }\nclass Q { }\nshared_ptr<P> a = new P();\nshared_ptr<D> d = new D();\nshared_ptr<P> n = null;\n";
+            auto r = e->check(classes + "array<weak_ptr<P>> ws = [a];\nws.push(a);\nws.push(d);\nws.push(n);\nws.push(null);\nws[0] = a;\n"
+                                        "map<string, weak_ptr<P>> m = {};\nm[\"k\"] = d;\nweak_ptr<P> w = a;\nws.push(w);");
+            check_eq((size_t)0, error_count(r), r.format());
+            r = e->check(classes + "shared_ptr<Q> q = new Q();\narray<weak_ptr<P>> ws = [];\nws.push(q);");
+            check_eq((size_t)1, error_count(r), r.format());
+            check_true(has_diag(r, dlevel::error, "expected 'weak_ptr<P>', got 'shared_ptr<Q>'"), r.format());
+        });
+
         test("checker_sees_promoted_char_arithmetic_host_results_and_string_namespace_arguments", [this]() {
             for (bool proofs : {true, false}) {
                 auto e = make_engine();

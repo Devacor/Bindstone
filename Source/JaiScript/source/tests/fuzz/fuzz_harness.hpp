@@ -420,7 +420,6 @@ namespace jai::fuzz {
 	// Suppressions for KNOWN divergences (fixes currently in flight on this
 	// branch). A suppression matches when every program needle appears in the
 	// program text AND every diff needle appears in the divergence summary.
-	// Documented in known_divergences.md next to this header.
 	// ------------------------------------------------------------------
 	struct suppression {
 		std::string id;
@@ -430,8 +429,7 @@ namespace jai::fuzz {
 	};
 
 	inline const std::vector<suppression>& known_suppressions() {
-		// Shapes observed and triaged in real fuzz runs; see known_divergences.md
-		// for the record (repro seeds, wrong-backend judgment, status).
+		// Shapes observed and triaged in real fuzz runs.
 		static const std::vector<suppression> list = {
 			// throw inside a class ordering operator swallowed by one backend
 			// (fix in flight; not observed since - matcher kept).
@@ -447,7 +445,6 @@ namespace jai::fuzz {
 			// neg-zero, overflow op names, float divzero text, recursion text,
 			// spaceship overflow swallow) were removed with their fixes; recorded
 			// seeds re-verified agreeing with --no-suppressions.
-			// See known_divergences.md "Fixed" for the root causes.
 		};
 		return list;
 	}

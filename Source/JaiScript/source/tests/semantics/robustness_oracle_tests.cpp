@@ -107,7 +107,7 @@ private:
 		return "";
 	}
 
-	// docs/static_checking.md rule table, docs/site/guide/07-classes.html "Choosing an overload": a by-value parameter runs the assignment table; a lone method
+	// docs/site/guide/02-type-ladder.html "The one conversion table", docs/site/guide/07-classes.html "Choosing an overload": a by-value parameter runs the assignment table; a lone method
 	// converts like a lone free function, among overloads the scorer takes the table's rows and a string never makes a bool
 	// parameter viable; the strict checker agrees at load
 	void method_conversions() {
@@ -270,7 +270,7 @@ private:
 		});
 	}
 
-	// docs/diagnostics.md: an uncaught error's what() is its text alone; the category message stands in only for an error
+	// internal/diagnostics.md: an uncaught error's what() is its text alone; the category message stands in only for an error
 	// that carries no text
 	void uncaught_texts() {
 		test("an_uncaught_error_reads_its_text_without_a_category_suffix", [this]() {
@@ -457,7 +457,7 @@ private:
 		});
 	}
 
-	// docs/parallel_design.md section 15: a read-only by-value local binds its source only when nothing after it can tell; every
+	// internal/parallel_design.md section 15: a read-only by-value local binds its source only when nothing after it can tell; every
 	// route that writes the source after the copy (operators, conversions, accessors, callbacks, coroutines, reflection,
 	// references) leaves the copy unchanged, elisions on or off (C++: T x = lvalue copies)
 	void local_alias_soundness() {

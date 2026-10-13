@@ -1,8 +1,7 @@
 // Seeded differential-fuzz smoke suite: every CI run fuzzes a little.
 // Runs a fixed range of generator seeds through the same harness as
 // jaiscript_fuzz and asserts zero UNSUPPRESSED divergences (known in-flight
-// parity gaps are matched by the suppressions in fuzz_harness.hpp and
-// documented in known_divergences.md).
+// parity gaps are matched by the suppressions in fuzz_harness.hpp).
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
@@ -184,7 +183,7 @@ public:
 			check_ge(order, 15.0, "order band programs entering a closed block: " + std::to_string(order) + "%");
 		});
 		test("fixed_seeds_no_new_divergence_no_proofs", [this]() {
-			// interp-vs-vm parity must hold in both proof states (docs/static_checking.md "Proofs")
+			// interp-vs-vm parity must hold in both proof states (docs/site/embedding/06-static-checking.html "Proofs")
 			run_seed_range(0, 40, false);
 		});
 		test("order_band_seeds_hold_three_oracles", [this]() {

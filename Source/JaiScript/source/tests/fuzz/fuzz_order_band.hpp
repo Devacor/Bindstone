@@ -341,7 +341,7 @@ namespace jai::fuzz::order {
 				out += tabs(depth) + t + " = " + v + ";\n";
 				return;
 			}
-			case sk::compound: {   // the right side first, then every part of the target (docs/invariants.md 12)
+			case sk::compound: {   // the right side first, then every part of the target (docs/site/guide/04-operators.html "Evaluation order is a contract")
 				const std::string v = value(s->e);
 				const std::string t = h ? target_text(s->target, depth, out) : place_text(s->target);
 				out += tabs(depth) + t + " " + s->op + "= " + v + ";\n";
@@ -746,7 +746,7 @@ namespace jai::fuzz::order {
 				store(sl, v, s->target.kind == pk::elem || s->target.kind == pk::map);
 				return;
 			}
-			case sk::compound: {   // the right side first, then every part of the target and its read (docs/invariants.md 12)
+			case sk::compound: {   // the right side first, then every part of the target and its read (docs/site/guide/04-operators.html "Evaluation order is a contract")
 				const mval v = eval(s->e, f);
 				const slot sl = resolve(s->target, f);
 				store(sl, arith(s->op, *sl.v, v), s->target.kind == pk::elem || s->target.kind == pk::map);
@@ -1445,7 +1445,7 @@ namespace jai::fuzz::order {
 			}
 			c.result = c.ret == ty::untyped ? (rng_.chance(70) ? ty::i : ty::f) : c.ret;
 			if (!c.by_ref) {
-				// a by-value closure snapshots every name it spells, a global included (both backends; docs/closures_and_captures.md says a
+				// a by-value closure snapshots every name it spells, a global included (both backends; docs/site/guide/06-functions.html "Lambdas and captures" says a
 				// global is never captured): it writes through a free writer, whose globals are live, and reads a captured local
 				std::vector<int> ws;
 				for (int w : writers_) { if (p_.calls[static_cast<size_t>(w)].params.empty()) ws.push_back(w); }

@@ -1,7 +1,7 @@
 // Function-value churn microbenchmarks (copy-trio targets from the function-value copy
 // audit): lambda create+call, named declare+call, pass+call. Each iteration re-executes
 // a pre-parsed bite, so the measured work is the runtime mint + call machinery, not
-// lexing/parsing. Compare min-of-3 whole-suite runs (invariants.md §7).
+// lexing/parsing. Compare min-of-3 whole-suite runs (internal/invariants.md §7).
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>

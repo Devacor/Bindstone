@@ -943,7 +943,7 @@ public:
 
         test("class_typed_return_first_redefinition_last_wins", [this]() {
             auto engine = make_engine();
-            // one signature defined twice in one unit is an error (docs/const.md 4.3); another unit's definition replaces it
+            // one signature defined twice in one unit is an error (docs/site/guide/06-functions.html "Overloads and redefinition"); another unit's definition replaces it
             engine->execute(R"(
                 class P { int x = 1; }
                 P mk() { return P(); }
@@ -1185,7 +1185,7 @@ public:
         });
 
         test("same_signature_twice_in_one_unit_is_an_error", [&, this]() {
-            // the general redefinition rule (docs/const.md 4.3)
+            // the general redefinition rule (docs/site/guide/06-functions.html "Overloads and redefinition")
             auto engine = make_engine();
             std::string err;
             try { engine->execute("function f(a) { return 1; } function f(a) { return 2; } f(0);"); } catch (const std::exception& ex) { err = ex.what(); }

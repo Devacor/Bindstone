@@ -714,7 +714,7 @@ public:
 
         // ============================================================
         // Template-string format specs: ${expr:spec}
-        // spec = [[fill]align][width][.precision][f|x|X|b] (docs/grammar.md)
+        // spec = [[fill]align][width][.precision][f|x|X|b] (docs/site/guide/09-containers-strings.html "Template strings & format specs")
         // ============================================================
 
         test("template_spec_float_precision", [this]() {

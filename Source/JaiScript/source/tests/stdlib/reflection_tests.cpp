@@ -1,5 +1,5 @@
-// reflect:: — the script-side reflection capability (docs/reflection.md front door,
-// docs/reflection_design.md companion). These pins hold the three contracts: reserved
+// reflect:: — the script-side reflection capability (docs/site/guide/12-reflection.html front door,
+// internal/reflection_design.md companion). These pins hold the three contracts: reserved
 // namespace (engine truth is not impersonatable; math:: stays open by contract),
 // live-query recapture (hot reload -> re-ask sees the new shape), and allowlist scoping
 // (an engine reflects only what IT registered).

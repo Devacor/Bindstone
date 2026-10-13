@@ -1,5 +1,5 @@
 // Parse-key + hot-reload-identity micro-benchmarks (parse-avoidance ladder study).
-// The Foundry us harness can't resolve this regime (invariants.md section 7), so each
+// The Foundry us harness can't resolve this regime (internal/invariants.md section 7), so each
 // row here is a dedicated ns measurement: min-of-5 trials, ns/op = best_total/iters.
 // Set PARSE_KEY_BENCH_BASELINE to 1 to compile against pre-ladder HEAD (no script_source,
 // no identical_redefinitions) for before/after tables.

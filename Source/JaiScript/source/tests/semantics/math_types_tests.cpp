@@ -1,4 +1,4 @@
-// The native math kinds (docs/math_types_design.md): math::vec2, math::vec3 (binary32 components) and math::ivec2,
+// The native math kinds (docs/site/guide/15-math.html): math::vec2, math::vec3 (binary32 components) and math::ivec2,
 // math::ivec3 (int32 components), inline in the value. Every row runs on both backends with proofs on and off.
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
@@ -665,7 +665,7 @@ public:
             check_eq(std::string("math::vec3 has no member 'foo'|"), errors("math::vec3 v; var q = v.foo();"), "an unknown method");
             check_eq(std::string("'dot' expects 1 argument|"), errors("math::vec3 v; var q = v.dot();"), "a method's arity");
             check_eq(std::string(""), errors("math::vec3 p; math::vec3 a = math::min(p); float c = math::length(p, p);"),
-                     "a library call's count is the kernel's runtime error (docs/static_checking.md), its result untyped");
+                     "a library call's count is the kernel's runtime error (docs/site/embedding/06-static-checking.html \"Namespaces, and recovery\"), its result untyped");
         });
     }
 };
@@ -675,7 +675,7 @@ public:
 using math_types_tests = jai::foundry::tests::math_types_tests;
 FOUNDRY_REGISTER(math_types_tests)
 
-// Host math types adapted to the native kinds (docs/math_types_design.md 8): they cross every binding as math values
+// Host math types adapted to the native kinds (docs/site/embedding/15-math-adapters.html): they cross every binding as math values
 namespace adapter_hosts {
     struct point3 { float x = 0, y = 0, z = 0; point3() = default; point3(float a, float b, float c) : x(a), y(b), z(c) {} template <class A> void serialize(A& ar) { ar(JAI_NVP(x), JAI_NVP(y), JAI_NVP(z)); } friend bool operator==(const point3&, const point3&) = default; };
     struct cell3 { int x = 0, y = 0, z = 0; template <class A> void serialize(A& ar) { ar(JAI_NVP(x), JAI_NVP(y), JAI_NVP(z)); } };

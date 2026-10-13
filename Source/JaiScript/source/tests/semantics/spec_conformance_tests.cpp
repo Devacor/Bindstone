@@ -1,7 +1,7 @@
-// Spec conformance: every expected value below is derived from the specification (docs/*.md, the guide
-// under docs/site/guide/, docs/site/stability.html, and C++ where the docs say C++ semantics), never from running
-// a backend. docs/spec_conformance.md lists each claim, its source and the tests that pin it.
-// Every row runs on the interpreter and the VM, with proofs on and off and the VM's passes off (and, in a
+// Spec conformance: every expected value below is derived from the specification (the documentation under
+// docs/site/: the guide, the embedding pages, the reference and docs/site/stability.html; the design notes under
+// internal/; and C++ where the docs say C++ semantics), never from running a backend. Each group names the source
+// of the claims it pins. Every row runs on the interpreter and the VM, with proofs on and off and the VM's passes off (and, in a
 // build that defines JAISCRIPT_MISS_INJECTION, with injected cell misses), against one expected string.
 
 #include <jaiscript/testing/foundry.hpp>
@@ -27,7 +27,7 @@ namespace jai::foundry::tests {
 
 namespace spec {
 
-// A host class whose accessors, methods and operators throw (docs/EXCEPTION_DESIGN.md: a C++ exception a bound
+// A host class whose accessors, methods and operators throw (docs/site/guide/05-control-flow.html "try / catch / throw": a C++ exception a bound
 // function, getter or setter raises becomes the script's exception)
 struct boundary_probe {
 	int v = 1;
@@ -655,7 +655,7 @@ private:
 		});
 	}
 
-	// By-value returns copy, own locals move (docs/script_extensible.md 6.5); aggregate copies copy values and share handles
+	// By-value returns copy, own locals move (docs/site/guide/03-value-semantics.html "The ambush: mutations on copies vanish silently"); aggregate copies copy values and share handles
 	// (docs/site/stability.html "Value semantics")
 	void by_value_returns_and_copies() {
 		test("by_value_returns_never_alias_what_the_callee_could_name", [this]() {
@@ -788,7 +788,7 @@ private:
 		});
 	}
 
-	// docs/site/guide/09-containers-strings.html "Key types"; texts from docs/diagnostics.md "element / key boundary"
+	// docs/site/guide/09-containers-strings.html "Key types": the rules and their texts
 	void map_keys() {
 		test("map_key_types_are_enforced_and_auto_keys_infer", [this]() {
 			expect("keys", R"(
@@ -883,7 +883,7 @@ private:
 		});
 	}
 
-	// docs/EXCEPTION_DESIGN.md addendum (the catch variable is a block-scoped local; coroutines park the exception trio)
+	// internal/EXCEPTION_DESIGN.md addendum (the catch variable is a block-scoped local; coroutines park the exception trio)
 	// and docs/site/guide/05-control-flow.html "switch: break by default, explicit fallthrough"
 	void catch_variables_and_switch() {
 		test("catch_variables_inside_switch_cases_with_fallthrough", [this]() {
@@ -939,7 +939,7 @@ private:
 		});
 	}
 
-	// docs/namespaces.md
+	// internal/namespaces.md
 	void namespaces() {
 		test("namespace_document_example", [this]() {
 			expect("geometry", R"(
@@ -1088,7 +1088,7 @@ private:
 		});
 	}
 
-	// docs/parallel_design.md section 13: parallel bodies see the enclosing function's locals
+	// internal/parallel_design.md section 13: parallel bodies see the enclosing function's locals
 	void parallel_locals() {
 		test("a_parallel_body_reads_the_enclosing_frames_local_over_a_same_named_global", [this]() {
 			expect("parallel locals", R"(
@@ -1105,10 +1105,11 @@ private:
 		});
 	}
 
-	// docs/grammar.md forStatement and Operators (compound assigns), docs/integer_semantics.md
+	// internal/grammar.md forStatement and Operators (compound assigns), docs/site/embedding/05-safety-rails.html
+	// "Checked integer overflow"
 	void grammar_and_operators() {
 		test("a_for_initializer_may_be_an_expression", [this]() {
-			// docs/grammar.md: forStatement = "for" "(" (variableDeclaration | expression)? ";" ...
+			// internal/grammar.md: forStatement = "for" "(" (variableDeclaration | expression)? ";" ...
 			expect("for init", R"(
 				class P { int x = 0; P(int v) { x = v; } }
 				function run() -> string {
@@ -1139,7 +1140,7 @@ private:
 		});
 	}
 
-	// docs/char_semantics.md
+	// docs/site/guide/04-operators.html "Chars promote like C++"
 	void chars() {
 		test("char_promotion_in_division_bitwise_and_map_keys", [this]() {
 			expect("chars", R"(
@@ -1198,7 +1199,7 @@ private:
 		});
 	}
 
-	// docs/global_shadowing.md: program-scope redeclarations shadow by unit and {} blocks scope as in C++
+	// internal/global_shadowing.md: program-scope redeclarations shadow by unit and {} blocks scope as in C++
 	void scopes_and_units() {
 		test("block_scopes_in_loops_tries_and_bare_blocks", [this]() {
 			expect("blocks", R"(
@@ -1256,7 +1257,7 @@ private:
 		});
 	}
 
-	// docs/reference_model.md, docs/script_extensible.md 6.5
+	// internal/reference_model.md, docs/site/guide/03-value-semantics.html (returns, reference declarations)
 	void references() {
 		test("reference_model_boundaries", [this]() {
 			expect("refs", R"(
@@ -1309,7 +1310,7 @@ private:
 		});
 	}
 
-	// docs/namespaces.md variable forms
+	// internal/namespaces.md variable forms
 	void namespace_forms() {
 		test("namespace_variable_spellings_and_captures", [this]() {
 			expect("ns forms", R"(
@@ -1334,7 +1335,7 @@ private:
 			)", "1|5|s|5|3,100|2|1");
 		});
 		test("a_namespace_variable_may_be_reference_declared", [this]() {
-			// docs/namespaces.md Variables: a namespace variable takes the spellings a program-scope variable takes, a reference
+			// internal/namespaces.md Variables: a namespace variable takes the spellings a program-scope variable takes, a reference
 			// included, and a reference-declared variable stores through to what it refers to
 			expect("ns ref", R"(
 				var G = 1;
@@ -1362,7 +1363,7 @@ private:
 		});
 	}
 
-	// docs/EXCEPTION_DESIGN.md
+	// internal/EXCEPTION_DESIGN.md
 	void exceptions_more() {
 		test("a_bare_rethrow_outside_any_catch_raises", [this]() {
 			every_config("rethrow nothing", "Bare throw with no active exception thrown.", [](engine& e) {
@@ -1371,7 +1372,7 @@ private:
 			});
 		});
 		test("rethrow_after_a_nested_try_inside_a_catch_rethrows_the_outer_exception", [this]() {
-			// docs/EXCEPTION_DESIGN.md addendum: a nested try inside a catch keeps the caught exception live for throw;
+			// internal/EXCEPTION_DESIGN.md addendum: a nested try inside a catch keeps the caught exception live for throw;
 			// (C++: a completed inner handler hands the exception back to the enclosing one)
 			expect("rethrow", R"(
 				function run() -> string {
@@ -1385,7 +1386,7 @@ private:
 			)", "yxqp211");
 		});
 		test("a_fresh_coroutine_starts_with_no_active_exception", [this]() {
-			// docs/EXCEPTION_DESIGN.md addendum: a bare throw; in a fresh coroutine raises even when the resumer sits inside a catch
+			// internal/EXCEPTION_DESIGN.md addendum: a bare throw; in a fresh coroutine raises even when the resumer sits inside a catch
 			expect("coroutine rethrow", R"(
 				coroutine int c() { throw; yield 1; }
 				function run() -> string {
@@ -1413,7 +1414,7 @@ private:
 			)", "outer");
 		});
 		test("a_throw_expression_composes_inside_a_ternary", [this]() {
-			// docs/grammar.md throwExpression: throw is an expression, so it composes (x > 0 ? x : throw "neg")
+			// docs/site/guide/05-control-flow.html "try / catch / throw": throw is an expression, so it composes (x > 0 ? x : throw "neg")
 			expect("throw in ternary", R"(
 				function g(int x) { return x > 0 ? x : throw "neg"; }
 				function k(int x) -> int { int y = x > 0 ? x : throw "neg3"; return y; }
@@ -1437,7 +1438,7 @@ private:
 		});
 	}
 
-	// docs/closures_and_captures.md
+	// docs/site/guide/06-functions.html "Lambdas and captures"
 	void closures() {
 		test("value_captures_copy_objects_and_share_handles_and_loop_variables_snapshot", [this]() {
 			expect("closures", R"(
@@ -1454,7 +1455,7 @@ private:
 		});
 	}
 
-	// docs/diagnostics.md: the texts a script catch sees, one per row; `setup` runs first, the failing statement in a try
+	// internal/diagnostics.md: the texts a script catch sees, one per row; `setup` runs first, the failing statement in a try
 	struct diag_row { const char* label; const char* setup; const char* failing; const char* expected; check_mode mode; };
 	void expect_texts(const std::vector<diag_row>& rows) {
 		for (const auto& r : rows) {
@@ -1571,7 +1572,7 @@ private:
 				try { e.max_call_depth(backend_type::interpreter, 0); out += "accepted"; } catch (const std::exception& ex) { out += ex.what(); }
 				out += "|";
 				e.static_checking(check_mode::off);
-				// not a tail call: a VM self tail call reuses its frame and runs into the budget instead (docs/diagnostics.md)
+				// not a tail call: a VM self tail call reuses its frame and runs into the budget instead (docs/site/reference/index.html "Run-time errors")
 				e.execution_budget(0);
 				try { e.execute("function r() { return r() + 1; } r();"); out += "no error"; } catch (const std::exception& ex) { out += ex.what(); }
 				out += "|";
@@ -1583,7 +1584,7 @@ private:
 
 	// An error raised by script a builtin or an operator runs on the program's behalf (a comparator, a predicate, a user
 	// operator, to_bool(), to_string(), an archive hook) is that script's error: it propagates with its own text, catchable,
-	// and the builtin stops calling back after it (docs/spec_conformance.md "Callback errors"; docs/diagnostics.md)
+	// and the builtin stops calling back after it (internal/diagnostics.md)
 	void callback_errors() {
 		test("a_sort_comparator_error_propagates_stops_the_calls_and_leaves_the_array", [this]() {
 			expect("sort error", R"(
@@ -1798,7 +1799,7 @@ private:
 		});
 	}
 
-	// docs/static_checking.md rule table: on plain assignment an object slot takes a source through a user operator= of its
+	// docs/site/guide/02-type-ladder.html "The one conversion table": on plain assignment an object slot takes a source through a user operator= of its
 	// class (C++ assignment: the operator runs on the held instance, exact match ahead of a converting constructor); the
 	// expression's value is the destination's (docs/site/stability.html "Statements and expressions"); container elements
 	// need the exact type (docs/site/guide/09-containers-strings.html "Typed containers"), so an element store never dispatches it
@@ -1850,7 +1851,7 @@ private:
 		});
 	}
 
-	// docs/diagnostics.md: every runtime error a catch sees has a text; one raised without its own reads as its code's
+	// internal/diagnostics.md: every runtime error a catch sees has a text; one raised without its own reads as its code's
 	// message, the text the host boundary shows (`what()` of the uncaught error)
 	void textless_errors() {
 		test("a_compound_error_on_a_variable_has_a_text", [this]() {
@@ -1873,7 +1874,8 @@ private:
 		});
 	}
 
-	// docs/static_checking.md rule table and precision map: load verdicts (engine::check reports, nothing runs)
+	// docs/site/embedding/06-static-checking.html "One conversion table" and "What still fails at run time (the precision
+	// map)": load verdicts (engine::check reports, nothing runs)
 	void checker_verdicts() {
 		test("checker_verdicts_follow_the_rule_table", [this]() {
 			struct row { const char* label; const char* src; size_t errors; };
@@ -1957,7 +1959,7 @@ private:
 		});
 	}
 
-	// docs/LOCAL_VARIABLES_BEHAVIOR.md: instance variables are an overlay for one execution, not dynamic scope
+	// internal/LOCAL_VARIABLES_BEHAVIOR.md: instance variables are an overlay for one execution, not dynamic scope
 	void instance_variable_overlays() {
 		test("an_instance_variable_overlay_lives_for_one_execution", [this]() {
 			every_config("overlay", "5|1|raised|raised|5", [](engine& e) {
@@ -2009,7 +2011,7 @@ private:
 		});
 	}
 
-	// docs/reflection.md "Enabled privileges", docs/site/embedding/05-safety-rails.html: the first missing built-in, then custom names in registration order
+	// docs/site/embedding/05-safety-rails.html: the first missing built-in, then custom names in registration order
 	void privilege_order() {
 		test("a_denial_names_the_first_missing_permission_in_registration_order", [this]() {
 			every_config("denial order", "Insufficient privilege: app.b.|Insufficient privilege: filesystem.", [](engine& e) {
@@ -2028,7 +2030,7 @@ private:
 	// docs/site/guide examples with their stated outputs
 	void guide_examples() {
 		test("guide_operator_precedence_and_associativity", [this]() {
-			// docs/grammar.md precedence (lowest to highest): assignment (right), ternary (right), ||, &&, |, ^, &, equality, relational, shift, additive
+			// docs/site/guide/04-operators.html, C++ precedence (lowest to highest): assignment (right), ternary (right), ||, &&, |, ^, &, equality, relational, shift, additive
 			expect("precedence", R"(
 				var a = 0; var b = 0; a = b = 5;
 				"" + a + b + "|" + to_string(true || false && false) + "|" + (1 | 2 ^ 3) + "|" + to_string(1 < 2 == true) + "|" + (1 << 2 + 1) + "|" +
@@ -2078,10 +2080,10 @@ private:
 		});
 	}
 
-	// docs/parallel_design.md contracts
+	// internal/parallel_design.md contracts
 	void parallel_contracts() {
 		test("a_helper_that_writes_a_global_hits_the_parallel_write_wall", [this]() {
-			// docs/parallel_design.md section 1: a callee that mutates a global hits the same wall; the source is unchanged
+			// internal/parallel_design.md section 1: a callee that mutates a global hits the same wall; the source is unchanged
 			expect("transitive write", R"(
 				var g = 0;
 				function helper(int v) -> int { g = v; return v; }
@@ -2247,7 +2249,7 @@ private:
 		});
 	}
 
-	// docs/closures_and_captures.md: a program-scope variable is never captured by default - [=],
+	// docs/site/guide/06-functions.html "Lambdas and captures": a program-scope variable is never captured by default - [=],
 	// [&] and bare [] read it when the lambda runs, [&g] is the same as not listing it, an explicit [g] copies it at creation;
 	// an init-capture [x = e] copies e, evaluated at creation in the enclosing scope, into the lambda's own x. Locals and
 	// parameters keep their contract (bare [] and [=] copy, [&] shares the cell)
@@ -2485,7 +2487,7 @@ private:
 		});
 	}
 
-	// docs/SIMPLIFICATION_AUDIT.md: the audit's divergences, each pinned here by the change that fixes it
+	// Divergences from the specification, each pinned here by the change that fixes it
 	void simplification_audit_fixes() {
 		test("f1_a_nested_assignment_yields_the_destinations_stored_value", [this]() {
 			// The value of an assignment is the destination's stored value, consumed anywhere
@@ -2558,7 +2560,8 @@ private:
 		});
 	}
 
-	// SIMPLIFICATION_AUDIT.md suspects S-a, S-b and S-c, and F13 (the destructors a throw's unwinding releases)
+	// Re-entrant destructors, a parked callee's release, the operand order a later reference binding sees, and the
+	// destructors a throw's unwinding releases
 	void reentrant_destructors_and_operand_order() {
 		test("a_destructor_that_reenters_while_a_frame_releases_its_loop_state_runs_to_completion", [this]() {
 			// C++: the last handle's release runs the destructor to completion and the caller continues intact. The released
@@ -2803,7 +2806,7 @@ private:
 		known_bugs_simplification_audit();
 	}
 
-	// docs/spec_conformance.md section 9
+	// Library rules and language edges
 	void library_and_edge_rules() {
 		test("a_bare_throw_with_nothing_active_is_a_catchable_runtime_error", [this]() {
 			expect("bare throw", R"(
@@ -2815,7 +2818,7 @@ private:
 			)", "top:Bare throw with no active exception thrown.|own:Bare throw with no active exception thrown.|caller:Bare throw with no active exception thrown.", check_mode::warn);
 		});
 		test("a_native_exception_is_caught_by_the_running_functions_own_try", [this]() {
-			// docs/EXCEPTION_DESIGN.md: a store through a property reference whose host setter refuses raises natively inside the
+			// docs/site/guide/05-control-flow.html "try / catch / throw": a store through a property reference whose host setter refuses raises natively inside the
 			// statement; the function's own try catches it, else it unwinds to the caller's
 			const std::string src = R"(
 				function f() -> string { Probe a = Probe(); var& r = a.lv; string s = "none"; try { r = 500; } catch (e) { s = "own:" + e; } return s + ":" + a.lv; }
@@ -3557,7 +3560,7 @@ private:
 
 	void block_callees() {
 		test("a_callee_of_a_top_level_block_sees_the_outer_binding", [this]() {
-			// docs/global_shadowing.md: a function called from inside a block sees the binding of the scope it was declared in
+			// internal/global_shadowing.md: a function called from inside a block sees the binding of the scope it was declared in
 			// (a {} block, an if body, a for body, a range-for body, a catch body, a nested block); a function declared inside
 			// the block keeps the block's names
 			expect("top block", R"(
@@ -3858,7 +3861,7 @@ private:
 
 	void compound_operand_text() {
 		test("a_compound_operand_error_has_one_text_at_every_destination", [this]() {
-			// docs/diagnostics.md compound assignment: Cannot apply 'op=' to <target> and <operand>, a variable, a field, a static,
+			// docs/site/reference/index.html "Run-time errors", compound assignment: Cannot apply 'op=' to <target> and <operand>, a variable, a field, a static,
 			// an element and a map entry alike
 			expect("compound text", R"(
 				class F { int n = 5; static int s = 5; }
@@ -3936,8 +3939,8 @@ private:
 		});
 	}
 
-	// A shared_ptr<T> field holds T or a subclass, the rule a shared_ptr<T> declaration enforces (docs/static_checking.md
-	// rule table, shared_ptr<T> row: one rule at a declaration, a field, a parameter, a return and a container element)
+	// A shared_ptr<T> field holds T or a subclass, the rule a shared_ptr<T> declaration enforces (docs/site/guide/02-type-ladder.html
+	// "The one conversion table", shared_ptr<T> row: one rule at a declaration, a field, a parameter, a return and a container element)
 	void handle_field_admission() {
 		test("a_shared_ptr_field_rejects_a_handle_holding_an_unrelated_class", [this]() {
 			expect("field handle", R"(

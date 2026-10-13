@@ -1,7 +1,7 @@
 // A program-scope variable redeclared by a later execute shadows the earlier declaration the way a
 // nested block shadows in C++: code that ran under the earlier unit keeps its binding, code that runs
 // under a later unit sees the new one; the same unit (a reload, a re-run hook) writes in place;
-// functions and classes replace as before (docs/global_shadowing.md). Every row runs both backends
+// functions and classes replace as before (internal/global_shadowing.md). Every row runs both backends
 // with proofs on and off against one expected string.
 
 #include <jaiscript/testing/foundry.hpp>

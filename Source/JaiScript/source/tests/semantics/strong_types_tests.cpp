@@ -1844,7 +1844,7 @@ public:
             }
         });
 
-        // cast<T>(e) / cast<T&>(e) / cast<shared_ptr<T>>(e) (docs/grammar.md, detail/cast_kernel.hpp):
+        // cast<T>(e) / cast<T&>(e) / cast<shared_ptr<T>>(e) (docs/site/guide/02-type-ladder.html, detail/cast_kernel.hpp):
         // every row is byte-identical on both backends under the strict default
         const std::string cast_prelude =
             "class S { int x = 1; } class T : S { int t = 2; } class H { S p = null; } "
@@ -1891,8 +1891,8 @@ public:
         });
 
         test("cast_char_rules", [this, check_both, both]() {
-            // char <-> int/float/string convert through the cast alone (docs/char_semantics.md
-            // "Casts"); plain assignment keeps refusing the pair
+            // char <-> int/float/string convert through the cast alone (docs/site/guide/02-type-ladder.html
+            // "cast<T>(e): the explicit boundary"); plain assignment keeps refusing the pair
             check_both("var ch = 'a'; to_string(cast<int>(ch)) + \":\" + type_of(cast<int>(ch))", "97:int", "char -> int is the code point");
             check_both("to_string(cast<int>('\\xC3'))", "195", "char -> int is unsigned (0..255)");
             check_both("var ch = 'a'; to_string(cast<float>(ch)) + \":\" + type_of(cast<float>(ch))", "97.0:float", "char -> float is the code point widened");
@@ -2266,7 +2266,7 @@ public:
             check(i1.find("ERROR") == 0, "push through var& alias stays enforced");
         });
 
-        // ===== TYPED FLAT ARRAY STORAGE (typed_array_design.md) =====
+        // ===== TYPED FLAT ARRAY STORAGE (docs/site/guide/09-containers-strings.html "Representation follows the declared type") =====
         // array<int>/array<float> hold raw primitive buffers by their declared type (the
         // representation, not a mode). The contract: typed
         // storage is observationally invisible - every snippet runs on both backends and
@@ -2346,7 +2346,7 @@ public:
 
         test("map_behaviour_battery", [check_quad, check_quad_error]() {
             // Every row is the pre-change output of BOTH backends: typed map storage
-            // (typed_array_design.md stage 6) must keep them
+            // (internal/typed_array_design.md stage 6) must keep them
             // byte-identical, and the two EDGE rows are undecided, not behaviour to copy
             check_quad("var m = {\"a\": 1, \"b\": 2}; to_string(m[\"a\"] + m[\"b\"]) + \",\" + to_string(m.size())", "3,2", "literal read + size");
             check_quad("map<string,int> m = {\"a\": 1, \"b\": 2}; to_string(m[\"b\"]) + \"|\" + type_of(m)", "2|map", "typed declaration");
@@ -2954,7 +2954,8 @@ public:
         });
 
         test("typed_to_array_var_conversion_rebuilds", [this, quad, check_quad, check_quad_error]() {
-			// `array<var> x = typed;` is the explicit representation step (typed_array_design.md):
+			// `array<var> x = typed;` is the explicit representation step (docs/site/guide/09-containers-strings.html
+			// "Representation follows the declared type"):
 			// every typed kind reboxes into a fresh script_value vector under the array<var> tag
 			// (pushes of anything then land), the source buffer is untouched, and the two are
 			// independent. Pre-fix the raw buffer survived under the array<var> tag and the
@@ -3169,7 +3170,7 @@ public:
                 "P==P", "value == shared");
         });
 
-        // ===== PARSE-TIME TYPE PROOFS (docs/static_checking.md "Proofs") =====
+        // ===== PARSE-TIME TYPE PROOFS (docs/site/embedding/06-static-checking.html "Proofs") =====
         // A proof selects a lane and a total runtime guard makes it sound, so every program
         // must read the same on {interp, vm} x {type_proofs on, off}. Segments run in order on
         // one engine per lane; a class unit is executed three times so its field proofs arm
@@ -3552,7 +3553,7 @@ public:
         });
         // ===== ONE CONVERSION TABLE FOR EVERY TYPED SLOT (detail::convert_for_typed_slot) =====
         // declaration/initializer, `=`, by-value parameter binding, typed return and field store
-        // all run the assignment table (docs/static_checking.md rule table); each site owns its
+        // all run the assignment table (docs/site/guide/02-type-ladder.html "The one conversion table"); each site owns its
         // rejection text. Every row is byte-identical across backends.
 
         test("typed_slot_string_accepts_anything_everywhere", [check_both]() {
@@ -3799,7 +3800,7 @@ public:
 
         test("typed_slot_handle_variable_texts", [check_both]() {
             // weak_ptr<T> / shared_ptr<T> VARIABLES reject through family D's declaration and
-            // assignment shapes like every other slot (docs/diagnostics.md): the payload's type,
+            // assignment shapes like every other slot (internal/diagnostics.md): the payload's type,
             // the slot, the declared handle type - never 'any', never a bare placeholder
             check_both(R"JAI(
                 class Foo { int a = 1; } class Bar { int b = 2; }
@@ -3900,9 +3901,9 @@ public:
         // A by-value string copy (declaration, =, parameter, capture, element, map value,
         // field, return) is observationally a deep copy: "strings never alias at a distance
         // ... the mutation is strictly local to the variable you called the method on"
-        // (OPEN_NOTES.md; guide ch.9 copy-first idiom). Storage stays one shared node per
+        // (guide ch.9 copy-first idiom). Storage stays one shared node per
         // value; the copy materializes at the first in-place write - the 17 mutators, +=,
-        // a host std::string& (value.hpp unchecked_as_string_ref, docs/invariants.md 11).
+        // a host std::string& (value.hpp unchecked_as_string_ref, internal/invariants.md 11).
 
         test("string_value_semantics_battery", [check_quad]() {
             check_quad("string a = \"hello\"; string b = a; b.to_upper(); a + \"|\" + b", "hello|HELLO", "typed decl copy");

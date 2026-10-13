@@ -730,7 +730,7 @@ public:
 			} catch (const std::exception& e) {
 				std::string error_msg = e.what();
 
-				// Family D's declaration shape (docs/diagnostics.md): the slot and its declared type
+				// Family D's declaration shape (internal/diagnostics.md): the slot and its declared type
 				check(error_msg.find("Cannot initialize 'weak' (declared weak_ptr<LifetimeTracker>) with LifetimeTracker") != std::string::npos,
 					  "weak_ptr declaration from a value names the slot (got: " + error_msg + ")");
 
@@ -756,7 +756,7 @@ public:
 			} catch (const std::exception& e) {
 				std::string error_msg = e.what();
 
-				// Family D's assignment shape (docs/diagnostics.md): the slot and its declared type
+				// Family D's assignment shape (internal/diagnostics.md): the slot and its declared type
 				check(error_msg.find("Cannot assign LifetimeTracker to 'weak' (declared weak_ptr<LifetimeTracker>)") != std::string::npos,
 					  "weak_ptr assignment from a value names the slot (got: " + error_msg + ")");
 
@@ -1131,7 +1131,7 @@ public:
                 auto tracker = shared_ptr<LifetimeTracker>(42);
             )");
 
-            // No operator=: family D's assignment shape names the handle variable (docs/diagnostics.md)
+            // No operator=: family D's assignment shape names the handle variable (internal/diagnostics.md)
             bool threw = false;
             std::string error_msg;
             try {

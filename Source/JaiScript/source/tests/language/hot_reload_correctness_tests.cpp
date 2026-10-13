@@ -481,7 +481,7 @@ public:
             check_eq((int64_t)4, eng->execute("at.g(2.4);").as_int());   // float converts, same site
         });
 
-        // ---- parse-time type proofs across reloads (docs/type_proofs_design.md ruling 2) ----
+        // ---- parse-time type proofs across reloads (internal/type_proofs_design.md ruling 2) ----
         // Field proofs armed by three executes (first execute -> stamped -> identical-reload
         // hit) must miss safely once a reload changes the field's facts: every step compares a
         // type_proofs(false) twin on the same backend, never a literal alone.

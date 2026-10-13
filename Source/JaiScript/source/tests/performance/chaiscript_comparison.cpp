@@ -119,7 +119,7 @@ public:
         jai_engine->execute("function factorial(auto n) -> auto { if (n <= 1) { return 1; } return n * factorial(n - 1); }");
         // Idiomatic &: ChaiScript arrays are reference-semantic, so a by-value JaiScript
         // param deep-clones the array per call (per recursion LEVEL for binarySearch) and
-        // measures the clone, not the algorithm (docs/aliasing_costs.md)
+        // measures the clone, not the algorithm (docs/site/embedding/11-performance.html "What each aliasing strategy costs")
         jai_engine->execute(R"(
             function binarySearch(array<int>& arr, auto target, auto left, auto right) -> auto {
                 if (left > right) { return -1; }

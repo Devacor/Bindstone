@@ -1,5 +1,5 @@
 // Regressions surfaced by the GLOOM dogfooding project (examples/gloom,
-// REFERENCE.md "language-feel notes"). Each test runs on BOTH backends and
+// reference/README.md "language-feel notes"). Each test runs on BOTH backends and
 // asserts the intended behavior.
 
 #include <jaiscript/testing/foundry.hpp>
@@ -483,7 +483,8 @@ public:
 		// spelling silently vanished (no parse error, "no member" at call time) and
 		// required `function name() -> var`. The reported failure does NOT
 		// reproduce at HEAD in any shape (incl. the real GLOOM Game class, jaibite
-		// cache reload and include-hot-reload) - grammar.md's form catalog says
+		// cache reload and include-hot-reload) - the declaration-form catalog
+		// (docs/site/guide/06-functions.html "Declaration forms: the full catalog") says
 		// class methods accept every free-function spelling, and they do. These
 		// pins keep the whole var/auto method family from EVER vanishing silently.
 		// ============================================================

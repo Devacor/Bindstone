@@ -601,7 +601,7 @@ public:
 				// Redefinition of a warm global by the same unit (a reload): in place into stable storage
 				check_eq((int64_t)35, e->execute_file_source(path, "var gmul = 7; q.u(4);").as_int(),
 					use_vm ? "[vm] global redefinition read-through" : "[interp] global redefinition read-through");
-				// Redefinition by another unit shadows: the method keeps its class's unit binding (docs/global_shadowing.md)
+				// Redefinition by another unit shadows: the method keeps its class's unit binding (internal/global_shadowing.md)
 				check_eq((int64_t)35, e->execute("var gmul = 9; q.u(4);").as_int(),
 					use_vm ? "[vm] another unit's redefinition shadows" : "[interp] another unit's redefinition shadows");
 			}
@@ -1408,7 +1408,7 @@ public:
 		// usable reference; the holder's owner pin (cell/element/field) is the
 		// lifetime, so the returned ref outliving the frame is legal.
 		test("ref_return_grammar_example", [this]() {
-			// The exact grammar.md shape: reference returns + reference locals
+			// The exact internal/grammar.md shape: reference returns + reference locals
 			const char* src = R"(
 				int& pick(array<int>& a, int i) { return a[i]; }
 				array<int> nums = [10, 20, 30, 40];
@@ -1525,7 +1525,7 @@ public:
 
 		// Stage C (cells): escape is LEGAL. Under mode 1 these shapes dangled or raised
 		// "Reference target environment has been destroyed"; the cell keeps the target
-		// alive for as long as any handle exists (docs/reference_model.md).
+		// alive for as long as any handle exists (internal/reference_model.md).
 		test("escape_capture_env_var_outlives_block_env", [this]() {
 			// [&] capture of a BLOCK-scoped env variable, invoked after the block env
 			// died: the capture shares the cell, so the closure keeps live state
@@ -2964,7 +2964,7 @@ public:
 				out;
 			)";
 			auto [i_plain, v_plain] = run_both_backends(plain_store);
-			// docs/EXCEPTION_DESIGN.md: the native exception is the running function's own, so its try catches it
+			// docs/site/guide/05-control-flow.html "try / catch / throw": the native exception is the running function's own, so its try catches it
 			check_true(i_plain.find("inner:") == 0, "interp: plain ref store is caught by the function's own try");
 			check_true(i_plain.find("removed array element") != std::string::npos, "interp: plain ref store error text");
 			check_eq(i_plain, v_plain, "plain ref store catchability parity");
@@ -3100,7 +3100,7 @@ public:
 		// swallows writes
 		test("tier1_map_pair_accessor_ref_args", [this]() {
 			// Range-for map pairs expose .second through a C++ property whose value is a
-			// live map-entry reference: the PROPERTY-mode ref (reference_model.md) writes
+			// live map-entry reference: the PROPERTY-mode ref (internal/reference_model.md) writes
 			// through the pair's setter into the real entry (the write
 			// lands in the map). kv.first is the pair's own COPY of the key:
 			// binding it writes that copy (by-reference binds properties), so
@@ -3546,7 +3546,7 @@ public:
 		});
 
 		// === Flat-stack stage 1 pins: callee inline cache + return classification ===
-		// (docs/flatstack_design.md §4 — lifetime pins land BEFORE stage 2's atomic core)
+		// (internal/flatstack_design.md §4 — lifetime pins land BEFORE stage 2's atomic core)
 
 		test("stage1_callee_cache_revalidates_on_redefinition", [this, run_both_backends]() {
 			// The same call site runs the old body, then the redefined body (with a
@@ -4911,7 +4911,7 @@ public:
 			check(i1.rfind("20:", 0) == 0, "read indexed the pre-reassignment array");
 		});
 
-		// ---- parse-time type proofs, vm consumers (docs/type_proofs_design.md section 6) ----
+		// ---- parse-time type proofs, vm consumers (internal/type_proofs_design.md section 6) ----
 		test("proof_vm_lanes_equal_with_proofs_on_and_off", [this]() {
 			// Every vm lane (V-S1/S2/S3, V-D1, V-C1, V-R1 in all three return forms, V-M1/M2,
 			// V-I1 plain + fused operand) against a proofs-off twin, three passes: first

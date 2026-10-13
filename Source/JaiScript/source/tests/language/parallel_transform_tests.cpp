@@ -1,4 +1,4 @@
-// parallel_transform v0 (docs/parallel_design.md; prove_or_serial §5 - contract A).
+// parallel_transform (internal/parallel_design.md; internal/parallel_prove_or_serial.md §5 - contract A).
 // Determinism: same inputs => identical output at every thread count, both backends.
 // Admission violations ERROR with location text - never silently serial.
 

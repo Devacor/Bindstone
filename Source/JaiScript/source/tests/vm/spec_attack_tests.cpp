@@ -1,5 +1,5 @@
-// Invariant attacks on the VM's fast paths (docs/typed_regions_design.md cell blocks, straight-line regions, grafts,
-// typed rows; docs/invariants.md): an event the fast path assumes away happens inside it, and the result must be the
+// Invariant attacks on the VM's fast paths (internal/typed_regions_design.md cell blocks, straight-line regions, grafts,
+// typed rows; internal/invariants.md): an event the fast path assumes away happens inside it, and the result must be the
 // one the specification gives for the plain program. Expected values come from the spec, never from a backend. Every
 // row runs on the interpreter and the VM, proofs on and off, passes off, and with injected cell misses when the build
 // defines JAISCRIPT_MISS_INJECTION.
@@ -96,8 +96,7 @@ public:
 	}
 
 private:
-	// VM lowerings no other registered test executed (Clang source coverage of the whole suite, docs/spec_conformance.md
-	// "Execution census"): each runs its general form's semantics
+	// VM lowerings no other registered test executed (Clang source coverage of the whole suite): each runs its general form's semantics
 	void census_paths() {
 		test("a_ternary_store_with_binary_arms_lands_through_the_fused_store", [this]() {
 			expect("ternary store arms", R"(
@@ -145,7 +144,7 @@ private:
 			)", "01278|3");
 		});
 		test("from_this_with_arguments_raises_its_arity_text", [this]() {
-			// docs/diagnostics.md: weak_from_this() takes no arguments
+			// internal/diagnostics.md: weak_from_this() takes no arguments
 			expect("from_this arity", R"(
 				class C { function f() { var w = weak_from_this(1); return 1; } }
 				string r = ""; try { C().f(); } catch (e) { r = e; } r;
@@ -160,7 +159,7 @@ private:
 		});
 	}
 
-	// docs/typed_regions_design.md "The contract": a raise inside a block leaves the general form's post-state
+	// internal/typed_regions_design.md "The contract": a raise inside a block leaves the general form's post-state
 	void exceptions_inside_fast_paths() {
 		test("a_raise_inside_a_closed_typed_loop_is_caught_in_the_same_function", [this]() {
 			expect("same function", R"(
@@ -205,7 +204,7 @@ private:
 			)", "27|18");
 		});
 		test("a_graft_binds_no_argument_before_every_argument_is_evaluated", [this]() {
-			// docs/typed_regions_design.md "Inlined leaves": the graft evaluates every argument before it binds the first
+			// internal/typed_regions_design.md "Inlined leaves": the graft evaluates every argument before it binds the first
 			expect("graft args", R"(
 				int N = 0;
 				function take(int a, int b) -> int { return a + b; }
@@ -221,7 +220,7 @@ private:
 		});
 	}
 
-	// docs/typed_regions_design.md "Closed typed loops": fiber frames take the general form; a resumer may change what a
+	// internal/typed_regions_design.md "Closed typed loops": fiber frames take the general form; a resumer may change what a
 	// suspended loop reads between resumes
 	void coroutines_over_fast_paths() {
 		test("a_coroutine_yields_between_calls_to_an_inlinable_leaf", [this]() {
@@ -301,7 +300,7 @@ private:
 		});
 	}
 
-	// docs/global_shadowing.md: functions and classes always replace in place (hot reload); docs/typed_regions_design.md grafts: a rebind or a
+	// internal/global_shadowing.md: functions and classes always replace in place (hot reload); internal/typed_regions_design.md grafts: a rebind or a
 	// reload takes the fallback call
 	void rebinding_and_reload_mid_loop() {
 		test("a_leaf_redefined_by_a_host_callback_mid_loop_is_called_with_its_new_body", [this]() {
@@ -338,7 +337,7 @@ private:
 			)", "3018");
 		});
 		test("a_local_or_parameter_named_like_a_math_alias_shadows_it", [this]() {
-			// docs/site/guide/07-classes.html "Name resolution in methods": locals before globals; docs/diagnostics.md family B callee text
+			// docs/site/guide/07-classes.html "Name resolution in methods": locals before globals; internal/diagnostics.md family B callee text
 			expect("alias shadow", R"(
 				function f(int x) -> float { var sqrt = [](float v) { return -v; }; return sqrt(x * 1.0) + sqrt(x); }
 				function g(var sqrt) -> string { try { return "" + sqrt(4.0); } catch (e) { return "E:" + e; } }
@@ -367,7 +366,7 @@ private:
 			});
 		});
 		test("a_method_redefined_mid_recursion_resolves_the_new_body", [this]() {
-			// docs/global_shadowing.md: a reload redefines a class for every caller and every instance; the function analogue
+			// internal/global_shadowing.md: a reload redefines a class for every caller and every instance; the function analogue
 			// (hot_reload_correctness_tests) finishes old frames with their old bodies and resolves the new one on the next call
 			every_config("reload method", "103|400", [](engine& e) {
 				engine* raw = &e;
@@ -409,7 +408,7 @@ private:
 			)", "6|Array index 3 out of bounds for array of size 3");
 		});
 		test("a_callee_clears_the_array_a_range_for_walks", [this]() {
-			// the range-for reads the array's size every iteration (docs/typed_regions_design.md range-for heads)
+			// the range-for reads the array's size every iteration (internal/typed_regions_design.md range-for heads)
 			expect("clear", R"(
 				var A = [1, 2, 3, 4];
 				function clear_a(int v) { if (v == 2) { A.clear(); } }
@@ -439,7 +438,7 @@ private:
 			)", "33,2");
 		});
 		test("a_compound_target_is_read_after_its_right_side_inside_a_loop", [this]() {
-			// docs/invariants.md 12: x += mutate(x) is 22, x + mutate(x) is 5
+			// docs/site/guide/04-operators.html "Evaluation order is a contract": x += mutate(x) is 22, x + mutate(x) is 5
 			expect("compound order", R"(
 				function mutate(int& v) -> int { v = 20; return 2; }
 				function c1() -> int { int s = 0; for (int i = 0; i < 4; i++) { int x = 3; x += mutate(x); s += x; } return s; }
@@ -449,7 +448,8 @@ private:
 		});
 	}
 
-	// docs/integer_semantics.md shifts; docs/EXCEPTION_DESIGN.md addendum: a budget overrun is terminal
+	// docs/site/guide/04-operators.html shifts, the count's text in docs/site/reference/index.html "Run-time errors";
+	// docs/site/guide/05-control-flow.html "Terminal errors": a budget overrun is terminal
 	void shifts_and_budget() {
 		test("shift_counts_out_of_range_raise_inside_a_counted_loop", [this]() {
 			expect("shifts", R"(
@@ -479,7 +479,7 @@ private:
 	}
 
 	// docs/site/embedding/12-debugging.html: both backends debug identically (breakpoints/stepping/locals);
-	// docs/typed_regions_design.md: a block takes the general back edge while a session is armed
+	// internal/typed_regions_design.md: a block takes the general back edge while a session is armed
 	void debugger_armed_mid_run() {
 		test("a_breakpoint_inside_a_closed_loop_fires_every_iteration", [this]() {
 			for (const auto& c : attack::configs()) {
@@ -534,8 +534,8 @@ private:
 
 	void removed_element_aliases() {
 		test("an_element_alias_whose_element_a_callee_removed_raises_the_removed_element_text", [this]() {
-			// docs/reference_model.md ELEMENT: a shrink under the reference raises "Reference to a removed array element"; the guide
-			// (ch. 3) makes it stop the script; docs/diagnostics.md: one text on both backends
+			// internal/reference_model.md ELEMENT: a shrink under the reference raises "Reference to a removed array element"; the guide
+			// (ch. 3) makes it stop the script; internal/diagnostics.md: one text on both backends
 			every_config("removed alias", "Reference to a removed array element", [](engine& e) {
 				e.execute(R"(
 					var T = [[1, 2], [3, 4], [5, 6]];
@@ -548,7 +548,7 @@ private:
 		});
 	}
 
-	// docs/parallel_design.md: grafts run in workers; results equal the serial program
+	// internal/parallel_design.md: grafts run in workers; results equal the serial program
 	void parallel_bodies_with_leaves() {
 		test("a_parallel_body_calling_an_inlinable_leaf_matches_the_serial_loop", [this]() {
 			expect("parallel leaf", R"(

@@ -15,8 +15,8 @@ generic.
 - `BindstoneClient_Android`: the Android client.
 
 ## Build and gates
-Build instructions and command lines live in `CLAUDE.md`; per-folder orientation in each `AGENTS.md`;
-JaiScript has its own `Source/JaiScript/CLAUDE.md`. Gates:
+Build instructions and command lines live in `AGENTS.md`; per-folder orientation in each folder's `AGENTS.md`;
+JaiScript has its own `Source/JaiScript/AGENTS.md`. Gates:
 - `Bindstone.exe -verifyassets` — every shipped scene/`.bindsnap`/catalog loads and round-trips headless;
   gameplay scripts eval, interface scripts static-check.
 - `Bindstone.exe -loginshot [frames]` — renders the Login page headless to `login_shot.bmp`.

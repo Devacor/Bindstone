@@ -6,7 +6,7 @@ into a live session, or point it at a file and re-run on every save. It is also 
 `main.cpp` is the canonical shape from `docs/site/embedding`.
 
 Built by the `jaiscript_runner` CMake target (on by default, `JAISCRIPT_BUILD_RUNNER`);
-the binary lands at `out/build/<config>/bin/jaiscript.exe`.
+the binary lands in the build directory's `bin/` (`build/bin/jaiscript`; see `docs/BUILD.md`).
 
 ## Mode 1 — file runner
 

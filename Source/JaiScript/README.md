@@ -217,19 +217,23 @@ Each has a `.jai` shim you can drop onto the runner, and each ships a self-check
 `--smoke` and it plays itself headlessly, printing a deterministic state hash. The interpreter
 and the VM have to produce the same one.
 
-A fourth, larger demo — a from-scratch DOOM reimplementation in roughly 8,000 lines of script,
-with 16-player netplay and demo playback — is described in the documentation but is not
-distributed here, because its content derives from assets that cannot be redistributed.
+A larger demo, **JaiDoom** (`examples/jaidoom`), is a DOOM-format engine written from scratch
+in script: WAD loader, BSP renderer, playsim, savegames, demo playback and 16-player netplay.
+The scripts ship here; no game data does. The first run fetches Freedoom (and, if you agree,
+the DOOM shareware episode), verifies each file by SHA-256 and keeps it outside the repository.
+It is a fan project, not affiliated with or endorsed by id Software.
 
 ## Documentation
 
 - [`docs/site/index.html`](docs/site/index.html) — the documentation site: language guide,
   embedding guide, examples, reference.
-- [`docs/README.md`](docs/README.md) — the index of the specifications behind the site.
-- [`docs/grammar.md`](docs/grammar.md) — the full grammar and operator precedence.
-- [`docs/static_checking.md`](docs/static_checking.md) — the checker's contract: modes, the
-  conversion table, escape hatches.
-- [`docs/diagnostics.md`](docs/diagnostics.md) — every error text, byte-identical on both backends.
+- [`docs/site/guide/index.html`](docs/site/guide/index.html) — the language guide, from the
+  first script to modules, reflection and strict checking.
+- [`docs/site/reference/index.html`](docs/site/reference/index.html) — operators, conversions,
+  builtin methods, the engine API, and every run-time error text (byte-identical on both
+  backends).
+- [`docs/site/embedding/06-static-checking.html`](docs/site/embedding/06-static-checking.html) —
+  the checker's contract: modes, the conversion table, escape hatches.
 - [`tools/vscode-jaiscript/`](tools/vscode-jaiscript/) — syntax highlighting and the debugger
   client for VS Code.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to build, test, and land a change.

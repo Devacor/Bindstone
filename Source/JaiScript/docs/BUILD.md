@@ -15,6 +15,17 @@ headers, and everything else in this repository — the test suite, the runner, 
 - **Ninja**, optional but recommended. It gives single-configuration build directories, which
   makes the output paths predictable.
 
+Two platform differences are worth knowing:
+
+- **The native-stack guard is Windows-only.** On Windows the engine reads the current thread's
+  stack bounds and raises the catchable `Maximum recursion depth exceeded` while 256 KiB of
+  headroom remain. Elsewhere only the numeric call-depth caps apply (interpreter 256, VM 250000
+  by default; `engine::max_call_depth(backend, depth)`), so a host with a small thread stack
+  should lower them.
+- **`.jaibite` files are portable.** The format is little-endian on disk whatever the host's
+  byte order, with IEEE-754 doubles and 64-bit ints, so a file written on one platform loads on
+  any other.
+
 ## The short version
 
 ```bash

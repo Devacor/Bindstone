@@ -1,4 +1,4 @@
-// The base every creature's script layer derives (Source/JaiScript/docs/script_extensible.md).
+// The base every creature's script layer derives (Source/JaiScript/docs/site/embedding/13-script-extensible.html).
 // A creature's spawn hook extends the ServerCreature it is handed with its element's class; the
 // update/death hooks call the layer. Any creature that crosses back into script - targeting.self(),
 // game().creature(id), alliesInRange() - IS its layer, so its fields are readable from any script.

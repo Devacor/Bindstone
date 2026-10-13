@@ -1,117 +1,71 @@
-# JaiScript Test Suite
+# JaiScript tests
 
-## Overview
+Every suite here is a Foundry suite (`include/jaiscript/testing/foundry.hpp`), compiled into one
+executable, `jaiscript_tests`, whose `main` is `main_test_runner.cpp`.
 
-JaiScript uses two test frameworks:
-- **Foundry** (recommended) - Modern, macro-free framework with metallurgy metaphors
-- **Legacy** - Older jai_test.hpp framework (being phased out)
+## Layout
 
-## Directory Structure
+| folder | what it covers |
+|---|---|
+| `language/` | language features: functions, classes, control flow, coroutines, hot reload, imports, privileges, regressions |
+| `semantics/` | conversions, typed slots, value semantics, the lexer, parser and static checker, strong types |
+| `containers/` | arrays, maps and their builtin methods |
+| `stdlib/` | `math::`, strings, `time::`, `binary::`, reflection, I/O |
+| `vm/` | bytecode-VM-specific behavior and lowering |
+| `integration/` | C++ bindings: `dynamic_binder`, overloads, host references, re-entrant callbacks |
+| `serialization/` | archives, polymorphic serialization, `.jaibite` round trips and validation |
+| `signals/`, `properties/` | the signal system and observable properties |
+| `core/` | `strong_ptr` |
+| `debug/` | the DAP debugger |
+| `foundry/` | the framework's own suite |
+| `performance/` | benchmarks, compiled only with `-DJAISCRIPT_ENABLE_BENCHMARKS=ON` |
+| `fuzz/` | the differential fuzzer `jaiscript_fuzz` (its own executable) and the seeded "Differential Fuzz Smoke" suite that joins `jaiscript_tests` |
 
-```
-tests/
-├── foundry/           # MODERN TESTS (use this for new tests)
-│   ├── core/         # Engine, value, parser, lexer, type conversion
-│   ├── language/     # Operators, functions, control flow, arrays, maps
-│   ├── integration/  # C++ bindings, serialization, shared_ptr
-│   ├── vm/          # Virtual machine specific tests
-│   └── performance/ # Benchmarks and stress tests
-├── legacy/          # Old framework (migrating to foundry)
-│   └── dev-tools/   # Debug utilities
-└── isolated_build.sh # Build single tests without conflicts
-```
+## Writing a test
 
-## Running Tests
-
-### Foundry Tests (Recommended)
-
-```bash
-cd tests/foundry
-
-# DEFAULT: Build individual tests (for concurrent development)
-make isolated-core/lexer_tests.cpp        # Single test
-make isolated-language/operator_tests.cpp # Another test
-make isolated-build-core                  # All core tests as separate executables
-
-# Run isolated test
-./isolated_lexer_tests
-
-# Full suite (avoid if others are working)
-make clean && make
-./quench                 # Run all tests
-./quench "operator"      # Filter by name
-
-# Cleanup
-make clean               # Clean main build
-make clean-isolated      # Clean isolated executables
-```
-
-### Legacy Tests
-```bash
-cd tests/legacy
-make run_tests
-```
-
-## Best Practices
-
-### 1. **Always Use Isolated Builds for Development**
-```bash
-# Good - no .o conflicts with other developers
-make isolated-core/parser_tests.cpp
-
-# Avoid unless testing everything
-make && ./quench
-```
-
-### 2. **Writing New Tests**
-- Add to `foundry/` directory (NOT legacy)
-- Place in appropriate subdirectory
-- Use foundry framework:
+A suite registers itself; nothing lists it by hand:
 
 ```cpp
 #include <jaiscript/testing/foundry.hpp>
-using namespace jai::foundry;
+#include <jaiscript/core/engine.hpp>
 
 namespace jai::foundry::tests {
 class my_tests : public suite {
 public:
-    my_tests() : suite("My Test Suite") {}
-    
+    my_tests() : suite("My Suite") {}
     void forge_tests() override {
-        test("test_name", [this]() {
-            engine engine;
-            check_eq(engine.execute("2 + 2").as<int>(), 4);
+        test("two_plus_two", [this]() {
+            auto e = make_engine();                                // honors --backend=
+            check_eq((int64_t)4, e->execute("2 + 2").as_int());   // check_eq(expected, actual)
         });
     }
 };
 }
-FOUNDRY_REGISTER(jai::foundry::tests::my_tests)
+
+using my_tests = jai::foundry::tests::my_tests;   // FOUNDRY_REGISTER is at global scope
+FOUNDRY_REGISTER(my_tests)
 ```
 
-### 3. **Test Organization**
-- **core/** - Low-level functionality (parser, lexer, value system)
-- **language/** - Script language features
-- **integration/** - C++ binding and interop
-- **vm/** - Virtual machine specific behavior
-- **performance/** - Benchmarks and stress tests
+Create engines with `make_engine()` so the runner's backend choice reaches the test. Add tests to
+an existing file when you can: the test list is a `file(GLOB_RECURSE)` evaluated at configure
+time, so a **new** `.cpp` needs a CMake reconfigure before it builds.
 
-### 4. **Debugging Tests**
+## Building and running
+
 ```bash
-# Build with debug symbols
-make isolated-core/parser_tests.cpp
-
-# Debug with GDB
-gdb ./isolated_parser_tests
-(gdb) break test_name
-(gdb) run
+cmake --build build --target jaiscript_tests
+build/bin/jaiscript_tests                  # tree-walking interpreter
+build/bin/jaiscript_tests --backend=vm     # bytecode VM
 ```
 
-### 5. **Auto-Registration**
-- Tests auto-register with `FOUNDRY_REGISTER` macro
-- No need to manually update test lists
+Both runs must be green. Filtering:
 
-## Migration Status
+```bash
+jaiscript_tests "Coroutine"          # additive: every matching suite (all its tests) OR every matching test name
+jaiscript_tests "Suite.Test"         # the dot form is the exact AND: suite filter AND test filter
+jaiscript_tests --verbose            # per-test names and timings; use it to find a hang
+```
 
-- 62+ tests migrated to foundry from 120+ legacy files
-- New tests should ONLY use foundry framework
-- Legacy tests remain for reference during migration
+`--gtest_filter=`, `--jaitest_filter=` and `--filter=` take the same patterns. Build directories,
+generators and the CTest view are in [`docs/BUILD.md`](../../docs/BUILD.md); the contribution
+workflow is in [`CONTRIBUTING.md`](../../CONTRIBUTING.md).

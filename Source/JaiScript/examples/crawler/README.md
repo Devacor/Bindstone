@@ -15,7 +15,7 @@ movement keys go **absolute**: `wasd`/`hjkl`/arrows step by compass direction,
 roguelike-style, with your facing following the step (so dropping back to first
 person points where you were walking; turn-then-walk is FPS-view-only). The view
 is a real one-ray-per-column raycaster drawn into a 24-bit pixel framebuffer at
-twice the text resolution (JaiDOOM's half-block method) — procedurally textured
+twice the text resolution (JaiDoom's half-block method) — procedurally textured
 walls, floors and ceilings shaded by torch distance and face orientation, materials
 that change wardrobe every couple of floors, and pixel-art billboard sprites with
 per-column z-buffer occlusion. A distant Grublin is a few green pixels at the end
@@ -188,7 +188,7 @@ far (`LEFT 3`); under RIGHT, LOOT does the same for loot (a mimic lists as a che
 until it bites). The forward view alone keeps the classic panel beside it and the
 last five log lines under it.
 
-JaiDOOM's terminal video method: the caster draws into a palette-indexed pixel canvas
+JaiDoom's terminal video method: the caster draws into a palette-indexed pixel canvas
 holding every pane (`VIEW_W x 2*VIEW_H` pixels for the forward view), and each text
 cell is an upper-half block `▀` whose truecolor foreground is the top pixel and
 background the bottom one. A row emits an escape only when its color changes

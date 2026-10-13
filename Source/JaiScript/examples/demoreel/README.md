@@ -22,7 +22,7 @@ byte-identical anyway.
 Each scene paints a `w x 2h` grid of palette indices (square pixels, two per
 terminal row) and the presenter in `util.jai` packs them into cells through the
 upper-half-block glyph `▀`: the **foreground** truecolor escape paints the top
-pixel, the **background** escape the bottom one (JaiDOOM's `vid_row_half`
+pixel, the **background** escape the bottom one (JaiDoom's `vid_row_half`
 technique). Escapes are emitted only when a color changes along the row, and a
 cell whose two pixels agree collapses to a space (a background run) or a full
 block (a foreground run), so smooth regions cost one byte per cell. Palettes

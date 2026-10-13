@@ -1345,7 +1345,7 @@ checked_result<expression_ptr> parser::primary() {
 
     // Map literals parse as a PRIMARY so postfix applies ({"k":1}["k"], {..}.size());
     // they used to short-circuit at assignment level, which silently rejected any
-    // postfix on a literal (grammar.md's own splice example was unparseable)
+    // postfix on a literal (internal/grammar.md's own splice example was unparseable)
     if (check(token_type::left_brace) && looks_like_map_literal()) {
         return parse_map_literal();
     }
@@ -1832,7 +1832,7 @@ checked_result<expression_ptr> parser::primary() {
 
 // Type parsing
 checked_result<type_info_ptr> parser::parse_type() {
-    if (check(token_type::const_keyword)) {   // array<const int>, cast<const T&>: const qualifies a declaration (docs/const.md)
+    if (check(token_type::const_keyword)) {   // array<const int>, cast<const T&>: const qualifies a declaration (internal/const.md)
         report_foreign(detail::foreign_word::const_type_argument, peek());
         return make_error_code(parse_error_code::unexpected_token);
     }
@@ -3599,7 +3599,7 @@ void parser::reject_class_in_function_body(const token& at) {
 // parsed here, in this scope, so the function's parameters and locals are theirs and theirs are the function's, and the
 // checker and both backends see one function. A computed path stays a runtime include (it runs in the environment and
 // never sees the frame), an unresolved or unreadable path is left to the runtime include's own error, and a function
-// without an include pays nothing (docs/global_shadowing.md).
+// without an include pays nothing (internal/global_shadowing.md).
 bool parser::splice_include(const declaration_ptr& decl, std::vector<declaration_ptr>& out) {
     if (!decl || decl->get_type() != node_type::include_decl || function_scope_stack_.empty() || !engine_) return false;
     auto* inc = static_cast<include_decl*>(decl.get());
@@ -4151,7 +4151,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
             continue;
         }
 
-        // const T NAME = e; (also static const / const static): a class-level constant (docs/const.md)
+        // const T NAME = e; (also static const / const static): a class-level constant (internal/const.md)
         bool member_const = false;
         bool const_static = false;
         const token const_at = peek();
@@ -4810,7 +4810,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
             }
             match(token_type::semicolon);  // Consume optional semicolon after class
         } else if (!inline_member && !const_member && match(token_type::coroutine_keyword)) {
-            // a coroutine member: the program-scope spellings (docs/grammar.md: a namespace body is declaration*)
+            // a coroutine member: the program-scope spellings (internal/grammar.md: a namespace body is declaration*)
             const bool was_in_coroutine = in_coroutine_;
             in_coroutine_ = true;
             coroutine_body_pending_ = true;
@@ -5209,7 +5209,7 @@ checked_result<declaration_ptr> parser::const_declaration() {
     }
     declaration_ptr decl;
     if (untyped_declaration_ahead()) {
-        // const x = e;: the JavaScript spelling of const auto x = e (docs/const.md)
+        // const x = e;: the JavaScript spelling of const auto x = e (internal/const.md)
         token name = advance();
         expression_ptr init;
         if (match(token_type::equal)) { JAISCRIPT_TRY_ASSIGN(init, expression()); }

@@ -9,7 +9,7 @@
 //
 // Compiled only when JAISCRIPT_ENABLE_DEBUGGER is defined (a CMake option, off in shipping /
 // mobile builds). The always-built core links no socket code; constructing a debug_connector
-// in a build without the option is a link error by design. See docs/DEBUGGER_DESIGN.md.
+// in a build without the option is a link error by design. See internal/DEBUGGER_DESIGN.md.
 
 #include <jaiscript/debug/controller.hpp>   // debug::transport base
 #include <memory>

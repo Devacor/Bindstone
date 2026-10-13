@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_DETAIL_AGGREGATE_LOWERING_HPP__
 #define __JAISCRIPT_DETAIL_AGGREGATE_LOWERING_HPP__
 
-// The aggregate lowering (docs/math_types_design.md 4.3): a typed math local of a function or lambda body becomes its
+// The aggregate lowering (internal/math_types_design.md 4.3): a typed math local of a function or lambda body becomes its
 // component slots (`p` -> `p$x`, `p$y`, `p$z`, float slots for the binary32 kinds and int slots for the ivec kinds), and
 // the vector operations over such locals become the kernel's component steps (detail/math_intrinsics.hpp f32$, i32$,
 // cstore$, i32add$ .. i32neg$, vcomp$), so both backends run float and int slots and compute the boxed kernel's bits and texts. A

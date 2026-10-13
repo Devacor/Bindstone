@@ -814,7 +814,7 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
 
     // The declared element type IS the representation: int/float element types mint
     // raw-buffer nodes, array<var> (null element type) the script_value vector. The
-    // airtight tag (typed_array_design.md stage 0) is what makes this sound.
+    // airtight tag (internal/typed_array_design.md stage 0) is what makes this sound.
     script_array::kind_t node_kind = script_array::kind_t::hetero;
     if (element_type) {
         switch (element_type->base_type) {

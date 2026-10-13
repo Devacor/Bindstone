@@ -20,7 +20,7 @@ inline uint64_t null_member_receiver_symbol(const expression* receiver) {
 }
 
 // {0} = the member, {1} = the receiver symbol (only used by the shapes that have one);
-// as_callee = the member is being called (docs/diagnostics.md family A)
+// as_callee = the member is being called (internal/diagnostics.md family A)
 inline std::string_view null_member_message(const expression* receiver, bool as_callee = false) {
     if (null_member_receiver_symbol(receiver) == 0) {
         return as_callee ? "Cannot call '{0}' on null" : "Cannot access '{0}' on null";
@@ -132,7 +132,7 @@ struct base_type_symbols {
     }
 };
 
-// Calling a value that is not a function (docs/diagnostics.md family B): named callee ->
+// Calling a value that is not a function (internal/diagnostics.md family B): named callee ->
 // "Cannot call 'x': it is an int, not a function" ({0} = name, {1} = type), computed callee ->
 // "Cannot call a value of type int: it is not a function" ({0} = type). The type spells the
 // class for class instances, the base type otherwise; the article follows the spelling.

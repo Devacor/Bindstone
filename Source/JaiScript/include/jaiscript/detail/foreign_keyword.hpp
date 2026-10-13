@@ -5,7 +5,7 @@
 namespace jai::detail {
 
 // Words and spellings other languages use that JaiScript does not: the parser names the JaiScript spelling instead of
-// a generic parse error (docs/diagnostics.md "Foreign keywords"). Each is recognized only where it would otherwise fail
+// a generic parse error (internal/diagnostics.md "Foreign keywords"). Each is recognized only where it would otherwise fail
 // to parse, so a script that uses one of these words as a name keeps working.
 enum class foreign_word : unsigned char {
 	const_method,

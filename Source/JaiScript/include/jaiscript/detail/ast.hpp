@@ -94,7 +94,7 @@ namespace jai {
         extern_decl,      // extern [type | function] name; - a name defined outside the program
     };
 
-    // The checker's const verdict at a write or a binding (docs/const.md), stamped by every walk: const_raises makes the node
+    // The checker's const verdict at a write or a binding (internal/const.md), stamped by every walk: const_raises makes the node
     // raise `text` (an assignment after its right side runs, everything else when reached); const_runtime leaves the decision
     // to the run time (a path through a var: detail/const_rules.hpp)
     inline constexpr uint8_t const_none = 0, const_raises = 1, const_runtime = 2;
@@ -163,7 +163,7 @@ namespace jai {
 #endif
         }    };
     
-    // Parse-time type proofs (docs/type_proofs_design.md). Stamped by the static checker's proof
+    // Parse-time type proofs (internal/type_proofs_design.md). Stamped by the static checker's proof
     // pass, never serialized (jaibite re-derives them at load), consumed behind total runtime
     // guards (detail/type_proofs.hpp). Default = no proof.
     inline constexpr uint8_t proof_none = 0;
@@ -460,7 +460,7 @@ namespace jai {
         // every closure created from this lambda shares it instead of deep-copying.
         // Capture-free lambdas (closure_env = nullptr) additionally reuse the ONE
         // script_defined_function across creations under one unit (a file two units include
-        // mints one per includer: docs/global_shadowing.md).
+        // mints one per includer: internal/global_shadowing.md).
         mutable std::shared_ptr<const std::vector<parameter>> shared_params_cache;
         mutable std::shared_ptr<script_defined_function> mint_cache;
 
@@ -592,7 +592,7 @@ namespace jai {
             : expression(loc, node_type::cast_expr), target(std::move(t)), by_reference(by_ref), operand(std::move(e)) {}    };
 
     // Base statement node
-    // [[warn_mode]] / [[strict_mode]] led the statement (docs/static_checking.md "Escape hatches").
+    // [[warn_mode]] / [[strict_mode]] led the statement (docs/site/embedding/06-static-checking.html "Escape hatches").
     // Checker-only: on a block's first statement it covers the block, elsewhere the statement's
     // own subtree; both backends ignore it.
     inline constexpr uint8_t check_mode_attr_none = 0, check_mode_attr_warn = 1, check_mode_attr_strict = 2;
@@ -687,7 +687,7 @@ namespace jai {
               is_reference(ref), is_const(constRef), container(cont), body(b) {}    };
 
     // parallel_for (auto& x : arr) { ... } — the in-place fork-join loop (parallel_for
-    // v1; docs/parallel_design.md §1, §11 Q4 RULED). The body is parsed as a
+    // v1; internal/parallel_design.md §1, §11 Q4 RULED). The body is parsed as a
     // ONE-PARAMETER FUNCTION BODY (own slot numbering: the loop variable is slot 0,
     // own local_count) so both backends execute it through the parallel region
     // machinery: workers bind the loop variable by reference to each owned element of
@@ -834,7 +834,7 @@ namespace jai {
         // adopted and its initializer never runs, else the declaration creates it (environment::share; a plain declaration
         // of the name then raises, detail::inline_redefinition)
         bool is_inline = false;
-        // `const T x = e;` (docs/const.md): set once by its initializer, then only read; in a class body a class-level constant
+        // `const T x = e;` (internal/const.md): set once by its initializer, then only read; in a class body a class-level constant
         bool is_const = false;
         mutable const_site const_check;   // T& / var& / shared_ptr<T> bound to a const
         // Declared `auto`: the unit's first proof pass types the slot by its initializer's
@@ -973,7 +973,7 @@ namespace jai {
         // unit (the cached mint's unit id is the reuse condition; the coroutine copy's too)
         mutable std::shared_ptr<script_defined_function> mint_cache;
         // The unit whose code ran this declaration (methods, constructors, coroutines and namespace
-        // functions run under it: docs/global_shadowing.md)
+        // functions run under it: internal/global_shadowing.md)
         mutable unit_stamp unit{};
         mutable uint64_t context = 0;   // a namespace function's declaring host entry (engine::host_entry_generation)
         // Return-epilogue classification memo (vm method frames; classify_return_conv

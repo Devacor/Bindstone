@@ -1358,7 +1358,7 @@ vm_backend::member_target vm_backend::resolve_member_target(const script_value& 
 		target.instance = std::static_pointer_cast<class_instance>(holder->data);
 		if (target.instance) {
 			target.class_def = target.instance->get_class_definition();
-			// A plain wrapper of an extended object IS the object's layer (docs/script_extensible.md
+			// A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
 			// S1): re-point the handle itself, so every copy of it - and every receiver site,
 			// getters, setters, bound methods, the caches - sees the layer from now on.
 			if (target.class_def && !target.class_def->is_script_class() && target.class_def->extended_ever()) {
@@ -5261,7 +5261,7 @@ op_status vm_backend::exec_binary(frame& f, const vm_instruction& ins) {
 }
 
 // the value behind a binding: a reference through a C++ property runs its getter on the dereference (user code), which a
-// cell block's callee probe must know (design_row118_canonical_lowering.md section 9); every other binding dereferences silently
+// cell block's callee probe must know; every other binding dereferences silently
 static JAI_FORCEINLINE script_value& binding_value(script_value& v, bool* observed) {
 	if (observed && v.is_reference()) { const auto* h = v.get_reference_holder(); if (h && h->property) { *observed = true; } }
 	return v.deref();
@@ -5426,7 +5426,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 	return nullptr;
 }
 
-// Fused subscript-read operand `base[i][j]...[k]` (docs/element_read_overhead_design.md
+// Fused subscript-read operand `base[i][j]...[k]` (internal/element_read_overhead_design.md
 // Stage 3, N-level): array levels step a pointer IN PLACE - zero copies, no op_index
 // dispatch. Sound because index resolution and the other operand's resolution run no
 // user code (idents/literals/element reads only) and the numeric fast path consumes
@@ -7092,7 +7092,7 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
-// Fused a[i] = v (docs/element_read_overhead_design.md store side): the plain-array
+// Fused a[i] = v (internal/element_read_overhead_design.md store side): the plain-array
 // shape resolves container+index ONCE and writes in place - no reference_holder mint,
 // no holder re-resolve. Every other shape (map/object/string/borrow/temporary base/OOB)
 // replays the exact INDEX(lvalue_write)+INDEX_ASSIGN sequence, so semantics and error
@@ -8725,7 +8725,7 @@ const script_value* vm_backend::env_operand_value(frame& f, const chunk::cell_lo
 	if (er.member_node == k_invalid_u32 || !v) return v;
 	const script_value& base = v->deref();
 	if (base.raw_storage_index() != script_value::TYPEID_MAP || er.member_node >= f.code->nodes.size()) return nullptr;
-	// an enum's map is const (docs/const.md 11): while the name holds the same map node, the entry found last time answers
+	// an enum's map is const (internal/const.md 11): while the name holds the same map node, the entry found last time answers
 	const strong_ptr<script_map>& node = base.unchecked_get_map_storage();
 	if (er.enum_map && er.enum_map == node && !parallel_worker_) { return er.enum_entry; }
 	const script_map& map = base.as_map();
@@ -9198,7 +9198,7 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 	default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only, a return only in a frame program); materialize before handing f.ip back
 	}
 }
-// a call inside the block (design_row118_canonical_lowering.md section 9): the probe, the pushes, the call and the landing
+// a call inside the block: the probe, the pushes, the call and the landing
 // are four copy instructions over one descriptor, the probe at its own place ahead of the argument values and the other
 // three at the call's; the general executors run verbatim underneath, so the callee sees the stack and the pending
 // register the general form gives it and its errors are the general ones (an error materializes the block and leaves
@@ -9308,7 +9308,7 @@ op_status vm_backend::exec_c_call(frame& f, const vm_instruction& ins) {
 	++f.ip;   // the consumer runs here
 	return cells_land(f, loop, cc);
 }
-// a raw call's probe (docs/typed_regions_design.md "Raw typed frames"): the callee name's binding is the site's cached script function, read through
+// a raw call's probe (internal/typed_regions_design.md "Raw typed frames"): the callee name's binding is the site's cached script function, read through
 // the probe's own lookup-cache row by its fast head (a plain environment cell: no getter can run, and no cell instruction between the probe and
 // the arguments instruction can rebind it), in a frame whose member scope cannot shadow the name, and the function's body has a raw-enterable
 // frame program of the call's arity; the general probe's own resolution otherwise
@@ -12653,7 +12653,7 @@ op_status vm_backend::raise_not_callable(uint64_t name_id, const script_value& c
 	return raise_(make_error_code(runtime_error_code::not_a_function), text.message, text.sym0, text.sym1);
 }
 
-// an inlined leaf's guard (docs/typed_regions_design.md, Inlined leaves): the site's name binds the function the graft was made from,
+// an inlined leaf's guard (internal/typed_regions_design.md, Inlined leaves): the site's name binds the function the graft was made from,
 // read through the name's own cache row without running a getter (a binding that is a property or an element reference takes the
 // fallback), and no debugger is armed; otherwise the fallback runs the original statement with its real call
 // a call's int or float result into the declaration or the compiler temp its consumer would fill: a declaration takes its own kind only
@@ -12680,7 +12680,7 @@ bool vm_backend::math_alias_holds(frame& f, const chunk::cell_loop::math_alias_s
 	return v && v->raw_storage_index() == script_value::TYPEID_FUNCTION && &v->unchecked_as_function() == math_alias_rows_[ms.fn].identity;
 }
 
-// a node the checker stamped const_runtime (docs/const.md): KEEP BYTE-PARALLEL with interpreter::const_guard_at
+// a node the checker stamped const_runtime (internal/const.md): KEEP BYTE-PARALLEL with interpreter::const_guard_at
 op_status vm_backend::exec_const_guard(frame& f, const vm_instruction& ins) {
 	const ast_node* node = f.code->nodes[ins.a].get();
 	const const_site* site = detail::const_site_of(node);
@@ -14300,7 +14300,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 				// global never wins over a local or a field. [&] cell-shares the source
 				// (escape-legal; share_env_ref also demotes counted-for cached pointers),
 				// [=] snapshots it; a hybrid's C++ property follows the field rule through
-				// its accessors (reference_model.md CPP-MEMBER / PROPERTY). KEEP BYTE-PARALLEL
+				// its accessors (internal/reference_model.md CPP-MEMBER / PROPERTY). KEEP BYTE-PARALLEL
 				// with the interpreter's visit_lambda_expr default-capture loop.
 				script_value* slot_val = nullptr;
 				detail::member_scope_ctx scope;
@@ -15210,7 +15210,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 				return {};
 			}
 		}
-		// no namespace and no class of that name: the class is what `C::m` names (docs/diagnostics.md, undefined names)
+		// no namespace and no class of that name: the class is what `C::m` names (internal/diagnostics.md, undefined names)
 		return raise_(make_error_code(runtime_error_code::class_not_found), "Class '{0}' not found", name_id);
 	}
 	script_value class_var = std::move(class_var_result.value());
@@ -15536,7 +15536,7 @@ op_status vm_backend::exec_get_static(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
-// Compile-time folding of a scoped const read (docs/const.md section 10): the first execution of `C::K`, `ns::x` or `E::v` that
+// Compile-time folding of a scoped const read (internal/const.md section 10): the first execution of `C::K`, `ns::x` or `E::v` that
 // reads a const resolves it through the general path above, then the instruction becomes a constant. A fold site remembers the
 // read it replaced; when a declaration that could change a folded const runs again (a class, a namespace, an enum), every site
 // is checked against its const's current value: the same value keeps the constant, another value patches it, a member that is
@@ -17800,7 +17800,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 					reflect_field_order_static.push_back(field_id);
 				}
 				// A reload preserves a static's runtime value; only NEW statics run their initializer
-				bool preserve_existing = is_redefinition && field_id != 0 && class_def->has_static_field(field_id) && !var_decl->is_const;   // a class constant has no state to keep (docs/const.md)
+				bool preserve_existing = is_redefinition && field_id != 0 && class_def->has_static_field(field_id) && !var_decl->is_const;   // a class constant has no state to keep (internal/const.md)
 
 				if (initializer_ast && !preserve_existing) {
 					auto init_result = eval_expression(initializer_ast, nullptr);
@@ -19396,7 +19396,7 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 			                                                      state.map_it->first, &state.map_it->second, engine_, nullptr));
 		} else {
 			// String keys share their node (the copy-on-write gate detaches any write -
-			// invariants.md 11), other key kinds snapshot; values deep-copy, shared_ptr share
+			// internal/invariants.md 11), other key kinds snapshot; values deep-copy, shared_ptr share
 			args.push_back(state.map_it->first.is_string() ? state.map_it->first : state.map_it->first.clone());
 			args.push_back(clone_for_assignment(state.map_it->second));
 		}
@@ -19977,7 +19977,7 @@ checked_result<void> vm_backend::run(frame& entry) {
 		} catch (const script_exception& e) {
 			if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; }   // a block run that ended in another frame (a raw call's callee) threw there
 			// a native exception an instruction raises is the running frame's exception: its own try sees it (C++,
-			// docs/EXCEPTION_DESIGN.md), else the unwind carries it to the callers like a script throw
+			// internal/EXCEPTION_DESIGN.md), else the unwind carries it to the callers like a script throw
 			convert_cpp_exception_in_frame(e);
 			if (!handle_throw_unwind(fp, records_base)) { return {}; }
 		} catch (const std::exception& e) {
@@ -23238,7 +23238,7 @@ op_status vm_backend::bind_site_reference(size_t i, const call_site& site, frame
 						VM_TRY(detail::bare_member_access(member, symbol_id, frame_access_context(*caller_frame)));
 					}
 					argPtr = member.value_ptr;
-					// A C++ property binds the member itself / its accessors (reference_model.md)
+					// A C++ property binds the member itself / its accessors (internal/reference_model.md)
 					if (member.what == detail::member_probe_hit::kind::cpp_property) {
 						auto minted = detail::bind_cpp_property_ref(*caller_frame->locals->scope_this,
 						                                            symbol_id, engine_, symbolizer_);
@@ -23510,7 +23510,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 		}
 
 		if (param.is_reference) {
-			// the argument is the caller's code: it resolves under the caller's unit (docs/global_shadowing.md); the callee's
+			// the argument is the caller's code: it resolves under the caller's unit (internal/global_shadowing.md); the callee's
 			// unit, entered by the record push ahead of the binding, resumes once this parameter is bound
 			unit_sync_scope unitSync{ this };   // the callee's unit again once the argument is bound
 			enter_unit(caller_unit);

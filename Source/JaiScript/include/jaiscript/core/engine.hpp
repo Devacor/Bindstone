@@ -218,7 +218,7 @@ namespace jai {
         // the path is a .jaibite itself.
         script_value execute_file_source(const std::string& resolvedPath, const std::string& content);
         // include: the file runs at the include site, in the current scope and under the running unit, so
-        // its declarations are the includer's (docs/global_shadowing.md). scope names the function or block the
+        // its declarations are the includer's (internal/global_shadowing.md). scope names the function or block the
         // include runs in (empty at program scope): an enum the file declares there stays local to it.
         script_value execute_include_source(const std::string& resolvedPath, const std::string& content, std::string_view scope = {});
         // An include's file read for the backends: false = it cannot be opened. Inside a running import the file joins the
@@ -248,7 +248,7 @@ namespace jai {
         // load to set jaibite::registration_mismatch().
         uint64_t registration_fingerprint() const;
 
-        // === STATIC TYPE CHECKING (docs/static_checking.md) ===
+        // === STATIC TYPE CHECKING (docs/site/embedding/06-static-checking.html) ===
         // strict (the default): any error-severity diagnostic makes execute()/jaibite
         //       creation/load throw static_check_error BEFORE anything runs; what() is the
         //       full accumulated, location-sorted, deduplicated listing with source + carets.
@@ -269,7 +269,7 @@ namespace jai {
         // Diagnostics from the most recent checked execute()/jaibite path (warn/strict).
         const check_report& last_check_diagnostics() const;
 
-        // === PARSE-TIME TYPE PROOFS (docs/type_proofs_design.md) ===
+        // === PARSE-TIME TYPE PROOFS (internal/type_proofs_design.md) ===
         // On by default. The checker's proof pass runs in EVERY check mode (one walk per
         // unique source per surface epoch, cached beside the parse; diagnostics are still
         // collected only under warn/strict) and stamps same-type / field proofs onto AST
@@ -279,7 +279,7 @@ namespace jai {
         // execute). Proofs are never serialized - a loaded jaibite re-derives them.
         void type_proofs(bool on);
         bool type_proofs() const;
-        // === THE AGGREGATE LOWERING (docs/math_types_design.md 4.3) ===
+        // === THE AGGREGATE LOWERING (internal/math_types_design.md 4.3) ===
         // Typed math locals of function and lambda bodies run as their component slots (detail/aggregate_lowering.hpp);
         // off, every vector stays one boxed value, observationally identical. The default follows the backend: on for the
         // vm (its typed rows and cells run the slots at the float-local floor), off for the interpreter (whose per-node
@@ -289,7 +289,7 @@ namespace jai {
         bool aggregate_lowering() const;
         uint64_t aggregate_lowered_locals() const;   // the typed locals and parameters lowered so far (a coverage count for the gates)
         uint64_t aggregate_lowered_sites() const;    // the function and lambda bodies the lowering rewrote so far (vector buffer statements included)
-        // === THE MIDDLE END'S SWITCH (docs/typed_regions_design.md, the pinned forms onward) ===
+        // === THE MIDDLE END'S SWITCH (internal/typed_regions_design.md, the pinned forms onward) ===
         // On by default. The VM's proof-based elisions and passes over closed regions (the forms
         // that skip a check the region analysis proved redundant, the passes that rewrite a region)
         // follow this switch; off, the region runs its checked canonical form, observationally
@@ -297,7 +297,7 @@ namespace jai {
         // next compile; a chunk already compiled keeps its form.
         void ir_passes(bool on);
         bool ir_passes() const;
-        // === MISS INJECTION (a testing lever; docs/typed_regions_design.md, the cell block section) ===
+        // === MISS INJECTION (a testing lever; internal/typed_regions_design.md, the cell block section) ===
         // Built only when JAISCRIPT_MISS_INJECTION is defined (the fuzz's MISS configuration): every nth cell
         // instruction whose own miss re-runs its original instruction misses before it runs, as a failed guard
         // would, so the flush and the continuation contract run against the interpreter at every such position
@@ -310,7 +310,7 @@ namespace jai {
         // The vm's cell block counters since the engine was made (block entries, boundary operations, resumed blocks, misses): a
         // testing lever, counted on those paths only; zeros on the interpreter
         cell_counters cells_counters() const;
-        // === THE LISTING SINK (`jaiscript --disasm=<file>`; out/fable/plan_row125_ir_module.md) ===
+        // === THE LISTING SINK (`jaiscript --disasm=<file>`) ===
         // Unset by default. When set, every chunk the VM compiles from here on (a program, a function at its
         // define, a standalone expression or declaration) is disassembled as it is compiled, with the regions'
         // canonical operations listed, and handed to the sink in compile order. No bytecode changes either way.
@@ -419,7 +419,7 @@ namespace jai {
         // speaks DAP over a TCP socket so VS Code can attach). The engine keeps it alive and
         // stops it — joining its thread and detaching the controller — before teardown, so a
         // paused script can never wedge the host. Passing nullptr stops and releases any
-        // current one. One connector per engine is the norm; see docs/DEBUGGER_DESIGN.md.
+        // current one. One connector per engine is the norm; see internal/DEBUGGER_DESIGN.md.
         void set_debug_connector(std::shared_ptr<debug::transport> connector);
 
         // Approximate script memory cap in bytes for one top-level execute()/resume()
@@ -443,11 +443,11 @@ namespace jai {
         // Per-engine execution-limit state (terminal-error latch, memory accounting)
         // shared by the backend and the builtin-method chokepoints. Internal. While a
         // parallel region's workers are running this resolves to the CALLING WORKER's
-        // own accounting (docs/parallel_design.md §2); outside a region it is the plain
+        // own accounting (internal/parallel_design.md §2); outside a region it is the plain
         // engine instance with one never-taken null test.
         detail::execution_limits& execution_limits() noexcept;
 
-        // === PARALLEL EXECUTION (parallel_transform v0; docs/parallel_design.md) ===
+        // === PARALLEL EXECUTION (parallel_transform v0; internal/parallel_design.md) ===
         // Worker count the next parallel_transform uses (also the thread_count() builtin).
         // 0 = auto (hardware concurrency). The calling thread runs one chunk; the pool
         // supplies the rest.
@@ -888,7 +888,7 @@ namespace jai {
         // Variable access
         script_value get_variable(const std::string& name) const;
         bool has_variable(const std::string& name) const;
-        // const program-scope and namespace cells (docs/const.md): marked by their declaration, consulted by the checker and the
+        // const program-scope and namespace cells (internal/const.md): marked by their declaration, consulted by the checker and the
         // host's writes (add_global / add_global_ref refuse a const)
         void mark_const_cell(const script_value* cell, bool is_const);
         bool const_cell(const script_value* cell) const;
@@ -949,7 +949,7 @@ namespace jai {
         // Get the class registry for this engine
         class_registry& get_class_registry();
 
-        // Script layers (docs/script_extensible.md). A script class deriving a bound C++ class
+        // Script layers (docs/site/embedding/13-script-extensible.html). A script class deriving a bound C++ class
         // owns its object as its native object; the object carries the layer back through its
         // script_extensible slot (else this engine's weak map), so every boundary return of a
         // shared_ptr<Base> hands script the layer, and serialization writes the script class.
@@ -1018,7 +1018,7 @@ namespace jai {
         // A program unit's name for diagnostics: its file's path, <script> for a literal, <host> for unit 0
         std::string unit_label(uint32_t unit) const;
         // The shadowing unit whose code is running (0 = the host: a file by path or a literal by
-        // content, numbered at first execution) and its execution number (docs/global_shadowing.md)
+        // content, numbered at first execution) and its execution number (internal/global_shadowing.md)
         unit_stamp current_unit() const;
         // Read-only by-value parameter binds that shared the argument instead of cloning it
         // (main thread; a test observable for the elision)

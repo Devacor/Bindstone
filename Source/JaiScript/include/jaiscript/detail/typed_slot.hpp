@@ -8,7 +8,7 @@
 // constructor whose declared parameter takes the source DIRECTLY (no chaining, no to_X()
 // on the way in), to_int/to_float/to_char/to_string, and to_bool(). Both backends and the
 // field store run detail::convert_for_typed_slot verbatim; each site maps the verdict onto
-// its own texts (docs/static_checking.md "Rule table"). A user conversion that fails
+// its own texts (docs/site/embedding/06-static-checking.html "One conversion table"). A user conversion that fails
 // propagates its own error.
 
 #include <jaiscript/core/class_definition.hpp>

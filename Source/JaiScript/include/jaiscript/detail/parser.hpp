@@ -57,7 +57,7 @@ namespace jai {
         // token buffer for handling >> splitting in generic contexts
         std::optional<token> pushed_back_token_;
         mutable token last_advanced_;  // Storage for advance() when consuming pushed_back_token_
-        // A literal include inside a function body is spliced here at parse time (docs/global_shadowing.md): the included
+        // A literal include inside a function body is spliced here at parse time (internal/global_shadowing.md): the included
         // declarations become the function's own, so they see its parameters and locals and it sees theirs; the files read
         // (the engine stamps them: a change re-parses the includer), the chain being spliced (a cycle guard) and its depth
         std::vector<std::string> spliced_files_;
@@ -112,7 +112,7 @@ namespace jai {
         checked_result<expression_ptr> import_call(const source_location& at);
         checked_result<declaration_ptr> extern_declaration();
         checked_result<declaration_ptr> inline_variable_declaration();
-        // const T x = e; / const x = e; (docs/const.md): the declaration, then finish_const marks it and enforces the initializer
+        // const T x = e; / const x = e; (internal/const.md): the declaration, then finish_const marks it and enforces the initializer
         checked_result<declaration_ptr> const_declaration();
         bool finish_const(const declaration_ptr& decl, const token& at, bool class_constant);
         bool const_method_suffix();   // `) const`: JaiScript has no const methods

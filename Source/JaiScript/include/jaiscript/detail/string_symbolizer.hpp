@@ -141,7 +141,7 @@ namespace jai {
 		// The unit whose code is running (0 = the host): a file by path or a literal by content,
 		// numbered by the engine at first execution. A program-scope variable redeclared by
 		// another unit gets its own cell; shadow_count() nonzero means some name has versions
-		// and lookups pick the version by unit (docs/global_shadowing.md).
+		// and lookups pick the version by unit (internal/global_shadowing.md).
 		[[nodiscard]] inline unit_stamp current_unit() const noexcept { return current_unit_; }
 		inline void set_current_unit(unit_stamp unit) noexcept { current_unit_ = unit; }
 		// A fresh execution number: the seq of the stamp execute_parsed installs for a run

@@ -914,7 +914,7 @@ namespace jai::vm {
     private:
 
         vm_compiler compiler_;
-        // a chunk belongs to one unit (docs/global_shadowing.md): every cache of compiled bodies is keyed by the node AND the
+        // a chunk belongs to one unit (internal/global_shadowing.md): every cache of compiled bodies is keyed by the node AND the
         // unit that runs it, so a body two units share (a textual include's) compiles once per unit and its lookup caches
         // never serve another unit's bindings
         struct node_unit_key {
@@ -2001,7 +2001,7 @@ namespace jai::vm {
         // result without a push or a second dispatch. Defined in vm_backend.cpp.
         template <typename Sink>
         op_status binary_fused_compute(frame& f, uint32_t proto_index, Sink&& sink);
-        // Typed heads (docs/typed_regions_design.md): a proto whose operands the checker
+        // Typed heads (internal/typed_regions_design.md): a proto whose operands the checker
         // proved int/int or float/float addresses its slots directly and computes with one
         // tag guard per operand; false = not handled (guard miss, an error case, a dead
         // slot), the general kernel then runs and raises exactly as before.
@@ -2130,7 +2130,7 @@ namespace jai::vm {
         // after an effect point inside the block: what user code could have reached is checked or re-read; false = a miss. raw: the call entered a
         // frame program raw (by-value scalar parameters bind nothing of the caller's, so the arguments' slots need no check)
         bool cells_reland(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc, bool raw = false, bool args_flushed = true);   // args_flushed: after the call (C_ARGS wrote the argument slots), not at the probe
-        // raw typed frames (docs/typed_regions_design.md "Raw typed frames"): the arguments instruction of a raw call site enters the parked callee's
+        // raw typed frames (internal/typed_regions_design.md "Raw typed frames"): the arguments instruction of a raw call site enters the parked callee's
         // frame program raw when it has one whose parameter kinds are the arguments' kinds (false: the general door runs); a frame program's return
         // lands raw in a raw caller's cell, else boxes through its return pad. Both switch the block loop's frame through raw_switch_
         bool raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm_instruction& ins, op_status& st);
@@ -2162,7 +2162,7 @@ namespace jai::vm {
         op_status cells_run_raw(frame& entry, op_status st, bool run_first);
         const script_value* env_operand_value(frame& f, const chunk::cell_loop::env_operand_ref& er);   // the binding, or an enum member's entry   // the raw chain from a block run (run_first false: the block already ran and switched)
         op_status cells_resume(frame& f, const vm_instruction& ins);   // the dispatcher's entry after a callee returned to the parked caller
-        // boundary operations (docs/typed_regions_design.md "Boundary operations"): the block parks for a statement the general form runs, and a
+        // boundary operations (internal/typed_regions_design.md "Boundary operations"): the block parks for a statement the general form runs, and a
         // CELLS_RESUME or a block's back-edge entry at the statement's end resumes it; the re-read is cells_resync
         void cells_writeback(frame& f, const chunk::cell_loop& loop);   // every dirty cell a statement may read back to its slot or binding; the cells stay valid
         const chunk::cell_loop* cells_unpark(frame& f);   // a block parked for a statement ending at f.ip, resumed (f.ip its resume copy ip); nullptr = the general form continues
@@ -2432,7 +2432,7 @@ namespace jai::vm {
         op_status exec_ref_return_lvalue(frame& f, const vm_instruction& ins);
         op_status exec_ref_target_store(frame& f, const vm_instruction& ins);
         op_status exec_const_guard(frame& f, const vm_instruction& ins);
-        // scoped const folding (docs/const.md section 10)
+        // scoped const folding (internal/const.md section 10)
         struct fold_site {
             chunk* code = nullptr;
             std::shared_ptr<chunk> pin;   // a chunk the cache does not hold

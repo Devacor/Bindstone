@@ -1099,7 +1099,7 @@ std::string slurp_file(const std::string& path) {
 }
 
 // read_file: the file's bytes, "" for an empty file; a missing or unreadable one raises the catchable
-// "Cannot read file '<path>': <reason>" (docs/diagnostics.md)
+// "Cannot read file '<path>': <reason>" (docs/site/guide/10-modules.html "Where files are")
 std::string read_file_or_raise(const std::string& path) {
 	std::error_code ec;
 	const fs::file_status st = fs::status(path, ec);

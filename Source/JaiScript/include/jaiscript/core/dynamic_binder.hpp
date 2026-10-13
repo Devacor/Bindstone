@@ -1030,7 +1030,7 @@ private:
             register_read_only_setter(name);
         }
 
-        // A box-decodable member binds BY REFERENCE as the member itself (reference_model.md
+        // A box-decodable member binds BY REFERENCE as the member itself (internal/reference_model.md
         // CPP-MEMBER): record its address accessor beside the getter/setter
         if constexpr (script_value::cpp_bound_encoding<P>::capable) {
             using encoding = script_value::cpp_bound_encoding<P>;

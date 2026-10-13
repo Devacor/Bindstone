@@ -1,4 +1,4 @@
-// parallel_transform v0 (docs/parallel_design.md; docs/parallel_prove_or_serial.md §5,
+// parallel_transform v0 (internal/parallel_design.md; internal/parallel_prove_or_serial.md §5,
 // contract A). One builtin, three phases, all charged to the call itself:
 //
 //   ADMISSION (amortized per body): a fail-closed static walk over fn's AST — every node
@@ -420,7 +420,7 @@ namespace {
 
 	// v0 host whitelist: pure math (stdlib/math.hpp minus the random family) + to_string.
 	// Everything else — print, io, json, user bindings — errors at admission until the
-	// parallel_for annotation surface (parallel_design.md §5) exists.
+	// parallel_for annotation surface (internal/parallel_design.md §5) exists.
 	bool parallel_host_whitelisted(std::string_view name) {
 		static constexpr std::string_view k_whitelist[] = {
 			"abs", "sign", "min", "max", "clamp",
@@ -3609,7 +3609,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	}
 
 	// THE RANGE. A primitive-kind typed range the body may write demotes IN PLACE at the
-	// barrier (STAGE-2a BRIDGE, typed_array_design.md - node identity preserved) so the
+	// barrier (STAGE-2a BRIDGE, internal/typed_array_design.md - node identity preserved) so the
 	// hetero kernel below stays correct until stage 3's raw typed worker reads/writes land;
 	// one the body only reads (the transform's input) is boxed ONCE into a private node the
 	// cursor can address instead. An OBJECT-kind range keeps its slots: element references
@@ -3735,7 +3735,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	const uint64_t pf_adm1 = __rdtsc();
 #endif
 	// THREAD COUNT: the override or min(hardware_concurrency - 1, 6), one context below
-	// k_parallel_small_n, then the measured-cost cap (parallel_design.md section 3)
+	// k_parallel_small_n, then the measured-cost cap (internal/parallel_design.md section 3)
 	size_t worker_count = eng.parallel_thread_count();
 	if (worker_count < 1) { worker_count = 1; }
 	if (worker_count > n) { worker_count = n; }
@@ -4437,7 +4437,7 @@ bool resolve_global_ref_write_callee(engine& eng, const identifier_expr& id, std
 }
 
 bool ref_parameter_takes_temporary(engine& eng, const std::vector<parameter>& params, const statement* body, size_t i, bool may_prove) {
-	if (i < params.size() && params[i].is_reference && params[i].is_const) { return true; }   // const T& (docs/const.md)
+	if (i < params.size() && params[i].is_reference && params[i].is_const) { return true; }   // const T& (internal/const.md)
 	if (i >= params.size() || !params[i].is_reference || !body) { return false; }
 	const parameter& p = params[i];
 	const uint64_t epoch = eng.definition_epoch();

@@ -1,4 +1,4 @@
-// The aggregate lowering (docs/math_types_design.md 4.3; detail/aggregate_lowering.hpp).
+// The aggregate lowering (internal/math_types_design.md 4.3; detail/aggregate_lowering.hpp).
 //
 // Per function or lambda body: an analysis walk finds the typed math locals and by-value math parameters, resolves every
 // identifier to them by scope (and the parser's slot), and lets a local escape wherever its storage could be named

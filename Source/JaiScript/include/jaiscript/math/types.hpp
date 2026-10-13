@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_MATH_TYPES_HPP__
 #define __JAISCRIPT_MATH_TYPES_HPP__
 
-// The C++ face of JaiScript's math vectors (docs/math_types_design.md): plain aggregates with no engine, laid out as
+// The C++ face of JaiScript's math vectors (internal/math_types_design.md): plain aggregates with no engine, laid out as
 // their components in order.
 
 #include <cstdint>

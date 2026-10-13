@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_DETAIL_CONST_RULES_HPP__
 #define __JAISCRIPT_DETAIL_CONST_RULES_HPP__
 
-// const (docs/const.md): the texts, the receiver-writes verdict of a method, and the run time's half of a const_runtime
+// const (internal/const.md): the texts, the receiver-writes verdict of a method, and the run time's half of a const_runtime
 // verdict. ONE kernel for the checker (load diagnostics and the stamps) and both backends (the guard at a stamped node).
 //
 // A write through a const is a write whose path from the const name crosses no handle (a shared_ptr or weak_ptr: past it the

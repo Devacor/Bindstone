@@ -928,7 +928,7 @@ private:
         }
     }
 
-    // A math value's JSON (docs/math_types_design.md 8.6): exactly {"$type": "math::K", "$val": {"x": .., "y": .. [, "z": ..]}}
+    // A math value's JSON (internal/math_types_design.md 8.6): exactly {"$type": "math::K", "$val": {"x": .., "y": .. [, "z": ..]}}
     // with numeric components; any other object is a map. A malformed math payload is an error, never a silent map.
     bool materialize_math(const JNode& node, engine* eng, script_value& out) {
         if (node.u.agg.count != 2) { return false; }

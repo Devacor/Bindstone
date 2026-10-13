@@ -109,7 +109,7 @@ namespace jai::vm {
         op_return_binary,   // a=token_type, b=operand shape, c=static_return_proof: fused `return <a op b>;`
                             // (BINARY+RETURN; pops two, computes like op_binary, returns)
 
-        op_inline_guard,    // a = inline site, b = the fallback ip: the site's name binds the site's function, or the fallback runs the original statement (docs/typed_regions_design.md, Inlined leaves)
+        op_inline_guard,    // a = inline site, b = the fallback ip: the site's name binds the site's function, or the fallback runs the original statement (internal/typed_regions_design.md, Inlined leaves)
         op_probe_callee,    // a=site index, b=argc: resolve the identifier callee at the
                             // callee-first observation point (callee-before-args IS the
                             // language, matching C++17) into the
@@ -187,7 +187,7 @@ namespace jai::vm {
                             // kernel); pushes the cast result
 
         op_error,           // a=runtime_error_code, b=message index (k_invalid_u32 = none), c=symbol index
-        op_const_guard,     // a=node index: a node whose const verdict the run time decides (detail::const_guard; docs/const.md)
+        op_const_guard,     // a=node index: a node whose const verdict the run time decides (detail::const_guard; internal/const.md)
         op_const_folded,    // a=const index, b=the fold site (vm_backend::fold_sites_): a scoped const read (C::K, ns::x, E::v) the first
                             // execution resolved, then constants[a] (patched or rewritten back when the const's declaration runs again)
         op_return_convert,  // a=return_stmt::static_return_proof: in-region `return` (a try/catch is
@@ -203,7 +203,7 @@ namespace jai::vm {
                                // resolved as operands; an array receiver appends through the builtin's
                                // exact kernel and pushes the call result (null), anything else replays
                                // the unfused LOAD, LOAD, CALL_METHOD sequence through its call site
-        // Typed scalar set (docs/typed_regions_design.md, stage 1): lowered from a fused
+        // Typed scalar set (internal/typed_regions_design.md, stage 1): lowered from a fused
         // binary, compare-jump or scalar move whose operands the checker proved int/int or
         // float/float and the compiler addresses directly. Each op keeps ONE tag guard per
         // operand and lands the way the general op would; any miss (a boxed slot, an
@@ -226,7 +226,7 @@ namespace jai::vm {
                             // a = receiver slot, b = value slot or const bit | index, c = push_protos index
         op_t_load,          // `T x = arr[index]` on the proven shape: a = decl slot; the container, the
                             // index fold and the landing facts sit in chunk::typed_sites[ip]
-        // closed typed loops as cell blocks (docs/typed_regions_design.md): the cell-form copy of a closed typed loop
+        // closed typed loops as cell blocks (internal/typed_regions_design.md): the cell-form copy of a closed typed loop
         op_cells_back,      // a = cell loop index: the loop's ORIGINAL back edge; budget poll, live-in guards,
                             // unboxing, then the copy's head (or the general head when a guard refuses)
         op_cells_enter,     // a = cell region index, b = its trampoline: a straight-line region's first instruction or a loop's head; the live-in guards and

@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_DETAIL_PARALLEL_TRANSFORM_HPP__
 #define __JAISCRIPT_DETAIL_PARALLEL_TRANSFORM_HPP__
 
-// parallel_transform v0 (docs/parallel_design.md, docs/parallel_prove_or_serial.md §5).
+// parallel_transform v0 (internal/parallel_design.md, internal/parallel_prove_or_serial.md §5).
 // Contract A: a body either satisfies the parallel contract or ERRORS — never silent-serial.
 // Everything here constructs lazily inside the first parallel_transform call; worker
 // contexts persist in an engine-owned slot pool and are RESET per call (reuse

@@ -4,7 +4,7 @@
 // execution hook, the breakpoint table, the step state machine, and the park/pump loop
 // that blocks the script thread at a stop while a *different* thread (a DAP connector,
 // or a test) drives resume/step and inspects state via posted closures. Pure std + an
-// engine*; no sockets, no DAP. See docs/DEBUGGER_DESIGN.md (Concurrency & lifecycle).
+// engine*; no sockets, no DAP. See internal/DEBUGGER_DESIGN.md (Concurrency & lifecycle).
 
 #include <jaiscript/core/value.hpp>
 #include <atomic>
@@ -65,7 +65,7 @@ public:
 // call from a thread other than the one running the script; inspection methods must run
 // on the parked script thread (post them via post_command()).
 //
-// Cost model (docs/DEBUGGER_DESIGN.md "Debugger performance"): the per-statement path
+// Cost model (internal/DEBUGGER_DESIGN.md "Debugger performance"): the per-statement path
 // reads ONLY the plain script-thread hot cache below — no atomics, no locks, no string
 // hashing. Transport-side writes (enable, breakpoints, pause) land in atomics and are
 // pulled into the cache by sync_hot_state(), which the interpreter calls only at its

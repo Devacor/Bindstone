@@ -627,7 +627,7 @@ struct call_frame {
         // Precomputed so ref-free call sites can skip the per-call arg-metadata build
         bool has_reference_parameters = false;
 
-        // Read-only by-value parameter elision (docs/parallel_design.md, parameter aliasing):
+        // Read-only by-value parameter elision (internal/parallel_design.md, parameter aliasing):
         // bit i set = the body provably never mutates, aliases, compares or otherwise uses
         // parameter i whole, and is itself pure with respect to enclosing state, so binding
         // the argument by handle instead of cloning it is unobservable. Proven lazily on the
@@ -636,7 +636,7 @@ struct call_frame {
         bool alias_candidate = false;
         mutable uint64_t alias_proof_epoch = 0;
         mutable uint32_t alias_proof_mask = 0;
-        unit_stamp unit{};   // the unit and the execution that declared it (docs/global_shadowing.md)
+        unit_stamp unit{};   // the unit and the execution that declared it (internal/global_shadowing.md)
         bool block_defined = false;   // declared inside a block scope (an include in a { }): a call keeps the caller's chain
         bool declared = false;   // a function declaration's (never a lambda's): another signature of its name joins it in an overload set
         size_t line = 0;   // the declaration's line (an overload's diagnostics name it)

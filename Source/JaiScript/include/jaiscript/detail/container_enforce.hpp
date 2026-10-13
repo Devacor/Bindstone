@@ -13,7 +13,7 @@
 #include <jaiscript/detail/uniquely_held.hpp>
 
 // Typed-container enforcement kernel, shared VERBATIM by both backends and the field
-// kernel (parity by construction — stage 0 of docs/typed_array_design.md). Two layers:
+// kernel (parity by construction — stage 0 of internal/typed_array_design.md). Two layers:
 //  - the element predicate/converter pair push and subscript stores use (consolidated
 //    from the interpreter/vm twins),
 //  - the whole-value BOUNDARY check: an array/map value crossing into a concretely

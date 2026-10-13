@@ -1,4 +1,4 @@
-// Static type checker (docs/static_checking.md). Backend-neutral AST walk,
+// Static type checker (docs/site/embedding/06-static-checking.html). Backend-neutral AST walk,
 // run once per unique source at parse-cache-entry creation (engine.cpp hook).
 //
 // Guiding contract: NO FALSE POSITIVES. A program that runs clean and doesn't
@@ -339,7 +339,7 @@ private:
     engine& eng_;
     const std::vector<declaration_ptr>& decls_;
 
-    // Proof pass (docs/type_proofs_design.md): independent of diagnostics - a stamp never
+    // Proof pass (internal/type_proofs_design.md): independent of diagnostics - a stamp never
     // depends on a diag() having fired, and diag() is a no-op when diagnostics are off.
     using proof_mode = check_options::proofs_t;
     proof_mode proofs_ = proof_mode::stamp;
@@ -443,7 +443,7 @@ private:
         size_t line = 0, column = 0;
         const lambda_expr* lambda = nullptr;   // a frame-slot local declared with a lambda literal (its calls' graft declaration)
         const enum_decl* enum_def = nullptr;   // an enum declared in a function or block: local to that scope
-        bool is_const = false;            // const T x / const T& p / a const reference (auto& over a const) (docs/const.md)
+        bool is_const = false;            // const T x / const T& p / a const reference (auto& over a const) (internal/const.md)
     };
     std::vector<std::unordered_map<std::string_view, var_entry>> scopes_;
     std::vector<size_t> namespace_scopes_;   // indices into scopes_ that are namespace bodies (their enums are the namespace's)
@@ -813,7 +813,7 @@ private:
         return fields != own_fields || statics != def->get_static_field_names().size();
     }
 
-    // The general redefinition rule (docs/const.md 4.3): two definitions of one signature in the same unit
+    // The general redefinition rule (internal/const.md 4.3): two definitions of one signature in the same unit
     // are an error - program-scope functions, methods, constructors and namespace functions, by their parameter types (T& and T
     // differ; const is not part of a signature). Declarations of other signatures are overloads. A
     // definition of the same signature from another unit is a redefinition, the hot-reload path: it replaces the earlier one, and
@@ -1361,7 +1361,7 @@ private:
     // `kv.first` of a range-for over a statically known map: the pair variable's name, or
     // empty. Map keys are read-only (C++ `const Key`, the ordering invariant); mutating the
     // pair's key copy is a load error here and a copy-on-write no-op at runtime
-    // (docs/invariants.md 11). A `var`-typed map is dynamic and leaves it to the runtime.
+    // (internal/invariants.md 11). A `var`-typed map is dynamic and leaves it to the runtime.
     std::string_view map_key_operand(const expression* e) {
         if (!e || e->get_type() != node_type::member_expr) { return {}; }
         const auto* m = static_cast<const member_expr*>(e);
@@ -1405,7 +1405,7 @@ private:
         return false;
     }
 
-    // -------------------------------------------------------------- const (docs/const.md)
+    // -------------------------------------------------------------- const (internal/const.md)
 
     std::unordered_map<std::string_view, const variable_decl*> top_consts_;   // this unit's program-scope consts (a use may precede the declaration)
     bool collecting_namespace_ = false;
@@ -1435,7 +1435,7 @@ private:
         return g && g->is_const ? g : nullptr;
     }
 
-    // Where a write lands, by C++'s top-level rule: through a const name and no handle, a write to the const (docs/const.md 2.2)
+    // Where a write lands, by C++'s top-level rule: through a const name and no handle, a write to the const (internal/const.md 2.2)
     const_hit const_path(const expression* e, bool value_too = false) {
         const_hit none;
         if (!e) { return none; }
@@ -1499,7 +1499,7 @@ private:
                 is_const = h.field->is_const;
                 if (!h.foreign) { hit.line = h.field->location.line; hit.column = h.field->location.column; }
                 from_type(h.field->type.get());
-            } else if (const enum_decl* en = find_enum(id->name)) {   // an enum's name: a const map<string, int> (docs/const.md 11)
+            } else if (const enum_decl* en = find_enum(id->name)) {   // an enum's name: a const map<string, int> (internal/const.md 11)
                 is_const = true;
                 known = true; library = true;
                 hit.line = en->location.line; hit.column = en->location.column;
@@ -1654,7 +1654,7 @@ private:
         return v;
     }
 
-    // a method call on a const-rooted receiver: an error when the method writes its receiver (docs/const.md 3.3)
+    // a method call on a const-rooted receiver: an error when the method writes its receiver (internal/const.md 3.3)
     void check_const_call(call_expr* c) {
         if (!c->callee || c->callee->get_type() != node_type::member_expr) { stamp_const(c->const_check, const_none, {}); return; }
         auto* m = static_cast<member_expr*>(c->callee.get());
@@ -1785,7 +1785,7 @@ private:
     }
 
     // -------------------------------------------------------------- type proofs
-    // docs/type_proofs_design.md. Every rule writes its node field on EVERY visit (a stamp
+    // internal/type_proofs_design.md. Every rule writes its node field on EVERY visit (a stamp
     // or the no-proof default), so a re-check can add or drop proofs but never leaves a
     // stale one the pass no longer derives.
 

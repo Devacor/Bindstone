@@ -45,9 +45,9 @@ namespace jai::detail {
         // The native math types' constructors (math::vec3(1, 2, 3); detail/math_values.hpp construct)
         vec2_, vec3_, ivec2_, ivec3_, vec4_,
         round_, remap_,
-        // math::color and its alternative blends (docs/math_types_design.md 6.3)
+        // math::color and its alternative blends (internal/math_types_design.md 6.3)
         color_, mix_rgb_, mix_hsv_,
-        // the geometry library on vectors (docs/math_types_design.md 6.1; distance and distance_squared take two vectors too)
+        // the geometry library on vectors (internal/math_types_design.md 6.1; distance and distance_squared take two vectors too)
         dot_, cross_, length_, length_squared_, normalize_, reflect_, project_, angle_between_, perpendicular_, rotate_,
         // the aggregate lowering's component steps (detail/aggregate_lowering.hpp), spelled with a `$` no source can write:
         // f32$(x) a binary32 component's value, i32$(x) an int32 component's, cstore$(x, kind) a component store's
@@ -651,7 +651,7 @@ namespace jai::detail {
         return math::construct(kind, view, argc, eng);
     }
 
-    // ---- the geometry library (docs/math_types_design.md 6.1) ------------------------------------------------------------
+    // ---- the geometry library (internal/math_types_design.md 6.1) ------------------------------------------------------------
     // Vectors only (a color has no geometry). A scalar result is binary64 from the widened components; a vector result is
     // computed in binary64 and lands as binary32, so an ivec argument gives a vec. The integral answers stay exact when
     // every vector argument is an ivec: dot, length_squared, distance_squared, cross and perpendicular, each step with the

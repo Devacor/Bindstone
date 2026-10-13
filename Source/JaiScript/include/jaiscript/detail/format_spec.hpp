@@ -11,8 +11,8 @@ namespace detail {
 
 // Format-spec mini-language for template-string splices (`${hp:.1f}`) and the
 // stdlib format()/print spec placeholders ({:.1f} / {0:>6}). Deliberate
-// std::format subset — full grammar documented in docs/grammar.md "Template
-// Strings":
+// std::format subset — documented in docs/site/guide/09-containers-strings.html
+// "Template strings & format specs":
 //
 //   spec      = [[fill] align] [sign] ["0"] [width] ["." precision] [type]
 //   align     = "<" | ">" | "^"

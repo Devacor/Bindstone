@@ -14,7 +14,7 @@ class function_decl;
 class class_definition;
 class environment;
 
-// A host entry's static signature for the checker (docs/static_checking.md "Language namespaces"): the arity range and
+// A host entry's static signature for the checker (internal/static_checking.md "Language namespaces"): the arity range and
 // the kind each argument must have (jai_string_type = text, a string or a utf8_string; jai_null_type = anything); the
 // entry still checks its arguments at run time. result_follows_first: the result is text of the first argument's kind.
 // jai_float_type is a number (an int or a float); a jai_object_type result names its class in result_class.

@@ -180,7 +180,7 @@ public:
     }
 
     // Textual execution (include): the declarations run in the backend's CURRENT environment under the running
-    // unit, as if written at the include site (docs/global_shadowing.md)
+    // unit, as if written at the include site (internal/global_shadowing.md)
     virtual script_value execute_textual(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) = 0;
 
     virtual void prepare_for_execution() = 0;
@@ -240,7 +240,7 @@ public:
     // backends' host-level resume detection), so an uncaught script throw converts
     // to a thrown script_exception there instead of staying a latched flag.
     virtual bool is_executing() const = 0;
-    // The unit of the running code (docs/global_shadowing.md), derived from the executing frame: a function's own
+    // The unit of the running code (internal/global_shadowing.md), derived from the executing frame: a function's own
     // stamp, the run's at top level. The symbolizer's ambient stamp is written only while a name has versions;
     // sync_unit re-aligns it with the executing frame after a nested run.
     virtual unit_stamp current_unit() const = 0;
@@ -262,7 +262,7 @@ public:
     virtual void push_external_call_scope() = 0;
     virtual void pop_external_call_scope() = 0;
     // A host callable's non-const T& argument: the reference a script T& parameter would bind for argument `index` of the
-    // call in flight (docs/reference_model.md), or a non-reference when the argument names no lvalue or no script site
+    // call in flight (internal/reference_model.md), or a non-reference when the argument names no lvalue or no script site
     // made this call; for an unboxed frame-slot local its value, with `slot` naming it for host_slot_store.
     // args is what the callable received, `offset` leading entries (a receiver) ahead of the arguments.
     virtual checked_result<script_value> host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,

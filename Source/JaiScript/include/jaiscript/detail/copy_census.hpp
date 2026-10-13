@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_DETAIL_COPY_CENSUS_HPP__
 #define __JAISCRIPT_DETAIL_COPY_CENSUS_HPP__
 
-// The copy and front-loading census (a diagnostic build: JAISCRIPT_VM_COVERAGE; docs/copy_and_compile_census.md). Every
+// The copy and front-loading census (a diagnostic build: JAISCRIPT_VM_COVERAGE). Every
 // counted event records the address it ran at (the physical function and its inline chain, symbolized at exit), the vm
 // instruction that was executing and the script line behind it. A deep copy also records whether its source was uniquely
 // held and how soon the source and the copy died, in vm instructions. JAI_COPY_CENSUS=<file> writes the process totals at

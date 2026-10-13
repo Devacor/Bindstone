@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Grep the site for the retired error texts listed in docs/diagnostics.md ("before" column).
+"""Grep the site for retired error texts (the current ones: reference/index.html "Run-time errors").
 
     python site_tools/check_old_texts.py
 
@@ -38,7 +38,7 @@ OLD_TEXTS = [
     r"Cannot store '[^']*' in '[^']*'",
     r"Cannot assign to static member: field",
     # `Cannot push 'string' to array<int>` and `Cannot assign 'string' to element of type 'int'`
-    # are still the live texts (diagnostics.md lists them under "untouched families"), so they
+    # are still the live texts (reference/index.html quotes the push one), so they
     # are deliberately not here.
 ]
 

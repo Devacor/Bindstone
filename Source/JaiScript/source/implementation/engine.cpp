@@ -412,7 +412,7 @@ struct engine::implementation {
     // Hybrid reverse lookup (complete C++ object pointer -> owning script instance),
     // weak entries swept lazily when the watermark is crossed
     // Script layers of objects whose type carries no script_extensible slot, keyed by the
-    // pointer stored in _cpp_object (docs/script_extensible.md D3).
+    // pointer stored in _cpp_object (internal/script_extensible.md D3).
     std::unordered_map<const void*, std::weak_ptr<class_instance>> script_layers_;
     size_t script_layer_sweep_watermark_ = 64;
     // Layers of slotless objects extended through this engine: nothing else can own them,
@@ -853,7 +853,7 @@ struct engine::implementation {
         std::vector<declaration_ptr> declarations;
         std::string source_path;   // the spelling the unit was parsed under ("<script>" for raw content)
         std::shared_ptr<void> compiled;
-        std::unordered_map<uint32_t, std::shared_ptr<void>> textual_compiled;   // an include's program per including unit: a chunk belongs to one unit (docs/global_shadowing.md)
+        std::unordered_map<uint32_t, std::shared_ptr<void>> textual_compiled;   // an include's program per including unit: a chunk belongs to one unit (internal/global_shadowing.md)
         uint64_t epoch = 0;
         uint64_t last_used = 0;
         uint32_t unit = 0;   // shadowing unit (the path for a file, the content for a literal); 0 until first run
@@ -930,7 +930,7 @@ struct engine::implementation {
     engine::disassembly_sink_fn disassembly_sink_;   // the listing tool's sink; unset = no listing
     proof_stats last_proof_stats_;
 
-    // Program closure (docs/static_checking.md "Programs"): a unit with literal top-level
+    // Program closure (internal/static_checking.md "Programs"): a unit with literal top-level
     // import/include paths is checked together with every unit those paths reach, before
     // any of them runs. The union of their top-level names lives for the engine's lifetime
     // and rides every check as extra_globals - a superset never makes a false error, and a
@@ -939,8 +939,8 @@ struct engine::implementation {
     std::unordered_set<std::string> program_names_;
     detail::program_class_map program_classes_;
     detail::program_enum_map program_enums_;   // the closure units' top-level enums (an enum value read is no user code: member_expr::enum_constant)
-    detail::program_function_map program_functions_;   // the closure units' free functions (docs/static_checking.md "Programs"; the inliner's cross-unit leaves)
-    detail::program_global_map program_globals_;   // the closure units' top-level variables: the proof pass types them (docs/static_checking.md "Proofs")
+    detail::program_function_map program_functions_;   // the closure units' free functions (internal/static_checking.md "Programs"; the inliner's cross-unit leaves)
+    detail::program_global_map program_globals_;   // the closure units' top-level variables: the proof pass types them (internal/static_checking.md "Proofs")
     struct closure_unit {
         std::string path;   // resolved spelling: the key the unit later executes under
         std::string source;
@@ -2389,7 +2389,7 @@ void engine::initialize_engine_reference() {
         return script_value(detail::same_object(args[0], args[1]), engine_weak);
     });
 
-    // Locations (docs/static_checking.md "Files and locations"): where the running code, the
+    // Locations (docs/site/guide/10-modules.html "Where files are"): where the running code, the
     // program's root file and the executable are, and the same resolution ladder import walks.
     // Engine-core so a program answers the same on every host; the file IO that USES a path
     // (read_file, write_file, list_dir) stays the host's to grant. Defined after the impl so
@@ -2401,7 +2401,7 @@ void engine::initialize_engine_reference() {
     register_location_builtins();
 
     // extend(object, Class): a script class layer over a C++ object, or a re-derived script
-    // instance (docs/script_extensible.md). Engine-core so the language feature exists on
+    // instance (docs/site/embedding/13-script-extensible.html). Engine-core so the language feature exists on
     // every engine.
     add_variadic_function("extend", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 2) {
@@ -2425,7 +2425,7 @@ void engine::initialize_engine_reference() {
         return script_value::make_cell_reference(std::move(extended.value()), engine_weak);
     });
 
-    // Parallel builtins (parallel_transform v0; docs/parallel_design.md). thread_count()
+    // Parallel builtins (parallel_transform v0; internal/parallel_design.md). thread_count()
     // reports the worker count a region uses without constructing the pool.
     add_function("thread_count", [this]() -> script_int {
         return static_cast<script_int>(parallel_thread_count());
@@ -3085,7 +3085,7 @@ size_t engine::jaibite_cache_write_failures() const {
 }
 
 void engine::add_global(const std::string& name, script_value value, bool is_serializable) {
-    if (is_const_global(name)) { throw runtime_error("Cannot assign to '" + name + "': it is read-only"); }   // docs/const.md
+    if (is_const_global(name)) { throw runtime_error("Cannot assign to '" + name + "': it is read-only"); }   // internal/const.md
     ++impl->check_surface_epoch_;   // the static checker can see globals
     // Intern the name and get a stable string_view for tracking
     uint64_t id = impl->string_symbolizer_.intern(name);
@@ -4290,7 +4290,7 @@ size_t engine::binary_scan_limit() const {
 
 detail::execution_limits& engine::execution_limits() noexcept {
     // While a parallel region's workers run, every charge site resolves to the calling
-    // worker's own accounting through this ONE chokepoint (docs/parallel_design.md §2).
+    // worker's own accounting through this ONE chokepoint (internal/parallel_design.md §2).
     // Outside a region: a single never-taken null test on an allocation-path accessor.
     if (detail::parallel_engine_state* p = impl->parallel_.get()) [[unlikely]] {
         if (detail::parallel_region_table* region = p->active_region) {

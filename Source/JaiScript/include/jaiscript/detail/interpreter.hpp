@@ -344,7 +344,7 @@ namespace jai {
         using execution_backend::execute;
         script_value execute_textual(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>&) override { return execute(declarations, true); }
         std::string get_backend_name() const override { return "interpreter"; }
-        // the unit of the running code, derived from the executing call frame (docs/global_shadowing.md), and the
+        // the unit of the running code, derived from the executing call frame (internal/global_shadowing.md), and the
         // re-alignment of the symbolizer's ambient with it (a store only while a name has versions)
         void sync_unit() noexcept override { if (!parallel_worker_ && string_symbolizer_->shadow_count() != 0) { string_symbolizer_->set_current_unit(current_unit()); } }
         

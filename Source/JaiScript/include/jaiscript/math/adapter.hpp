@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_MATH_ADAPTER_HPP__
 #define __JAISCRIPT_MATH_ADAPTER_HPP__
 
-// Host math types as JaiScript's native math kinds (docs/math_types_design.md section 8). A host type whose
+// Host math types as JaiScript's native math kinds (docs/site/embedding/15-math-adapters.html). A host type whose
 // math_adapter specialization exists crosses the binding layer as a math value: a parameter or return of that
 // type, a bound member of it, a std::vector of it and a signal argument all exchange a math::vec3 (or the kind the
 // adapter names) and never a class instance. The specialization lives beside the host type, in the header that

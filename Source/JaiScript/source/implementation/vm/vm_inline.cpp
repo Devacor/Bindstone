@@ -1,4 +1,4 @@
-// Inlined leaves (docs/typed_regions_design.md, "Inlined leaves"): a plain identifier call the checker resolved to one small free
+// Inlined leaves (internal/typed_regions_design.md, "Inlined leaves"): a plain identifier call the checker resolved to one small free
 // script function compiles at its call site as the callee's body. The call becomes a temp: the operands the statement evaluates
 // before the call go into typed temps first, in program order (the spill), then the graft declares the result temp (a guard on
 // the callee's identity, the by-value parameters as declarations in slots above the caller's frame, a reference parameter renamed
@@ -834,7 +834,7 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 // intrinsic is no call. A node the graft's clone cannot hold ends the scan.
 void call_events(const expression_ptr& e, std::vector<std::shared_ptr<call_expr>>& out, bool& unsupported) {
 	if (!e || unsupported) return;
-	if (detail::const_site_of(e.get())) { unsupported = true; return; }   // a const guard runs where the node is reached (docs/const.md)
+	if (detail::const_site_of(e.get())) { unsupported = true; return; }   // a const guard runs where the node is reached (internal/const.md)
 	switch (e->get_type()) {
 	case node_type::literal_expr: case node_type::identifier_expr: return;
 	case node_type::binary_expr: { auto* b = static_cast<const binary_expr*>(e.get()); call_events(b->left, out, unsupported); call_events(b->right, out, unsupported); return; }
@@ -1129,7 +1129,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 		case node_type::assignment_expr: {
 			auto* s = static_cast<const assignment_expr*>(a.get());
 			if (x != s->value.get()) { out.why = "a call in a store's target"; return false; }
-			break;   // a store runs its value ahead of every part of its target, compound or plain (docs/invariants.md 12)
+			break;   // a store runs its value ahead of every part of its target, compound or plain (internal/invariants.md 12)
 		}
 		case node_type::call_expr: {
 			auto* ce = static_cast<const call_expr*>(a.get());

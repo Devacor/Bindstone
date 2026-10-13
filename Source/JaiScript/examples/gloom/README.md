@@ -7,13 +7,8 @@ is the same thin shell as the crawler/demoreel: a VT console, held-key input, a
 seeded `Rng`, a monotonic clock, flags as globals — now split into a shared,
 runtime-agnostic core and a per-language adapter so the cross-language
 comparison ports (ChaiScript/Squirrel/Lua, opt-in CMake targets) reuse the
-exact harness. PORTING.md is the porter's guide. Everything else — the raycaster, the sub-cell renderer, enemy
+exact harness. [ports/README.md](ports/README.md) is the porter's guide. Everything else — the raycaster, the sub-cell renderer, enemy
 brains, weapons, particles, the episode, the autopilot — is script.
-
-**The five-way comparison report** (JaiScript reference vs the Squirrel / Lua /
-ChaiScript / Python ports — perf, conformance, expressiveness, play) is
-[docs/GLOOM_COMPARISON.md](../../docs/GLOOM_COMPARISON.md); the per-port
-primary records are `ports/<lang>/NOTES.md`.
 
 GLOOM is the crawler's bigger sibling and a deliberate dogfood of this month's
 language work: **`parallel_transform`** drives the wall rays and the particle pool,
@@ -36,7 +31,7 @@ then:
 build/bin/jaiscript examples/gloom/gloom.jai
 ```
 
-(On Windows the runner is `buildin\jaiscript.exe`.) The native host is the `jai_gloom` target: `cmake --build build --config Release --target jai_gloom`, then
+(On Windows the runner is `build\bin\jaiscript.exe`.) The native host is the `jai_gloom` target: `cmake --build build --config Release --target jai_gloom`, then
 `build/bin/jai_gloom`.
 
 ## The look (doom-cli's trick, in script)
@@ -97,7 +92,7 @@ while turning and firing works like it should.
 ### No C++ host: the standalone runner
 
 `gloom.jai` is a drag-drop shim for the standalone `jaiscript.exe` runner: it
-supplies the host API of REFERENCE.md section 2 in pure script (a bit-exact
+supplies the host API of reference/README.md section 2 in pure script (a bit-exact
 xorshift64\* `Rng` under checked overflow, `host_log`/`itrunc`/`ifloor`/`utf8`/
 `ESC`, the `HOST_*` globals) on top of the runner's console IO, then loads
 `scripts/` and runs the host pump. Flags go after `--`:
@@ -178,9 +173,9 @@ Measured (i7-6920HQ 4C/8T, Release, 100x40 console, seed 666, quiet machine,
 Single 300-tick runs; treat ±10% as machine noise (a thermal-loaded rerun of
 this table once showed serial interp at 64 ms — measure quiet or measure twice).
 
-The current numbers (Core Ultra 9 285HX, 100x40, 600 warmed ticks, against Lua 5.4,
-5.5 and LuaJIT JIT under the same hashes) are in
-[docs/PERFORMANCE.md](../../docs/PERFORMANCE.md); the tables above are that older laptop.
+The tables above are an older laptop; the [performance guide](../../docs/site/embedding/11-performance.html)
+covers measuring JaiScript, and [ports/README.md](ports/README.md) the warmed comparison against Lua 5.4,
+5.5 and LuaJIT JIT under the same hashes.
 
 Stage ablation (VM, quad, W=4, measured by early-returning the pipeline):
 sim ~2 ms, ray chunk build ~1 ms, ray transform ~1.5 ms (2.2x over its serial
@@ -200,7 +195,7 @@ on background while every half-mode cell is a 3-byte half-block glyph.
 
 ### Captured reads dissolve the glyph wall (v0.5)
 
-`parallel_transform` captured reads (docs/parallel_design.md §13) let a body
+`parallel_transform` captured reads (docs/site/guide/09-containers-strings.html, "Parallel loops") let a body
 READ enclosing globals, so the quad glyph-row builder is now a per-row function
 over `ROWIDX` reading the pixel grid as a captured **borrow** (`PIX` is a flat
 all-primitive int array touched only by subscript — zero copies, raw element
@@ -253,7 +248,7 @@ words with the landlord.
 
 ```
 gloom_host.hpp/.cpp thin SHARED host: console, held keys, Rng, clock, flags,
-                    smoke/bench harness; language-agnostic (PORTING.md has the
+                    smoke/bench harness; language-agnostic (ports/README.md has the
                     adapter contract for the cross-language comparison ports)
 gloom_adapter_jai.cpp  the JaiScript adapter + main() (this exe)
 gloom_adapter_{chai,squirrel,lua}.cpp  port scaffolds (opt-in CMake targets)

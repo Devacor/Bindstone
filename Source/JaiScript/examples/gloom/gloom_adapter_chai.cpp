@@ -1,5 +1,5 @@
 // gloom_chai: ChaiScript adapter for the GLOOM shared host. Binds the host API
-// per REFERENCE.md section 2 into a chaiscript::ChaiScript engine, loads the
+// per reference/README.md section 2 into a chaiscript::ChaiScript engine, loads the
 // ports/chai/scripts game (main.chai use()s the rest), and forwards the six
 // gloom_* entry points. ChaiScript core has no math library, so the C-math the
 // game needs (sqrt/cos/sin/atan2/floor) is bound here alongside the host API.

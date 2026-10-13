@@ -5,13 +5,13 @@
 //     jaiscript.exe gloom_idiomatic.jai -- --smoke --ticks 300 headless parity self-test
 //     jaiscript.exe gloom_idiomatic.jai -- --bench 300         autopilot + live render split
 //
-// scripts/ here is the class-based rewrite measured in IDIOMATIC_COST.md; it is
+// scripts/ here is the class-based rewrite of ../gloom/scripts; it is
 // bit-exact with ../gloom/scripts (same STATE_HASH and frame bytes at every
 // documented checkpoint), so the same reference table gates parity. The shared
 // C++ host (../gloom/gloom_host.cpp) owned the console, input, clock, Rng, and
 // flags; the runner already provides the console half (key_down/read_key/
 // term_cols/term_rows/print) and the stdlib's time:: the clock. This file
-// supplies the rest of the REFERENCE.md section 2 contract in pure script —
+// supplies the rest of the ../gloom/reference/README.md section 2 contract in pure script —
 // Rng (bit-exact xorshift64* under checked overflow), host_log/itrunc/ifloor/
 // utf8/ESC, the HOST_* globals from ARGS — then loads scripts/ and runs the
 // host pump.
@@ -181,7 +181,7 @@ int SHIM_H = 0;
 float SHIM_FPS = 30.0;
 int SHIM_DUMP = -1;
 
-// REFERENCE.md section 3.5 checkpoints + IDIOMATIC_COST.md's 100/600 rows
+// ../gloom/reference/README.md section 3.5 checkpoints + the 100/600-tick rows
 // (the rewrite is bit-exact with canonical), keyed seed/god/ticks
 var SMOKE_REF = {
 	"666/0/100": 2414528911,

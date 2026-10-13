@@ -1,5 +1,5 @@
 // GLOOM shared host: the language-agnostic console shell for the cross-language
-// comparison. REFERENCE.md is the game/host spec; PORTING.md is the adapter
+// comparison. reference/README.md is the game/host spec; ports/README.md is the adapter
 // contract. The host owns: VT console, held-key state + key events, a monotonic
 // clock, the xorshift64* Rng, command-line flags, and the --smoke/--bench
 // harnesses with their hashes. A script_adapter supplies everything
@@ -127,7 +127,7 @@ public:
 	virtual std::string title() const {
 		return program_name() + " - GLOOM, a terminal raycast shooter (" + language() + " port)";
 	}
-	// Fresh engine + host-API bindings (REFERENCE.md section 2), scripts not yet
+	// Fresh engine + host-API bindings (reference/README.md section 2), scripts not yet
 	// loaded. live_input=false in smoke/bench (services.key_down is gated too).
 	virtual std::unique_ptr<script_session> make_session(const std::string& backend,
 		const host_services& services, const host_options& opt, bool live_input) = 0;

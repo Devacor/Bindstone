@@ -2,14 +2,14 @@
 rem Builds the peers and the JaiScript host into bench\kernels\bin.
 rem   set LUA_SRC=<lua-5.5.x source root>    (the folder holding src\lua.h)
 rem   set LUAJIT_SRC=<LuaJIT checkout root>  (the folder holding src\msvcbuild.bat)
-rem   set JAI_BUILD=<JaiScript build dir>    (default: out\build\x64-Release BENCHMARKS)
+rem   set JAI_BUILD=<JaiScript build dir>    (default: build, the package's Release build directory)
 setlocal enabledelayedexpansion
 rem msvcbuild.bat runs its freshly built helpers from the current directory
 set NoDefaultCurrentDirectoryInExePath=
 set HERE=%~dp0
 set ROOT=%HERE%..\..\..
 set OUT=%HERE%..\bin
-if "%JAI_BUILD%"=="" set JAI_BUILD=%ROOT%\out\build\x64-Release BENCHMARKS
+if "%JAI_BUILD%"=="" set JAI_BUILD=%ROOT%\build
 call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 if not exist "%OUT%" mkdir "%OUT%"
 pushd "%OUT%"

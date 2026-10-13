@@ -7,7 +7,7 @@
 // The shared C++ host (gloom_host.cpp) owned the console, input, clock, Rng,
 // and flags; the runner already provides the console half (key_down/read_key/
 // term_cols/term_rows/print) and the stdlib's time:: the clock. This file
-// supplies the rest of the REFERENCE.md section 2 contract in pure script —
+// supplies the rest of the reference/README.md section 2 contract in pure script —
 // Rng (bit-exact xorshift64* under checked overflow), host_log/itrunc/ifloor/
 // utf8/ESC, the HOST_* globals from ARGS — then loads scripts/ and runs the
 // host pump.
@@ -177,7 +177,7 @@ int SHIM_H = 0;
 float SHIM_FPS = 30.0;
 int SHIM_DUMP = -1;
 
-// REFERENCE.md section 3.5 checkpoints, keyed seed/god/ticks (pix-independent)
+// reference/README.md section 3.5 checkpoints, keyed seed/god/ticks (pix-independent)
 var SMOKE_REF = {
 	"666/0/300": 3580805725,
 	"666/0/2000": 319812559,

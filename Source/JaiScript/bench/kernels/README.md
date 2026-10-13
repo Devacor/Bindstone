@@ -53,9 +53,10 @@ host\build.cmd                             -> bin\lua_kernel_host.exe, luajit.ex
 python run.py [--runs 5] [--kernels a,b] [--impls jai_vm_typed,jai_vm_dyn,jai_interp_typed,jai_interp_dyn,lua,luajit_joff,luajit]
 ```
 
-`build.cmd` links the host against `out\build\x64-Release BENCHMARKS\lib\jaiscript.lib`, and `run.py`
-uses that folder's `bin\jaiscript.exe`: configure it with `-DCMAKE_BUILD_TYPE=Release
--DJAISCRIPT_ENABLE_BENCHMARKS=ON` and build `jaiscript_runner` first. Set `TIMING_LOCK` to a lock
+`build.cmd` links the host against `build\lib\jaiscript.lib`, and `run.py` uses `build\bin\jaiscript.exe`
+(the package's build layout, `docs/BUILD.md`): build the library and `jaiscript_runner` in Release
+first. `JAI_BUILD` names another build directory for both (an Open Folder build's
+`out\build\<config>`). Set `TIMING_LOCK` to a lock
 directory to share the machine; `--no-lock` skips it. The report lands in `RESULTS_<date>.md`.
 
 The "DAS interp est." columns scale this machine's Lua time by dasProfile's published DAS

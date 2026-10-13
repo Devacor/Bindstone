@@ -1,4 +1,4 @@
--- Generated from demo.jai by tools/transpile.py; see PORTING.md.
+-- Generated from demo.jai by tools/transpile.py; see internal/examples/jaidoom/ports/PORTING.md.
 require("map")
 require("things")
 DEMO_REC = false

@@ -267,7 +267,7 @@ where consumption differs.
 
 The host is shared across all language ports; each language supplies a thin
 adapter (`gloom_adapter_<lang>.cpp`) implementing the interface in
-`gloom_host.hpp` — see **PORTING.md** for the adapter contract, CMake options,
+`gloom_host.hpp` — see **ports/README.md** for the adapter contract, CMake options,
 measurement protocol, and feedback rubric.
 
 The host owns: console, input, timing, rng, flags. Script owns everything else.

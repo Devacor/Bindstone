@@ -8,7 +8,7 @@ import state
 
 # per-cell RENDER kinds for the raycaster (secret -> wall kind 1, red/blue
 # doors -> 7/8). The reference bit-packs this 15-per-int64 for its pure-value
-# parallel contract; REFERENCE.md 4.2 lets serial ports read a flat array.
+# parallel contract; reference/README.md 4.2 lets serial ports read a flat array.
 TILE_TO_KIND = (0, 1, 2, 3, 4, 5, 6, 1, 7, 8)
 
 

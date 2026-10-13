@@ -508,7 +508,7 @@ function rows_half(var& pix, var& parts) -> var {
 
 // quad mode: 2x2 pixels per cell, two colors by luminosity partition.
 // ONE glyph row, written as a parallel_transform body over CAPTURED state
-// (docs/parallel_design.md §13): PIX and PAL_LUM are all-primitive and touched
+// (docs/site/guide/09-containers-strings.html, "Parallel loops"): PIX and PAL_LUM are all-primitive and touched
 // only by subscript reads, so the region BORROWS them (zero-copy raw element
 // reads - the pixel grid never rides inside the elements); PAL_FG/PAL_BG/QUADG
 // are string tables (per-worker snapshots at the barrier, dense re-reads then

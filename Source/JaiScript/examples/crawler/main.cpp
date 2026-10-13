@@ -375,7 +375,7 @@ int main(int argc, char** argv) {
 
 	auto eng = jai::engine::make();
 	if (opt.debug) {
-		opt.backend = "interpreter";   // the statement hook is interpreter-only (see DEBUGGER_DESIGN.md)
+		opt.backend = "interpreter";
 		eng->set_backend(jai::backend_type::interpreter);
 	}
 	else if (opt.backend == "vm") { eng->set_backend(jai::backend_type::vm); }

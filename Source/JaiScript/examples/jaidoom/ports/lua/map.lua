@@ -1,4 +1,4 @@
--- Generated from map.jai by tools/transpile.py; see PORTING.md.
+-- Generated from map.jai by tools/transpile.py; see internal/examples/jaidoom/ports/PORTING.md.
 require("wad")
 MAP_NAME = ""
 VX_X = _j_array({})

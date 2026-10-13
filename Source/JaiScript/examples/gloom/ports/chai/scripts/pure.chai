@@ -1,4 +1,4 @@
-// The wall-ray DDA (REFERENCE.md 1.8 / 4.2). The reference runs this as a
+// The wall-ray DDA (reference/README.md 1.8 / 4.2). The reference runs this as a
 // pure parallel body over column chunks; ports run the serial-equivalent form
 // (identical math, identical outputs). One shared implementation serves both
 // the renderer (per cell column) and hitscan/tracers (single rays): results

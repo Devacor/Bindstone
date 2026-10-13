@@ -1,5 +1,5 @@
 // The episode: hand-authored maps + parser + boot-time validation.
-// Map chars / tile ints per the reference (REFERENCE.md section 1.9/1.11).
+// Map chars / tile ints per the reference (reference/README.md section 1.9/1.11).
 // Chars are compared as Squirrel char-code integers (s[i] is an int).
 
 ::MAPS <- [

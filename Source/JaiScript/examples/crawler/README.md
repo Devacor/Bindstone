@@ -59,7 +59,7 @@ then:
 build/bin/jaiscript examples/crawler/scripts/crawler.jai
 ```
 
-(On Windows the runner is `buildin\jaiscript.exe`.) The native host is the `jai_crawler` target: `cmake --build build --config Release --target jai_crawler`, then
+(On Windows the runner is `build\bin\jaiscript.exe`.) The native host is the `jai_crawler` target: `cmake --build build --config Release --target jai_crawler`, then
 `build/bin/jai_crawler`.
 
 ## Build

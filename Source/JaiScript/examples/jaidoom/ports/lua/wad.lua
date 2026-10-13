@@ -1,4 +1,4 @@
--- Generated from wad.jai by tools/transpile.py; see PORTING.md.
+-- Generated from wad.jai by tools/transpile.py; see internal/examples/jaidoom/ports/PORTING.md.
 WAD = ""
 WAD_ID = ""
 WAD_BASE = ""

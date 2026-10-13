@@ -21,7 +21,7 @@ function main() -> int {
 	check(WAD_ID == "IWAD", "IWAD header");
 	check(NUM_LUMPS > 1000 && NUM_LUMPS < 3000, "plausible lump count");
 
-	// language byte-contract pins (char_semantics.md: promotion, to_char, \xNN)
+	// language byte-contract pins (docs/site/guide/04-operators.html: promotion, to_char, \xNN)
 	check(("A"[0] + 0) == 65 && "I"[0] == 73 && " "[0] == 32, "char promotion in arithmetic AND comparison");
 	check(to_char(73) == 'I' && ("" + to_char(0)).size() == 1, "to_char minting round-trip (incl. NUL)");
 	check("\xC8"[0] == 200 && ("\xFF"[0] + 0) == 255, "\\xNN literals; high bytes unsigned both ways");

@@ -24,7 +24,7 @@ then:
 build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai
 ```
 
-(On Windows the runner is `buildin\jaiscript.exe`.)
+(On Windows the runner is `build\bin\jaiscript.exe`.)
 
 ## Play
 

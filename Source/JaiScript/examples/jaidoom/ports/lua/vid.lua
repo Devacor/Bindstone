@@ -1,4 +1,4 @@
--- Generated from vid.jai by tools/transpile.py; see PORTING.md.
+-- Generated from vid.jai by tools/transpile.py; see internal/examples/jaidoom/ports/PORTING.md.
 require("wad")
 ESC = ""
 RESET = ""

@@ -2,7 +2,7 @@
 every creature's script layer derives) plus every creature's main.script / mainClient.script.
 Run from the repo root: python Tools/Creatures/generate_creatures.py
 
-Model (Source/JaiScript/docs/script_extensible.md): each creature's spawn hook extends the C++
+Model (Source/JaiScript/docs/site/embedding/13-script-extensible.html): each creature's spawn hook extends the C++
 ServerCreature it is handed with the script class - in place, so the host's handle becomes the
 layer - and the update/death hooks call the layer's methods. C++ never names a class. Inside
 methods, members and inherited C++ methods are bare; callbacks never capture the creature - they
@@ -17,7 +17,7 @@ def write(rel, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     open(path, "w", encoding="utf-8", newline="\n").write(text)
 
-KIND = r'''// The base every creature's script layer derives (Source/JaiScript/docs/script_extensible.md).
+KIND = r'''// The base every creature's script layer derives (Source/JaiScript/docs/site/embedding/13-script-extensible.html).
 // A creature's spawn hook extends the ServerCreature it is handed with its element's class; the
 // update/death hooks call the layer. Any creature that crosses back into script - targeting.self(),
 // game().creature(id), alliesInRange() - IS its layer, so its fields are readable from any script.

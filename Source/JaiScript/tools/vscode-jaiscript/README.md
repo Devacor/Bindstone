@@ -33,10 +33,11 @@ or link it into your extensions folder
 Windows), or package it: `npm install`, `npx @vscode/vsce package`, then
 `code --install-extension jaiscript-0.2.0.vsix`.
 
-Build the server with `cmake --build "out/build/x64-Release BENCHMARKS" --target jaiscript_lsp`.
-The extension looks for it in this order: the `jaiscript.languageServer.path` setting,
-`server/jaiscript_lsp.exe` inside the extension folder, the repository's build
-(`out/build/x64-Release BENCHMARKS`, `x64-Release`, `x64-Debug`), then `PATH`.
+Build the server like any other target, `cmake --build build --target jaiscript_lsp`; the binary
+lands in `build/bin/` (see `docs/BUILD.md`). The extension looks for it in this order: the
+`jaiscript.languageServer.path` setting, `server/jaiscript_lsp` inside the extension folder, the
+repository's Visual Studio Open Folder build tree (`out/build/<config>/bin/`), then `PATH`. For a
+`build/` directory, set `jaiscript.languageServer.path` or put `build/bin` on `PATH`.
 
 ## Settings
 

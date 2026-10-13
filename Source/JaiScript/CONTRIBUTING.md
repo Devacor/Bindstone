@@ -131,9 +131,11 @@ jaiscript_fuzz --no-proofs             # with parse-time type proofs disabled
 jaiscript_fuzz --no-suppressions       # include already-triaged shapes
 ```
 
-Exit code 0 means no *new* divergence. The already-triaged shapes are written up in
-`source/tests/fuzz/known_divergences.md`; if you hit one of those, the entry explains why it is
-allowed. A fixed set of seeds also runs inside `jaiscript_tests` as the "Differential Fuzz
+Exit code 0 means no *new* divergence. The already-triaged shapes are the suppressions in
+`known_suppressions()` (`source/tests/fuzz/fuzz_harness.hpp`): each one has an id, a one-line
+description, and needles that match the program text and the reported difference. Triaging a
+divergence means adding such an entry, with a comment naming the backend at fault; fixing it
+means removing the entry and re-running its seeds with `--no-suppressions`. A fixed set of seeds also runs inside `jaiscript_tests` as the "Differential Fuzz
 Smoke" suite, so a regression shows up in the ordinary test run.
 
 ## Code style
@@ -161,21 +163,23 @@ Match the surrounding code. Beyond that:
 
 Two catalogues move with the code:
 
-- **Error texts** are listed in [`docs/diagnostics.md`](docs/diagnostics.md) and must stay
-  byte-identical across backends. Change a text, update the catalog, and check the site for
+- **Error texts** are listed in the "Run-time errors" table of the reference
+  ([`docs/site/reference/index.html`](docs/site/reference/index.html#run-time-errors)) and must
+  stay byte-identical across backends. Change a text, update that table, and check the site for
   output blocks that quote it.
 - **The AST format.** A change to what the serializer writes bumps `k_jaibite_version` in
   `include/jaiscript/detail/ast_serializer.hpp`, so stale `.jaibite` caches are
   rejected instead of misread.
 
 Before you touch value layout, `strong_ptr`, raw-index dispatch or the VM run loop, read
-[`docs/invariants.md`](docs/invariants.md).
+[`internal/invariants.md`](internal/invariants.md).
 
 ## Documentation
 
-Prose lives in two places, and they have a precedence order: `docs/*.md` are the contract, and
-the site in `docs/site/` explains it. When they disagree, the `.md` files win and the site is
-the bug.
+The site in `docs/site/` is the specification as well as the documentation: the guide, the
+embedding guide and the reference state the rules, and the tests hold the implementation to
+them. When the code and the site disagree, one of them is a bug; a change to a rule changes the
+site in the same commit.
 
 Every JaiScript sample on the site must run on both backends under strict checking. If you
 change a sample, run it:
@@ -194,8 +198,8 @@ One-line commit messages — a title, no body.
 Before you open a PR:
 
 - [ ] `jaiscript_tests` and `jaiscript_tests --backend=vm` green in Debug **and** Release
-- [ ] `jaiscript_fuzz` green (or the divergence triaged in `known_divergences.md`)
-- [ ] `docs/diagnostics.md` updated if any error text changed
+- [ ] `jaiscript_fuzz` green (or the divergence triaged as a suppression in `fuzz_harness.hpp`)
+- [ ] the reference's "Run-time errors" table updated if any error text changed
 - [ ] docs updated, and any sample you touched re-run on both backends
 - [ ] no new `static` / `thread_local` mutable state
 

@@ -199,8 +199,8 @@ static int run(int argc, char** argv) {
 	try {
 		call(*eng, "explode", {eng->make_value("kaboom")});
 		expect(false, "a script throw inside a called function reaches the host");
-	} catch (const jai::script_exception& e) {
-		expect(std::string(e.what()) == "kaboom", std::string("a script throw arrives as jai::script_exception: ") + e.what());
+	} catch (const jai::runtime_error& e) {   // a checked_result call reports the throw in its result; call() rethrows that error
+		expect(std::string(e.what()) == "kaboom", std::string("a script throw arrives as the call's error: ") + e.what());
 	}
 	auto typed_tick = jai::convert_script_function<int64_t(int64_t)>(eng->get_variable("tick"));
 	expect(typed_tick(1) == 2, "convert_script_function gives a typed std::function");

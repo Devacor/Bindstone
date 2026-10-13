@@ -27,6 +27,7 @@ Studio; agents build and verify it from the command line (below).
 | `Source/Editor` | Legacy in-game editor (scene/BindSnap authoring), kept until `Source/Workbench` reaches authoring parity |
 | `Source/Workbench` | The editor: dockable panels, reflection-driven inspector, undo/redo, gizmos, hot-reloaded `.jai` panels (`Bindstone.exe -workbench`) |
 | `Source/JaiScript` | JaiScript: the scripting language, property system and archives everything above serializes through (own AGENTS.md, CMake build, test suite) |
+| `Source/JaiScriptComparisons` | JaiScript against ChaiScript, Lua, LuaJIT, Luau and Squirrel: the game ports, `comparison_benchmarks`, the kernel suite's Lua side (own CMake project that adds `Source/JaiScript`; its README has the path map) |
 | `Source/SolutionSpecific` | Entry points for each executable (client, Android client, game server, lobby server) |
 | `Assets/`       | Art, JSON catalogs, Spine animations, `.scene`/`.bindsnap` files, JaiScript `.script` gameplay/UI scripts and `.jai` Workbench panels |
 | `Tools/`        | Generators and harnesses (`Creatures/generate_creatures.py`, `Balance/arena.py`, `LocalServer/`) |

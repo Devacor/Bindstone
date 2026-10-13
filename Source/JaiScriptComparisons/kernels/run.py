@@ -11,10 +11,11 @@ per kernel. Writes RESULTS_<date>.md beside this file.
 import argparse, datetime, os, re, statistics, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
+ROOT = os.path.normpath(os.path.join(HERE, "..", "..", "JaiScript"))   # the JaiScript kernels and their host live in its bench/kernels
+JAI_KERNELS = os.path.join(ROOT, "bench", "kernels")
 BIN = os.path.join(HERE, "bin")
 RUNNER = os.path.join(os.environ.get("JAI_BUILD") or os.path.join(ROOT, "build"), "bin", "jaiscript.exe")
-HOST = os.path.join(BIN, "jai_kernel_host.exe")
+HOST = os.path.join(JAI_KERNELS, "bin", "jai_kernel_host.exe")
 LUA = os.path.join(BIN, "lua_kernel_host.exe")
 LUAJIT = os.path.join(BIN, "luajit.exe")
 LOCK = os.environ.get("TIMING_LOCK", "")
@@ -73,10 +74,10 @@ def command(impl, kernel):
     if impl.startswith("jai_"):
         backend = "interp" if "_interp_" in impl else "vm"
         flavor = "dyn" if impl.endswith("_dyn") else "typed"
-        script = os.path.join(HERE, "jai", f"{kernel}_{flavor}.jai")
+        script = os.path.join(JAI_KERNELS, "jai", f"{kernel}_{flavor}.jai")
         if kernel == "interop":
-            return [HOST, f"--backend={backend}", script], os.path.join(HERE, "jai")
-        return [RUNNER, "--no-debug", "--no-pause", f"--backend={backend}", script], os.path.join(HERE, "jai")
+            return [HOST, f"--backend={backend}", script], os.path.join(JAI_KERNELS, "jai")
+        return [RUNNER, "--no-debug", "--no-pause", f"--backend={backend}", script], os.path.join(JAI_KERNELS, "jai")
     lua_dir = os.path.join(HERE, "lua")
     if impl == "lua":
         return [LUA, f"{kernel}.lua"], lua_dir

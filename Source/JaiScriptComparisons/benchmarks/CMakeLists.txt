@@ -1,0 +1,55 @@
+# comparison_benchmarks: the Foundry suites that time JaiScript against ChaiScript, Lua (sol2) and Squirrel in one
+# process. A runtime that is absent compiles its suite down to a skip.
+add_executable(comparison_benchmarks
+    "${JAISCRIPT_DIR}/source/tests/main_test_runner.cpp"
+    chaiscript_comparison.cpp
+    sol2_comparison.cpp
+    squirrel_comparison.cpp
+)
+target_link_libraries(comparison_benchmarks PRIVATE jaiscript)
+target_compile_definitions(comparison_benchmarks PRIVATE FOUNDRY_VERBOSE=1)
+if(MSVC)
+    target_compile_options(comparison_benchmarks PRIVATE /W3 /bigobj)
+    target_link_options(comparison_benchmarks PRIVATE /STACK:134217728)
+endif()
+
+if(EXISTS "${COMPARISONS_CHAISCRIPT_ROOT}/include/chaiscript/chaiscript.hpp")
+    target_include_directories(comparison_benchmarks PRIVATE "${COMPARISONS_CHAISCRIPT_ROOT}/include")
+    target_compile_definitions(comparison_benchmarks PRIVATE HAVE_CHAISCRIPT=1 CHAISCRIPT_NO_THREADS=1)
+    message(STATUS "comparisons: ChaiScript at ${COMPARISONS_CHAISCRIPT_ROOT}")
+else()
+    message(STATUS "comparisons: ChaiScript not found at ${COMPARISONS_CHAISCRIPT_ROOT}")
+endif()
+
+set(SQUIRREL_ROOT "${COMPARISONS_THIRD_PARTY}/squirrel")
+if(EXISTS "${SQUIRREL_ROOT}/include/squirrel.h")
+    file(GLOB squirrel_sources "${SQUIRREL_ROOT}/squirrel/*.cpp" "${SQUIRREL_ROOT}/sqstdlib/*.cpp")
+    add_library(squirrel_lib STATIC ${squirrel_sources})
+    target_include_directories(squirrel_lib PUBLIC "${SQUIRREL_ROOT}/include")
+    if(MSVC)
+        target_compile_options(squirrel_lib PRIVATE /W2)
+    endif()
+    target_link_libraries(comparison_benchmarks PRIVATE squirrel_lib)
+    target_compile_definitions(comparison_benchmarks PRIVATE HAVE_SQUIRREL=1)
+    message(STATUS "comparisons: Squirrel at ${SQUIRREL_ROOT}")
+else()
+    message(STATUS "comparisons: Squirrel not found at ${SQUIRREL_ROOT}")
+endif()
+
+set(LUA_ROOT "${COMPARISONS_THIRD_PARTY}/lua")
+set(SOL2_ROOT "${COMPARISONS_THIRD_PARTY}/sol2")
+if(EXISTS "${LUA_ROOT}/src/lua.h" AND EXISTS "${SOL2_ROOT}/include/sol/sol.hpp")
+    file(GLOB lua_sources "${LUA_ROOT}/src/*.c")
+    list(FILTER lua_sources EXCLUDE REGEX "/(lua|luac)\.c$")
+    add_library(lua_lib STATIC ${lua_sources})
+    target_include_directories(lua_lib PUBLIC "${LUA_ROOT}/src")
+    if(MSVC)
+        target_compile_options(lua_lib PRIVATE /W3)
+    endif()
+    target_include_directories(comparison_benchmarks PRIVATE "${SOL2_ROOT}/include")
+    target_link_libraries(comparison_benchmarks PRIVATE lua_lib)
+    target_compile_definitions(comparison_benchmarks PRIVATE HAVE_SOL2=1)
+    message(STATUS "comparisons: Lua + sol2 at ${LUA_ROOT} / ${SOL2_ROOT}")
+else()
+    message(STATUS "comparisons: Lua/sol2 not found at ${LUA_ROOT} / ${SOL2_ROOT}")
+endif()

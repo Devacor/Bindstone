@@ -196,11 +196,12 @@ class FrameCertificateTests(unittest.TestCase):
 		self.addCleanup(self.temp.cleanup)
 		self.root=pathlib.Path(self.temp.name)
 		self.game=self.root/"examples/jaidoom"
+		self.comparisons=self.root/"comparisons"
 		self.build=self.root/"build"
 		self.cert=self.root/"certificate"
 		self.cert.mkdir()
 		self.inputs={}
-		for path in [self.game/"scripts/main.jai",self.game/"ports/lua/main.lua",
+		for path in [self.game/"scripts/main.jai",self.comparisons/"jaidoom/ports/lua/main.lua",
 			self.game/"demo.json",self.game/"wads/doom1.wad",
 			self.build/"bin/jai_doom_lua.exe",self.build/"bin/jai_doom_lua_padding.exe"]:
 			path.parent.mkdir(parents=True,exist_ok=True)
@@ -218,13 +219,13 @@ class FrameCertificateTests(unittest.TestCase):
 			(self.cert/(name+".trace")).write_text(self.trace)
 
 	def validate(self):
-		return comparison.validate_timedemo_conformance(self.cert,{"baseline":self.build},self.root)
+		return comparison.validate_timedemo_conformance(self.cert,{"baseline":self.build},self.root,self.comparisons)
 
 	def test_complete_matching_frame_certificate_is_accepted(self):
 		self.assertEqual(7968,self.validate()["records_per_configuration"])
 
 	def test_changed_script_invalidates_the_certificate(self):
-		(self.game/"ports/lua/main.lua").write_text("changed")
+		(self.comparisons/"jaidoom/ports/lua/main.lua").write_text("changed")
 		with self.assertRaisesRegex(RuntimeError,"input changed"):
 			self.validate()
 

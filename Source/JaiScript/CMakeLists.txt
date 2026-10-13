@@ -26,12 +26,14 @@ else()
     set(JAISCRIPT_IS_TOP_LEVEL OFF)
 endif()
 
-# Output directories
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
-foreach(config Debug Release RelWithDebInfo MinSizeRel)   # a multi-config generator puts every configuration's programs in bin/ too
-    string(TOUPPER ${config} config_upper)
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config_upper} ${PROJECT_BINARY_DIR}/bin)
-endforeach()
+# Output directories (a parent project that chose its own programs directory keeps it)
+if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
+    foreach(config Debug Release RelWithDebInfo MinSizeRel)   # a multi-config generator puts every configuration's programs in bin/ too
+        string(TOUPPER ${config} config_upper)
+        set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config_upper} ${PROJECT_BINARY_DIR}/bin)
+    endforeach()
+endif()
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 

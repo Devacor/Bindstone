@@ -1,5 +1,4 @@
-// jai_demoreel: the JaiScript adapter for the demoreel shared host and the reference
-// implementation of the adapter contract (README.md, Porting). Two engine backends (tree-walking
+// jai_demoreel: the JaiScript adapter for the demoreel shared host. Two engine backends (tree-walking
 // interpreter, bytecode vm) run the same scenes/*.jai; --smoke byte-compares their
 // frame streams, TAB swaps the live one, 'r' hot-reloads every scene file.
 

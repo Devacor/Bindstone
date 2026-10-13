@@ -2,7 +2,7 @@
 
 Build the baseline and candidate Release trees with DEMOREEL_PADDING_CONTROLS=ON. Enable DEMOREEL_PORT_LUA and DEMOREEL_PORT_SQUIRREL on the baseline tree for the port controls. The CMake roots for those dependencies are explicit cache options.
 
-Use run_ossuary_comparison.py with --baseline BUILD --candidate BUILD --scenes SHAPED --natural-scenes NATURAL --lua-scenes LUA --squirrel-scenes SQUIRREL --output PATH. All output must be under Source/JaiScript/out/astra. Make NATURAL from a copy of the scene directory with skull_natural.jai replacing skull.jai. The original scripts remain unchanged.
+Use run_ossuary_comparison.py with --baseline BUILD --candidate BUILD --scenes SHAPED --natural-scenes NATURAL --lua-scenes LUA --squirrel-scenes SQUIRREL --output PATH. All output must be under Source/JaiScriptComparisons/out. Make NATURAL from a copy of the scene directory with skull_natural.jai replacing skull.jai. The original scripts remain unchanged.
 
 The runner measures the zero-based scene 15 at 100x40, t=3.0 and seed 20260705. Default workload: five measured frames, preceded by five warm-up frames in the same runtime and then a reboot/jump to the same scene state. --frames N and --warmup N can increase the interval. --perf --scene also works directly on each executable; without --scene the existing whole-reel per-scene behavior is retained.
 

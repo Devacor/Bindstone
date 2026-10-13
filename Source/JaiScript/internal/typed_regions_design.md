@@ -476,7 +476,7 @@ point for the ceiling of the technique and is measured as such, labeled as a JIT
 ## Comparison suite
 
 The reference numbers are the GLOOM ports under bit-exact conformance hashes
-(`examples/gloom/ports`). The suite carries Lua 5.4 today; it gains Lua 5.5 (array storage
+(`JaiScriptComparisons/gloom/ports`). The suite carries Lua 5.4 today; it gains Lua 5.5 (array storage
 and collector changed between the two) and LuaJIT, each run warmed, with the core count
 stated, on the same 600-tick workload. Whole-application numbers (GLOOM, the JaiDOOM
 timedemo) are reported separately from native-bound object workloads.

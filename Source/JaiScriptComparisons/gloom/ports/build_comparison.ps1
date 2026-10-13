@@ -4,14 +4,15 @@ param(
 	[switch]$ProfileMarkers
 )
 $ErrorActionPreference = 'Stop'
-$jaiRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
+$comparisonRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+$jaiRoot = [IO.Path]::GetFullPath((Join-Path $comparisonRoot '..\JaiScript'))
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
-	$OutputRoot = Join-Path $jaiRoot 'out\astra'
+	$OutputRoot = Join-Path $comparisonRoot 'out'
 }
 $OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
-$outPrefix = [IO.Path]::GetFullPath((Join-Path $jaiRoot 'out\astra')) + [IO.Path]::DirectorySeparatorChar
+$outPrefix = [IO.Path]::GetFullPath((Join-Path $comparisonRoot 'out')) + [IO.Path]::DirectorySeparatorChar
 if ($OutputRoot -ne $outPrefix.TrimEnd([IO.Path]::DirectorySeparatorChar) -and -not $OutputRoot.StartsWith($outPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-	throw 'The comparison build must be under Source/JaiScript/out/astra/.'
+	throw 'The comparison build must be under Source/JaiScriptComparisons/out/.'
 }
 if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
 	throw 'Run this script in an x64 Visual Studio Native Tools environment.'
@@ -29,7 +30,7 @@ try {
 }
 $release = Join-Path $OutputRoot 'release'
 $configure = @(
-	'-S', $jaiRoot, '-B', $release, '-G', 'Ninja',
+	'-S', $comparisonRoot, '-B', $release, '-G', 'Ninja',
 	'-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_CXX_COMPILER=cl', '-DCMAKE_C_COMPILER=cl',
 	'-DCMAKE_CXX_FLAGS_RELEASE=/O2 /DNDEBUG /Zi',
 	'-DCMAKE_C_FLAGS_RELEASE=/O2 /DNDEBUG /Zi',

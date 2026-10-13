@@ -19,9 +19,9 @@ instead of rejecting (a desktop-load snapshot, reported as such).
 import argparse, importlib.util, json, os, pathlib, re, statistics, subprocess, sys, time
 
 HERE = pathlib.Path(__file__).resolve().parent
-GAME = HERE.parent
-ROOT = HERE.parents[2]
-SPEC = importlib.util.spec_from_file_location("gloom_comparison", ROOT / "examples/gloom/ports/run_comparison.py")
+ROOT = HERE.parents[2] / "JaiScript"
+GAME = ROOT / "examples/gatorquest"
+SPEC = importlib.util.spec_from_file_location("gloom_comparison", HERE.parents[1] / "gloom/ports/run_comparison.py")
 COMMON = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(COMMON)
 

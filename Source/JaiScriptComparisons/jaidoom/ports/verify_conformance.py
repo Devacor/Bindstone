@@ -6,7 +6,7 @@ def digest(path):
 	return hashlib.sha256(path.read_bytes()).hexdigest()
 
 def main():
-	root=pathlib.Path(__file__).resolve().parents[3]
+	root=pathlib.Path(__file__).resolve().parents[3]/"JaiScript"
 	parser=argparse.ArgumentParser(description=__doc__)
 	parser.add_argument("--build",type=pathlib.Path,required=True)
 	parser.add_argument("--game-root",type=pathlib.Path,default=root/"examples/jaidoom")
@@ -19,10 +19,10 @@ def main():
 	if args.repeats<0 or args.limit<0:parser.error("negative count")
 	backends=args.backends.split(",")
 	if not backends or any(x not in ("vm","interpreter") for x in backends):parser.error("unknown backend")
-	out=args.output.resolve();out.relative_to((root/"out/astra").resolve())
+	out=args.output.resolve();out.relative_to((pathlib.Path(__file__).resolve().parents[2]/"out").resolve())
 	if out.exists():parser.error("use a fresh evidence directory")
 	out.mkdir(parents=True)
-	game=args.game_root.resolve();scripts=(args.lua_scripts or game/"ports/lua").resolve();build=args.build.resolve()
+	game=args.game_root.resolve();scripts=(args.lua_scripts or pathlib.Path(__file__).resolve().parent/"lua").resolve();build=args.build.resolve()
 	extension=".exe" if __import__("os").name=="nt" else ""
 	exes={n:build/"bin"/(n+extension) for n in ("jai_doom_reference","jai_doom_lua","jai_doom_lua_padding")}
 	files=[*game.joinpath("scripts").glob("*.jai"),*scripts.glob("*.lua"),game/"demo.json",game/"wads/doom1.wad",*exes.values()]

@@ -33,10 +33,10 @@ The host binds binary file IO, paths, a steady millisecond clock, integer/floor 
 
 ## Build
 
-Use an x64 Visual Studio Native Tools shell on Windows. All build directories below are under out/astra.
+Use an x64 Visual Studio Native Tools shell on Windows. All build directories below are under Source/JaiScriptComparisons/out.
 
-    cmake -S Source/JaiScript -B Source/JaiScript/out/astra/doom-comparison -G Ninja -DCMAKE_BUILD_TYPE=Release -DJAISCRIPT_BUILD_TESTS=OFF -DJAISCRIPT_BUILD_EXAMPLES=ON -DJAISCRIPT_BUILD_RUNNER=ON -DJAISCRIPT_RUNNER_PADDING_CONTROL=ON -DJAIDOOM_PORT_LUA=ON -DJAIDOOM_PORT_TOOLS=ON -DJAIDOOM_LUA_ROOT=D:/git/Bindstone/Source/JaiScript/out/astra/deps/lua-5.4.8
-    cmake --build Source/JaiScript/out/astra/doom-comparison --target jaiscript_runner jaiscript_runner_padding jai_doom_lua jai_doom_lua_padding jai_doom_reference
+    cmake -S Source/JaiScriptComparisons -B Source/JaiScriptComparisons/out/doom-comparison -G Ninja -DCMAKE_BUILD_TYPE=Release -DJAISCRIPT_RUNNER_PADDING_CONTROL=ON -DJAIDOOM_PORT_LUA=ON -DJAIDOOM_PORT_TOOLS=ON -DJAIDOOM_LUA_ROOT=Source/JaiScriptComparisons/out/deps/lua-5.4.8
+    cmake --build Source/JaiScriptComparisons/out/doom-comparison --target jaiscript_runner jaiscript_runner_padding jai_doom_lua jai_doom_lua_padding jai_doom_reference
 
 The existing GLOOM build_comparison.ps1 also builds these targets. Its preparation script verifies the pinned Lua archive. The Lua host can be built standalone from this ports directory with JAIDOOM_LUA_ROOT set; the reference/export tools require the main JaiScript project.
 
@@ -48,7 +48,7 @@ The existing GLOOM build_comparison.ps1 also builds these targets. Its preparati
 
 --repeat 1: the first complete replay warms the runtime, then main() runs again without recreating the state. Both state hashes are required. No frame tracing occurs unless --trace is supplied. --limit requires --trace and produces only a diagnostic prefix.
 
-    python Source/JaiScript/examples/jaidoom/ports/verify_conformance.py --build Source/JaiScript/out/astra/doom-comparison --output Source/JaiScript/out/astra/doom-conformance
+    python Source/JaiScriptComparisons/jaidoom/ports/verify_conformance.py --build Source/JaiScriptComparisons/out/doom-comparison --output Source/JaiScriptComparisons/out/doom-conformance
 
 For a frozen source copy, also pass --game-root. Conformance defaults to both JaiScript backends and both Lua layouts, with one warm replay. It refuses to reuse an evidence directory and records input/executable SHA256 hashes.
 
@@ -56,7 +56,7 @@ For a frozen source copy, also pass --game-root. Conformance defaults to both Ja
 
 Use the existing whole-program runner:
 
-    python Source/JaiScript/examples/gloom/ports/run_comparison.py --build Source/JaiScript/out/astra/doom-comparison --engines jai-lua --workloads timedemo --rounds 3 --output Source/JaiScript/out/astra/doom-pair
+    python Source/JaiScriptComparisons/gloom/ports/run_comparison.py --build Source/JaiScriptComparisons/out/doom-comparison --engines jai-lua --workloads timedemo --rounds 3 --output Source/JaiScriptComparisons/out/doom-pair
 
 With both runtimes selected, each round runs Jai normal, Lua normal, Jai padded, Lua padded, then repeats that sequence. Three rounds give six accepted samples per runtime/layout. Every process runs a full warm-up and replay, pinned to one detected performance core. The padding binary has 40 retained volatile statements in its cold help function. Report the paired padding range beside each median.
 
@@ -70,6 +70,6 @@ The runner automatically creates a full frame certificate before timing Lua, or 
 
 Build jai_doom_export_ast, export the 17 source modules to .jai.json files, then:
 
-    python Source/JaiScript/examples/jaidoom/ports/tools/transpile.py --ast PATH/TO/AST --output Source/JaiScript/examples/jaidoom/ports/lua
+    python Source/JaiScriptComparisons/jaidoom/ports/tools/transpile.py --ast PATH/TO/AST --output Source/JaiScriptComparisons/jaidoom/ports/lua
 
 The exporter uses JaiScript's actual parser, including its template-string desugaring. The generator propagates workload types, rejects unsupported AST forms and emits readable Lua. Keep runtime.lua and the explicit string-builder equivalents. A regenerated port is not a measurement input until its source manifest and full cold/warm frame oracle are reverified.

@@ -35,37 +35,6 @@ if(JAISCRIPT_ENABLE_BENCHMARKS)
         performance/*.hpp
     )
     message(STATUS "JaiScript: Performance benchmarks ENABLED (may increase test runtime)")
-
-    # Check if ChaiScript is available for comparison benchmarks
-    set(CHAISCRIPT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../External/ChaiScript-6.1.0")
-    if(EXISTS "${CHAISCRIPT_ROOT}/include/chaiscript/chaiscript.hpp")
-        message(STATUS "JaiScript: ChaiScript found - enabling comparison benchmarks")
-        set(HAVE_CHAISCRIPT ON)
-    else()
-        message(STATUS "JaiScript: ChaiScript not found at ${CHAISCRIPT_ROOT}")
-        set(HAVE_CHAISCRIPT OFF)
-    endif()
-
-    # Check if Squirrel is available for comparison benchmarks
-    set(SQUIRREL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../squirrel")
-    if(EXISTS "${SQUIRREL_ROOT}/include/squirrel.h")
-        message(STATUS "JaiScript: Squirrel found - enabling comparison benchmarks")
-        set(HAVE_SQUIRREL ON)
-    else()
-        message(STATUS "JaiScript: Squirrel not found at ${SQUIRREL_ROOT}")
-        set(HAVE_SQUIRREL OFF)
-    endif()
-
-    # Check if Lua + sol2 are available for comparison benchmarks
-    set(LUA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../lua")
-    set(SOL2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../sol2")
-    if(EXISTS "${LUA_ROOT}/src/lua.h" AND EXISTS "${SOL2_ROOT}/include/sol/sol.hpp")
-        message(STATUS "JaiScript: Lua + sol2 found - enabling comparison benchmarks")
-        set(HAVE_SOL2 ON)
-    else()
-        message(STATUS "JaiScript: Lua/sol2 not found at ${LUA_ROOT} / ${SOL2_ROOT}")
-        set(HAVE_SOL2 OFF)
-    endif()
 else()
     message(STATUS "JaiScript: Performance benchmarks DISABLED (use -DJAISCRIPT_ENABLE_BENCHMARKS=ON to enable)")
 endif()
@@ -91,82 +60,6 @@ target_compile_definitions(jaiscript_tests PRIVATE
 target_include_directories(jaiscript_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
-
-# Add ChaiScript support if available
-if(HAVE_CHAISCRIPT)
-    target_include_directories(jaiscript_tests PRIVATE
-        "${CHAISCRIPT_ROOT}/include"
-    )
-    target_compile_definitions(jaiscript_tests PRIVATE
-        HAVE_CHAISCRIPT=1
-        CHAISCRIPT_NO_THREADS=1  # ChaiScript thread support not needed for benchmarks
-    )
-    message(STATUS "JaiScript: ChaiScript include path: ${CHAISCRIPT_ROOT}/include")
-endif()
-
-# Add Squirrel support if available
-if(HAVE_SQUIRREL)
-    # Build Squirrel library
-    set(SQUIRREL_SRC_DIR "${SQUIRREL_ROOT}/squirrel")
-    set(SQSTDLIB_SRC_DIR "${SQUIRREL_ROOT}/sqstdlib")
-
-    # Collect Squirrel source files
-    file(GLOB SQUIRREL_SOURCES "${SQUIRREL_SRC_DIR}/*.cpp")
-    file(GLOB SQSTDLIB_SOURCES "${SQSTDLIB_SRC_DIR}/*.cpp")
-
-    # Create Squirrel static library
-    add_library(squirrel_lib STATIC ${SQUIRREL_SOURCES} ${SQSTDLIB_SOURCES})
-    target_include_directories(squirrel_lib PUBLIC
-        "${SQUIRREL_ROOT}/include"
-    )
-    if(MSVC)
-        target_compile_options(squirrel_lib PRIVATE /W2)
-        set_property(TARGET squirrel_lib PROPERTY
-            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-        )
-    endif()
-
-    # Link Squirrel to tests
-    target_include_directories(jaiscript_tests PRIVATE
-        "${SQUIRREL_ROOT}/include"
-    )
-    target_link_libraries(jaiscript_tests PRIVATE squirrel_lib)
-    target_compile_definitions(jaiscript_tests PRIVATE
-        HAVE_SQUIRREL=1
-    )
-    message(STATUS "JaiScript: Squirrel include path: ${SQUIRREL_ROOT}/include")
-endif()
-
-# Add Lua + sol2 support if available
-if(HAVE_SOL2)
-    enable_language(C)  # top-level project() is CXX-only; Lua is C
-
-    # Lua core: everything except the standalone interpreter/compiler mains.
-    # .c files compile as C by default with MSVC - do NOT add /TP.
-    file(GLOB LUA_SOURCES "${LUA_ROOT}/src/*.c")
-    list(FILTER LUA_SOURCES EXCLUDE REGEX "/(lua|luac)\\.c$")
-
-    add_library(lua_lib STATIC ${LUA_SOURCES})
-    target_include_directories(lua_lib PUBLIC
-        "${LUA_ROOT}/src"
-    )
-    if(MSVC)
-        target_compile_options(lua_lib PRIVATE /W3)
-        set_property(TARGET lua_lib PROPERTY
-            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-        )
-    endif()
-
-    # Link Lua + sol2 to tests
-    target_include_directories(jaiscript_tests PRIVATE
-        "${SOL2_ROOT}/include"
-    )
-    target_link_libraries(jaiscript_tests PRIVATE lua_lib)
-    target_compile_definitions(jaiscript_tests PRIVATE
-        HAVE_SOL2=1
-    )
-    message(STATUS "JaiScript: sol2 include path: ${SOL2_ROOT}/include")
-endif()
 
 # Platform-specific settings
 if(MSVC)

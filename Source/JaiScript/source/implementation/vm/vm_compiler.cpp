@@ -5303,13 +5303,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		c.max_cells = std::max(c.max_cells, static_cast<uint32_t>(loop.cells.size()));
 		c.cell_loops.push_back(std::move(loop));
 	}
-	// a compare-headed loop's head is an entry too (after every translation, which reads the general code at the heads): the first iteration
+	// a compare-headed loop's head (a range-for's ITER_NEXT) is an entry too (after every translation, which reads the general code at the heads): the first iteration
 	// runs in the block, the back edge re-enters after a miss, and a refusal or a miss at the head resumes at the trampoline
 	for (uint32_t li = 0; li < c.cell_loops.size(); ++li) {
 		chunk::cell_loop& loop = c.cell_loops[li];
-		if (loop.straight || loop.frame_program || loop.counted != k_invalid_u32 || loop.iter_proto != k_invalid_u32 || loop.trampoline != k_invalid_u32) continue;
+		if (loop.straight || loop.frame_program || loop.counted != k_invalid_u32 || loop.trampoline != k_invalid_u32) continue;
 		const vm_instruction& h = code[loop.head];
-		const bool head_ok = (h.op >= opcode::op_t_jlt_ii && h.op <= opcode::op_t_jne_ff) || h.op == opcode::op_fused_cmp_jump || (h.op == opcode::op_load && h.c == 0) || always_true(h) || entry_op(h);
+		const bool head_ok = (h.op >= opcode::op_t_jlt_ii && h.op <= opcode::op_t_jne_ff) || h.op == opcode::op_fused_cmp_jump || (h.op == opcode::op_load && h.c == 0) || always_true(h) || entry_op(h) || (h.op == opcode::op_iter_next && loop.iter_proto != k_invalid_u32);
 		if (!head_ok) continue;
 		loop.trampoline = entry_trampoline(loop.head, li);
 	}

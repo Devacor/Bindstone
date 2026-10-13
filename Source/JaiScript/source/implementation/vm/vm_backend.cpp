@@ -8749,6 +8749,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 		if (iter_states_.empty() || ipr.slot == SIZE_MAX || !f.locals || f.top_level) { JAI_CELLS_COUNT(1); return false; }
 		const iter_state& st = iter_states_.back();
 		if (st.is_map || st.is_string || st.coroutine || st.env_pushed || !st.container || !st.container->is_array()) { JAI_CELLS_COUNT(1); return false; }
+		if (st.index >= st.container->unchecked_get_array_storage()->size()) { return false; }   // no element left: the general ITER_NEXT ends the loop, no block runs for nothing
 	}
 	// this loop's environment bindings from its last entry in this call still answer while the environment and its epoch hold (the lookup cache's rule)
 	const bool env_reuse = cs.env_loop == &loop && cs.env_of == environment_.get() && cs.env_serial == env_symbolizer_->env_epoch();

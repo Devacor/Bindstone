@@ -42,7 +42,7 @@ struct host_options {
 	std::string scripted_input;  // keys fed to read_key(); empty = interactive
 	std::string scripts_dir;
 	std::string save_path = "jai_crawler_save.json";
-	bool debug = false;          // stand up the DAP debug_connector (forces the interpreter)
+	bool debug = false;          // stand up the DAP debug_connector
 	bool debug_wait = false;     // also hold boot until a debugger attaches (--debug-wait)
 	int64_t debug_port = 52472;   // port VS Code attaches to
 };
@@ -323,7 +323,7 @@ void print_usage() {
 		"  --load          continue from the save file\n"
 		"  --save PATH     save file path (default jai_crawler_save.json)\n"
 		"  --scripts DIR   override the scripts directory\n"
-		"  --debug         listen for a VS Code debugger for the whole run (forces interpreter)\n"
+		"  --debug         listen for a VS Code debugger for the whole run (either backend)\n"
 		"  --debug-wait    like --debug, but also hold boot until you attach + press Enter\n"
 		"  --debug-port N  port for --debug (default 52472)\n");
 }
@@ -374,11 +374,7 @@ int main(int argc, char** argv) {
 	if (!(opt.debug && opt.debug_wait)) { console.init(); }
 
 	auto eng = jai::engine::make();
-	if (opt.debug) {
-		opt.backend = "interpreter";
-		eng->set_backend(jai::backend_type::interpreter);
-	}
-	else if (opt.backend == "vm") { eng->set_backend(jai::backend_type::vm); }
+	if (opt.backend == "vm") { eng->set_backend(jai::backend_type::vm); }
 	else if (opt.backend == "interpreter" || opt.backend == "interp") {
 		eng->set_backend(jai::backend_type::interpreter);
 	} else {

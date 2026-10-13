@@ -62,9 +62,9 @@ the global environment directly, so these resolve **live, at call time**:
   in the shared global environment and persists across `execute()` calls on the same engine.
   The same file (or the same literal string) declaring `var x` again **updates the same
   storage in place**; a *different* file declaring `var x` gets its own binding, and the
-  first file's functions and closures keep theirs (`docs/global_shadowing.md`).
+  first file's functions and closures keep theirs (`internal/global_shadowing.md`).
 - Exception: `execute()` called with `instance_variables` puts top-level `var`s in a
-  temporary overlay that evaporates (see `docs/LOCAL_VARIABLES_BEHAVIOR.md`).
+  temporary overlay that evaporates (see `internal/LOCAL_VARIABLES_BEHAVIOR.md`).
 
 This holds for `[=]`, `[&]` and capture-free `[]`: all take no
 global, so a global named in the body is read, and written, when the lambda runs. `[&g]` is the

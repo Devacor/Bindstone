@@ -166,9 +166,9 @@ temporary and its mutation stays in the temporary. Map keys follow from this: `k
 key was inserted through all share the key's node - no per-iteration copy - and the first
 write through any of them detaches, so the key itself is never written; the static checker
 additionally rejects every mutation spelling on `kv.first` it can see (`cannot mutate
-'kv.first': map keys are read-only`, `docs/static_checking.md` Map keys). Bound
+'kv.first': map keys are read-only`, `internal/static_checking.md` Map keys). Bound
 (`cpp_bound`) strings are the live C++ member and keep write-through
-(`docs/invariants.md` 11).
+(`internal/invariants.md` 11).
 
 A typed reference binds compatible storage and never converts it (`detail::reference_binding_admits`,
 one kernel for parameters, range-for variables, reference returns and the vm's inlined grafts): a

@@ -21,7 +21,7 @@ This addendum SUPERSEDES the spec's line anchors and site counts. The spec's sem
 |---|---|---|---|
 | #1 `unchecked_as_int_ref\|unchecked_as_float_ref` | — | 43 | vm_backend 18, interpreter 21 (incl. range-for :7959/:7973/:8016), value.hpp 2 (defs :406/:420) |
 | #2 `unchecked_as_string_ref` | — | 21 | interpreter 19 (17 = string builtin methods :1398-1768, receiver-dispatched; 2 = compound in-place :3878 + vm :2852), value.hpp def :429 |
-| #3 `raw_storage_index` | 169 / 11 files | **169 / 11 files** (same total, sites moved) | interpreter 40, interpreter_dispatch 38, vm_backend 61, value.hpp 17, ref_lvalue.hpp 4, vm_compiler 3, interpreter.hpp 2, value.cpp 1, disassembler 1, + non-production: test_fallthrough_debug.cpp 1, docs/REFERENCE_SEMANTICS_PLAN.md 1 |
+| #3 `raw_storage_index` | 169 / 11 files | **169 / 11 files** (same total, sites moved) | interpreter 40, interpreter_dispatch 38, vm_backend 61, value.hpp 17, ref_lvalue.hpp 4, vm_compiler 3, interpreter.hpp 2, value.cpp 1, disassembler 1, + non-production: test_fallthrough_debug.cpp 1, REFERENCE_SEMANTICS_PLAN.md 1 |
 | #4 `std::get_if<TYPEID` | 21 | **19** (value.hpp 13, value.cpp 6) |
 | #4b `std::get<` | 59 | 69 raw hits (value.hpp 50, value.cpp 9, interpreter 5, vm_backend 5, ref_lvalue 0) — includes non-storage_ gets; re-filter at audit time |
 | #5 `current_type()\|storage_type()` | — | 36 / 7 files; NEW consumers: class_definition.hpp:82/:1021 (deref().current_type() equality — S3-safe, no get pairing), ref_lvalue.hpp:318 (type-name for error text — S3-safe) |

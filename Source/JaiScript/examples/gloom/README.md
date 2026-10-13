@@ -4,15 +4,15 @@ A real-time 2.5D raycast shooter in the terminal — one tight four-map episode 
 corridors, keycards, secrets, and things that roar before they charge — written
 **entirely in JaiScript**. The C++ host (`gloom_host.*` + `gloom_adapter_jai.cpp`)
 is the same thin shell as the crawler/demoreel: a VT console, held-key input, a
-seeded `Rng`, a monotonic clock, flags as globals — now split into a shared,
+seeded `Rng`, a monotonic clock, flags as globals — split into a shared,
 runtime-agnostic core and a per-language adapter. Everything else — the raycaster, the sub-cell renderer, enemy
 brains, weapons, particles, the episode, the autopilot — is script.
 
-GLOOM is the crawler's bigger sibling and a deliberate dogfood of this month's
-language work: **`parallel_transform`** drives the wall rays and the particle pool,
+GLOOM is the crawler's bigger sibling and a deliberate dogfood of the language's
+larger features: **`parallel_transform`** drives the wall rays and the particle pool,
 **coroutine handles living in fields** drive every enemy brain and the demo pilot,
 `new`/`shared_ptr` holds the world and its registries, and template strings (with
-the new `:spec` formats) build the HUD.
+`:spec` formats) build the HUD.
 
 ## Run it
 
@@ -144,8 +144,8 @@ in `render.jai`:
 - **Particles** — the 288-slot pool is a flat value array stepped by one pure
   function (fixed timestep baked in as a literal).
 - **Glyph rows (quad)** — `gloom_row_quad(ry)` reads the CAPTURED pixel grid
-  (borrow tier: zero-copy) and palette tables (per-worker snapshots); see the
-  v0.5 section below.
+  (borrow tier: zero-copy) and palette tables (per-worker snapshots); see
+  "Captured reads dissolve the glyph wall" below.
 
 `--workers 0` runs the same pure functions in a plain serial loop — determinism
 across worker counts is checked by construction (`--smoke` hashes are identical
@@ -179,21 +179,21 @@ sim ~2 ms, ray chunk build ~1 ms, ray transform ~1.5 ms (2.2x over its serial
 cost at W=4), wall paint ~6 ms, sprites+particles ~3 ms, **glyph-row building
 ~16 ms**.
 
-The honest headline (v0, historical): the *parallel* parts were cheap and
+Without captured reads, the *parallel* parts were cheap and
 scaled (the ray stage alone ran 2.2x at W=4), but they were a small slice — the
 serial consumption of the pixel grid was the wall. An element read through the
 VM costs ~0.5 µs, and the row builder must read all 13.6k sub-pixels per frame;
 that one stage cost more than rays, paint, and sim combined, so total ms/tick
-barely moved with worker count (Amdahl, working as advertised). The v0
-value-only contract couldn't touch it, because the pixel grid would have had to
+barely moved with worker count (Amdahl, working as advertised). A value-only
+contract cannot touch it, because the pixel grid would have had to
 ride inside the elements. One curiosity: `--pix half` emits MORE bytes per
 frame than quad (35.6 KB vs 21.5 KB) because flat quad cells are a 1-byte space
 on background while every half-mode cell is a 3-byte half-block glyph.
 
-### Captured reads dissolve the glyph wall (v0.5)
+### Captured reads dissolve the glyph wall
 
 `parallel_transform` captured reads (docs/site/guide/09-containers-strings.html, "Parallel loops") let a body
-READ enclosing globals, so the quad glyph-row builder is now a per-row function
+READ enclosing globals, so the quad glyph-row builder is a per-row function
 over `ROWIDX` reading the pixel grid as a captured **borrow** (`PIX` is a flat
 all-primitive int array touched only by subscript — zero copies, raw element
 reads; the escape-string palettes `PAL_FG`/`PAL_BG` snapshot per worker per

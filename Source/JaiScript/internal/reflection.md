@@ -141,7 +141,7 @@ or on the engine execution thread, never concurrently from another thread or dur
 parallel region. No new synchronization is added. Arbitrary callbacks, streams and shared native
 objects remain the
 host's responsibility, not a process sandbox. See the
-[filesystem boundary](site/embedding/05-safety-rails.html#filesystem-privilege) for the exact
+[filesystem boundary](../docs/site/embedding/05-safety-rails.html#filesystem-privilege) for the exact
 scope, including skipped disk caches and allowed in-memory programs.
 
 ---

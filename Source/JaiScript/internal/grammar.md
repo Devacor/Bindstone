@@ -84,7 +84,7 @@ Notes:
 - **Null**: `null` (or `nullptr`)
 
 Escape sequences in `"..."` strings and `'...'` chars are exactly `\n \r \t \\ \" \'` and
-`\xNN` (EXACTLY two hex digits — `"\x415"` is `'A'` then `"5"`; see docs/char_semantics.md).
+`\xNN` (EXACTLY two hex digits — `"\x415"` is `'A'` then `"5"`; see internal/char_semantics.md).
 Anything else (including `\0` — spell it `\x00`) is an "Invalid escape sequence" error.
 
 ### Template Strings
@@ -961,7 +961,7 @@ string healthLevel = health > 75 ? "healthy" :
     `utf8_string` counts characters); compound stores read, apply and write back. The target
     read mints a STRING-ELEMENT reference pinned through the base (its own reference, a
     field/property reference, or the boxed variable cell) and the write goes through the
-    copy-on-write gate (`docs/invariants.md` 11; `detail/string_element.hpp`). `char`
+    copy-on-write gate (`internal/invariants.md` 11; `detail/string_element.hpp`). `char`
     supports the full comparison set including ordering (`c >= '1' && c <= '9'`);
     char-vs-int ordering is deliberately an error (no silent promotion).
 15. **Parallel Builtins and the `parallel_for` statement**: `parallel_transform(arr, fn)` and

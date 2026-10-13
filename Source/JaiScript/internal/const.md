@@ -46,7 +46,7 @@ handle, `var` or `auto`: `const 'x' needs an initializer: const int x = 0;`. For
 ### 1.3 Positions that stay foreign
 
 `const` written anywhere else is a parse error that names what JaiScript supports
-(`detail/foreign_keyword.hpp`, docs/diagnostics.md "Foreign keywords"). Each text is recognized only where `const` (or the
+(`detail/foreign_keyword.hpp`, internal/diagnostics.md "Foreign keywords"). Each text is recognized only where `const` (or the
 word) would otherwise fail to parse:
 
 | written | text |
@@ -235,7 +235,7 @@ state that a reload carries over in non-const variables.
 ### 6.2 Shadowing
 
 Constness belongs to the cell. A unit that declares a name another unit declared gets its own cell under
-docs/global_shadowing.md, and each cell keeps its own constness: a plain variable can shadow a const, and a const can
+internal/global_shadowing.md, and each cell keeps its own constness: a plain variable can shadow a const, and a const can
 shadow a plain variable. A reference bound to a cell before the redeclaration stays on it, together with that cell's
 constness. A re-run that changes its own declaration between const and plain converts the cell in place (the
 `inline` switch's precedent), and folded code adjusts (10.3).
@@ -484,7 +484,7 @@ JaiScript's:
 - **Interpreter:** the guard at the stamped nodes, the cell mark, `const T&` temporaries for lambdas.
 - **VM:** `op_const_guard`, `op_error` for a certain violation, folding (`op_const_folded`, `vm_backend::fold_site`,
   `revalidate_folds`), the enum entry memo on a cell block's environment operand.
-- **Docs:** this note, docs/diagnostics.md ("Const" and the foreign keywords), docs/grammar.md, docs/static_checking.md,
+- **Docs:** this note, internal/diagnostics.md ("Const" and the foreign keywords), internal/grammar.md, internal/static_checking.md,
   the guide (chapter 3) and the bridges.
 
 ## 13. Tests and gates

@@ -83,7 +83,7 @@ even where an unchecked runtime store would accept the value. Known container
 types follow the runtime element boundary, including empty typed containers.
 `var` preserves dynamic checking, and `[[warn_mode]]` downgrades diagnostics. A chained conversion (`TA -> TB -> TC`, `X.to_int() -> C(int)`)
 is never implicit; a converting constructor or `to_X()` that throws surfaces its own error.
-Each site names its slot in the rejection text (`docs/diagnostics.md` family D):
+Each site names its slot in the rejection text (`internal/diagnostics.md` family D):
 `Cannot initialize 'x' (declared int) with S` for declarations, `Cannot assign S to 'x'
 (declared int)` for `=`, `Cannot assign S to field 'f' of C (declared int)` / `... to static 's'
 of C ...` for fields, `Cannot pass S to parameter 'n' of 'fib' (declared int)` and
@@ -105,7 +105,7 @@ error surfaces in the caller.
 only, as the runtime does: `s += 'c'` and `s += "t"` append, `s += n` with a known non-text
 operand (an int, a float, a bool, null, a container, an object) is `cannot apply '+=' to
 'string' and 'int'` - the promoted type counts, so `s += to_char(a) + to_char(b)` is `string +=
-int` (`docs/char_semantics.md`; `"" + to_char(a) + to_char(b)` is the text spelling). An
+int` (`internal/char_semantics.md`; `"" + to_char(a) + to_char(b)` is the text spelling). An
 element target (`names[i] += 5`) concatenates at run time and stays lenient; a registered
 global `+` operator makes the rule lenient. `++`/`--` on a string member (the `+= 1` desugar) is
 `cannot apply '++' to 'string'`. `var` targets keep dynamic behavior, unchecked.
@@ -300,7 +300,7 @@ binds the parameter as `T&` or `shared_ptr<T>`, and `return kv.first` from a `->
 `-> shared_ptr<T>` function. A copy is always fine (`var okay = kv.first; okay.to_upper()`,
 `string s = kv.first`, `cast<string>(kv.first)`, a by-value parameter or return) and is the
 copy-on-write path at runtime: strings share their node until the first in-place write
-(`docs/invariants.md` 11), so what the checker cannot see (a `var` map) mutates a copy and the
+(`internal/invariants.md` 11), so what the checker cannot see (a `var` map) mutates a copy and the
 map is never touched. `m.keys()[i]` stays lenient (builtin results are untyped here); a pair
 that escapes whole into a container or a by-value parameter loses the marker.
 
@@ -346,7 +346,7 @@ produces one diagnostic, not a cascade; (line, col, message) dedupe on top. Cap 
 
 A unit whose top-level `import`/`include` declarations carry literal paths, or which holds a
 literal-path `import` anywhere (an import takes no scope: in a function, a block or a lambda it still
-declares at program scope, `docs/global_shadowing.md`), is the root of a **program**. Before anything runs, the engine gathers the program's **closure**: every unit
+declares at program scope, `internal/global_shadowing.md`), is the root of a **program**. Before anything runs, the engine gathers the program's **closure**: every unit
 those paths reach, resolved exactly as the runtime resolves them (the importing file's folder, then the include paths, then the working directory),
 recursively, each file once (cycles are fine), parsed into the same cache entries the unit's
 later `import` executes through. The union of every unit's top-level names — functions,
@@ -422,7 +422,7 @@ extern config;                    // untyped: var - reads and stores are dynamic
 ```
 
 At run time an extern declares nothing: the unit uses the visible global instead of declaring
-its own (a declaration would shadow it, `docs/global_shadowing.md`), and an extern may run
+its own (a declaration would shadow it, `internal/global_shadowing.md`), and an extern may run
 before the unit or the host that defines the name. A read, store or call of the name while
 nothing defines it raises `'G' is declared extern but never defined (an 'inline' declaration
 creates it)` (a function extern: `'f' is declared extern but never defined`), on both backends.

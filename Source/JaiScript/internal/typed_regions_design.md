@@ -68,7 +68,7 @@ in the same loop; there is no second dispatcher. First set:
 
 Every typed opcode has one failure mode at most (overflow, bounds, division by zero) and
 raises the same catalog text the general opcode raises for the same input
-(`docs/diagnostics.md`). Integer overflow keeps the build policy: checked builds raise, wrap
+(`internal/diagnostics.md`). Integer overflow keeps the build policy: checked builds raise, wrap
 builds wrap, through the same `jai::ints` helpers.
 
 ## Frame layout

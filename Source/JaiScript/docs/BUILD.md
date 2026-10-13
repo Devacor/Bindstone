@@ -37,6 +37,10 @@ build/bin/jaiscript_tests
 That builds everything: the library, the test suite, the differential fuzzer, the runner, and
 the three example games. Binaries land in `build/bin/`, the library in `build/lib/`.
 
+`CMakePresets.json` names the same two trees: `cmake --preset release` / `cmake --build --preset release`
+configure and build `build/`, and `debug` does the same in `build-debug/`. Visual Studio's Open Folder lists the
+`x64-*` presets, which build under `out/build/<name>/`.
+
 ## Picking targets
 
 Building everything takes a while; usually you want one or two things.

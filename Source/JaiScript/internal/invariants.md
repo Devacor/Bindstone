@@ -13,7 +13,7 @@ nothrow-move (`valueless_by_exception` + the noexcept move ctor depend on it). L
 var/auto/int type ladder live in them — never evict either to buy payload bytes. A new variant
 alternative must be pointer-sized and nothrow-move or the asserts fire. The math vectors are one
 alternative, a copy-on-write `script_vec_node` handle: every relocation shape that carried a 12-byte
-inline payload measured 1-6% whole-program (`docs/math_types_design.md` 4.1).
+inline payload measured 1-6% whole-program (`internal/math_types_design.md` 4.1).
 
 ## 2. strong_ptr single-pointer rules
 
@@ -91,7 +91,7 @@ heap-use-after-free when broken).
 The old ref-anchor rule is dead machinery: `reference_holder` no longer has a raw
 `target` pointer or a `weak_ptr<environment> sourceEnv` — a reference NEVER holds a
 raw address + lifetime guess. Exactly six owner-pinned holder modes exist
-(`reference_holder`, value.hpp; long-form: docs/reference_model.md): CELL (the holder
+(`reference_holder`, value.hpp; long-form: internal/reference_model.md): CELL (the holder
 OWNS the value in inline storage — Lua upvalue), vector element (container+index
 re-resolve), instance field (owner+id re-resolve), map entry (pinned map + key
 re-resolve), CPP-MEMBER (receiver + C++ object pinned; the inline storage is a

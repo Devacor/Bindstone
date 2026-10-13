@@ -422,22 +422,8 @@ Both formats share the same archive interface but differ in implementation:
 | `needs_property_keys()` | true | false |
 | `is_text_format` | false | true |
 
-The `is_text_format` static constexpr is used by smart pointer serialization to choose between formats at compile time (no virtual dispatch):
-- **Binary**: Compact format - just ID + object data
-- **JSON**: Verbose format - `{"_type_": "ptr", "$id": id, "$val": {...}}` for readability
-
-```cpp
-// Compile-time format detection (like Cereal)
-template<typename Archive, typename T>
-void write_shared_ptr(Archive& ar, const std::shared_ptr<T>& ptr) {
-    constexpr bool text_format = std::remove_reference_t<Archive>::is_text_format;
-    if constexpr (text_format) {
-        // JSON verbose format
-    } else {
-        // Binary compact format
-    }
-}
-```
+`is_text_format` is a static constexpr trait of each archive; pointer records do not depend on it (both formats write
+the same record shapes, see Shared Pointer Handling).
 
 ### Binary Object Format
 
@@ -460,38 +446,26 @@ JaiScript tracks shared_ptr instances to:
 1. **Avoid duplicate serialization** - Same object serialized once, referenced by ID
 2. **Reconstruct weak_ptr** - weak_ptr stores ID reference, resolved after load
 
-### Binary Format (Compact)
+### Pointer records (both formats)
 
-```cpp
-// shared_ptr: [id:uint32][object data if new]
-// weak_ptr: [id:uint32]
+Binary and JSON write the same record shapes, keyed by the archive's per-save object ids (the binary writer encodes
+them as ordinary records and properties):
 
-// Writing shared_ptr:
-auto [id, is_new] = ar.get_or_assign_shared_id(ptr.get());
-ar.write_uint32(id);
-if (is_new && ptr) {
-    ptr->save(ar);  // Serialize object directly
-}
+| Value | Written as |
+|---|---|
+| `shared_ptr`, first time its object is written | `{"$id": N, "$val": {...}}`; through a base pointer holding a registered derived class, `{"$id": N, "$type": "Derived", "$val": {...}}` |
+| `shared_ptr` to an object already written | `{"$id": N}`, re-aliased on load |
+| `weak_ptr` | `{"$ref": N}`, with the object's `$val` (and `$type`) inline when the weak pointer is its first reference in the save; an expired one is null |
+| `unique_ptr` | `{"$val": {...}}` by the pointer's static type, no `$type` (a derived object writes only the base's fields) |
+| null | null |
 
-// Writing weak_ptr:
-uint32_t id = ar.lookup_shared_id(shared.get());
-ar.write_uint32(id);
-```
+The public statement of these shapes is the site's serialization chapter ("Wire formats"); keep the two in step.
 
-### JSON Format (Verbose)
+### Archive user context
 
-```cpp
-// shared_ptr: {"_type_": "ptr", "$id": id, "$val": {...}}
-// weak_ptr: {"_type_": "weak_ptr", "$id": id}
-
-ar.begin_object("ptr", 0);
-ar(make_nvp("$id", id));
-if (is_new && ptr) {
-    ar.write_property_name("$val");
-    // ... serialize object
-}
-ar.end_object();
-```
+`set_user_context<T>(T*)` attaches a pointer the code inside save/load reads back with
+`ar.template get_user_context<T>()` (null when none of that type was set); the convenience loads that take a context
+argument (`from_json(eng, text, ctx)` and its binary twins, `convenience.hpp`) set it.
 
 ## Version Handling
 

@@ -41,10 +41,12 @@ value into text and back: one line each way.</p>
 <p><strong>C++ side</strong>: an archive framework that writes JSON or a compact binary through one
 interface (<code>include/jaiscript/serialization/</code>). It is a drop-in for Cereal-shaped code: the same
 member/free <code>serialize</code> / <code>save</code> / <code>load</code> dispatch.</p>
-<p>The part worth knowing before you write any of it: <strong>a class you have already bound for
-scripting is most of the way to serializable.</strong> The <a href="02-dynamic-binder.html">dynamic_binder</a>
-chain names the class for the archives&#x27; script-value path, and a <code>jai::registrar</code>
-around the same chain gives a plain class the identity polymorphic saves need (below).</p>
+<p>The part worth knowing before you write any of it: <strong>binding a class for scripting does not
+make it archivable by itself.</strong> The C++ archives need what the class declares for them: a member or free
+<code>serialize</code> / <code>save</code> / <code>load</code>, or <code>JAI_PROPERTY</code> fields on a
+<code>property_owner</code>. What the <a href="02-dynamic-binder.html">dynamic_binder</a> chain adds is the
+class&#x27;s name for the script-value path, and a <code>jai::registrar</code> around the same chain gives the
+identity polymorphic saves need (below).</p>
 <h2 id="script-side-to-json-from-json">Script side: <code>to_json</code> / <code>from_json</code><a class="hlink" href="#script-side-to-json-from-json" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Player {
     int hp = 0;

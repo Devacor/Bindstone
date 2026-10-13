@@ -716,6 +716,23 @@ out;
         // the vm's map lanes remember their last entry: a get then a store of one key, a key changed in place between them, a copy,
         // a replaced map, an erase, a clear, a map kept across a re-run of its unit, and a parallel body reading the map (workers
         // leave the shared memo alone) all read what the interpreter reads
+        // an int key's lookup beside keys of other kinds (float, char, bool, string), present and absent, read through
+        // a subscript, get and has on both backends
+        test("map_int_keys_beside_other_kinds", [this, both_mode]() {
+            const char* src = R"JAI(
+map<var, var> m = {};
+m[1] = "int"; m[1.0] = "float"; m['1'] = "char"; m[true] = "bool"; m["1"] = "string"; m[-7] = "neg";
+for (int i = 100; i < 160; ++i) { m[i] = i * 2; }
+string out = to_string(m[1]) + to_string(m[1.0]) + to_string(m['1']) + to_string(m[true]) + to_string(m["1"]) + to_string(m[-7]);
+int s = 0; for (int i = 90; i < 170; ++i) { if (m.has(i)) { s += m.get(i, 0); } }
+out += " " + to_string(s) + " " + to_string(m[2]) + " " + to_string(m.size());
+out;
+)JAI";
+            auto [i_out, v_out] = both_mode(src, check_mode::warn);
+            check_eq(std::string("intfloatcharboolstringneg 15540 null 66"), i_out, "interpreter");
+            check_eq(i_out, v_out, "backend parity");
+        });
+
         test("map_lane_memo_parity", [this, both_mode]() {
             const char* src = R"JAI(
 map<string, int> m = {};

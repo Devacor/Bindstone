@@ -118,12 +118,27 @@ namespace jai {
         template <typename K>
         entry* find_entry(const K& key) const {
             if (size_ == 0) return nullptr;
+            if constexpr (std::is_same_v<K, script_value>) {
+                if (key.raw_storage_index() == script_value::TYPEID_INT) return find_int_entry(key.unchecked_as_int(), &key, nullptr);
+            }
             const size_t h = script_value_hash{}(key);
             const short_key b = short_of(key);
             for (size_t i = home(h);; i = (i + 1) & mask()) {
                 const slot& s = slots_[i];
                 if (!s.e) return nullptr;
                 if (s.hash == h && same_key(s.e, b, key)) return s.e;
+            }
+        }
+        // an int key's probe: an int entry compares its payload in place; any other kind under the same hash takes the key equality
+        entry* find_int_entry(script_int x, const script_value* key, engine* eng) const {
+            const size_t h = map_key_mix(script_value_type::jai_int_type, static_cast<uint64_t>(x));
+            for (size_t i = home(h);; i = (i + 1) & mask()) {
+                const slot& s = slots_[i];
+                if (!s.e) return nullptr;
+                if (s.hash != h) continue;
+                const script_value& k = s.e->kv.first;
+                if (k.raw_storage_index() == script_value::TYPEID_INT ? k.unchecked_as_int() == x
+                                                                     : key ? script_value_key_eq{}(k, *key) : script_value_key_eq{}(k, script_value(x, eng))) return s.e;
             }
         }
         void place(entry* e) noexcept {
@@ -380,6 +395,9 @@ namespace jai {
             entry* e = find_entry(p);
             return e ? const_iterator(this, &e->kv, npos, gen_, false) : end();
         }
+        // key's entry where it lives, or null: the lookup with no iterator
+        const value_type* lookup(const script_value& k) const { entry* e = find_entry(k); return e ? &e->kv : nullptr; }
+        const value_type* lookup_int(script_int x, engine* eng) const { if (size_ == 0) return nullptr; entry* e = find_int_entry(x, nullptr, eng); return e ? &e->kv : nullptr; }
         size_type count(const script_value& k) const { return find_entry(k) ? 1 : 0; }
         bool contains(const script_value& k) const { return find_entry(k) != nullptr; }
 

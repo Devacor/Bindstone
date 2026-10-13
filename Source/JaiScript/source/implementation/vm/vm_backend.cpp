@@ -6788,9 +6788,8 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 					stack_.push_back(make_null());
 				}
 			} else {
-				auto it = map.find(right);
-				if (it != map.end()) {
-					script_value val = it->second;
+				if (const script_map::value_type* hit = map.lookup(right)) {
+					script_value val = hit->second;
 					if (!val.has_valid_engine()) {
 						val.set_engine(engine_);
 					}
@@ -7526,9 +7525,9 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 		    kk == script_value::TYPEID_BOOL || kk == script_value::TYPEID_CHAR) {
 			const auto& map_ptr = const_cast<script_value&>(left).get_map_storage();
 			if (map_ptr) {
-				auto it = key ? map_ptr->find(*key) : map_ptr->find(script_value(raw_index, engine_));
-				if (it != map_ptr->end()) {
-					script_value val = it->second;
+				const script_map::value_type* hit = key ? map_ptr->lookup(*key) : map_ptr->lookup_int(raw_index, engine_);
+				if (hit) {
+					script_value val = hit->second;
 					if (!val.has_valid_engine()) {
 						val.set_engine(engine_);
 					}

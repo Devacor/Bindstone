@@ -785,8 +785,8 @@ void script_value::release_deferred_cell_cycles(engine* eng) {
     delete registry;
 }
 
-script_value script_value::make_map_entry_reference(const strong_ptr<script_map>& map_storage,
-                                                    const script_value& key, engine* eng, type_info_ptr value_type) {
+script_value script_value::make_map_entry_reference(const strong_ptr<script_map>& map_storage, const script_value& key,
+                                                    const script_value* entry, engine* eng, type_info_ptr value_type) {
     if (!map_storage) {
         throw runtime_error("Cannot create reference to null map");
     }
@@ -794,8 +794,7 @@ script_value script_value::make_map_entry_reference(const strong_ptr<script_map>
         throw runtime_error("Cannot create reference: null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    auto it = map_storage->find(key);
-    v.type_info_ = eng->get_type_info_reference(it != map_storage->end() ? it->second.get_type_info() : nullptr);
+    v.type_info_ = eng->get_type_info_reference(entry ? entry->get_type_info() : nullptr);
     eng->execution_limits().memory_charge_deferred(sizeof(reference_holder));
     auto ref = acquire_reference_holder(eng);
     new (ref->cell_storage) script_value(key.is_reference() ? key.deref() : key);

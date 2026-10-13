@@ -332,9 +332,9 @@ namespace detail { struct argument_capture_storage; }
         static void release_deferred_cell_cycles(engine* eng);
         // Map-entry reference: pins the owning map (strong) and re-resolves find(key) on
         // every deref/assign-through - an erased entry errors instead of dangling, and a
-        // reference into a temporary map keeps the map alive.
-        static script_value make_map_entry_reference(const strong_ptr<script_map>& map_storage,
-                                                     const script_value& key, engine* eng, type_info_ptr value_type);
+        // reference into a temporary map keeps the map alive. entry: the key's value as the site found it (null when absent).
+        static script_value make_map_entry_reference(const strong_ptr<script_map>& map_storage, const script_value& key,
+                                                     const script_value* entry, engine* eng, type_info_ptr value_type);
         // CPP-MEMBER reference (a binder member-pointer property the cpp_bound box can decode):
         // the referent IS the C++ member at `address`; object_pin keeps the object alive,
         // `receiver` is the handle the property was bound on (docs/reference_model.md).

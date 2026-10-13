@@ -210,10 +210,13 @@ namespace {
     checked_result<script_value> call_map_entry(const builtin_callback& callback, uint32_t positions, script_value& map_value,
                                                 const script_value& key, engine* eng) {
         const auto map_type = map_value.get_type_info();
+        const auto& map = map_value.unchecked_as_map();
+        const auto it = map.find(key);
         std::vector<script_value> call_args{
             (positions & 1) ? script_value::make_cell_reference(script_value(key), eng) : key,
-            (positions & 2) ? script_value::make_map_entry_reference(map_value.unchecked_get_map_storage(), key, eng, map_type ? map_type->value_type() : nullptr)
-                            : map_value.unchecked_as_map().find(key)->second };
+            (positions & 2) ? script_value::make_map_entry_reference(map_value.unchecked_get_map_storage(), key, it != map.end() ? &it->second : nullptr,
+                                                                     eng, map_type ? map_type->value_type() : nullptr)
+                            : it->second };
         return callback(call_args);
     }
 
@@ -1075,7 +1078,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (it != map.end()) {
             if (!stored_result_is_heavy(it->second)) { return it->second; }
             const auto tag = self.get_type_info();
-            return script_value::make_map_entry_reference(self.unchecked_get_map_storage(), it->first, ctx.get_engine(), tag ? tag->value_type() : nullptr);
+            return script_value::make_map_entry_reference(self.unchecked_get_map_storage(), it->first, &it->second, ctx.get_engine(), tag ? tag->value_type() : nullptr);
         }
         if (args.size() < 2) { return ctx.make_value(); }  // Missing keys never insert
         if (!stored_result_is_heavy(args[1])) { return args[1]; }
@@ -4044,7 +4047,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     auto map_type_info = left.get_type_info();
                     type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
                     // Map-entry mode: pins the map + re-resolves by key (temporaries/erase safe)
-                    script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, engine_, value_type);
+                    script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, &value_ref, engine_, value_type);
                     push_value(std::move(ref_value));
                 } else if (is_lvalue && !transient_read) {
                     // lvalue-shaped but a READ (e.g. x = m[k], or the inner m[k]
@@ -4069,7 +4072,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                         }
                         auto map_type_info = left.get_type_info();
                         type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
-                        push_value(script_value::make_map_entry_reference(left.get_map_storage(), right, engine_, value_type));
+                        push_value(script_value::make_map_entry_reference(left.get_map_storage(), right, &value_ref, engine_, value_type));
                     } else {
                         // Missing key on a read: yield null WITHOUT inserting.
                         push_value(script_value(std::monostate{}, engine_));
@@ -11654,7 +11657,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                     if (stmt->is_reference) {
                         // For references, create a pair with a map-entry reference to the value
                         args.push_back(it->first);  // Don't clone - just pass the key
-                        args.push_back(script_value::make_map_entry_reference(map_storage, it->first, engine_, nullptr));
+                        args.push_back(script_value::make_map_entry_reference(map_storage, it->first, &it->second, engine_, nullptr));
                     } else {
                         // Copy binding: string keys share their node (the copy-on-write
                         // gate detaches any write - invariants.md 11), other key kinds

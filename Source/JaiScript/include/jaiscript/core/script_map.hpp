@@ -18,6 +18,8 @@
 #include <optional>
 #include <stdexcept>
 #include <vector>
+#include <memory>
+#include <cstddef>
 #include <algorithm>
 #include <iterator>
 #include <utility>
@@ -99,9 +101,49 @@ namespace jai {
             if (b.len != no_short && e->brief.len != no_short) { return b.len == e->brief.len && b.text == e->brief.text; }
             return script_value_key_eq{}(e->kv.first, key);
         }
+        // the entries' storage: chunks that never move (an entry stays where it was made until it is erased), filled in
+        // insertion order so a map built at once keeps its entries together; an erased entry's storage is reused
+        class entry_pool {
+            struct free_node { free_node* next; };
+            std::vector<std::unique_ptr<std::byte[]>> chunks_;
+            std::byte* cursor_ = nullptr;
+            size_t left_ = 0;
+            size_t next_count_ = 8;
+            free_node* free_ = nullptr;
+            void reset() noexcept { cursor_ = nullptr; left_ = 0; next_count_ = 8; free_ = nullptr; }
+        public:
+            entry_pool() = default;
+            entry_pool(const entry_pool&) = delete;
+            entry_pool& operator=(const entry_pool&) = delete;
+            entry_pool(entry_pool&& o) noexcept
+                : chunks_(std::move(o.chunks_)), cursor_(o.cursor_), left_(o.left_), next_count_(o.next_count_), free_(o.free_) { o.chunks_.clear(); o.reset(); }
+            entry_pool& operator=(entry_pool&& o) noexcept {
+                chunks_ = std::move(o.chunks_); o.chunks_.clear();
+                cursor_ = o.cursor_; left_ = o.left_; next_count_ = o.next_count_; free_ = o.free_;
+                o.reset();
+                return *this;
+            }
+            template <typename... A>
+            entry* make(A&&... a) {
+                void* p;
+                if (free_) { p = free_; free_ = free_->next; }
+                else {
+                    if (left_ == 0) {
+                        chunks_.emplace_back(new std::byte[next_count_ * sizeof(entry)]);
+                        cursor_ = chunks_.back().get(); left_ = next_count_;
+                        next_count_ = std::min<size_t>(next_count_ * 2, 512);
+                    }
+                    p = cursor_; cursor_ += sizeof(entry); --left_;
+                }
+                try { return new (p) entry(std::forward<A>(a)...); }
+                catch (...) { auto* n = static_cast<free_node*>(p); n->next = free_; free_ = n; throw; }
+            }
+            void destroy(entry* e) noexcept { e->~entry(); auto* n = reinterpret_cast<free_node*>(e); n->next = free_; free_ = n; }
+        };
         struct slot { size_t hash; entry* e; };
         static constexpr size_t min_capacity = 8;
 
+        entry_pool pool_;
         std::vector<slot> slots_;                   // empty, or a power of two
         size_t size_ = 0;
         unsigned shift_ = 64;                       // 64 - log2(capacity): the home slot is the top bits of hash * golden ratio
@@ -208,11 +250,12 @@ namespace jai {
             grow_for(o.size_);
             for (const slot& s : o.slots_) {
                 if (!s.e) continue;
-                place(new entry(s.hash, s.e->kv.first, s.e->kv.second));
+                place(pool_.make(s.hash, s.e->kv.first, s.e->kv.second));
                 ++size_;
             }
         }
         void take_from(script_map& o) noexcept {
+            pool_ = std::move(o.pool_);
             slots_ = std::move(o.slots_); o.slots_.clear();
             size_ = o.size_; o.size_ = 0;
             shift_ = o.shift_; o.shift_ = 64;
@@ -306,18 +349,20 @@ namespace jai {
             if (this != &o) {
                 script_map fresh(o);
                 std::vector<entry*> dying = detach_all();
+                entry_pool old = std::move(pool_);
                 take_from(fresh);
                 changed();
-                for (entry* e : dying) { delete e; }
+                for (entry* e : dying) { old.destroy(e); }
             }
             return *this;
         }
         script_map& operator=(script_map&& o) noexcept {
             if (this != &o) {
                 std::vector<entry*> dying = detach_all();
+                entry_pool old = std::move(pool_);
                 take_from(o);
                 changed(); o.changed();
-                for (entry* e : dying) { delete e; }
+                for (entry* e : dying) { old.destroy(e); }
             }
             return *this;
         }
@@ -329,7 +374,7 @@ namespace jai {
             for (entry* e : dying) {
                 work.push_back(std::move(e->kv.second));
                 work.push_back(std::move(const_cast<script_value&>(e->kv.first)));
-                delete e;
+                pool_.destroy(e);
             }
             changed();
             order_.clear();
@@ -342,7 +387,7 @@ namespace jai {
         void clear() noexcept {
             std::vector<entry*> dying = detach_all();
             changed();
-            for (entry* e : dying) { delete e; }
+            for (entry* e : dying) { pool_.destroy(e); }
         }
 
         iterator begin() { build_order(); iterator it(this, nullptr, npos, gen_, false); it.seat(0); return it; }
@@ -374,7 +419,7 @@ namespace jai {
                 entry* e = static_cast<entry*>(const_cast<void*>(memo.e));
                 if (same_key(e, short_of(key), key)) return &e->kv;
             }
-            entry* e = find_or_insert(key, [](size_t h, const script_value& k) { return new entry(h, k); }).first;
+            entry* e = find_or_insert(key, [this](size_t h, const script_value& k) { return pool_.make(h, k); }).first;
             memo = entry_memo{this, gen_, e};
             return &e->kv;
         }
@@ -402,10 +447,10 @@ namespace jai {
         bool contains(const script_value& k) const { return find_entry(k) != nullptr; }
 
         script_value& operator[](const script_value& k) {
-            return find_or_insert(k, [](size_t h, const script_value& key) { return new entry(h, key); }).first->kv.second;
+            return find_or_insert(k, [this](size_t h, const script_value& key) { return pool_.make(h, key); }).first->kv.second;
         }
         script_value& operator[](script_value&& k) {
-            return find_or_insert(std::move(k), [](size_t h, script_value&& key) { return new entry(h, std::move(key)); }).first->kv.second;
+            return find_or_insert(std::move(k), [this](size_t h, script_value&& key) { return pool_.make(h, std::move(key)); }).first->kv.second;
         }
         script_value& at(const script_value& k) {
             entry* e = find_entry(k);
@@ -420,13 +465,13 @@ namespace jai {
 
         template <typename K, typename V>
         std::pair<iterator, bool> emplace(K&& k, V&& v) {
-            auto [e, inserted] = find_or_insert(script_value(std::forward<K>(k)), [&](size_t h, script_value&& key) { return new entry(h, std::move(key), std::forward<V>(v)); });
+            auto [e, inserted] = find_or_insert(script_value(std::forward<K>(k)), [&](size_t h, script_value&& key) { return pool_.make(h, std::move(key), std::forward<V>(v)); });
             return {iterator(this, &e->kv, npos, gen_, false), inserted};
         }
         template <typename K, typename V>
         std::pair<iterator, bool> insert_or_assign(K&& k, V&& v) {
             bool fresh = false;
-            auto [e, inserted] = find_or_insert(script_value(std::forward<K>(k)), [&](size_t h, script_value&& key) { fresh = true; return new entry(h, std::move(key), std::forward<V>(v)); });
+            auto [e, inserted] = find_or_insert(script_value(std::forward<K>(k)), [&](size_t h, script_value&& key) { fresh = true; return pool_.make(h, std::move(key), std::forward<V>(v)); });
             if (!fresh) { e->kv.second = std::forward<V>(v); }
             return {iterator(this, &e->kv, npos, gen_, false), inserted};
         }
@@ -436,7 +481,7 @@ namespace jai {
         size_type erase(const script_value& k) {
             entry* gone = unlink(k);
             if (!gone) return 0;
-            delete gone;
+            pool_.destroy(gone);
             return 1;
         }
         // the entry after `pos` in key order

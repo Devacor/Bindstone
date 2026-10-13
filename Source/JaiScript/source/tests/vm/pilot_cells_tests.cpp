@@ -3937,6 +3937,53 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(vm, got, "counted loops entered at their prep under an injected miss at every " + std::to_string(every));
 			}
 		});
+		test("a_range_for_is_entered_at_its_iter_next", [this]() {
+			// ITER_NEXT is the entry: a one-element array runs it in the block, an empty one enters nothing, a reference binding writes the
+			// elements, a break, a call and a throw from a call on the first element, a live-in the body redefines, a body that empties the array,
+			// and a map and a string (the general form); both backends, proofs off, the middle end off and miss injection
+			const std::string prelude =
+				"int sum(array<int> a) { int s = 0; for (int v : a) { s = s * 3 + v; } return s; }\n"
+				"int dbl(int n) { array<int> a = []; for (int i = 0; i < n; i++) { a.push(i + 1); } for (auto& x : a) { x = x * 2; } int s = 0; for (int v : a) { s = s + v; } return s; }\n"
+				"int brk(array<int> a) { int s = 0; for (int v : a) { s = s + v; if (v > 0) { break; } } return s; }\n"
+				"int sq(int x) { string why = \"c\"; return x * x; }\n"
+				"int calls(array<int> a) { int s = 0; for (int v : a) { s = s + sq(v); } return s; }\n"
+				"int boom(int x) { string why = \"t\"; if (x == 7) { throw \"seven\"; } return x; }\n"
+				"int thr(array<int> a) { int s = 0; try { for (int v : a) { s = s + boom(v); } } catch (e) { s = s + 1000; } return s; }\n"
+				"int later(array<int> a) { int s = 0; int t = 5; for (int v : a) { s = s + t; t = v * 3; } return s; }\n"
+				"int shrink(array<int> a) { int s = 0; for (int v : a) { s = s + v; a.clear(); } return s; }\n"
+				"int mp() { map<string, int> m = {\"a\": 1, \"b\": 2}; int s = 0; for (auto kv : m) { s = s + kv.second; } return s; }\n"
+				"int st() { int s = 0; for (char c : \"abc\") { s = s + cast<int>(c); } return s; }\n";
+			const std::string body = "to_string(sum([4])) + \"|\" + to_string(sum([])) + \"|\" + to_string(sum([1, 2, 3])) + \"|\" + to_string(dbl(4)) + \"|\" + to_string(brk([3, 4, 5])) + \"|\" + "
+				"to_string(calls([3])) + \"|\" + to_string(calls([1, 2, 3])) + \"|\" + to_string(thr([7, 1])) + \"|\" + to_string(later([1, 2, 3])) + \"|\" + to_string(shrink([5, 6, 7])) + \"|\" + "
+				"to_string(mp()) + \"|\" + to_string(st());";
+			const std::string expected = "4|0|18|20|3|9|14|1000|14|5|3|294";
+			both(prelude + body, expected, "range-fors entered at their head");
+			both(prelude + body, expected, "range-fors entered at their head, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(vm, off, "the middle end's switch off answers the same");
+			}
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+				e->execute(prelude);
+				struct shape { const char* call; uint64_t entries; };
+				for (const shape& sh : { shape{ "sum([4]);", 1 }, shape{ "sum([]);", 0 }, shape{ "sum([1, 2, 3, 4, 5]);", 1 }, shape{ "brk([3, 4, 5]);", 1 } }) {
+					const cell_counters c0 = e->cells_counters();
+					e->execute(sh.call);
+					const cell_counters c1 = e->cells_counters();
+					check_eq(sh.entries, c1.entries - c0.entries, std::string(sh.call) + ": block entries");
+					check_eq(uint64_t{0}, c1.misses - c0.misses, std::string(sh.call) + ": nothing misses");
+				}
+			}
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(vm, got, "range-fors entered at their head under an injected miss at every " + std::to_string(every));
+			}
+		});
 		test("inlined_leaves_run_inside_blocks", [this]() {
 			// small free leaves called from a loop block (light_band's early returns, dist2's plain body, lerp's floats, a var
 			// parameter, a void leaf through an element alias) compile at their call sites; the values hold on both backends, with proofs

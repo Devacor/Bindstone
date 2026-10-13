@@ -1,0 +1,58 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Release (build/)",
+      "description": "Optimized build in build/; binaries land in build/bin.",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug (build-debug/)",
+      "description": "Debug build in build-debug/ for iteration; binaries land in build-debug/bin.",
+      "binaryDir": "${sourceDir}/build-debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "vs-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "architecture": { "value": "x64", "strategy": "external" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "x64-Debug",
+      "inherits": "vs-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "JAISCRIPT_ENABLE_BENCHMARKS": "ON" }
+    },
+    {
+      "name": "x64-Debug BENCHMARKS",
+      "inherits": "vs-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "x64-Release",
+      "inherits": "vs-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+    {
+      "name": "x64-Release BENCHMARKS",
+      "inherits": "vs-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "JAISCRIPT_ENABLE_BENCHMARKS": "ON",
+        "JAISCRIPT_BUILD_TESTS": "ON",
+        "CHAISCRIPT_NO_THREADS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "release", "configurePreset": "release" },
+    { "name": "debug", "configurePreset": "debug" }
+  ]
+}

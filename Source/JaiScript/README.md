@@ -178,8 +178,7 @@ build/bin/jaiscript_tests --backend=vm    # bytecode VM
 ```
 
 Both must be green. That is the project's central rule, and the reason two backends can be
-maintained at all. As of September 2026 the suite is 111 suites / 2,497 tests in the
-benchmarks configuration, green on both backends.
+maintained at all.
 
 Filter with `jaiscript_tests "Coroutine"` (additive: matching suites *or* matching test names)
 or `jaiscript_tests "Suite.Test"` (the strict AND form). `jaiscript_fuzz --iterations 1000`
@@ -201,21 +200,25 @@ It defaults to the VM backend and strict checking; `--backend=interp`, `--check=
 
 ## Examples
 
-Three complete programs live in [`examples/`](examples). Each has a C++ host that is a thin
-console shell — a VT terminal, key input, a clock — and *all* of the actual program in script.
+Four complete programs live in [`examples/`](examples). Three have a C++ host that is a thin
+console shell — a VT terminal, key input, a clock — and *all* of the actual program in script;
+the fourth runs on the stock runner alone.
 
 - **GLOOM** (`examples/gloom`) — a real-time raycast shooter: four maps, keycards, secrets,
-  enemy brains as coroutines, particles through `parallel_transform`. It has also been ported
-  to Squirrel, Lua, ChaiScript and Python for a five-way comparison.
+  enemy brains as coroutines, particles through `parallel_transform`.
 - **GRUBWELL** (`examples/crawler`) — a step-based first-person dungeon crawler, and the hot
   reload showpiece: run it with `--dev`, edit a script, press `R`, and the dungeon changes
   under you.
 - **demoreel** (`examples/demoreel`) — thirteen truecolor demoscene scenes running on *two*
   live engines at once; TAB swaps the backend mid-scene and the picture does not change.
+- **Gator Quest** (`examples/gatorquest`) — a terminal RPG across six realms, with combat, spells,
+  crafting, bots and netplay; the world, the art, the sound effects and the music are generated
+  by the scripts. It needs nothing but the runner:
+  `build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai`.
 
-Each has a `.jai` shim you can drop onto the runner, and each ships a self-check: run it with
-`--smoke` and it plays itself headlessly, printing a deterministic state hash. The interpreter
-and the VM have to produce the same one.
+Each runs from a `.jai` entry script on the runner, and each ships a self-check that plays itself
+headlessly and prints a deterministic state hash (`--smoke` for the hosted three, `-- smoke` after
+Gator Quest's script). The interpreter and the VM have to produce the same one.
 
 A larger demo, **JaiDoom** (`examples/jaidoom`), is a DOOM-format engine written from scratch
 in script: WAD loader, BSP renderer, playsim, savegames, demo playback and 16-player netplay.

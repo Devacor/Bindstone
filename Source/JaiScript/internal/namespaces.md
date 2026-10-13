@@ -36,7 +36,7 @@ inside the namespace reads the namespace's `x`).
   captures the variable like any variable of an enclosing scope (`[&]` shares the cell).
 - Reopening the namespace and declaring a name again writes the same cell in place; functions that read it
   see the new value.
-- A namespace's scope is one scope for every unit (`docs/global_shadowing.md`): a unit's own `var x` at
+- A namespace's scope is one scope for every unit (`internal/global_shadowing.md`): a unit's own `var x` at
   program scope never touches `ns::x`, and `ns::x = v` from any unit writes the namespace's cell.
 - The qualified spelling is not an lvalue to a reference: `var& r = ns::x;` and passing `ns::x` to a `var&`
   parameter raise the non-lvalue texts (`Cannot take reference of non-lvalue expression ...`, `Cannot pass

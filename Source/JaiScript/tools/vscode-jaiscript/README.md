@@ -36,8 +36,8 @@ Windows), or package it: `npm install`, `npx @vscode/vsce package`, then
 Build the server like any other target, `cmake --build build --target jaiscript_lsp`; the binary
 lands in `build/bin/` (see `docs/BUILD.md`). The extension looks for it in this order: the
 `jaiscript.languageServer.path` setting, `server/jaiscript_lsp` inside the extension folder, the
-repository's Visual Studio Open Folder build tree (`out/build/<config>/bin/`), then `PATH`. For a
-`build/` directory, set `jaiscript.languageServer.path` or put `build/bin` on `PATH`.
+checkout's `build/bin/` and `build-debug/bin/` (the CMake presets), the Visual Studio Open Folder build trees
+(`out/build/<config>/bin/`), then `PATH`.
 
 ## Settings
 

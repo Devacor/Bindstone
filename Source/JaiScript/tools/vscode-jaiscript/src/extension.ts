@@ -17,11 +17,16 @@ function serverExecutable(context: vscode.ExtensionContext): string | undefined 
 		const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
 		return configured.replace(/\$\{workspaceFolder\}/g, folder);
 	}
-	// A packaged extension carries the server beside it; from the repository, the extension sits
-	// in Source/JaiScript/tools/vscode-jaiscript and the CMake build tree is ../../out/build.
+	// A packaged extension carries the server beside it; run from a source checkout, the extension
+	// sits in tools/vscode-jaiscript and the build trees are ../../build (CMake presets) and
+	// ../../out/build/<config> (Visual Studio's Open Folder).
+	const root = path.resolve(context.extensionPath, '..', '..');
 	const candidates = [path.join(context.extensionPath, 'server', exe)];
+	for (const tree of ['build', 'build-debug']) {
+		candidates.push(path.join(root, tree, 'bin', exe));
+	}
 	for (const config of ['x64-Release BENCHMARKS', 'x64-Release', 'x64-Debug']) {
-		candidates.push(path.resolve(context.extensionPath, '..', '..', 'out', 'build', config, 'bin', exe));
+		candidates.push(path.join(root, 'out', 'build', config, 'bin', exe));
 	}
 	for (const candidate of candidates) {
 		if (fs.existsSync(candidate)) {

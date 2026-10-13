@@ -273,7 +273,7 @@ rewrites.
   step is `acos$` (the kernel's clamped acos). The OKLab mixes run boxed on rebuilt values. A library call's argument
   count is checked against one table (`math_arity_of`, `detail/math_intrinsics.hpp`): the kernel raises the table's text on
   both backends, the lowering keeps such a call boxed, and the checker leaves its result untyped (arity is the kernel's
-  runtime error, `docs/static_checking.md`).
+  runtime error, `internal/static_checking.md`).
 - **Constructors and conversions.** `math::K(...)`, the extension forms and the typed-slot conversions between kinds
   lower to their narrowed components.
 - **Values.** A vector the program needs as a value (a call argument of a lowered expression, a container element, a
@@ -413,7 +413,7 @@ whose type changed. The work is the accessor's single entry for every observer, 
 
 ### 5.3 Conversions at typed slots
 
-Math types join the one conversion table (`detail/typed_slot.hpp`, `docs/static_checking.md`). A slot of kind K takes a
+Math types join the one conversion table (`detail/typed_slot.hpp`, `internal/static_checking.md`). A slot of kind K takes a
 value of kind K. Scalars establish a precedent: int and float convert both ways, float-to-int through the checked
 kernel. **[Dev]** The recommendation mirrors it:
 
@@ -457,7 +457,7 @@ place:
 | hetero element | the boxed element |
 | reference (`var& r = v; r.x = 1`) | resolved by mode; scratch-backed modes (typed element, PROPERTY) commit afterwards, as string mutators do (invariant 11) |
 | CPP-MEMBER box (`node.pos.x = 1`) | the host memory at the component's offset |
-| component reference (`auto& r = v.x; r = 1`, `f(v.x)` with `float&`; Dev ruling 2026-09-30) | the COMPONENT holder over the base's reference: the same component store into the value the base names, then the base's commit (`docs/reference_model.md`) |
+| component reference (`auto& r = v.x; r = 1`, `f(v.x)` with `float&`; Dev ruling 2026-09-30) | the COMPONENT holder over the base's reference: the same component store into the value the base names, then the base's commit (`internal/reference_model.md`) |
 | PROPERTY (`obj.prop.x = 1`, getter/setter) | getter into scratch, component store, setter (the copy-in/write-back proxy) |
 | temporary (`f().x = 1`, `node.position().x = 1`) | error: `Cannot assign to a member of a temporary` (C++ [expr.ass] rejects assignment to a member of a class prvalue) |
 
@@ -752,7 +752,7 @@ today:
 | `value_converter<const T&>::from` | decode into a parameter-storage temporary (12 bytes), as primitives do today |
 | `value_converter<T&>::to` (a `T&` return) | v1: by value. Aliasing reaches C++ memory only through `.property` members and `add_global_ref`, whose lifetimes are pinned or host-guaranteed |
 | `FunctionBinder::create_argument` (non-const `T&` parameter) | a host-aliased box passes the live host object; a plain script value passes a copy whose final value is stored back into the argument's lvalue after the call (Dev ruling 2026-09-30, every value kind: `int&`, `float&`, `vec3&`; `detail::host_writes_back`), a component argument (`v.x`) through the component store |
-| `dynamic_binder::property_impl` | `cpp_bound_encoding<P>::capable` is true for an aliasable adapted `P`, so the member binds CPP-MEMBER (write-through, receiver pinned; `docs/reference_model.md`); reads return a boxed copy (components at a lowered site); stores convert with the typed-slot table. A non-aliasable `P` registers getter and setter only, so references bind PROPERTY: the proxy |
+| `dynamic_binder::property_impl` | `cpp_bound_encoding<P>::capable` is true for an aliasable adapted `P`, so the member binds CPP-MEMBER (write-through, receiver pinned; `internal/reference_model.md`); reads return a boxed copy (components at a lowered site); stores convert with the typed-slot table. A non-aliasable `P` registers getter and setter only, so references bind PROPERTY: the proxy |
 | `property(name, getter, setter)` | PROPERTY: `obj.prop.x = 5` is getter, component store, setter |
 | reflected `JAI_PROPERTY` / `JAI_NAMED_PROPERTY` of an adapted type (`auto_bind`, which every registrar runs) | PROPERTY with no per-property binding: the schema entry carries a `math_property_bridge` (`math_bridge_of<T>()`, filled by the macros), the getter reads the member into a vector, and whole, component and compound stores assign through the property's own assignment, so an observable property notifies. A method bound on the class under the property's script name (Palette's `color()` / `color(c)`) is the class's spelling: the property is reached through it and no accessor is registered |
 | `make_cpp_bound` / `add_global_ref(name, hostVec)` | a vector box: host memory, host-guaranteed lifetime, as for primitives |
@@ -881,7 +881,7 @@ instructions are an optional last step (section 12) held to the 1.5% bar.
   - Kinds are reachable only qualified. **[Dev]** `vec3` bare, or a `using` spelling. The recommendation is qualified
     only, since bare `color` would collide with MV's `color()` methods and ordinary variable names.
   - `using math::vec3;` (several names: `using math::vec3, math::dot;`) makes the bare name the qualified one for the
-    rest of the unit's text, rewritten at parse time (Dev ruling 2026-09-30; `docs/namespaces.md` \"Using declarations\"):
+    rest of the unit's text, rewritten at parse time (Dev ruling 2026-09-30; `internal/namespaces.md` \"Using declarations\"):
     file-local and not transitive, any namespace, the name cannot be declared again, and `using namespace` does not exist.
 - **ctype.**
   - One new kind `math_k`, with a sub-kind naming the math type.

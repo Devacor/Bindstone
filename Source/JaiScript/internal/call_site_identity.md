@@ -9,7 +9,7 @@ and stays the oracle.
 
 An identifier callee compiles to `PROBE_CALLEE site, argc`, the argument code, then
 `CALL_FROM_SCRATCH argc, site`. The probe runs at the C++17 observation point (callee
-before arguments, `docs/invariants.md` 12): it resolves the name and parks the result in
+before arguments, `internal/invariants.md` 12): it resolves the name and parks the result in
 the pending-callee register. The call pops the register and enters the callee. An
 argument that rebinds the name cannot change which function the call enters, and a
 callee that does not resolve raises before any argument runs.

@@ -430,7 +430,7 @@ check. Same story made `construct` cheap (env lookup + call).
 | `include/jaiscript/core/execution_backend.hpp` | `virtual const class_definition* current_access_context() const` | ~3 |
 | interpreter.hpp / vm_backend.hpp | the two overrides (`env->find_access_context()`) | ~8 |
 | `engine.cpp` / `engine.hpp` | class-name enumeration accessor; wire `register_reflection_functions` | ~30 |
-| `docs/grammar.md` + site | builtin catalog note (like the §15 parallel-builtins note) | ~20 |
+| `internal/grammar.md` + site | builtin catalog note (like the §15 parallel-builtins note) | ~20 |
 
 Rough total: **600-750 lines of implementation**.
 

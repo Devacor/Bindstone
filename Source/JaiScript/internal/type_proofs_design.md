@@ -883,7 +883,7 @@ Green gates before merge: `jaiscript_tests.exe` and `jaiscript_tests.exe --backe
 green; `jaiscript_fuzz --seed-start 0 --iterations 300 --max-depth 4 --timeout-ms 250 --isolate`
 with and without `--no-proofs`: no new divergences.
 
-## 8. Docs — `docs/static_checking.md`
+## 8. Docs — `internal/static_checking.md`
 
 Add `## Proofs (2026-09)` after "The false-positive contract" (95-102): what a proof is, the
 lane/guard principle, the certain set (= the complement of the lenient rows in the rule table),

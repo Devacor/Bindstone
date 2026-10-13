@@ -11,7 +11,7 @@ Status (Dev, 2026-10-07):
 
 A reference (`var& r = o.f`, a `T&` parameter, `for (auto& x : xs)`, `auto& e = m[k]`) is a `script_value` whose storage is a
 `strong_ptr<reference_holder>`. The holder pins what it names and finds the target again on every touch. The six holder
-modes are listed in invariants.md §3 and docs/reference_model.md. This note costs four ways to make a touch, a mint and a
+modes are listed in invariants.md §3 and internal/reference_model.md. This note costs four ways to make a touch, a mint and a
 release cheaper. Each keeps today's observable rules:
 
 - a removed field raises `Reference to a removed field`;

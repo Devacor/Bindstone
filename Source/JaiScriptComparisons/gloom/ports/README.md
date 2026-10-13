@@ -6,7 +6,7 @@ against JaiScript.
 
 ## Porting
 
-**[reference/README.md](../reference/README.md) is the normative game/host
+**[reference/README.md](../../../JaiScript/examples/gloom/reference/README.md) is the normative game/host
 spec** (tick order, RNG contract, STATE_HASH recipe, checkpoint hashes); this
 section covers the mechanics: the C++ adapter contract, the CMake wiring, the
 measurement protocol, and the feedback rubric each porter fills in.
@@ -164,7 +164,7 @@ Numbers reported per reference/README.md section 3.4:
 3. **Interactive split**: `--bench 300` sim/draw ms per frame (quad).
 4. Optional ablation for stage-level parity with the JaiScript numbers:
    sim-only / rays / paint / rows, measured by early-returning the render
-   pipeline (see [the GLOOM README](../README.md)).
+   pipeline (see [the GLOOM README](../../../JaiScript/examples/gloom/README.md)).
 
 The whole-program gates below are the timed comparison.
 
@@ -287,8 +287,8 @@ the rival configurations with:
 python examples/gloom/ports/run_comparison.py --engines jai --workloads gloom,timedemo --rounds 3 --build <output root>/release --output <output root>/<evidence directory>
 ```
 
-Run `examples/jaidoom/bootstrap.bat` once as described in its README to
-provide the git-ignored `examples/jaidoom/wads/doom1.wad`. The timedemo
+Run `Source/JaiScript/examples/jaidoom/bootstrap.bat` once as described in its README to
+provide the git-ignored `Source/JaiScript/examples/jaidoom/wads/doom1.wad`. The timedemo
 requires that WAD and `demo.json` before the runner can hash its inputs.
 
 JaiDOOM uses `examples/jaidoom/scripts/p10_timedemo.jai`, `demo.json` and

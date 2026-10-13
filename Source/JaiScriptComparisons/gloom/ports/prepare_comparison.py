@@ -20,9 +20,9 @@ ARCHIVES = (
 )
 
 def main():
-	root = pathlib.Path(__file__).resolve().parents[3]
+	root = pathlib.Path(__file__).resolve().parents[2]
 	parser = argparse.ArgumentParser(description=__doc__)
-	parser.add_argument("--deps", type=pathlib.Path, default=root / "out/astra/deps")
+	parser.add_argument("--deps", type=pathlib.Path, default=root / "out/deps")
 	args = parser.parse_args()
 	deps = args.deps.resolve()
 	deps.relative_to((root / "out").resolve())

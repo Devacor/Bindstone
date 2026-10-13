@@ -5,9 +5,7 @@ corridors, keycards, secrets, and things that roar before they charge — writte
 **entirely in JaiScript**. The C++ host (`gloom_host.*` + `gloom_adapter_jai.cpp`)
 is the same thin shell as the crawler/demoreel: a VT console, held-key input, a
 seeded `Rng`, a monotonic clock, flags as globals — now split into a shared,
-runtime-agnostic core and a per-language adapter so the cross-language
-comparison ports (ChaiScript/Squirrel/Lua, opt-in CMake targets) reuse the
-exact harness. [ports/README.md](ports/README.md) is the porter's guide. Everything else — the raycaster, the sub-cell renderer, enemy
+runtime-agnostic core and a per-language adapter. Everything else — the raycaster, the sub-cell renderer, enemy
 brains, weapons, particles, the episode, the autopilot — is script.
 
 GLOOM is the crawler's bigger sibling and a deliberate dogfood of this month's
@@ -174,8 +172,7 @@ Single 300-tick runs; treat ±10% as machine noise (a thermal-loaded rerun of
 this table once showed serial interp at 64 ms — measure quiet or measure twice).
 
 The tables above are an older laptop; the [performance guide](../../docs/site/embedding/11-performance.html)
-covers measuring JaiScript, and [ports/README.md](ports/README.md) the warmed comparison against Lua 5.4,
-5.5 and LuaJIT JIT under the same hashes.
+covers measuring JaiScript.
 
 Stage ablation (VM, quad, W=4, measured by early-returning the pipeline):
 sim ~2 ms, ray chunk build ~1 ms, ray transform ~1.5 ms (2.2x over its serial
@@ -248,8 +245,7 @@ words with the landlord.
 
 ```
 gloom_host.hpp/.cpp thin SHARED host: console, held keys, Rng, clock, flags,
-                    smoke/bench harness; language-agnostic (ports/README.md has the
-                    adapter contract for the cross-language comparison ports)
+                    smoke/bench harness; language-agnostic
 gloom_adapter_jai.cpp  the JaiScript adapter + main() (this exe)
 gloom_adapter_{chai,squirrel,lua}.cpp  port scaffolds (opt-in CMake targets)
 scripts/state.jai   RNG global

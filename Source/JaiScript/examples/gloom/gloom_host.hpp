@@ -1,6 +1,5 @@
-// GLOOM shared host: the language-agnostic console shell for the cross-language
-// comparison. reference/README.md is the game/host spec; ports/README.md is the adapter
-// contract. The host owns: VT console, held-key state + key events, a monotonic
+// GLOOM shared host: the language-agnostic console shell. reference/README.md is the
+// game/host spec. The host owns: VT console, held-key state + key events, a monotonic
 // clock, the xorshift64* Rng, command-line flags, and the --smoke/--bench
 // harnesses with their hashes. A script_adapter supplies everything
 // language-specific: engine creation, host-API binding, script loading, and the

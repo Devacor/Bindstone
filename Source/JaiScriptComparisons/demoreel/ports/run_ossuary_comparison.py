@@ -10,8 +10,9 @@ import statistics
 import subprocess
 import time
 
-ROOT = Path(__file__).resolve().parents[3]
-SPEC = importlib.util.spec_from_file_location("gloom_comparison", ROOT / "examples/gloom/ports/run_comparison.py")
+COMPARISONS = Path(__file__).resolve().parents[2]
+ROOT = COMPARISONS.parent / "JaiScript"
+SPEC = importlib.util.spec_from_file_location("gloom_comparison", COMPARISONS / "gloom/ports/run_comparison.py")
 COMMON = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(COMMON)
 ROW = re.compile(r"^(\S+)\s+\|\s+16\s+\|\s+OSSUARY\s+\|\s+([\d.]+)\s+\|\s+([\d.]+)\s+\|\s+([0-9a-f]{16})\s*$", re.M)
@@ -57,7 +58,7 @@ def main():
 	if args.rounds < 3 or args.frames < 1 or args.warmup < args.frames:
 		parser.error("Use at least three rounds and a full workload of warm-up frames.")
 	out = args.output.resolve()
-	out.relative_to((ROOT / "out/astra").resolve())
+	out.relative_to((COMPARISONS / "out").resolve())
 	out.mkdir(parents=True, exist_ok=True)
 	if (out / "runs.json").exists():
 		parser.error("Use a fresh evidence directory.")

@@ -68,7 +68,3 @@ The scripts are part of JaiScript and carry its license. Freedoom is BSD 3-Claus
 Copyright 1993 id Software; it may be redistributed unmodified and is not open source.
 The engine was written from the public WAD and engine format documentation; no id
 Software source is transcribed.
-
-## Lua comparison port
-
-The headless [Lua comparison port](ports/README.md) runs the full recorded timedemo with the same simulation and rendered output, plus the P4 and P7 gates. Its paired runner measures warmed JaiScript and Lua replays with fixed affinity and padding controls. The game data remains shared and untracked.

@@ -148,7 +148,7 @@ def parse_timedemo(text, warmed=True):
 		"state_hash":int(hashes[-1]) if hashes else None,"frame_hash":None}
 
 
-def validate_timedemo_conformance(directory, builds, workload_root):
+def validate_timedemo_conformance(directory, builds, workload_root, comparison_root):
 	directory=directory.resolve()
 	report=json.loads((directory/"comparison.json").read_text())
 	inputs=json.loads((directory/"inputs.json").read_text())
@@ -158,7 +158,7 @@ def validate_timedemo_conformance(directory, builds, workload_root):
 		if file_hash(pathlib.Path(path))!=sha:
 			raise RuntimeError("Conformance input changed: "+path)
 	required=[* (workload_root/"examples/jaidoom/scripts").glob("*.jai"),
-		* (workload_root/"examples/jaidoom/ports/lua").glob("*.lua"),
+		* (comparison_root/"jaidoom/ports/lua").glob("*.lua"),
 		workload_root/"examples/jaidoom/demo.json",workload_root/"examples/jaidoom/wads/doom1.wad"]
 	for build in builds.values():
 		required += [build/"bin/jai_doom_lua.exe",build/"bin/jai_doom_lua_padding.exe"]
@@ -327,13 +327,15 @@ def difference_rows(configs, builds, records):
 def main():
 	if os.name!="nt":
 		raise SystemExit("This runner records Windows topology and affinity.")
-	root=pathlib.Path(__file__).resolve().parents[3]
+	comparisons=pathlib.Path(__file__).resolve().parents[2]
+	root=comparisons.parent/"JaiScript"
 	parser=argparse.ArgumentParser(description=__doc__)
-	parser.add_argument("--build",type=pathlib.Path,default=root/"out/astra/release")
+	parser.add_argument("--build",type=pathlib.Path,default=comparisons/"out/release")
 	parser.add_argument("--jai-workload-root",type=pathlib.Path,default=root,help="JaiScript source root containing examples/gloom and examples/jaidoom; use a frozen copy for campaign measurements.")
+	parser.add_argument("--comparison-root",type=pathlib.Path,default=comparisons,help="JaiScriptComparisons root containing the ports; use a frozen copy for campaign measurements.")
 	parser.add_argument("--compare-build",type=pathlib.Path,help="Interleave a candidate build against the baseline.")
 	parser.add_argument("--variant-build",action="append",default=[],metavar="NAME=PATH",help="Add a named build; every pair retains the interleaved normal/padding order.")
-	parser.add_argument("--output",type=pathlib.Path,default=root/"out/astra/whole-program")
+	parser.add_argument("--output",type=pathlib.Path,default=comparisons/"out/whole-program")
 	parser.add_argument("--rounds",type=int,default=3)
 	parser.add_argument("--resume",action="store_true",help="Resume after completed gates, verifying the original inputs and exact accepted ABAB prefix.")
 	parser.add_argument("--max-attempts",type=int,default=10,help="Busy attempts per required timing; acceptance threshold is unchanged.")
@@ -346,6 +348,7 @@ def main():
 	args=parser.parse_args()
 	workloads=args.workloads.split(",")
 	jai_workload_root=args.jai_workload_root.resolve()
+	comparison_root=args.comparison_root.resolve()
 	if args.resume and args.conformance_only:
 		parser.error("--resume continues timing; it cannot be combined with --conformance-only.")
 	if args.max_attempts<1:
@@ -353,7 +356,7 @@ def main():
 	if args.rounds<3 or not workloads or any(w not in ("gloom","timedemo") for w in workloads):
 		parser.error("Use at least three rounds and workloads gloom,timedemo.")
 	out=args.output.resolve()
-	out.relative_to((root/"out/astra").resolve())
+	out.relative_to((comparisons/"out").resolve())
 	out.mkdir(parents=True,exist_ok=True)
 	if (out/"runs.json").exists() and not args.resume:
 		parser.error("Use a new output directory; existing raw runs are never overwritten.")
@@ -372,10 +375,10 @@ def main():
 				if not certificate.exists():raise RuntimeError("Missing original frame conformance")
 			else:
 				machine.wait_for_quiet(args.max_background_cores)
-				subprocess.run([os.sys.executable,str(root/"examples/jaidoom/ports/verify_conformance.py"),
+				subprocess.run([os.sys.executable,str(comparison_root/"jaidoom/ports/verify_conformance.py"),
 					"--build",str(next(iter(builds.values()))),"--game-root",str(jai_workload_root/"examples/jaidoom"),
 					"--output",str(certificate)],check=True)
-		timedemo_certificate=validate_timedemo_conformance(certificate,builds,jai_workload_root)
+		timedemo_certificate=validate_timedemo_conformance(certificate,builds,jai_workload_root,comparison_root)
 	# Pin executable identities. Runtime source may advance in Fable's lane after a build.
 	binaries={}
 	for build in builds.values():
@@ -385,9 +388,9 @@ def main():
 				binaries[str(exe)]=file_hash(exe)
 	script_paths=list((jai_workload_root/"examples/gloom/scripts").glob("*.jai"))
 	script_paths+=list((jai_workload_root/"examples/jaidoom/scripts").glob("*.jai"))
-	script_paths+=list((jai_workload_root/"examples/jaidoom/ports/lua").glob("*.lua")) if any(c["target"]=="jai_doom_lua" for c in configs) else []
-	script_paths+=list((root/"examples/gloom/ports").rglob("*.lua"))
-	script_paths+=list((jai_workload_root/"examples/gloom/ports/squirrel/scripts").glob("*.nut"))
+	script_paths+=list((comparison_root/"jaidoom/ports/lua").glob("*.lua")) if any(c["target"]=="jai_doom_lua" for c in configs) else []
+	script_paths+=list((comparison_root/"gloom/ports").rglob("*.lua"))
+	script_paths+=list((comparison_root/"gloom/ports/squirrel/scripts").glob("*.nut"))
 	script_paths += [jai_workload_root/"examples/jaidoom/demo.json",jai_workload_root/"examples/jaidoom/wads/doom1.wad"] if "timedemo" in workloads else []
 	workload_hashes={str(p):file_hash(p) for p in script_paths}
 	metadata={"runner_sha256":file_hash(pathlib.Path(__file__).resolve()),"created_utc":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),
@@ -436,9 +439,9 @@ def main():
 			command=[str(exe),"--smoke","--backend",config["backend"],"--workers",str(config["workers"]),
 				"--ticks",str(ticks),"--warmup","0" if cold else "600","--seed","666","--pix","quad"]
 			if config["target"]=="jai_gloom":command+=["--scripts",str(jai_workload_root/"examples/gloom/scripts")]
-			elif config["target"]=="gloom_squirrel":command+=["--scripts",str(jai_workload_root/"examples/gloom/ports/squirrel/scripts")]
+			elif config["target"]=="gloom_squirrel":command+=["--scripts",str(comparison_root/"gloom/ports/squirrel/scripts")]
 		elif config["target"]=="jai_doom_lua":
-			command=[str(exe),"--scripts",str(jai_workload_root/"examples/jaidoom/ports/lua"),
+			command=[str(exe),"--scripts",str(comparison_root/"jaidoom/ports/lua"),
 				"--game-root",str(jai_workload_root/"examples/jaidoom"),"--repeat","0" if cold else "1","--",
 				str(jai_workload_root/"examples/jaidoom/demo.json"),"120x78"]
 		else:

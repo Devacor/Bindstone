@@ -314,6 +314,7 @@ tally();</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">live 2 pinned 1 scaled 10
 report sees hits = 0 (copied before the hits)
 hits = 2, misses = 1</code></pre></div>
+<p>A reference capture can close a cycle: <code>var again; again = [&amp;]() { again(); };</code> stores in <code>again</code> a lambda that holds <code>again</code>. Such a cycle never outlives its frame on its own: when the frame exits, every shared local that only its own closures still hold is released, with whatever those locals own (a destructor runs at that point, as it would without the lambda). A closure that escaped the frame (returned, stored in a global or a field) keeps its shared locals for as long as anything holds it; once nothing does, the engine reclaims the cycle in a later sweep, at the latest when the engine is destroyed.</p>
 <p><strong>The JavaScript closure.</strong> An anonymous <code>function(...)</code> expression has no capture list: it closes over its scope by reference, as <code>[&amp;]</code> does, so it sees writes made after it was created, nests and curries, and keeps the shared locals alive after the creating frame returns:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function make_account(int opening) {
     int balance = opening;

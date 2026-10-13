@@ -39,9 +39,8 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 both answers: the design that makes the VM quick, the cost model that makes <em>your</em> code quick,
 and every measured number: microbenchmarks against Lua, Squirrel, and ChaiScript (head-to-head suites
 in <code>source/tests/performance/</code>, MSVC x64 Release, min-of-5), the embedding cost sheet, and
-complete games measured end-to-end. The long-form report is <a href="https://github.com/Devacor/JaiScript/blob/master/docs/PERFORMANCE.md"><code>docs/PERFORMANCE.md</code></a>;
-this page adds a second machine&#x27;s numbers beside it, and says which is which at the top of
-the <a href="#measured-results">measured section</a>. One caveat travels with all of it: the
+complete games measured end-to-end. The numbers come from two machines, and the top of the
+<a href="#measured-results">measured section</a> says which is which. One caveat travels with all of it: the
 benchmark harness reports integer µs with real run-to-run variance. Compare bands and medians,
 not &plusmn;1&nbsp;µs deltas.</p>
 <h2 id="what-the-vm-does-for-you">What the VM does for you<a class="hlink" href="#what-the-vm-does-for-you" aria-label="link">&#8203;</a></h2>
@@ -176,17 +175,16 @@ once; per-frame scripts should call, not declare.</li></ul>
 <p>Three altitudes: the raw cost sheet for embedders, microbenchmarks against three rival runtimes, and
 complete games measured end-to-end. Sources are named per table.</p>
 <div class="callout"><p><strong>Two machines appear below; never compare a number from one with a number
-from the other.</strong> The <em>report machine</em> is a 2016-era 4-core/8-thread laptop: it produced
-<a href="https://github.com/Devacor/JaiScript/blob/master/docs/PERFORMANCE.md"><code>docs/PERFORMANCE.md</code></a> in July 2026, and the cost sheet, the dispatch regimes, the aliasing table,
+from the other.</strong> The <em>report machine</em> is a 2016-era 4-core/8-thread laptop: the cost sheet, the dispatch regimes, the aliasing table,
 the parallel-scaling figures and the five-way GLOOM report all come from it. The <em>reference machine</em>
 is a current 24-thread laptop CPU (Core Ultra 9 285HX): the head-to-head table, the GLOOM row and the DOOM
 rows were measured there, at later builds (each game row names its date). It runs everything faster, and the two runs are different builds of the
 VM, so the recursion gap reads ~4.5&times; against Lua here and ~6.7&times; in the report. Read ratios
 within one table.</p></div>
 <h3 id="embedding-costs">The embedding cost sheet<a class="hlink" href="#embedding-costs" aria-label="link">&#8203;</a></h3>
-<p>Order-of-magnitude operation costs from <a href="https://github.com/Devacor/JaiScript/blob/master/docs/PERFORMANCE.md"><code>docs/PERFORMANCE.md</code></a> (interp / VM):</p>
+<p>Order-of-magnitude operation costs, report machine (interp / VM):</p>
 <div class="tablewrap"><table><thead><tr><th>operation</th><th>cost</th></tr></thead><tbody><tr><td>single arithmetic op</td><td>&lt;1 µs both backends</td></tr><tr><td>function call</td><td>~2 µs interp / ~1 µs VM (in a tight loop: 0.9 / 0.44 µs)</td></tr><tr><td>class creation</td><td>~15 µs interp / ~14 µs VM</td></tr><tr><td>method invocation</td><td>~12 µs interp / ~9 µs VM (per-call in a tight loop: ~1 µs either backend)</td></tr><tr><td>hot loop, per iteration</td><td><strong>~45 ns</strong> (VM, fused compound loop; ~12 ns on the reference machine)</td></tr><tr><td>engine creation</td><td>~73–77 µs (+ lazy backend init on first execute; ~90 µs all-in)</td></tr><tr><td>stdlib registration</td><td>~311 µs</td></tr></tbody></table></div>
-<p>Dispatch regimes from <a href="https://github.com/Devacor/JaiScript/blob/master/docs/execution_mode_metrics.md"><code>docs/execution_mode_metrics.md</code></a> (Release builds, medians of
+<p>Dispatch regimes, report machine (Release builds, medians of
 interleaved samples; scripts: a 1-line predicate, a 6-line function script, a ~30-line class+loop
 script):</p>
 <div class="tablewrap"><table><thead><tr><th>regime</th><th>interpreter</th><th>vm</th></tr></thead><tbody><tr><td>engine create + first trivial execute</td><td>~90 µs</td><td>~87 µs (identical)</td></tr><tr><td>cold one-shot, fresh engine (tiny script)</td><td>36.9 µs</td><td>34.8 µs (VM already ahead)</td></tr><tr><td>warm engine, novel string every time (tiny)</td><td>7.1 µs</td><td>8.4 µs (interp +18–20% ahead)</td></tr><tr><td>warm engine, repeated string (tiny)</td><td>1.03 µs</td><td>0.60 µs (<strong>VM 1.7–1.8x faster</strong>)</td></tr><tr><td>warm jaibite execute (tiny)</td><td>0.85 µs</td><td><strong>0.38 µs</strong></td></tr><tr><td>warm jaibite execute (6-line fn script)</td><td>3.10 µs</td><td><strong>1.69 µs</strong></td></tr><tr><td>~30-line class/loop script, warm</td><td>251.6 µs</td><td>241.4 µs (1.04x)</td></tr></tbody></table></div>
@@ -202,8 +200,7 @@ per collision.</p>
 <h3 id="value-strategy-costs">What each aliasing strategy costs<a class="hlink" href="#value-strategy-costs" aria-label="link">&#8203;</a></h3>
 <p><a href="../guide/03-value-semantics.html">Value Semantics</a> teaches the strategies; this is the
 bill. Same computation, three ways of holding and passing a meaty object (string name + 8-int stats
-array + 4 scalars; 200 precompiled calls per row, best of five runs; full protocol in
-<a href="https://github.com/Devacor/JaiScript/blob/master/docs/aliasing_costs.md"><code>docs/aliasing_costs.md</code></a>):</p>
+array + 4 scalars; 200 precompiled calls per row, best of five runs, report machine):</p>
 <div class="tablewrap"><table><thead><tr><th>strategy</th><th>interp µs/call</th><th>vm µs/call</th><th>vs <code>&amp;</code></th></tr></thead><tbody><tr><td>read-only compute, pass <code>Creature c</code> (by value)</td><td>8.0</td><td>6.6</td><td>1.3–1.4×. The deep copy, ~1.8 µs/call here, grows with payload</td></tr><tr><td>read-only compute, pass <code>Creature&amp; c</code></td><td>6.2</td><td>4.8</td><td>1.0</td></tr><tr><td>read-only compute, pass <code>shared_ptr&lt;Creature&gt; c</code></td><td>6.4</td><td>4.9</td><td>tie (within noise)</td></tr><tr><td>mutate: <code>heal(Unit&amp; u)</code> vs <code>heal(shared_ptr&lt;Unit&gt; u)</code></td><td>1.7 / 1.8</td><td>1.4 / 1.4</td><td>tie (within noise)</td></tr><tr><td>method call, held as value / <code>auto&amp;</code> / shared_ptr</td><td>5.7–5.8</td><td>4.7</td><td>all tie: the holder doesn&#x27;t matter</td></tr></tbody></table></div>
 <p>The structure-heavy version of the same story, on the node-aliasing BST benchmark (15 nodes):
 in-place <code>&amp;</code> params are ~1.35&times; faster than the shared_ptr return-and-reassign
@@ -211,8 +208,8 @@ shape (that delta is the shape, not a per-access penalty), and both are ~3.5&tim
 by-value, which deep-copies subtrees at every recursion level.</p>
 <h3 id="the-comparison-story">Against Lua, Squirrel, and ChaiScript<a class="hlink" href="#the-comparison-story" aria-label="link">&#8203;</a></h3>
 <p>All three rivals are measured live in the same suites, same machine, same protocol. This table is the
-reference-machine run; <a href="https://github.com/Devacor/JaiScript/blob/master/docs/PERFORMANCE.md"><code>docs/PERFORMANCE.md</code></a> holds the full per-class tables from the report
-machine, and the two agree on every ordering and verdict while disagreeing on every absolute number.
+reference-machine run; the report machine&#x27;s run of the same suites agrees on every ordering and
+verdict while disagreeing on every absolute number.
 Headline rows, µs/iteration (a plain function call rounds to 0 µs on every runtime but ChaiScript, so that row is omitted; the cost sheet above has it in nanoseconds):</p>
 <div class="tablewrap"><table><thead><tr><th>benchmark</th><th>Jai interp</th><th>Jai VM</th><th>Lua 5.4</th><th>Squirrel</th><th>ChaiScript</th></tr></thead><tbody>
 <tr><td>Method invocation</td><td>1</td><td>1</td><td>1</td><td>2</td><td>38</td></tr>
@@ -265,8 +262,7 @@ Eight workers take JaiScript from 1.401 to 0.973 ms/tick (1.44&times;): only the
 whose loops the engine proves safe run in parallel, and the rest stay serial.
 Lua 5.4.8 and 5.5.1 overlap within noise, and LuaJIT&#x27;s spread is wide. LuaJIT&#x27;s JIT
 generates machine code at run time, which some shipping targets (iOS) forbid, so it is a
-ceiling rather than a target.
-<a href="https://github.com/Devacor/JaiScript/blob/master/examples/gloom/ports/RESULTS_2026-09-09.md">Full results, control medians, versions and methodology</a>.</td></tr>
+ceiling rather than a target.</td></tr>
 <tr><td><strong>Demoreel</strong> (<code>examples/demoreel</code>): thirteen truecolor scenes at
 100&times;40 = 4,000 cells per frame, the whole reel including transitions
 (<code>--smoke</code>, 1,700 frames; the example&#x27;s README is the record)</td><td>interpreter
@@ -275,14 +271,13 @@ runs the full reel <strong>1.28&times;</strong> faster on byte-identical frame s
 array-element-bound, where the two backends sit closest: the backend choice measured whole-program on one
 real workload</td></tr>
 </tbody></table></div>
-<p>The five-way report is worth reading beyond the numbers: the same enemy brain is ~23 lines of
+<p>The five ports say something beyond the numbers: the same enemy brain is ~23 lines of
 coroutine or generator method in JaiScript, Lua, Squirrel, and Python. In ChaiScript, which has no coroutines, it is a 50-line
 hand-lowered state machine. Expressiveness parity is table stakes; the
 differentiators are speed and what the language lets you say directly.</p>
 <p><strong>Style is near-free, and provably so.</strong> GLOOM exists in a second complete flavor,
 <code>examples/gloom_idiomatic</code>, a full rewrite in modern class-based style: subsystem classes, an
-enemy hierarchy with virtual coroutine brains, typed classes for the record types instead of string-keyed maps
-(<code>examples/gloom_idiomatic/IDIOMATIC_COST.md</code>). It produces <em>bit-identical</em> state and
+enemy hierarchy with virtual coroutine brains, typed classes for the record types instead of string-keyed maps. It produces <em>bit-identical</em> state and
 frame hashes to the flat original on both backends at every worker count, and measures within noise on
 the interpreter and ~4–7% behind on the VM. The moral for code review: choose the architecture you want
 to maintain; the per-pixel hot stages are held to the flat shape by the parallel-admission rules either
@@ -296,8 +291,7 @@ jaiscript_tests &quot;Lua (sol2) Performance Comparison&quot; --verbose   # need
 number taken from one means anything.
 Run min-of-3 and compare medians; the integer-µs harness cannot resolve sub-µs changes (use a
 dedicated ns micro-bench for those). For end-to-end embedding costs (engine create, parse, compile,
-warm dispatch, crossover points) the methodology and full tables are in
-<a href="https://github.com/Devacor/JaiScript/blob/master/docs/execution_mode_metrics.md"><code>docs/execution_mode_metrics.md</code></a>, summarized in <a href="#embedding-costs">the cost sheet
+warm dispatch, crossover points) see <a href="#embedding-costs">the cost sheet
 above</a>. The whole-game harnesses that ship reproduce too: <code>jai_gloom.exe --smoke</code> and
 <code>jai_demoreel --smoke</code> run each game headless on both backends and print ms per tick or frame
 next to the parity hashes (each example&#x27;s README has the flags).</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/10-signals-properties.html"><span>&larr; previous</span>Signals &amp; Observable Properties</a><a class="next" rel="next" href="../embedding/12-debugging.html"><span>next &rarr;</span>Debugging</a></nav></article>

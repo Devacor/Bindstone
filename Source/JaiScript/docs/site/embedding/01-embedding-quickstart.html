@@ -190,6 +190,23 @@ heal(hp + 1, 5);          // a temporary: the callee works on a copy, nothing is
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_include_path(&quot;scripts&quot;);           // where import/include look after the file&#x27;s own folder
 eng-&gt;execute_file(&quot;scripts/game.jai&quot;);      // parse (or load the .jaibite sibling), check, run</code></pre></div>
 <p><code>execute_file</code> attributes every node to the file&#x27;s canonical path, whatever spelling you pass: check listings, stack traces and debugger breakpoints all name it. It keeps a parsed copy beside the source (<code>game.jai</code> gets <code>game.jaibite</code>); add <code>*.jaibite</code> to your <code>.gitignore</code>, or turn the cache off with <code>eng-&gt;jaibite_cache(false)</code>. Functions, classes and globals the file declares stay in the engine for later calls.</p>
+<h2 id="per-execution-variables">Per-execution variables<a class="hlink" href="#per-execution-variables" aria-label="link">&#8203;</a></h2>
+<p><code>execute(source, instance_variables)</code> and <code>execute_file(path, instance_variables)</code> run one execution with extra names in scope. <code>jai::instance_variables</code> is a <code>std::unordered_map&lt;std::string, jai::script_value&gt;</code>; a non-empty map becomes a scope over the globals for that one execution and is discarded when it returns.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(&quot;var counter = 0;&quot;);                        // no overlay: a global
+
+jai::instance_variables locals{{&quot;increment&quot;, eng-&gt;make_value(int64_t{5})}};
+eng-&gt;execute(&quot;counter = counter + increment;&quot;, locals);  // reads the overlay, writes the global
+eng-&gt;execute(&quot;var temp = 1;&quot;, locals);                   // temp is declared in the overlay
+
+eng-&gt;execute(&quot;counter&quot;).as_int();                        // 5
+eng-&gt;execute(&quot;increment&quot;);                               // raises: the overlay is gone
+eng-&gt;execute(&quot;temp&quot;);                                    // raises: temp died with the overlay</code></pre></div>
+<ul>
+<li><strong>It lasts one execute.</strong> The script reads the supplied names; one shadows a global of the same name for that execution only. Assigning to an existing global still writes the global.</li>
+<li><strong>Declarations land in the overlay.</strong> With a non-empty map, a top-level <code>var x = 10;</code> is declared in the overlay and disappears with it; nothing is copied back to the globals. An empty map is the plain <code>execute(source)</code>, whose top-level declarations are globals. The checker treats the supplied names as declared.</li>
+<li><strong>It is not dynamic scope.</strong> A function resolves its free names through the scope it was created in, never its caller's. A function defined by an earlier execute does not see a later execute's overlay; only code from the same execute does.</li>
+<li><strong>Signal receivers use it.</strong> A script-text receiver on a <code>jai::signal</code> runs this way on every emit: the emit's arguments become an overlay named by the signal's <code>parameter_names</code>, so they never leak into the globals (<a href="10-signals-properties.html#script-facing-integration">Connecting from script</a>).</li>
+</ul>
 <h2 id="calling-script-from-c">Calling script from C++<a class="hlink" href="#calling-script-from-c" aria-label="link">&#8203;</a></h2>
 <p>A script function is a value. Look it up by name and call it with a vector of arguments; the result is a <code>checked_result</code>, not an exception:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int damage_for(int level) { return level * 3; }</code></pre></div>

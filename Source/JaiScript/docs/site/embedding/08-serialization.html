@@ -39,7 +39,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <p><strong>Script side</strong>: the <code>to_json</code> / <code>from_json</code> builtins turn any script
 value into text and back: one line each way.</p>
 <p><strong>C++ side</strong>: an archive framework that writes JSON or a compact binary through one
-interface (<code>include/jaiscript/serialization/</code>; spec in <a href="https://github.com/Devacor/JaiScript/blob/master/docs/SERIALIZATION.md"><code>docs/SERIALIZATION.md</code></a>). It is a drop-in for Cereal-shaped code: the same
+interface (<code>include/jaiscript/serialization/</code>). It is a drop-in for Cereal-shaped code: the same
 member/free <code>serialize</code> / <code>save</code> / <code>load</code> dispatch.</p>
 <p>The part worth knowing before you write any of it: <strong>a class you have already bound for
 scripting is most of the way to serializable.</strong> The <a href="02-dynamic-binder.html">dynamic_binder</a>
@@ -131,8 +131,49 @@ loaded: level=7 hero=Alice items=3
 binary: 114 bytes, hero=Alice</code></pre></div>
 <p>Also available: <code>to_binary_string</code>/<code>from_binary_string</code>, <code>to_base64</code>/<code>from_base64</code>, and <code>Context&amp;</code> overloads (<code>jai::from_json&lt;T&gt;(*eng, json, ctx)</code>) that thread a user context pointer to nested <code>load</code> calls. The binary format is little-endian on every platform, so a blob written on one machine loads on another.</p>
 <h3 id="dispatch-priority-cereal-style-provide-either-serialize-or-save-load">Dispatch priority (Cereal-style: provide either <code>serialize</code> OR <code>save</code>/<code>load</code>)<a class="hlink" href="#dispatch-priority-cereal-style-provide-either-serialize-or-save-load" aria-label="link">&#8203;</a></h3>
-<p>For a type <code>T</code> the archive picks, in order: native handling (primitives, <code>std::vector/ map/unordered_map/array/pair</code>, <code>shared_ptr/weak_ptr/unique_ptr</code>) → member <code>save</code>/<code>load</code> → member <code>serialize</code> → free <code>save</code>/<code>load</code> via ADL → free <code>serialize</code> via ADL → <code>JAI_STATIC_BINDER</code> (a compile-time property table some hosts declare instead of <code>property_owner</code>; see <a href="https://github.com/Devacor/JaiScript/blob/master/docs/SERIALIZATION.md"><code>docs/SERIALIZATION.md</code></a>) → automatic <code>property_owner&lt;T&gt;</code> fallback (all <code>JAI_PROPERTY</code> fields). No match = <code>static_assert</code>, so an unserializable type fails at compile time, not in a shipped save. For smart pointers to non-default-constructible types, <code>load_and_construct</code> (member or ADL) is checked first. Full spec: <a href="https://github.com/Devacor/JaiScript/blob/master/docs/SERIALIZATION.md"><code>docs/SERIALIZATION.md</code></a>.</p>
+<p>For a type <code>T</code> the archive picks, in order: native handling (primitives, <code>std::vector/ map/unordered_map/array/pair</code>, <code>shared_ptr/weak_ptr/unique_ptr</code>) → member <code>save</code>/<code>load</code> → member <code>serialize</code> → free <code>save</code>/<code>load</code> via ADL → free <code>serialize</code> via ADL → <code>JAI_STATIC_BINDER</code> (a compile-time property table some hosts declare instead of <code>property_owner</code>, saved and loaded through <code>jai_static_type&lt;T&gt;::save</code> / <code>load</code>) → automatic <code>property_owner&lt;T&gt;</code> fallback (all <code>JAI_PROPERTY</code> fields). No match = <code>static_assert</code>, so an unserializable type fails at compile time, not in a shipped save. For smart pointers to non-default-constructible types, <code>load_and_construct</code> (member or ADL) is checked first; without one the archive default-constructs and loads normally. A member wins over a free function of the same kind, and <code>property_owner</code> is the last resort: a <code>property_owner</code> type that also declares <code>save</code>/<code>load</code> uses them, and can call <code>property_mgr.save(ar)</code> / <code>property_mgr.load(ar)</code> inside them to write its <code>JAI_PROPERTY</code> fields beside the hand-written ones. A type with <code>save</code> but no <code>load</code> loads through its <code>serialize</code> (and the reverse).</p>
 <p>Private members: <code>friend jai::access</code>.</p>
+<h3 id="archive-methods">The archive inside <code>save</code>, <code>load</code> and <code>serialize</code><a class="hlink" href="#archive-methods" aria-label="link">&#8203;</a></h3>
+<p>Named properties are the normal form; the unnamed calls exist for hand-written layouts. A writer:</p>
+<div class="tablewrap"><table><thead><tr><th>Call</th><th>Writes</th></tr></thead><tbody>
+<tr><td><code>ar.serialize("name", value)</code>, <code>ar("name", value)</code></td><td>a named property; <code>value</code> goes through the dispatch above</td></tr>
+<tr><td><code>ar(JAI_NVP(x), JAI_NVP(y))</code>, <code>ar(make_nvp("name", value))</code></td><td>named properties, the key spelled by the macro (the variable's name) or the pair</td></tr>
+<tr><td><code>ar(obj)</code></td><td><code>obj</code>'s own <code>save</code> or <code>serialize</code>, in place</td></tr>
+<tr><td><code>ar.write_element(value)</code></td><td>the next element between <code>begin_array</code> and <code>end_array</code></td></tr>
+<tr><td><code>ar.write_int8</code> &hellip; <code>write_int64</code>, <code>write_uint8</code> &hellip; <code>write_uint64</code>, <code>write_float32</code>, <code>write_float64</code>, <code>write_bool</code>, <code>write_string</code></td><td>one unnamed primitive</td></tr>
+<tr><td><code>begin_object(type_name, version)</code> / <code>end_object()</code>, <code>begin_array(size)</code> / <code>end_array()</code>, <code>begin_map(size)</code> / <code>write_map_key(key)</code> / <code>end_map()</code></td><td>structure</td></tr>
+</tbody></table></div>
+<p>A reader mirrors it:</p>
+<div class="tablewrap"><table><thead><tr><th>Call</th><th>Reads</th></tr></thead><tbody>
+<tr><td><code>ar.serialize("name", value)</code>, <code>ar("name", value)</code>, <code>ar(nvp)</code></td><td>the named property into <code>value</code>; a record without it throws <code>jai::serialization_error</code> (<code>Property 'name' not found during deserialization</code>)</td></tr>
+<tr><td><code>ar(obj)</code></td><td><code>obj</code>'s own <code>load</code> or <code>serialize</code>, from the current record</td></tr>
+<tr><td><code>ar.read_element(value)</code></td><td>the next element between <code>begin_array</code> and <code>end_array</code></td></tr>
+<tr><td><code>ar.has_property("name")</code>, <code>ar.seek_property("name")</code></td><td>whether the current record has the property; positions the reader at it (false when it is absent)</td></tr>
+<tr><td><code>ar.read_int32()</code>, <code>ar.read_string()</code>, &hellip; (the writer's widths)</td><td>one unnamed primitive</td></tr>
+<tr><td><code>begin_object(type_name, version)</code> (fills both) / <code>end_object()</code>, <code>size_t n = begin_array()</code> / <code>end_array()</code>, <code>begin_map()</code> / <code>read_map_key(key)</code> / <code>end_map()</code></td><td>structure</td></tr>
+<tr><td><code>ar.get_version()</code></td><td>the version of the record being read</td></tr>
+</tbody></table></div>
+<p>Every failure in either direction throws <code>jai::serialization_error</code>, a <code>jai::runtime_error</code>.</p>
+<h3 id="versions-and-missing-fields">Versions and missing fields<a class="hlink" href="#versions-and-missing-fields" aria-label="link">&#8203;</a></h3>
+<p>Both formats are self-describing: every record names its properties, so a reader finds a property by name, never by position. The automatic <code>property_owner</code> load reads the properties the record and the class share. A property the record lacks keeps its initializer and a property the class no longer declares is skipped, so adding or removing a <code>JAI_PROPERTY</code> needs no migration code.</p>
+<p>A hand-written <code>load</code> asks for what it reads: <code>ar("name", v)</code> requires the property, so a field newer than some saves is read under <code>ar.has_property("name")</code>. Each record also carries a version. A type bound through a binder chain declares its own with <code>.version(n)</code>; JSON writes it as <code>"_version_"</code> when it is above 1, and a record without one reads as 1. A versioned <code>load(Archive&amp;, std::uint32_t version)</code> or <code>serialize(Archive&amp;, std::uint32_t version)</code> receives the record's version, and <code>ar.get_version()</code> answers it inside any load:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">template&lt;class Archive&gt;
+void load(Archive&amp; ar, std::uint32_t version) {
+    ar(&quot;health&quot;, health);
+    ar(&quot;level&quot;, level);
+    if (version &gt;= 2 &amp;&amp; ar.has_property(&quot;experience&quot;)) { ar(&quot;experience&quot;, experience); }
+    else { experience = level * 100; }      // an older record: derive the field
+}</code></pre></div>
+<h3 id="wire-formats">Wire formats<a class="hlink" href="#wire-formats" aria-label="link">&#8203;</a></h3>
+<p>Both formats run the same calls; the writer decides the bytes. JSON writes a record as an object whose <code>"_type_"</code> (and <code>"_version_"</code>, above 1) lead its properties. The binary writer is little-endian: a record is the byte <code>0x01</code>, its type name (a <code>uint32</code> length, then the bytes) and a <code>uint32</code> version, then, when the record closes, its property count, every property name, every property's byte size, the values, and <code>0x02</code>. An array is <code>0x03</code>, a count, the elements and <code>0x04</code>; a map is <code>0x05</code> &hellip; <code>0x06</code>; null is <code>0x00</code>. The names and sizes up front let a reader jump to a property by name and skip the ones it does not know without parsing them.</p>
+<p>Pointers have the same record shapes in both formats, keyed by the archive's per-save object ids:</p>
+<div class="tablewrap"><table><thead><tr><th>Value</th><th>Written as</th></tr></thead><tbody>
+<tr><td><code>shared_ptr</code>, first time its object is written</td><td><code>{"$id": N, "$val": {...}}</code>; through a base pointer holding a registered derived class, <code>{"$id": N, "$type": "Derived", "$val": {...}}</code></td></tr>
+<tr><td><code>shared_ptr</code> to an object already written</td><td><code>{"$id": N}</code>, which the load re-aliases</td></tr>
+<tr><td><code>weak_ptr</code></td><td><code>{"$ref": N}</code>, with the object's <code>"$val"</code> (and <code>"$type"</code>) inline when the weak pointer is its first reference in the save; an expired one is null</td></tr>
+<tr><td><code>unique_ptr</code></td><td><code>{"$val": {...}}</code></td></tr>
+<tr><td>a null pointer</td><td>null</td></tr>
+</tbody></table></div>
 <h3 id="migrating-from-cereal">Migrating from Cereal<a class="hlink" href="#migrating-from-cereal" aria-label="link">&#8203;</a></h3>
 <p>A Cereal-serialized type moves over with spelling changes; its functions keep their shape.</p>
 <table><thead><tr><th>Cereal</th><th>JaiScript</th></tr></thead><tbody>
@@ -145,7 +186,22 @@ binary: 114 bytes, hero=Alice</code></pre></div>
 <tr><td><code>CEREAL_REGISTER_TYPE</code> + <code>CEREAL_REGISTER_POLYMORPHIC_RELATION</code></td><td>a <code>jai::registrar&lt;Derived, void, jai::bases&lt;Base&gt;&gt;</code> (above) or a <code>property_owner</code> declaration</td></tr>
 <tr><td><code>CEREAL_CLASS_VERSION(T, n)</code></td><td><code>.version(n)</code> on the type's binder chain</td></tr>
 </tbody></table>
-<p>While both libraries are in the build, one function can serve both: branch on <code>jai::serialization::jai_archive&lt;Archive&gt;</code> (pattern 5 in <a href="https://github.com/Devacor/JaiScript/blob/master/docs/SERIALIZATION.md"><code>docs/SERIALIZATION.md</code></a>). Code that already holds a Cereal name-value pair hands it to a JaiScript archive as its two halves:</p>
+<p>While both libraries are in the build, one function can serve both: branch on <code>jai::serialization::jai_archive&lt;Archive&gt;</code>.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">class MyComponent {
+    int value = 0;
+public:
+    template&lt;class Archive&gt;
+    void save(Archive&amp; ar, std::uint32_t version) const {
+        if constexpr (jai::serialization::jai_archive&lt;Archive&gt;) { ar(&quot;value&quot;, value); }
+        else { ar(cereal::make_nvp(&quot;value&quot;, value)); }
+    }
+    template&lt;class Archive&gt;
+    void load(Archive&amp; ar, std::uint32_t version) {
+        if constexpr (jai::serialization::jai_archive&lt;Archive&gt;) { ar(&quot;value&quot;, value); }
+        else { ar(cereal::make_nvp(&quot;value&quot;, value)); }
+    }
+};</code></pre></div>
+<p>The versioned signatures are detected and preferred over the one-parameter forms, so Cereal's versioned functions need no forwarding <code>save(Archive&amp; ar) const { save(ar, 0); }</code> shims. Code that already holds a Cereal name-value pair hands it to a JaiScript archive as its two halves:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">template&lt;class Archive, class T&gt;
 void archive_pair(Archive&amp; ar, cereal::NameValuePair&lt;T&gt;&amp; pair) {
     if constexpr (jai::serialization::jai_archive&lt;Archive&gt;) { ar(pair.name, pair.value); }

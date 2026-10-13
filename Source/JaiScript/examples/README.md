@@ -15,6 +15,7 @@ Then each game is one command (on Windows the runner is `build\bin\jaiscript.exe
 | [demoreel](demoreel/README.md) | a sixteen-scene demoscene reel on two live engines | `build/bin/jaiscript examples/demoreel/demoreel.jai` |
 | [gloom](gloom/README.md) | GLOOM, a real-time terminal raycast shooter | `build/bin/jaiscript examples/gloom/gloom.jai` |
 | [gatorquest](gatorquest/README.md) | Gator Quest, a terminal RPG with netplay | `build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai` |
+| [jaidoom](jaidoom/README.md) | JaiDoom, a DOOM-format engine in script (the first run fetches Freedoom; a fan project, not affiliated with or endorsed by id Software) | `build/bin/jaiscript examples/jaidoom/scripts/jaidoom.jai` |
 | [embed_quickstart](embed_quickstart/README.md) | a minimal C++ host: bindings, calls, signals, hot reload | see its README (a C++ build) |
 
 The crawler, the reel and GLOOM also have native hosts (`jai_crawler`, `jai_demoreel`, `jai_gloom`), built the

@@ -135,7 +135,7 @@ Where things are is not the host's to invent: every engine carries the location 
 `_path` twins; the guide's Modules chapter, "Where files are"). Loading walks the import
 ladder through `resolve_path`; saving picks an anchor and asks `writable_dir` whether it can
 take a file. A script dropped onto the executable therefore runs the same from any working
-directory. JaiDOOM chooses the folder above `scripts/` when it is writable and
+directory. JaiDoom chooses the folder above `scripts/` when it is writable and
 `app_data_dir("JaiDOOM")` otherwise.
 
 and an asynchronous download the script polls from its own loop, the same shape as the
@@ -153,7 +153,7 @@ addresses (loopback left out), which is what a player hosting a game tells the o
 
 The transport is the platform's own: WinHTTP on Windows, libcurl on Linux and macOS when
 the build found it, otherwise the `curl` executable at run time. A failed transfer leaves no
-partial file. JaiDOOM's first run uses this to fetch and verify its own game data.
+partial file. JaiDoom's first run uses this to fetch and verify its own game data.
 
 plus `ARGS` (strings after `--`).
 

@@ -1,8 +1,10 @@
-# JaiDOOM
+# JaiDoom
 
 A playable DOOM engine written in JaiScript: the WAD loader, BSP renderer, playsim, HUD,
 sound and music decoding, savegames, demos and 16-player netplay are all script. It draws
 to the terminal with half-block glyphs and 24-bit colour. `DESIGN.md` covers the internals.
+
+JaiDoom is a fan project, not affiliated with or endorsed by id Software; DOOM is a trademark of id Software.
 
 ## Play
 

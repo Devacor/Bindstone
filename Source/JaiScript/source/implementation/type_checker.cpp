@@ -140,7 +140,9 @@ std::string ctype_name(const ctype& t) {
 		case ctype::map_k: return t.ti ? t.ti->canonical_name() : "map";
 		case ctype::function_k: return "function";
 		case ctype::weak_k: return t.ti ? t.ti->canonical_name() : "weak_ptr";
-		case ctype::object_k: return t.cls.empty() ? "object" : std::string(t.cls);
+		case ctype::object_k:
+			if (t.ti && t.ti->base_type == script_value_type::jai_shared_ptr_type) { return t.ti->canonical_name(); }
+			return t.cls.empty() ? "object" : std::string(t.cls);
 		case ctype::class_ref_k: return "class " + std::string(t.cls);
 		case ctype::enum_ref_k: return "enum " + std::string(t.cls);
 		case ctype::math_k: return std::string(t.cls);
@@ -2219,9 +2221,10 @@ private:
 			accepted = src.kind == ctype::null_k ||
 				(src.kind == ctype::object_k && class_relation(src.cls, dst.cls) != 0);
 		} else if (target->base_type == script_value_type::jai_weak_ptr_type) {
-			// The weak-element kernel accepts null or an existing weak handle.
-			// Shared-to-weak conversion at an element boundary is not a runtime row.
-			accepted = src.kind == ctype::null_k || src.kind == ctype::weak_k;
+			// A weak element takes null, a weak handle, or a shared handle of T or a subclass (C++: weak = shared, the declaration's row)
+			accepted = src.kind == ctype::null_k || src.kind == ctype::weak_k ||
+				(src.kind == ctype::object_k && (!src.ti || src.ti->base_type == script_value_type::jai_shared_ptr_type) &&
+				 weak_initializer_compatible(src, dst));
 		}
 		if (accepted) { return {}; }
 		return "expected '" + target->canonical_name() + "', got '" + ctype_name(src) + "'";

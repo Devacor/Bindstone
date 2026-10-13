@@ -116,6 +116,12 @@ public:
 				cap("map-decl", function() -> string { map<string, shared_ptr<Foo>> m = {"k": null}; return to_string(m["k"] == null); });
 				cap("map-store", function() -> string { map<string, shared_ptr<Foo>> m = {}; m["k"] = null; shared_ptr<Foo> h = Foo(); m["k"] = h; int n = m["k"].n; m["k"] = null; return to_string(n) + "," + to_string(m["k"] == null); });
 				cap("weak", function() -> string { array<weak_ptr<Foo>> a = [null]; a.push(null); a[0] = null; return to_string(a.size()) + "," + to_string(a[0] == null); });
+				cap("weak-push-shared", function() -> string { array<weak_ptr<Foo>> a = []; shared_ptr<Foo> h = Foo(); shared_ptr<Dog> d = Dog(); a.push(h); a.push(d); return to_string(a.size()) + "," + to_string(a[0].expired()) + "," + to_string(a[1].expired()); });
+				cap("weak-store-shared", function() -> string { array<weak_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); a[0] = h; bool live = !a[0].expired(); h = null; return to_string(live) + "," + to_string(a[0].expired()); });
+				cap("weak-map-shared", function() -> string { map<string, weak_ptr<Foo>> m = {}; shared_ptr<Foo> h = Foo(); m["k"] = h; bool live = !m["k"].expired(); h = null; return to_string(live) + "," + to_string(m["k"].expired()); });
+				cap("weak-literal-shared", function() -> string { shared_ptr<Foo> h = Foo(); array<weak_ptr<Foo>> a = [h, null]; return to_string(a[0].expired()) + "," + to_string(a[1] == null); });
+				cap("weak-null-handle", function() -> string { shared_ptr<Foo> n = null; array<weak_ptr<Foo>> a = []; a.push(n); a.push(null); return to_string(a.size()) + "," + to_string(a[0] == null); });
+				cap("weak-wrong-class", function() -> int { array<weak_ptr<Foo>> a = []; shared_ptr<Bar> b = Bar(); a.push(b); return 0; });
 				cap("iterate", function() -> int { array<shared_ptr<Foo>> a = [null]; shared_ptr<Foo> h = Foo(); a.push(h); a.push(null); int c = 0; for (auto x : a) { if (x != null) { c += x.n; } } return c; });
 				cap("raw-push", function() -> string { array<shared_ptr<Foo>> a = []; a.push(Foo()); return type_of(a[0]) + "," + to_string(a[0].n) + "," + to_string(a[0] == null); });
 				cap("raw-decl", function() -> string { array<shared_ptr<Foo>> a = [Foo(), null]; return to_string(a.size()) + "," + type_of(a[0]) + "," + to_string(a[1] == null); });
@@ -147,11 +153,13 @@ public:
 			check_eq(seen[0], seen[1], "both backends land and reject identically");
 			const std::vector<std::string> expected = {
 				"decl:true,false,1", "push:3,true,1", "store:1,true", "ref:1,true", "var-null:1,true",
-				"map-decl:true", "map-store:1,true", "weak:2,true", "iterate:1",
+				"map-decl:true", "map-store:1,true", "weak:2,true", "weak-push-shared:2,false,false", "weak-store-shared:true,true",
+				"weak-map-shared:true,true", "weak-literal-shared:false,true", "weak-null-handle:2,true",
+				"weak-wrong-class!Cannot push 'shared_ptr<Bar>' to array<weak_ptr<Foo>>", "iterate:1",
 				"raw-push:Foo,1,false", "raw-decl:2,Foo,true", "raw-store:4", "raw-map:1", "raw-shares-like-a-handle-slot:true",
 				"raw-subclass:2,Dog,Dog", "handle-array-widens:1,Dog",
 				"wrong-class-raw!Cannot push 'Bar' to array<shared_ptr<Foo>>",
-				"wrong-class-handle!Cannot push 'Bar' to array<shared_ptr<Foo>>",
+				"wrong-class-handle!Cannot push 'shared_ptr<Bar>' to array<shared_ptr<Foo>>",
 				"wrong-class-store!Cannot assign 'Bar' to element of type 'shared_ptr<Foo>'",
 				"int-into-handle-array!Cannot store int in array<shared_ptr<Foo>>",
 				"value-decl!Cannot store null in array<Foo>",

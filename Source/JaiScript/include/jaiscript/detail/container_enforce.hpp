@@ -94,6 +94,9 @@ namespace jai::detail {
 	bool object_element_admits(const script_value& v, const type_info& element_type, engine* eng);
 	// a handle into a shared_ptr<T> element: a variable's rule (the static pointee of a typed handle, a var-held one's class)
 	bool shared_element_admits(const script_value& v, const type_info_ptr& element_type, engine* eng);
+	// a shared handle into a weak_ptr<T> element: the declaration's row (C++: weak = shared), the handle downgrades
+	bool weak_element_takes_shared(const script_value& v, const type_info_ptr& element_type, engine* eng);
+	checked_result<script_value> weak_element_from_shared(const script_value& v, engine* eng);
 	// The class a tag names for the subclass walk: a handle tag's pointee, else the tag itself
 	inline uint64_t class_tag_id(const type_info& t) {
 		const bool handle = t.base_type == script_value_type::jai_shared_ptr_type || t.base_type == script_value_type::jai_weak_ptr_type;
@@ -106,6 +109,9 @@ namespace jai::detail {
 	inline std::string container_value_type_name(const script_value& val) {
 		const script_value& v = val.is_reference() ? val.deref() : val;
 		auto info = v.get_type_info();
+		if (info && (info->base_type == script_value_type::jai_shared_ptr_type || info->base_type == script_value_type::jai_weak_ptr_type)) {
+			return info->canonical_name();
+		}
 		if (info && !info->type_name.empty() && info->base_type != script_value_type::jai_any_type) {
 			return info->type_name;
 		}
@@ -132,6 +138,10 @@ namespace jai::detail {
 
 		auto elem_type = actual_element.type();
 		auto target_type = element_type->base_type;
+
+		if (target_type == script_value_type::jai_weak_ptr_type && elem_type == script_value_type::jai_shared_ptr_type) {
+			return weak_element_takes_shared(actual_element, element_type, eng);
+		}
 
 		// A handle-typed element takes null (C++: a vector of handles
 		// holds empty handles); by-value elements stay non-nullable like std::vector<T>
@@ -299,6 +309,10 @@ namespace jai::detail {
 
 		auto actual_type_info = actual_element.get_type_info();
 		if (actual_type_info && actual_type_info->base_type == script_value_type::jai_shared_ptr_type) {
+			if (element_type && element_type->base_type == script_value_type::jai_weak_ptr_type &&
+			    actual_element.raw_storage_index() != script_value::TYPEID_NULL) {
+				return weak_element_from_shared(actual_element, eng);
+			}
 			return actual_element;
 		}
 
@@ -713,6 +727,9 @@ namespace jai::detail {
 					     target_elem_base == script_value_type::jai_bool_type || is_math_type(target_elem_base))) {
 						needs_conversion = true;
 					}
+					if (target_elem_base == script_value_type::jai_weak_ptr_type && actual.type() == script_value_type::jai_shared_ptr_type) {
+						needs_conversion = true;   // a shared handle downgrades
+					}
 					if (target_elem_base == script_value_type::jai_array_type || target_elem_base == script_value_type::jai_map_type) {
 						// nested: the inner tag decides; an untagged or differently tagged inner
 						// node is rebuilt through its own boundary
@@ -782,6 +799,9 @@ namespace jai::detail {
 					     value_base == script_value_type::jai_float_type ||
 					     value_base == script_value_type::jai_bool_type || is_math_type(value_base))) {
 						needs_conversion = true;
+					}
+					if (value_base == script_value_type::jai_weak_ptr_type && actual.type() == script_value_type::jai_shared_ptr_type) {
+						needs_conversion = true;   // a shared handle downgrades
 					}
 					if ((value_base == script_value_type::jai_array_type || value_base == script_value_type::jai_map_type) &&
 					    actual.get_type_info().get() != value_type.get()) {

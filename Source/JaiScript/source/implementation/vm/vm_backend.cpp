@@ -6770,7 +6770,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 				auto map_type_info = left.get_type_info();
 				type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
 				// Map-entry mode: pins the map + re-resolves by key (temporaries/erase safe)
-				script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, engine_, value_type);
+				script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, &value_ref, engine_, value_type);
 				stack_.push_back(std::move(ref_value));
 			} else if (lvalue_shape && !transient_read) {
 				// Read: reference the existing entry, never insert
@@ -6782,7 +6782,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 					}
 					auto map_type_info = left.get_type_info();
 					type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
-					stack_.push_back(script_value::make_map_entry_reference(left.get_map_storage(), right, engine_, value_type));
+					stack_.push_back(script_value::make_map_entry_reference(left.get_map_storage(), right, &value_ref, engine_, value_type));
 				} else {
 					stack_.push_back(make_null());
 				}
@@ -19377,7 +19377,7 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 		if (proto.is_reference) {
 			args.push_back(state.map_it->first);
 			args.push_back(script_value::make_map_entry_reference(state.container->get_map_storage(),
-			                                                      state.map_it->first, engine_, nullptr));
+			                                                      state.map_it->first, &state.map_it->second, engine_, nullptr));
 		} else {
 			// String keys share their node (the copy-on-write gate detaches any write -
 			// invariants.md 11), other key kinds snapshot; values deep-copy, shared_ptr share

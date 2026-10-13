@@ -99,6 +99,8 @@ EMBEDDING = [
      "jaiscript_lsp answers the editor from the engine's own parser and strict checker: diagnostics as you type across a whole program, definitions, references, hover, completion, rename."),
     ("15-math-adapters.html", "Math Adapters: Host Vector Types",
      "One macro line makes a host vector, point or color struct cross every binding as math::vec3, math::ivec2 or math::color: parameters, returns, write-back, bound members, reflected properties and std::vector buffers."),
+    ("16-migrating-from-cereal.html", "Migrating from Cereal",
+     "Moving a C++ codebase from Cereal to the JaiScript archives: every Cereal construct mapped, a worked conversion, the property route that removes serialize functions, both libraries side by side, and converting existing files once."),
 ]
 
 BRIDGES = [
@@ -118,7 +120,7 @@ SECTION_INDEX_DESC = {
     "guide/index.html":
         "Fifteen chapters covering the whole core language - every standalone sample runs on both backends, with the output it prints.",
     "embedding/index.html":
-        "Fifteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, editor support, and host math types.",
+        "Sixteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, editor support, host math types, and migrating from Cereal.",
     "examples/index.html":
         "Complete, playable programs written in JaiScript - a raycast shooter, a dungeon crawler, a demoscene reel, an online RPG and a DOOM port - and what each one proves.",
     "reference/index.html":

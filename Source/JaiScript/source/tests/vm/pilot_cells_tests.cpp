@@ -3890,6 +3890,53 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(vm, got, "loops entered at their heads under an injected miss at every " + std::to_string(every));
 			}
 		});
+		test("a_counted_loop_is_entered_at_its_cfor_prep", [this]() {
+			// CFOR_PREP is the entry once its first compare passes: a one-iteration loop runs in the block, a zero-trip loop enters nothing, a live-in
+			// read before the body redefines it, a var live-in that is null at the head (refused there, entered at the back edge), a kind the body
+			// widens, a break and a return on the first iteration, a nested zero-trip inner loop, a step variable, and a call and a throw from
+			// a call on the first iteration; both backends, proofs off, the middle end off and miss injection
+			const std::string prelude =
+				"int once(int k) { int n = 3; for (int i = 0; i < k; i++) { n = n * 7 + i; } return n; }\n"
+				"int later(int k) { int s = 0; int t = 5; for (int i = 0; i < k; i++) { s = s + t; t = i * 3; } return s; }\n"
+				"int vt(int k) { int s = 0; var t; for (int i = 0; i < k; i++) { if (i > 0) { s = s + t; } t = i * 3; } return s; }\n"
+				"float widen(int k) { var w = 0; for (int i = 0; i < k; i++) { w = w + 0.5; } return w; }\n"
+				"int brk(int k) { int s = 0; for (int i = 0; i < k; i++) { s = s + 10; if (i == 0) { break; } s = s + 1; } return s; }\n"
+				"int ret(int k) { int s = 0; for (int i = 0; i < k; i++) { s = s + i; if (i == 0) { return 77 + s; } } return 1; }\n"
+				"int nest(int k) { int s = 0; for (int i = 0; i < k; i++) { for (int j = 0; j < i; j++) { s = s + j; } } return s; }\n"
+				"int step(int k) { int s = 0; int st = 3; for (int i = 0; i < k; i += st) { s = s + i; } return s; }\n"
+				"int sq(int x) { string why = \"c\"; return x * x; }\n"
+				"int calls(int k) { int s = 0; for (int i = 0; i < k; i++) { s = s + sq(i); } return s; }\n"
+				"int boom(int x) { string why = \"t\"; if (x == 0) { throw \"first\"; } return x; }\n"
+				"int thr(int k) { int s = 0; try { for (int i = 0; i < k; i++) { s = s + boom(i); } } catch (e) { s = s + 1000; } return s; }\n";
+			const std::string body = "to_string(once(1)) + \"|\" + to_string(once(0)) + \"|\" + to_string(later(4)) + \"|\" + to_string(vt(4)) + \"|\" + to_string(widen(9)) + \"|\" + to_string(brk(5)) + \"|\" + to_string(ret(3)) + \"|\" + to_string(nest(5)) + \"|\" + to_string(step(10)) + \"|\" + to_string(calls(1)) + \"|\" + to_string(calls(4)) + \"|\" + to_string(thr(3));";
+			const std::string expected = "21|3|14|9|4.5|10|77|10|18|0|14|1000";
+			both(prelude + body, expected, "counted loops entered at their prep");
+			both(prelude + body, expected, "counted loops entered at their prep, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(vm, off, "the middle end's switch off answers the same");
+			}
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+				e->execute(prelude);
+				struct shape { const char* call; uint64_t entries; };
+				for (const shape& sh : { shape{ "once(1);", 1 }, shape{ "once(0);", 0 }, shape{ "once(6);", 1 }, shape{ "brk(5);", 1 }, shape{ "later(4);", 1 } }) {
+					const cell_counters c0 = e->cells_counters();
+					e->execute(sh.call);
+					const cell_counters c1 = e->cells_counters();
+					check_eq(sh.entries, c1.entries - c0.entries, std::string(sh.call) + ": block entries");
+					check_eq(uint64_t{0}, c1.misses - c0.misses, std::string(sh.call) + ": nothing misses");
+				}
+			}
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(vm, got, "counted loops entered at their prep under an injected miss at every " + std::to_string(every));
+			}
+		});
 		test("inlined_leaves_run_inside_blocks", [this]() {
 			// small free leaves called from a loop block (light_band's early returns, dist2's plain body, lerp's floats, a var
 			// parameter, a void leaf through an element alias) compile at their call sites; the values hold on both backends, with proofs

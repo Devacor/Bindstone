@@ -5313,6 +5313,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		if (!head_ok) continue;
 		loop.trampoline = entry_trampoline(loop.head, li);
 	}
+	// a counted loop's CFOR_PREP is its entry (b = the loop's index + 1): once its first compare passes, the first iteration runs in the block
+	for (uint32_t li = 0; li < c.cell_loops.size(); ++li) {
+		const chunk::cell_loop& loop = c.cell_loops[li];
+		if (loop.straight || loop.frame_program || loop.counted == k_invalid_u32 || loop.counted >= c.counted_for_protos.size()) continue;
+		const size_t prep = c.counted_for_protos[loop.counted].generic_cond_ip - 1;
+		if (prep < original_size && code[prep].op == opcode::op_cfor_prep && code[prep].a == loop.counted) { code[prep].b = li + 1; }
+	}
 	if (!c.typed_sites.empty() && c.typed_sites.size() < code.size()) { c.typed_sites.resize(code.size()); }
 }
 

@@ -59,7 +59,7 @@ namespace jai {
     
     // Container types. script_array is the ONE array node behind TYPEID_ARRAY (the
     // strong_ptr pointee — its address is the array's identity for ordering, borrows,
-    // and COW probes). Typed kinds (docs/typed_array_design.md stage 2) store raw
+    // and COW probes). Typed kinds (internal/typed_array_design.md stage 2) store raw
     // primitive buffers instead of 32-byte script_values; the airtight array<T> tag
     // (stage 0) + demote-on-stamp keep node kind ⟺ view tag. values() is the HETERO
     // element surface only — every caller either sits behind a kind check or handles

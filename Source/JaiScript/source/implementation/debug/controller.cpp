@@ -153,13 +153,13 @@ script_value controller::get_variable(const std::string& name) const {
 void controller::set_variable(const std::string& name, const script_value& value) {
     // NOTE (phase 3.1): writes through add_global, which does not enforce the int/auto
     // type ladder for existing typed locals. Phase-4 routes edits through
-    // enforce_type_compatibility before the store. See docs/DEBUGGER_DESIGN.md setVariable.
+    // enforce_type_compatibility before the store. See internal/DEBUGGER_DESIGN.md setVariable.
     engine_->add_global(name, value);
 }
 
 std::vector<frame_info> controller::list_frames() const {
     // Phase 3: the top frame — the stop location. Multi-frame walk of the interpreter's
-    // call_stack_ is the immediate follow-up (see docs/DEBUGGER_DESIGN.md phasing).
+    // call_stack_ is the immediate follow-up (see internal/DEBUGGER_DESIGN.md phasing).
     return { frame_info{ "script", current_stop_.file, current_stop_.line } };
 }
 

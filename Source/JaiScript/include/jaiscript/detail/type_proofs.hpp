@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_DETAIL_TYPE_PROOFS_HPP__
 #define __JAISCRIPT_DETAIL_TYPE_PROOFS_HPP__
 
-// Runtime guards for parse-time type proofs (docs/type_proofs_design.md). A proof selects a
+// Runtime guards for parse-time type proofs (internal/type_proofs_design.md). A proof selects a
 // lane; these TOTAL guards make the lane sound: TRUE only when the skipped conversion is
 // provably the identity on the value actually in hand, or when the class object, its
 // field-shape epoch and a present cell all match. Guard failure = the existing code runs.

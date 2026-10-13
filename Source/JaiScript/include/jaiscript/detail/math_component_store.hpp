@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_DETAIL_MATH_COMPONENT_STORE_HPP__
 #define __JAISCRIPT_DETAIL_MATH_COMPONENT_STORE_HPP__
 
-// `base.x = v` on a math value (docs/math_types_design.md 5.5), shared VERBATIM by both backends: a math value is
+// `base.x = v` on a math value (internal/math_types_design.md 5.5), shared VERBATIM by both backends: a math value is
 // a value, so the store lands in the storage the base NAMES, never in the evaluated copy. The base resolves by
 // shape: an evaluated reference (a subscript read, a ref alias) writes through; an identifier is its variable's
 // cell (the backend's own ladder: slot, member scope, environment); a pure lvalue path (members and literal or

@@ -258,7 +258,7 @@ namespace detail { struct argument_capture_storage; }
         script_value parallel_detached_copy(std::vector<type_info*>* collected_types = nullptr,
                                             std::vector<const void*>* collected_nodes = nullptr) const;
 
-        // === Parallel captured-read borrow (docs/parallel_design.md, captured reads) ===
+        // === Parallel captured-read borrow (internal/parallel_design.md, captured reads) ===
         // A borrow VIEW of an enclosing container: one raw tagged pointer, so copying the
         // value never touches a refcount - the one operation a worker may not perform on
         // shared structure (strong_ptr counts are non-atomic; even a read-only element
@@ -337,7 +337,7 @@ namespace detail { struct argument_capture_storage; }
                                                      const script_value* entry, engine* eng, type_info_ptr value_type);
         // CPP-MEMBER reference (a binder member-pointer property the cpp_bound box can decode):
         // the referent IS the C++ member at `address`; object_pin keeps the object alive,
-        // `receiver` is the handle the property was bound on (docs/reference_model.md).
+        // `receiver` is the handle the property was bound on (internal/reference_model.md).
         static script_value make_cpp_member_reference(const script_value& receiver, std::shared_ptr<void> object_pin,
                                                       void* address, uint8_t size_and_sign, uint8_t semantic_index,
                                                       uint64_t field_id, engine* eng);
@@ -753,7 +753,7 @@ namespace detail { struct argument_capture_storage; }
             return *storage_.get_if<TYPEID_OBJECT>();
         }
 
-        // The in-place string WRITE gate (docs/invariants.md 11): string copies share one
+        // The in-place string WRITE gate (internal/invariants.md 11): string copies share one
         // node (O(1) copies), so a write through a shared node would reach every holder.
         // A node anyone else holds is replaced by a private copy first (copy-on-write) -
         // the write lands in *this alone, which must therefore be the storage the script
@@ -1924,7 +1924,7 @@ namespace detail { struct argument_capture_storage; }
 
             // Registered-class T& binding: the live C++ object (data stays null). Non-owning!
             void* bound_ptr = nullptr;
-            // An extended object's native object (script_extensible.md): non-owning like bound_ptr,
+            // An extended object's native object (internal/script_extensible.md): non-owning like bound_ptr,
             // but the object's shared_ptr is reachable weakly so shared_ptr extraction can
             // still hand out ownership while the object lives.
             std::weak_ptr<void> weak_data;
@@ -1975,7 +1975,7 @@ namespace detail { struct argument_capture_storage; }
         // erased entry errors cleanly and a reference into a temporary map keeps the
         // map alive.
         //
-        // CPP-MEMBER / PROPERTY (binder .property() members; docs/reference_model.md): the
+        // CPP-MEMBER / PROPERTY (binder .property() members; internal/reference_model.md): the
         // holder keeps the receiver handle and the property's field id. CPP-MEMBER aims a
         // cpp_bound box in the inline storage at the C++ member itself (object_pin is the
         // object's lifetime); PROPERTY re-runs the getter into the inline scratch on every
@@ -2024,7 +2024,7 @@ namespace detail { struct argument_capture_storage; }
             // as the other modes; callers already may not cache the address. Writers
             // never go through deref on typed elements: assign_through()/the typed
             // chokepoints store into the raw buffer (a scratch write-back would be
-            // silent data loss — audited; see typed_array_design.md).
+            // silent data loss — audited; see internal/typed_array_design.md).
             bool has_elem_scratch = false;
             bool typed_element() const noexcept { return container && container->is_typed(); }
             const script_value& materialize_typed_element(engine* eng);   // value.cpp
@@ -2154,7 +2154,7 @@ namespace detail { struct argument_capture_storage; }
         static constexpr size_t TYPEID_CPP_BOUND = 14;
         static constexpr size_t TYPEID_PARALLEL_BORROW = 15;
         static constexpr size_t TYPEID_UTF8_STRING = 16;
-        // math::vec2 / vec3 / vec4 / ivec2 / ivec3 (docs/math_types_design.md): one pooled copy-on-write node type,
+        // math::vec2 / vec3 / vec4 / ivec2 / ivec3 (internal/math_types_design.md): one pooled copy-on-write node type,
         // script_vec_node (component count, element type, components), under one storage index per kind, so the index
         // names the kind and current_type() stays a constant per row
         static constexpr size_t TYPEID_VEC2 = 17;
@@ -2552,7 +2552,7 @@ namespace detail { struct argument_capture_storage; }
 
         // Non-null iff *this is a reference whose deref() hands back the holder's inline
         // scratch (a TYPED array element, a C++ PROPERTY or a STRING-ELEMENT): in-place
-        // mutators must commit_scratch() after writing (typed_array_design.md, reference_model.md).
+        // mutators must commit_scratch() after writing (internal/typed_array_design.md, internal/reference_model.md).
         reference_holder* scratch_ref_holder() noexcept {
             if (raw_storage_index() != TYPEID_REFERENCE) { return nullptr; }
             auto& holder = *storage_.get_if<TYPEID_REFERENCE>();
@@ -2640,7 +2640,7 @@ namespace detail { struct argument_capture_storage; }
         // Set type info for special cases (like weak_ptr creation)
         void set_type_info(type_info_ptr type) {
             type_info_ = type;
-            // Demote-on-stamp (typed_array_design.md): re-tagging an array value 'any'
+            // Demote-on-stamp (internal/typed_array_design.md): re-tagging an array value 'any'
             // (var binding) or an open-element array tag (array<var>: the boundary
             // kernel rebuilds first, this is the net) demotes a typed node in place —
             // node kind must never outrun the views' tags. The stamp sites operate on

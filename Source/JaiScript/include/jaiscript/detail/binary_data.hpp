@@ -8,7 +8,7 @@
 // name an encoding, and a binary::layout is a validated list of named widths that unpack, pack
 // and read(Class, layout) apply in order. Little-endian until big_endian(). A read past the end, a value that does not fit its
 // width, a malformed layout and a C-string scan past engine::binary_scan_limit raise catchable errors
-// (docs/diagnostics.md "binary data"). Engine-core: every engine registers it (engine.cpp), and string's to_bytes()/reader()
+// (internal/diagnostics.md "binary data"). Engine-core: every engine registers it (engine.cpp), and string's to_bytes()/reader()
 // builtins live here beside it.
 
 #include <jaiscript/core/engine.hpp>

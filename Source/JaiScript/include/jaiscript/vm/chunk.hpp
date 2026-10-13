@@ -40,7 +40,7 @@ namespace jai::vm {
         uint32_t const_index = k_invalid_u32; // index into chunk::constants; invalid = identifier
         uint32_t load_flags = 0;              // load_flag_* (type-ctor names)
         // Env-resolved plain identifier: chunk::nodes index of its identifier_expr, read live
-        // for field proofs (docs/type_proofs_design.md); invalid = slotted / literal / subscript
+        // for field proofs (internal/type_proofs_design.md); invalid = slotted / literal / subscript
         uint32_t ident_node = k_invalid_u32;
 
         // Subscript-read operand `base[i][j]...[k]` (every level transient-marked, so the
@@ -60,7 +60,7 @@ namespace jai::vm {
         uint32_t member_node = k_invalid_u32;
 
         // A plain frame-slot identifier (or a compiler temp): the typed heads address it
-        // straight off the frame, no resolution ladder (docs/typed_regions_design.md)
+        // straight off the frame, no resolution ladder (internal/typed_regions_design.md)
         bool direct = false;
     };
 
@@ -295,7 +295,7 @@ namespace jai::vm {
         // (polymorphic site) or no slot (overflow field) takes the generic find.
         uint64_t this_field_serial = 0;
         const void* this_field_class = nullptr;
-        uint64_t this_field_sym = 0;       // the symbol that armed the proof: cache roles are per ip, not per symbol (invariants.md 9)
+        uint64_t this_field_sym = 0;       // the symbol that armed the proof: cache roles are per ip, not per symbol (internal/invariants.md 9)
         uint32_t this_field_slot = 0xFFFFFFFFu;
         // Store twin (bare method-field WRITES): the same serial + class proof names the
         // cell; the arm banks what the store landing needs on top - no C++ property
@@ -366,7 +366,7 @@ namespace jai::vm {
         // decl_slot is a compiler temp (no declaration node): the read lands there for the consuming
         // op (a binary operand, a store value, an outer index); a non-scalar element lands boxed
         bool decl_temp = false;
-        // Typed element lanes (docs/typed_regions_design.md): the compiler proved the shape -
+        // Typed element lanes (internal/typed_regions_design.md): the compiler proved the shape -
         // a plain identifier container, an index that is a direct slot, a literal or an
         // int/int-stamped fold whose chain steps are int/int with direct or literal rights.
         // A decl proto with the lane facts above opens exec_index_fused_decl with
@@ -521,7 +521,7 @@ namespace jai::vm {
             struct call_arg { uint8_t kind; uint32_t v; uint32_t ip; };   // kind 0 = a slot (a cell or verbatim, decided at emission), 1 = cell v, 2 = the push at ip verbatim
             // raw: the checker resolved the callee to a free script function with scalar by-value parameters and a scalar result, and every
             // argument is a cell or a constant; at run time the arguments instruction enters the callee's frame program raw when the parked
-            // callee has one whose parameter kinds are the arguments' kinds (docs/typed_regions_design.md "Raw typed frames")
+            // callee has one whose parameter kinds are the arguments' kinds (internal/typed_regions_design.md "Raw typed frames")
             // raw: the arguments instruction may enter the callee's frame program raw; raw_kinds: the callee's parameter kinds as the checked
             // declaration names them (four bits per parameter, parameter i at bits 4i); raw_proven: every argument is a pinned cell or a constant
             // of exactly that kind, so a raw entry checks no argument
@@ -540,7 +540,7 @@ namespace jai::vm {
             bool frame_program = false;
             bool raw_enterable = false;
             bool raw_sites = false;   // a call of the block may be raw (plans is sized): only such a block advances the raw epoch at its entry and its doors
-            // a boundary operation (docs/typed_regions_design.md "Boundary operations"): a statement the translation does not take runs on the
+            // a boundary operation (internal/typed_regions_design.md "Boundary operations"): a statement the translation does not take runs on the
             // general form while the block stays parked; start is its first general ip, end the general ip it ends at (the resume point: a
             // CELLS_RESUME there, or the loop's back edge), resume the copy ip the block continues from, define the cell of the local the
             // statement declares (read back from its slot at the resume, whatever the block held before)
@@ -609,7 +609,7 @@ namespace jai::vm {
         std::vector<push_proto> push_protos;
         std::vector<member_store_proto> member_store_protos;
         std::vector<velem_proto> velem_protos;
-        // an inlined leaf (docs/typed_regions_design.md, Inlined leaves): the guard at guard_ip admits [begin_ip, fallback_ip) when the callee
+        // an inlined leaf (internal/typed_regions_design.md, Inlined leaves): the guard at guard_ip admits [begin_ip, fallback_ip) when the callee
         // name binds the function whose body is `body`; otherwise the fallback [fallback_ip, join_ip) runs the original statement
         struct inline_site {
             fused_operand callee;                 // the callee identifier, resolved as the probe resolves it

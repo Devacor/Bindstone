@@ -109,7 +109,7 @@ namespace jai::vm {
         bool ir_listing_ = false;
         bool ir_passes_ = true;
         static constexpr size_t k_region_min_work = 16;   // a straight-line region's least number of operations it runs in place of dispatches (its entry and flush cost about ten)
-        // raw typed frames (docs/typed_regions_design.md "Raw typed frames"): each parameter's scalar kind when every parameter of the callable
+        // raw typed frames (internal/typed_regions_design.md "Raw typed frames"): each parameter's scalar kind when every parameter of the callable
         // being compiled is a by-value int, float or bool in its own slot, without a default (frame_eligible_ false: the body gets no frame program)
         std::vector<uint8_t> frame_param_kinds_;
         bool frame_eligible_ = false;

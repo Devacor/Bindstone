@@ -165,7 +165,7 @@ inline checked_result<void> write_cpp_property(const script_value& receiver,
 // same-named script field shadows), a plain wrapper of a bound C++ class, or a raw
 // non-owning handle - with the class its accessors resolve on. getter_id 0 = not a C++
 // property of this receiver. One resolver for the reference mint and every per-touch
-// re-resolution (docs/reference_model.md CPP-MEMBER / PROPERTY).
+// re-resolution (internal/reference_model.md CPP-MEMBER / PROPERTY).
 struct cpp_property_site {
     slot_class_view view;
     uint64_t getter_id = 0;

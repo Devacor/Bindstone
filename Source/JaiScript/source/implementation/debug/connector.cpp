@@ -1,7 +1,7 @@
 // jai::debug::debug_connector — DAP-over-TCP transport. Compiled only when
 // JAISCRIPT_ENABLE_DEBUGGER is defined; otherwise this TU is empty and constructing a
 // debug_connector is a link error by design (mobile / shipping builds ship no socket code).
-// See docs/DEBUGGER_DESIGN.md (Transport internals, DAP lifecycle & request routing).
+// See internal/DEBUGGER_DESIGN.md (Transport internals, DAP lifecycle & request routing).
 
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 

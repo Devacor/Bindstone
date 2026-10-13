@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_VM_REGION_IR_HPP__
 #define __JAISCRIPT_VM_REGION_IR_HPP__
 
-// The region IR (docs/typed_regions_design.md "The contract", out/fable/plan_middle_end.md): a closed loop's
+// The region IR (internal/typed_regions_design.md "The contract"): a closed loop's
 // canonical operations, one per instruction of the general form, over cells. vm_compiler::lower_typed_ops
 // translates a loop into a region_ir and emits the cell copy from it; this module holds what every pass
 // consults: the operation set, the region's control flow graph, the verifier (must-define over the graph,

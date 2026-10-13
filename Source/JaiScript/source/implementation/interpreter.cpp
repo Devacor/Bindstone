@@ -2532,7 +2532,7 @@ interpreter::member_target interpreter::resolve_member_target(const script_value
         target.instance = std::static_pointer_cast<class_instance>(holder->data);
         if (target.instance) {
             target.class_def = target.instance->get_class_definition();
-            // A plain wrapper of an extended object IS the object's layer (docs/script_extensible.md
+            // A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
             // S1): re-point the handle itself, so every copy of it - and every receiver site,
             // getters, setters, bound methods, the vm's caches - sees the layer from now on.
             if (target.class_def && !target.class_def->is_script_class() && target.class_def->extended_ever()) {
@@ -3544,7 +3544,7 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
             push_value(own->deref());
             return checked_result<void>();
         }
-        // Proven this-field read (docs/type_proofs_design.md I-I1): class object + shape
+        // Proven this-field read (internal/type_proofs_design.md I-I1): class object + shape
         // epoch + present cell -> the cell copy the probe's field rung pushes; any miss
         // runs the probe (which materializes defaults) unchanged
         if (expr->proven_class && !parallel_worker_ &&
@@ -4579,7 +4579,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     return {};
 }
 
-// a node the checker stamped with a const verdict (docs/const.md): KEEP BYTE-PARALLEL with the vm's op_error / op_const_guard
+// a node the checker stamped with a const verdict (internal/const.md): KEEP BYTE-PARALLEL with the vm's op_error / op_const_guard
 checked_result<void> interpreter::const_guard_at(const ast_node* node, const const_site& site) {
     return detail::const_guard(node, site, detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
                                environment_.get(), engine_, string_symbolizer_);
@@ -5933,7 +5933,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             bool member_wins = false;
             if (!identifier->global_qualified && member_scope_.active() &&
                 !detail::own_scope_lookup(environment_.get(), member_scope_.floor, identifier->symbol_id)) {
-                // Proven this-field store (docs/type_proofs_design.md I-S3): the implicit-this
+                // Proven this-field store (internal/type_proofs_design.md I-S3): the implicit-this
                 // landing below with its conversion gated by the proof (KEEP BYTE-PARALLEL with
                 // vm_backend store_popped_value's proven lane)
                 if (identifier->proven_class && identifier->proven_field_write && !parallel_worker_ &&
@@ -6221,7 +6221,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     }
 
                     // Enforce type compatibility (a proven store whose payload guard holds is
-                    // the identity - docs/type_proofs_design.md I-S2)
+                    // the identity - internal/type_proofs_design.md I-S2)
                     if (!(expr->static_store_proof == proof_same_type && target_type &&
                           detail::same_type_payload(value, target_type.get()))) {
                         auto enforced = enforce_type_compatibility(std::move(value), target_type, identifier->name);
@@ -6489,7 +6489,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 return {};
             }
 
-            // Proven field store (docs/type_proofs_design.md I-M2): assign_member_value's field
+            // Proven field store (internal/type_proofs_design.md I-M2): assign_member_value's field
             // branch minus the ladder (KEEP BYTE-PARALLEL with vm_backend exec_set_member's
             // proven lane)
             if (memberExpr->proven_class && memberExpr->proven_field_write && !parallel_worker_ &&
@@ -8484,7 +8484,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                     return {};
                 }
             }
-            // no namespace and no class of that name: the class is what `C::m` names (docs/diagnostics.md, undefined names)
+            // no namespace and no class of that name: the class is what `C::m` names (internal/diagnostics.md, undefined names)
             return checked_result<void>(make_error_code(runtime_error_code::class_not_found), "Class '{0}' not found", name_id);
         }
         script_value class_var = std::move(class_var_result.value());
@@ -8684,7 +8684,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         return {};
     }
 
-    // Proven field read (docs/type_proofs_design.md I-M1): class object + shape epoch +
+    // Proven field read (internal/type_proofs_design.md I-M1): class object + shape epoch +
     // present cell -> the cell copy the field rung pushes; any miss runs the ladder
     if (expr->proven_class && !parallel_worker_) {
         if (script_value* cell = detail::proven_field_cell(objectValue, expr->proven_class, expr->proven_epoch,
@@ -9528,7 +9528,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     // same-named global never wins over a local or a field. [&] cell-shares
                     // the source (escape-legal: the cell outlives the frame), [=] snapshots
                     // it; a hybrid's C++ property follows the field rule through its
-                    // accessors (reference_model.md CPP-MEMBER / PROPERTY).
+                    // accessors (internal/reference_model.md CPP-MEMBER / PROPERTY).
                     script_value* slot_val = nullptr;
                     if (!call_stack_.empty()) {
                         for (const auto& ref : outer_slot_refs) {
@@ -10381,7 +10381,7 @@ checked_result<void> interpreter::visit_throw_expr_t(throw_expr* expr, const rep
     }
 
     is_unwinding_ = true;
-    // throw is an expression (docs/grammar.md): it yields the unwinding placeholder every operand consumer pops
+    // throw is an expression (internal/grammar.md): it yields the unwinding placeholder every operand consumer pops
     push_value(make_value());
     return {};
 }
@@ -11660,7 +11660,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                         args.push_back(script_value::make_map_entry_reference(map_storage, it->first, &it->second, engine_, nullptr));
                     } else {
                         // Copy binding: string keys share their node (the copy-on-write
-                        // gate detaches any write - invariants.md 11), other key kinds
+                        // gate detaches any write - internal/invariants.md 11), other key kinds
                         // snapshot; values deep-copy, shared_ptr values share
                         args.push_back(it->first.is_string() ? it->first : it->first.clone());
                         args.push_back(clone_for_assignment(it->second));
@@ -11995,7 +11995,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
     }
 
     // Execute try block (a catch resume skips it: it completed before the suspension). A native exception an instruction of the
-    // block raises is this try's exception, as in C++ (docs/EXCEPTION_DESIGN.md; KEEP BYTE-PARALLEL with vm_backend::run)
+    // block raises is this try's exception, as in C++ (internal/EXCEPTION_DESIGN.md; KEEP BYTE-PARALLEL with vm_backend::run)
     checked_result<void> try_result;
     if (!resuming_catch) {
         const size_t try_stack_mark = valueStack_.size();
@@ -12768,7 +12768,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 }
                 // A reload preserves a static's runtime value (statics are state, not code);
                 // only a static that is NEW in this definition runs its initializer.
-                bool preserve_existing = is_redefinition && field_id != 0 && class_def->has_static_field(field_id) && !var_decl->is_const;   // a class constant has no state to keep (docs/const.md)
+                bool preserve_existing = is_redefinition && field_id != 0 && class_def->has_static_field(field_id) && !var_decl->is_const;   // a class constant has no state to keep (internal/const.md)
 
                 // Static fields must be evaluated immediately (they're shared across all instances)
                 if (initializer_ast && !preserve_existing) {
@@ -14412,7 +14412,7 @@ checked_result<bool> interpreter::bind_site_reference(const expression* argExpr,
             if (member.value_ptr) {
                 return reference_to_storage(*member.value_ptr, out);
             }
-            // A C++ property binds the member itself / its accessors (reference_model.md)
+            // A C++ property binds the member itself / its accessors (internal/reference_model.md)
             if (member.what == detail::member_probe_hit::kind::cpp_property) {
                 auto minted = detail::bind_cpp_property_ref(*caller_locals->scope_this, symbol_id, engine_, string_symbolizer_);
                 if (!minted) {
@@ -14547,7 +14547,7 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
                                                            const script_value* evaluated_arg,
                                                            unit_stamp caller_unit,
                                                            const script_defined_function* callee, size_t param_index) {
-    // the argument is the caller's code: its identifier resolves under the caller's unit (docs/global_shadowing.md); the
+    // the argument is the caller's code: its identifier resolves under the caller's unit (internal/global_shadowing.md); the
     // callee's unit, entered by the call ahead of the binding, resumes when the binding returns
     unit_sync_scope unitSync{ this };   // the callee's unit again once the argument is bound
     enter_unit(caller_unit);
@@ -14797,7 +14797,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     }
 
     // Parse-time argument proofs belong to the ONE callee the site resolved to: body
-    // identity is the callee check (docs/type_proofs_design.md I-C1)
+    // identity is the callee check (internal/type_proofs_design.md I-C1)
     const uint8_t* arg_proofs = nullptr;
     if (call_ctx && call_ctx->site && call_ctx->site->proven_callee_body == function.body.get() &&
         call_ctx->site->static_arg_proofs.size() == function.parameters().size() &&
@@ -14970,7 +14970,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     std::vector<script_value> held_args;
     const std::vector<script_value>* argv = &args;
     // A native exception unwinding through this activation (a C++ callable, a removed-element reference, a bare rethrow
-    // with nothing to rethrow) pops the frame first and converts at the caller's call boundary (docs/EXCEPTION_DESIGN.md)
+    // with nothing to rethrow) pops the frame first and converts at the caller's call boundary (internal/EXCEPTION_DESIGN.md)
     size_t last_body_idx = 0;
     try {
     for (size_t i = 0; i < function.parameters().size(); ++i) {

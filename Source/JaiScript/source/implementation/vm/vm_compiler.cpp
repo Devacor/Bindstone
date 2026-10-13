@@ -1,6 +1,6 @@
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/vm/region_ir.hpp>   // the region IR: the operation set, the verifier, the listing, the liveness
-#include <jaiscript/detail/const_rules.hpp>   // const guards (docs/const.md)
+#include <jaiscript/detail/const_rules.hpp>   // const guards (internal/const.md)
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/body_walker.hpp>
@@ -2298,7 +2298,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 	return false;
 }
 
-// a node the checker stamped with a const verdict (docs/const.md): it raises its text, or the run time walks its path, before any
+// a node the checker stamped with a const verdict (internal/const.md): it raises its text, or the run time walks its path, before any
 // of it runs (KEEP BYTE-PARALLEL with interpreter::const_guard_at)
 void vm_compiler::emit_const_guard(const std::shared_ptr<ast_node>& node) {
 	const const_site* site = detail::const_site_of(node.get());
@@ -2654,7 +2654,7 @@ bool vm_compiler::try_lower_store_move(identifier_expr* ident, const expression_
 	return false;
 }
 
-// The typed scalar lowering (docs/typed_regions_design.md, stage 1): a fused binary or
+// The typed scalar lowering (internal/typed_regions_design.md, stage 1): a fused binary or
 // compare-jump whose proto carries the checker's int/int or float/float class and whose
 // operands are direct slots, temps or literals becomes one op_t_* with the slots in the
 // instruction word; the original instruction waits in typed_sites for any guard miss.
@@ -3103,7 +3103,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			break;
 		}
 	}
-	// Cell blocks (design: out/fable/design_row116_cell_ir.md, docs/typed_regions_design.md "The contract"). A loop closes
+	// Cell blocks (internal/typed_regions_design.md "The contract"). A loop closes
 	// when every instruction of its body translates into a canonical operation (arith, mov, cmp with its test, load, store,
 	// math, jump, guard, the back edge) over admitted values (semantic locals, compiler values, environment values,
 	// container bindings, snapshots, literals) and the legality pass accepts the result; anything else is a refusal with a
@@ -3157,7 +3157,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	auto array_site = [&](const fused_index_proto& fp) { return fp.receiver != 3 && container_operand(fp.container); };   // a container the checker proved a map is no element site: its statement stays general (a boundary)
 	auto array_target = [&](const fused_index_proto& fp) { return fp.receiver != 1 && array_site(fp); };   // a string's element is written through its base, never a cell site
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL);
-	// straight-line regions (plan B, docs/typed_regions_design.md "Straight-line regions"): after the loops, the spans of translatable
+	// straight-line regions (plan B, internal/typed_regions_design.md "Straight-line regions"): after the loops, the spans of translatable
 	// instructions outside every closed loop, cut at the caller's statement boundaries, become regions of their own; a span the
 	// translation refuses splits around the refusing statement
 	std::vector<std::pair<uint32_t, uint32_t>> straight;   // [head, end)
@@ -3207,7 +3207,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		default: return false;
 		}
 	};
-	// a frame program (docs/typed_regions_design.md "Raw typed frames"): a body whose parameters are all by-value scalars, with no loop and at least
+	// a frame program (internal/typed_regions_design.md "Raw typed frames"): a body whose parameters are all by-value scalars, with no loop and at least
 	// one call the checker resolved to a raw-signature function, is one region from its first instruction to its HALT; a refusal falls back to the
 	// body's spans
 	size_t fn_candidate = SIZE_MAX;
@@ -4257,7 +4257,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				use_slot(st.b, 0, false, 0, nullptr, ip); use_slot(st.b, 0, true, k_typed_dst_compound, nullptr, ip);
 				op.kind = ir::arith; op.tok = static_cast<uint8_t>((st.c & incdec_flag_increment) ? token_type::plus : token_type::minus); op.a = st.b; op.b = st.b; op.c = k_typed_const_bit | int_one(); op.writes = st.b; slot_read(op, st.b);
 			} else if (st.op == opcode::op_probe_callee && st.a < c.call_sites.size()) {
-				// a call (design_row118_canonical_lowering.md section 9): the probe, the argument zone, the call and its consumer are
+				// a call: the probe, the argument zone, the call and its consumer are
 				// one operation of the body. An argument is a value: a cell, a constant or an environment name pushed as the general
 				// instruction pushes it, or a computed value (a fused binary, an element read, a math call or a unary over a slot)
 				// landing in a compiler value of its own ahead of the call. The consumer lands the result by the declared-type rule
@@ -4444,7 +4444,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		    && snap_ip >= first && (counted != k_invalid_u32 || snap_ip > cmp_ip) && last_ip >= snap_ip && refusal_ip >= snap_ip && ops.size() >= snap_ip - first
 		    && (snap_graft == SIZE_MAX ? caller_stmt_of(snap_ip) == snap_stmt && (snap_ip == first || caller_stmt_of(snap_ip - 1) != snap_stmt)
 		                               : snap_ip > first && graft_of(snap_ip - 1) == snap_graft && stmt_of(snap_ip - 1) != snap_stmt)) {
-			// a boundary operation (docs/typed_regions_design.md "Boundary operations"): a statement the translation does not take runs whole on the
+			// a boundary operation (internal/typed_regions_design.md "Boundary operations"): a statement the translation does not take runs whole on the
 			// general form while the block stays parked (its dirty cells written back first), and the block resumes at the statement's end, re-reading
 			// what the statement changed; the translation state is the statement's start snapshot, as a bail's. Consecutive such statements are one
 			auto whole_statement = [&](const ast_node* sn) {
@@ -5426,7 +5426,7 @@ static bool primitive_declared_type(const type_info* t) {
 }
 
 // a frame slot no user code can rebind: a value declaration (not a reference) that no reference or capture reaches; it may
-// stay an in-op operand ahead of any hoisted read (design_row118 section 3: an operand resolved inside its operation only
+// stay an in-op operand ahead of any hoisted read (an operand resolved inside its operation only
 // when nothing evaluated after it in the source can run user code)
 // a graft's result or a spilled operand standing in a statement's clone: a value, never an lvalue a reference parameter binds
 bool vm_compiler::graft_value(const expression* e) const {
@@ -5944,7 +5944,7 @@ void vm_compiler::materialize_operand_temp(const expression_ptr& e, fused_operan
 // A container ahead of a hoisted read: the guard (op_operand_temp, c = 1) materializes a reference-slot container
 // into `guard` only when the slot's reference is not a plain cell, so a getter runs once and in its place; the
 // always form (c = 2) takes the container's value every time, ahead of an index that may run user code which
-// could rebind the container (design_row118 section 3); either way the read's container operand stays the
+// could rebind the container; either way the read's container operand stays the
 // original one, so a region's site is keyed on it, and the readers take the temp when the guard filled it
 void vm_compiler::guard_container_temp(const expression_ptr& e, fused_operand& container, uint32_t& guard, bool always) {
 	fused_binary_proto p;

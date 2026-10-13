@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_DETAIL_MATH_VALUES_HPP__
 #define __JAISCRIPT_DETAIL_MATH_VALUES_HPP__
 
-// The math vectors' semantics (docs/math_types_design.md section 5), shared VERBATIM by both backends and by the value
+// The math vectors' semantics (internal/math_types_design.md section 5), shared VERBATIM by both backends and by the value
 // layer: components, construction, conversions, the operator rows, equality, ordering, hashing and text. math::vec2 /
 // vec3 / vec4 hold binary32 components, math::ivec2 / ivec3 int32 components, all one boxed node type under one storage index per kind, whose
 // node carries the count and the element type; every component operation is one binary32 (or checked int32)

@@ -3,11 +3,11 @@
 #ifndef __JAISCRIPT_DETAIL_THREAD_POOL_HPP__
 #define __JAISCRIPT_DETAIL_THREAD_POOL_HPP__
 
-// Persistent worker pool (parallel_design.md Q5: JaiScript owns the pool).
+// Persistent worker pool (internal/parallel_design.md Q5: JaiScript owns the pool).
 // Standard C++ only (std::thread/mutex/condition_variable) — no OS APIs.
 //
 // Two submission modes, because the parallel design's pinned worker engines must
-// always run on their own thread (parallel_design.md §1):
+// always run on their own thread (internal/parallel_design.md §1):
 //   submit(task)            — shared queue, any worker runs it.
 //   submit_to(worker, task) — that worker's dedicated queue; ONLY worker `worker`'s
 //                             thread ever runs it (stable std::this_thread::get_id()).

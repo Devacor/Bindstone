@@ -14,7 +14,7 @@ namespace detail {
     bool script_layer_from_json(const std::shared_ptr<class_instance>& layer, const std::string& json);
 }
 
-// Lets a C++ object carry the script class instance extending it (docs/script_extensible.md).
+// Lets a C++ object carry the script class instance extending it (docs/site/embedding/13-script-extensible.html).
 // Two ownership directions share the slot: a script-constructed hybrid's layer owns its
 // object (the slot only points back, weakly); an EXTENDED object owns its layer (strong), and
 // the layer references the object without owning it. Either way handles -> layer -> object

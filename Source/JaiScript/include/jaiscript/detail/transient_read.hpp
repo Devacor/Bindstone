@@ -9,7 +9,7 @@
 
 namespace jai::detail {
 
-    // ---- Transient-read pass (element-read overhead, docs/element_read_overhead_design.md) ----
+    // ---- Transient-read pass (element-read overhead, internal/element_read_overhead_design.md) ----
     // Stamps binary_expr::transient_element_read on subscript READS whose result is provably
     // consumed as a transient value, so both backends (vm_compiler emit / interpreter subscript
     // branch - parity by construction, ONE classifier) can push a shallow element copy instead

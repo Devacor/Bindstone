@@ -3,7 +3,7 @@
 #ifndef JAISCRIPT_STDLIB_REFLECTION_HPP
 #define JAISCRIPT_STDLIB_REFLECTION_HPP
 
-// The reflect:: namespace (docs/reflection.md — the front door; docs/reflection_design.md —
+// The reflect:: namespace (docs/site/guide/12-reflection.html — the front door; internal/reflection_design.md —
 // the machinery). Every builtin is a LIVE read of the engine's registered classes: hot
 // reload a class and the next call sees the new shape (recapture = re-ask). Results are
 // ordinary value-semantic containers minted at call time. The namespace itself is RESERVED

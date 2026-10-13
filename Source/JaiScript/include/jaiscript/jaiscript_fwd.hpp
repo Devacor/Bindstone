@@ -69,7 +69,7 @@ namespace jai {
         jai_color_type           // math::color (r, g, b, a f32, straight alpha)
     };
     
-    // The unit whose code is running and the execution that compiled it (docs/global_shadowing.md):
+    // The unit whose code is running and the execution that compiled it (internal/global_shadowing.md):
     // id numbers units by first execution (0 = the host), seq numbers executions engine-wide
     struct unit_stamp {
         unsigned int id = 0;

@@ -8,7 +8,7 @@
 
 namespace jai::detail {
 
-// Arity texts (docs/diagnostics.md family C): "'fib' expects 1 argument, got 2" / "lambda expects
+// Arity texts (internal/diagnostics.md family C): "'fib' expects 1 argument, got 2" / "lambda expects
 // 1 argument, got 0". {0} = the callee (its name view points into symbolizer storage, so the
 // intern is a hit even while frozen), {1} = "N argument(s), got M", composed only while the
 // symbolizer is unfrozen; a parallel worker gets the declared count alone from the table below.

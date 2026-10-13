@@ -160,7 +160,7 @@ namespace jai {
 	//       }
 	//   };
 
-	// Every property_owner is script_extensible (docs/script_extensible.md): the slot comes
+	// Every property_owner is script_extensible (docs/site/embedding/13-script-extensible.html): the slot comes
 	// from the first extensible base when one exists (so multiple property_owner bases never
 	// leave two ambiguous slots), else from deriving the mixin here.
 	template<typename Derived, typename... Bases>

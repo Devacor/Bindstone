@@ -46,7 +46,7 @@ namespace jai {
         // not touch the missing registrations); errors surface at execute() if it does.
         bool registration_mismatch() const { return registration_mismatch_; }
 
-        // Static-check state (docs/static_checking.md). A bite created or executed under
+        // Static-check state (internal/static_checking.md). A bite created or executed under
         // warn/strict carries its diagnostics; checked_clean() means it was checked and
         // has no error-severity diagnostics. save() stamps that flag beside the
         // registration fingerprint; jaibite_load trusts the stamp only when the

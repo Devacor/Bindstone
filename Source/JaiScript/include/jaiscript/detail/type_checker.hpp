@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_DETAIL_TYPE_CHECKER_HPP__
 #define __JAISCRIPT_DETAIL_TYPE_CHECKER_HPP__
 
-// Static type checking (docs/static_checking.md), strict by default. Backend-neutral: walks the
+// Static type checking (docs/site/embedding/06-static-checking.html), strict by default. Backend-neutral: walks the
 // parsed AST both backends share, once per unique source (amortized like parsing).
 // This header stays light — engine.hpp includes it for the mode/diagnostics API; the
 // walker lives in source/implementation/type_checker.cpp.
@@ -125,7 +125,7 @@ namespace jai {
 
         inline constexpr size_t k_check_diagnostic_cap = 100;
 
-        // Program closure classes (engine.cpp, docs/static_checking.md "Programs"): every
+        // Program closure classes (engine.cpp, internal/static_checking.md "Programs"): every
         // top-level class of every closure unit by name, the declaring node kept alive here so
         // the checker can model it exactly as it models the unit's own classes. A re-gather
         // replaces an entry (newest declaration wins); a unit's own declaration always wins
@@ -154,7 +154,7 @@ namespace jai {
             enum class proofs_t : uint8_t { leave, stamp, clear };
             proofs_t proofs = proofs_t::stamp;
             proof_stats* stats = nullptr;   // filled by stamp/clear passes when given
-            // Program closure names (engine.cpp, docs/static_checking.md "Programs"): every
+            // Program closure names (engine.cpp, internal/static_checking.md "Programs"): every
             // top-level name of every unit reachable through literal import/include, treated
             // exactly like extra_globals.
             const std::unordered_set<std::string>* program_names = nullptr;

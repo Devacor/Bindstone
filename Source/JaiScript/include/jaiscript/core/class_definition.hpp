@@ -84,7 +84,7 @@ namespace detail {
                                                             uint64_t field_id = 0, const class_definition* owner = nullptr,
                                                             bool is_static = false);
     inline std::optional<script_value> field_store_convert_no_script(const script_value& value, const type_info_ptr& declared, engine* eng);
-    // Overload-miss text (docs/diagnostics.md family C), defined below with the slot texts
+    // Overload-miss text (internal/diagnostics.md family C), defined below with the slot texts
     inline error_propagator overload_miss(std::error_code ec, uint64_t name_id, const script_value* args, size_t argc,
                                           engine* eng, bool constructor = false);
 }
@@ -147,7 +147,7 @@ public:
     // script class deriving a bound C++ class: into the object's script_extensible slot
     // when its base registered one, else the engine's weak map. Called from set_native so
     // every path — binder-ctor super() in both backends, extend, archive load — registers
-    // identically (docs/script_extensible.md).
+    // identically (internal/script_extensible.md).
     void note_script_layer_owner(const script_value& value);
 
     // Script-write enforcement: declared-type fields convert like '=' on locals or error
@@ -565,7 +565,7 @@ public:
     // in declaration order, the C++ base), skipping entries flagged synthesized in their
     // owning class; null when none. On a C++ class (empty auto set) this is get_method. A
     // synthesized entry anywhere in the script chain is a script field declaration, which
-    // shadows a same-named C++ .property() (docs/script_extensible.md S10).
+    // shadows a same-named C++ .property() (internal/script_extensible.md S10).
     const script_value* user_accessor(uint64_t id) const {
         bool script_field_seen = false;
         return user_accessor_walk(id, script_field_seen);
@@ -674,7 +674,7 @@ public:
     }
 
     // A host callable's C++ exception is the script's catchable runtime error with its text, wherever the runtime
-    // calls it (a method, an operator, a property getter or setter, a static; docs/EXCEPTION_DESIGN.md)
+    // calls it (a method, an operator, a property getter or setter, a static; internal/EXCEPTION_DESIGN.md)
     static checked_result<script_value> host_exception_result(engine* eng, const std::exception& e) {
         return host_exception_error(eng, e.what());
     }
@@ -1032,7 +1032,7 @@ public:
         return static_fields_.find(id) != static_fields_.end();
     }
 
-    // a class constant (`const T s = e;` in the body, docs/const.md): marked when the class is defined; the chain answers
+    // a class constant (`const T s = e;` in the body, internal/const.md): marked when the class is defined; the chain answers
     void mark_const_static(uint64_t id, bool is_const) {
         if (is_const) { const_statics_.insert(id); } else { const_statics_.erase(id); }
     }
@@ -1695,7 +1695,7 @@ public:
     }
 
     // Member-pointer property whose type the cpp_bound box decodes: the address a
-    // by-reference binding aims its box at (docs/reference_model.md CPP-MEMBER). Encoded
+    // by-reference binding aims its box at (internal/reference_model.md CPP-MEMBER). Encoded
     // exactly as script_value::cpp_bound_encoding / make_cpp_bound.
     struct cpp_member_accessor {
         std::function<void*(const script_value& receiver)> address;
@@ -1770,7 +1770,7 @@ public:
         return out;
     }
 
-    // Reflection surface (docs/reflection.md): dynamic_binder marks host-backed classes;
+    // Reflection surface (docs/site/guide/12-reflection.html): dynamic_binder marks host-backed classes;
     // the generation counter bumps on every redefinition so tools poll one integer and
     // re-query only when it moved (the live-query/recapture model).
     bool cpp_backed() const { return cpp_backed_; }
@@ -2737,7 +2737,7 @@ inline void class_instance::copy_fields_from(const class_instance& other) {
 
 namespace detail {
 
-// The ONE conversion table for every typed slot (docs/static_checking.md rule table):
+// The ONE conversion table for every typed slot (docs/site/embedding/06-static-checking.html "One conversion table"):
 // declaration/initializer, `=`, compound store-back, the cast<T> value form, by-value
 // parameter binding, typed return and field store all classify the source by STORAGE
 // (never by its tag - a shared_ptr<C> handle IS a C) and run these rows. This is the
@@ -3166,7 +3166,7 @@ inline std::optional<script_value> field_store_value(slot_conversion& out, const
     return stored;
 }
 
-// ---- Diagnostic spellings shared by every typed-boundary and overload site (docs/diagnostics.md) ----
+// ---- Diagnostic spellings shared by every typed-boundary and overload site (internal/diagnostics.md) ----
 
 // Source spelling for rejection texts: the payload's own type - a class name for objects
 // and handles, "null", the primitive names, "array" / "map" - never a var tag. Every spelling
@@ -3234,7 +3234,7 @@ inline error_propagator overload_miss(std::error_code ec, uint64_t name_id, cons
 }
 
 // A method with one declaration called with a count its parameters do not accept: the function's arity text, the method by
-// name (docs/diagnostics.md family C); a parallel worker's frozen symbolizer keeps the list-free overload shape
+// name (internal/diagnostics.md family C); a parallel worker's frozen symbolizer keeps the list-free overload shape
 inline error_propagator method_arity_miss(uint64_t name_id, size_t expected, size_t argc, engine* eng) {
     string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
     const std::error_code ec = make_error_code(runtime_error_code::argument_count_mismatch);
@@ -3315,7 +3315,7 @@ inline error_propagator typed_slot_rejection(const script_value& source, const t
     return {ec, slot_rejection_message_unnamed(site.kind, target.canonical_name()), source_id, target.id};
 }
 
-// A compound assignment whose operator does not take its operands (docs/diagnostics.md, compound assignment): op 0..4 is
+// A compound assignment whose operator does not take its operands (internal/diagnostics.md, compound assignment): op 0..4 is
 // += -= *= /= %=, {0} = the target's type, {1} = the operand's. Every spelling is already interned (see above).
 inline constexpr std::string_view compound_mismatch_texts[10] = {
     "Cannot apply '+=' to {0} and {1}", "Cannot apply '-=' to {0} and {1}", "Cannot apply '*=' to {0} and {1}",
@@ -3482,7 +3482,7 @@ inline checked_result<void> enforce_member_access(const class_definition* cls, u
         "Cannot access private member '{0}' of class '{1}'", member_id, declarer->get_type_id());
 }
 
-// operator= on a plain store (docs/static_checking.md rule table; C++ assignment; no slicing).
+// operator= on a plain store (docs/site/embedding/06-static-checking.html "One conversion table"; C++ assignment; no slicing).
 // A destination slot holding a class instance by value keeps its object: a source of the held instance's class
 // assigns every member into it (the implicit copy assignment: a by-value class member assigns in turn, any other member
 // takes the member-copy rule, clone_element); a source of another class the slot's declared class admits (that class or a
@@ -3796,7 +3796,7 @@ inline std::optional<checked_result<void>> element_copy_assign(const script_valu
 }
 
 inline checked_result<script_value> class_definition::enforce_static_write(uint64_t id, script_value value) const {
-    if (!const_statics_.empty() && is_const_static(id)) [[unlikely]] {   // a class constant (docs/const.md)
+    if (!const_statics_.empty() && is_const_static(id)) [[unlikely]] {   // a class constant (internal/const.md)
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Cannot assign to '{0}': it is read-only", id);
     }
     auto it = static_declared_types_.find(id);

@@ -4,7 +4,7 @@
 #define __JAISCRIPT_DETAIL_BINARY_HANDLERS_HPP__
 
 // The general binary operators, run once a backend's fast lanes decline: one body per operator family, shared by both
-// backends (docs/invariants.md 4 and 6). Each entry normalizes a cpp-bound operand, a utf8_string operand and a char pair
+// backends (internal/invariants.md 4 and 6). Each entry normalizes a cpp-bound operand, a utf8_string operand and a char pair
 // first, then answers numbers and strings, then (only when an operand holds an object) unwraps transparent wrappers,
 // answers again and asks the class's operator method. The host supplies:
 //   script_value make_int(script_int), make_float(script_float), make_bool(bool); engine* engine()
@@ -338,7 +338,7 @@ namespace jai::detail {
 		else { return "Right shift requires integer operands"; }
 	}
 
-	// Shifts wrap mod 2^64 by contract (docs/integer_semantics.md); the amount must be 0..63
+	// Shifts wrap mod 2^64 by contract (docs/site/guide/04-operators.html); the amount must be 0..63
 	template <bit_op Op, class Host>
 	checked_result<script_value> binary_bitwise(Host& h, uint64_t method_id, const script_value& left, const script_value& right) {
 		if (utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {

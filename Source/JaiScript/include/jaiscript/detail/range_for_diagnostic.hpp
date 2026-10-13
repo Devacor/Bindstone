@@ -8,7 +8,7 @@
 
 namespace jai::detail {
 
-// Range-for texts shared by both backends (docs/diagnostics.md "iteration"). A string
+// Range-for texts shared by both backends (internal/diagnostics.md "iteration"). A string
 // iterates by value only: its chars are reads like s[i], never cells.
 inline constexpr std::string_view string_range_for_by_ref_text =
     "Cannot iterate a string by reference: its chars are not lvalues (use for (auto c : s))";

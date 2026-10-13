@@ -122,7 +122,7 @@ inline bool object_declares_method(const script_value& arg, std::string_view nam
 // defined beside script_class_definition)
 inline bool converting_constructor_takes(const script_value& arg, const type_info& target);
 
-// The assignment table's rows past the exact type that a by-value parameter takes (docs/static_checking.md), as overload costs:
+// The assignment table's rows past the exact type that a by-value parameter takes (docs/site/embedding/06-static-checking.html "One conversion table"), as overload costs:
 // int<->float and bool to a number 1 (a conversion, ahead of a var parameter); a to_int/to_float/to_char method and the string
 // and bool rows 2 and a converting constructor 3 (k_loose_conversion and up: after a var parameter, which takes the value as it
 // is); 0 = not viable. Among several overloads a string never makes a bool parameter viable.

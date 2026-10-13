@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_DETAIL_SLOT_SITE_HPP__
 #define __JAISCRIPT_DETAIL_SLOT_SITE_HPP__
 
-// The slot a typed-boundary rejection names (docs/diagnostics.md family D). Sites hand one
+// The slot a typed-boundary rejection names (internal/diagnostics.md family D). Sites hand one
 // to detail::typed_slot_rejection (class_definition.hpp); the wrappers' callers describe the
 // slot they bind and the text follows the kind. Dependency-free so both backends' headers
 // can default it in their signatures.

@@ -79,7 +79,7 @@ public:
 
 #if defined(_WIN32)
         // The vm's script calls are in-loop frames: its depth is its cap on any host stack. The interpreter recurses natively,
-        // so a small host stack ends its recursion first, with its own catchable text (a known divergence: docs/diagnostics.md)
+        // so a small host stack ends its recursion first, with its own catchable text (a known divergence: docs/site/reference/index.html "Run-time errors")
         test("a_small_host_stack_bounds_the_interpreter_with_its_own_text", [this]() {
             struct probe_state {
                 std::string results[2];

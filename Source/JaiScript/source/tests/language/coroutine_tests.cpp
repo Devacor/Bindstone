@@ -51,7 +51,7 @@ public:
         // coroutine's saved env chain, so resuming in a later execute (with global redeclares
         // in between) threw "Undefined variable 'g'"; vm fibers resumed fine.
         test("coroutine_resume_across_executes_with_redeclare", [this]() {
-            // the coroutine body belongs to the unit that declared it (docs/global_shadowing.md): another unit's
+            // the coroutine body belongs to the unit that declared it (internal/global_shadowing.md): another unit's
             // `var g` shadows and the body keeps its own g; the same unit (a reload of the file) writes in place
             auto engine = make_engine();
             engine->disable(jai::filesystem);
@@ -1221,7 +1221,7 @@ public:
             // parity pin: literal to be sharpened once the behavior is ruled
             std::string r = check_parity("coroutine int gen(int x) { yield x; return x; }\nint f(int x) { auto h = gen(x); return h.resume(); }\nstring r = \"no-error\";\ntry { parallel_transform([1, 2, 3], f); } catch (e) { r = to_string(e); }\nr",
                 "a parallel body that mints and resumes a coroutine");
-            check_true(r != "no-error", "no yield reaches a parallel body (docs/parallel_design.md 8): " + r);
+            check_true(r != "no-error", "no yield reaches a parallel body (docs/site/guide/09-containers-strings.html \"Parallel loops\"): " + r);
             both_drained("int dbl(int x) { return x * 2; }\ncoroutine int g() { yield 1; var r = parallel_transform([1, 2, 3], dbl); yield r[0] + r[1] + r[2]; return 0; }\nauto h = g(); drain(h)",
                 "1|12|0", "a parallel_transform between two yields of a coroutine");
         });

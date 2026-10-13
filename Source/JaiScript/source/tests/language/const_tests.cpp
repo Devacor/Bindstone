@@ -1,4 +1,4 @@
-// const (docs/const.md): declarations, parameters, class constants, C++'s top-level rule (deep through values, stopping at
+// const (docs/site/guide/03-value-semantics.html "const: set once, then only read"): declarations, parameters, class constants, C++'s top-level rule (deep through values, stopping at
 // handles), the load-time diagnostics and the run-time texts. Every test runs on whichever backend the runner selected
 // (--backend=vm for the vm); the interpreter is the oracle.
 
@@ -262,7 +262,7 @@ public:
             check_true(contains(err, "Cannot assign to 'LIMIT': it is read-only"), err);
         });
 
-        // ------------------------------------------------------------------ folding and hot reload (docs/const.md 10)
+        // ------------------------------------------------------------------ folding and hot reload (internal/const.md 10)
         test("a_redefined_class_constant_reaches_every_use", [this]() {
             auto e = make_engine();
             stdlib::register_all(*e);
@@ -302,7 +302,7 @@ public:
             check_eq(script_int(4), e->execute("w();").as_int());
         });
 
-        // ------------------------------------------------------------------ enums (docs/const.md 11)
+        // ------------------------------------------------------------------ enums (internal/const.md 11)
         test("an_enum_name_is_a_const_map", [this]() {
             check_true(contains(run("enum Dir { n, e } Dir = 5;").error, "cannot assign to const 'Dir'"));
             check_true(contains(run("enum Dir { n, e } Dir[\"s\"] = 2;").error, "'Dir' is const"));

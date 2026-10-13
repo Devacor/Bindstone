@@ -3784,7 +3784,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		});
 		test("an_enums_values_read_by_name_run_in_blocks", [this]() {
 			// `Fac.monster` (an enum value read by name) lands in a temp through an environment cell for the member, read at entry and after every
-			// call; both backends, proofs off, the middle end off and miss injection. An enum's map is const (docs/const.md 11), so the call in
+			// call; both backends, proofs off, the middle end off and miss injection. An enum's map is const (internal/const.md 11), so the call in
 			// with_poke writes a global
 			const std::string prelude =
 				"enum Fac { player, npc, monster, guard }\n"
@@ -6067,7 +6067,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 		});
 		// a compound store runs its value ahead of every part of its target (a member's receiver and read, a static, a namespace variable,
-		// an element's container and index; docs/invariants.md 12), so a graft of the value's call keeps the order at every target (the
+		// an element's container and index; docs/site/guide/04-operators.html "Evaluation order is a contract"), so a graft of the value's call keeps the order at every target (the
 		// ordering fuzz band, seeds 0, 14, 28, 29, 31)
 		test("a_compound_stores_value_runs_ahead_of_its_target_grafted_or_not", [this]() {
 			const std::string src = "class K { int v = 1; static int s = 1; int bump() { v = v + 10; return 1; } int thisv() { this.v += bump(); return v; } }\n"
@@ -6355,7 +6355,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
-		// raw typed frames (docs/typed_regions_design.md "Raw typed frames"): a body whose parameters are by-value scalars and whose calls reach
+		// raw typed frames (internal/typed_regions_design.md "Raw typed frames"): a body whose parameters are by-value scalars and whose calls reach
 		// functions of the same shape is one frame program; a call between frame programs passes its arguments and its result raw
 		test("raw_frames_recursion_and_chains_land_the_same", [this]() {
 			const std::string src =

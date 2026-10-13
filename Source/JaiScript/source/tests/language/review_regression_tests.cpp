@@ -1450,7 +1450,7 @@ public:
             check_eq(std::string("ABCD"), r.as_string());
         });
 
-        // The string copy-on-write gate at the host boundary (docs/invariants.md 11): a
+        // The string copy-on-write gate at the host boundary (internal/invariants.md 11): a
         // script_value copy the host keeps is a VALUE - a later script mutation of the
         // variable never reaches it; a host std::string& writes back into its argument's
         // variable alone (a copy that shared its text keeps it); a bound global keeps
@@ -1999,7 +1999,7 @@ public:
             }
         });
         test("compound_assignment_mismatch_names_the_operator_and_both_types", [this]() {
-            // docs/diagnostics.md: every compound site raises the same catchable text on both backends (the runtime text is under
+            // docs/site/reference/index.html "Run-time errors": every compound site raises the same catchable text on both backends (the runtime text is under
             // test, so the checker is off); a float target with a non-numeric operand used to escape the try as a C++ exception
             for (bool proofs : {true, false}) {
                 auto e = make_engine();
@@ -2349,7 +2349,7 @@ public:
             check_eq(undef_msg[0], undef_msg[1], "undefined-name text is byte-identical across backends");
         });
         // ---- by-reference binding of C++ properties (bind the MEMBER ITSELF;
-        // docs/reference_model.md CPP-MEMBER / PROPERTY). Every row runs both backends. ----
+        // internal/reference_model.md CPP-MEMBER / PROPERTY). Every row runs both backends. ----
         auto propref_engine = [](bool use_vm) {
             auto e = jai::engine::make();
             e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
@@ -2741,7 +2741,7 @@ public:
             }
             check_eq(ref_msg[0], ref_msg[1], "mistyped-store text is byte-identical across backends");
             check_eq(direct_msg[0], direct_msg[1]);
-            // docs/diagnostics.md: a native boundary may append ': C++ exception' to the shared text (the direct store's
+            // internal/diagnostics.md: a native boundary may append ': C++ exception' to the shared text (the direct store's
             // setter error leaves as that runtime error, the reference store's as a throw of its text)
             const std::string boundary_suffix = ": C++ exception";
             std::string direct_text = direct_msg[0];
@@ -3436,7 +3436,7 @@ public:
     }
 };
 
-// Element-read mint elision (docs/element_read_overhead_design.md Stage 1): subscript
+// Element-read mint elision (internal/element_read_overhead_design.md Stage 1): subscript
 // reads consumed as transient values push a shallow copy instead of a reference_holder.
 // These pin the semantics the elision must preserve on BOTH backends.
 class element_read_elision_tests : public suite {

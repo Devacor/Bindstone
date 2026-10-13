@@ -1,6 +1,6 @@
-// Parallel Transform scaling benchmarks (parallel_design.md; v0 deliverable).
+// Parallel Transform scaling benchmarks (internal/parallel_design.md).
 // Same body as a serial for-loop baseline, then parallel_transform at 1/2/4/8 workers.
-// Foundry reports integer µs/iteration with ±50% variance (invariants.md §7): compare
+// Foundry reports integer µs/iteration with ±50% variance (internal/invariants.md §7): compare
 // min-of-3 whole-suite runs and note machine load; the SHAPE of the scaling table is
 // the claim, not sub-µs deltas.
 

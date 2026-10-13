@@ -635,8 +635,8 @@ public:
 
         // ---- cost-model benchmarks (verbose runs only; non-asserting) ----
         // The same script as Performance Benchmarks' "Hot Loop (1000 iterations)", run
-        // under each debugger configuration from docs/DEBUGGER_DESIGN.md "Debugger
-        // performance". The loop-body statement sits on line 4 of the source.
+        // under each debugger configuration from docs/site/embedding/11-performance.html
+        // "What the debugger costs". The loop-body statement sits on line 4 of the source.
         static constexpr const char* hot_loop_src = R"(
                 auto sum = 0;
                 for (auto i = 0; i < 1000; i += 1) {

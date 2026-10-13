@@ -315,7 +315,7 @@ public:
         });
 
         test("module_scope_var_is_shared_across_executes_of_the_same_unit", [this, makeHolderEngine]() {
-            // docs/global_shadowing.md: another text declaring `alias` shadows (the closure keeps its unit's cell);
+            // internal/global_shadowing.md: another text declaring `alias` shadows (the closure keeps its unit's cell);
             // the same text executed again is the same unit and writes the cell in place
             std::shared_ptr<hook_holder> holder;
             auto eng = makeHolderEngine(holder);

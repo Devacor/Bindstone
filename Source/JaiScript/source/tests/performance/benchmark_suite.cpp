@@ -203,7 +203,7 @@ public:
         });
 
         // Map range-for hands the pair a SHARED key handle (no per-iteration key copy -
-        // docs/invariants.md 11); this row guards that cost, by value and by reference
+        // internal/invariants.md 11); this row guards that cost, by value and by reference
         benchmark("Map Range-For (64 string keys, by value + by ref)", [this]() {
             test_engine->execute(R"(
                 map<string,int> m = {};
@@ -1204,7 +1204,7 @@ public:
         }, 300);
 
         benchmark("Map lookup: map<string,int> 100 keys, 1000 dynamic-key reads", [this]() {
-            // the typed-map yardstick (typed_array_design.md stage 6): dynamic
+            // the typed-map yardstick (internal/typed_array_design.md stage 6): dynamic
             // string keys build a script string per read today; a typed string-keyed map
             // can compare the bytes without one
             if (!bite) {
@@ -1286,8 +1286,8 @@ public:
 
 // ============================================================================
 // Element-traffic ns micro-harness (dedicated steady_clock resolution, NOT the
-// integer-uS Foundry benchmark harness). Isolates array element read/store cost
-// per the value-traffic analysis (GLOOM_COMPARISON.md 2.4). Run with:
+// integer-uS Foundry benchmark harness). Isolates array element read/store cost.
+// Run with:
 //   jaiscript_tests.exe "Element Traffic NS" --verbose            (interpreter)
 //   jaiscript_tests.exe "Element Traffic NS" --verbose --backend=vm
 // Prints ns/op (body loop minus a same-shape overhead loop, divided by op count).

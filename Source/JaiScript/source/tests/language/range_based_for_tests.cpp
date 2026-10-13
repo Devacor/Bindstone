@@ -210,7 +210,7 @@ public:
             check(result.as<std::string>().find("30") != std::string::npos);
         });
 
-        // ===== STRINGS (docs/grammar.md, docs/char_semantics.md): one char per element,
+        // ===== STRINGS (docs/site/guide/09-containers-strings.html "Bytes and chars"): one char per element,
         // by value only - the same char s[i] reads =====
         test("string_value_iteration", [this]() {
             auto engine = make_engine();

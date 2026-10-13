@@ -447,7 +447,7 @@ public:
         // reference; `auto& kv` aliases the value only. The pair's `first` stays a SHARED
         // handle of the key (no per-iteration copy); the checker
         // rejects the mutation spellings it can see under strict, and the runtime backstop
-        // is the string copy-on-write gate (docs/invariants.md 11): whatever the checker
+        // is the string copy-on-write gate (internal/invariants.md 11): whatever the checker
         // cannot see mutates a copy and the map is never touched. Every row runs on both
         // backends and pins byte-identical output.
         auto both_mode = [](const char* src, check_mode mode) {

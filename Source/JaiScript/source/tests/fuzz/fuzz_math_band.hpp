@@ -1,6 +1,6 @@
 #pragma once
 
-// Math band: the math kinds (math::vec2, vec3, vec4, ivec2, ivec3, color; docs/math_types_design.md) as typed, auto and var
+// Math band: the math kinds (math::vec2, vec3, vec4, ivec2, ivec3, color; docs/site/guide/15-math.html) as typed, auto and var
 // locals, array elements, map values, class fields, statics, namespace variables and parameters, read and written through every lvalue kind
 // (component stores and compounds, whole-value compounds, reference parameters, range-for aliases and copies, [&] and
 // [=] captures, a function writing a global) inside counted loops, so a lane that takes a math value for a scalar or a

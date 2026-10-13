@@ -1,4 +1,4 @@
-// Static type checking (docs/static_checking.md; strict by default): mode API, the
+// Static type checking (docs/site/embedding/06-static-checking.html; strict by default): mode API, the
 // type-ladder rule table, accumulation/recovery/cap, strict gating (throws before anything
 // runs), warn retrieval, hot-reload + registration-epoch re-checks, jaibite stamping, and a
 // generator-corpus false-positive gate (false positives are the feature's death).
@@ -1050,7 +1050,7 @@ public:
         });
 
         // ------------------------------------------------------------ type proofs
-        // docs/type_proofs_design.md: the proof pass rides the checker walk in every mode
+        // docs/site/embedding/06-static-checking.html "Proofs": the proof pass rides the checker walk in every mode
         // and stamps AST nodes; consumers guard at runtime, so proofs on/off must be
         // observationally identical. These pin the stamping side (counters) and the
         // engine plumbing (switch, re-stamp on surface moves, jaibite paths).
@@ -1472,7 +1472,7 @@ public:
         });
 
         test("proof_differential_gate", [this]() {
-            // The byte-parallel contract (docs/static_checking.md "Proofs"): per generated
+            // The byte-parallel contract (docs/site/embedding/06-static-checking.html "Proofs"): per generated
             // program, each backend must produce identical segment results, printed output,
             // error text and liveness with type_proofs on and off - four fresh engines with
             // identical registrations per seed. Cross-backend agreement is the fuzz smoke

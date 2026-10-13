@@ -365,7 +365,7 @@ public:
         test("include_is_textual_the_file_runs_at_the_include_site", [=, this]() {
             // Includes are the includer's scope. The included declarations belong to the including unit (a
             // later `var x` in the includer writes the included x in place, and the included function sees it), and an include
-            // inside a block or a function body scopes with it (docs/global_shadowing.md)
+            // inside a block or a function body scopes with it (docs/site/guide/10-modules.html)
             auto eng = make_engine();
             jai::stdlib::register_all(*eng);
             auto lib = create_temp_file("textual_lib.jai", R"(
@@ -498,7 +498,7 @@ public:
         test("a_textual_include_shared_by_two_units_resolves_each_units_cells", [=, this]() {
             // An included file's compiled program and the functions it defines belong to
             // the including unit; two units including the same file each get their own, so the VM's lookup caches never serve
-            // another unit's binding (docs/global_shadowing.md)
+            // another unit's binding (internal/global_shadowing.md)
             auto eng = make_engine();
             jai::stdlib::register_all(*eng);
             auto reader = create_temp_file("unit_reader.jai", "x;");
@@ -560,7 +560,7 @@ public:
             eng->execute("import(\"module\" + letterB + \".jai\");");
             
             // Since we're using 'once' behavior, importing again should not change anything. The same reader text
-            // executed again resolves as of this run, so it sees module B's declaration (docs/global_shadowing.md)
+            // executed again resolves as of this run, so it sees module B's declaration (internal/global_shadowing.md)
             check_eq(eng->execute("module_letter").as<std::string>(), "B");
 
             cleanup_temp_file(moduleA);

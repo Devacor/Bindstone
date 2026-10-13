@@ -1042,7 +1042,7 @@ public:
 };
 
 // ============================================================================
-// Script layers: a script class deriving a bound C++ class (docs/script_extensible.md)
+// Script layers: a script class deriving a bound C++ class (docs/site/embedding/13-script-extensible.html "Serialization")
 // ============================================================================
 
 // Two C++ bases, one per lookup path: HybridCreature carries no slot (the engine map),

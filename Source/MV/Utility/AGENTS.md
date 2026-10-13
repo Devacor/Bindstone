@@ -6,4 +6,4 @@ Highlights:
 - Thread pools (`asioThreadPool.*`, `threadPool.hpp`).
 - Logging (`log.h` / `log.cpp`).
 - Task system (`task.h`, `task.cpp`).
-- Properties, optional calls, timers, and string utilities.
+- Service registry (`services.hpp`), stopwatch timers, localization, string/UTF-8 utilities, optional calls.

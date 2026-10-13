@@ -286,9 +286,7 @@ public:
                 instance_names_.insert(n);
             }
         }
-        if (opts.program_names) {
-            extra_globals_.insert(opts.program_names->begin(), opts.program_names->end());
-        }
+        program_names_ = opts.program_names;
         program_classes_ = opts.program_classes;
         program_functions_ = opts.program_functions;
         program_globals_ = opts.program_globals;
@@ -404,6 +402,8 @@ private:
     std::unordered_set<std::string_view> assigned_names_;
     std::unordered_map<std::string_view, std::vector<const expression*>> layout_inits_;
     std::unordered_set<std::string> extra_globals_;
+    const std::unordered_set<std::string>* program_names_ = nullptr;   // the program's names, consulted beside extra_globals_ (never copied per check)
+    bool extra_global(const std::string& name) const { return extra_globals_.count(name) || (program_names_ && program_names_->count(name)); }
     std::unordered_set<std::string> instance_names_;   // the host's per-call instance variables (a subset of extra_globals_)
     // Top-level (and namespace-flattened) variable names. Runtime resolution reads the
     // scope chain THROUGH the globals before falling back to this-fields, so a name that
@@ -462,7 +462,7 @@ private:
     void warn_scoped_enum(const enum_decl* e) {
         const std::string name(e->name);
         auto top = enums_.find(e->name);
-        if (top == enums_.end() && !extra_globals_.count(name) && !eng_.has_variable(name)) { return; }
+        if (top == enums_.end() && !extra_global(name) && !eng_.has_variable(name)) { return; }
         std::string where = "a block";
         if (!fn_stack_.empty()) {
             where = fn_stack_.back().name.empty() || fn_stack_.back().name == "<lambda>" ? std::string("a lambda") : "function '" + std::string(fn_stack_.back().name) + "'";
@@ -935,7 +935,7 @@ private:
     bool global_tier_name(std::string_view name) {
         if (global_var_names_.count(name) || functions_.count(name)) { return true; }
         std::string n(name);
-        return extra_globals_.count(n) || eng_.has_variable(n) || eng_.has_function(n);
+        return extra_global(n) || eng_.has_variable(n) || eng_.has_function(n);
     }
 
     void note_global_use(std::string_view name) {
@@ -3575,7 +3575,7 @@ private:
 				ctype operand_t = infer(c->operand.get());
 				check_const_cast(c);
 				ctype t = ctype_from_type_info(c->target.get());
-				if (t.kind == ctype::object_k && !known_class(t.cls) && !extra_globals_.count(std::string(t.cls))) {
+				if (t.kind == ctype::object_k && !known_class(t.cls) && !extra_global(std::string(t.cls))) {
 					diag(diag_level::error, c->location, "unknown type in cast: '" + std::string(t.cls) + "'");
 					return {};
 				}
@@ -3658,7 +3658,7 @@ private:
 		if (namespaces_.count(id->name)) { return {}; }
 		std::string name(id->name);
 		if (const variable_decl* g = program_global(name)) { note_global_use(id->name); return program_global_type(g); }   // the proof pass alone types a global another unit declares
-		if (extra_globals_.count(name)) { note_global_use(id->name); return {}; }
+		if (extra_global(name)) { note_global_use(id->name); return {}; }
 		if (eng_.is_type_name(name) || eng_.get_class_registry().find_script_class(name)) {
 			return ctype{ctype::class_ref_k, id->name};
 		}
@@ -3971,7 +3971,7 @@ private:
 			}
 			if (enums_.count(id->name)) { return {}; }
 			std::string name(id->name);
-			if (extra_globals_.count(name)) { note_global_use(id->name); return {}; }
+			if (extra_global(name)) { note_global_use(id->name); return {}; }
 			if (eng_.is_type_name(name) || eng_.get_class_registry().find_script_class(name)) {
 				return object_of(id->name);   // registered class ctor: args lenient
 			}
@@ -4168,7 +4168,7 @@ private:
 				if (hit.unresolved) { return done(rhs); }
 			}
 			std::string name(id->name);
-			if (extra_globals_.count(name)) {
+			if (extra_global(name)) {
 				note_global_use(id->name);
 				ctype gt = program_scope_store_type(name);
 				if (gt.is_unknown()) { return done(rhs); }
@@ -5078,7 +5078,7 @@ private:
             if (functions_.count(cap.name) || classes_.count(cap.name) || enums_.count(cap.name) ||
                 all_names_.count(cap.name)) { continue; }
             std::string name(cap.name);
-            if (extra_globals_.count(name) || engine_knows_name(name)) { continue; }
+            if (extra_global(name) || engine_knows_name(name)) { continue; }
             undeclared(l->location, cap.name);
         }
         capture_stack_.push_back(capture_ctx{scopes_.size(), l});

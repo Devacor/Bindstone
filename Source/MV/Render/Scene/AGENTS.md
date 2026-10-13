@@ -3,6 +3,6 @@
 Contains the scene graph implementation used to render sprites and UI.
 
 Key classes:
-- `Node` / `component.*` – base scene objects.
-- `Sprite`, `Text`, `Button`, `Scroller`, etc. for visual elements.
-- Script bindings live in each type's `.cpp` as a `jai::registrar` (`sceneHooks.cxx` is an empty tombstone; it registers nothing).
+- `Node` (`node.*`) / `Component` (`component.*`) – base scene objects; `Drawable` is the base of everything drawn.
+- `Sprite`, `Text`, `Button`, `Scroller`, `Slider`, `Clipped`, `Emitter`, `Spine` (`spineMV.*`), etc. for visual elements.
+- Script bindings and the serialization identity live in each type's `.cpp` as a `jai::registrar`.

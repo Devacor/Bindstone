@@ -7,7 +7,8 @@ Key entries:
 - `Audio/` – ogg music.
 - `BattleEffects/`, `Buildings/`, `Creatures/` – one folder per unit: `Default/*.bindsnap` plus
   `main.script` (server) and `mainClient.script` (client).
-- `Catalogs/` – `Buildings.json`, `Creatures.json`, `BattleEffects.json` describing the units.
+- `Catalogs/` – `Buildings.json`, `Creatures.json`, `BattleEffects.json` describing the units, plus
+  `Elements.json` (cross-element damage, synergy and ward rules; `Source/Game/elements.h`).
 - `Fonts/`, `Images/`, `Map/`, `Pixel/`, `Spine/` – art.
 - `Interface/` – UI pages: `Login/`, `Main/`, `interfaceManager.script`.
 - `Localization/` – `languages.json`, `translations.json`.

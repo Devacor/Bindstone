@@ -33,6 +33,8 @@ namespace jai::detail {
     //   - the VALUE of an assignment (simple or compound) when the target subtree is
     //     callout_free (both backends deref the RHS before storing - byte-parallel)
     //   - both branches of a ternary propagate the ternary's own consumer context
+    //   - the initializer of an int/float/bool/char declaration and the value of a by-value return from a function or lambda
+    //     declaring one (the slot converts it; coroutines excluded)
     //
     // Runtime gate: the mark only takes effect while the engine has no GLOBAL
     // binary-operator or "[]" registration (has_custom_binary_ops, latched at the
@@ -196,6 +198,16 @@ namespace jai::detail {
             m->component_lvalue = true;
         }
 
+        // int/float/bool/char consume a value in every outcome: a matching scalar copies, anything else converts to a fresh
+        // value or raises, so nothing retains an un-cloned payload
+        static bool hard_scalar(const type_info_ptr& t) noexcept {
+            return t && (t->base_type == script_value_type::jai_int_type || t->base_type == script_value_type::jai_float_type ||
+                         t->base_type == script_value_type::jai_bool_type || t->base_type == script_value_type::jai_char_type);
+        }
+
+        // the innermost function returns a hard scalar by value
+        bool scalar_return = false;
+
         // transient_ctx: this expression's RESULT is consumed as a transient value by its parent.
         void walk_expr(expression* e, bool transient_ctx) {
             if (!e) {
@@ -257,7 +269,10 @@ namespace jai::detail {
                         walk_expr(p.default_value.get(), false);
                     }
                     for (auto& cap : l->captures) { walk_expr(cap.initializer.get(), false); }
+                    const bool outer_scalar_return = scalar_return;
+                    scalar_return = hard_scalar(l->return_type);
                     walk_stmt(l->body.get());
+                    scalar_return = outer_scalar_return;
                     return;
                 }
                 case node_type::new_expr: {
@@ -355,7 +370,7 @@ namespace jai::detail {
                     return;
                 }
                 case node_type::return_stmt:
-                    walk_expr(static_cast<return_stmt*>(s)->value.get(), false);   // ref-returns: mint
+                    walk_expr(static_cast<return_stmt*>(s)->value.get(), scalar_return && !static_cast<return_stmt*>(s)->binds_reference);
                     if (static_cast<return_stmt*>(s)->binds_reference) { stamp_component_lvalue(static_cast<return_stmt*>(s)->value.get()); }
                     return;
                 case node_type::try_stmt: {
@@ -400,12 +415,7 @@ namespace jai::detail {
                     // un-cloned transient copy would alias the element); reference-typed
                     // decls bind their initializer and compile via the decl_ref ops.
                     auto* d = static_cast<variable_decl*>(s);
-                    const bool hard_scalar = d->type &&
-                        (d->type->base_type == script_value_type::jai_int_type ||
-                         d->type->base_type == script_value_type::jai_float_type ||
-                         d->type->base_type == script_value_type::jai_bool_type ||
-                         d->type->base_type == script_value_type::jai_char_type);
-                    walk_expr(d->initializer.get(), hard_scalar);
+                    walk_expr(d->initializer.get(), hard_scalar(d->type));
                     if (d->type && d->type->base_type == script_value_type::jai_reference_type) { stamp_component_lvalue(d->initializer.get()); }
                     return;
                 }
@@ -420,7 +430,10 @@ namespace jai::detail {
                         }
                         stamp_arg_captures(ci.arguments, ci.arg_captures);
                     }
+                    const bool outer_scalar_return = scalar_return;
+                    scalar_return = !fd->is_coroutine && hard_scalar(fd->return_type);
                     walk_stmt(fd->body.get());
+                    scalar_return = outer_scalar_return;
                     return;
                 }
                 case node_type::class_decl:

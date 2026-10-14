@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
 		else if (a == "--log") { log = true; }
 		else if (a == "--stdio") {}
 		else if (a == "--help" || a == "-h") { usage(); return 0; }
-		else if (a == "--version") { std::cout << "jaiscript_lsp 0.1.0\n"; return 0; }
+		else if (a == "--version") { std::cout << "jaiscript_lsp 0.5.0-beta\n"; return 0; }
 	}
 	jai_lsp::server s(make_engine, host, includes, log);
 	int code = s.run();

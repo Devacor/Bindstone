@@ -476,7 +476,7 @@ json server::on_initialize(const json& params) {
 	caps.set("documentSymbolProvider", true);
 	caps.set("workspaceSymbolProvider", true);
 	json info = json::object();
-	info.set("name", "jaiscript_lsp").set("version", "0.1.0");
+	info.set("name", "jaiscript_lsp").set("version", "0.5.0-beta");
 	json result = json::object();
 	result.set("capabilities", std::move(caps)).set("serverInfo", std::move(info));
 	return result;

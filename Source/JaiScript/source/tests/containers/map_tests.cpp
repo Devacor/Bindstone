@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <map>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -794,6 +795,93 @@ out;
                     "to_string(inv.items.size()) + \" \" + to_string(inv.items[\"k42\"]) + \" \" + to_string(inv.items[\"k5\"]) + \" \" + first + \" \" + to_string(inv.extra);").to_string();
                 check_eq(std::string("299 42 50 k0 7"), got, use_vm ? "vm" : "interpreter");
             }
+        });
+
+        // script_map against an ordered model under random operations on clustered ints, sparse ints, negatives, floats
+        // and strings: every lookup, the size, the key order of iteration, copies, and the address of every live value
+        // (an entry stays where it was made until its key is erased)
+        test("map_storage_against_a_model", [this]() {
+            auto e = jai::engine::make();
+            jai::engine* eng = e.get();
+            std::map<jai::script_value, int64_t, jai::script_value_map_less> model;
+            jai::script_map m;
+            std::map<jai::script_value, const jai::script_map::value_type*, jai::script_value_map_less> where;
+            uint64_t rng = 0x9E3779B97F4A7C15ull;
+            auto next = [&]() { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; return rng; };
+            auto make_key = [&]() -> jai::script_value {
+                const uint64_t r = next() % 100;
+                if (r < 45) return jai::script_value(static_cast<jai::script_int>(1028 + next() % 300), eng);
+                if (r < 60) return jai::script_value(static_cast<jai::script_int>(static_cast<int64_t>(next() % 2000000) - 1000000), eng);
+                if (r < 70) return jai::script_value(static_cast<jai::script_int>(-(static_cast<int64_t>(next() % 64))), eng);
+                if (r < 78) return jai::script_value(static_cast<jai::script_float>(static_cast<double>(1028 + next() % 300)), eng);
+                if (r < 82) return jai::script_value(static_cast<jai::script_int>(INT64_MAX - static_cast<int64_t>(next() % 4)), eng);
+                return jai::script_value(std::string("k") + std::to_string(next() % 400), eng);
+            };
+            bool ok = true;
+            for (int step = 0; step < 20000 && ok; ++step) {
+                const uint64_t op = next() % 100;
+                const jai::script_value k = make_key();
+                if (op < 55) {
+                    const int64_t v = static_cast<int64_t>(next() % 1000);
+                    m[k] = jai::script_value(static_cast<jai::script_int>(v), eng);
+                    model[k] = v;
+                    if (!where.count(k)) { where[k] = &*m.find(k); }
+                } else if (op < 75) {
+                    const bool had = model.erase(k) != 0;
+                    where.erase(k);
+                    ok = ok && (m.erase(k) == (had ? 1u : 0u));
+                } else if (op < 98) {
+                    const jai::script_map::value_type* hit = m.lookup(k);
+                    auto it = model.find(k);
+                    ok = ok && ((hit != nullptr) == (it != model.end())) && (!hit || hit->second.as_int() == it->second);
+                } else if (op == 98) {
+                    jai::script_map copy(m);
+                    m = copy;
+                    where.clear();
+                    for (const auto& kv : model) { where[kv.first] = &*m.find(kv.first); }
+                } else {
+                    m.clear(); model.clear(); where.clear();
+                }
+                if (step % 997 == 0 || step == 19999) {
+                    ok = ok && m.size() == model.size();
+                    auto mi = model.begin();
+                    for (const auto& kv : m) {
+                        if (mi == model.end() || !(kv.first == mi->first) || kv.second.as_int() != mi->second) { ok = false; break; }
+                        ++mi;
+                    }
+                    ok = ok && mi == model.end();
+                    for (const auto& [key, addr] : where) { const auto* hit = m.lookup(key); ok = ok && hit == addr; }
+                }
+                if (!ok) { check_true(false, "script_map disagrees with the model at step " + std::to_string(step)); }
+            }
+            check_true(ok, "script_map agrees with the ordered model through every operation");
+        });
+
+        // maps mixing clustered int keys with sparse ints, floats and strings read, store, iterate and serialize as one
+        // ordered map on both backends; a reference into a value survives inserts around it
+        test("map_mixed_keys_read_store_iterate_and_serialize", [this, both_mode]() {
+            const char* src = R"JAI(
+map<var, var> m = {};
+for (int i = 0; i < 124; ++i) { m[1028 + i * 2] = i; }
+m[-5] = "neg"; m[1000000] = "far"; m[1030.0] = "float"; m["1030"] = "text"; m[true] = "bool";
+var& r = m[1100];
+for (int i = 0; i < 300; ++i) { m[2000 + i * 7] = i; }
+r = "kept";
+m.erase(1032); m[1032] = "again";
+string out = to_string(m[1028]) + " " + to_string(m[1030]) + " " + to_string(m[1030.0]) + " " + to_string(m["1030"]) + " " + to_string(m[1100]) + " " + to_string(m[1032]) + " " + to_string(m.has(1029)) + " " + to_string(m.get(1031, -1));
+string keys = ""; int n = 0;
+for (auto [k, v] : m) { if (n < 6 || n > m.size() - 4) { keys += to_string(k) + ","; } ++n; }
+map<int, int> lump = {};
+for (int i = 0; i < 124; ++i) { lump[1028 + i] = i * 3; }
+int s = 0; for (int i = 1000; i < 1200; ++i) { s += lump.get(i, 0); if (lump.has(i)) { lump[i] = lump[i] + 1; } }
+var copy = lump; copy[1028] = -1;
+out += " " + keys + " " + to_string(n) + " " + to_string(s) + " " + to_string(lump[1028]) + " " + to_string(copy[1028]) + " " + to_json(lump).size();
+out;
+)JAI";
+            auto [i_out, v_out] = both_mode(src, check_mode::warn);
+            check_eq(i_out, v_out, "backend parity");
+            check_true(i_out.find("ERROR") == std::string::npos, "runs: " + i_out);
+            check_eq(std::string("0 1 float text kept again false -1 -5,1028,1030,1032,1034,1036,1030.0,1030,true, 429 22878 1 -1 1338"), i_out, "pinned output");
         });
     }
 };

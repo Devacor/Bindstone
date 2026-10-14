@@ -166,7 +166,7 @@ def split_cpp(text):
     flush()
     return segs
 
-CITE = r"(?:[Ss]ee\s+)?internal/[\w./-]+\.md"
+CITE = r"(?:[Ss]ee\s+)?internal/[\w./-]+\.md(?:,\s*[Ss]tage \d+[a-z]?\b)?"
 # a section label after a citation: up to four short tokens (3.2, §5, "The contract", family D, I-M1, stage 0)
 SECTION = r"(?:[ \t]+(?:\"[^\"\n]*\"|§?\s?[\w.§/-]+)){0,4}?"
 SEE_SECTION = r"(?:[ \t]+(?:\"[^\"\n]*\"|\([^()\n]*\)|§?\s?[\w.§/-]+)){0,4}"

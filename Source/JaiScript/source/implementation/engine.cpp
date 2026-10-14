@@ -4254,8 +4254,7 @@ debug::controller& engine::debugger() {
     if (!impl->debugger_) {
         impl->debugger_ = std::make_unique<debug::controller>(this);
         for (const auto& node : impl->script_cache) { impl->debugger_->note_source(node.path); }
-        // Wire the active backend's statement hook. backend() constructs it lazily; the
-        // vm backend's set_debug_controller is a no-op until phase 5.
+        // Wire the active backend's statement hook (backend() constructs it lazily).
         backend()->set_debug_controller(impl->debugger_.get());
     }
     return *impl->debugger_;

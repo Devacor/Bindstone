@@ -28,12 +28,12 @@
     {
       "name": "x64-Debug",
       "inherits": "vs-base",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "JAISCRIPT_ENABLE_BENCHMARKS": "ON" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     },
     {
       "name": "x64-Debug BENCHMARKS",
       "inherits": "vs-base",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "JAISCRIPT_ENABLE_BENCHMARKS": "ON" }
     },
     {
       "name": "x64-Release",
@@ -46,8 +46,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "JAISCRIPT_ENABLE_BENCHMARKS": "ON",
-        "JAISCRIPT_BUILD_TESTS": "ON",
-        "CHAISCRIPT_NO_THREADS": "ON"
+        "JAISCRIPT_BUILD_TESTS": "ON"
       }
     }
   ],

@@ -135,8 +135,8 @@ namespace jai::vm {
                             // in-place fork-join region (detail::run_parallel_for)
 
         op_binary_fused_decl,  // a=fused_binary_dst_protos index: BINARY_FUSED whose result
-                               // initializes a declaration directly (dest-addressed, flatstack
-                               // stage 6) - scalar slot decls land via frame_slot_set with no
+                               // initializes a declaration directly (dest-addressed) - scalar
+                               // slot decls land via frame_slot_set with no
                                // push and no second dispatch; every other decl shape pushes and
                                // runs exec_decl_var verbatim (semantics by construction)
         op_binary_fused_store, // a=fused_binary_dst_protos index: BINARY_FUSED whose result

@@ -39,7 +39,7 @@ using breakpoint_table = std::unordered_map<std::string, std::vector<int>>;
 
 // One stack frame at a stop (parked-thread inspection result).
 struct frame_info {
-    std::string name;   // display name (phase 3: "script")
+    std::string name;   // display name ("script")
     std::string file;
     int line = 0;
 };
@@ -107,7 +107,7 @@ public:
     // ---- inspection: call ONLY on the parked script thread (via post_command) ----
     script_value get_variable(const std::string& name) const;   // live scope at the stop
     void set_variable(const std::string& name, const script_value& value);
-    std::vector<frame_info> list_frames() const;   // stack at the stop (phase 3: top frame only)
+    std::vector<frame_info> list_frames() const;   // stack at the stop (the top frame only)
     std::vector<variable_info> list_locals() const;// in-scope locals at the stop (callables hidden)
 
     // ---- script/hot path: the interpreter statement hook ----

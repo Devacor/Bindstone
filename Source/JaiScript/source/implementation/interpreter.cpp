@@ -3524,8 +3524,8 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         size_t pos = expr->name.find('<');
         std::string base_type(expr->name.substr(0, pos));
         
-        // Look up the constructor function for this type (nullable-pointer probe,
-        // checked_result stage 1: same ladder as get(), null miss - KEEP BYTE-PARALLEL
+        // Look up the constructor function for this type (nullable-pointer probe:
+        // same ladder as get(), null miss - KEEP BYTE-PARALLEL
         // with vm_backend::exec_load)
         if (script_value* ctor = environment_->get_value_ptr(string_symbolizer_->intern(base_type));
             ctor && ctor->is_function()) {

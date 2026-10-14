@@ -61,7 +61,7 @@ namespace jai {
     // strong_ptr pointee — its address is the array's identity for ordering, borrows,
     // and COW probes). Typed kinds (internal/typed_array_design.md stage 2) store raw
     // primitive buffers instead of 32-byte script_values; the airtight array<T> tag
-    // (stage 0) + demote-on-stamp keep node kind ⟺ view tag. values() is the HETERO
+    // and demote-on-stamp keep node kind ⟺ view tag. values() is the HETERO
     // element surface only — every caller either sits behind a kind check or handles
     // typed nodes through get()/set()/typed buffers (kind-dispatch helpers live in
     // value.hpp where script_value is complete).

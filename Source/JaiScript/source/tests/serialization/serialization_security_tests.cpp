@@ -1,4 +1,4 @@
-// Security regression tests for the Phase 2 deserialization findings (June release review, B5).
+// Security regression tests for deserialization of hostile input.
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>

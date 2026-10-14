@@ -7024,7 +7024,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			else if (expr->typed_store_provable) flags |= store_flag_type_provable;
 			if (ident->global_qualified) flags |= store_flag_global_only;
 			if (expr->static_store_proof == proof_same_type) flags |= store_flag_same_type;
-			// Dest-addressed peephole (flatstack stage 6): a fused-binary rhs runs
+			// Dest-addressed peephole: a fused-binary rhs runs
 			// op_store's exact post-pop tail with no push/pop round-trip. In-place
 			// rewrite like emit_compound_store, so jump targets never shift.
 			auto& code = chunk_->code;
@@ -7864,7 +7864,7 @@ void vm_compiler::compile_decl_value(const std::shared_ptr<variable_decl>& decl,
 	compile_expression(init);
 	const uint32_t lvalue_init = is_lvalue_shaped(init.get()) ? 1u : 0u;
 	if (try_lower_decl_move(decl, init.get())) return;
-	// Dest-addressed peephole (flatstack stage 6, same in-place rewrite shape as
+	// Dest-addressed peephole (same in-place rewrite shape as
 	// emit_compound_store): a fused-binary init lands straight in the decl - one
 	// dispatch, no push. The exec falls back to op_decl_var verbatim for every
 	// non-scalar decl shape, so this fuses unconditionally.

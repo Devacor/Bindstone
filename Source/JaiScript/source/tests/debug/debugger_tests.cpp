@@ -27,7 +27,7 @@ void set_source_breakpoints_for_test(Controller& dbg, const std::string& path, s
     }
 }
 
-// Phase 5: BOTH backends carry the statement hook, driven by the one engine-owned
+// BOTH backends carry the statement hook, driven by the one engine-owned
 // controller. The core flows run twice — an interpreter engine and a vm engine built
 // explicitly (not via the backend-aware make_engine(); the suite is backend-agnostic
 // by construction, so it runs identically under --backend=vm).
@@ -685,8 +685,8 @@ public:
             bench_eng_->execute(hot_loop_src);
         });
 
-        // Same 5 configurations on the vm backend (phase 5: the per-dispatch gate must
-        // hold the vm's hot-loop band).
+        // Same 5 configurations on the vm backend (the per-dispatch gate must hold the
+        // vm's hot-loop band).
         benchmark("Hot Loop [vm]: no debugger constructed", [this]() {
             if (!bench_eng_) bench_eng_ = make_backend_engine(jai::backend_type::vm);
             bench_eng_->execute(hot_loop_src);

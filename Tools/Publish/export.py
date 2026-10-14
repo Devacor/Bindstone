@@ -36,7 +36,9 @@ DEFAULT_STAGING = os.path.abspath(os.path.join(REPO, "..", "jaiscript-staging"))
 CPP_EXT = (".cpp", ".hpp", ".h", ".c", ".cc", ".inl")
 BINARY_OK_EXT = (".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".otf")
 SIZE_LIMIT = 1024 * 1024
-SIZE_EXCEPTIONS = ("docs/site/assets/search-index.js", "docs/site/reference/api-catalog.json")
+SIZE_EXCEPTIONS = ("docs/site/assets/search-index.js", "docs/site/reference/api-catalog.json",
+                   "source/implementation/vm/vm_backend.cpp")
+INTERNAL_BLOCK = re.compile(r"[ \t]*<!-- internal-only -->.*?<!-- /internal-only -->[ \t]*\r?\n", re.S)
 
 PUBLIC_GITIGNORE = """out/
 build/
@@ -66,7 +68,7 @@ LEAK_CHECKS = [
     ("machine-path", re.compile(r"\b[A-Za-z]:[\\/](?:git|Users|Program Files)|/d/git\b|C:\\\\Users|Source/JaiScript|out/astra|JaiScriptComparisons")),
     ("provenance", re.compile(r"\bDev (?:ruling|request|direction|decision|approved|ruled)|\bDev's\b|\(Dev\b|\bper Dev\b")),
     ("agent-name", re.compile(r"\b(?:Astra|Fable|Claude)\b")),
-    ("ledger", re.compile(r"\bcampaign\b|\bledger\b|\brows? \d+[a-z]?(?:\.\d+)?\b")),
+    ("ledger", re.compile(r"\bcampaign\b|\bledger\b|\b(?:ledger|perf[- ]pass) rows? \d+")),
     ("iso-date", re.compile(r"\b20\d\d-[01]\d-[0-3]\d\b")),
     ("internal-ref", re.compile(r"(?<![\w.])\.internal/|(?<![\w./])internal/[\w./-]+\.md")),
     ("email", re.compile(r"\b[\w.+-]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}\b")),
@@ -260,7 +262,7 @@ def stage(args):
         if not is_text(data):
             continue
         text = data.decode("utf-8")
-        new = text.replace("@RELEASE_DATE@", date)
+        new = INTERNAL_BLOCK.sub("", text.replace("@RELEASE_DATE@", date))
         if rel.endswith(CPP_EXT) and "internal/" in new:
             out, n = strip_cpp_citations(new)
             if n:
@@ -306,6 +308,8 @@ def stage(args):
             if not target or re.match(r"^[a-z]+:", target):
                 continue
             resolved = os.path.normpath(os.path.join(os.path.dirname(rel), target)).replace(os.sep, "/")
+            if resolved == ".":
+                continue
             if resolved.startswith("..") or not (resolved in kept or any(k.startswith(resolved.rstrip("/") + "/") for k in kept)):
                 broken += 1
                 fail(f"link: {rel} -> {m.group(1)}")

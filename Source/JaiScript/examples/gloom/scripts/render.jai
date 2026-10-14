@@ -319,8 +319,8 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 		t.planey = planey;
 	}
 	// Serial unless workers are EXPLICITLY requested: at this grain the region
-	// barrier costs more than the ray work it distributes (measured 2026-07-12:
-	// serial 3.42 ms/tick beats every worker count)
+	// barrier costs more than the ray work it distributes (measured: serial
+	// 3.42 ms/tick beats every worker count)
 	if (HOST_WORKERS <= 0) {
 		for (auto& t : WALL_WS) { gloom_ray_chunk_step(t); }
 	} else {

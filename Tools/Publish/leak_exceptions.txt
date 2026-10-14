@@ -1,0 +1,6 @@
+# Justified leak-scan hits. One per line, tab-separated:
+#   <path glob>	<check id>	<text the hit must contain>	<reason>
+# A hit is excused only when the file matches the glob, the check id matches, and the matched line contains the text.
+
+LICENSE	email	mike@m2tm.net	the license holder's contact, kept by decision
+README.md	email	mike@m2tm.net	the author credit, kept by decision

@@ -2335,6 +2335,7 @@ namespace jai::vm {
         op_status store_popped_value_full(frame& f, const vm_instruction& ins, script_value value);
         bool store_scalar_lane(script_value& slot, script_value& value, const vm_instruction& ins);
         bool store_ref_alias_var(frame& f, const vm_instruction& ins, script_value& value);
+        bool store_this_field_scalar(frame& f, const vm_instruction& ins, script_value& value);
         op_status dyn_string_add(frame& f, const vm_instruction& ins, bool& landed);
         script_value* env_store_cell(frame& f, size_t cache_slot, uint64_t symbol_id);
         bool store_slot_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv);

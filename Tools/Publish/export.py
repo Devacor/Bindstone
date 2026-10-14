@@ -434,6 +434,11 @@ def gate(args):
     for cmd in GATES[args.name]:
         if cmd[0].startswith("build") and os.name == "nt":
             cmd = [os.path.join(staging, cmd[0].replace("/", os.sep)) + ".exe"] + cmd[1:]
+        elif not os.path.isabs(cmd[0]):
+            found = shutil.which(cmd[0])          # PATH order: Windows would otherwise find System32's bash (WSL) first
+            if not found:
+                die("not on PATH: " + cmd[0])
+            cmd = [found] + cmd[1:]
         run(cmd, cwd)
     print(f"gate {args.name}: OK")
 

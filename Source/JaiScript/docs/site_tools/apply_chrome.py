@@ -99,11 +99,9 @@ EMBEDDING = [
      "jaiscript_lsp answers the editor from the engine's own parser and strict checker: diagnostics as you type across a whole program, definitions, references, hover, completion, rename."),
     ("15-math-adapters.html", "Math Adapters: Host Vector Types",
      "One macro line makes a host vector, point or color struct cross every binding as math::vec3, math::ivec2 or math::color: parameters, returns, write-back, bound members, reflected properties and std::vector buffers."),
-    ("16-migrating-from-cereal.html", "Migrating from Cereal",
-     "Moving a C++ codebase from Cereal to the JaiScript archives: every Cereal construct mapped, a worked conversion, the property route that removes serialize functions, both libraries side by side, and converting existing files once."),
 ]
 
-BRIDGES = [
+LANGUAGE_BRIDGES = [
     ("01-from-javascript.html", "From JavaScript",
      "JavaScript beside JaiScript, idiom by idiom: what carries over, the habits that get a different answer (copies, ==, integer division, closures, map keys, array helpers), and a complete program."),
     ("02-from-cpp.html", "From C++",
@@ -112,15 +110,28 @@ BRIDGES = [
      "C# beside JaiScript, idiom by idiom: classes as value types, var and auto, properties as accessors, loops for LINQ, coroutines for async, and a complete program."),
 ]
 
+CODE_MIGRATIONS = [
+    ("04-from-cereal.html", "From Cereal",
+     "Moving a C++ codebase from Cereal or Boost.Serialization to the JaiScript archives: every construct mapped, a worked conversion, the property route that removes serialize functions, both libraries side by side, and converting existing files once."),
+    ("05-from-boost-signals2.html", "From Boost.Signals2",
+     "Moving C++ signals from Boost.Signals2 to jai::signal: every Boost type and call mapped, a class converted, and the behavioral differences that bite (the private emitter, connection lifetime, emits during emits, threads, combiners), with notes for Qt and sigslot code."),
+    ("06-from-chaiscript.html", "From ChaiScript Bindings",
+     "Moving a ChaiScript host to JaiScript: functions, classes, constructors, members, overloads, bases, globals, modules, calls into script and errors, from a real host's binding code, and the script habits that get a different answer."),
+    ("07-from-sol2.html", "From sol2 (Lua) Bindings",
+     "Moving a Lua host built on sol2 to JaiScript: usertypes, constructors, properties, overloads, bases, globals, protected calls and errors, from a real host's binding code, and the Lua habits that get a different answer (copies, 0-based indexing, division, truthiness)."),
+]
+
+BRIDGES = LANGUAGE_BRIDGES + CODE_MIGRATIONS
+
 SECTION_INDEX_DESC = {
     "tour/index.html":
         "Ten minutes, one small game: value semantics, the strict checker, a swarm, coroutines, hot reload and parallel_for, every line run on both backends.",
     "bridges/index.html":
-        "Three pages for programmers arriving from JavaScript, C++ or C#: the familiar spellings side by side, the habits that get a different answer, and a complete program for each.",
+        "Language bridges for programmers arriving from JavaScript, C++ or C#, and code migrations for C++ hosts moving from Cereal, Boost.Signals2, ChaiScript or sol2 to JaiScript's equivalents.",
     "guide/index.html":
         "Fifteen chapters covering the whole core language - every standalone sample runs on both backends, with the output it prints.",
     "embedding/index.html":
-        "Sixteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, editor support, host math types, and migrating from Cereal.",
+        "Fifteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, editor support, and host math types.",
     "examples/index.html":
         "Complete, playable programs written in JaiScript - a raycast shooter, a dungeon crawler, a demoscene reel, an online RPG and a DOOM port - and what each one proves.",
     "reference/index.html":
@@ -131,7 +142,7 @@ SECTION_INDEX_DESC = {
         "What is settled in the language and the embedding API, and what a 0.x release may still change before 1.0.",
 }
 
-SECTION_TITLE = {"tour": "The Ten-Minute Tour", "bridges": "Language Bridges",
+SECTION_TITLE = {"tour": "The Ten-Minute Tour", "bridges": "Bridges",
                  "guide": "The Language Guide", "embedding": "Embedding &amp; Engine Guide",
                  "examples": "The Example Games", "reference": "Reference"}
 
@@ -189,8 +200,7 @@ def header(section, root):
     ])
 
 
-def chapter_sidebar(section, chapters, current, root):
-    label = {"guide": "Guide", "embedding": "Embedding", "bridges": "Language Bridges"}[section]
+def chapter_items(section, chapters, current, root):
     items = []
     for name, title, _ in chapters:
         href = "%s%s/%s" % (root, section, name)
@@ -199,9 +209,24 @@ def chapter_sidebar(section, chapters, current, root):
                          '<ol class="page-toc" data-page-toc></ol></li>' % (href, title))
         else:
             items.append("<li><a href=\"%s\">%s</a></li>" % (href, title))
-    return ('<aside class="sidebar" aria-label="Chapters">'
-            '<details class="sidebar-box" open><summary class="sidebar-title">%s</summary>'
-            '<ol class="chapter-list">%s</ol></details></aside>' % (label, "".join(items)))
+    return "".join(items)
+
+
+def chapter_box(label, items, first_number=1):
+    counter = "" if first_number == 1 else ' style="counter-reset: ch %d"' % (first_number - 1)
+    return ('<details class="sidebar-box" open><summary class="sidebar-title">%s</summary>'
+            '<ol class="chapter-list"%s>%s</ol></details>' % (label, counter, items))
+
+
+def chapter_sidebar(section, chapters, current, root):
+    if section == "bridges":
+        boxes = (chapter_box("Language Bridges", chapter_items(section, LANGUAGE_BRIDGES, current, root))
+                 + chapter_box("Code Migrations", chapter_items(section, CODE_MIGRATIONS, current, root),
+                               len(LANGUAGE_BRIDGES) + 1))
+    else:
+        label = {"guide": "Guide", "embedding": "Embedding"}[section]
+        boxes = chapter_box(label, chapter_items(section, chapters, current, root))
+    return '<aside class="sidebar" aria-label="Chapters">%s</aside>' % boxes
 
 
 def page_sidebar(with_h3):
@@ -278,10 +303,15 @@ def build_pages():
     bridges_index = ("../bridges/index.html", "bridges", SECTION_TITLE["bridges"])
     pages.append(("bridges/index.html", "bridges", "../", SECTION_INDEX_DESC["bridges/index.html"],
                   chapter_sidebar("bridges", BRIDGES, None, "../"), ""))
-    for name, title, desc in BRIDGES:
+    for name, title, desc in LANGUAGE_BRIDGES:
         pages.append(("bridges/" + name, "bridges", "../", desc,
                       chapter_sidebar("bridges", BRIDGES, name, "../"),
                       prevnext(bridges_index, ("../guide/01-hello.html", "next &middot; the guide", GUIDE[0][1]))))
+    for name, title, desc in CODE_MIGRATIONS:
+        pages.append(("bridges/" + name, "bridges", "../", desc,
+                      chapter_sidebar("bridges", BRIDGES, name, "../"),
+                      prevnext(bridges_index, ("../embedding/index.html", "next &middot; embedding",
+                                               SECTION_TITLE["embedding"]))))
 
     guide_index = ("../guide/index.html", "guide", SECTION_TITLE["guide"])
     embed_index = ("../embedding/index.html", "embedding", SECTION_TITLE["embedding"])

@@ -180,6 +180,7 @@ main:focus { outline: none; }
   scrollbar-width: thin;
 }
 .sidebar-box { border: 0; }
+.sidebar-box + .sidebar-box { margin-top: 1.6rem; }
 .sidebar-title {
   font: 600 .72rem var(--mono); letter-spacing: .14em;
   text-transform: uppercase; color: var(--fg-dim); margin-bottom: .7rem;

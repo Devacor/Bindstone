@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Language Bridges — JaiScript docs</title>
-<meta name="description" content="Three pages for programmers arriving from JavaScript, C++ or C#: the familiar spellings side by side, the habits that get a different answer, and a complete program for each.">
+<title>Bridges — JaiScript docs</title>
+<meta name="description" content="Language bridges for programmers arriving from JavaScript, C++ or C#, and code migrations for C++ hosts moving from Cereal, Boost.Signals2, ChaiScript or sol2 to JaiScript's equivalents.">
 <meta name="theme-color" content="#0b0d13" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="JaiScript docs">
-<meta property="og:title" content="Language Bridges — JaiScript docs">
-<meta property="og:description" content="Three pages for programmers arriving from JavaScript, C++ or C#: the familiar spellings side by side, the habits that get a different answer, and a complete program for each.">
+<meta property="og:title" content="Bridges — JaiScript docs">
+<meta property="og:description" content="Language bridges for programmers arriving from JavaScript, C++ or C#, and code migrations for C++ hosts moving from Cereal, Boost.Signals2, ChaiScript or sol2 to JaiScript's equivalents.">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -32,16 +32,26 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Language Bridges</summary><ol class="chapter-list"><li><a href="../bridges/01-from-javascript.html">From JavaScript</a></li><li><a href="../bridges/02-from-cpp.html">From C++</a></li><li><a href="../bridges/03-from-csharp.html">From C#</a></li></ol></details></aside>
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Language Bridges</summary><ol class="chapter-list"><li><a href="../bridges/01-from-javascript.html">From JavaScript</a></li><li><a href="../bridges/02-from-cpp.html">From C++</a></li><li><a href="../bridges/03-from-csharp.html">From C#</a></li></ol></details><details class="sidebar-box" open><summary class="sidebar-title">Code Migrations</summary><ol class="chapter-list" style="counter-reset: ch 3"><li><a href="../bridges/04-from-cereal.html">From Cereal</a></li><li><a href="../bridges/05-from-boost-signals2.html">From Boost.Signals2</a></li><li><a href="../bridges/06-from-chaiscript.html">From ChaiScript Bindings</a></li><li><a href="../bridges/07-from-sol2.html">From sol2 (Lua) Bindings</a></li></ol></details></aside>
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span>Bridges</nav>
-<h1>Language Bridges</h1>
-<p>Three pages for programmers who already know another language. Each one sets that language beside JaiScript idiom by idiom, then lists the places where a habit from it gets a different answer, each with a sample that shows what JaiScript does, and ends with a complete program written the way that audience would write it. Every code sample was executed on <strong>both</strong> backends (tree-walking interpreter and bytecode VM); the output shown beneath each example is the real, verified output.</p>
+<h1>Bridges</h1>
+<p>Two kinds of starting point. The <a href="#language-bridges">Language Bridges</a> are for programmers who already know another language and want to write JaiScript. The <a href="#code-migrations">Code Migrations</a> are for C++ code that already uses a library JaiScript replaces, and wants to move onto JaiScript's equivalent.</p>
+<h2 id="language-bridges">Language Bridges</h2>
+<p>Each bridge sets a language beside JaiScript idiom by idiom, then lists the places where a habit from it gets a different answer, each with a sample that shows what JaiScript does, and ends with a complete program written the way that audience would write it. Every code sample was executed on <strong>both</strong> backends (tree-walking interpreter and bytecode VM); the output shown beneath each example is the real, verified output.</p>
 <p>Run a sample by saving it as <code>try.jai</code> and running <code>jaiscript try.jai</code> with the standalone runner (<a href="../guide/01-hello.html#try-it-from-a-terminal">Hello &amp; Basics</a> has the two-minute setup). The static checker is on, in strict mode, by default, so a typed mistake it can see stops the load before anything runs.</p>
 <p>After a bridge, the <a href="../guide/index.html">Language Guide</a> covers every rule in depth, starting from the same place each bridge points to first: <a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a>.</p>
 <ol class="toc">
 <li><a href="01-from-javascript.html">From JavaScript</a><p class="toc-desc"><code>var</code>, <code>function</code>, template strings and <code>?.</code> carry over, with <code>let</code>, arrow functions, <code>??</code>, <code>do</code> ... <code>while</code> and the array helpers (<code>map</code>, <code>reduce</code>, <code>find</code>, ...). Assignment copies arrays and objects, <code>==</code> compares contents and never converts, <code>7 / 2</code> is <code>3</code>, lambdas name what they capture.</p></li>
 <li><a href="02-from-cpp.html">From C++</a><p class="toc-desc">Value classes, references, destructors, operators and capture lists mean what they mean in C++. No pointers or templates, a narrow <code>const</code>; a defined evaluation order, checked overflow, no slicing, and a <code>switch</code> that never falls through.</p></li>
 <li><a href="03-from-csharp.html">From C#</a><p class="toc-desc">Classes, <code>override</code>, statics and <code>yield</code> look familiar, but a class is a value type: <code>new</code> makes the shared reference. <code>var</code> is <code>dynamic</code> and <code>auto</code> is C#'s <code>var</code>; properties are accessor methods, and coroutines replace <code>async</code>.</p></li>
+</ol>
+<h2 id="code-migrations">Code Migrations</h2>
+<p>Each migration maps a C++ library's types and calls to their JaiScript spelling, converts real code from one to the other, and then covers the behavior that changes, where a straight translation compiles and gives another result. The C++ on these pages was compiled against the libraries it names, and the JaiScript samples ran on both backends.</p>
+<ol class="toc" style="counter-reset: toc 3">
+<li><a href="04-from-cereal.html">From Cereal</a><p class="toc-desc">Cereal's archives, names, save/load splits, versions, polymorphic registration and pointer identity mapped to JaiScript's archives, a converted save game, the <code>JAI_PROPERTY</code> route that deletes the serialize functions, both libraries in one function during the transition, converting existing files once, and the Boost.Serialization spellings of all of it.</p></li>
+<li><a href="05-from-boost-signals2.html">From Boost.Signals2</a><p class="toc-desc"><code>signal</code>, <code>connection</code>, <code>scoped_connection</code>, <code>track</code>, blocks and combiners mapped to <code>jai::signal</code>; a class converted; and what behaves differently: the private emitter, a handle that is the connection, connecting and disconnecting during an emit, the lock held through an emit. Notes for Qt and sigslot code.</p></li>
+<li><a href="06-from-chaiscript.html">From ChaiScript Bindings</a><p class="toc-desc"><code>fun</code>, <code>user_type</code>, <code>constructor</code>, <code>base_class</code>, modules, globals, <code>eval</code> and <code>eval_error</code> mapped to the engine and <code>dynamic_binder</code>, from a real host's binding block; then the script habits that change: containers copy, interpolation uses backticks, integers are 64-bit and checked.</p></li>
+<li><a href="07-from-sol2.html">From sol2 (Lua) Bindings</a><p class="toc-desc"><code>new_usertype</code>, <code>constructors</code>, <code>property</code>, <code>overload</code>, <code>bases</code>, meta functions, tables and protected calls mapped to the engine and <code>dynamic_binder</code>, from a real host's binding block; then the Lua habits that change: tables become values, indexes start at 0, <code>/</code> truncates between integers, <code>0</code> is false.</p></li>
 </ol>
 </main>
 </div>

@@ -32,7 +32,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Embedding</summary><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li class="current"><a href="../embedding/10-signals-properties.html" aria-current="page">Signals &amp; Observable Properties</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li><li><a href="../embedding/14-language-server.html">Editor Support: the Language Server</a></li><li><a href="../embedding/15-math-adapters.html">Math Adapters: Host Vector Types</a></li><li><a href="../embedding/16-migrating-from-cereal.html">Migrating from Cereal</a></li></ol></details></aside>
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Embedding</summary><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li class="current"><a href="../embedding/10-signals-properties.html" aria-current="page">Signals &amp; Observable Properties</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li><li><a href="../embedding/14-language-server.html">Editor Support: the Language Server</a></li><li><a href="../embedding/15-math-adapters.html">Math Adapters: Host Vector Types</a></li></ol></details></aside>
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Embedding</a><span class="sep" aria-hidden="true">/</span>10</nav>
 <article class="chapter"><h1 id="signals-observable-properties">Signals &amp; Observable Properties<a class="hlink" href="#signals-observable-properties" aria-label="link">&#8203;</a></h1>
 <p>Gameplay is event-shaped: a door opens, a wave spawns, three unrelated systems need to hear
@@ -76,7 +76,7 @@ door.open(7);           // only the C++ receiver remains</code></pre></div>
 script receiver: opened to 42
 C++ receiver: opened to 7</code></pre></div>
 <h3 id="api-essentials-signals-signal-decl-hpp">API essentials (<code>signals/signal_decl.hpp</code>)<a class="hlink" href="#api-essentials-signals-signal-decl-hpp" aria-label="link">&#8203;</a></h3>
-<ul><li><strong>Connection lifetime = receiver lifetime.</strong> <code>connect(...)</code> is <code>[[nodiscard]]</code> and returns <code>signal&lt;T&gt;::shared_receiver_type</code> (alias <code>jai::receiver&lt;T&gt;::shared_type</code>); hold it in a member, drop it to disconnect. Alternatively use <strong>owned named connections</strong> (<code>connect("id", callback)</code> / <code>disconnect("id")</code>), where the emitter owns the receiver, or <code>connect_oneshot(...)</code> for fire-once.</li><li>Script receivers come in two forms: a <strong>source snippet</strong> (fired with <code>parameter_names</code> bound, as above) or a <strong>script function value</strong> (<code>connect(id, script_value fn)</code>). A failing receiver, C++ or script of either form, throws out of the emit, and the receivers after it in that pass do not run (<a href="#compare-errors">When a receiver fails</a>).</li><li><code>emit_while(...)</code> treats receivers as predicates (stop propagation on false); receivers can <code>block()</code>/<code>unblock()</code> themselves.</li><li><strong>Thread safety is on by default</strong> (recursive mutex around connect/disconnect/emit, so callbacks may modify the signal while it fires); define <code>JAI_SIGNALS_NO_THREADSAFE</code> for single-threaded max performance.</li><li>Header hygiene: hot-path headers should include <code>signals/signal_decl.hpp</code> only; <code>signals/signal.hpp</code> (the umbrella) or <code>signal_impl.hpp</code> is needed in TUs that actually <em>fire script</em> receivers. It pulls the engine glue.</li></ul>
+<ul><li><strong>Connection lifetime = receiver lifetime.</strong> <code>connect(...)</code> is <code>[[nodiscard]]</code> and returns <code>signal&lt;T&gt;::shared_receiver_type</code> (alias <code>jai::receiver&lt;T&gt;::shared_type</code>); hold it in a member, drop it to disconnect. Alternatively use <strong>owned named connections</strong> (<code>connect("id", callback)</code> / <code>disconnect("id")</code>), where the emitter owns the receiver, or <code>connect_oneshot(...)</code> for fire-once.</li><li>Script receivers come in two forms: a <strong>source snippet</strong> (fired with <code>parameter_names</code> bound, as above) or a <strong>script function value</strong> (<code>connect(id, script_value fn)</code>). A failing receiver, C++ or script of either form, throws out of the emit, and the receivers after it in that pass do not run (<a href="../bridges/05-from-boost-signals2.html#receivers-that-throw">Receivers that throw</a>).</li><li><code>emit_while(...)</code> treats receivers as predicates (stop propagation on false); receivers can <code>block()</code>/<code>unblock()</code> themselves.</li><li><strong>Thread safety is on by default</strong> (recursive mutex around connect/disconnect/emit, so callbacks may modify the signal while it fires); define <code>JAI_SIGNALS_NO_THREADSAFE</code> for single-threaded max performance.</li><li>Header hygiene: hot-path headers should include <code>signals/signal_decl.hpp</code> only; <code>signals/signal.hpp</code> (the umbrella) or <code>signal_impl.hpp</code> is needed in TUs that actually <em>fire script</em> receivers. It pulls the engine glue.</li></ul>
 <p>All of it (C++ and script receivers, oneshot, named connections, serialization of signal-bearing types) is covered by a dedicated test suite.</p>
 <h2 id="observable-property">observable_property<a class="hlink" href="#observable-property" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/properties/property_manager.hpp&gt;
@@ -165,145 +165,8 @@ same receivers), so this is an opt-in nicety, never a requirement.</li>
 </ul>
 <h3 id="script-facing-notes">Notes that apply to all three routes<a class="hlink" href="#script-facing-notes" aria-label="link">&#8203;</a></h3>
 <ul><li><strong>What the checker sees.</strong> A bound class is a declared name, so <code>auto s = Spawner();</code> passes strict; the signal member itself is a binder property, which the checker leaves untyped. <code>connect</code> / <code>disconnect</code> / <code>connected</code> and their arguments are checked at run time, never at load. A handler lambda&#x27;s body is checked like any other lambda. (Rules in <a href="06-static-checking.html">Static Checking</a>.)</li><li><code>observable_property&lt;T&gt;</code> members registered via the property schema (<code>auto_bind</code> on a <code>property_owner</code>) surface to script as <strong>transparent wrappers</strong>: <code>player.score + 5</code> forwards to the underlying int, while <code>player.score.on_change</code> resolves on the wrapper, identically on both backends.</li><li>When C++ invokes a script function directly outside a normal call (converted callbacks, signal receivers), wrap the invocation in <code>jai::engine::external_call_guard</code>. Without it, reference parameters would bind against whatever script call happens to be in flight (<code>engine.hpp</code>; the signal glue does this for you).</li></ul>
-<h2 id="how-this-compares">How this compares: Boost.Signals2, Qt, sigslot<a class="hlink" href="#how-this-compares" aria-label="link">&#8203;</a></h2>
-<p>If you have used a C++ signal library, most of <code>jai::signal</code> will look familiar: a typed
-multicast event, callables connected to it, every receiver run in connection order when it fires. The
-differences sit where a scripting engine needs what a pure C++ library never does (script receivers,
-connections that ride a save file) and in a few deliberate choices about ownership and errors. The table
-is the summary; the subsections give the details.</p>
-<div class="tablewrap"><table><thead><tr><th></th><th>JaiScript</th><th>Boost.Signals2</th><th>Qt</th></tr></thead><tbody>
-<tr><td>Declared as</td><td>a private <code>signal_emitter&lt;Sig&gt;</code> and a public <code>signal&lt;Sig&gt;</code> built from it</td><td>one <code>signal&lt;Sig&gt;</code> object</td><td>a <code>signals:</code> member function that moc implements, on a <code>QObject</code></td></tr>
-<tr><td>Who can emit</td><td>the owner of the emitter</td><td>anyone who can reach the signal</td><td>anyone who can reach the object</td></tr>
-<tr><td><code>connect</code> returns</td><td><code>shared_receiver_type</code>, a <code>shared_ptr</code> to the receiver</td><td>a <code>connection</code> handle</td><td>a <code>QMetaObject::Connection</code> handle</td></tr>
-<tr><td>Dropping that handle</td><td>disconnects</td><td>leaves the connection in place (<code>scoped_connection</code> disconnects)</td><td>leaves the connection in place</td></tr>
-<tr><td>Tied to a receiving object</td><td>the object holds the handle (a member, <code>receiver_owner</code>, <code>track(...)</code>)</td><td>the slot tracks a smart pointer (<code>track</code>, <code>track_foreign</code>)</td><td>automatic: destroying the receiver or context object disconnects</td></tr>
-<tr><td>Script receivers</td><td>script text and script functions, connected from C++ or script</td><td>none</td><td>JavaScript handlers through the QML engine</td></tr>
-<tr><td>Saved with the object</td><td>script-text receivers, named and unnamed (<code>JAI_SIGNAL_PROPERTY</code>)</td><td>no</td><td>no</td></tr>
-<tr><td>A receiver throws</td><td>out of the emit; later receivers do not run</td><td>out of the call; later slots do not run</td><td>undefined unless the slot catches it</td></tr>
-<tr><td>Threads</td><td>one recursive mutex per emitter, held through the whole emit; receivers run on the emitting thread</td><td>internal locking; slots run outside the signal&#x27;s lock</td><td>direct connections on the emitting thread, queued ones on the receiver&#x27;s thread</td></tr>
-<tr><td>Return values</td><td>none from <code>emit</code>; <code>emit_while</code> stops at the first <code>false</code></td><td>a combiner; the default returns an optional of the last slot&#x27;s result</td><td>signals are documented as <code>void</code></td></tr>
-</tbody></table></div>
-<p>Lightweight header-only sigslot libraries usually take Boost&#x27;s shape with fewer features: a signal
-object anyone can emit, <code>connect</code> returning a connection handle (often with a scoped variant
-that disconnects on destruction), lifetime tracking through an observer base class or a weak pointer, and
-thread safety chosen by a template or compile-time switch. None of them runs script or saves its
-connections, so where this section says Boost, read that family too.</p>
-<h3 id="compare-declaration">Declaring: only the owner fires<a class="hlink" href="#compare-declaration" aria-label="link">&#8203;</a></h3>
-<p>A Boost signal is its whole interface: whoever can reach the object can both connect and call
-<code>operator()</code>, so a class that wants to keep emission to itself keeps the signal private and
-writes its own forwarding <code>connect</code>. Qt signals are member functions that moc implements, and
-any code holding the object can call them; keeping emission inside the class is a convention.</p>
-<p>JaiScript splits the two roles into two types. <code>signal_emitter&lt;Sig&gt;</code> connects and
-emits; <code>signal&lt;Sig&gt;</code> is a facade over a reference to an emitter with only the connecting
-half (<code>connect</code>, <code>connect_oneshot</code>, <code>disconnect</code>, <code>connected</code>,
-<code>observer_count</code>). The owner keeps the emitter private and builds the public facade from it in
-its constructor, so the compiler enforces who can fire. <code>JAI_SIGNAL_PROPERTY</code> declares exactly
-that pair, and script holds the same line: a facade member read from script has no <code>emit</code>;
-script fires a signal only when the host binds the emitter itself. The facade holds a reference, so a copy
-of it is valid only while the owning object lives.</p>
-<h3 id="compare-lifetime">Connection lifetime and ownership<a class="hlink" href="#compare-lifetime" aria-label="link">&#8203;</a></h3>
-<p><strong>The handle is the connection.</strong> <code>connect</code> returns a
-<code>shared_ptr</code> to the receiver (<code>signal&lt;Sig&gt;::shared_receiver_type</code>, also spelled
-<code>receiver&lt;Sig&gt;::shared_type</code>) and the emitter keeps only a weak reference. The connection
-lives exactly as long as someone holds that pointer: reset it, or let the member holding it die, and the
-receiver stops firing; the emitter drops the dead entry after its next emit. Boost and Qt default the
-other way: a connection outlives its handle until someone calls <code>disconnect</code> or the signal is
-destroyed, and Boost&#x27;s <code>scoped_connection</code> is the closest match to JaiScript&#x27;s default.
-The unnamed <code>connect</code> overloads are <code>[[nodiscard]]</code> because discarding their
-result disconnects at once.</p>
-<p><strong>Tying a connection to an object</strong> means letting the object hold the handle: a member, or
-a <code>receiver_owner</code> (<code>signals/receiver_owner.hpp</code>), which holds receivers of any
-signature and is built into every <code>property_owner</code> as <code>track(...)</code>. When the object
-dies its handles die, and the connections with them. Boost turns this around: the slot watches the object
-(<code>slot_type(f).track(ptr)</code>, or <code>track_foreign</code> for <code>std::shared_ptr</code>), the
-connection ends when the tracked object expires, and the tracked object is kept alive while its slot runs.
-JaiScript keeps the receiver alive for the length of its own call, but nothing pins an object the callback
-captured. Qt needs no code at all for <code>QObject</code> receivers: destroying the sender, the receiver
-or the context object of a functor connection disconnects it, and a functor connected without a context
-object lives as long as the sender.</p>
-<p><strong>Named connections</strong> (<code>connect("id", ...)</code>) belong to the emitter: they last
-until <code>disconnect("id")</code>, <code>clear()</code> or the emitter&#x27;s death, and connecting again
-under an id that is already connected takes the name over: the earlier receiver stops firing unless C++
-still holds its handle. Script connects only this way. If the
-emitter dies first, a handle stays safe to hold and its receiver&#x27;s <code>connected()</code> reports
-<code>false</code>.</p>
-<h3 id="compare-script-receivers">Script receivers and hot reload<a class="hlink" href="#compare-script-receivers" aria-label="link">&#8203;</a></h3>
-<p>A receiver is a C++ callable, a <strong>script-text receiver</strong> or a <strong>script function
-receiver</strong>, and both script forms connect from either side. From C++, <code>connect("text")</code>
-returns a handle like any other, while <code>connect("id", "text")</code> and
-<code>connect("id", fn)</code> (a function <code>script_value</code>) are named connections. From script,
-<code>obj.sig.connect("name", handler)</code> takes a function or lambda, or a string of source. A
-function receiver receives the emit&#x27;s arguments positionally; a text receiver runs its source with the
-arguments bound as locals under the emitter&#x27;s <code>parameter_names</code> (<code>arg_0</code>,
-<code>arg_1</code>, ... when none are set), on the engine the emitter was given with
-<code>script_engine(eng)</code>. Boost connects C++ callables only. Qt&#x27;s QML engine connects
-JavaScript handlers to signals, a separate mechanism from moc&#x27;s C++ slots.</p>
-<p>Under hot reload, connections are C++ state on the emitter, so a reload neither drops nor duplicates
-them, and re-running the code that connects under a name replaces the receiver of that name. What a
-receiver runs after the reload depends on its form:</p>
-<ul>
-<li>A <strong>text receiver</strong> runs its source each time the signal fires, so the names in it
-resolve to whatever is defined at that moment, reloaded definitions included.</li>
-<li>A <strong>lambda</strong> resolves the program-scope names it calls when it runs, so
-<code>[=](int w) -&gt; void { on_wave(w); }</code> reaches a reloaded <code>on_wave</code>.</li>
-<li>A <strong>named function passed directly</strong> (<code>connect("hud", on_wave)</code>) is the
-function value it was when connected and keeps that body; wrap it in a lambda, or re-run the connect,
-to follow reloads.</li>
-</ul>
-<h3 id="compare-serialization">Connections that save<a class="hlink" href="#compare-serialization" aria-label="link">&#8203;</a></h3>
-<p><code>JAI_SIGNAL_PROPERTY</code> gives the signal a hidden property that serializes the emitter with
-the owner&#x27;s other properties, in JSON or binary. It writes the signal&#x27;s
-<code>parameter_names</code> and each script-text receiver with its source and parameter names, a named one
-by id; loading rebuilds those receivers on the archive&#x27;s engine and reconnects them, a named one under its id
-and an unnamed one held by the emitter, ready to fire. C++ callbacks and script function receivers are runtime-only: a function value is not
-text, so it is not written. Neither Boost nor Qt saves connections as part of an object&#x27;s state;
-there the host reconnects after a load.</p>
-<h3 id="compare-errors">When a receiver fails<a class="hlink" href="#compare-errors" aria-label="link">&#8203;</a></h3>
-<p>A failing receiver throws out of the emit, whatever its kind: a C++ callback&#x27;s exception, a
-script-text receiver&#x27;s error and a script function receiver&#x27;s error alike. The receivers after it in
-that pass do not run. The emitter stays consistent as the exception unwinds (disconnects queued during the
-emit, fired one-shots and dead entries are still cleaned up), so the emit site can catch the exception and
-fire again. When script triggered the emit through a bound method, the error is that call&#x27;s run-time
-error, and a script <code>try</code>/<code>catch</code> around the call catches it.</p>
-<p>Boost behaves the same way: an exception from a slot propagates out of the signal call and the
-remaining slots do not run. Qt documents an exception thrown from a slot invoked through a connection as
-undefined behavior unless the slot handles it, and a queued slot runs from the event loop, where there is
-no emitter to throw to.</p>
-<h3 id="compare-threads">Threads<a class="hlink" href="#compare-threads" aria-label="link">&#8203;</a></h3>
-<p>Unless <code>JAI_SIGNALS_NO_THREADSAFE</code> is defined, each emitter owns one recursive mutex, held by
-<code>connect</code>, <code>disconnect</code>, <code>connected</code>, <code>observer_count</code>,
-<code>clear</code> and the whole of an emit, receivers included. That is the guarantee, and it has three
-consequences:</p>
-<ul>
-<li>Emits of one signal from different threads run one after another, and a <code>connect</code> or
-<code>disconnect</code> from another thread waits for an emit in progress to finish.</li>
-<li>A receiver may connect, disconnect or re-emit the same signal while it fires (the mutex is recursive).
-A receiver disconnected during an emit can still run later in that pass; it leaves the list when the
-outermost emit returns. A receiver connected during an emit runs in the same pass.</li>
-<li>Because the lock is held while receivers run, a receiver must not wait on another thread that is
-connecting to or emitting the same signal.</li>
-</ul>
-<p>Nothing else is locked: <code>block()</code>/<code>unblock()</code> (on the emitter or a receiver),
-<code>script_engine(...)</code> and <code>parameter_names(...)</code> are plain state, set up before the
-signal is shared. Receivers run on the emitting thread, and a script receiver runs on its engine there,
-so a signal with script receivers is emitted on the thread that is using that engine
-(<a href="02-dynamic-binder.html#live-objects-both-directions">one engine serves one thread at a time</a>).</p>
-<p>Boost.Signals2 locks internally so connect, disconnect and invocation can be called from different
-threads at once; it runs slots without holding the signal&#x27;s own lock, and its mutex type is a template
-parameter (<code>dummy_mutex</code> for single-threaded use). Qt adds what neither library has, delivery
-across threads: a queued connection copies the arguments into an event for the receiver&#x27;s thread and
-runs the slot from that thread&#x27;s event loop, and the default automatic connection chooses queued
-delivery when the receiver lives in another thread. JaiScript has no queued delivery; a host that emits
-from a worker and wants receivers on its main thread hands the emit to that thread itself.</p>
-<h3 id="compare-return-values">Combiners and return values<a class="hlink" href="#compare-return-values" aria-label="link">&#8203;</a></h3>
-<p>A signature may return a value, but <code>emit</code> and <code>operator()</code> return nothing: each
-receiver&#x27;s result is discarded. The one aggregate is <code>emit_while</code>, available when the
-signature returns <code>bool</code>: it runs receivers in order, stops at the first that returns
-<code>false</code> and returns <code>false</code>, otherwise <code>true</code> (a blocked signal returns
-<code>true</code> without running any). Boost generalizes this with combiners: the combiner receives an
-iterator range over the slots&#x27; results, invoking each slot as it is dereferenced, and the default
-returns an optional holding the last slot&#x27;s result (empty when no slot ran). Qt documents signals as
-returning <code>void</code> and has no combiner.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/09-coroutine-hosting.html"><span>&larr; previous</span>Coroutine Hosting</a><a class="next" rel="next" href="../embedding/11-performance.html"><span>next &rarr;</span>Performance Notes</a></nav></article>
+<h2 id="coming-from-another-signal-library">Coming from another signal library<a class="hlink" href="#coming-from-another-signal-library" aria-label="link">&#8203;</a></h2>
+<p>Code written against Boost.Signals2, Qt or a sigslot library moves over with <a href="../bridges/05-from-boost-signals2.html">From Boost.Signals2</a>, which maps every type and call, converts a class, and covers what behaves differently: connection lifetime, emits during emits, receiver errors, threads, return values, script receivers under hot reload, and connections that save.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/09-coroutine-hosting.html"><span>&larr; previous</span>Coroutine Hosting</a><a class="next" rel="next" href="../embedding/11-performance.html"><span>next &rarr;</span>Performance Notes</a></nav></article>
 </main>
 </div>
 <footer class="site-footer">

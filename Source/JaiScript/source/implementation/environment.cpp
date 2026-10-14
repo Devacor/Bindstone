@@ -886,7 +886,7 @@ void environment::reset(std::shared_ptr<environment> new_parent) {
         bump_env_epoch();   // chain shape changed: vm lookup caches through this env are stale
     }
 
-    parent_ = new_parent;
+    parent_ = std::move(new_parent);
 
     // Reset to standard kind and clear kind-specific fields
     kind_ = env_kind::standard;
@@ -910,7 +910,7 @@ void environment::reset_as_method(std::shared_ptr<environment> parent, script_va
         bump_env_epoch();   // chain shape changed: vm lookup caches through this env are stale
     }
 
-    parent_ = parent;
+    parent_ = std::move(parent);
 
     // Set to method kind with this object (caller stamps set_access_context after)
     kind_ = env_kind::method;
@@ -934,7 +934,7 @@ void environment::reset_as_static_method(std::shared_ptr<environment> parent, st
         bump_env_epoch();   // chain shape changed: vm lookup caches through this env are stale
     }
 
-    parent_ = parent;
+    parent_ = std::move(parent);
 
     // Set to static_method kind with class definition
     kind_ = env_kind::static_method;

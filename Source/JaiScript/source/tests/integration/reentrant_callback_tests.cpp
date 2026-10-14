@@ -177,6 +177,44 @@ public:
 
 	void forge_tests() override {
 		stack_moving_reentry();
+		// Methods entered from native code (bound methods a builtin calls, destructors, a bound method called directly):
+		// fields, sibling calls, private members, a lambda capturing this, and the caller's own variables afterwards
+		test("methods_entered_from_native_code_see_their_object_and_leave_the_caller_intact", [this]() {
+			auto eng = make_engine();
+			stdlib::register_all(*eng);
+			auto r = eng->execute(R"(
+				array<int> log = [];
+				class Acc {
+					int total = 0;
+					int calls = 0;
+					void add(int v) { total = total + v; bump(); }
+					void bump() { calls += 1; }
+					var reader() { return [this]() -> int { return total; }; }
+					~Acc() { log.push(total); }
+				}
+				class Secret {
+				private:
+					int hidden = 1;
+				public:
+					void add(int v) { hidden += v; }
+					int get() { return hidden; }
+				}
+				int scoped() { Acc tmp; tmp.add(5); return tmp.calls; }
+				int outer = 40;
+				Acc a;
+				Secret s;
+				array<int> xs = [1, 2, 3];
+				xs.for_each(reflect::bind(a, "add"));
+				xs.for_each(reflect::bind(s, "add"));
+				var f = reflect::bind(a, "add");
+				f(10);
+				var read = a.reader();
+				int c = scoped();
+				to_string(a.total) + "|" + to_string(a.calls) + "|" + to_string(s.get()) + "|" + to_string(read()) + "|" +
+					to_string(c) + "|" + to_string(log.size()) + ":" + to_string(log[0]) + "|" + to_string(outer);
+			)");
+			check_eq(std::string("16|4|7|16|1|1:5|40"), r.to_string());
+		});
 		test("nested_execute_in_converted_callback_keeps_outer_run", [this]() {
 			auto eng = make_engine();
 			engine* raw = eng.get();

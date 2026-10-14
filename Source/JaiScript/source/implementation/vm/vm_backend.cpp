@@ -23830,9 +23830,30 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	}
 	locals.function_name = function.name;
 
-	auto previousEnv = environment_;
-
-	setup_callee_env(function, locals, previousEnv, method);
+	// A method whose body needs no frame env runs over its definition env with `this` on the frame, as an in-loop lazy
+	// method frame does; the caller's env moves aside, and stays put when it already is the definition env
+	const bool lazy_method = method && method->access && *method->parent && !body_chunk->needs_frame_env &&
+	                         !method->access->chain_has_nonpublic();
+	bool env_untouched = false;
+	std::shared_ptr<environment> previousEnv;
+	if (lazy_method) {
+		locals.set_this(*method->this_obj);
+		locals.scope_static = method->access;
+		if (environment_.get() == method->parent->get()) {
+			env_untouched = true;
+		} else {
+			previousEnv = std::move(environment_);
+			environment_ = *method->parent;
+		}
+	} else {
+		previousEnv = std::move(environment_);
+		try {
+			setup_callee_env(function, locals, previousEnv, method);
+		} catch (...) {
+			environment_ = std::move(previousEnv);
+			throw;
+		}
+	}
 
 	bool previousHasReturn = has_return_value_;
 	std::optional<script_value> previousReturn = std::move(return_value_);
@@ -23843,7 +23864,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	f.pin = std::move(body_chunk);
 	f.ip = 0;
 	f.locals = &locals;
-	f.entry_env = environment_;
+	f.entry_env = lazy_method ? nullptr : environment_;
 	// Native-entry frame window built at the current stack top during binding
 	f.window_backed = true;
 	f.window_base = stack_.size();
@@ -23863,23 +23884,23 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	auto cleanup = [&]() {
 		if (is_unwinding_ && !trace_captured_) capture_stack_trace();
 		truncate_detached(pending_callees_, entry_pending);
-		clear_this_on_frame_exit(f.entry_env);
+		if (!lazy_method) { clear_this_on_frame_exit(f.entry_env); }
 		std::vector<script_value> shared_cells;
 		if ((f.code->shares_cells || locals.boxed_cells) && !parallel_worker_) [[unlikely]] { gather_native_frame_cells(f, locals, shared_cells); }
-		environment_ = previousEnv;
+		if (!env_untouched) { environment_ = std::move(previousEnv); }
 		has_return_value_ = previousHasReturn;
 		return_value_ = std::move(previousReturn);
 		if (stack_.size() > f.stack_base) {
 			stack_.truncate(f.stack_base);
 		}
 		f.window_live = 0;
-		release_scope_env(std::move(f.entry_env));
+		if (!lazy_method) { release_scope_env(std::move(f.entry_env)); }
 		if (!shared_cells.empty()) [[unlikely]] { script_value::release_cell_cycles(shared_cells, engine_); }
 	};
 
 	{
 		auto bind_result = bind_parameters(function.parameters(), args, first, argc, f, *f.code,
-	                                   previousEnv, site, caller_frame, caller_code,
+	                                   env_untouched ? environment_ : previousEnv, site, caller_frame, caller_code,
 	                                   site_arg_proofs(site, caller_code, function.body.get(), function.parameters().size(), argc), &function, caller_unit);
 		if (bind_result == op_status::failed) {
 			cleanup();
@@ -23943,6 +23964,10 @@ prepared_callback* vm_backend::prepare_callback(const script_value& callable) {
 	s.window_slots = std::max(function.local_count, static_cast<size_t>(s.body->local_count));
 	frame& f = s.f;
 	f = frame{};
+	if (s.lazy && function.closure_env) {   // the frame keeps the closure env as its context for the whole session
+		s.closure_env = function.closure_env;
+		f.entry_env = function.closure_env;
+	}
 	f.code = s.body.get();
 	f.locals = &s.locals;
 	f.window_backed = true;
@@ -23958,6 +23983,7 @@ void vm_backend::release_callback(prepared_callback* prepared) {
 	--callback_depth_;
 	s.f = frame{};
 	s.body.reset();
+	s.closure_env.reset();
 	s.locals = call_frame{};
 	s.callable = nullptr;
 	s.fn = nullptr;
@@ -23984,8 +24010,12 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 	call_frame& locals = s.locals;
 	locals.reset_member_scope();
 	const bool untouched = s.lazy && !function.closure_env && (function.block_defined || !environment_ || !environment_->block_scope());
+	// a lazy closure trades envs with its session (the caller's env waits in s.closure_env): no count moves per call
+	const bool swapped = s.lazy && s.closure_env;
 	std::shared_ptr<environment> previous_env;
-	if (!untouched) {
+	if (swapped) {
+		environment_.swap(s.closure_env);
+	} else if (!untouched) {
 		previous_env = std::move(environment_);
 		if (!s.lazy) {
 			try {
@@ -23995,10 +24025,10 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 				throw;
 			}
 		} else {
-			environment_ = function.closure_env ? function.closure_env : environment::call_parent(previous_env, false);
+			environment_ = environment::call_parent(previous_env, false);
 		}
 	}
-	f.entry_env = s.lazy && !function.closure_env ? nullptr : environment_;
+	if (!swapped) { f.entry_env = s.lazy ? nullptr : environment_; }
 	f.ip = 0;
 	f.window_base = stack_.size();
 	f.stack_base = f.window_base;
@@ -24019,7 +24049,8 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 		if (!s.lazy) { clear_this_on_frame_exit(f.entry_env); }
 		std::vector<script_value> shared_cells;
 		if ((f.code->shares_cells || locals.boxed_cells) && !parallel_worker_) [[unlikely]] { gather_native_frame_cells(f, locals, shared_cells); }
-		if (!untouched) { environment_ = std::move(previous_env); }
+		if (swapped) { environment_.swap(s.closure_env); }
+		else if (!untouched) { environment_ = std::move(previous_env); }
 		has_return_value_ = previous_has_return;
 		return_value_ = std::move(previous_return);
 		if (stack_.size() > f.stack_base) {
@@ -24027,7 +24058,6 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 		}
 		f.window_live = 0;
 		if (!s.lazy) { release_scope_env(std::move(f.entry_env)); }
-		else { f.entry_env = nullptr; }
 		if (!shared_cells.empty()) [[unlikely]] { script_value::release_cell_cycles(shared_cells, engine_); }
 		if (locals.is_method) {
 			*locals.this_object_ptr = make_null();
@@ -24047,7 +24077,7 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 		op_status bound{};
 		try {
 			bound = bind_parameters(function.parameters(), args, 0, args.size(), f, *s.body,
-			                        untouched ? environment_ : previous_env, nullptr, nullptr, nullptr, nullptr, &function, caller_unit);
+			                        untouched ? environment_ : swapped ? s.closure_env : previous_env, nullptr, nullptr, nullptr, nullptr, &function, caller_unit);
 		} catch (...) {
 			cleanup();
 			throw;

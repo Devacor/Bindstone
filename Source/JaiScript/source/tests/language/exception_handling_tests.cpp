@@ -674,8 +674,8 @@ public:
                     "  return x;\n"           // 4
                     "}\n"                     // 5
                     "auto h = co();\n"        // 6
-                    "var a = h.resume();\n"   // 7
-                    "var b = h.resume();\n";  // 8
+                    "var a = h.next();\n"   // 7
+                    "var b = h.next();\n";  // 8
                 std::string what = failure_text(*engine, src);
                 check_true(what.find("Cannot return string from 'co' (declared -> int)") == 0, "top-level resume text (got: " + what + ")");
                 check_eq(std::string("co:4|<script>:8"), trace_shape(*engine));
@@ -691,8 +691,8 @@ public:
                     "}\n"                     // 5
                     "auto h = co();\n"        // 6
                     "int g() {\n"             // 7
-                    "  h.resume();\n"         // 8
-                    "  return h.resume();\n"  // 9
+                    "  h.next();\n"         // 8
+                    "  return h.next();\n"  // 9
                     "}\n"                     // 10
                     "int b = g();\n";         // 11
                 std::string what = failure_text(*engine, src);
@@ -709,7 +709,7 @@ public:
                     "}\n"                     // 4
                     "auto h = co();\n"        // 5
                     "int g() {\n"             // 6
-                    "  return h.resume();\n"  // 7
+                    "  return h.next();\n"  // 7
                     "}\n"                     // 8
                     "int b = g();\n";         // 9
                 std::string what = failure_text(*engine, src);
@@ -730,8 +730,8 @@ public:
                     "  return y;\n"           // 5
                     "}\n"                     // 6
                     "auto h = co();\n"        // 7
-                    "var a = h.resume();\n"   // 8
-                    "var b = h.resume();\n";  // 9
+                    "var a = h.next();\n"   // 8
+                    "var b = h.next();\n";  // 9
                 std::string what = failure_text(*engine, src);
                 check_true(what.find("Array index 0 out of bounds") == 0, "index error text (got: " + what + ")");
                 check_eq(std::string("co:4|<script>:9"), trace_shape(*engine));
@@ -745,8 +745,8 @@ public:
                     "  return 1;\n"           // 4
                     "}\n"                     // 5
                     "auto h = co();\n"        // 6
-                    "var a = h.resume();\n"   // 7
-                    "var b = h.resume();\n";  // 8
+                    "var a = h.next();\n"   // 7
+                    "var b = h.next();\n";  // 8
                 std::string what = failure_text(*engine, src);
                 check_eq(std::string("x"), what);
                 check_eq(std::string("co:3|<script>:8"), trace_shape(*engine));
@@ -887,8 +887,8 @@ public:
                     "  try { var x = \"s\"; return x; } catch (e) { return -1; }\n"
                     "}\n"
                     "auto h = co();\n"
-                    "h.resume()\n").as_int());
-                check_eq((int64_t)-1, engine->execute("h.resume()").as_int());
+                    "h.next()\n").as_int());
+                check_eq((int64_t)-1, engine->execute("h.next()").as_int());
                 check_true(engine->execute("h.done()").as_bool(), "completed after the caught return");
             }
             {
@@ -898,7 +898,7 @@ public:
                     "  try { var x = \"s\"; return x; } catch (e) { return -1; }\n"
                     "}\n"
                     "auto h = co();\n"
-                    "h.resume()\n").as_int());
+                    "h.next()\n").as_int());
                 check_true(engine->execute("h.done()").as_bool(), "first resume completed");
             }
             // Uncaught: the row-29 text/trace hold and the handle reads done (failed) afterwards
@@ -911,8 +911,8 @@ public:
                     "  return x;\n"           // 4
                     "}\n"                     // 5
                     "auto h = co();\n"        // 6
-                    "var a = h.resume();\n"   // 7
-                    "var b = h.resume();\n";  // 8
+                    "var a = h.next();\n"   // 7
+                    "var b = h.next();\n";  // 8
                 std::string what = failure_text(*engine, src);
                 check_true(what.find("Cannot return string from 'co' (declared -> int)") == 0, "uncaught text (got: " + what + ")");
                 check_eq(std::string("co:4|<script>:8"), trace_shape(*engine));

@@ -24,7 +24,11 @@ public:
 
     coroutine_handle(engine* eng);
 
-    checked_result<script_value> resume(engine* eng);
+    // Advances a_count yields (each step runs to the next yield, the last step's value is returned); a step past the
+    // end raises "Cannot resume a completed coroutine" after the earlier steps ran
+    checked_result<script_value> next(engine* eng, script_int a_count = 1);
+    // h.next() / h.next(count) as script calls it: both backends dispatch the builtin method here
+    checked_result<script_value> next_from_script(engine* eng, const script_value* a_args, size_t a_argCount);
     bool done() const { return status_ == status::completed || status_ == status::failed; }
     status get_status() const { return status_; }
 
@@ -55,6 +59,8 @@ public:
 
 private:
     friend class interpreter;
+
+    checked_result<script_value> resume_once(engine* eng);
 
     engine* engine_ = nullptr;
     status status_ = status::created;

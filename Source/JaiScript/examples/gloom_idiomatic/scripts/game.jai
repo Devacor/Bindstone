@@ -278,7 +278,7 @@ class Pilot {
 public:
 	function next() -> var {
 		if (brain == null || brain.done()) { brain = think(); }
-		return brain.resume();
+		return brain.next();
 	}
 
 private:

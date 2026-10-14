@@ -52,7 +52,7 @@ public:
 			return;
 		}
 		if (brain == null || brain.done()) { brain = make_brain(); }
-		brain.resume();
+		brain.next();
 	}
 
 	// overridden by every subclass; the base brain just stands there

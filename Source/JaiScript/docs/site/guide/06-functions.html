@@ -203,7 +203,7 @@ print(f(swap()));
 print(f(2));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">old lambda got 1
 new lambda got 2</code></pre></div>
-<p>Each argument takes its value as it is evaluated. The callee receives what the argument was at that point, even when a later argument changes it before the call runs. The rule covers functions, lambdas, methods, constructors and <code>new</code>, and every kind of value: an array argument followed by an argument that pushes onto that array binds the array as it was. A conversion the binding runs, such as a converting constructor for one parameter, runs after every argument has been taken. A constructor takes its arguments before its field initializers and initializer list run, and the arguments of <code>: super(...)</code> and <code>: this(...)</code> take their values as they are evaluated. A coroutine takes its arguments at the call and binds them when it first resumes. A reference parameter binds the caller&#x27;s storage instead, so it sees every write made before the body runs:</p>
+<p>Each argument takes its value as it is evaluated. The callee receives what the argument was at that point, even when a later argument changes it before the call runs. The rule covers functions, lambdas, methods, constructors and <code>new</code>, and every kind of value: an array argument followed by an argument that pushes onto that array binds the array as it was. A conversion the binding runs, such as a converting constructor for one parameter, runs after every argument has been taken. A constructor takes its arguments before its field initializers and initializer list run, and the arguments of <code>: super(...)</code> and <code>: this(...)</code> take their values as they are evaluated. A coroutine takes its arguments at the call and binds them at its first <code>next()</code>. A reference parameter binds the caller&#x27;s storage instead, so it sees every write made before the body runs:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var queue = [1, 2, 3];
 function drain() { queue.push(4); return 0; }
 function count(q, extra) { return q.size() + extra; }
@@ -213,7 +213,7 @@ print(count_ref(queue, drain()));
 coroutine function later(x) { yield x; }
 var h = later(queue[0]);
 queue[0] = 100;
-print(h.resume());</code></pre></div>
+print(h.next());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3
 5
 1</code></pre></div>

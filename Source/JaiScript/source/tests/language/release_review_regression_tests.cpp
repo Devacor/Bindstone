@@ -296,8 +296,8 @@ public:
 						yield x;
 					}
 					auto c = co();
-					auto a = c.resume();
-					c.resume();
+					auto a = c.next();
+					c.next();
 				)");
 			});
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());
@@ -319,8 +319,8 @@ public:
 					return 0;
 				}
 				auto c = co();
-				auto a = c.resume();
-				auto b = c.resume();
+				auto a = c.next();
+				auto b = c.next();
 				a * 10 + b;
 			)");
 			check_eq((int64_t)13, r.as_int());

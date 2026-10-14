@@ -128,8 +128,8 @@ public:
                 auto g = G();
                 var h = g.gen(1);
             )");
-            check_eq(eng->execute("h.resume()").as<int>(), 1);
-            check_eq(eng->execute("h.resume()").as<int>(), 6);
+            check_eq(eng->execute("h.next()").as<int>(), 1);
+            check_eq(eng->execute("h.next()").as<int>(), 6);
         });
 
         test("defaults_overload_ambiguity_exact_arity_wins", [&]() {

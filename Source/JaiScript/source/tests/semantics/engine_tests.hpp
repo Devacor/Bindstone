@@ -319,7 +319,7 @@ public:
                     return 3;
                 }
                 auto c = counter();
-                auto total = c.resume() + c.resume() + c.resume();
+                auto total = c.next() + c.next() + c.next();
                 total
             )");
             check_eq(bite.execute().as<int>(), 6);

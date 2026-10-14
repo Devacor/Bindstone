@@ -109,7 +109,7 @@ explosion burst + `warden_down = true`), message. Else pain roll
 next non-stunned tick — mid-phase interruption is the mechanic), state → hunt.
 
 `enemy.tick()`: `anim += 1`; flash decrements; dead → return; stun decrements
-→ return; brain minted if null/done; `brain.resume()` (one yield = one tick).
+→ return; brain minted if null/done; `brain.next()` (one yield = one tick).
 
 Perception: `sees_player()` = distance < 13 AND `los_clear` (§1.8);
 `hears_player()` = `noise > 0` AND distance < 12. `noise` is set by player

@@ -1784,7 +1784,7 @@ namespace jai::fuzz {
 				int resumes = static_cast<int>(rng_.range(1, 4));
 				for (int i = 0; i < resumes; ++i) {
 					std::string r = fresh("r");
-					lines_.push_back("auto " + r + " = " + h + ".resume();");
+					lines_.push_back("auto " + r + " = " + h + ".next();");
 					lines_.push_back("print(" + r + ");");
 				}
 				declare(h, vt::any);
@@ -1853,7 +1853,7 @@ namespace jai::fuzz {
 						int resumes = static_cast<int>(rng_.range(1, 3));
 						for (int i = 0; i < resumes; ++i) {
 							std::string r = fresh("r");
-							lines_.push_back("auto " + r + " = " + h + ".resume();");
+							lines_.push_back("auto " + r + " = " + h + ".next();");
 							lines_.push_back("print(" + r + ");");
 						}
 						lines_.push_back("print(" + h + ".done());");

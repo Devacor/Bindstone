@@ -409,11 +409,16 @@ public:
 		test("api_consistency_coroutine_arguments_are_validated", [this]() {
 			expect("coroutine arity", R"(
 				coroutine function produce() { yield 3; }
-				auto h = produce(); string errors = "";
-				try { h.resume(7); } catch (e) { errors += e; }
+				var h = produce(); string errors = "";
+				try { h.next(1, 2); } catch (e) { errors += e; }
+				try { h.next("2"); } catch (e) { errors += "|" + e; }
+				try { h.next(2.0); } catch (e) { errors += "|" + e; }
+				try { h.next(0); } catch (e) { errors += "|" + e; }
+				try { h.next(-3); } catch (e) { errors += "|" + e; }
 				try { h.done(7); } catch (e) { errors += "|" + e; }
-				errors + "|" + to_string(h.resume());
-			)", "resume() takes no arguments|done() takes no arguments|3");
+				errors + "|" + to_string(h.done()) + "|" + to_string(h.next());
+			)", "next() takes 0 or 1 arguments ([count])|next() count must be an integer|next() count must be an integer|"
+			    "next() count must be at least 1|next() count must be at least 1|done() takes no arguments|false|3");
 		});
 		test("api_consistency_standard_builtin_three_way_order", [this]() {
 			expect("value orders", R"(
@@ -1287,7 +1292,7 @@ private:
 			expect("ref across yield", R"(
 				array<int> A = [1];
 				coroutine int co() { auto& r = A[0]; yield 0; r = 7; yield 1; }
-				var h = co(); h.resume(); A.push(2); h.resume();
+				var h = co(); h.next(); A.push(2); h.next();
 				"" + A[0];
 			)", "7");
 		});
@@ -1296,8 +1301,8 @@ private:
 				coroutine int co() { yield 1; yield 2; }
 				var H = co();
 				function get() { return H; }
-				get().resume();
-				"" + H.resume();
+				get().next();
+				"" + H.next();
 			)", "2");
 		});
 		test("a_reference_to_a_by_value_call_result_is_an_error", [this]() {
@@ -1391,7 +1396,7 @@ private:
 				coroutine int c() { throw; yield 1; }
 				function run() -> string {
 					string r = "";
-					try { throw "outer"; } catch (e) { try { var h = c(); h.resume(); } catch (e2) { r = e2; } r += "|" + e; }
+					try { throw "outer"; } catch (e) { try { var h = c(); h.next(); } catch (e2) { r = e2; } r += "|" + e; }
 					return r;
 				}
 				run();
@@ -1409,7 +1414,7 @@ private:
 			expect("resumer trio", R"(
 				coroutine int g() { yield 1; }
 				var r = "";
-				try { throw "outer"; } catch (e) { var h = g(); h.resume(); try { throw; } catch (x) { r = x; } }
+				try { throw "outer"; } catch (e) { var h = g(); h.next(); try { throw; } catch (x) { r = x; } }
 				r;
 			)", "outer");
 		});
@@ -2520,8 +2525,8 @@ private:
 				coroutine g() { throw; yield 1; }
 				coroutine k() { throw "boom"; yield 1; }
 				coroutine m() { yield 1; throw; yield 2; }
-				function t(var h) -> string { string r = ""; try { h.resume(); } catch (e) { r = e; } try { h.resume(); } catch (e) { r = r + "|" + e; } return r; }
-				function u(var h) -> string { h.resume(); return t(h); }
+				function t(var h) -> string { string r = ""; try { h.next(); } catch (e) { r = e; } try { h.next(); } catch (e) { r = r + "|" + e; } return r; }
+				function u(var h) -> string { h.next(); return t(h); }
 				string out = t(g()) + " / " + t(k()) + " / " + u(m());
 				try { throw "outer"; } catch (e) { out += " / " + e; }
 				out;
@@ -3007,7 +3012,7 @@ private:
 				auto handle = std::static_pointer_cast<coroutine_handle>(e.get_variable("h").get_object_holder()->data);
 				for (int i = 0; i < 2; ++i) {
 					try {
-						auto r = handle->resume(&e);
+						auto r = handle->next(&e);
 						out += r ? "ok:" + spec::render(r.value()) + "|" : route("err", e.format_error(r), "co boom") + "|";
 					} catch (const std::exception& ex) { out += route("throw", ex.what(), "co boom") + "|"; }
 				}
@@ -3323,7 +3328,7 @@ private:
 				Player player; player.heal();
 				H hh; hh.cb = []() { return 5; }; var g = hh.cb;
 				var co = gen();
-				"" + player.hp + " " + g() + " " + co.resume() + "|" +
+				"" + player.hp + " " + g() + " " + co.next() + "|" +
 				    t([]() { Player p; var f = p.heal; return 1; }) + "|" +
 				    t([]() { shared_ptr<Player> h = new Player(); var f = h.heal; return 1; }) + "|" +
 				    t([]() { Team team; var f = team.lead.heal; return 1; }) + "|" +
@@ -3331,7 +3336,7 @@ private:
 				    t([]() { var a = [1]; var f = a.push; return 1; }) + "|" +
 				    t([]() { string s = "x"; var f = s.to_upper; return 1; }) + "|" +
 				    t([]() { map<string, int> m = {}; var f = m.clear; return 1; }) + "|" +
-				    t([]() { var c = gen(); var f = c.resume; return 1; });
+				    t([]() { var c = gen(); var f = c.next; return 1; });
 			)", "6 5 1|'heal' is a method of Player; call it with p.heal() or bind it with reflect::bind(p, \"heal\")|"
 			    "'heal' is a method of Player; call it with h.heal() or bind it with reflect::bind(h, \"heal\")|"
 			    "'heal' is a method of Player; call it with team.lead.heal() or bind it with reflect::bind(team.lead, \"heal\")|"
@@ -3339,7 +3344,7 @@ private:
 			    "'push' is a method of array; call it with a.push() or wrap the call in a lambda|"
 			    "'to_upper' is a method of string; call it with s.to_upper() or wrap the call in a lambda|"
 			    "'clear' is a method of map; call it with m.clear() or wrap the call in a lambda|"
-			    "'resume' is a method of coroutine; call it with c.resume() or wrap the call in a lambda", check_mode::off);
+			    "'next' is a method of coroutine; call it with c.next() or wrap the call in a lambda", check_mode::off);
 			every_config("method value at load", "rejected", [&](engine& e) {
 				try {
 					e.execute("class Player { void heal() {} } Player player; var f = player.heal;");

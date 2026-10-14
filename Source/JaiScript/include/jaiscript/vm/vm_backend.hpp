@@ -1099,7 +1099,7 @@ namespace jai::vm {
         uint64_t builtin_push_id_ = 0;   // "push" (the array-push inline fast path)
         uint64_t builtin_has_id_ = 0;    // "has" (the map-has inline)
         uint64_t coroutine_handle_type_id_ = 0;
-        uint64_t resume_id_ = 0;
+        uint64_t next_id_ = 0;
         uint64_t done_id_ = 0;
         uint64_t class_definition_type_id_ = 0;
         uint64_t hot_reload_migrate_id_ = 0;

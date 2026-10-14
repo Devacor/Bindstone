@@ -1850,6 +1850,29 @@ public:
             }
         });
 
+        test("a_coroutine_handle_answers_next_and_done_only", [this]() {
+            for (bool proofs : {true, false}) {
+                auto e = make_engine();
+                e->type_proofs(proofs);
+                const std::string gen = "coroutine int g() { yield 1; yield 2; }\n";
+                auto r = e->check(gen + "auto h = g();\nh.resume();");
+                check_eq((size_t)1, error_count(r), r.format());
+                check_true(has_diag(r, dlevel::error, "no member 'resume' on 'coroutine_handle' (did you mean 'next'?)"), r.format());
+                check_true(has_diag(e->check(gen + "g().resume();"), dlevel::error, "no member 'resume' on 'coroutine_handle' (did you mean 'next'?)"));
+                check_true(has_diag(e->check(gen + "class C { coroutine int m() { yield 1; } }\nauto c = C();\nauto h = c.m();\nh.resume();"), dlevel::error,
+                                    "no member 'resume' on 'coroutine_handle' (did you mean 'next'?)"));
+                check_true(has_diag(e->check(gen + "auto h = g();\nh.nxt();"), dlevel::error, "no member 'nxt' on 'coroutine_handle' (did you mean 'next'?)"));
+                check_true(has_diag(e->check(gen + "auto h = g();\nvar f = h.resume;"), dlevel::error, "no member 'resume' on 'coroutine_handle'"));
+                check_true(has_diag(e->check(gen + "auto h = g();\nh.next(1, 2);"), dlevel::error, "next() takes 0 or 1 arguments ([count])"));
+                check_true(has_diag(e->check(gen + "auto h = g();\nh.next(\"2\");"), dlevel::error, "next() count must be an integer"));
+                check_true(has_diag(e->check(gen + "auto h = g();\nh.done(1);"), dlevel::error, "done() takes no arguments"));
+                check_eq((size_t)0, error_count(e->check(gen + "auto h = g();\nint a = h.next();\nvar b = h.next(2);\nbool d = h.done();\nfor (auto v : g()) { a += v; }\nh = g();")));
+                // a user class's own resume is its method, and a var handle stays dynamic
+                check_eq((size_t)0, error_count(e->check("class Timer { int resume() { return 1; } }\nauto t = Timer();\nt.resume();")));
+                check_eq((size_t)0, error_count(e->check(gen + "var h = g();\nh.anything();")));
+            }
+        });
+
         test("reference_temporary_rules_keep_non_string_write_checks", [this]() {
             // string& admits writable temporaries; other reference types retain inferred read-only admission.
             const std::string decl = "int index_of_name(array<string>& names, string n, int def) { for (int i = 0; i < names.size(); ++i) { if (names[i] == n) { return i; } } return def; }\n";

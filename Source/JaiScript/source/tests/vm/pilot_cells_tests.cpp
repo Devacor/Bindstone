@@ -399,7 +399,7 @@ public:
 				var a = walker(1, 4);
 				var b = walker(1000, 4);
 				string out = "";
-				for (int k = 0; k < 4; ++k) { out = out + to_string(a.resume()) + "/" + to_string(b.resume()) + ";"; }
+				for (int k = 0; k < 4; ++k) { out = out + to_string(a.next()) + "/" + to_string(b.next()) + ";"; }
 				out;
 			)";
 			both(script, "", "interleaved coroutines");
@@ -7137,7 +7137,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"int fib(int n) { if (n < 2) { return n; } return fib(n - 2) + fib(n - 1); }\n"
 				"coroutine gen(int n) -> int { for (int i = 0; i < n; ++i) { int v = fib(i); yield v; } }\n"
 				"string out = \"\"; var a = gen(8); var b = gen(6);\n"
-				"for (int k = 0; k < 8; ++k) { out += to_string(a.resume()) + \",\"; if (!b.done()) { out += to_string(b.resume()) + \";\"; } }\n"
+				"for (int k = 0; k < 8; ++k) { out += to_string(a.next()) + \",\"; if (!b.done()) { out += to_string(b.next()) + \";\"; } }\n"
 				"for (int v : gen(5)) { out += to_string(v) + \" \"; }\n"
 				"out;";
 			both(src, "", "raw chains inside coroutines");

@@ -156,7 +156,7 @@ public:
 						return 0;
 					}
 					auto c = spin();
-					c.resume();
+					c.next();
 				)");
 			});
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());

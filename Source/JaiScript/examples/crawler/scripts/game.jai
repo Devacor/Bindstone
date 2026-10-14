@@ -547,7 +547,7 @@ function pilot_has_upgrade() -> bool {
 
 function autopilot_key() -> string {
 	if (PILOT_CO == null || PILOT_CO.done()) { PILOT_CO = pilot_brain(); }
-	var key = PILOT_CO.resume();
+	var key = PILOT_CO.next();
 	if (key == null) { return "."; }
 	return key;
 }

@@ -210,15 +210,15 @@ public:
                 g.h = g.steps(3);
                 int total = 0;
                 for (auto v : g.steps(2)) { total += v; }
-                string s = to_string(g.h.resume()) + "," + to_string(g.h.resume());
+                string s = to_string(g.h.next()) + "," + to_string(g.h.next());
                 auto m = g.mixed();
-                s += "|" + to_string(m.resume()) + "," + to_string(m.resume()) + "," + to_string(m.resume()) + "," + to_string(m.done());
+                s += "|" + to_string(m.next()) + "," + to_string(m.next()) + "," + to_string(m.next()) + "," + to_string(m.done());
                 coroutine int typed() { yield 1; return 2.7; }
                 auto t = typed();
-                t.resume();
-                var last = t.resume();
+                t.next();
+                var last = t.next();
                 string e = "";
-                try { t.resume(); } catch (err) { e = to_string(err); }
+                try { t.next(); } catch (err) { e = to_string(err); }
                 to_string(total) + "|" + s + "|" + type_of(last) + ":" + to_string(last) + "|" + e;
             )");
         });
@@ -235,7 +235,7 @@ public:
                 for (auto v : sq()) { total += v; }
                 auto c = gen(3);
                 int manual = 0;
-                while (!c.done()) { manual += c.resume(); }
+                while (!c.done()) { manual += c.next(); }
                 to_string(total) + "|" + to_string(manual);
             )");
         });
@@ -275,7 +275,7 @@ public:
                 try { throw 2; } catch (e) { log = to_string(e) + "/"; }
                 coroutine var g() { try { throw "c"; } catch (e) { yield e; yield e + "2"; return e; } }
                 var h = g();
-                log + f() + "|" + to_string(h.resume()) + "|" + to_string(h.resume()) + "|" + to_string(h.resume()) + "|" + e;
+                log + f() + "|" + to_string(h.next()) + "|" + to_string(h.next()) + "|" + to_string(h.next()) + "|" + e;
             )");
         });
 

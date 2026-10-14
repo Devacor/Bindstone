@@ -44,12 +44,12 @@ public:
 				coroutine int descend(int n) {
 					if (n == 0) { return 0; }
 					auto child = descend(n - 1);
-					return child.resume() + 1;
+					return child.next() + 1;
 				}
 				auto root = descend(20);
-				root.resume();
+				root.next();
 			)");
-			check_eq(script_int(2), eng->execute("auto small = descend(2); small.resume();").as_int());
+			check_eq(script_int(2), eng->execute("auto small = descend(2); small.next();").as_int());
 		});
 
 		test("already_suspended_coroutine_chain_obeys_cap", [this]() {
@@ -60,18 +60,18 @@ public:
 				coroutine int parked(int index) {
 					yield index;
 					if (index == 0) { return 0; }
-					return handles[index - 1].resume() + 1;
+					return handles[index - 1].next() + 1;
 				}
 				for (int i = 0; i <= 20; ++i) { handles.push(parked(i)); }
 				int total = 0;
-				for (int i = 0; i <= 20; ++i) { total += handles[i].resume(); }
+				for (int i = 0; i <= 20; ++i) { total += handles[i].next(); }
 				total;
 			)").as_int());
 			// Every handle has yielded already, so this exercises continuation replay
 			// rather than the interpreter's guarded first-resume call_function path.
-			expect_depth_error(*eng, "handles[20].resume();");
+			expect_depth_error(*eng, "handles[20].next();");
 			check_eq(script_int(42), eng->execute(
-				"coroutine int fresh() { return 42; } auto next = fresh(); next.resume();").as_int());
+				"coroutine int fresh() { return 42; } auto next = fresh(); next.next();").as_int());
 		});
 
 		test("yield_and_completion_release_resume_depth", [this]() {
@@ -84,7 +84,7 @@ public:
 				}
 				auto values = sequence();
 				int total = 0;
-				for (int i = 0; i <= 32; ++i) { total += values.resume(); }
+				for (int i = 0; i <= 32; ++i) { total += values.next(); }
 				total;
 			)").as_int());
 			check_eq(script_int(42), eng->execute("int single() { return 42; } single();").as_int());

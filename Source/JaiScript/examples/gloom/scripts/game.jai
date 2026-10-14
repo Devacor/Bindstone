@@ -189,7 +189,7 @@ public:
 	function gather_input() -> var {
 		if (autopilot) {
 			if (pilot == null || pilot.done()) { pilot = pilot_brain(); }
-			return pilot.resume();
+			return pilot.next();
 		}
 		bool fire_edge = frame_key == " " || frame_key == "enter";
 		return new Input(

@@ -478,10 +478,11 @@ print(w.size(), &quot; &quot;, to_json(w.to_string().to_bytes()));</code></pre><
 </div>
 </section>
 <section class="api-group"><h2 id="group-coroutine">coroutine</h2>
-<div class="api-entry" data-provider="core" data-search="coroutine.done() -&gt; bool observe  every engine"><h3 id="api-20d699eb9029"><code>coroutine.done() -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<div class="api-entry" data-provider="core" data-search="coroutine.done() -&gt; bool observe whether the body finished (returned or failed); it never starts or advances the coroutine. every engine"><h3 id="api-20d699eb9029"><code>coroutine.done() -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>Whether the body finished (returned or failed); it never starts or advances the coroutine.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="coroutine.resume() -&gt; var advance, callback runs to the next yield and returns its value; the call that finishes the body returns the return value. resuming a completed coroutine raises cannot resume a completed coroutine. takes no arguments. every engine"><h3 id="api-56c2de4f029a"><code>coroutine.resume() -&gt; var</code></h3><p><strong>Every engine</strong> &middot; advance, callback</p>
-<p>Runs to the next yield and returns its value; the call that finishes the body returns the return value. Resuming a completed coroutine raises Cannot resume a completed coroutine. Takes no arguments.</p>
+<div class="api-entry" data-provider="core" data-search="coroutine.next(count: int = 1) -&gt; var advance, callback runs to the next yield and returns its value; next(count) advances count yields and returns the last one&#x27;s value. the call that finishes the body returns the return value; a step on a completed coroutine raises cannot resume a completed coroutine. count is an int of at least 1. nothing in the body runs before the first next(). every engine"><h3 id="api-3b59220a74e0"><code>coroutine.next(count: int = 1) -&gt; var</code></h3><p><strong>Every engine</strong> &middot; advance, callback</p>
+<p>Runs to the next yield and returns its value; next(count) advances count yields and returns the last one&#x27;s value. The call that finishes the body returns the return value; a step on a completed coroutine raises Cannot resume a completed coroutine. count is an int of at least 1. Nothing in the body runs before the first next().</p>
 </div>
 </section>
 <section class="api-group"><h2 id="group-global">global</h2>

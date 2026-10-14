@@ -185,7 +185,7 @@ namespace jai {
         void prepare_for_execution() override;
 
         // ===== Execution budget (engine::execution_budget) =====
-        // A top-level execute()/resume() that runs past the armed deadline raises a
+        // A top-level execute()/next() that runs past the armed deadline raises a
         // catchable runtime error. Ticked at loop back-edges and call entry; the clock
         // is only sampled every 1024 ticks so the hot path pays one increment+branch.
         void set_execution_budget(std::chrono::nanoseconds budget) override {
@@ -899,7 +899,7 @@ namespace jai {
         uint64_t weak_from_this_id_;
         uint64_t shared_from_this_id_;
         uint64_t coroutine_handle_type_id_;
-        uint64_t resume_id_;
+        uint64_t next_id_;
         uint64_t done_id_;
         uint64_t same_as_id_;
         uint64_t eq_method_id_ = 0;   // "==" interned at construction (worker probes must not intern)

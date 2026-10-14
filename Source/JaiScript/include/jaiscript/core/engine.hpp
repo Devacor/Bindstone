@@ -386,7 +386,7 @@ namespace jai {
         // there is no runtime toggle (so the hot path carries no policy branch).
         bool throw_on_overflow() const;
 
-        // Wall-clock budget in seconds for one host entry: an execute()/resume() call, or a script function the host
+        // Wall-clock budget in seconds for one host entry: an execute()/next() call, or a script function the host
         // calls while no script runs, each armed from the budget current at the entry (fractional is
         // fine — e.g. 1.0/60 for a frame). A script exceeding it raises a TERMINAL
         // runtime error (execution_budget_exceeded): script catch handlers are skipped
@@ -422,7 +422,7 @@ namespace jai {
         // current one. One connector per engine is the norm; see internal/DEBUGGER_DESIGN.md.
         void set_debug_connector(std::shared_ptr<debug::transport> connector);
 
-        // Approximate script memory cap in bytes for one top-level execute()/resume()
+        // Approximate script memory cap in bytes for one top-level execute()/next()
         // call. Accounting is a HIGH-WATER MARK charged at the heavy-value chokepoints
         // (container growth, string concat, clone, environment growth); frees are not
         // credited back. An allocation that would exceed the cap is DENIED and raises a
@@ -1236,7 +1236,7 @@ namespace jai {
 
         // The engine-wide import check pass (guide ch. 10): at most once per `seconds` (default 0.2; 0 = every reach) the first
         // import reached opens a pass, every import reached during it stats its modules, and the pass closes when a module it
-        // already checked is reached again or when the outermost execute()/resume() returns; between passes an import does
+        // already checked is reached again or when the outermost execute()/next() returns; between passes an import does
         // nothing. A frame therefore checks every import it reaches or none. The window runs on the engine's clock sample
         // (the real steady clock as read at the host entry, at the budget check's samples and by a time:: read of the system
         // clock), so an import reads no clock itself; a host time_source never moves it.

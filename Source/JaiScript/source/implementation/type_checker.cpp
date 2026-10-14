@@ -101,7 +101,8 @@ struct ctype {
         class_ref_k,   // a class used as a value (Class::static access, constructor callee)
         enum_ref_k,    // an enum name (member access checks its values)
         utf8_k,
-        math_k         // a native math kind; cls names it ("math::vec3")
+        math_k,        // a native math kind; cls names it ("math::vec3")
+        coroutine_k    // the handle a coroutine call returns
     };
     kind_t kind = unknown;
     std::string_view cls{};   // object_k / class_ref_k / enum_ref_k
@@ -146,6 +147,7 @@ std::string ctype_name(const ctype& t) {
 		case ctype::class_ref_k: return "class " + std::string(t.cls);
 		case ctype::enum_ref_k: return "enum " + std::string(t.cls);
 		case ctype::math_k: return std::string(t.cls);
+		case ctype::coroutine_k: return "coroutine_handle";
 		default: return "unknown";
 	}
 }
@@ -2641,6 +2643,38 @@ private:
         diag(diag_level::error, m->location, "no member '" + std::string(m->member) + "' on '" + ctype_name(recv) + "'" +
              (best.empty() ? std::string() : " (did you mean '" + best + "'?)"));
     }
+	// A coroutine handle answers next() and done() only (the runtime's texts); resume is the retired spelling of next
+	void coroutine_member_missing(const member_expr* a_member) {
+		std::string best;
+		if (a_member->member == "resume") {
+			best = "next";
+		} else {
+			size_t bestDistance = 3;
+			for (const std::string_view name : {std::string_view{"done"}, std::string_view{"next"}}) {
+				const size_t distance = edit_distance(a_member->member, name);
+				if (distance < bestDistance) { bestDistance = distance; best = std::string(name); }
+			}
+		}
+		diag(diag_level::error, a_member->location, "no member '" + std::string(a_member->member) + "' on 'coroutine_handle'" +
+			(best.empty() ? std::string() : " (did you mean '" + best + "'?)"));
+	}
+	ctype coroutine_method_call(const ctype& a_receiver, const member_expr* a_member, const call_expr* a_call, const std::vector<ctype>& a_args) {
+		if (a_receiver.tentative) { return {}; }
+		if (a_member->member == "done") {
+			if (!a_args.empty()) { diag(diag_level::error, a_call->location, "done() takes no arguments"); }
+			return ctype::make(ctype::bool_k);
+		}
+		if (a_member->member == "next") {
+			if (a_args.size() > 1) {
+				diag(diag_level::error, a_call->location, "next() takes 0 or 1 arguments ([count])");
+			} else if (a_args.size() == 1 && !a_args[0].is_unknown() && !a_args[0].tentative && a_args[0].kind != ctype::int_k) {
+				diag(diag_level::error, a_call->arguments[0]->location, "next() count must be an integer");
+			}
+			return {};
+		}
+		coroutine_member_missing(a_member);
+		return {};
+	}
 	void checkBuiltinArity(const ctype& a_receiver, const member_expr* a_member, const call_expr* a_call) {
 		uint8_t receiver;
 		switch (a_receiver.kind) {
@@ -3002,8 +3036,8 @@ private:
             }
             return out;
         }
-        if (viable_count == 1 && !only_viable->is_coroutine) {
-            out.result = ctype_from_type_info(only_viable->return_type.get());
+        if (viable_count == 1) {
+            out.result = only_viable->is_coroutine ? ctype::make(ctype::coroutine_k) : ctype_from_type_info(only_viable->return_type.get());
         }
         if (viable_count > 1 && scored) { report_ambiguous_call(fname, overloads, args, loc); }
         return out;
@@ -3739,6 +3773,10 @@ private:
 			c.tentative = true;
 			return c;
 		}
+		if (recv.kind == ctype::coroutine_k) {
+			if (!recv.tentative && m->member != "next" && m->member != "done") { coroutine_member_missing(m); }
+			return {};
+		}
 		if (recv.is_unknown() && !writing) {
 			if (ctype t = reference_field_read(m); !t.is_unknown()) { return t; }
 		}
@@ -4031,6 +4069,7 @@ private:
 				full.insert(full.end(), args.begin(), args.end());
 				return math_intrinsic_result(fn, full);
 			}
+			if (recv.kind == ctype::coroutine_k && !m->is_static) { return coroutine_method_call(recv, m, c, args); }
 			if (ctype t; binary_member_call(c, m, recv, args, t)) { return t; }
 			if (recv.kind == ctype::array_k && recv.ti && m->member == "push" && args.size() == 1) {
 				const auto issue = container_element_issue(args[0], recv.ti->element_type().get());
@@ -4448,7 +4487,7 @@ private:
             case node_type::range_for_stmt: {
                 auto* f = static_cast<range_for_stmt*>(s);
                 const ctype container = infer(f->container.get());
-                if (f->variable_name == "entry#" && !container.tentative && !container.is_unknown() && container.kind != ctype::map_k) {   // for (auto [k, v] : x)
+                if (f->variable_name == "entry#" && !container.tentative && !container.is_unknown() && container.kind != ctype::map_k && container.kind != ctype::coroutine_k) {   // for (auto [k, v] : x)
                     diag(diag_level::error, f->container->location, "a structured binding takes a map's entries, its key and value: cannot bind '" +
                          ctype_name(container) + "' to [k, v]");
                 }
@@ -4761,7 +4800,7 @@ private:
 	void type_auto_slot(variable_decl* decl, const ctype& init) {
 		if (!decl->auto_spelled || decl->auto_typed || !semantic_walk()) { return; }
 		decl->auto_typed = true;
-		if (init.is_unknown()) {
+		if (init.is_unknown() || init.kind == ctype::coroutine_k) {
 			decl->type = eng_.get_type_info_any();
 			decl->decl_fast_flags = variable_decl::classify_decl_fast(decl->type);
 		} else if (init.kind == ctype::float_k && decl->initializer && decl->initializer->get_type() == node_type::ternary_expr &&

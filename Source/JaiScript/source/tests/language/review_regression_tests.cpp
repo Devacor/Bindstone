@@ -1270,15 +1270,15 @@ public:
                 mismatch("lambda") + "  at <lambda> (<script>:3)\n  at <script> (<script>:5)\n", "lambda return");
             expect_both("class C {\n  int m() {\n    var x = \"s\";\n    return x;\n  }\n}\nauto c = C();\nint b = c.m();\n",
                 mismatch("'m'") + "  at m (<script>:4)\n  at <script> (<script>:8)\n", "method return");
-            expect_both("coroutine int co() {\n  yield 1;\n  var x = \"s\";\n  return x;\n}\nauto h = co();\nvar a = h.resume();\nvar b = h.resume();\n",
+            expect_both("coroutine int co() {\n  yield 1;\n  var x = \"s\";\n  return x;\n}\nauto h = co();\nvar a = h.next();\nvar b = h.next();\n",
                 mismatch("'co'") + "  at co (<script>:4)\n  at <script> (<script>:8)\n", "coroutine return, top-level resume");
-            expect_both("coroutine int co() {\n  yield 1;\n  var x = \"s\";\n  return x;\n}\nauto h = co();\nint g() {\n  h.resume();\n  return h.resume();\n}\nint b = g();\n",
+            expect_both("coroutine int co() {\n  yield 1;\n  var x = \"s\";\n  return x;\n}\nauto h = co();\nint g() {\n  h.next();\n  return h.next();\n}\nint b = g();\n",
                 mismatch("'co'") + "  at co (<script>:4)\n  at g (<script>:9)\n  at <script> (<script>:11)\n", "coroutine return, nested resume");
-            expect_both("coroutine int co() {\n  var x = \"s\";\n  return x;\n}\nauto h = co();\nint g() {\n  return h.resume();\n}\nint b = g();\n",
+            expect_both("coroutine int co() {\n  var x = \"s\";\n  return x;\n}\nauto h = co();\nint g() {\n  return h.next();\n}\nint b = g();\n",
                 mismatch("'co'") + "  at co (<script>:3)\n  at g (<script>:7)\n  at <script> (<script>:9)\n", "coroutine return, first resume");
-            expect_both("coroutine int co() {\n  yield 1;\n  var a = [];\n  int y = a[0];\n  return y;\n}\nauto h = co();\nvar a = h.resume();\nvar b = h.resume();\n",
+            expect_both("coroutine int co() {\n  yield 1;\n  var a = [];\n  int y = a[0];\n  return y;\n}\nauto h = co();\nvar a = h.next();\nvar b = h.next();\n",
                 "Array index 0 out of bounds for array of size 0\n  at co (<script>:4)\n  at <script> (<script>:9)\n", "coroutine body error");
-            expect_both("coroutine int co() {\n  yield 1;\n  throw \"x\";\n  return 1;\n}\nauto h = co();\nvar a = h.resume();\nvar b = h.resume();\n",
+            expect_both("coroutine int co() {\n  yield 1;\n  throw \"x\";\n  return 1;\n}\nauto h = co();\nvar a = h.next();\nvar b = h.next();\n",
                 "x\n  at co (<script>:3)\n  at <script> (<script>:8)\n", "coroutine body throw");
             expect_both("int& f() {\n  return 5;\n}\nint b = f();\n",
                 "Function with reference return type must return an lvalue reference\n  at f (<script>:2)\n  at <script> (<script>:4)\n", "ref return");
@@ -1292,7 +1292,7 @@ public:
                 "Cannot return string from 'f' (declared -> int)\n  at f (<script>:6)\n  at <script> (<script>:9)\n", "catch rethrow");
             expect_both("int& f() {\n  try { return 5; } catch (e) { throw \"c:\" + e; }\n}\nint b = f();\n",
                 "c:Function with reference return type must return an lvalue reference\n  at f (<script>:2)\n  at <script> (<script>:4)\n", "ref return caught at the site");
-            expect_both("coroutine int co() {\n  yield 1;\n  try { var x = \"s\"; return x; } catch (e) { return -1; }\n}\nauto h = co();\nh.resume();\nthrow h.resume() == -1 ? \"co:-1\" : \"co:other\";\n",
+            expect_both("coroutine int co() {\n  yield 1;\n  try { var x = \"s\"; return x; } catch (e) { return -1; }\n}\nauto h = co();\nh.next();\nthrow h.next() == -1 ? \"co:-1\" : \"co:other\";\n",
                 "co:-1\n  at <script> (<script>:7)\n", "coroutine return caught at the site");
             expect_both("class T { int to_int() { throw \"boom\"; } }\nint f() {\n  try { var t = T(); return t; } catch (e) { return -7; }\n}\nthrow f() == -7 ? \"t:-7\" : \"t:other\";\n",
                 "t:-7\n  at <script> (<script>:5)\n", "throwing to_int caught at the site");
@@ -1369,15 +1369,15 @@ public:
             const char* src = R"(
                 coroutine int co() { yield 10; yield 11; }
                 auto h = co();
-                var a = to_string(h.resume()) + "|" + to_string(h.resume()) + "|" + to_string(h.resume());
+                var a = to_string(h.next()) + "|" + to_string(h.next()) + "|" + to_string(h.next());
                 class D { int v = 7; coroutine int g() { v = 8; } }
                 auto d = D();
                 auto hm = d.g();
-                var b = to_string(hm.resume()) + "|" + to_string(d.v);
+                var b = to_string(hm.next()) + "|" + to_string(d.v);
                 class F { int q = 3; coroutine int g2() { yield 1; return this.q; } }
                 auto f = F();
                 auto hf = f.g2();
-                var c = to_string(hf.resume()) + "|" + to_string(hf.resume());
+                var c = to_string(hf.next()) + "|" + to_string(hf.next());
                 a + " / " + b + " / " + c;
             )";
             std::string out[2];
@@ -1874,14 +1874,14 @@ public:
                     return acc.total;
                 }
                 var h = gen();
-                var first = h.resume();
+                var first = h.next();
                 var acc2 = Acc(); var between = acc2.add(2 + 3);
-                var final = h.resume();
+                var final = h.next();
                 "" + first + ":" + between + ":" + final + ":" + h.done();
             )", "1:5:5:true", "method calls around a yield", check_mode::strict);
             expect_order((std::string(side_prelude) + R"(
                 coroutine int gen() { yield 1; return 2; }
-                var h = gen(); h.resume(); h.resume();
+                var h = gen(); h.next(); h.next();
                 string message = ""; try { h.done(side()); } catch (e) { message = e; }
                 log + "|" + message;
             )").c_str(), "A|done() takes no arguments", "handle arguments are evaluated before arity rejection", check_mode::strict);
@@ -2970,7 +2970,7 @@ public:
                 {"sh(1)", "ok"},
                 {"lam()", "lambda expects 1 argument, got 0"},
                 {"lam(1,2)", "lambda expects 1 argument, got 2"},
-                {"auto c = co(); c.resume()", "'co' expects 1 argument, got 0"}};
+                {"auto c = co(); c.next()", "'co' expects 1 argument, got 0"}};
             std::string texts[2][9];
             int idx = 0;
             for (bool use_vm : {false, true}) {
@@ -5238,10 +5238,10 @@ public:
 
         test("a_coroutine_takes_its_arguments_at_the_call", [expect]() {
             const std::string ga = "var GA = [1, 2, 3]; ";
-            expect(ga + "coroutine function co(a) { yield a; } var h = co(GA[1]); GA[1] = 100; to_string(h.resume())", "2", "an element");
-            expect("var arr = [1, 2, 3]; coroutine function co(a) { yield a.size(); } var h = co(arr); arr.push(4); to_string(h.resume())", "3", "a heavy value");
-            expect(ga + "class K { coroutine function gen(a) { yield a; } } var k = K(); var h = k.gen(GA[1]); GA[1] = 100; to_string(h.resume())", "2", "a method coroutine");
-            expect(ga + "coroutine function cr(int& a) { yield a; } var h = cr(GA[1]); GA[1] = 100; to_string(h.resume())", "100", "a reference parameter still aliases");
+            expect(ga + "coroutine function co(a) { yield a; } var h = co(GA[1]); GA[1] = 100; to_string(h.next())", "2", "an element");
+            expect("var arr = [1, 2, 3]; coroutine function co(a) { yield a.size(); } var h = co(arr); arr.push(4); to_string(h.next())", "3", "a heavy value");
+            expect(ga + "class K { coroutine function gen(a) { yield a; } } var k = K(); var h = k.gen(GA[1]); GA[1] = 100; to_string(h.next())", "2", "a method coroutine");
+            expect(ga + "coroutine function cr(int& a) { yield a; } var h = cr(GA[1]); GA[1] = 100; to_string(h.next())", "100", "a reference parameter still aliases");
         });
 
         test("a_grafted_call_keeps_the_arguments_ahead_of_it", [expect]() {

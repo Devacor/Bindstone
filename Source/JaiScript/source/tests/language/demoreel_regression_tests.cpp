@@ -394,8 +394,8 @@ public:
 					}
 					function kick9() -> int {
 						var co = gen9(3);
-						int a = co.resume();
-						int b = co.resume();
+						int a = co.next();
+						int b = co.next();
 						return a * 10 + b;
 					}
 					function later9(int v) -> int { return v * 2; }

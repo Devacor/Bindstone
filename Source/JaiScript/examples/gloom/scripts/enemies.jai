@@ -1,7 +1,7 @@
 // Enemies. Instances live in G.enemies as shared_ptr handles
 // — registry-of-handles per the aliasing guidance — and each enemy's BRAIN is a
 // coroutine handle stored in its own field: kind-specific coroutine METHODS
-// mint the handle, the handle pins the instance, and per-tick resume() drives
+// mint the handle, the handle pins the instance, and per-tick next() drives
 // multi-phase behavior with all phase state living in the coroutine frame.
 
 int ENEMY_STATE_DORMANT = 0;
@@ -50,7 +50,7 @@ public:
 			else if (kind == 2) { brain = brain_turret(); }
 			else { brain = brain_warden(); }
 		}
-		brain.resume();
+		brain.next();
 	}
 
 	float player_dist() { return math::sqrt(dist2(x, y, G.px, G.py)); }

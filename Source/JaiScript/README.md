@@ -245,11 +245,11 @@ Bugs and questions: [github.com/Devacor/JaiScript/issues](https://github.com/Dev
 
 ## Status
 
-JaiScript 0.1.0 — first public release (September 2026). The language, both backends, the
-embedding API and the `.jaibite` format are complete and covered by 2,400+ tests
-run on both backends and a differential fuzzer. Pre-1.0 means the C++ API may still change
-between minor versions; [`docs/site/stability.html`](docs/site/stability.html) lists what is
-settled and what may change before 1.0.
+JaiScript 0.5 beta, released @RELEASE_DATE@. The language, both backends, the embedding API and
+the `.jaibite` format are complete and covered by 4,000+ tests run on both backends and a
+differential fuzzer. Beta means the C++ API may still change between minor versions;
+[`docs/site/stability.html`](docs/site/stability.html) lists what is settled and what may change
+before 1.0.
 
 ## License
 
@@ -258,3 +258,7 @@ MIT — see [LICENSE](LICENSE).
 ## Credits
 
 JaiScript was designed and created by Devacor (mike@m2tm.net) in honor of his love, Jai.
+
+If you ship a game or a tool with JaiScript inside, a small line in its credits, such as "Scripted with
+JaiScript", would be lovely to see. It is a request, not a condition: the MIT license is the only term that
+applies.

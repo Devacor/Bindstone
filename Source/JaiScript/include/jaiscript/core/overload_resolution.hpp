@@ -524,6 +524,14 @@ inline const std::shared_ptr<function_decl>* class_definition::resolve_method_ov
     return best_ast;
 }
 
+inline bool class_definition::method_arity_decides(uint64_t name_id, size_t argc) const {
+    auto it = method_overloads_.find(name_id);
+    if (it == method_overloads_.end()) { return false; }
+    size_t takes = 0;
+    for (const auto& o : it->second) { takes += arity_accepts(o->parameters, argc) ? 1 : 0; }
+    return takes == 1;
+}
+
 inline checked_result<const std::shared_ptr<function_decl>*> class_definition::resolve_method_overload_ref(
     uint64_t name_id, const script_value* args, size_t argc) const {
     std::error_code ec;

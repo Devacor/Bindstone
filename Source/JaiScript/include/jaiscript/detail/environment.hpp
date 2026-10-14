@@ -387,6 +387,12 @@ namespace jai {
         checked_result<script_value> operator()(const std::vector<script_value>& args) const;
     };
 
+    namespace detail {
+        // A bound method's non-owning reference into its receiver (the chaining idiom's `return *this`) keeps the receiver's
+        // object alive, so a temporary receiver outlives the call
+        void anchor_bound_method_result(const script_value& this_obj, checked_result<script_value>& result);
+    }
+
     // The ONE implicit-copy kernel for assignment-shaped store boundaries (decl from
     // lvalue, identifier/field/element assign, range-for bindings, destructuring,
     // by-value parameter binding), shared by both backends: plain values deep-copy

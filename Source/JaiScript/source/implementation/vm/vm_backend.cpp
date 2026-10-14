@@ -23943,7 +23943,30 @@ prepared_callback* vm_backend::prepare_callback(const script_value& callable) {
 	const script_value& c = callable.deref();
 	if (c.raw_storage_index() != script_value::TYPEID_FUNCTION) { return nullptr; }
 	const auto* thunk = c.unchecked_as_function().target<script_callable_thunk>();
-	if (!thunk || thunk->eng != engine_ || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn) { return nullptr; }
+	if (!thunk) {
+		// a bound script method (reflect::bind): its overload binds at the first call, by argument count
+		const auto* bound = c.unchecked_as_function().target<bound_method_fn>();
+		if (!bound || !bound->method.is_function()) { return nullptr; }
+		const auto* dispatch = bound->method.unchecked_as_function().target<script_method_dispatch>();
+		if (!dispatch || dispatch->eng != engine_ || !dispatch->cls || !dispatch->definition_env || dispatch->cls->chain_has_nonpublic()) { return nullptr; }
+		if (detail::native_stack_low()) [[unlikely]] { return nullptr; }
+		if (callback_depth_ == callback_sessions_.size()) { callback_sessions_.push_back(std::make_unique<callback_session>()); }
+		callback_session& s = *callback_sessions_[callback_depth_++];
+		s.vm = this;
+		s.callable = &c.unchecked_as_function();
+		s.fn = nullptr;
+		s.dispatch = dispatch;
+		s.receiver = &bound->this_obj;
+		s.scope_static = dispatch->cls.get();
+		s.method_argc = SIZE_MAX;
+		s.lazy = true;
+		s.closure_env = dispatch->definition_env;
+		s.f = frame{};
+		s.f.locals = &s.locals;
+		s.f.window_backed = true;
+		return &s;
+	}
+	if (thunk->eng != engine_ || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn) { return nullptr; }
 	if (detail::native_stack_low()) [[unlikely]] { return nullptr; }
 	const script_defined_function& function = *thunk->payload.fn;
 	auto body = std::static_pointer_cast<chunk>(function.backend_body_cache);
@@ -23987,10 +24010,53 @@ void vm_backend::release_callback(prepared_callback* prepared) {
 	s.locals = call_frame{};
 	s.callable = nullptr;
 	s.fn = nullptr;
+	s.dispatch = nullptr;
+	s.receiver = nullptr;
+	s.scope_static = nullptr;
 }
 
 // call_script_function's entry for a builtin's callback: no pending site (the builtin's own arguments are not the
 // callback's), the lazy environment of an in-loop push, primitive arguments bound by copy
+bool vm_backend::bind_method_session(callback_session& s, const std::vector<script_value>& args) {
+	const class_definition& cls = *s.dispatch->cls;
+	if (s.fn && s.method_argc == args.size() && s.method_epoch == cls.method_epoch()) { return true; }
+	s.fn = nullptr;
+	if (!cls.method_arity_decides(s.dispatch->name_id, args.size())) { return false; }
+	auto resolved = s.dispatch->resolve(args, 0);
+	if (!resolved || (*resolved.value())->is_coroutine) { return false; }
+	const script_defined_function& function = method_function_for(*resolved.value());
+	auto body = std::static_pointer_cast<chunk>(function.backend_body_cache);
+	if (!body) {
+		body = chunk_for_body(function.name, function.parameters(), function.body, function.local_count, function.unit);
+		function.backend_body_cache = body;
+	}
+	if (body->needs_frame_env) { return false; }
+	lean_bind_of(function);
+	s.fn = &function;
+	s.body = std::move(body);
+	s.method_argc = args.size();
+	s.method_epoch = cls.method_epoch();
+	s.locals.function_name = function.name;
+	s.window_slots = std::max(function.local_count, static_cast<size_t>(s.body->local_count));
+	s.f.code = s.body.get();
+	s.f.return_type = function.return_type;
+	s.f.return_conv_class = static_cast<uint8_t>(detail::return_conv_of(function));
+	s.f.unit = function.unit;
+	return true;
+}
+
+checked_result<script_value> vm_backend::run_method_callback(callback_session& s, const std::vector<script_value>& args) {
+	if (is_unwinding_ || !bind_method_session(s, args)) { return (*s.callable)(args); }
+	s.locals.set_this(*s.receiver);
+	auto result = run_callback(s, args);
+	if (s.locals.is_method) {   // run_callback left before its frame: the receiver goes as cleanup would take it
+		*s.locals.this_object_ptr = make_null();
+		s.locals.is_method = false;
+	}
+	detail::anchor_bound_method_result(*s.receiver, result);
+	return result;
+}
+
 checked_result<script_value> vm_backend::run_callback(callback_session& s, const std::vector<script_value>& args) {
 	const script_defined_function& function = *s.fn;
 	if (is_unwinding_ || args.size() != function.parameters().size() ||
@@ -24009,6 +24075,7 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 	frame& f = s.f;
 	call_frame& locals = s.locals;
 	locals.reset_member_scope();
+	locals.scope_static = s.scope_static;
 	const bool untouched = s.lazy && !function.closure_env && (function.block_defined || !environment_ || !environment_->block_scope());
 	// a lazy closure trades envs with its session (the caller's env waits in s.closure_env): no count moves per call
 	const bool swapped = s.lazy && s.closure_env;
@@ -24104,7 +24171,7 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 	script_value result = make_null();
 	if (has_return_value_) {
 		result = std::move(return_value_.value());
-	} else if (!s.lazy) {
+	} else if (!s.lazy || locals.is_method) {
 		result = implicit_this_result(locals);
 	} else if (environment_->is_method_env()) {
 		result = environment_->get_this_object();

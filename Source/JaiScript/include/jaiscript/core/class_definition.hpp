@@ -798,6 +798,8 @@ public:
         auto it = method_overloads_.find(name_id);
         return (it != method_overloads_.end() && it->second.size() == 1) ? it->second[0] : nullptr;
     }
+    // argc alone picks name_id's overload (one overload, or one that takes argc): its resolution ignores argument types
+    bool method_arity_decides(uint64_t name_id, size_t argc) const;
 
     // Reflection enumeration (reflect::methods / method_arguments): this class's OWN
     // tables — script overload sets (AST decls carry names/types/defaults), the typed

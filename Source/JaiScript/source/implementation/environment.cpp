@@ -1109,6 +1109,11 @@ checked_result<script_value> bound_method_fn::operator()(const std::vector<scrip
         return method_func(method_args);
     }();
 
+    detail::anchor_bound_method_result(this_obj, result);
+    return result;
+}
+
+void detail::anchor_bound_method_result(const script_value& this_obj, checked_result<script_value>& result) {
     // If the method returned a NON-OWNING reference into its receiver (the
     // classic chaining idiom `Counter& increment() { ...; return *this; }`
     // produces a cpp-bound T& whose object_holder owns nothing), pin the
@@ -1130,7 +1135,6 @@ checked_result<script_value> bound_method_fn::operator()(const std::vector<scrip
             }
         }
     }
-    return result;
 }
 
 script_value make_bound_method(const script_value& this_obj, const script_value& method) {

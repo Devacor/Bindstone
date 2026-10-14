@@ -87,7 +87,13 @@ struct script_method_dispatch {
     // path). Function-value copies share the underlying dispatcher storage, so this slot
     // is per-method like body_cache. The interpreter ignores it.
     mutable std::shared_ptr<environment> backend_scope_env;
+    // the overload an argument count alone picks, valid while the class's method epoch holds (class_definition's memo pattern)
+    mutable const std::shared_ptr<function_decl>* resolved_memo = nullptr;
+    mutable uint64_t resolved_memo_epoch = 0;
+    mutable size_t resolved_memo_argc = 0;
     checked_result<script_value> operator()(const std::vector<script_value>& args) const;
+    // The overload the arguments args[first..] call
+    checked_result<const std::shared_ptr<function_decl>*> resolve(const std::vector<script_value>& args, size_t first) const;
     // The method on this_obj with the arguments args[first..]
     checked_result<script_value> invoke(const script_value& this_obj, const std::vector<script_value>& args, size_t first) const;
 };

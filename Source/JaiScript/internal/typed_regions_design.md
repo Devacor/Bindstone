@@ -738,6 +738,18 @@ The copy ends with an exit to the span's end; a return's exit, a forward jump pa
 do. An exit holds the compiler values its caller's statement defined ahead of it (a graft's result before a return's own
 instructions), since the general continuation reads them; a bail holds the same set.
 
+A door's probe at a region's first instruction reads the trampoline's copy of that instruction: the entry replaced it in the
+general form.
+
+Whole-body regions (one region from a function's first instruction to its HALT, its loops inner loops, its calls doors) were
+tried and measured slower. Every edge of a block costs the whole block: the entry guards and resolves every site and
+environment value, including those of loops that do not run in that call; each landing after a door call re-checks every site
+it can reach; a boundary resyncs every cell. OSSUARY's per-pixel function (28 loops, 626 cells) went from 9.25 entries per
+call to one, and ran 45% slower: about 3.0G cycles of block overhead against 0.58G for its per-loop blocks, from a 5K-cycle
+entry, 4.7 landings per call at 6K cycles each and a 12K-cycle resume. A whole-body block needs edges that cost what runs
+(sites and environment values resolved lazily, a boundary that writes back and resyncs only the cells its statement touches,
+an entry that guards only live-ins) before it can pay.
+
 ### The region IR module
 
 The canonical operations of a closed loop and the analyses over them live in `include/jaiscript/vm/region_ir.hpp`

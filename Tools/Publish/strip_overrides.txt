@@ -1,0 +1,183 @@
+# Exact rewrites the export applies to a C/C++ file before its internal/ citations are stripped, for citations the
+# strip rules cannot remove cleanly (a parenthetical that spans comment lines). Each block:
+#   file: <package-relative path>
+#   <<<
+#   <old text, exactly as in the file (LF line ends; CRLF files are matched with CRLF)>
+#   ===
+#   <new text>
+#   >>>
+# The export fails when an old text no longer matches, so a stale override is noticed.
+
+file: include/jaiscript/core/dynamic_binder.hpp
+<<<
+        // A box-decodable member binds BY REFERENCE as the member itself (internal/reference_model.md
+        // CPP-MEMBER): record its address accessor beside the getter/setter
+===
+        // A box-decodable member binds BY REFERENCE as the member itself: record its address
+        // accessor beside the getter/setter
+>>>
+
+file: include/jaiscript/core/engine.hpp
+<<<
+        // === MISS INJECTION (a testing lever; internal/typed_regions_design.md, the cell block section) ===
+===
+        // === MISS INJECTION (a testing lever for the cell blocks) ===
+>>>
+
+file: include/jaiscript/detail/ast.hpp
+<<<
+    // parallel_for (auto& x : arr) { ... } — the in-place fork-join loop (parallel_for
+    // v1; internal/parallel_design.md §1, §11 Q4 RULED). The body is parsed as a
+===
+    // parallel_for (auto& x : arr) { ... } — the in-place fork-join loop. The body is parsed as a
+>>>
+
+file: source/implementation/interpreter.cpp
+<<<
+            // A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
+            // S1): re-point the handle itself, so every copy of it - and every receiver site,
+===
+            // A plain wrapper of an extended object IS the object's layer: re-point the handle
+            // itself, so every copy of it - and every receiver site,
+>>>
+
+file: source/implementation/vm/vm_backend.cpp
+<<<
+			// A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
+			// S1): re-point the handle itself, so every copy of it - and every receiver site,
+===
+			// A plain wrapper of an extended object IS the object's layer: re-point the handle
+			// itself, so every copy of it - and every receiver site,
+>>>
+
+file: source/implementation/vm/vm_backend.cpp
+<<<
+// Fused subscript-read operand `base[i][j]...[k]` (internal/element_read_overhead_design.md
+// Stage 3, N-level): array levels step a pointer IN PLACE - zero copies, no op_index
+===
+// Fused subscript-read operand `base[i][j]...[k]` (N levels): array levels step a pointer
+// IN PLACE - zero copies, no op_index
+>>>
+
+file: source/implementation/parallel_transform.cpp
+<<<
+// parallel_transform v0 (internal/parallel_design.md; internal/parallel_prove_or_serial.md §5,
+// contract A). One builtin, three phases, all charged to the call itself:
+===
+// parallel_transform. One builtin, three phases, all charged to the call itself:
+>>>
+
+file: include/jaiscript/core/value.hpp
+<<<
+            // silent data loss — audited; see internal/typed_array_design.md).
+===
+            // silent data loss — audited).
+>>>
+
+file: include/jaiscript/detail/container_enforce.hpp
+<<<
+// kernel (parity by construction — stage 0 of internal/typed_array_design.md). Two layers:
+===
+// kernel (parity by construction). Two layers:
+>>>
+
+file: include/jaiscript/detail/parser.hpp
+<<<
+        // const T x = e; / const x = e; (internal/const.md): the declaration, then finish_const marks it and enforces the initializer
+===
+        // const T x = e; / const x = e; is the declaration, then finish_const marks it and enforces the initializer
+>>>
+
+file: source/implementation/parser.cpp
+<<<
+    // postfix on a literal (internal/grammar.md's own splice example was unparseable)
+===
+    // postfix on a literal (the grammar's own splice example was unparseable)
+>>>
+
+file: source/implementation/vm/vm_backend.cpp
+<<<
+			// String keys share their node (the copy-on-write gate detaches any write -
+			// internal/invariants.md 11), other key kinds snapshot; values deep-copy, shared_ptr share
+===
+			// String keys share their node (the copy-on-write gate detaches any write), other key
+			// kinds snapshot; values deep-copy, shared_ptr share
+>>>
+
+file: source/implementation/vm/vm_backend.cpp
+<<<
+			// a native exception an instruction raises is the running frame's exception: its own try sees it (C++,
+			// internal/EXCEPTION_DESIGN.md), else the unwind carries it to the callers like a script throw
+===
+			// a native exception an instruction raises is the running frame's exception: its own try sees it (C++),
+			// else the unwind carries it to the callers like a script throw
+>>>
+
+file: source/tests/performance/benchmark_suite.cpp
+<<<
+        // Map range-for hands the pair a SHARED key handle (no per-iteration key copy -
+        // internal/invariants.md 11); this row guards that cost, by value and by reference
+===
+        // Map range-for hands the pair a SHARED key handle (no per-iteration key copy); this
+        // row guards that cost, by value and by reference
+>>>
+
+file: source/tests/vm/spec_attack_tests.cpp
+<<<
+			// (ch. 3) makes it stop the script; internal/diagnostics.md: one text on both backends
+===
+			// (ch. 3) makes it stop the script; one text on both backends
+>>>
+
+file: source/tests/vm/vm_backend_tests.cpp
+<<<
+		// (internal/flatstack_design.md §4 — lifetime pins land BEFORE stage 2's atomic core)
+===
+		// (lifetime pins land BEFORE stage 2's atomic core)
+>>>
+
+file: include/jaiscript/stdlib/reflection.hpp
+<<<
+// The reflect:: namespace (docs/site/guide/12-reflection.html — the front door; internal/reflection_design.md —
+// the machinery). Every builtin is a LIVE read of the engine's registered classes: hot
+===
+// The reflect:: namespace (docs/site/guide/12-reflection.html). Every builtin is a LIVE read of the engine's
+// registered classes: hot
+>>>
+
+file: source/tests/language/review_regression_tests.cpp
+<<<
+        // ---- by-reference binding of C++ properties (bind the MEMBER ITSELF;
+        // internal/reference_model.md CPP-MEMBER / PROPERTY). Every row runs both backends. ----
+===
+        // ---- by-reference binding of C++ properties (bind the MEMBER ITSELF). Every row runs
+        // both backends. ----
+>>>
+
+file: source/tests/semantics/spec_conformance_tests.cpp
+<<<
+	// internal/EXCEPTION_DESIGN.md addendum (the catch variable is a block-scoped local; coroutines park the exception trio)
+===
+	// The catch variable is a block-scoped local; coroutines park the exception trio
+>>>
+
+file: source/tests/semantics/spec_conformance_tests.cpp
+<<<
+	// internal/grammar.md forStatement and Operators (compound assigns), docs/site/embedding/05-safety-rails.html
+===
+	// The for statement and the compound assignments, docs/site/embedding/05-safety-rails.html
+>>>
+
+file: source/tests/semantics/spec_conformance_tests.cpp
+<<<
+	// internal/namespaces.md variable forms
+===
+	// Namespace variable forms
+>>>
+
+file: source/tests/semantics/spec_conformance_tests.cpp
+<<<
+	// internal/parallel_design.md contracts
+===
+	// Parallel contracts
+>>>

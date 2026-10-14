@@ -165,47 +165,96 @@ def split_cpp(text):
     flush()
     return segs
 
-CITE = r"internal/[\w./-]+\.md"
-SECTION = r"(?:\s*(?:§\s*)?[\w.]+(?:\s*\"[^\"]*\")?|\s*\"[^\"]*\"|\s*\([^()]*\))*"
+CITE = r"(?:[Ss]ee\s+)?internal/[\w./-]+\.md"
+# a section label after a citation: up to four short tokens (3.2, §5, "The contract", family D, I-M1, stage 0)
+SECTION = r"(?:[ \t]+(?:\"[^\"\n]*\"|§?\s?[\w.§/-]+)){0,4}?"
+SEE_SECTION = r"(?:[ \t]+(?:\"[^\"\n]*\"|\([^()\n]*\)|§?\s?[\w.§/-]+)){0,4}"
 STRIP_RULES = [
-    re.compile(r"\s*\((?:see\s+)?" + CITE + r"[^()]*\)"),                          # (internal/x.md ...)
-    re.compile(r"\s*[;,]\s*(?:see\s+)?" + CITE + r"[^();,]*(?=\))"),                 # (... ; internal/x.md ...)
-    re.compile(r"\s*[;,]\s*(?:see\s+)?" + CITE + r"[^.;\n]*"),                       # ..., internal/x.md ...
-    re.compile(r"\s*\b[Ss]ee\s+" + CITE + r"[^.\n]*\.?"),                            # See internal/x.md ...
-    re.compile(r"\s*\b(?:[Ii]n|[Pp]er|[Ff]rom|[Ff]ollows)\s+" + CITE + SECTION),     # in internal/x.md 3.2
-    re.compile(r"\s*" + CITE + SECTION + r"\s*[:;,-]?"),                               # bare citation
+    (re.compile(r"[ \t]*\b[Ss]ee\s+internal/[\w./-]+\.md" + SEE_SECTION + r"\.?"), ""),     # See internal/x.md (a section).
+    (re.compile(r"[ \t]*\(" + CITE + SECTION + r"\)"), ""),                                  # (internal/x.md 3)
+    (re.compile(r"\(" + CITE + SECTION + r"\s*[;,:]\s*"), "("),                              # (internal/x.md; more)
+    (re.compile(r"\s*[;,:]\s*" + CITE + SECTION + r"(?=\s*\))"), ""),                        # (more; internal/x.md)
+    (re.compile(r"\s+-\s+" + CITE + SECTION + r"(?=\s*\))"), ""),                            # (more - internal/x.md)
+    (re.compile(r"\s*[;,]\s*" + CITE + SECTION + r"(?=\s*[;,.]|\s*$)", re.M), ""),           # a, internal/x.md, b
+    (re.compile(r"(?m)^([ \t]*(?://+|\*)?[ \t]*)" + CITE + SECTION + r"\s*[:;,-]\s*"), r"\1"),  # internal/x.md: text
+    (re.compile(r"\s*\b(?:in|per|from)\s+" + CITE + SECTION), ""),                           # as in internal/x.md 3
+    (re.compile(r"[ \t]*\b" + CITE + SECTION + r"\.?"), ""),                                 # anything left
 ]
 
 def strip_comment(comment):
-    out = comment
-    for rule in STRIP_RULES:
-        out = rule.sub("", out)
-    out = re.sub(r"\(\s*\)", "", out)
+    out, prev = comment, None
+    while out != prev:                                   # rules feed each other: run them to a fixed point,
+        prev = out                                       # the catch-all (the last rule) only once the others rest
+        for rule, repl in STRIP_RULES[:-1]:
+            out = rule.sub(repl, out)
+    rule, repl = STRIP_RULES[-1]
+    out = rule.sub(repl, out)
+    out = re.sub(r"^([ \t]*//+[ \t]*)\.[ \t]+", r"\1", out, flags=re.M)
+    empties = len(re.findall(r"\(\s*\)", comment))
+    if len(re.findall(r"\(\s*\)", out)) > empties:      # only the parentheses a removed citation emptied
+        out = re.sub(r"\s*\(\s*\)", "", out)
+    out = re.sub(r"\(\s+", "(", out)
+    out = re.sub(r"[ \t]+$", "", out, flags=re.M)
     return out
 
-def strip_cpp_citations(text):
+QUALITY = [re.compile(p, re.M) for p in (
+    r"\(\s*$", r"\(\s*[,;:-]", r"\s[,;:-]\s*\)", r"\s[,;]\s*$", r"\s-\s*[),]", r"[,;:]\s*[,;:)]", r"\(\s*§",
+    r"\bof\)", r"\('s", r"^\s*//+\s*[).,;:§]", r"^\s*//+\s*\d+[.)]")]
+
+def strip_quality(old, new):
+    """A rewritten comment that reads wrong: a dangling or unbalanced parenthesis, or a stray separator."""
+    if old.count("(") - old.count(")") != new.count("(") - new.count(")"):
+        return "parenthesis balance changed"
+    for rx in QUALITY:
+        if len(rx.findall(new)) > len(rx.findall(old)):
+            return "dangling text where a citation was: " + rx.pattern
+    if re.search(r"[ \t]{2,}\S", new.lstrip()) and not re.search(r"[ \t]{2,}\S", comment_body(old)):
+        return "a gap where text was removed"
+    return None
+
+def comment_body(text):
+    return text.lstrip()
+
+def strip_cpp_citations(text, overrides):
+    for old, new in overrides:
+        text = text.replace(old, new)
     segs = split_cpp(text)
-    changed = 0
+    changed, issues = 0, []
     out = []
     for kind, s in segs:
         if kind == "comment" and "internal/" in s:
             new = strip_comment(s)
             if new != s:
                 changed += 1
+                why = strip_quality(s, new)
+                if why:
+                    issues.append(f"{why}: {s.strip()[:120]!r} -> {new.strip()[:120]!r}")
                 if new.startswith("//") and not new[2:].strip():
-                    new = None                       # the comment held only the citation: drop it
+                    new = "\0DROP\0"                 # the comment held only the citation
             s = new
-        if s is not None:
-            out.append(s)
+        out.append(s)
     result = "".join(out)
-    result = re.sub(r"[ \t]+(\r?\n)", r"\1", result) if changed else result
-    # a line left blank by a dropped whole-line comment goes too
-    if changed:
-        orig_lines = text.split("\n")
-        new_lines = result.split("\n")
-        if len(new_lines) == len(orig_lines):
-            result = "\n".join(l for l, o in zip(new_lines, orig_lines) if not (l.strip() == "" and o.strip() != ""))
-    return result, changed
+    # a line that held only a dropped comment goes; a dropped trailing comment leaves its code
+    lines = []
+    for line in result.split("\n"):
+        if "\0DROP\0" in line:
+            rest = line.replace("\0DROP\0", "")
+            if not rest.strip():
+                continue
+            line = rest.rstrip(" \t\r") + ("\r" if line.endswith("\r") else "")
+        lines.append(line)
+    return "\n".join(lines), changed, issues
+
+def read_overrides(path):
+    """Exact rewrites applied before the strip, for citations the rules cannot rewrite cleanly:
+    blocks of 'file: <path>' then '<<<' old text '===' new text '>>>'."""
+    out, cur = {}, None
+    if not os.path.exists(path):
+        return out
+    text = open(path, encoding="utf-8").read()
+    for m in re.finditer(r"^file: (\S+)\n<<<\n(.*?)\n===\n(.*?)\n>>>$", text, re.M | re.S):
+        out.setdefault(m.group(1), []).append((m.group(2), m.group(3)))
+    return out
 
 def code_tokens(text):
     return re.sub(r"\s+", " ", "".join(s for k, s in split_cpp(text) if k != "comment")).strip()
@@ -257,6 +306,7 @@ def stage(args):
 
     # 3. release date, then the comment strip with its token-identical check
     date = args.release_date or datetime.date.today().strftime("%d %B %Y").lstrip("0")
+    overrides = read_overrides(os.path.join(HERE, "strip_overrides.txt"))
     stripped_files, stripped_comments = 0, 0
     for rel, data in list(kept.items()):
         if not is_text(data):
@@ -264,12 +314,19 @@ def stage(args):
         text = data.decode("utf-8")
         new = INTERNAL_BLOCK.sub("", text.replace("@RELEASE_DATE@", date))
         if rel.endswith(CPP_EXT) and "internal/" in new:
-            out, n = strip_cpp_citations(new)
-            if n:
+            crlf = "\r\n" in new
+            fixes = [(o.replace("\n", "\r\n"), n.replace("\n", "\r\n")) if crlf else (o, n) for o, n in overrides.get(rel, [])]
+            for o, n in fixes:
+                if o not in new:
+                    fail(f"strip override no longer matches in {rel}: {o.strip()[:80]!r}")
+            out, n, issues = strip_cpp_citations(new, fixes)
+            for issue in issues:
+                fail(f"comment strip in {rel}: {issue}")
+            if out != new:
                 if code_tokens(out) != code_tokens(new):
                     fail(f"comment strip changed code in {rel}")
                     continue
-                stripped_files += 1; stripped_comments += n
+                stripped_files += 1; stripped_comments += n + len(fixes)
                 new = out
         if new != text:
             kept[rel] = new.encode("utf-8")

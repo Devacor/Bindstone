@@ -17066,7 +17066,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					                                            frame_access_context(f)));
 				}
 				if (target && target.class_def && !target.has_field(member->member_id)) {
-					// Per-member getter probe (stage 5a, method-cost agent handoff): every
+					// Per-member getter probe: every
 					// field-bearing script class auto-registers _get_/_set_ accessors, so
 					// the old blanket has_property_getters() bail kept essentially every
 					// real class off this in-loop path (full bound-method mint per call,

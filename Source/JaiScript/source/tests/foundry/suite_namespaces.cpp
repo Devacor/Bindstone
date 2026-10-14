@@ -352,7 +352,7 @@ public:
             auto r3 = eng->execute("dog::wag()");
             check_eq(r3.as<int>(), 200);
         });
-        // Row 123.4: a namespace is a scope; its variables are cells (C++). Stores through ns::x, writes from the
+        // A namespace is a scope; its variables are cells (C++). Stores through ns::x, writes from the
         // namespace's own functions, initializers over earlier members, reopening in place, host entries read-only.
         test("namespace_variable_store_from_outside", [&]() {
             auto eng = make_engine();

@@ -3109,7 +3109,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	// container bindings, snapshots, literals) and the legality pass accepts the result; anything else is a refusal with a
 	// class and the first offending instruction (chunk::cell_refusals: the profile's open-loop table, the disassembly).
 	// Translation runs here, once per chunk after the typed lowering; the runtime executes the copy and translates
-	// nothing. Row 116a's encoding is one cell instruction per original instruction with an explicit origin table.
+	// nothing. The encoding is one cell instruction per original instruction with an explicit origin table.
 	const size_t original_size = code.size();
 	// the operation set (ir, ir_op, k_ir_env_bit), the region and its analyses: jaiscript/vm/region_ir.hpp
 	auto stamp_kind = [](const type_info* t) -> uint8_t {

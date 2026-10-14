@@ -19,7 +19,7 @@
 #include <cstdlib>
 
 #include <jaiscript/serialization/json_archive.hpp>
-#include "../../JaiScript/bench/fast_json.hpp"
+#include "fast_json.hpp"
 #include "MV/Render/Scene/emitter.h"
 #include <chrono>
 #include <algorithm>

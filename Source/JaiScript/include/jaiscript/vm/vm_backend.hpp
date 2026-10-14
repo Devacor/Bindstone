@@ -2309,6 +2309,7 @@ namespace jai::vm {
             frame f;
             size_t window_slots = 0;
             bool lazy = false;
+            std::shared_ptr<environment> closure_env;   // a lazy closure's env, swapped with the caller's around each call
             checked_result<script_value> call(const std::vector<script_value>& args) override { return vm->run_callback(*this, args); }
         };
         checked_result<script_value> run_callback(callback_session& s, const std::vector<script_value>& args);

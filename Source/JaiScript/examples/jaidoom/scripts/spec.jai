@@ -39,7 +39,7 @@ class Mover {
 		co = mover_run(s, pl, t, sp, w, r);
 	}
 	bool tic() {
-		co.resume();
+		co.next();
 		return co.done();
 	}
 }

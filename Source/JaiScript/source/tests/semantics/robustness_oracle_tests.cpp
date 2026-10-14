@@ -285,7 +285,7 @@ private:
 				         uncaught("class C { int add(int a, int b) { return a + b; } int add(string a, string b, string c) { return 0; } } C k; k.add(true);"),
 				         "overload miss" + label);
 				check_eq(std::string("Cannot resume a completed coroutine"),
-				         uncaught("coroutine int g() { yield 1; } auto h = g(); h.resume(); h.resume(); h.resume();"), "resume" + label);
+				         uncaught("coroutine int g() { yield 1; } auto h = g(); h.next(); h.next(); h.next();"), "next past the end" + label);
 				check_eq(std::string("Division by zero"), uncaught("int z = 0; int q = 5 / z;"), "division" + label);
 				check_eq(std::string("boom: Type mismatch"), uncaught("throw \"boom: Type mismatch\";"), "a thrown text stays whole" + label);
 			}
@@ -392,7 +392,7 @@ private:
 				}
 				string s = "";
 				for (auto v : ns::co(3)) { s += "" + v; }
-				auto h = ns::names(); s += h.resume(); s += h.resume();
+				auto h = ns::names(); s += h.next(); s += h.next();
 				s + ns::plain();
 			)", "012ab1");
 		});
@@ -497,7 +497,7 @@ private:
 				{"reference before", "auto& r = G;", "G", "r.v = 7;"},
 				{"lambda", "auto fn = [&]() { G.v = 7; };", "G", "fn();"},
 				{"callback", "", "G", "array<int> xs = [1]; xs.for_each((k) => { G.v = 7; });"},
-				{"coroutine", "", "G", "auto c = co(); c.resume();"},
+				{"coroutine", "", "G", "auto c = co(); c.next();"},
 				{"reflect", "", "G", "reflect::set(G, \"v\", 7);"},
 				{"element", "", "GA[0]", "for (auto& t : GA) { t.v = 7; }"},
 				{"local swap", "T s = T(1); T t2 = T(7);", "s", "T tmp = s; s = t2; t2 = tmp;"},
@@ -676,7 +676,7 @@ private:
 				int total = 0;
 				for (auto v : gen()) { total += v; }
 				int finished = dead;
-				function abandon() -> int { auto c = gen(); return c.resume(); }
+				function abandon() -> int { auto c = gen(); return c.next(); }
 				int first = abandon();
 				to_string(total) + " " + to_string(finished) + " " + to_string(first) + " " + to_string(dead)
 			)", "5 1 2 2");

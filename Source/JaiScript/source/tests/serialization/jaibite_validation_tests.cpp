@@ -342,7 +342,7 @@ public:
                     int a = 1; int b = 2; int c = 3; int value = 4;
                     coroutine int result(int v) { yield v; return 0; }
                     auto handle = result(value);
-                    return handle.resume();
+                    return handle.next();
                 }
                 read();
             )");

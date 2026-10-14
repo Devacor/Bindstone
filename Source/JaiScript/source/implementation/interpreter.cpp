@@ -2937,7 +2937,7 @@ interpreter::interpreter()
     weak_from_this_id_ = string_symbolizer_->intern("weak_from_this");
     shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
     coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
-    resume_id_ = string_symbolizer_->intern("resume");
+    next_id_ = string_symbolizer_->intern("next");
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
@@ -3009,7 +3009,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     weak_from_this_id_ = string_symbolizer_->intern("weak_from_this");
     shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
     coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
-    resume_id_ = string_symbolizer_->intern("resume");
+    next_id_ = string_symbolizer_->intern("next");
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
@@ -3081,7 +3081,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     weak_from_this_id_ = string_symbolizer_->intern("weak_from_this");
     shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
     coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
-    resume_id_ = string_symbolizer_->intern("resume");
+    next_id_ = string_symbolizer_->intern("next");
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
@@ -8769,23 +8769,18 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         auto objHolder = objectValue.get_object_holder();
         if (objHolder && objHolder->type_id == coroutine_handle_type_id_) {
             auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->data);
-            if (expr->member_id == resume_id_) {
+            if (expr->member_id == next_id_) {
 	            if (!as_callee) { return method_value_error(expr, objectValue, false); }
-                // Return a bound "resume" method
                 auto captured_handle = handle;
                 auto* eng = engine_;
-                script_function resume_method = [captured_handle, eng](const std::vector<script_value>& a_args) -> checked_result<script_value> {
-                    if (!a_args.empty()) {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "resume() takes no arguments");
-                    }
-                    return captured_handle->resume(eng);
+                script_function next_method = [captured_handle, eng](const std::vector<script_value>& a_args) -> checked_result<script_value> {
+                    return captured_handle->next_from_script(eng, a_args.data(), a_args.size());
                 };
-                push_value(script_value::make_function(resume_method, engine_));
+                push_value(script_value::make_function(next_method, engine_));
                 return {};
             }
             if (expr->member_id == done_id_) {
 	            if (!as_callee) { return method_value_error(expr, objectValue, false); }
-                // Return a bound "done" method
                 auto captured_handle = handle;
                 auto* eng = engine_;
                 script_function done_method = [captured_handle, eng](const std::vector<script_value>& a_args) -> checked_result<script_value> {
@@ -11747,7 +11742,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                     // the body dispatch below fast-forwards to the yield point
                     replaying = false;
                 } else {
-                    auto resume_result = handle->resume(engine_);
+                    auto resume_result = handle->next(engine_);
                     if (!resume_result) {
                         pop_scope();
                         return resume_result.error_value();
@@ -12461,7 +12456,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
         uint64_t coroutine_type_id = coroutine_handle_type_id_;
         script_value functionValue = script_value::make_function(
             [eng, coroutine_type_id, func_decl_ptr, closure_env](const std::vector<script_value>& args) -> checked_result<script_value> {
-                // Create a new coroutine handle; resume() resolves the live backend itself
+                // Create a new coroutine handle; next() resolves the live backend itself
                 auto handle = std::make_shared<coroutine_handle>(eng);
                 handle->set_function(func_decl_ptr, args, closure_env);
 
@@ -15450,8 +15445,8 @@ script_value interpreter::make_coroutine_object(engine* eng, uint64_t type_id, s
 checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& handle) {
     // Host-level resume is its own budgeted entry; a resume nested inside an
     // executing script keeps the outer deadline (and the outer limit state).
-    // Depth alone is not enough: a TOP-LEVEL script statement calling resume() also
-    // runs at call depth 0, and re-arming there let `for(..){ h.resume(); }` push the
+    // Depth alone is not enough: a TOP-LEVEL script statement calling next() also
+    // runs at call depth 0, and re-arming there let `for(..){ h.next(); }` push the
     // deadline forever (fuzz livelock seeds 3507/8285/1213/8356/8391).
     if (current_call_depth_ == 0 && execute_depth_ == 0) {
         arm_execution_deadline();
@@ -15564,7 +15559,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         state.function->unit = function->unit;
 
         // A first resume nested inside another call's argument list must not see that
-        // call's in-flight arg metadata (a zero-arg .resume() never saves/clears it)
+        // call's in-flight arg metadata (a zero-arg .next() never saves/clears it)
         auto call_result = call_function(*state.function, handle.get_args());
 
         if (hasYieldRequest_) {

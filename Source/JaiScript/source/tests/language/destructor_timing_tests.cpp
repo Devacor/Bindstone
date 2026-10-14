@@ -237,7 +237,7 @@ public:
         test("an_abandoned_coroutine_destroys_its_locals", [this]() {
             expect_log(R"(
                 coroutine gen() -> int { Token a = Token("a"); yield 1; yield 2; }
-                function f() -> void { var g = gen(); g.resume(); LOG = LOG + "|"; g = null; LOG = LOG + "|"; }
+                function f() -> void { var g = gen(); g.next(); LOG = LOG + "|"; g = null; LOG = LOG + "|"; }
                 f(); LOG;
             )", "|a|");
         });
@@ -245,7 +245,7 @@ public:
         test("a_coroutine_keeps_its_locals_across_yields", [this]() {
             expect_log(R"(
                 coroutine gen() -> int { Token a = Token("a"); yield 1; LOG = LOG + "r"; yield 2; }
-                function f() -> void { var g = gen(); g.resume(); LOG = LOG + "|"; g.resume(); LOG = LOG + "|"; g.resume(); LOG = LOG + "|"; }
+                function f() -> void { var g = gen(); g.next(); LOG = LOG + "|"; g.next(); LOG = LOG + "|"; g.next(); LOG = LOG + "|"; }
                 f(); LOG;
             )", "|r|a|");
         });

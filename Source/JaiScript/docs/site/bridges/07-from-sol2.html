@@ -88,7 +88,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <tr><td><code>protected_function::set_default_handler(lua["debug"]["traceback"])</code></td><td><code>eng-&gt;format_stack_trace()</code> after a failure</td></tr>
 <tr><td><code>error("msg")</code> in script</td><td><code>throw "msg";</code>, which reaches the host as <code>jai::script_exception</code> with that text</td></tr>
 <tr><td>a C++ exception from a bound function, turned into a Lua error</td><td>a run-time error the script can <code>catch</code>, carrying the exception's <code>what()</code></td></tr>
-<tr><td><code>sol::coroutine</code>, <code>sol::thread</code></td><td>a script coroutine's handle, resumed from C++ with <code>resume(engine*)</code> (<a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a>)</td></tr>
+<tr><td><code>sol::coroutine</code>, <code>sol::thread</code></td><td>a script coroutine's handle, advanced from C++ with <code>next(engine*)</code> or <code>next(engine*, n)</code> (<a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a>)</td></tr>
 </tbody></table></div>
 
 <h2 id="a-host-converted">A host converted<a class="hlink" href="#a-host-converted" aria-label="link">&#8203;</a></h2>

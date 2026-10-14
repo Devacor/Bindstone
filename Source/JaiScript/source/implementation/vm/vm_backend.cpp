@@ -363,7 +363,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		eq_method_id_ = symbolizer_->intern("==");
 		same_as_id_ = symbolizer_->intern("same_as");
 		coroutine_handle_type_id_ = symbolizer_->intern("coroutine_handle");
-		resume_id_ = symbolizer_->intern("resume");
+		next_id_ = symbolizer_->intern("next");
 		done_id_ = symbolizer_->intern("done");
 		class_definition_type_id_ = symbolizer_->intern("class_definition");
 		hot_reload_migrate_id_ = symbolizer_->intern("hot_reload_migrate");
@@ -880,8 +880,8 @@ vm_backend::vm_coroutine_state& vm_backend::coroutine_fiber_state(coroutine_hand
 checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& handle) {
 	// A top-level resume (no live VM frames) arms a fresh deadline; a resume nested inside
 	// a running script inherits the outer deadline (and the outer limit state).
-	// Depth alone is not enough: a TOP-LEVEL script statement calling resume() also runs
-	// at call depth 0, and re-arming there let `for(..){ h.resume(); }` push the deadline
+	// Depth alone is not enough: a TOP-LEVEL script statement calling next() also runs
+	// at call depth 0, and re-arming there let `for(..){ h.next(); }` push the deadline
 	// forever (fuzz livelock seeds 3507/8285/1213/8356/8391).
 	if (current_call_depth_ == 0 && frames_.empty()) {
 		arm_execution_deadline();
@@ -890,7 +890,7 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 
 	const auto prev_status = handle.get_status();
 	if (prev_status == coroutine_handle::status::running) {
-		// Defensive twin of coroutine_handle::resume's guard (script paths never get
+		// Defensive twin of coroutine_handle::resume_once's guard (script paths never get
 		// here): activating a running fiber would swap its live stacks out from under it
 		return checked_result<script_value>(
 			make_error_code(runtime_error_code::evaluation_failed),
@@ -13114,7 +13114,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 	if (receiver_type == script_value::TYPEID_OBJECT || receiver_type == script_value::TYPEID_SHARED_PTR) {
 		const auto holder = objectValue.get_object_holder();
 		if (holder && holder->type_id == coroutine_handle_type_id_) {
-			if (member_id == resume_id_ || member_id == done_id_) { return {}; }
+			if (member_id == next_id_ || member_id == done_id_) { return {}; }
 			return raise_(make_error_code(runtime_error_code::member_not_found),
 				"coroutine_handle has no member '{0}'", member_id);
 		}
@@ -14736,17 +14736,14 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		auto objHolder = objectValue.get_object_holder();
 		if (objHolder && objHolder->type_id == coroutine_handle_type_id_) {
 			auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->data);
-			if (expr->member_id == resume_id_) {
+			if (expr->member_id == next_id_) {
 				if (!as_callee) { return raise_method_value(expr, objectValue, false); }
 				auto captured_handle = handle;
 				auto* eng = engine_;
-				script_function resume_method = [captured_handle, eng](const std::vector<script_value>& a_args) -> checked_result<script_value> {
-					if (!a_args.empty()) {
-						return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "resume() takes no arguments");
-					}
-					return captured_handle->resume(eng);
+				script_function next_method = [captured_handle, eng](const std::vector<script_value>& a_args) -> checked_result<script_value> {
+					return captured_handle->next_from_script(eng, a_args.data(), a_args.size());
 				};
-				out = script_value::make_function(resume_method, engine_);
+				out = script_value::make_function(next_method, engine_);
 				return {};
 			}
 			if (expr->member_id == done_id_) {
@@ -17032,18 +17029,18 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 						"captured-read state)", member->member_id);
 				}
 			}
-			// Coroutine resume()/done() dispatch directly: the native branch mints a fresh
-			// closure + function value PER RESUME just to forward to the handle. Same
-			// handle call, same argument-count and checked_result propagation. Any other member falls
+			// Coroutine next()/done() dispatch directly: the native branch mints a fresh
+			// closure + function value PER STEP just to forward to the handle. Same
+			// handle call, same argument checks and checked_result propagation. Any other member falls
 			// through for member_access_value's coroutine error spelling.
 			if (holder && holder->type_id == coroutine_handle_type_id_ && holder->data &&
-			    (member->member_id == resume_id_ || member->member_id == done_id_)) {
-				if (!arguments.empty()) {
-					return raise_(make_error_code(runtime_error_code::argument_count_mismatch), member->member_id == resume_id_ ? "resume() takes no arguments" : "done() takes no arguments");
-				}
+			    (member->member_id == next_id_ || member->member_id == done_id_)) {
 				auto handle = std::static_pointer_cast<coroutine_handle>(holder->data);
-				if (member->member_id == resume_id_) {
-					return guarded_native_call([&] { return handle->resume(engine_); });
+				if (member->member_id == next_id_) {
+					return guarded_native_call([&] { return handle->next_from_script(engine_, arguments.data(), arguments.size()); });
+				}
+				if (!arguments.empty()) {
+					return raise_(make_error_code(runtime_error_code::argument_count_mismatch), "done() takes no arguments");
 				}
 				stack_.push_back(script_value(handle->done(), engine_));
 				return {};
@@ -19302,7 +19299,7 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 			stack_.push_back(script_value(false, engine_));
 			return {};
 		}
-		auto resume_result = handle->resume(engine_);
+		auto resume_result = handle->next(engine_);
 		if (!resume_result) {
 			return raise_from(resume_result);
 		}

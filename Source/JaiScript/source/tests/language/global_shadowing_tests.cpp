@@ -101,7 +101,7 @@ public:
 			every_backend("declaring unit", "1 1 1 1 5 1 1", [](engine& e) {
 				e.execute("var G = 1; class C { var x = G; function get() { return G; } function qualified() { return ::G; } static function stat() { return G; } } var lam = function() { return G; }; coroutine co() { yield G; }");
 				e.execute("int G = 5; class D { var x = G; } var c = C(); var d = D(); var h = co();");
-				return e.execute("to_string(c.x) + \" \" + to_string(c.get()) + \" \" + to_string(c.qualified()) + \" \" + to_string(C::stat()) + \" \" + to_string(d.x) + \" \" + to_string(lam()) + \" \" + to_string(h.resume())").as_string();
+				return e.execute("to_string(c.x) + \" \" + to_string(c.get()) + \" \" + to_string(c.qualified()) + \" \" + to_string(C::stat()) + \" \" + to_string(d.x) + \" \" + to_string(lam()) + \" \" + to_string(h.next())").as_string();
 			});
 		});
 		test("a_reference_bound_before_the_redeclaration_pins_the_old_cell", [this]() {
@@ -295,7 +295,7 @@ public:
 				          " function mkc() { coroutine co() { yield g; } return co; }");
 				e.execute("var g = 2; var f = mk(); var h = mkf(); var c = mkc();");
 				e.execute("var g = 3;");
-				return e.execute("to_string(f()) + \" \" + to_string(h()) + \" \" + to_string(c().resume())").as_string();
+				return e.execute("to_string(f()) + \" \" + to_string(h()) + \" \" + to_string(c().next())").as_string();
 			});
 		});
 		test("a_callable_minted_by_a_shared_include_keeps_its_includers_unit", [this]() {
@@ -314,7 +314,7 @@ public:
 				e.execute("var x = 11; var fa = include \"" + fn + "\"; var la = include \"" + lam + "\"; var ga = include \"" + gen + "\";");
 				e.execute("var x = 22; var fb = include \"" + fn + "\"; var lb = include \"" + lam + "\"; var gb = include \"" + gen + "\";");
 				return e.execute("to_string(fa()) + \" \" + to_string(fb()) + \" \" + to_string(fa()) + \" \" + to_string(fb()) + \"|\""
-				                 " + to_string(la()) + \" \" + to_string(lb()) + \"|\" + to_string(ga().resume()) + \" \" + to_string(gb().resume())").as_string();
+				                 " + to_string(la()) + \" \" + to_string(lb()) + \"|\" + to_string(ga().next()) + \" \" + to_string(gb().next())").as_string();
 			});
 		});
 		test("a_block_is_a_scope_inside_a_unit", [this]() {

@@ -26,7 +26,7 @@ namespace jai::detail {
 		// Terminal-error latch: while set, EVERY script catch handler is skipped -
 		// try/catch, catch-all, nested, catches inside coroutines/lambdas, and catches
 		// in outer scripts around a failing reentrant execute(). The failure unwinds
-		// to the outermost host execute()/resume() boundary, which reports it normally.
+		// to the outermost host execute()/next() boundary, which reports it normally.
 		// Budget overruns latch this ALWAYS (scripts can never catch a timeout).
 		// Cleared only by a non-reentrant prepare_for_execution or a host-level resume.
 		bool terminal_error = false;

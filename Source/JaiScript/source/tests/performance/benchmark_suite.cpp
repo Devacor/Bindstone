@@ -119,7 +119,7 @@ public:
                     }
                     void tick() {
                         if (brain == null || brain.done()) { brain = think(); }
-                        brain.resume();
+                        brain.next();
                     }
                     int fold() { return id * 31 + mood; }
                 }

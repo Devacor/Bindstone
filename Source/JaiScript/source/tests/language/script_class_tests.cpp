@@ -1643,7 +1643,7 @@ public:
                         int outer() { return helper(4) + helper(1); }
                         int grab() { var fv = [this](int k) { return helper(k); }; return fv(3); }
                         coroutine void steps() { while (true) { ticks = ticks + helper(1); yield; } }
-                        void tick() { if (brain == null || brain.done()) { brain = steps(); } brain.resume(); }
+                        void tick() { if (brain == null || brain.done()) { brain = steps(); } brain.next(); }
                     }
                     var s = S();
                 )");

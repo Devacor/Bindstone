@@ -469,7 +469,7 @@ unit already defined as the warning `'f' redefines the function defined in <file
 
 ## Host call failures
 
-A `checked_result` host call (`fn.as_function()(args)`, a method or static method value, `coroutine_handle::resume`) carries
+A `checked_result` host call (`fn.as_function()(args)`, a method or static method value, `coroutine_handle::next`) carries
 every failure in its result: a run-time error keeps its own code and text; an uncaught script throw, a
 missing module or a failed reload comes back as `evaluation_failed` with the text `execute()` would throw (the thrown text,
 `Failed to open import file: <path>`, the check listing). `convert_script_function` refuses a value that is neither a function

@@ -212,7 +212,7 @@ the non-fast-path operator machinery; op[] and += get true fast paths").
   80.5k, `ifloor` 78k, `sqrt` 12k (~290 math-builtin boundary crossings/tick, each paying
   arg-vector + value copies + std::function for one machine instruction), `parallel_transform`
   3/tick (main thread holds the whole region: barrier grid scan + palette snapshots),
-  `brain.resume()` fiber switches under CALL_METHOD. Plus 39k `op_load`/tick at ~37ns = the
+  `brain.next()` fiber switches under CALL_METHOD. Plus 39k `op_load`/tick at ~37ns = the
   structural stack-vs-register gap. Next campaign: builtin-call fast lane (intrinsic dispatch
   for pure-numeric natives), then region-entry cost, then method/coroutine cost.
 

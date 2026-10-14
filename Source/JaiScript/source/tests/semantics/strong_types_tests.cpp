@@ -1980,7 +1980,7 @@ public:
             check_eq(std::string("Cannot apply '++' to string"), pi, "++ on cast<string&> raises at run time");
             check_both("var log = \"\"; function v() -> int { log += \"v\"; return 5; } "
                        "coroutine h() { array<int> a = [0, 0]; cast<int&>(a[(yield 1) == null ? 1 : 0]) += v(); int k = 1; cast<int&>(k) += v() + ((yield 2) == null ? 1 : 0); yield to_string(a[1]) + to_string(k); } "
-                       "var co = h(); co.resume(); co.resume(); co.resume() + log", "57vv", "a yield inside the target or the right side resumes without re-running either");
+                       "var co = h(); co.next(); co.next(); co.next() + log", "57vv", "a yield inside the target or the right side resumes without re-running either");
             check_both("class W { static int s = 1; } cast<int&>(W::s) += 0.75; type_of(W::s) + \":\" + to_string(W::s)", "int:1", "a static's own table");
         });
 
@@ -2021,7 +2021,7 @@ public:
             check_both("int a = 1; (a += 1) *= 3; to_string(a)", "6", "a compound yields its left side");
             check_both("int x = 1; ++x = 10; int y = 1; (++y) += 5; int z = 1; --z = 4; to_string(x) + \",\" + to_string(y) + \",\" + to_string(z)", "10,7,4", "a prefix increment yields its operand");
             check_both("array<int> a = [1]; ++a[0] = 9; int x = 0; auto r = (++x = 10); to_string(a[0]) + \",\" + to_string(r)", "9,10", "a prefix increment of an element");
-            check_both("coroutine h() { int a = 0; int b = 0; ((yield 1) == null ? a : b) = 5; yield to_string(a) + to_string(b); } var co = h(); co.resume(); co.resume()", "50", "a yield inside the condition resumes once");
+            check_both("coroutine h() { int a = 0; int b = 0; ((yield 1) == null ? a : b) = 5; yield to_string(a) + to_string(b); } var co = h(); co.next(); co.next()", "50", "a yield inside the condition resumes once");
             auto [si, sv] = both("int g = 1; function f() -> int& { return g; } f() = \"s\";");
             check_eq(si, sv, "static rejection parity: a string into an int& result");
             check(si.find("ERROR: ") == 0 && si.find("cannot assign 'string'") != std::string::npos, "a string into an int& result is rejected at load: " + si);
@@ -2334,7 +2334,7 @@ public:
             check_quad(q("function mk() -> array<K> { array<K> r = [K(3), K(4)]; return r; } auto got = mk(); to_string(got[1].a) + \"|\" + type_of(got)").c_str(), "4|array", "returned array");
             check_quad(q("array<array<K>> grid = [[K(1)], [K(2), K(3)]]; to_string(grid[1][1].a)").c_str(), "3", "nested arrays stay dynamic outside");
             check_quad(q("array<K> ks = []; ks.push(K(2)); to_string(ks.size()) + \":\" + to_string(ks[0].a)").c_str(), "1:2", "empty then push");
-            check_quad(q("coroutine int walk(array<K> xs) { for (auto x : xs) { yield x.a; } return 0; } array<K> ks = [K(5), K(6)]; auto h = walk(ks); to_string(h.resume()) + \",\" + to_string(h.resume())").c_str(), "5,6", "coroutine over an object buffer");
+            check_quad(q("coroutine int walk(array<K> xs) { for (auto x : xs) { yield x.a; } return 0; } array<K> ks = [K(5), K(6)]; auto h = walk(ks); to_string(h.next()) + \",\" + to_string(h.next())").c_str(), "5,6", "coroutine over an object buffer");
             check_quad(q("array<K> ks = [K(1), K(2)]; int acc = 0; for (int i = 0; i < 1000; i++) { acc += ks[i & 1].a; } to_string(acc)").c_str(), "1500", "hot element field reads");
             check_quad_error(q("class J { int b = 0; } array<K> ks = [K()]; ks.push(J())").c_str(), "another class does not push");
             check_quad_error(q("array<K> ks = [K()]; ks.push(5)").c_str(), "an int does not push");
@@ -2385,7 +2385,7 @@ public:
             check_quad("map<string,int> m = {}; for (int i = 0; i < 50; i++) { m[\"k\" + to_string(i)] = i; } int acc = 0; for (int i = 0; i < 50; i++) { acc += m[\"k\" + to_string(i)]; } to_string(acc) + \",\" + to_string(m.size())", "1225,50", "dynamic-key stores and reads");
             check_quad("map<string,int> m = {\"a\": 1}; m.clear(); m[\"b\"] = 2; to_string(m.size()) + \",\" + to_string(m.contains(\"a\"))", "1,false", "clear then store");
             check_quad("map<string,array<int>> m = {\"a\": [1, 2]}; m[\"a\"].push(3); to_string(m[\"a\"].size()) + \",\" + to_string(m[\"a\"][2])", "3,3", "array value mutates through the entry");
-            check_quad("coroutine int walk(map<string,int> mm) { for (auto kv : mm) { yield kv.second; } return 0; } map<string,int> m = {\"a\": 5, \"b\": 6}; auto h = walk(m); to_string(h.resume()) + \",\" + to_string(h.resume())", "5,6", "coroutine over a map");
+            check_quad("coroutine int walk(map<string,int> mm) { for (auto kv : mm) { yield kv.second; } return 0; } map<string,int> m = {\"a\": 5, \"b\": 6}; auto h = walk(m); to_string(h.next()) + \",\" + to_string(h.next())", "5,6", "coroutine over a map");
             check_quad_error("map<string,int> m = {}; m[5] = 1", "key type enforced on a direct store");
             check_quad_error("map<string,int> m = {}; m[\"k\"] = \"str\"", "value type enforced on store");
             check_quad_error("map<string,int> m = {\"a\": \"s\"}", "value type enforced on declaration");
@@ -3287,7 +3287,7 @@ public:
             check_proof_run({"void bump(int& r) { r = r + 1; } int x = 1; bump(x); to_string(x)"}, "2", "by-reference parameter");
             check_proof_run({"int twice(int v) { return v * 2; } var f = twice; to_string(f(4))"}, "8", "callable local");
             check_proof_error({"int twice(int v) { return v * 2; } var f = twice; f(\"s\")"}, "callable local still enforces its parameter");
-            check_proof_run({"coroutine int gen(int n) { yield n; return n + 1; } auto h = gen(3); to_string(h.resume()) + \":\" + to_string(h.resume())"}, "3:4", "coroutine callee");
+            check_proof_run({"coroutine int gen(int n) { yield n; return n + 1; } auto h = gen(3); to_string(h.next()) + \":\" + to_string(h.next())"}, "3:4", "coroutine callee");
             check_proof_run({cls + "C a = C(); a = null; type_of(a)"}, "", "null into an object slot");
             check_proof_run({cls + "C a; C b = a; type_of(b)"}, "", "typed-null placeholder");
             check_proof_run({cls + "C b = D(); to_string(b.v) + \":\" + type_of(b)"}, "1:D", "derived into base");

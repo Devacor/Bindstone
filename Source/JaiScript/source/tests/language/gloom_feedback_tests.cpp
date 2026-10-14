@@ -512,8 +512,8 @@ public:
 					auto h = H();
 					var inp = g.gather();
 					auto co = g.brain();
-					co.resume();
-					var second = co.resume();
+					co.next();
+					var second = co.next();
 					var parts = [];
 					parts.push(to_string(inp["n"]));
 					parts.push(to_string(g.pick()));

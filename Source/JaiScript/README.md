@@ -122,7 +122,7 @@ delegation, static members (`C::s`), operator overloading, user `_get_x` / `_set
 accessors, and hot reload that migrates live instances field by field.
 
 **Coroutines.** `coroutine` functions *and* methods, `yield`, drivable from a range-`for` or
-resumed by the host a frame at a time.
+advanced with `next()` by the host a frame at a time.
 
 **Everything else you reach for.** Lambdas with automatic captures, default and variadic
 arguments, template strings, `include` / `import` with a `.jaibite` disk cache, namespaces,

@@ -235,7 +235,7 @@ private:
 			expect("resumer write", R"(
 				array<int> xs = [1, 2, 3, 4, 5, 6];
 				coroutine int walk() { int s = 0; for (int i = 0; i < xs.size(); i++) { s += xs[i]; if (i == 2) { yield s; } } yield s; }
-				function run() -> string { var h = walk(); var a = h.resume(); xs[4] = 100; var b = h.resume(); return "" + a + "|" + b; }
+				function run() -> string { var h = walk(); var a = h.next(); xs[4] = 100; var b = h.next(); return "" + a + "|" + b; }
 				run();
 			)", "6|116");
 		});
@@ -244,7 +244,7 @@ private:
 			expect("interleaved", R"(
 				function inner(int n) -> int { int s = 0; int i = 0; while (i < n) { s = s + i; i = i + 1; } return s; }
 				coroutine int gen(int k) { int t = 0; for (int r = 0; r < k; ++r) { int i = 0; while (i < 20) { t = t + inner(i); i = i + 1; } yield t; } return t; }
-				function run() -> string { var a = gen(3); var b = gen(2); string out = ""; for (int round = 0; round < 2; round++) { out += "" + a.resume() + "/" + b.resume() + ";"; } return out; }
+				function run() -> string { var a = gen(3); var b = gen(2); string out = ""; for (int round = 0; round < 2; round++) { out += "" + a.next() + "/" + b.next() + ";"; } return out; }
 				run();
 			)", "1140/1140;2280/2280;");
 		});
@@ -384,11 +384,11 @@ private:
 					coroutine int gen() { for (int i = 1; i <= 4; i++) { yield leaf(i); } }
 					var h = gen();
 					var out = "";
-					out += "" + h.resume() + ",";
-					out += "" + h.resume() + ",";
+					out += "" + h.next() + ",";
+					out += "" + h.next() + ",";
 				)");
 				e.execute("function leaf(int x) -> int { return x * 100; }");
-				return e.execute("out += \"\" + h.resume() + \",\"; out += \"\" + h.resume() + \",\"; out;").as_string();
+				return e.execute("out += \"\" + h.next() + \",\"; out += \"\" + h.next() + \",\"; out;").as_string();
 			});
 		});
 	}

@@ -2136,15 +2136,15 @@
     },
     {
       "owner": "coroutine",
-      "name": "resume",
-      "signature": "resume() -> var",
+      "name": "next",
+      "signature": "next(count: int = 1) -> var",
       "provider": "core",
       "effect": "advance, callback",
-      "notes": "Runs to the next yield and returns its value; the call that finishes the body returns the return value. Resuming a completed coroutine raises Cannot resume a completed coroutine. Takes no arguments.",
-      "source": "source/implementation/interpreter.cpp",
+      "notes": "Runs to the next yield and returns its value; next(count) advances count yields and returns the last one's value. The call that finishes the body returns the return value; a step on a completed coroutine raises Cannot resume a completed coroutine. count is an int of at least 1. Nothing in the body runs before the first next().",
+      "source": "source/implementation/coroutine.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "coroutine.resume() -> var"
+      "display": "coroutine.next(count: int = 1) -> var"
     },
     {
       "owner": "coroutine",
@@ -2152,7 +2152,7 @@
       "signature": "done() -> bool",
       "provider": "core",
       "effect": "observe",
-      "notes": "",
+      "notes": "Whether the body finished (returned or failed); it never starts or advances the coroutine.",
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",

@@ -130,7 +130,7 @@ function monster_act(var& m) -> void {
 			// (game.jai) — the handle pins G, its phase state survives across
 			// turns, and the handle lives in G's own boss_co field.
 			if (G.boss_co == null || G.boss_co.done()) { G.boss_co = G.boss_brain(m.id); }
-			G.boss_co.resume();
+			G.boss_co.next();
 			break;
 		}
 	}

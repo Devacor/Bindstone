@@ -90,7 +90,7 @@ pointee's, which a const handle does not own.
 | `const Foo` (by value) | error | field stores (`f.hp = 5`, `f.inv.items.push(x)`) and a call of a method that writes its receiver (3.3): errors. A `shared_ptr` field can't be rebound, but its pointee is writable |
 | `const math::vec2` (and the other math values) | error | component stores, mutating methods: errors |
 | `const shared_ptr<Foo>`, `const weak_ptr<Foo>` | error | none: `h.hp = 5` and `h.move()` write the pointee |
-| `const function`, `const coroutine_handle` | error | none (calling or resuming is not a write, as C++'s `coroutine_handle::resume` is `const`) |
+| `const function`, `const coroutine_handle` | error | none (calling or resuming is not a write, as C++'s `std::coroutine_handle::resume` is `const`) |
 
 ### 2.3 `const var` and `const auto`
 

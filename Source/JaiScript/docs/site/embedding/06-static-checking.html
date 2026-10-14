@@ -197,7 +197,7 @@ side has no numeric-to-string conversion, unlike a script <code>string</code> sl
 is an error; a bare <code>return;</code> or a path that falls off the end is an error when the result holds no null (a
 primitive, a string, a reference) and a warning for a class, handle or container result. The walk runs at load and adds
 nothing to a call. Coroutines are
-exempt (calling one yields a handle; yield and return types are not checked).</p>
+exempt (calling one yields a handle typed as <code>coroutine_handle</code>; yield and return types are not checked).</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript &middot; required_returns.jai</span><pre><code class="lang-jai">class Box { int v = 1; }
 int sign(int a) { if (a &gt; 0) { return 1; } }    // falls off the end
 int none() { return; }                           // bare return from an int function
@@ -488,7 +488,7 @@ mistake in any of these spots is a run-time error, never a load error:</p>
 <tr><td>engine globals (typed off the value tag; a later retag is invisible), host-object conversions, callables held in variables, host functions beyond arity and primitive certainties, binder (C++) methods reached through a script chain, binder properties</td><td>no static signature in view</td></tr>
 <tr><td>dynamic-path <code>import(expr)</code>/<code>include(expr)</code> units (undeclared identifiers drop to warnings), untyped <code>extern</code> names, a parent found nowhere, namespaces at every depth</td><td>such a unit or name can define anything</td></tr>
 <tr><td>accessor-bearing members whose declaration is ambiguous (two getter/setter overloads, <code>var</code>/<code>auto</code>/coroutine/parameterized getters, reference or untyped setter parameters, an accessor on a registered-only ancestor)</td><td>no single declaration to trust</td></tr>
-<tr><td>coroutines: yield and return types; a call yields a handle typed as unknown</td><td>the checker does not model coroutine types</td></tr>
+<tr><td>coroutines: yield and return types, and what a handle's <code>next()</code> returns (the handle itself is typed: <code>next</code> and <code>done</code> are its only members)</td><td>the checker does not model what a coroutine yields</td></tr>
 <tr><td>mixed-branch ternaries, <code>this</code>/<code>super</code> as values, hot-reload redefinitions (receivers that carry the old shape are open), <code>extend</code>ed classes and everything passed to <code>extend(...)</code></td><td>the shape is decided at run time</td></tr>
 </tbody></table></div>
 <p>For <em>proofs</em> (below) the lenient set is wider still: every row here, cross-unit classes until their

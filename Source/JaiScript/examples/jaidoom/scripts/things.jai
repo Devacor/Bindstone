@@ -904,7 +904,7 @@ function monster_tic(int m) -> void {
 	if (MO_STATE[m] == 4) { return; }                // pain stun; the anim driver ends it
 	var b = MO_BRAIN[m];
 	if (b == null || b.done()) { MO_BRAIN[m] = monster_brain(m); }
-	MO_BRAIN[m].resume();
+	MO_BRAIN[m].next();
 }
 
 // monster movement: same opening rules as the player, own radius, no big

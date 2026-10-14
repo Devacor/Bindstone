@@ -275,7 +275,7 @@ public:
                             try { s = s + raise_at(i); } catch (e) { errs = errs + e; }
                         }
                         var co = gen(3); int g = 0;
-                        while (true) { var v = co.resume(); if (co.done()) { break; } g = g + v; }
+                        while (true) { var v = co.next(); if (co.done()) { break; } g = g + v; }
                         var f = [this](int k) { return pick(k) + vf(k); };
                         int l = 0; for (int i = 0; i < 3; ++i) { l = l + f(i); }
                         return to_string(s) + " " + to_string(r) + " " + errs + " " + to_string(g) + " " + to_string(l);

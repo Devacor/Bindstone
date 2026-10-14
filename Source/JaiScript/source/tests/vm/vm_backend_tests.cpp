@@ -1391,9 +1391,9 @@ public:
 					return a * 10;
 				}
 				auto c = co();
-				auto r1 = c.resume();
-				auto r2 = c.resume();
-				auto r3 = c.resume();
+				auto r1 = c.next();
+				auto r2 = c.next();
+				auto r3 = c.next();
 				r1 * 100 + r2 * 10 + r3;
 			)";
 			for (bool use_vm : {false, true}) {
@@ -2332,7 +2332,7 @@ public:
 		test("unsupported_constructs_error_cleanly", [this]() {
 			auto e = vm_engine();
 			check_eq((int64_t)7, e->execute("class Cat { int a = 7; } auto c = Cat(); c.a").as_int());
-			check_eq((int64_t)1, e->execute("coroutine gen() { yield 1; } auto g = gen(); g.resume();").as_int(), "bare coroutine spelling runs");
+			check_eq((int64_t)1, e->execute("coroutine gen() { yield 1; } auto g = gen(); g.next();").as_int(), "bare coroutine spelling runs");
 			check_throws([&]() { e->execute("include \"no_such_file.jai\";"); }, "include reports B4");
 			// Engine stays usable
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());
@@ -2579,7 +2579,7 @@ public:
 				}
 				auto c = gen();
 				auto sum = 0;
-				while (!c.done()) { sum = sum + c.resume(); }
+				while (!c.done()) { sum = sum + c.next(); }
 				sum
 			)");
 			check_eq((int64_t)67, rhs.as_int());
@@ -2600,7 +2600,7 @@ public:
 				}
 				auto c = gen();
 				auto sum = 0;
-				while (!c.done()) { sum = sum + c.resume(); }
+				while (!c.done()) { sum = sum + c.next(); }
 				sum
 			)");
 			check_eq((int64_t)135, rhs.as_int());
@@ -2618,8 +2618,8 @@ public:
 				}
 				{
 					auto c = forever();
-					c.resume();
-					c.resume();
+					c.next();
+					c.next();
 				}
 			)");
 			check_eq((int64_t)42, e->execute("21 * 2").as_int());
@@ -2643,8 +2643,8 @@ public:
 					return 0;
 				}
 				auto c = co();
-				auto a = c.resume();
-				auto b = c.resume();
+				auto a = c.next();
+				auto b = c.next();
 				a * 10 + b
 			)");
 			check_eq((int64_t)13, r.as_int());
@@ -2715,9 +2715,9 @@ public:
 				}
 				var box = Box();
 				auto g = gen(box);
-				auto r1 = g.resume();
-				auto r2 = g.resume();
-				auto r3 = g.resume();
+				auto r1 = g.next();
+				auto r2 = g.next();
+				auto r3 = g.next();
 				r1 * 1000 + r2 * 100 + r3 * 10 + box.v;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
@@ -2739,11 +2739,11 @@ public:
 					return arr[1] + box.v;
 				}
 				auto g = gen();
-				auto r1 = g.resume();
+				auto r1 = g.next();
 				arr.push(4); arr.push(5); arr.push(6); arr.push(7);
 				box.v = 50;
-				auto r2 = g.resume();
-				auto r3 = g.resume();
+				auto r2 = g.next();
+				auto r3 = g.next();
 				r1 * 100000 + r2 * 100 + r3;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
@@ -2759,8 +2759,8 @@ public:
 				var box = Box();
 				coroutine int gen(int& x) { x = x + 1; yield x; x = x + 1; return x; }
 				auto g = gen(box.v);
-				auto r1 = g.resume();
-				auto r2 = g.resume();
+				auto r1 = g.next();
+				auto r2 = g.next();
 				r1 * 1000 + r2 * 10 + box.v;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
@@ -2773,8 +2773,8 @@ public:
 				var y = 7;
 				coroutine int gen(int& x) { x = x + 1; yield x; x = x + 1; return x; }
 				auto g = gen(y);
-				auto r1 = g.resume();
-				auto r2 = g.resume();
+				auto r1 = g.next();
+				auto r2 = g.next();
 				r1 * 1000 + r2 * 10 + y;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
@@ -2791,7 +2791,7 @@ public:
 				coroutine int gen(int& x) { x = 99; yield 1; return 2; }
 				function take(var a, var b) -> int { return a + b; }
 				auto g = gen(555);
-				take(box.v, g.resume());
+				take(box.v, g.next());
 				box.v;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
@@ -2805,7 +2805,7 @@ public:
 				coroutine int gen(int& x) { x = 99; yield 1; return 2; }
 				function take(var a, var b) -> int { return a + b; }
 				auto g = gen(555);
-				take(y, g.resume());
+				take(y, g.next());
 				y;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
@@ -2856,8 +2856,8 @@ public:
 				function pumpYield(int& x) { x = x + 1; yield x; x = x + 1; }
 				coroutine int gen() { pumpYield(box.v); return box.v; }
 				auto g = gen();
-				auto r1 = g.resume();
-				auto r2 = g.resume();
+				auto r1 = g.next();
+				auto r2 = g.next();
 				r1 * 100 + r2 * 10 + box.v;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
@@ -2877,9 +2877,9 @@ public:
 					return 0;
 				}
 				auto g = gen();
-				auto a = g.resume();
-				auto b = g.resume();
-				auto c = g.resume();
+				auto a = g.next();
+				auto b = g.next();
+				auto c = g.next();
 				a * 1000 + b * 100 + c * 10 + box.v;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
@@ -4719,9 +4719,9 @@ public:
 					return add(10, (yield 1) ? 0 : 5);
 				}
 				var h = gen();
-				var first = h.resume();
+				var first = h.next();
 				var between = add(2, 3);
-				var last = h.resume();
+				var last = h.next();
 				"" + first + ":" + between + ":" + last + ":" + h.done();
 			)");
 			check_eq(std::string("1:5:15:true"), i1, "interp: yield-in-args pending isolation");

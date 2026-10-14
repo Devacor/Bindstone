@@ -216,7 +216,7 @@ cmake --install build-jai
 ```
 
 ```cmake
-find_package(JaiScript 0.1 CONFIG REQUIRED)          # -DCMAKE_PREFIX_PATH=/opt/jaiscript
+find_package(JaiScript 0.5 CONFIG REQUIRED)          # -DCMAKE_PREFIX_PATH=/opt/jaiscript
 target_link_libraries(my_game PRIVATE JaiScript::jaiscript)
 ```
 

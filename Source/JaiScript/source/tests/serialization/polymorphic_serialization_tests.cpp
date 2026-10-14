@@ -1086,6 +1086,23 @@ struct NoCopyCreature : jai::script_extensible {
     int health = 100;
 };
 
+// The extend / add_global order matrix: one base per lookup path (the engine map for a polymorphic type, the slot, the map
+// for a non-polymorphic type) and a derived C++ type whose binder registers after its object was extended
+struct OrderPoly {
+    virtual ~OrderPoly() = default;
+    int health = 100;
+};
+struct OrderElite : OrderPoly {
+    int rank = 1;
+};
+struct OrderSlot : jai::script_extensible {
+    virtual ~OrderSlot() = default;
+    int health = 100;
+};
+struct OrderPlain {
+    int health = 100;
+};
+
 struct hybrid_holder {
     std::shared_ptr<HybridCreature> pet;
     int tag = 0;
@@ -1158,6 +1175,72 @@ public:
         return eng;
     }
 
+    std::shared_ptr<engine> order_engine() {
+        auto eng = make_engine();
+        stdlib::register_all(*eng);
+        dynamic_binder<OrderPoly>(*eng, "OrderPoly").constructor<>().property("health", &OrderPoly::health).build();
+        dynamic_binder<OrderSlot>(*eng, "OrderSlot").constructor<>().property("health", &OrderSlot::health).build();
+        dynamic_binder<OrderPlain>(*eng, "OrderPlain").constructor<>().property("health", &OrderPlain::health).build();
+        eng->execute(R"(
+            class PolyKin : OrderPoly { int chomp = 3; PolyKin() : super() {} }
+            class SlotKin : OrderSlot { int chomp = 3; SlotKin() : super() {} }
+            class PlainKin : OrderPlain { int chomp = 3; PlainKin() : super() {} }
+        )");
+        return eng;
+    }
+
+    // Every entry hands script the object's one identity: its layer once extended, whatever the order
+    template<typename T>
+    void every_entry_is_the_layer(const std::shared_ptr<engine>& eng, const std::shared_ptr<T>& object, const std::string& kin,
+                                  const std::string& order) {
+        try { every_entry_is_the_layer_checked(eng, object, kin, order); }
+        catch (const std::exception& e) { check(false, order + " threw: " + e.what()); }
+    }
+    template<typename T>
+    void every_entry_is_the_layer_checked(const std::shared_ptr<engine>& eng, const std::shared_ptr<T>& object, const std::string& kin,
+                                          const std::string& order) {
+        auto is_kin = [&](const std::string& expr, const std::string& what) {
+            check_eq(kin, eng->execute("type_of(" + expr + ")").as<std::string>(), order + ": " + what);
+            check_eq((script_int)3, eng->execute(expr + ".chomp").as_int(), order + ": " + what + " reaches the script field");
+        };
+        is_kin("hero", "the global");
+        eng->execute("hero.chomp = 9;");
+        check_eq((script_int)9, eng->execute("hero.chomp").as_int(), order + ": the global is the stored layer");
+        eng->execute("hero.chomp = 3;");
+        eng->add_global("via_make", eng->make_object(object));
+        is_kin("via_make", "make_object");
+        check_true(eng->execute("same_object(hero, via_make)").as<bool>(), order + ": make_object is the same object");
+        eng->add_global_ref("via_ref", *object);
+        is_kin("via_ref", "add_global_ref");
+        eng->add_function("crowd", [object]() { return std::vector<std::shared_ptr<T>>{object}; });
+        is_kin("crowd()[0]", "a container element");
+        eng->add_function("visit", [object, e = eng.get()](const script_value& f) -> std::string {
+            auto ran = f.as_function()({e->make_value(object)});
+            return ran ? ran.value().as<std::string>() : std::string("call failed");
+        });
+        check_eq(kin, eng->execute("visit(function(var x) -> string { return type_of(x); })").as<std::string>(), order + ": a callback argument");
+        check_eq((script_int)3, eng->execute("hero.health - 97").as_int(), order + ": the C++ property reads through the layer");
+    }
+
+    template<typename T>
+    void order_matrix(const std::string& kin) {
+        auto run = [&](const std::string& order, auto&& steps) {
+            auto eng = order_engine();
+            auto object = std::make_shared<T>();
+            try { steps(eng, object); }
+            catch (const std::exception& e) { check(false, kin + " " + order + " threw: " + e.what()); return; }
+            every_entry_is_the_layer(eng, object, kin, kin + " " + order);
+        };
+        run("extend then add_global", [&](auto& eng, auto& object) { (void)eng->extend(object, kin); eng->add_global("hero", object); });
+        run("add_global then C++ extend", [&](auto& eng, auto& object) { eng->add_global("hero", object); (void)eng->extend(object, kin); });
+        run("add_global then script extend", [&](auto& eng, auto& object) { eng->add_global("hero", object); eng->execute("extend(hero, " + kin + ");"); });
+        run("two globals then extend", [&](auto& eng, auto& object) {
+            eng->add_global("hero", eng->make_object(object));
+            eng->add_global("again", object);
+            (void)eng->extend(object, kin);
+            check_eq(kin, eng->execute("type_of(again)").as<std::string>(), kin + " two globals then extend: the second global follows");
+        });
+    }
     // The observable identity of a layer reached from C++: the boundary return IS the layer
     // (script field, override, inherited C++ property all resolve through it).
     template<typename Base>
@@ -1530,6 +1613,29 @@ public:
             eng->execute("extend(p, Pt3).a = 6;");
             check_eq((script_int)6, eng->execute("p.a").as_int(), "chained access reaches the instance");
             check_throws([&]() { eng->execute("extend(p, Pt);"); }, "a class that does not derive the instance's class is refused");
+        });
+
+        // extend and add_global agree in every order (Dev 2026-10-14): extend before or after the object is bound, from C++ or
+        // script, and every entry (add_global, make_object, add_global_ref, a container element, a callback argument) hands
+        // script the one object, re-classed in place
+        test("extend_and_add_global_agree_in_every_order", [&]() {
+            order_matrix<OrderPoly>("PolyKin");
+            order_matrix<OrderSlot>("SlotKin");
+            order_matrix<OrderPlain>("PlainKin");
+        });
+
+        // An object extended through its base before its own C++ type is bound keeps its layer once the binder registers
+        test("extend_before_the_derived_binder_registers", [&]() {
+            auto eng = order_engine();
+            auto elite = std::make_shared<OrderElite>();
+            std::shared_ptr<OrderPoly> as_base = elite;
+            (void)eng->extend(as_base, "PolyKin");
+            dynamic_binder<OrderElite>(*eng, "OrderElite").constructor<>().base_class<OrderPoly>().property("rank", &OrderElite::rank).build();
+            eng->add_global("hero", elite);
+            check_eq(std::string("PolyKin"), eng->execute("type_of(hero)").as<std::string>(), "the global is the layer");
+            check_eq((script_int)3, eng->execute("hero.chomp").as_int(), "the layer's script field");
+            eng->add_global("via_base", as_base);
+            check_true(eng->execute("same_object(hero, via_base)").as<bool>(), "the base pointer reaches the same layer");
         });
 
         // An extended object owns its layer: when the object dies, a layer a script still holds

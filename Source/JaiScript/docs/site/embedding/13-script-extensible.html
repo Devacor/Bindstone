@@ -168,7 +168,7 @@ Under multiple inheritance the first extensible base's slot is the one used, re-
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto creature = std::make_shared&lt;Creature&gt;();          // C++ constructs and owns, as always
 
 jai::script_value layer = eng-&gt;extend(creature, "Goblin");  // the same thing the builtin does
-eng-&gt;add_global_extended("hero", creature, "Goblin");        // extend-on-bind: handed over already extended
+eng-&gt;add_global("hero", creature);                          // the Goblin: every entry hands script the object's layer, in any order
 eng-&gt;execute("hero.bite = 17;");
 
 std::shared_ptr&lt;jai::class_instance&gt; live = eng-&gt;script_layer(*creature);   // the live layer, or null

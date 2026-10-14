@@ -970,9 +970,6 @@ namespace jai {
         script_value extend(const script_value& object, const script_value& script_class, const std::string& fields_json);
         template<typename T>
         script_value extend(const std::shared_ptr<T>& object, std::string_view script_class, const std::string& fields_json = std::string());
-        // extend-on-bind: hand an object to script already extended
-        template<typename T>
-        void add_global_extended(const std::string& name, const std::shared_ptr<T>& object, std::string_view script_class);
         // The layer's fields as JSON, and the object no longer carries a layer; the old layer is
         // retired (C++ access through it errors, its script fields stay). "" without a layer.
         template<typename T>
@@ -985,6 +982,9 @@ namespace jai {
         // note_script_layer is called from class_instance::set_native.
         void note_script_layer(const void* cpp_object, const std::weak_ptr<class_instance>& owner);
         std::shared_ptr<class_instance> script_layer_of(const void* cpp_object) const;
+        // The instance script already holds for a native object: its layer, or the plain wrapper make_object handed out
+        // (one identity per object, so extend re-classes the object every holder sees)
+        std::shared_ptr<class_instance> object_instance_of(const void* cpp_object) const;
         // Archive: $type (script class) + $script (fields as JSON) for a layer this engine owns;
         // the C++ base a script class extends ("" when it is not such a class); re-attachment
         // around a freshly loaded object (initializers, then hydration, then post_load) - the

@@ -92,7 +92,9 @@ void load(Archive& ar, signal_emitter<T>& sig) {
 	std::vector<serialized_receiver> observers;
 	ar(serialization::make_nvp("observers", observers));
 	for (const auto& r : observers) {
-		sig.connect(rebuild(r));
+		auto recv = rebuild(r);
+		sig.loaded_observers_.push_back(recv);
+		sig.connect(recv);
 	}
 
 	std::map<std::string, serialized_receiver> owned_observers;

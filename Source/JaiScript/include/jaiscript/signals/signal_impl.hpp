@@ -44,25 +44,14 @@ typename signal_emitter<T>::shared_receiver_type signal_emitter<T>::connect(cons
 	return connect(id, convert_script_function<T>(fn_callback));
 }
 
-// Text-receiver bodies have no error-value channel and must not throw into C++ emit
-// sites — errors route to report_script_error like every converted callback (the old
-// silent catch made a receiver typo indistinguishable from the mutation not landing).
+// A text receiver's failure throws out of the emit as a direct execute() of its text would (a function receiver's throws as
+// its converted std::function does); the receivers after it do not run
 template<typename T>
 template<typename... Args>
 void receiver<T>::call_script(Args&&... args) {
 	if (script_engine_ && !script_callback_.empty()) {
-		try {
-			auto locals = detail::build_script_locals(
-				script_engine_,
-				ordered_parameter_names_,
-				std::forward<Args>(args)...
-			);
-			script_engine_->execute(script_callback_, locals);
-		} catch (const std::exception& e) {
-			script_engine_->report_script_error(e.what());
-		} catch (...) {
-			script_engine_->report_script_error("Unknown exception in script signal receiver");
-		}
+		auto locals = detail::build_script_locals(script_engine_, ordered_parameter_names_, std::forward<Args>(args)...);
+		script_engine_->execute(script_callback_, locals);
 	}
 }
 
@@ -70,21 +59,8 @@ template<typename T>
 template<typename... Args>
 bool receiver<T>::call_script_predicate(Args&&... args) {
 	if (script_engine_ && !script_callback_.empty()) {
-		try {
-			auto locals = detail::build_script_locals(
-				script_engine_,
-				ordered_parameter_names_,
-				std::forward<Args>(args)...
-			);
-			auto result = script_engine_->execute(script_callback_, locals);
-			return result.template as<bool>();
-		} catch (const std::exception& e) {
-			script_engine_->report_script_error(e.what());
-			return false;
-		} catch (...) {
-			script_engine_->report_script_error("Unknown exception in script signal receiver");
-			return false;
-		}
+		auto locals = detail::build_script_locals(script_engine_, ordered_parameter_names_, std::forward<Args>(args)...);
+		return script_engine_->execute(script_callback_, locals).template as<bool>();
 	}
 	return false;
 }
@@ -92,29 +68,14 @@ bool receiver<T>::call_script_predicate(Args&&... args) {
 template<typename T>
 void receiver<T>::call_script() {
 	if (script_engine_ && !script_callback_.empty()) {
-		try {
-			script_engine_->execute(script_callback_);
-		} catch (const std::exception& e) {
-			script_engine_->report_script_error(e.what());
-		} catch (...) {
-			script_engine_->report_script_error("Unknown exception in script signal receiver");
-		}
+		script_engine_->execute(script_callback_);
 	}
 }
 
 template<typename T>
 bool receiver<T>::call_script_predicate() {
 	if (script_engine_ && !script_callback_.empty()) {
-		try {
-			auto result = script_engine_->execute(script_callback_);
-			return result.template as<bool>();
-		} catch (const std::exception& e) {
-			script_engine_->report_script_error(e.what());
-			return false;
-		} catch (...) {
-			script_engine_->report_script_error("Unknown exception in script signal receiver");
-			return false;
-		}
+		return script_engine_->execute(script_callback_).template as<bool>();
 	}
 	return false;
 }

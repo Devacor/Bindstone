@@ -4,6 +4,9 @@
 #include <jaiscript/signals/signal_binding.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/signals/signal_serialization.hpp>
+#include <jaiscript/serialization/convenience.hpp>
 #include <vector>
 #include <stdexcept>
 
@@ -16,6 +19,11 @@ class emit_board {
 public:
     jai::signal_emitter<void(int)> onTickedSignal;
     jai::signal<void(int)> onTicked{ onTickedSignal };
+};
+
+struct signal_box {
+    signal_emitter<void(int)> sig;
+    template<typename Archive> void serialize(Archive& ar) { ar("sig", sig); }
 };
 
 class signal_tests : public suite {
@@ -238,7 +246,7 @@ public:
         // don't land" — the mutations always landed; a receiver-body ERROR was being
         // swallowed by call_script's silent catch, which is indistinguishable from a
         // lost mutation at the consumer. Pins: pushes from BOTH receiver flavors
-        // mutate live globals, and receiver errors surface via report_script_error.
+        // mutate live globals, and receiver errors throw out of the emit.
         test("signal_receiver_container_pushes_land", [this]() {
             auto eng = jai::foundry::make_engine();
             eng->execute(R"(
@@ -259,17 +267,136 @@ public:
                 "nested pushes landed from both receiver flavors");
         });
 
-        test("signal_receiver_errors_surface_not_swallowed", [this]() {
+        // A script receiver's failure throws out of the emit with the text a direct call gives (a text receiver: execute of
+        // its text; a function receiver: its converted std::function); the receivers after it do not run
+        test("script_receiver_errors_throw_out_of_the_emit", [this]() {
             auto eng = jai::foundry::make_engine();
+            jai::stdlib::register_all(*eng);
             std::vector<std::string> reported;
             eng->set_script_error_handler([&](const std::string& msg) { reported.push_back(msg); });
-            signal_emitter<void(int)> sig;
-            sig.script_engine(eng.get());
-            sig.parameter_names({"v"});
-            auto recv = sig.connect("undefined_name_xyz.push(v);");
-            sig.emit(3);
-            check_true(!reported.empty(), "receiver-body error routes to report_script_error");
-            check_eq((int64_t)3, eng->execute("1 + 2").as_int(), "engine stays usable after the reported error");
+            eng->execute(R"(
+                int seen = 0;
+                var divides = [](int v) -> void { int z = v / 0; seen += 100; };
+                var counts = [](int v) -> void { seen += v; };
+            )");
+            auto thrown_text = [](auto&& fn) {
+                try { fn(); } catch (const jai::runtime_error& e) { return std::string(e.what()); }
+                return std::string("<no throw>");
+            };
+
+            signal_emitter<void(int)> text_sig;
+            text_sig.script_engine(eng.get());
+            text_sig.parameter_names({"v"});
+            auto t1 = text_sig.connect("a_text", std::string("int z = v / 0; seen += 100;"));
+            auto t2 = text_sig.connect("b_counts", eng->get_variable("counts"));
+            instance_variables locals;
+            locals["v"] = eng->make_value(int64_t{3});
+            const std::string direct_text = thrown_text([&]() { eng->execute("int z = v / 0; seen += 100;", locals); });
+            const std::string text_receiver = thrown_text([&]() { text_sig.emit(3); });
+            check_true(direct_text.find("Division by zero") != std::string::npos, direct_text);
+            check_eq(direct_text, text_receiver, "a text receiver throws what executing its text throws");
+            check_eq((int64_t)0, eng->get_variable("seen").as_int(), "the receiver after the failing one did not run");
+
+            signal_emitter<void(int)> fn_sig;
+            auto f1 = fn_sig.connect("a_divides", eng->get_variable("divides"));
+            auto f2 = fn_sig.connect("b_counts", eng->get_variable("counts"));
+            auto host_fn = convert_script_function<void(int)>(eng->get_variable("divides"));
+            const std::string direct_fn = thrown_text([&]() { host_fn(3); });
+            const std::string fn_receiver = thrown_text([&]() { fn_sig.emit(3); });
+            check_true(direct_fn.find("Division by zero") != std::string::npos, direct_fn);
+            check_eq(direct_fn, fn_receiver, "a function receiver throws what its converted std::function throws");
+            check_eq((int64_t)0, eng->get_variable("seen").as_int());
+
+            signal_emitter<void(int)> throw_sig;
+            throw_sig.script_engine(eng.get());
+            throw_sig.parameter_names({"v"});
+            auto th = throw_sig.connect("a_throws", std::string("throw \"boom \" + to_string(v);"));
+            check_eq(std::string("boom 4"), thrown_text([&]() { throw_sig.emit(4); }), "a script throw arrives with its text");
+
+            signal_emitter<void(int)> once_sig;
+            auto once = once_sig.connect_oneshot([](int) { throw jai::runtime_error("once"); });
+            check_eq(std::string("once"), thrown_text([&]() { once_sig.emit(1); }));
+            check_eq(std::string("<no throw>"), thrown_text([&]() { once_sig.emit(2); }), "a one-shot that threw has fired");
+
+            check_true(reported.empty(), "nothing went to the error handler");
+            check_eq((int64_t)3, eng->execute("1 + 2").as_int(), "engine stays usable");
+        });
+
+        // A load rebuilds an unnamed text receiver with nothing outside to hold it: the emitter holds it, as it holds a named one
+        test("unnamed_text_receivers_survive_a_load", [this]() {
+            auto eng = jai::foundry::make_engine();
+            eng->execute("int hits = 0;");
+            signal_box box;
+            box.sig.script_engine(eng.get());
+            box.sig.parameter_names({"v"});
+            auto held = box.sig.connect(std::string("hits += v;"));
+            auto named = box.sig.connect("named", std::string("hits += 100;"));
+            auto save = [&](const signal_box& b) {
+                serialization::json_archive_writer w(2, eng.get());
+                w.begin_object("", 1);
+                w.serialize_object_content(b);
+                w.end_object();
+                return w.str();
+            };
+            const std::string json = save(box);
+            signal_box loaded;
+            {
+                serialization::json_archive_reader r(json, eng.get());
+                std::string type_name;
+                uint32_t version = 0;
+                r.begin_object(type_name, version);
+                r(loaded);
+                r.end_object();
+            }
+            loaded.sig.emit(2);
+            check_eq((int64_t)102, eng->get_variable("hits").as_int(), "the unnamed receiver and the named one both ran after the load");
+            check_eq(json, save(loaded), "the loaded signal saves what it loaded");
+            loaded.sig.clear();
+            loaded.sig.emit(5);
+            check_eq((int64_t)102, eng->get_variable("hits").as_int(), "clear() drops the loaded receivers");
+        });
+
+        test("script_receiver_errors_reach_the_script_that_fired_the_signal", [this]() {
+            auto eng = jai::foundry::make_engine();
+            jai::stdlib::register_all(*eng);
+            signal_emitter<void(int)> text_sig;
+            text_sig.script_engine(eng.get());
+            text_sig.parameter_names({"v"});
+            signal_emitter<void(int)> fn_sig;
+            signal_emitter<void(int)> outer;
+            signal_emitter<void(int)> inner;
+            eng->add_function("fire_text", [&](script_int v) { text_sig.emit(static_cast<int>(v)); });
+            eng->add_function("fire_fn", [&](script_int v) { fn_sig.emit(static_cast<int>(v)); });
+            eng->add_function("fire_outer", [&](script_int v) { outer.emit(static_cast<int>(v)); });
+            eng->add_function("fire_inner", [&](script_int v) { inner.emit(static_cast<int>(v)); });
+            eng->execute(R"(
+                int seen = 0;
+                var lam = [](int v) -> void { throw "lam " + to_string(v); };
+                var nests = [](int v) -> void { fire_inner(v); seen += 1000; };
+                var counts = [](int v) -> void { seen += v; };
+            )");
+            auto t1 = text_sig.connect("a_text", std::string("throw \"text \" + to_string(v);"));
+            auto t2 = text_sig.connect("b_counts", eng->get_variable("counts"));
+            auto f1 = fn_sig.connect("a_lam", eng->get_variable("lam"));
+            auto f2 = fn_sig.connect("b_counts", eng->get_variable("counts"));
+            auto i1 = inner.connect("a_lam", eng->get_variable("lam"));
+            auto o1 = outer.connect("a_nests", eng->get_variable("nests"));
+            auto o2 = outer.connect("b_counts", eng->get_variable("counts"));
+            auto r = eng->execute(R"(
+                string got = "";
+                try { fire_text(4); got += "missed"; } catch (e) { got += e.message; }
+                got += "|";
+                try { fire_fn(5); got += "missed"; } catch (e) { got += e.message; }
+                got += "|";
+                try { fire_outer(6); got += "missed"; } catch (e) { got += e.message; }
+                got + "|" + to_string(seen);
+            )");
+            check_eq(std::string("text 4|lam 5|lam 6|0"), r.as_string(),
+                "each failure reached the script's catch, the nested one outward through both emits, and no later receiver ran");
+            bool threw = false;
+            try { outer.emit(7); } catch (const jai::runtime_error& e) { threw = std::string(e.what()) == "lam 7"; }
+            check_true(threw, "a nested emit's failure leaves the outer C++ emit too");
+            check_eq((int64_t)0, eng->get_variable("seen").as_int());
         });
 
         test("signal_disconnect_during_emit", [this]() {

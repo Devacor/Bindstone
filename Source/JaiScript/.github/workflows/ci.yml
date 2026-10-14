@@ -69,7 +69,7 @@ jobs:
           '-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug>:Embedded>'
 
       - name: Build
-        run: cmake --build build --target jaiscript_tests jaiscript_fuzz jaiscript_runner jaiscript_lsp jai_gloom jai_crawler jai_demoreel
+        run: cmake --build build --target jaiscript_tests jaiscript_fuzz jaiscript_runner jaiscript_lsp jai_gloom jai_crawler jai_demoreel embed_quickstart
 
       - name: Tests (interpreter)
         run: bash tools/ci/gates.sh tests-interp
@@ -85,6 +85,9 @@ jobs:
 
       - name: crawler hash gate
         run: bash tools/ci/gates.sh crawler
+
+      - name: Embedding quickstart
+        run: bash tools/ci/gates.sh embed-quickstart
 
       - name: Language server tests
         run: bash tools/ci/gates.sh lsp

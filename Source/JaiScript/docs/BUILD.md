@@ -164,8 +164,8 @@ Adding a **new** test `.cpp` requires re-running CMake — the test list is a
 ## Comparison benchmarks
 
 `JAISCRIPT_ENABLE_BENCHMARKS=ON` adds the performance suites, which time JaiScript alone. The cross-language
-comparisons (Lua, Squirrel, ChaiScript and the game ports) are a separate harness with its own build and its own
-dependency list (see `JaiScriptComparisons/README.md` beside this package); nothing third-party ships here.
+comparisons (Lua, Squirrel, ChaiScript and the game ports) are a separate harness, not part of this package;
+nothing third-party ships here.
 
 ## Layout
 

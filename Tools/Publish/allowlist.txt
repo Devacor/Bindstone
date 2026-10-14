@@ -30,6 +30,7 @@
 - .internal/**
 - bench/**
 - CMakeSettings.json
+- tools/publish/**
 - examples/gloom_idiomatic/**
 
 # Never shipped, whatever the include

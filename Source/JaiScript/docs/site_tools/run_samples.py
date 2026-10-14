@@ -32,7 +32,10 @@ from html.parser import HTMLParser
 
 SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 REPO = SITE.parents[1]
-DEFAULT_RUNNER = REPO / "out" / "build" / "x64-Release BENCHMARKS" / "bin" / "jaiscript.exe"
+RUNNER_DIRS = [REPO / "build" / "bin", REPO / "out" / "build" / "x64-Release" / "bin",
+               REPO / "out" / "build" / "x64-Release BENCHMARKS" / "bin"]
+DEFAULT_RUNNER = next((d / "jaiscript" for d in RUNNER_DIRS if any((d / n).exists() for n in ("jaiscript", "jaiscript.exe"))),
+                      RUNNER_DIRS[0] / "jaiscript")
 
 INTRO_SUPPORT_RE = re.compile(r"^\s*(?:with|and|plus|then)\s+`([A-Za-z0-9_./-]+\.jai)`\s*:?\s*$", re.I)
 INTRO_SUPPORT_RE2 = re.compile(r"`([A-Za-z0-9_./-]+\.jai)`\s*:\s*$")
@@ -240,6 +243,8 @@ def main():
     args = ap.parse_args()
 
     runner = pathlib.Path(args.runner)
+    if not runner.exists() and runner.with_name(runner.name + ".exe").exists():
+        runner = runner.with_name(runner.name + ".exe")
     if not runner.exists():
         print("runner not found: %s" % runner)
         return 2

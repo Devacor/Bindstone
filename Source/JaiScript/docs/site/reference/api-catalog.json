@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "basis": "Source-audited c2ac8b4ab draft with approved API consistency changes (2026-10-02)",
+  "basis": "The public C++ API declared under include/jaiscript",
   "entries": [
     {
       "owner": "array<T>",

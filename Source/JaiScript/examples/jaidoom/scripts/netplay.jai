@@ -2,8 +2,8 @@
 // organized as classes: a Player per slot (LocalPlayer = me, Puppet = a
 // net-driven PLAY-sprite ghost), and a Session owning the wire (HostSession =
 // NetServer star hub: assigns slots, relays, runs co-op authority;
-// ClientSession = one NetChannel to the host). Bindstone's action pattern
-// carries everything: one JSON map per packet, "t" type + "s" sender slot,
+// ClientSession = one NetChannel to the host). One action pattern carries
+// everything: one JSON map per packet, "t" type + "s" sender slot,
 // dispatched by Session.apply. The mobj pool stays flat (admission rules);
 // classes hold INDICES into it. Free np_* functions remain the boundary the
 // rest of the game calls — they delegate to SESSION.

@@ -140,11 +140,13 @@ copying is shallow. Interned symbol IDs are engine-bound: never share or seriali
 
 ## Implementation notes
 
-Design notes live in `internal/` when it is present (published copies may omit it). Read before touching:
-`internal/invariants.md` (value layout, `strong_ptr`, raw-index dispatch, the VM run loop),
-`internal/typed_regions_design.md` (adding an opcode: it joins both env safe-lists in `vm_compiler.cpp` and, if it names
-a slot, the debugger's locals walk), `internal/type_proofs_design.md` (proofs). Without `internal/`, the code and the
-site are the reference.
+A new opcode joins both env safe-lists in `vm_compiler.cpp` and, if it names a slot, the debugger's locals walk.
+<!-- internal-only -->
+Design notes live in `internal/`. Read before touching: `internal/invariants.md` (value layout, `strong_ptr`, raw-index
+dispatch, the VM run loop), `internal/typed_regions_design.md` (the VM's typed regions and opcodes),
+`internal/type_proofs_design.md` (proofs).
+<!-- /internal-only -->
+The code and the site are the reference for everything else.
 
 ## Commits
 

@@ -171,8 +171,10 @@ Two catalogues move with the code:
   `include/jaiscript/detail/ast_serializer.hpp`, so stale `.jaibite` caches are
   rejected instead of misread.
 
+<!-- internal-only -->
 Before you touch value layout, `strong_ptr`, raw-index dispatch or the VM run loop, read
 [`internal/invariants.md`](internal/invariants.md).
+<!-- /internal-only -->
 
 ## Documentation
 

@@ -1,6 +1,16 @@
 # Justified leak-scan hits. One per line, tab-separated:
-#   <path glob>	<check id>	<text the hit must contain>	<reason>
+#   <path glob>	<check id>	<text the hit's line must contain>	<reason>
 # A hit is excused only when the file matches the glob, the check id matches, and the matched line contains the text.
 
 LICENSE	email	mike@m2tm.net	the license holder's contact, kept by decision
 README.md	email	mike@m2tm.net	the author credit, kept by decision
+docs/site_tools/check_leakage.py	host-project	(r"	the site leak checker's own patterns
+docs/site_tools/check_leakage.py	provenance	(r"	the site leak checker's own patterns
+docs/site_tools/check_leakage.py	ledger	(r"	the site leak checker's own patterns
+docs/site_tools/check_leakage.py	agent-name	(r"	the site leak checker's own patterns
+docs/site/embedding/11-performance.html	iso-date	<tr><td><strong>	the date a published measurement was taken
+docs/site/guide/14-time.html	iso-date	<code>	a date-format example
+source/tests/stdlib/time_tests.cpp	iso-date	months across years	date arithmetic test data
+source/tests/language/function_tests.cpp	ledger	edger	a script class named Ledger in a nocopy test
+source/tests/language/review_regression_tests.cpp	ledger	edger	a script class named Ledger in a nocopy test
+docs/site/guide/07-classes.html	ledger	nocopy class Ledger	a script class named Ledger in a nocopy example

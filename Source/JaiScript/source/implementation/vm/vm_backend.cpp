@@ -3682,7 +3682,11 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			// an environment variable through the load's armed cache: the full path's walk resolves the same cell (get_env_var_ptr
 			// and vm_storage_lookup share the ladder), and a frame whose member scope is active keeps the full path's member rules
 			bool plain = !f.locals || f.top_level;
-			if (!plain) { ensure_frame_member_scope(f, environment_.get()); plain = !frame_scope_active(f); }
+			if (!plain) {
+				ensure_frame_member_scope(f, environment_.get());
+				plain = !frame_scope_active(f);
+				if (!plain && (ins.c & store_flag_no_result) && store_this_field_scalar(f, ins, value)) { return op_status::ok; }
+			}
 			if (plain) {
 				if (script_value* cell = env_store_cell(f, f.ip * 3 + 2, f.code->symbols[ins.a])) {
 					const size_t ci = cell->raw_storage_index();
@@ -3756,6 +3760,16 @@ JAI_NOINLINE bool vm_backend::store_ref_alias_var(frame& f, const vm_instruction
 	storage = std::move(v);
 	if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
 	return true;
+}
+
+// a statement-position bare store of a scalar into a field of the method's receiver, through the armed this-field store IC: a declared
+// type of the scalar's own kind (or none) is the full path's identity conversion, so the cell takes the value in place; false = the full path
+JAI_NOINLINE bool vm_backend::store_this_field_scalar(frame& f, const vm_instruction& ins, script_value& value) {
+	type_info* declared = nullptr;
+	script_value* cell = this_field_store_probe(f, f.ip * 3, f.code->symbols[ins.a], declared);
+	if (!cell || cell->raw_storage_index() == script_value::TYPEID_REFERENCE || cell->raw_storage_index() == script_value::TYPEID_CPP_BOUND) { return false; }
+	if (declared && declared->base_type != script_value_type::jai_any_type && declared->base_type != value.current_type()) { return false; }
+	return store_scalar_lane(*cell, value, ins);
 }
 
 // a scalar into storage that is untagged, var or of the scalar's own type: the cell holds the value (a var's own tag stamped on it), the

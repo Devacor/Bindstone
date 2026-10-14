@@ -117,9 +117,9 @@ s.spawn_wave();
 s.spawn_wave();</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave 1 incoming
 wave 2 incoming</code></pre></div>
-<p>This is the default route for engine classes. Reach for it first. Named <strong>script-text</strong>
+<p>This is the default route for engine classes. Reach for it first. <strong>Script-text</strong>
 receivers connect through the same verb (<code>s.onWave.connect("logger", "print(\"wave logged\");")</code>)
-and are the receivers that can ride save files; the binder chapter&#x27;s serialization section shows one
+and are the receivers that can ride save files, named or unnamed; the binder chapter&#x27;s serialization section shows one
 surviving a JSON round-trip and firing after load.</p>
 <h3 id="any-signal-member-one-line">2. Any signal member, one binder line<a class="hlink" href="#any-signal-member-one-line" aria-label="link">&#8203;</a></h3>
 <p>A class that isn&#x27;t a <code>property_owner</code> exposes a plain <code>jai::signal&lt;Sig&gt;</code> or
@@ -178,7 +178,7 @@ is the summary; the subsections give the details.</p>
 <tr><td>Dropping that handle</td><td>disconnects</td><td>leaves the connection in place (<code>scoped_connection</code> disconnects)</td><td>leaves the connection in place</td></tr>
 <tr><td>Tied to a receiving object</td><td>the object holds the handle (a member, <code>receiver_owner</code>, <code>track(...)</code>)</td><td>the slot tracks a smart pointer (<code>track</code>, <code>track_foreign</code>)</td><td>automatic: destroying the receiver or context object disconnects</td></tr>
 <tr><td>Script receivers</td><td>script text and script functions, connected from C++ or script</td><td>none</td><td>JavaScript handlers through the QML engine</td></tr>
-<tr><td>Saved with the object</td><td>named script-text receivers (<code>JAI_SIGNAL_PROPERTY</code>)</td><td>no</td><td>no</td></tr>
+<tr><td>Saved with the object</td><td>script-text receivers, named and unnamed (<code>JAI_SIGNAL_PROPERTY</code>)</td><td>no</td><td>no</td></tr>
 <tr><td>A receiver throws</td><td>out of the emit; later receivers do not run</td><td>out of the call; later slots do not run</td><td>undefined unless the slot catches it</td></tr>
 <tr><td>Threads</td><td>one recursive mutex per emitter, held through the whole emit; receivers run on the emitting thread</td><td>internal locking; slots run outside the signal&#x27;s lock</td><td>direct connections on the emitting thread, queued ones on the receiver&#x27;s thread</td></tr>
 <tr><td>Return values</td><td>none from <code>emit</code>; <code>emit_while</code> stops at the first <code>false</code></td><td>a combiner; the default returns an optional of the last slot&#x27;s result</td><td>signals are documented as <code>void</code></td></tr>
@@ -253,9 +253,9 @@ to follow reloads.</li>
 <h3 id="compare-serialization">Connections that save<a class="hlink" href="#compare-serialization" aria-label="link">&#8203;</a></h3>
 <p><code>JAI_SIGNAL_PROPERTY</code> gives the signal a hidden property that serializes the emitter with
 the owner&#x27;s other properties, in JSON or binary. It writes the signal&#x27;s
-<code>parameter_names</code> and each named script-text receiver by id, with its source and parameter
-names; loading rebuilds those receivers on the archive&#x27;s engine and reconnects them under their ids,
-ready to fire. C++ callbacks and script function receivers are runtime-only: a function value is not
+<code>parameter_names</code> and each script-text receiver with its source and parameter names, a named one
+by id; loading rebuilds those receivers on the archive&#x27;s engine and reconnects them, a named one under its id
+and an unnamed one held by the emitter, ready to fire. C++ callbacks and script function receivers are runtime-only: a function value is not
 text, so it is not written. Neither Boost nor Qt saves connections as part of an object&#x27;s state;
 there the host reconnects after a load.</p>
 <h3 id="compare-errors">When a receiver fails<a class="hlink" href="#compare-errors" aria-label="link">&#8203;</a></h3>

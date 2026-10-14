@@ -250,10 +250,10 @@ int run_endgame() {
 	// the Six Scales
 	quest_talk(0, R_ORACLE);
 	quest_talk(0, R_ORACLE);
-	bool avatar = CHARS[0].quest_stage[Q_SIX_SCALES] == 99;
+	bool crowned = CHARS[0].quest_stage[Q_SIX_SCALES] == 99;
 	bool crown = CHARS[0].worn[Slot.head].base == I_CROWN_SWAMP || pack_has(0, I_CROWN_SWAMP, 1);
-	print(`  the Six Scales: ${avatar ? "turned in" : "NOT turned in"}; crown ${crown ? "received" : "missing"}; title "${player_title(0)}"`);
-	if (!avatar || !crown) { fails = fails + 1; }
+	print(`  the Six Scales: ${crowned ? "turned in" : "NOT turned in"}; crown ${crown ? "received" : "missing"}; title "${player_title(0)}"`);
+	if (!crowned || !crown) { fails = fails + 1; }
 	print(`endgame: ${fails == 0 ? "complete" : to_string(fails) + " problems"}, ${total_deaths} deaths in six boss fights, tick ${TICK}, STATE_HASH ${state_hash()}`);
 	return fails;
 }

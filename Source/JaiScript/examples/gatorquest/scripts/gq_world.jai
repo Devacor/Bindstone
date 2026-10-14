@@ -320,7 +320,7 @@ void gen_overworld() {
 	add_town(w, mx - 2, my - 2, mx + 15, my + 11, "Mudport");
 	carve_road(w, sx + 25, sy + 9, mx, my + 5, T_ROAD);
 
-	// six moongates in a ring around Swampton
+	// six lilygates in a ring around Swampton
 	for (int g = 1; g <= 6; ++g) {
 		int ang = (g - 1) * 60 + 30;
 		int gx = px + math::itrunc(math::cos(ang * 0.0174533) * 26.0);
@@ -365,7 +365,7 @@ void gen_overworld() {
 	add_spawner(w, sx + 32, sy - 4, mid("Swamp Rat"), 3, 5, 300);
 }
 
-// a world's way home: a moongate at its arrival point leading back to Gatorland
+// a world's way home: a lilygate at its arrival point leading back to Gatorland
 void arrival_gate(int w, int x, int y) {
 	fill_disc(w, x, y, 2, w == 6 ? T_CLOUD : (w == 2 ? T_RUINFLOOR : (w == 4 ? T_SNOW : (w == 5 ? T_OBSIDIAN : T_MUD))));
 	add_gate(w, x, y, 0);

@@ -125,7 +125,7 @@ void quest_talk(int slot, int role) {
 		fx_at(MOB_WORLD[c.mob], MOB_X[c.mob], MOB_Y[c.mob], Fx.gold, 16);
 		if (q == Q_SIX_SCALES) {
 			for (int s = 0; s < CHARS.size(); ++s) {
-				if (CHARS[s].active) { say_to(s, `${c.name} has become the GATOR AVATAR! All hail!`, C_YELLOW); }
+				if (CHARS[s].active) { say_to(s, `${c.name} has become the GRAND GATOR! All hail!`, C_YELLOW); }
 			}
 		}
 		return;

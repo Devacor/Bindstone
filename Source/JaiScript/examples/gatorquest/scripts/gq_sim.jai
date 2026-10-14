@@ -134,7 +134,7 @@ void weather_tick() {
 	}
 }
 
-// wild reagents sprout where players roam (the classic shard sight: pearls and moss on the grass)
+// wild reagents sprout where players roam (pearls and moss on the grass)
 void forage_tick() {
 	if (TICK % 120 != 0) { return; }
 	for (int s = 0; s < CHARS.size(); ++s) {

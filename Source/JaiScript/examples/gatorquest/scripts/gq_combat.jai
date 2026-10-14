@@ -1,4 +1,4 @@
-// Gator Quest - combat and the skill system: UO-style skills that rise by
+// Gator Quest - combat and the skill system: skills that rise by
 // use, hit/parry/crit resolution, damage types, death (loot, fame, slime
 // splits, boss relics), ghosts and resurrection, poison/burn/slow, regen.
 
@@ -10,7 +10,7 @@ int DMG_COLD = 2;
 int DMG_POISON = 3;
 int DMG_ENERGY = 4;
 
-int SKILL_CAP = 7000;          // total skill tenths (700.0), like the old shards
+int SKILL_CAP = 7000;          // total skill tenths (700.0)
 array<int> SKILL_STAT = [0, 0, 1, 0, 0, 1, 2, 2, 2, 1, 1, 0, 0, 0, 2, 2, 1, 1];   // 0 str, 1 dex, 2 int
 
 int skill_total(int slot) {
@@ -68,7 +68,7 @@ bool skill_check(int slot, int sk, int difficulty) {
 
 string player_title(int slot) {
 	Character& c = CHARS[slot];
-	if (c.quest_stage.size() > Q_SIX_SCALES && c.quest_stage[Q_SIX_SCALES] == 99) { return "the Gator Avatar"; }
+	if (c.quest_stage.size() > Q_SIX_SCALES && c.quest_stage[Q_SIX_SCALES] == 99) { return "the Grand Gator"; }
 	int best = 0;
 	for (int i = 1; i < c.skill.size(); ++i) {
 		if (c.skill[i] > c.skill[best]) { best = i; }

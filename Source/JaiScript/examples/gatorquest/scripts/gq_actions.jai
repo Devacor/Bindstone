@@ -55,9 +55,9 @@ int player_create(int slot, string name, int hue) {
 	pack_add(slot, make_item(I_MINORHEAL, 3));
 	pack_add(slot, make_item(I_BANDAGE, 8));
 	pack_add(slot, make_item(I_FISHPOLE, 1));
-	pack_add(slot, make_item(I_GARLIC, 6));
-	pack_add(slot, make_item(I_GINSENG, 6));
-	pack_add(slot, make_item(I_ASH, 8));
+	pack_add(slot, make_item(I_ONION, 6));
+	pack_add(slot, make_item(I_CATTAIL, 6));
+	pack_add(slot, make_item(I_FIREFLY, 8));
 	pack_add(slot, make_item(I_BREAD, 3));
 	player_spawn(slot);
 	return slot;
@@ -688,7 +688,7 @@ void use_item(int slot, int index) {
 		heal_mob(m, 10, m);
 		return;
 	}
-	if (eff == "nightsight") { pack_take_at(slot, index, 1); c.buff_night = TICK + d.pow; say_to(slot, "The darkness melts away.", C_YELLOW); return; }
+	if (eff == "eyeshine") { pack_take_at(slot, index, 1); c.buff_night = TICK + d.pow; say_to(slot, "The darkness melts away.", C_YELLOW); return; }
 	if (eff == "fireres") { pack_take_at(slot, index, 1); c.buff_fire = TICK + d.pow; say_to(slot, "Your scales feel cool and fireproof.", C_ORANGE); return; }
 	if (eff == "regen") { pack_take_at(slot, index, 1); c.buff_regen = TICK + d.pow; say_to(slot, "You feel your wounds knitting.", C_GREEN); return; }
 	if (eff == "food") {

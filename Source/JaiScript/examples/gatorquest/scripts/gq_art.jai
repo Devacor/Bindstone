@@ -535,7 +535,7 @@ int sprite_compiled(int spr, string tint, int armor_c, int hat_c, int weapon_c) 
 array<string> ICON_NAMES = ["sword", "greatsword", "dagger", "club", "mace", "hammer", "pan", "anchor", "trident", "bow", "crossbow", "wand", "staff",
 	"hat", "cap", "helm", "wizhat", "crown", "tunic", "chain", "plate", "robe", "gloves", "legs", "boots", "shield", "amulet", "ring",
 	"potion", "bomb", "scroll", "rune", "book", "fish", "meat", "crawdad", "bowl", "bread", "cheese", "pie", "marsh", "shroom",
-	"pearl", "herb", "garlic", "root", "silk", "ash", "pole", "pick", "axe", "mortar", "bandage", "arrow", "ore", "ingot", "log",
+	"pearl", "herb", "bulb", "root", "silk", "ash", "pole", "pick", "axe", "mortar", "bandage", "arrow", "ore", "ingot", "log",
 	"feather", "hide", "bone", "orb", "shard", "fluff", "tail", "gem", "coins", "can", "bottle", "scale", "frog", "duck", "kazoo", "banjo", "bag"];
 array<string> ICON_BITS = ["00001000100010011100", "00011001100110011110", "00000000100010001100", "00000001100110011100", "01110011100010000100", "11111011100010000100", "01110011100010000100", "10101111110010001110", "10101111100010000100", "01100100101001001100", "10001111110010001000", "00001000100010010000", "00001000100010010000",
 	"01110111110000000000", "01110111100000000000", "01110111110101000000", "00100011100111011111", "10101111111111100000", "11011111110111001110", "11011111111111001110", "11011111111111101110", "01110111110111011111", "11011110110000000000", "11110110101101100000", "01100111000000000000", "11111111110111000100", "01010001000111000100", "00000011100101001110",

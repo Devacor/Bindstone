@@ -258,7 +258,7 @@ bool bot_survive(Bot& b, int m) {
 		if (p < 0) { p = pack_index_of(b.slot, I_MINORHEAL); }
 		if (p >= 0 && TICK % 5 == 0) { intent_act(b.slot, "U" + to_string(p)); return false; }
 		if (c.action == 0 && pack_has(b.slot, I_BANDAGE, 1) && TICK % 7 == 0) { intent_act(b.slot, "N"); }
-		if (c.spells[0] == 1 && MOB_MP[m] >= 4 && pack_has(b.slot, I_GARLIC, 1) && pack_has(b.slot, I_GINSENG, 1) && TICK % 9 == 0) {
+		if (c.spells[0] == 1 && MOB_MP[m] >= 4 && pack_has(b.slot, I_ONION, 1) && pack_has(b.slot, I_CATTAIL, 1) && TICK % 9 == 0) {
 			intent_act(b.slot, "C0");
 		}
 	}
@@ -286,7 +286,7 @@ bool bot_fight_and_loot(Bot& b, int m, int r) {
 		else if (d <= 1) { intent_move(b.slot, dir_of(MOB_X[t] - MOB_X[m], MOB_Y[t] - MOB_Y[m])); }
 		else { intent_move(b.slot, -1); }
 		// a spell now and then
-		if (CHARS[b.slot].spells[1] == 1 && MOB_MP[m] >= 8 && pack_has(b.slot, I_ASH, 2) && bot_roll(b, 6) == 0) { intent_act(b.slot, "C1"); }
+		if (CHARS[b.slot].spells[1] == 1 && MOB_MP[m] >= 8 && pack_has(b.slot, I_FIREFLY, 2) && bot_roll(b, 6) == 0) { intent_act(b.slot, "C1"); }
 		return true;
 	}
 	int gi = nearest_ground_item(m, b.slot, 7);

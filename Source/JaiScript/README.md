@@ -7,8 +7,8 @@ two interchangeable backends — a tree-walking interpreter and a bytecode VM �
 byte-for-byte parity by 2,400+ tests and a differential fuzzer. It has no dependencies and
 builds as a static library plus headers.
 
-The documentation — a 14-chapter language guide, a 14-chapter embedding guide, the examples
-and a reference — is a static site in [`docs/site/`](docs/site/). Open
+The documentation — a 15-chapter language guide, a 15-chapter embedding guide, language bridges
+and code migrations, the examples and a reference — is a static site in [`docs/site/`](docs/site/). Open
 `docs/site/index.html` in a browser; a clone is all you need.
 
 ## A taste
@@ -232,6 +232,9 @@ It is a fan project, not affiliated with or endorsed by id Software.
   embedding guide, examples, reference.
 - [`docs/site/guide/index.html`](docs/site/guide/index.html) — the language guide, from the
   first script to modules, reflection and strict checking.
+- [`docs/site/bridges/index.html`](docs/site/bridges/index.html) — language bridges from
+  JavaScript, C++ and C#, and code migrations from Cereal, Boost.Serialization, Boost.Signals2,
+  ChaiScript and sol2.
 - [`docs/site/reference/index.html`](docs/site/reference/index.html) — operators, conversions,
   builtin methods, the engine API, and every run-time error text (byte-identical on both
   backends).

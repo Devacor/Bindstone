@@ -1514,6 +1514,42 @@ public:
 			check_lt(weighted_bounds[1], flat_bounds[1]);
 		});
 
+		// A worker remembers which function each of its call sites validated (vm_backend::worker_callee_memo_): rows hold raw node
+		// addresses, written and read only by the worker's own thread, cleared before every region; a provisioned callee lives in
+		// the worker's root for the whole region, so an address cannot name another function until the next clear. The shared
+		// sites' caches stay main-thread. Inlined leaves and parked calls, many regions, and a redefinition between regions, with
+		// one worker and several (the XTHREAD canary build checks that no worker touches a shared count).
+		test("worker_callee_memo_follows_redefinitions_between_regions", [this]() {
+			for (size_t workers : {size_t(1), size_t(4)}) {
+				auto e = make_engine();
+				e->parallel_thread_count(workers);
+				e->execute(R"(
+					int leaf(int x) { return x * 3 + 1; }
+					int big(int x) { int s = 0; for (int i = 0; i < 3; ++i) { s += x + i; } return s; }
+					int f(int x) { return leaf(x) + big(x) + leaf(x + 1); }
+					var a = [];
+					for (var i = 0; i < 64; i++) { a.push(i); }
+				)");
+				auto run = [&]() { return e->execute("var r = parallel_transform(a, f); return [r[0], r[5], r[63]];").as_array(); };
+				for (int round = 0; round < 3; ++round) {
+					auto r = run();
+					check_eq((int64_t)(1 + 3 + 4), r[0].as_int(), "leaf + big + leaf at 0");
+					check_eq((int64_t)(16 + 18 + 19), r[1].as_int(), "at 5");
+					check_eq((int64_t)(190 + 192 + 193), r[2].as_int(), "at 63");
+				}
+				e->execute("int leaf(int x) { return x - 2; }");
+				for (int round = 0; round < 2; ++round) {
+					auto r = run();
+					check_eq((int64_t)(-2 + 3 - 1), r[0].as_int(), "the redefined leaf at 0");
+					check_eq((int64_t)(3 + 18 + 4), r[1].as_int(), "the redefined leaf at 5");
+				}
+				e->execute("int big(int x) { return 100; }");
+				auto r = run();
+				check_eq((int64_t)(-2 + 100 - 1), r[0].as_int(), "the redefined big at 0");
+				check_eq((int64_t)(61 + 100 + 62), r[2].as_int(), "the redefined big at 63");
+			}
+		});
+
 		test("admission_recheck_after_function_redefine", [this]() {
 			auto e = make_engine();
 			e->parallel_thread_count(2);

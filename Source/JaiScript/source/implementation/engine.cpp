@@ -5518,11 +5518,17 @@ void engine::note_script_layer(const void* cpp_object, const std::weak_ptr<class
     layers[cpp_object] = owner;
 }
 
-std::shared_ptr<class_instance> engine::script_layer_of(const void* cpp_object) const {
+std::shared_ptr<class_instance> engine::object_instance_of(const void* cpp_object) const {
     auto& layers = impl->script_layers_;
     if (layers.empty()) { return nullptr; }
     auto it = layers.find(cpp_object);
     return it == layers.end() ? nullptr : it->second.lock();
+}
+
+std::shared_ptr<class_instance> engine::script_layer_of(const void* cpp_object) const {
+    auto instance = object_instance_of(cpp_object);
+    const class_definition* def = instance ? instance->get_class_definition() : nullptr;
+    return def && def->is_script_class() ? instance : nullptr;
 }
 
 bool engine::script_layer_save(const std::shared_ptr<class_instance>& layer, std::string& script_class_name, std::string& fields_json) {

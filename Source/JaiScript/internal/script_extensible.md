@@ -29,7 +29,7 @@ self.spawn = [=](var& creature) -> void { extend(creature, Voidling).spawn(); };
 C++ never names the class. Its side is one line, when it wants one at all:
 
 ```cpp
-engine->extend(creature, "Voidling");                 // or add_global_extended("hero", creature, "Voidling")
+engine->extend(creature, "Voidling");                 // add_global("hero", creature), before or after, hands script the layer
 ```
 
 Nothing is registered, cast, keyed, or looked up by hand. From that line on, every road back
@@ -120,7 +120,7 @@ carried across the boundary.
 | D8 | A retired layer carries a flag; the C++ extraction funnels and the property-getter paths report on it. A retired *extended* layer references an object it no longer owns (fine: the object outlives it or the flag catches the access); a retired *constructed* layer keeps owning its object. | Stale use must not reach an object another layer speaks for (S7); no holder surgery, one flag. |
 | D8b | An extended object's native object is non-owning: `bound_ptr` for member access (zero cost, guarded by the retired flag), `weak_data` for `shared_ptr` extraction (locks the object's own owner). | The object must be free to die; the layer must still serve `T&` at pointer-read cost and `shared_ptr` with real ownership. |
 | D9 | Archive load runs field initializers before `$script` hydration. | Fields untouched during play were never materialized, so they were never saved; without this they load as null. |
-| D10 | Names: `script_extensible` (members `script_layer`, `script_layer_to_json`, `script_layer_from_json`, `attach_script_layer`, `own_script_layer`, `detach_script_layer`, `jai_script_slot`), `engine::extend`, `engine::add_global_extended`, `engine::script_layer_detach`, `engine::script_layer`; engine internals prefixed `script_layer_`; the script builtin `extend`. Nothing generic (`detach`, `attach`) lands on property_owner-derived types — components own those names. | `adopt` already means definition-adoption in the binder; `extend` is the word the vision doc reserved for exactly this. One vocabulary, no pollution of derived classes. |
+| D10 | Names: `script_extensible` (members `script_layer`, `script_layer_to_json`, `script_layer_from_json`, `attach_script_layer`, `own_script_layer`, `detach_script_layer`, `jai_script_slot`), `engine::extend`, `engine::script_layer_detach`, `engine::script_layer`; engine internals prefixed `script_layer_`; the script builtin `extend`. Nothing generic (`detach`, `attach`) lands on property_owner-derived types — components own those names. | `adopt` already means definition-adoption in the binder; `extend` is the word the vision doc reserved for exactly this. One vocabulary, no pollution of derived classes. |
 | D13 | Engine literals are interned once (`post_load`); errors travel as `checked_result` codes with symbol placeholders, thrown only at the host boundary. | House rules: interned lookups, error codes inside, throw at `execute`-level doors. |
 | D14 | Re-derive re-classes the instance in place (`class_instance::reclass`) rather than minting a replacement and retiring the old one; a stale wrapper re-points its handle at the layer on first touch (S3c). | "Extend in place in all cases". Handles never go stale within an engine; no retired twins to explain. |
 | D11 | Two-level chains (`Voidling : CreatureKind : ServerCreature`) are hybrids: every hybrid-semantic site resolves the C++ base with `class_definition::find_cpp_base_class()` (chain walk), never the direct-base field. | `cpp_base_class_` is only set on the class whose *direct* base is C++; every mid-class design needs the walk. |
@@ -158,8 +158,6 @@ public:
     script_value extend(const script_value& object, const script_value& script_class);
     template<typename T> script_value extend(const std::shared_ptr<T>& object, std::string_view script_class,
                                              const std::string& fields_json = {});
-    template<typename T> void add_global_extended(const std::string& name, const std::shared_ptr<T>& object,
-                                                  std::string_view script_class);
     // The layer's fields as JSON; the object no longer carries a layer (the old layer is
     // retired). Empty string when there was no layer.
     template<typename T> std::string script_layer_detach(const std::shared_ptr<T>& object);

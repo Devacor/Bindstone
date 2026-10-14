@@ -69,16 +69,24 @@ script_value engine::make_object(std::shared_ptr<T> data) {
     // script sees the derived script class (fields, overrides) through any boundary return
     // — virtual dispatch through a base pointer, carried across the boundary. Slot when the
     // type carries one (a pointer read), else the map by complete-object pointer.
-    if constexpr (std::is_base_of_v<script_extensible, T>) {
-        if (data) {
+    // A plain wrapper is the object's one identity too (recorded by its complete-object pointer, handed out again for an
+    // owner-equivalent handle), so an extend after the object was bound re-classes the instance every holder already has.
+    const void* key = nullptr;
+    if (data) {
+        if constexpr (std::is_polymorphic_v<T>) { key = dynamic_cast<const void*>(data.get()); } else { key = static_cast<const void*>(data.get()); }
+        if constexpr (std::is_base_of_v<script_extensible, T>) {
             if (auto layer = data->jai_script_slot().script_layer(); layer && layer->get_engine() == this) {
                 return script_value::make_object(layer->get_class_definition()->get_name(), layer, this);
             }
         }
-    } else if constexpr (std::is_polymorphic_v<T>) {
-        if (data) {
-            if (std::shared_ptr<detail::first_type_t<class_instance, T>> layer = script_layer_of(dynamic_cast<void*>(data.get()))) {
-                return script_value::make_object(layer->get_class_definition()->get_name(), layer, this);
+        if (std::shared_ptr<detail::first_type_t<class_instance, T>> known = object_instance_of(key)) {
+            const class_definition* def = known->get_class_definition();
+            const script_value* held = known->native();
+            auto holder = held ? held->get_object_holder() : nullptr;
+            const bool layer = def && def->is_script_class() && !std::is_base_of_v<script_extensible, T>;
+            const bool same_object = holder && holder->data && !holder->data.owner_before(data) && !data.owner_before(holder->data);
+            if (def && (layer || same_object)) {
+                return script_value::make_object(def->get_name(), known, this);
             }
         }
     }
@@ -89,6 +97,7 @@ script_value engine::make_object(std::shared_ptr<T> data) {
                 std::shared_ptr<void> complete_object(data, dynamic_cast<void*>(data.get()));
                 instance->set_native(
                     script_value::make_cpp_object(dynamic_def->get_name(), dynamic_def->get_type_id(), complete_object, this));
+                note_script_layer(key, instance);
                 return script_value::make_object(dynamic_def->get_name(), instance, this);
             }
         }
@@ -102,6 +111,7 @@ script_value engine::make_object(std::shared_ptr<T> data) {
 
             instance->set_native(
                 script_value::make_cpp_object(type_name, class_def->get_type_id(), std::static_pointer_cast<void>(data), this));
+            if (data) { note_script_layer(key, instance); }
 
             return script_value::make_object(type_name, instance, this);
         }
@@ -121,11 +131,6 @@ script_value engine::extend(const std::shared_ptr<T>& object, std::string_view s
         throw runtime_error("extend: cannot extend a null object with '" + std::string(script_class) + "'");
     }
     return extend(make_object(object), script_value(std::string(script_class), this), fields_json);
-}
-
-template<typename T>
-void engine::add_global_extended(const std::string& name, const std::shared_ptr<T>& object, std::string_view script_class) {
-    add_global(name, extend(object, script_class));
 }
 
 template<typename T>

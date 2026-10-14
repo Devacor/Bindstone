@@ -5299,6 +5299,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			// the entry replaces the region's first instruction, which moves to the trampoline ahead of a jump to the next one
 			loop.straight = true;
 			loop.trampoline = entry_trampoline(head, loop_index);
+			for (chunk::cell_loop::cell_call& cc : loop.calls) { if (cc.probe_ip == head) { cc.probe_ip = loop.trampoline; } }   // a door's probe at the region's head reads the instruction the entry replaced
 		}
 		c.max_cells = std::max(c.max_cells, static_cast<uint32_t>(loop.cells.size()));
 		c.cell_loops.push_back(std::move(loop));

@@ -4003,6 +4003,32 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(uint64_t{0}, c1.misses - c0.misses, "call " + std::to_string(k) + ": nothing misses");
 			}
 		});
+		test("a_landing_rereads_the_globals_a_callee_writes", [this]() {
+			// a landing re-reads the globals the callees write: one the first callee writes and the block reads right after it, one it reads
+			// only after the second call; a frame program whose head probes its callee (the door reads the trampoline's copy), before and
+			// after the callee's name is rebound to a lambda; both backends, proofs off and miss injection
+			const std::string prelude =
+				"int G = 1;\n"
+				"int H = 5;\n"
+				"int bump(int d) { if (d <= 0) { G = G + 10; H = H + 3; return 1; } return bump(d - 1); }\n"
+				"int other(int d) { if (d <= 0) { H = H * 2; return 2; } return other(d - 1); }\n"
+				"int f(int n) { int s = 0; for (int i = 0; i < n; i++) { s = s + bump(1); s = s + G; s = s + other(1); s = s * 2 + H; } return s; }\n"
+				"int h(int x) { if (x <= 0) { return 0; } return h(x - 1) + 1; }\n"
+				"int g(int a) { return h(a) + 3; }\n"
+				"int sum_g(int n) { int s = 0; for (int i = 0; i < n; i++) { s = s + g(i); } return s; }\n";
+			const std::string body = "auto a = f(6); auto b = sum_g(5); var hv = function(int x) -> int { return x * 10; }; h = hv; auto c = sum_g(5); "
+				"to_string(a) + \"|\" + to_string(b) + \"|\" + to_string(c) + \"|\" + to_string(G) + \"|\" + to_string(H);";
+			both(prelude + body, "", "landings and a head probe");
+			both(prelude + body, "", "landings and a head probe, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the answer: " + vm);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(vm, got, "landings under an injected miss at every " + std::to_string(every));
+			}
+		});
 		test("a_range_for_is_entered_at_its_iter_next", [this]() {
 			// ITER_NEXT is the entry: a one-element array runs it in the block, an empty one enters nothing, a reference binding writes the
 			// elements, a break, a call and a throw from a call on the first element, a live-in the body redefines, a body that empties the array,

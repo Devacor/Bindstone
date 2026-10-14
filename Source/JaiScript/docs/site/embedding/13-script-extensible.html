@@ -50,16 +50,28 @@ creature does. C++ never names a script class; it hands the creature over and th
 <div class="codeblock cb-jai" data-host="Creature registration + self"><span class="cb-label">jaiscript &middot; needs the host&#x27;s classes</span><pre><code class="lang-jai">extern self;                       // the host binds `self` (its callback slots) after load
 
 class Slime : Creature {        // Creature is the host's bound C++ class
-    int bites = 0;
+    int size = 3;
     double hopCooldown = 0.0;
-    bool tick(double dt) override { hopCooldown = hopCooldown - dt; return false; }
+
+    void update(double dt) override {
+        hopCooldown = hopCooldown - dt;
+        if (hopCooldown &lt;= 0.0) { hop(); hopCooldown = 1.5; }   // hop() is a Creature method
+    }
+
+    void death() override {         // a big slime splits into two smaller ones
+        if (size &lt;= 1) { return; }
+        for (int i = 0; i &lt; 2; ++i) {
+            var child = spawn_creature(position);   // the host spawns a plain C++ creature
+            extend(child, Slime).size = size - 1;   // ...and the script says it is a smaller Slime
+        }
+    }
 }
 
 // the three callbacks this host happens to expose (spawn, update, death) - your host will
 // have its own. It passes the C++ creature; the script says what it becomes.
 self.spawn  = [=](var&amp; creature) -&gt; void { extend(creature, Slime).spawn(); };
-self.update = [=](var&amp; creature, double dt) -&gt; void { creature.update(dt); };
-self.death  = [=](var&amp; creature) -&gt; void { creature.death(); };</code></pre></div>
+self.update = [=](var&amp; creature, double dt) -&gt; void { creature.update(dt); };   // runs Slime.update
+self.death  = [=](var&amp; creature) -&gt; void { creature.death(); };                 // runs Slime.death</code></pre></div>
 <p>After <code>extend</code>, every road back into script (a bound method returning
 <code>shared_ptr&lt;Creature&gt;</code>, a signal argument, a container element, a serialized
 <code>shared_ptr&lt;Base&gt;</code>, the host's next <code>update</code> call) hands script the
@@ -67,7 +79,7 @@ self.death  = [=](var&amp; creature) -&gt; void { creature.death(); };</code></p
 the derived object", carried across the boundary. The object is a <strong>hybrid</strong>: one script instance
 that owns or references the C++ object (internal storage no script name reaches; the bound properties and methods
 reach it) and carries the script layer (fields, overrides) on top. Overrides dispatch wherever script calls the method; a call C++ makes on the
-object (<code>creature-&gt;tick(dt)</code>, or a bound C++ method that calls a virtual) runs the C++ body.</p>
+object (<code>creature-&gt;update(dt)</code>, or a bound C++ method that calls a virtual) runs the C++ body.</p>
 
 <h2 id="extend-object-class">extend(object, Class)<a class="hlink" href="#extend-object-class" aria-label="link">&#8203;</a></h2>
 <p><code>extend</code> is an engine-core builtin (every engine has it, sandboxes included). <code>Class</code> is

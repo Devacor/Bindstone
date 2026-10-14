@@ -1689,6 +1689,9 @@ namespace detail { struct argument_capture_storage; }
             }
             // Support for other shared_ptr types
             else if constexpr (is_specialization_v<T, std::shared_ptr>) {
+                if (is_null()) {
+                    return checked_result<T>(T{});
+                }
                 // First check if there's a registered conversion
                 if (engine_) {
                     auto registry = get_engine_conversion_registry(engine_);
@@ -1753,6 +1756,32 @@ namespace detail { struct argument_capture_storage; }
                     make_error_code(runtime_error_code::not_an_object),
                     "script_value is not an object"
                 );
+            }
+            // weak_ptr<T>: from null, a shared handle, or a script weak_ptr (an expired one is empty)
+            else if constexpr (is_specialization_v<T, std::weak_ptr>) {
+                using shared_type = std::shared_ptr<typename T::element_type>;
+                const script_value& d = deref();
+                if (d.is_null()) {
+                    return checked_result<T>(T{});
+                }
+                if (d.raw_storage_index() == TYPEID_WEAK_PTR) {
+                    auto locked = d.storage_.template get<jai::weaker_ptr<object_holder>>().lock();
+                    if (!locked) {
+                        return checked_result<T>(T{});
+                    }
+                    script_value target(std::monostate{}, engine_);
+                    target.set_object_holder(locked);
+                    auto shared = target.template checked_as<shared_type>();
+                    if (!shared) {
+                        return shared.error_value();
+                    }
+                    return checked_result<T>(T(shared.value()));
+                }
+                auto shared = d.template checked_as<shared_type>();
+                if (!shared) {
+                    return shared.error_value();
+                }
+                return checked_result<T>(T(shared.value()));
             }
             // Support for extracting custom objects by value (dereference shared_ptr)
             else if constexpr (std::is_class_v<T> &&

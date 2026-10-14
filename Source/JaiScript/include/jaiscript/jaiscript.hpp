@@ -53,14 +53,14 @@
 
 // Version information
 #define JAISCRIPT_VERSION_MAJOR 0
-#define JAISCRIPT_VERSION_MINOR 1
+#define JAISCRIPT_VERSION_MINOR 5
 #define JAISCRIPT_VERSION_PATCH 0
 
 namespace jai {
     
     // Version string
     inline const std::string& version() {
-        static const std::string version_string = "0.1.0";
+        static const std::string version_string = "0.5.0-beta";
         return version_string;
     }
     

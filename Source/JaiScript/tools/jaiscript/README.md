@@ -34,7 +34,7 @@ jaiscript
 A persistent engine: globals, functions and classes accumulate across lines.
 
 ```
-JaiScript 0.1.0 - vm backend, stdlib loaded, budget off. :help for commands.
+JaiScript 0.5.0-beta - vm backend, stdlib loaded, budget off. :help for commands.
 debugger: DAP listening on 127.0.0.1:52477 (VS Code: Attach to JaiScript)
 jai> int hp = 100;
 jai> hp - 58

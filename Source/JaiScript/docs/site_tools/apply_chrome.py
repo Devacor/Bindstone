@@ -17,7 +17,7 @@ import sys
 
 SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 
-VERSION = "0.1.0"
+VERSION = "0.5 beta"
 REPO = "https://github.com/Devacor/JaiScript"
 
 FONTS = (

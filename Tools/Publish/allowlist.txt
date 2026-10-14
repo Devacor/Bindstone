@@ -1,0 +1,44 @@
+# Which tracked files of Source/JaiScript go into the public export.
+# "+ glob" includes, "- glob" excludes; an exclude wins over an include, and a tracked file no rule
+# matches fails the export, so every new top-level kind of file gets a decision here.
+# Globs are package-relative with / separators: * stays inside one path segment, ** crosses them.
+
++ CMakeLists.txt
++ CMakePresets.json
++ LICENSE
++ README.md
++ CONTRIBUTING.md
++ AGENTS.md
++ cmake/**
++ .github/**
++ include/**
++ source/**
++ tools/**
++ docs/BUILD.md
++ docs/site/**
++ docs/site_tools/**
++ examples/README.md
++ examples/crawler/**
++ examples/demoreel/**
++ examples/embed_quickstart/**
++ examples/gatorquest/**
++ examples/gloom/**
++ examples/jaidoom/**
+
+# Internal notes and Bindstone-only material
+- internal/**
+- .internal/**
+- bench/**
+- CMakeSettings.json
+- examples/gloom_idiomatic/**
+
+# Never shipped, whatever the include
+- **/*.jaibite
+- **/*.exe
+- **/*.dll
+- **/*.lib
+- **/*.pdb
+- **/*.obj
+- **/*.o
+- **/*.zip
+- **/*.wad

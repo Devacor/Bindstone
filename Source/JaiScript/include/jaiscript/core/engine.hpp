@@ -1135,9 +1135,9 @@ namespace jai {
         // Cold class-reload boundary: recover surviving worker copies after a failed join.
         void recover_parallel_registrations();
 
-        // Script errors at a boundary with no error-value channel (signal receivers) route here; a converted
-        // std::function callback throws runtime_error to its host caller instead (engine_impl.hpp). Default sink
-        // is std::cerr; the message includes the script stack trace if captured.
+        // Script errors at a boundary with no error-value channel (a destructor that fails where nothing can catch it) route
+        // here; a converted std::function callback and a signal's script receiver throw to the host caller instead
+        // (engine_impl.hpp, signal_impl.hpp). Default sink is std::cerr; the message includes the script stack trace if captured.
         void set_script_error_handler(std::function<void(const std::string&)> a_handler);
         void report_script_error(const std::string& a_message, std::error_code a_code = {});
 

@@ -1,17 +1,22 @@
 cmake_minimum_required(VERSION 3.20)
-project(embed_quickstart LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Standalone (configured on its own, as a consumer would): builds JaiScript too. Inside the JaiScript build
+# (JAISCRIPT_BUILD_EXAMPLES) it is one more example target over the library already defined there.
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+	project(embed_quickstart LANGUAGES CXX)
 
-# Default: build JaiScript from source as a subproject. ON: use an installed package
-# (cmake --install from a JaiScript build, then -DCMAKE_PREFIX_PATH=<prefix>).
-option(EMBED_QUICKSTART_FIND_PACKAGE "Use an installed JaiScript through find_package" OFF)
+	set(CMAKE_CXX_STANDARD 20)
+	set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-if(EMBED_QUICKSTART_FIND_PACKAGE)
-	find_package(JaiScript 0.1 CONFIG REQUIRED)
-else()
-	add_subdirectory(../.. jaiscript)
+	# Default: build JaiScript from source as a subproject. ON: use an installed package
+	# (cmake --install from a JaiScript build, then -DCMAKE_PREFIX_PATH=<prefix>).
+	option(EMBED_QUICKSTART_FIND_PACKAGE "Use an installed JaiScript through find_package" OFF)
+
+	if(EMBED_QUICKSTART_FIND_PACKAGE)
+		find_package(JaiScript 0.1 CONFIG REQUIRED)
+	else()
+		add_subdirectory(../.. jaiscript)
+	endif()
 endif()
 
 add_executable(embed_quickstart main.cpp)

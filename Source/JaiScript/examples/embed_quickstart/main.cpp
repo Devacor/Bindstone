@@ -345,11 +345,16 @@ static int run(int argc, char** argv) {
 		expect(std::string(e.what()).find("from script") == 0, std::string("script_exception: ") + e.what());
 	}
 
-	std::string reported;
-	eng->set_script_error_handler([&](const std::string& message) { reported = message; });
 	eng->execute("troll.on_hurt.connect(\"broken\", [=](string who, int left) -> void { int z = left / 0; });");
-	troll->hurt(1);
-	expect(!reported.empty(), "a failing signal receiver reaches the error handler: " + reported);
+	try {
+		troll->hurt(1);   // a script receiver's failure throws out of the emit; the receivers after it do not run
+		expect(false, "a failing signal receiver should throw out of the emit");
+	} catch (const jai::runtime_error& e) {
+		expect(std::string(e.what()).find("Division by zero") != std::string::npos, std::string("a failing signal receiver throws to the emitter: ") + e.what());
+	}
+	expect(eng->execute("string caught = \"\"; try { troll.hurt(1); } catch (e) { caught = e.message; } caught").as_string().find("Division by zero") != std::string::npos,
+		"a script that fires the signal catches the receiver's failure");
+	eng->execute("troll.on_hurt.disconnect(\"broken\");");
 
 	std::cout << "\n" << (failures == 0 ? "all checks passed" : std::to_string(failures) + " check(s) failed") << "\n";
 	return failures == 0 ? 0 : 1;

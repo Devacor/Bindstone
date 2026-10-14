@@ -2,7 +2,7 @@
 # The CI gates, one per argument, so the workflow can give each its own step and a
 # local run can reproduce any of them:
 #
-#   BIN=build/bin tools/ci/gates.sh tests-interp tests-vm fuzz gloom demoreel crawler gatorquest lsp lsp-latency
+#   BIN=build/bin tools/ci/gates.sh tests-interp tests-vm fuzz gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency
 #   tools/ci/gates.sh all
 #
 # BIN is the directory holding the built executables (default: build/bin under the
@@ -106,14 +106,28 @@ gate_gatorquest() {
 	done
 }
 
-ALL=(tests-interp tests-vm fuzz gloom demoreel crawler gatorquest lsp lsp-latency)
+gate_embed_quickstart() {
+	local work
+	work="$(mktemp -d)"
+	cd "$work"
+	for backend in vm interp; do
+		local flags=()
+		[ "$backend" = interp ] && flags=(--interp)
+		run_logged "$BIN/embed_quickstart" "${flags[@]+"${flags[@]}"}"
+		want "embed_quickstart $backend: expected every check to hold" "^all checks passed\$"
+	done
+	cd "$ROOT"
+	rm -rf "$work"
+}
+
+ALL=(tests-interp tests-vm fuzz gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency)
 
 [ "$#" -gt 0 ] || { echo "usage: $0 <gate>... (${ALL[*]} all)" >&2; exit 2; }
 [ "$1" = all ] && set -- "${ALL[@]}"
 
 for gate in "$@"; do
 	case "$gate" in
-		tests-interp | tests-vm | fuzz | gloom | demoreel | crawler | gatorquest | lsp | lsp-latency) ;;
+		tests-interp | tests-vm | fuzz | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency) ;;
 		*) echo "unknown gate: $gate (${ALL[*]} all)" >&2; exit 2 ;;
 	esac
 	echo "== gate: $gate"

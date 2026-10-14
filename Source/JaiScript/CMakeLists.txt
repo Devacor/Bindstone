@@ -137,6 +137,12 @@ if(JAISCRIPT_BUILD_EXAMPLES)
 endif()
 # --- end jai_gloom ---
 
+# --- embed_quickstart (examples/embed_quickstart): the C++ host the embedding quickstart documents ---
+if(JAISCRIPT_BUILD_EXAMPLES AND JAISCRIPT_IS_TOP_LEVEL)
+    add_subdirectory(examples/embed_quickstart)
+endif()
+# --- end embed_quickstart ---
+
 # --- jaiscript runner (tools/jaiscript): standalone file runner / REPL / --watch live-coding ---
 option(JAISCRIPT_BUILD_RUNNER "Build the standalone jaiscript runner/REPL executable" ${JAISCRIPT_IS_TOP_LEVEL})
 if(JAISCRIPT_BUILD_RUNNER)

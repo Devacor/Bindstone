@@ -323,6 +323,7 @@ public:
 		owned_connections_.clear();
 		if (in_call_depth_ == 0) {
 			observers_.clear();
+			loaded_observers_.clear();
 		} else {
 			// Queue all for removal
 			for (auto& weak_obs : observers_) {
@@ -497,22 +498,21 @@ private:
 			auto locked = observers_[i].lock();
 			if (!locked) { has_dead_observers_ = true; continue; }
 
+			if (locked->is_oneshot()) {
+				has_oneshots_pending_ = true;   // before the call: a one-shot that throws has fired
+			}
+
 			if constexpr (ShortCircuit) {
 				// Pass as LVALUES: forwarding rvalue args inside the loop would let the
 				// first receiver's by-value parameter move-consume them, handing every
 				// later receiver an empty shell (null shared_ptr, empty string, ...).
 				if (!locked->predicate(args...)) {
 					result = false;
-					if (locked->is_oneshot()) has_oneshots_pending_ = true;
 					has_dead_observers_ = true;  // unscanned tail may hold dead observers
 					break;
 				}
 			} else {
 				locked->notify(args...);
-			}
-
-			if (locked->is_oneshot()) {
-				has_oneshots_pending_ = true;
 			}
 		}
 
@@ -539,19 +539,18 @@ private:
 			auto locked = observers_[i].lock();
 			if (!locked) { has_dead_observers_ = true; continue; }
 
+			if (locked->is_oneshot()) {
+				has_oneshots_pending_ = true;
+			}
+
 			if constexpr (ShortCircuit) {
 				if (!locked->predicate()) {
 					result = false;
-					if (locked->is_oneshot()) has_oneshots_pending_ = true;
 					has_dead_observers_ = true;  // unscanned tail may hold dead observers
 					break;
 				}
 			} else {
 				locked->notify();
-			}
-
-			if (locked->is_oneshot()) {
-				has_oneshots_pending_ = true;
 			}
 		}
 
@@ -567,11 +566,16 @@ private:
 				}),
 			observers_.end()
 		);
+		if (!loaded_observers_.empty()) {
+			std::erase_if(loaded_observers_, [&recv](const shared_receiver_type& held) { return held->id() == recv->id(); });
+		}
 	}
 
 	// Vector, not set: receivers fire in insertion order.
 	std::vector<weak_receiver_type> observers_;
 	std::map<std::string, shared_receiver_type> owned_connections_;
+	// unnamed script receivers a load rebuilt: nothing outside holds them, so the emitter does (signal_serialization.hpp)
+	std::vector<shared_receiver_type> loaded_observers_;
 
 	// Prevent shared_from_this issues - we use this for connected() tracking
 	std::shared_ptr<char> prevent_shared_ownership_;

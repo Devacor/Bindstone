@@ -1325,7 +1325,7 @@ public:
 
         instance->set_class_definition(this);
 
-        register_instance(std::weak_ptr<class_instance>(instance), instance.get());
+        register_live_instance(instance.get());
 
         if (const auto& plan = instance_plan(); !plan.empty()) {
             instance->seed_fields_from_plan(plan, field_slot_count());
@@ -2313,6 +2313,16 @@ public:
                                                             : std::unique_lock<std::mutex>();
     }
 
+    // An instance its caller owns: the weak handle exists only for a worker's parked registration
+    void register_live_instance(class_instance* live) {
+        if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
+            register_live_instance_in_region(live);
+            return;
+        }
+        register_instance_after_region(std::weak_ptr<class_instance>(), nullptr, live);
+    }
+    JAI_NOINLINE void register_live_instance_in_region(class_instance* live) { register_instance(live->weak_from_this(), live); }
+
     void register_instance(std::weak_ptr<class_instance> instance, class_instance* live = nullptr) {
         if (engine_ && engine_->parallel_region_active()) {
             // A pool worker parks the registration (no lock; the join registers survivors);
@@ -2683,7 +2693,7 @@ inline void class_instance::reclass(const std::shared_ptr<class_definition>& cla
         }
     }
     rehome_overflow_fields();
-    class_def_->register_instance(weak_from_this(), this);
+    class_def_->register_live_instance(this);
 }
 
 template <typename F>
@@ -4004,7 +4014,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
             new_instance->flat_fields_[slot] = new_instance->make_cell(cell->clone_element());
         }
         copy_native(*new_instance);
-        class_def_->register_instance(std::weak_ptr<class_instance>(new_instance), new_instance.get());
+        class_def_->register_live_instance(new_instance.get());
         return new_instance;
     }
     for_each_field([&](uint64_t id, const script_value& value) {
@@ -4018,7 +4028,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
     copy_native(*new_instance);
 
     if (class_def_) {
-        class_def_->register_instance(std::weak_ptr<class_instance>(new_instance), new_instance.get());
+        class_def_->register_live_instance(new_instance.get());
     }
 
     return new_instance;

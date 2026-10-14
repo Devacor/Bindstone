@@ -1351,13 +1351,12 @@ script_value script_value::clone() const {
         }
 
         if (obj_holder->is_class_instance_wrapper) {
-            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-            auto new_instance = instance->deep_copy();
+            auto new_instance = static_cast<const class_instance*>(obj_holder->data.get())->deep_copy();
 
             auto new_holder = acquire_object_holder(engine_);
             new_holder->type_name = obj_holder->type_name;
             new_holder->type_id = obj_holder->type_id;
-            new_holder->data = new_instance;
+            new_holder->data = std::move(new_instance);
             new_holder->is_class_instance_wrapper = true;
 
             script_value result(std::monostate{}, engine_);
@@ -1455,15 +1454,14 @@ script_value script_value::clone() const {
             }
 
             if (obj_holder->is_class_instance_wrapper) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-                auto new_instance = instance->deep_copy();
+                auto new_instance = static_cast<const class_instance*>(obj_holder->data.get())->deep_copy();
 
                 auto new_holder = acquire_object_holder(engine_);
                 new_holder->type_name = obj_holder->type_name;
                 new_holder->type_id = obj_holder->type_id;  // Preserve the cached type_id
-                new_holder->data = new_instance;
+                new_holder->data = std::move(new_instance);
                 new_holder->is_class_instance_wrapper = true;
-                result.storage_ = new_holder;
+                result.storage_ = std::move(new_holder);
             } else {
                 bool copied = false;
                 if (engine_) {

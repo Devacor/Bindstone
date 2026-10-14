@@ -608,6 +608,32 @@ public:
         });
 
         // The release stack keeps C++ order exactly: every limit, the stack always (0) to never in practice, logs alike
+        // call sites remember the callee they last validated (inline guards, the call-site cache, a worker's memo); none of those
+        // keeps a closure alive: a capturing closure called at a site dies when its variable lets go, and a self-referencing
+        // closure's cell cycle is released when its frame exits, at the same points as with no cache
+        test("a_closure_a_call_site_validated_dies_on_time", [this]() {
+            expect_log(R"(
+                var f = [t = Token("c")](int x) -> int { return x + 1; };
+                int s = 0;
+                for (int i = 0; i < 3; ++i) { s += f(i); }
+                LOG = LOG + "a";
+                f = [](int x) -> int { return x; };
+                LOG = LOG + "|";
+                for (int i = 0; i < 3; ++i) { s += f(i); }
+                function mk() -> int {
+                    Token keep = Token("k");
+                    var g;
+                    g = [&](int n) -> int { if (n == 0) { return 0; } return g(n - 1) + 1; };
+                    int r = 0;
+                    for (int i = 0; i < 3; ++i) { r += g(2); }
+                    return r;
+                }
+                int r = mk();
+                LOG = LOG + "|" + to_string(r) + "|" + to_string(s);
+                LOG
+            )", "cac|k|6|9");
+        });
+
         test("the_release_stack_keeps_destruction_order", [this]() {
             const std::string shapes = R"(
                 class Tag { string n = ""; Tag() {} Tag(string s) { n = s; } ~Tag() { LOG = LOG + n; } }

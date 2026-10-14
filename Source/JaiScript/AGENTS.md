@@ -100,8 +100,9 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
 - Binding instantiations, not header parsing, dominate consumer compile time: keep binder thunks and container
   conversions out of headers that do not need them (schema-driven primitive property binders live out of line in
   `schema_binding.cpp`).
-- `signals/signal_decl.hpp` does not include `signal_impl.hpp`; hot-path headers include `signal_decl.hpp`, and `.cpp`
-  files that fire script receivers include `signal.hpp` (or `signal_impl.hpp`).
+- `signals/signal_decl.hpp` does not include `signal_impl.hpp`; headers that only declare signal members include
+  `signal_decl.hpp`, and every `.cpp` that emits includes `signal.hpp` (or `signal_impl.hpp`): an emit instantiates the
+  script-receiver path, so `signal_decl.hpp` alone leaves it unresolved at link time.
 - `checked_result.hpp` does not include `<format>`; error messages use plain `{0}`/`{1}` substitution.
 - `detail/integer_ops.hpp` (and its `<intrin.h>`) stays out of `interpreter.hpp`. Keep `<intrin.h>`, heavy standard
   headers and implementation headers out of widely included core headers.

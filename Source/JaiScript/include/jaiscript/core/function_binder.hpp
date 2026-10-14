@@ -294,6 +294,20 @@ class engine;
             }
         };
         
+        template<typename T>
+        struct value_converter<std::weak_ptr<T>> {
+            static std::weak_ptr<T> from(const script_value& v, engine* eng) {
+                return v.as<std::weak_ptr<T>>();
+            }
+
+            static script_value to(const std::weak_ptr<T>& ptr, engine* eng) {
+                if (!eng) {
+                    throw runtime_error("Engine reference required for custom type conversion");
+                }
+                return convert_custom_type_with_registry<std::weak_ptr<T>>(ptr, eng);
+            }
+        };
+
         // Specializations for reference types - ZERO-COPY for built-in types
         template<typename T>
         struct value_converter<T&> {
@@ -405,7 +419,7 @@ class engine;
                 }
                 // Smart-pointer params can't alias script storage (the holder owns T, not
                 // shared_ptr<T>): materialize a temp handle in parameter storage.
-                else if constexpr (is_specialization_v<T, std::shared_ptr>) {
+                else if constexpr (is_specialization_v<T, std::shared_ptr> || is_specialization_v<T, std::weak_ptr>) {
                     auto* storage = detail::get_engine_parameter_storage(eng);
                     if (!storage) {
                         throw runtime_error("No parameter storage available for const reference conversion");
@@ -975,7 +989,7 @@ class engine;
                 // Smart-pointer params materialize the handle by value (holders own T, not
                 // shared_ptr<T> — wrapping again would reinterpret T's bytes as a handle);
                 // the tuple element is an lvalue, so const shared_ptr<T>& binds to it.
-                if constexpr (is_specialization_v<base_type, std::shared_ptr>) {
+                if constexpr (is_specialization_v<base_type, std::shared_ptr> || is_specialization_v<base_type, std::weak_ptr>) {
                     return actual_arg.as<base_type>();
                 }
                 // A math value has no host object to alias: the decoded host value

@@ -266,6 +266,53 @@ std::string detail::format_value_with_spec(const script_value& value, const form
 // object/inheritance, with a non-match returning -1. Single source of truth shared by
 // OverloadSet::findBestMatch (free functions / constructors, first_arg = 0) and
 // engine::select_cpp_overload (same-arity C++ method dispatch, first_arg = 1 to skip 'this').
+// Cost of an object argument for an object, shared_ptr<T> or weak_ptr<T> parameter, or -1 when its class cannot reach T
+static int object_param_cost(
+        const script_value& arg,
+        script_value_type argType,
+        const param_type_info& paramInfo,
+        const std::unordered_map<std::type_index, std::shared_ptr<class_definition>>* classes_by_type,
+        const class_name_map* classes_by_name) {
+    if (!classes_by_type || paramInfo.cpp_type == std::type_index(typeid(void))) {
+        return 50;                               // no C++ type info - typed overloads preferred
+    }
+    auto paramClassIt = classes_by_type->find(paramInfo.cpp_type);
+    if (paramClassIt == classes_by_type->end()) {
+        return 100;                              // expected class not found - accept with high cost
+    }
+    const std::string& expectedClassName = paramClassIt->second->get_name();
+    auto instance = const_cast<script_value&>(arg).get_class_instance();
+    class_definition* argClassDef = nullptr;
+    std::optional<std::string_view> argClassName;
+    if (instance) {
+        argClassDef = instance->get_class_definition();
+        argClassName = instance->get_class_name();
+    } else {
+        // cpp_bound / raw C++ holders carry the registered name on the holder
+        auto holder = arg.get_object_holder();
+        if (holder && !holder->type_name.empty()) {
+            argClassName = holder->type_name;
+            if (classes_by_name) {
+                auto argClassIt = classes_by_name->find(holder->type_name);
+                if (argClassIt != classes_by_name->end()) {
+                    argClassDef = argClassIt->second.get();
+                }
+            }
+        }
+    }
+    if (argClassDef) {
+        if (argClassDef->get_name() == expectedClassName) {
+            // Exact match; shared_ptr<T> -> T counts as a small conversion.
+            return argType == script_value_type::jai_shared_ptr_type && paramInfo.base_type == script_value_type::jai_object_type ? 1 : 0;
+        }
+        return argClassDef->is_subtype_of(expectedClassName) ? 1 : -1;
+    }
+    if (argClassName) {
+        return *argClassName == expectedClassName ? 0 : -1;
+    }
+    return -1;                                   // no class identity - not a valid object
+}
+
 static int compute_param_match_cost(
         const std::vector<script_value>& args,
         size_t first_arg,
@@ -287,59 +334,36 @@ static int compute_param_match_cost(
             continue;
         }
 
-        if ((paramInfo.base_type == script_value_type::jai_object_type ||
-             paramInfo.base_type == script_value_type::jai_shared_ptr_type) &&
+        const bool handleParam = paramInfo.base_type == script_value_type::jai_shared_ptr_type ||
+                                 paramInfo.base_type == script_value_type::jai_weak_ptr_type;
+        // null converts to an empty handle, as nullptr does in C++ (a typed handle variable may hold null too)
+        if (handleParam && arg.is_null()) {
+            totalCost += 1;
+            continue;
+        }
+
+        if ((paramInfo.base_type == script_value_type::jai_object_type || handleParam) &&
             (argType == script_value_type::jai_object_type ||
              argType == script_value_type::jai_shared_ptr_type)) {
-
-            if (classes_by_type && paramInfo.cpp_type != std::type_index(typeid(void))) {
-                auto paramClassIt = classes_by_type->find(paramInfo.cpp_type);
-                if (paramClassIt != classes_by_type->end()) {
-                    const std::string& expectedClassName = paramClassIt->second->get_name();
-                    auto instance = const_cast<script_value&>(arg).get_class_instance();
-                    class_definition* argClassDef = nullptr;
-                    std::optional<std::string_view> argClassName;
-                    if (instance) {
-                        argClassDef = instance->get_class_definition();
-                        argClassName = instance->get_class_name();
-                    } else {
-                        // cpp_bound / raw C++ holders carry the registered name on the holder
-                        auto holder = arg.get_object_holder();
-                        if (holder && !holder->type_name.empty()) {
-                            argClassName = holder->type_name;
-                            if (classes_by_name) {
-                                auto argClassIt = classes_by_name->find(holder->type_name);
-                                if (argClassIt != classes_by_name->end()) {
-                                    argClassDef = argClassIt->second.get();
-                                }
-                            }
-                        }
-                    }
-                    if (argClassDef) {
-                        if (argClassDef->get_name() == expectedClassName) {
-                            // Exact match; shared_ptr<T> -> T counts as a small conversion.
-                            if (argType == script_value_type::jai_shared_ptr_type &&
-                                paramInfo.base_type == script_value_type::jai_object_type) {
-                                totalCost += 1;
-                            }
-                        } else if (argClassDef->is_subtype_of(expectedClassName)) {
-                            totalCost += 1;  // derived type
-                        } else {
-                            return -1;       // incompatible class types
-                        }
-                    } else if (argClassName) {
-                        if (*argClassName != expectedClassName) {
-                            return -1;
-                        }
-                    } else {
-                        return -1;           // no class identity - not a valid object
-                    }
-                } else {
-                    totalCost += 100;            // expected class not found - accept with high cost
-                }
-            } else {
-                totalCost += 50;                 // no C++ type info - typed overloads preferred
+            const int cost = object_param_cost(arg, argType, paramInfo, classes_by_type, classes_by_name);
+            if (cost < 0) {
+                return -1;
             }
+            // shared_ptr<T> -> weak_ptr<T> is a conversion
+            totalCost += cost + (paramInfo.base_type == script_value_type::jai_weak_ptr_type ? 1 : 0);
+        } else if (paramInfo.base_type == script_value_type::jai_weak_ptr_type && argType == script_value_type::jai_weak_ptr_type) {
+            auto locked = arg.get_weak_ptr().lock();
+            if (!locked) {
+                totalCost += 1;                  // an expired weak_ptr is an empty one
+                continue;
+            }
+            script_value target(std::monostate{}, arg.get_engine());
+            target.set_object_holder(locked);
+            const int cost = object_param_cost(target, script_value_type::jai_shared_ptr_type, paramInfo, classes_by_type, classes_by_name);
+            if (cost < 0) {
+                return -1;
+            }
+            totalCost += cost;
         } else if (is_math_type(paramInfo.base_type)) {
             // an adapted host parameter takes its kind exactly and the other precision by the typed-slot table
             if (argType == paramInfo.base_type) { continue; }

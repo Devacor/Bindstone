@@ -215,6 +215,46 @@ public:
 			)");
 			check_eq(std::string("16|4|7|16|1|1:5|40"), r.to_string());
 		});
+
+		// A bound method a builtin calls: an overload the argument count picks, overloads only the argument types tell
+		// apart, a two-argument comparator and a class with private members
+		test("bound_methods_as_builtin_callbacks_pick_the_overload_each_call_would", [this]() {
+			auto eng = make_engine();
+			stdlib::register_all(*eng);
+			auto r = eng->execute(R"(
+				class Acc { int total = 0; int add(int v) { total += v; return total; } }
+				class Typed {
+					int seen = 0;
+					string show(int v) { seen += 1; return "i" + to_string(v); }
+					string show(string v) { seen += 1; return "s" + v; }
+				}
+				class Order { bool before(int a, int b) { return a > b; } }
+				class Hidden { private: int k = 10; public: int add(int v) { k += v; return k; } }
+				Acc acc;
+				Typed typed;
+				Order order;
+				Hidden hidden;
+				array<int> xs = [1, 2, 3];
+				array<var> sums = array::map(xs, reflect::bind(acc, "add"));
+				array<var> shown = array::map([1, "b"], reflect::bind(typed, "show"));
+				array<int> sorted = [2, 3, 1];
+				sorted.sort(reflect::bind(order, "before"));
+				array<var> hid = array::map(xs, reflect::bind(hidden, "add"));
+				to_string(sums[2]) + "|" + to_string(acc.total) + "|" + shown[0] + shown[1] + to_string(typed.seen) + "|" +
+					to_string(sorted[0]) + to_string(sorted[2]) + "|" + to_string(hid[2]);
+			)");
+			check_eq(std::string("6|6|i1sb2|31|16"), r.to_string());
+		});
+
+		test("a_bound_method_callback_runs_the_redefined_body_after_a_reload", [this]() {
+			auto eng = make_engine();
+			stdlib::register_all(*eng);
+			eng->execute("class Acc { int total = 0; int add(int v) { total += v; return total; } }");
+			eng->execute("Acc acc; var b = reflect::bind(acc, \"add\"); array<int> xs = [1, 2];");
+			check_eq((int64_t)3, eng->execute("array::map(xs, b)[1]").as_int());
+			eng->execute("class Acc { int total = 0; int add(int v) { total += v * 10; return total; } }");
+			check_eq((int64_t)33, eng->execute("array::map(xs, b)[1]").as_int(), "the reloaded add ran on the same receiver");
+		});
 		test("nested_execute_in_converted_callback_keeps_outer_run", [this]() {
 			auto eng = make_engine();
 			engine* raw = eng.get();

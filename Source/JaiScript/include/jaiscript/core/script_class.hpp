@@ -274,9 +274,22 @@ inline checked_result<script_value> script_method_dispatch::operator()(const std
     return invoke(args[0], args, 1);
 }
 
+inline checked_result<const std::shared_ptr<function_decl>*> script_method_dispatch::resolve(const std::vector<script_value>& args,
+                                                                                              size_t first) const {
+    const size_t argc = args.size() - first;
+    if (resolved_memo && resolved_memo_epoch == cls->method_epoch() && resolved_memo_argc == argc) { return resolved_memo; }
+    auto resolved = cls->resolve_method_overload_ref(name_id, args.data() + first, argc);
+    if (resolved && cls->method_arity_decides(name_id, argc) && !(eng && eng->parallel_region_active())) {
+        resolved_memo = resolved.value();
+        resolved_memo_epoch = cls->method_epoch();
+        resolved_memo_argc = argc;
+    }
+    return resolved;
+}
+
 inline checked_result<script_value> script_method_dispatch::invoke(const script_value& this_obj, const std::vector<script_value>& args,
                                                                    size_t first) const {
-    auto resolved = cls->resolve_method_overload(name_id, args.data() + first, args.size() - first);
+    auto resolved = resolve(args, first);
     if (!resolved) {
         return resolved.error_value();
     }
@@ -288,7 +301,7 @@ inline checked_result<script_value> script_method_dispatch::invoke(const script_
 
     script_callable payload;
     payload.kind = script_callable::kind_type::method;
-    payload.ast = std::move(resolved.value());
+    payload.ast = *resolved.value();
     payload.cls = cls;
     payload.definition_env = definition_env;
     payload.this_obj = this_obj;

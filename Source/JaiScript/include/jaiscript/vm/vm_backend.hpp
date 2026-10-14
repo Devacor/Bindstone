@@ -2309,9 +2309,21 @@ namespace jai::vm {
             size_t window_slots = 0;
             bool lazy = false;
             std::shared_ptr<environment> closure_env;   // a lazy closure's env, swapped with the caller's around each call
-            checked_result<script_value> call(const std::vector<script_value>& args) override { return vm->run_callback(*this, args); }
+            // a bound method: its dispatcher and receiver; fn is the overload the argument count picks, rebound when the
+            // count or the class's method epoch moves
+            const script_method_dispatch* dispatch = nullptr;
+            const script_value* receiver = nullptr;
+            class_definition* scope_static = nullptr;   // the method's declaring class (a function session's stays null)
+            size_t method_argc = SIZE_MAX;
+            uint64_t method_epoch = 0;
+            checked_result<script_value> call(const std::vector<script_value>& args) override {
+                return dispatch ? vm->run_method_callback(*this, args) : vm->run_callback(*this, args);
+            }
         };
         checked_result<script_value> run_callback(callback_session& s, const std::vector<script_value>& args);
+        JAI_NOINLINE checked_result<script_value> run_method_callback(callback_session& s, const std::vector<script_value>& args);
+        // a bound method session takes the overload argc picks when argc alone decides it and its body needs no frame env
+        JAI_NOINLINE bool bind_method_session(callback_session& s, const std::vector<script_value>& args);
         op_status map_scalar_store(script_value& container, const script_value& key, const script_value& value, bool& handled, script_value*& stored);
         const script_map::value_type* map_lane_find(const script_map& map, const script_value& key) const;
         script_value& map_lane_slot(script_map& map, const script_value& key) const;

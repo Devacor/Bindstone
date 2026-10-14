@@ -1,8 +1,8 @@
 # Gator Quest
 
-A Britannia-lite RPG for the terminal, written entirely in JaiScript. You are a gator. Six tyrants rule the
-six realms beyond the Moongates, each hoarding a Relic Scale; bring all six to the Shrine of the Six and
-become the Gator Avatar. Along the way: swordplay and spellcraft, fishing and mining, smithing and cooking,
+An old-school open-world RPG for the terminal, set in Gatorland and written entirely in JaiScript. You are a gator. Six tyrants rule the
+six realms beyond the Lilygates, each hoarding a Relic Scale; bring all six to the Shrine of the Six and
+become the Grand Gator. Along the way: swordplay and spellcraft, fishing and mining, smithing and cooking,
 raccoons that steal your gold (catch them in their warrens below the sewers and they drop it), slimes that split, and a
 ghostly walk back to the healer when it goes wrong.
 
@@ -62,7 +62,7 @@ builds `dist\GatorQuest\` (gitignored): `jaiscript.exe` (statically linked: only
 pre-synthesized audio cache, then checks the folder with a short headless smoke run by the copied exe. About 9 MB,
 93 files; zip it and it runs on any Windows 10+ machine with a truecolor terminal.
 
-## The road to Gator Avatar
+## The road to Grand Gator
 
 Quests from the Mayor, the Captain, the shopkeepers and the Oracle lead from sewer rats to the six realm tyrants.
 Each tyrant guards a Relic Scale: Big Mama Snapper in the Bayou, the Drowned King in Sogg, Count Crocula in Gloomfen,

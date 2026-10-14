@@ -1,11 +1,11 @@
 GATOR QUEST
 ===========
 
-You are a gator. Six tyrants rule the six realms beyond the Moongates, each hoarding a Relic Scale:
+You are a gator. Six tyrants rule the six realms beyond the Lilygates, each hoarding a Relic Scale:
 Big Mama Snapper (the Bayou), the Drowned King (the Sunken City of Sogg), Count Crocula (Gloomfen),
 the Glacier Queen (Frostfang Caverns), Emberjaw the Wyrm (Mt. Scorchmaw) and the Thunder Roc
 (Cloudreach). Bring all six scales to the Shrine of the Six, north-west of Swampton, and become the
-Gator Avatar. Fight, fish, mine, chop, smith, cook and brew along the way. Raccoons will steal your gold;
+Grand Gator. Fight, fish, mine, chop, smith, cook and brew along the way. Raccoons will steal your gold;
 they hide in warrens below the sewers, and drop what they stole when they fall.
 
 START
@@ -51,7 +51,7 @@ TIPS
   Skills rise as you use them. Reagents grow wild: pick them up for your spells.
   Talk to the Mayor, the Captain, the shopkeepers and the Oracle for quests.
   Stand in tall grass or reeds and press X to hide from monsters.
-  Moongates around Swampton lead to the six realms; the grate in the plaza leads to the sewers, and stairs in
+  Lilygates around Swampton lead to the six realms; the grate in the plaza leads to the sewers, and stairs in
   the sewers lead further down, to the Raccoon Warrens.
 
 SAVES

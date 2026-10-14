@@ -323,8 +323,8 @@ array<string> title_pane(int w, int rows) {
 		out.push(rule("PLAY", w));
 		for (int i = 0; i < TM_MAIN.size(); ++i) { out.push(tm_row(TM_MAIN[i], i == TM_SEL, w)); }
 		array<string> story = [
-			"", "The swamp is in trouble. Six tyrants have seized the six realms beyond the Moongates: Big Mama Snapper, the Drowned King, Count Crocula, the Glacier Queen, Emberjaw the Wyrm and the Thunder Roc.",
-			"", "Each hoards a Relic Scale. Bring all six to the Shrine of the Six and become the GATOR AVATAR.", ""];
+			"", "The swamp is in trouble. Six tyrants have seized the six realms beyond the Lilygates: Big Mama Snapper, the Drowned King, Count Crocula, the Glacier Queen, Emberjaw the Wyrm and the Thunder Roc.",
+			"", "Each hoards a Relic Scale. Bring all six to the Shrine of the Six and become the GRAND GATOR.", ""];
 		for (int i = 0; i < story.size() && out.size() + 6 < rows; ++i) {
 			if (story[i] == "") { out.push(pane_line(SGR_DIM, "", w)); }
 			else { tm_wrapped(out, SGR_TEXT, story[i], w); }

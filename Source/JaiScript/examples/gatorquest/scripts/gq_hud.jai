@@ -318,7 +318,7 @@ array<string> build_pane(ClientView& v, int w, int rows) {
 	out.push(pane_line("38;2;170;210;140", where, w));
 	array<string> wx = ["clear", "rain", "snow", "storm", "fog", "ashfall"];
 	string buffs = "";
-	if (v.buff_night > 0) { buffs = buffs + " nightsight"; }
+	if (v.buff_night > 0) { buffs = buffs + " eyeshine"; }
 	if (v.buff_fire > 0) { buffs = buffs + " fireproof"; }
 	if (v.buff_regen > 0) { buffs = buffs + " regen"; }
 	if (v.pvp) { buffs = buffs + " PVP"; }

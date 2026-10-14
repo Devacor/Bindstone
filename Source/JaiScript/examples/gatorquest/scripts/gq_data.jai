@@ -9,7 +9,7 @@ array<string> SKILL_NAME = ["Swordsmanship", "Mace Fighting", "Archery", "Wrestl
 	"Blacksmithing", "Cooking", "Alchemy", "Stealth", "Swimming"];
 array<string> SKILL_KEY = ["swords", "maces", "archery", "wrestling", "tactics", "parrying", "magery", "meditation",
 	"resist", "healing", "fishing", "mining", "lumber", "smithing", "cooking", "alchemy", "stealth", "swimming"];
-// UO-style titles: the highest skill names you
+// titles: the highest skill names you
 array<string> SKILL_TITLE = ["Swordsgator", "Brawler", "Archer", "Wrestler", "Tactician", "Shieldbearer",
 	"Mage", "Mystic", "Warder", "Healer", "Angler", "Miner", "Lumberjack", "Blacksmith", "Chef", "Alchemist",
 	"Sneak", "Swimmer"];
@@ -17,7 +17,7 @@ array<string> RANK_NAME = ["Neophyte", "Novice", "Apprentice", "Journeyman", "Ex
 array<string> SLOT_NAME = ["head", "neck", "body", "hands", "legs", "feet", "weapon", "offhand", "ring", "trinket"];
 array<string> KIND_NAME = ["weapon", "armor", "shield", "potion", "scroll", "food", "reagent", "tool", "resource", "ammo", "trinket", "junk", "gem", "quest", "gold"];
 array<string> RARITY_NAME = ["Common", "Uncommon", "Rare", "Epic", "Legendary"];
-array<string> EFF_NAME = ["none", "heal", "mana", "cure", "str", "dex", "int", "nightsight", "fireres", "regen", "learn",
+array<string> EFF_NAME = ["none", "heal", "mana", "cure", "str", "dex", "int", "eyeshine", "fireres", "regen", "learn",
 	"recall", "food", "random", "firebreath", "bandage", "bottle", "squeak", "music", "bomb", "spellbook"];
 array<string> AF_NAME = ["dmg", "fire", "cold", "poison", "leech", "str", "dex", "int", "speed", "armor", "hp", "mana",
 	"luck", "resist", "regen", "thorns", "swim", "crit", "gold", "mregen", "magery"];
@@ -80,7 +80,7 @@ array<string> TILE_SRC = [
 	"reeds|walk=6|hide",
 	"grave|walk=0",
 	"bog|walk=6",
-	"moongate|walk=1|st=7|light=5",
+	"lilygate|walk=1|st=7|light=5",
 	"stairs down|walk=1|st=8|light=2",
 	"stairs up|walk=1|st=8|light=2",
 	"shrine|walk=0|st=6|light=5",
@@ -185,7 +185,7 @@ int T_LILY = tid("lily pad");
 int T_REEDS = tid("reeds");
 int T_GRAVE = tid("grave");
 int T_BOG = tid("bog");
-int T_GATE = tid("moongate");
+int T_GATE = tid("lilygate");
 int T_STAIRS_DN = tid("stairs down");
 int T_STAIRS_UP = tid("stairs up");
 int T_SHRINE = tid("shrine");
@@ -290,14 +290,14 @@ array<string> ITEM_SRC = [
 	"Mana Potion|potion|eff=mana|pow=35|val=45|tier=2|stack|spr=potion|col=blue",
 	"Cure Potion|potion|eff=cure|val=30|tier=1|stack|spr=potion|col=orange",
 	"Strength Potion|potion|eff=str|pow=10|val=60|tier=2|stack|spr=potion|col=white",
-	"Night Sight Potion|potion|eff=nightsight|pow=1500|val=35|tier=1|stack|spr=potion|col=yellow",
+	"Eyeshine Potion|potion|eff=eyeshine|pow=1500|val=35|tier=1|stack|spr=potion|col=yellow",
 	"Fire Resist Potion|potion|eff=fireres|pow=900|val=70|tier=3|stack|spr=potion|col=lava",
 	"Swamp Tonic|potion|eff=regen|pow=300|val=55|tier=2|stack|spr=potion|col=moss|d=Tastes like the bottom of a pond. In a good way.",
 	"Swamp Gas Bomb|potion|eff=bomb|pow=25|val=80|tier=3|stack|spr=bomb|col=slime|d=Do not light indoors.",
 	// -- scrolls: pow = spell id
 	"Scroll of Heal|scroll|eff=learn|pow=0|val=30|tier=1|stack|spr=scroll|col=paper",
-	"Scroll of Magic Arrow|scroll|eff=learn|pow=1|val=30|tier=1|stack|spr=scroll|col=paper",
-	"Scroll of Night Sight|scroll|eff=learn|pow=2|val=35|tier=1|stack|spr=scroll|col=paper",
+	"Scroll of Snap Bolt|scroll|eff=learn|pow=1|val=30|tier=1|stack|spr=scroll|col=paper",
+	"Scroll of Eyeshine|scroll|eff=learn|pow=2|val=35|tier=1|stack|spr=scroll|col=paper",
 	"Scroll of Cure|scroll|eff=learn|pow=3|val=40|tier=1|stack|spr=scroll|col=paper",
 	"Scroll of Frost Bolt|scroll|eff=learn|pow=4|val=90|tier=2|stack|spr=scroll|col=paper",
 	"Scroll of Fireball|scroll|eff=learn|pow=5|val=110|tier=2|stack|spr=scroll|col=paper",
@@ -308,10 +308,10 @@ array<string> ITEM_SRC = [
 	"Scroll of Greater Heal|scroll|eff=learn|pow=10|val=260|tier=3|stack|spr=scroll|col=paper",
 	"Scroll of Summon Frog|scroll|eff=learn|pow=11|val=300|tier=3|stack|spr=scroll|col=paper",
 	"Scroll of Resurrection|scroll|eff=learn|pow=12|val=500|tier=4|stack|spr=scroll|col=paper",
-	"Scroll of Flamestrike|scroll|eff=learn|pow=13|val=600|tier=4|stack|spr=scroll|col=paper",
+	"Scroll of Flame Geyser|scroll|eff=learn|pow=13|val=600|tier=4|stack|spr=scroll|col=paper",
 	"Scroll of Chain Lightning|scroll|eff=learn|pow=14|val=800|tier=5|stack|spr=scroll|col=paper",
 	"Scroll of Meteor Swarm|scroll|eff=learn|pow=15|val=1200|tier=5|stack|spr=scroll|col=paper",
-	"Recall Rune|scroll|eff=recall|val=50|tier=1|stack|spr=rune|col=blue|d=Snap it to go home. Works 60% of the time, every time.",
+	"Homeward Rune|scroll|eff=recall|val=50|tier=1|stack|spr=rune|col=blue|d=Snap it to go home. Works 60% of the time, every time.",
 	"Spellbook|tool|eff=spellbook|val=40|tier=1|spr=book|col=purple|d=A slim volume. Your spells live here.",
 	// -- food: pow = heal
 	"Raw Fish|food|eff=food|pow=3|val=3|tier=1|stack|spr=fish|col=silver",
@@ -336,14 +336,14 @@ array<string> ITEM_SRC = [
 	"Smoked Eel|food|eff=food|pow=45|val=50|tier=3|stack|spr=fish|col=char",
 	"Golden Carp|junk|val=750|tier=4|spr=fish|col=gold|d=A legend of the Bayou. Worth a fortune to the Fishmonger.",
 	// -- reagents
-	"Black Pearl|reagent|val=5|tier=1|stack|spr=pearl|col=black",
-	"Bloodmoss|reagent|val=5|tier=1|stack|spr=herb|col=red",
-	"Garlic|reagent|val=3|tier=1|stack|spr=garlic|col=white",
-	"Ginseng|reagent|val=3|tier=1|stack|spr=root|col=tan",
-	"Mandrake Root|reagent|val=4|tier=1|stack|spr=root|col=brown",
-	"Nightshade|reagent|val=4|tier=1|stack|spr=herb|col=purple",
-	"Spider Silk|reagent|val=4|tier=1|stack|spr=silk|col=white",
-	"Sulfurous Ash|reagent|val=4|tier=1|stack|spr=ash|col=yellow",
+	"Swamp Pearl|reagent|val=5|tier=1|stack|spr=pearl|col=black",
+	"Gatormoss|reagent|val=5|tier=1|stack|spr=herb|col=red",
+	"Wild Onion|reagent|val=3|tier=1|stack|spr=bulb|col=white",
+	"Cattail Root|reagent|val=3|tier=1|stack|spr=root|col=tan",
+	"Gnarlroot|reagent|val=4|tier=1|stack|spr=root|col=brown",
+	"Voodoo Lily|reagent|val=4|tier=1|stack|spr=herb|col=purple",
+	"Bog Silk|reagent|val=4|tier=1|stack|spr=silk|col=white",
+	"Firefly Dust|reagent|val=4|tier=1|stack|spr=ash|col=yellow",
 	// -- tools and ammo
 	"Fishing Pole|tool|val=12|tier=1|spr=pole|col=wood",
 	"Pickaxe|tool|val=20|tier=1|spr=pick|col=iron",
@@ -398,7 +398,7 @@ array<string> ITEM_SRC = [
 	"Glacier Queen's Tiara|armor|slot=head|arm=4|val=2400|tier=5|rar=legendary|spr=crown|col=ice|aff=int:12,mregen:4,frost:0",
 	"Emberjaw's Fang|weapon|dmg=15-28|spd=8|sk=swords|val=3000|tier=5|rar=legendary|spr=sword|col=lava|aff=fire:12,crit:8",
 	"Stormcaller|weapon|dmg=11-22|spd=9|sk=archery|rng=10|val=3200|tier=5|rar=legendary|spr=bow|col=cyan|aff=speed:2,dex:10",
-	"Crown of the Swamp|armor|slot=head|arm=8|val=9999|tier=5|rar=legendary|spr=crown|col=gold|aff=str:15,dex:15,int:15,hp:40,luck:25|d=Worn by the Gator Avatar. Fits perfectly."
+	"Crown of the Swamp|armor|slot=head|arm=8|val=9999|tier=5|rar=legendary|spr=crown|col=gold|aff=str:15,dex:15,int:15,hp:40,luck:25|d=Worn by the Grand Gator. Fits perfectly."
 ];
 
 array<ItemDef> build_items() {
@@ -467,14 +467,14 @@ int I_MINORHEAL = iid("Minor Heal Potion");
 int I_HEAL = iid("Heal Potion");
 int I_MANA = iid("Mana Potion");
 int I_CURE = iid("Cure Potion");
-int I_BLACKPEARL = iid("Black Pearl");
-int I_BLOODMOSS = iid("Bloodmoss");
-int I_GARLIC = iid("Garlic");
-int I_GINSENG = iid("Ginseng");
-int I_MANDRAKE = iid("Mandrake Root");
-int I_NIGHTSHADE = iid("Nightshade");
-int I_SILK = iid("Spider Silk");
-int I_ASH = iid("Sulfurous Ash");
+int I_SWAMPPEARL = iid("Swamp Pearl");
+int I_GATORMOSS = iid("Gatormoss");
+int I_ONION = iid("Wild Onion");
+int I_CATTAIL = iid("Cattail Root");
+int I_GNARLROOT = iid("Gnarlroot");
+int I_VOODOOLILY = iid("Voodoo Lily");
+int I_SILK = iid("Bog Silk");
+int I_FIREFLY = iid("Firefly Dust");
 int I_IRONORE = iid("Iron Ore");
 int I_SILVERORE = iid("Silver Ore");
 int I_MITHRILORE = iid("Mithril Ore");
@@ -506,7 +506,7 @@ int I_GOLD = iid("Gold Coins");
 int I_CROWN_SWAMP = iid("Crown of the Swamp");
 array<int> RELICS = [iid("Mossy Relic Scale"), iid("Pearl Relic Scale"), iid("Shadow Relic Scale"),
 	iid("Frost Relic Scale"), iid("Ember Relic Scale"), iid("Storm Relic Scale")];
-array<int> REAGENTS = [I_BLACKPEARL, I_BLOODMOSS, I_GARLIC, I_GINSENG, I_MANDRAKE, I_NIGHTSHADE, I_SILK, I_ASH];
+array<int> REAGENTS = [I_SWAMPPEARL, I_GATORMOSS, I_ONION, I_CATTAIL, I_GNARLROOT, I_VOODOOLILY, I_SILK, I_FIREFLY];
 
 // ---------------------------------------------------------------- affixes ---
 // name|pre or suf|applies (any, weapon, armor)|code|lo-hi|tier
@@ -546,25 +546,25 @@ array<AffixDef> AFFIXES = build_affixes();
 
 // ---------------------------------------------------------------- spells ---
 array<string> SPELL_SRC = [
-	"Heal|circle=1|mana=4|reg=Garlic,Ginseng|tgt=0|eff=heal|pow=8-14|fx=heal|snd=heal|d=Knit flesh. Or scales.",
-	"Magic Arrow|circle=1|mana=4|reg=Sulfurous Ash|tgt=1|eff=dmg|pow=5-10|fx=magic|snd=zap|d=A bolt of pure spite.",
-	"Night Sight|circle=1|mana=5|reg=Spider Silk,Sulfurous Ash|tgt=8|eff=nightsight|pow=1500|fx=magic|snd=chime|d=See in the dark like a proper swamp predator.",
-	"Cure|circle=2|mana=6|reg=Garlic,Ginseng|tgt=0|eff=cure|fx=heal|snd=heal|d=Purge poison.",
-	"Frost Bolt|circle=2|mana=8|reg=Nightshade,Spider Silk|tgt=1|eff=frost|pow=8-15|fx=frost|snd=zap|d=Damage and slow a foe.",
-	"Fireball|circle=3|mana=9|reg=Black Pearl|tgt=1|eff=fire|pow=10-18|fx=fire|snd=fire|d=The classic.",
-	"Teleport|circle=3|mana=10|reg=Bloodmoss,Mandrake Root|tgt=5|eff=blink|pow=6|fx=warp|snd=warp|d=Blink forward up to six tiles.",
-	"Poison|circle=3|mana=10|reg=Nightshade|tgt=1|eff=poison|pow=40-60|fx=poison|snd=hiss|d=Slow, green, and personal.",
-	"Recall|circle=4|mana=12|reg=Black Pearl,Bloodmoss,Mandrake Root|tgt=6|eff=recall|fx=warp|snd=warp|d=Return home to your bound shrine.",
-	"Lightning|circle=4|mana=14|reg=Mandrake Root,Sulfurous Ash|tgt=1|eff=dmg|pow=16-26|fx=zap|snd=thunder|d=Smite.",
-	"Greater Heal|circle=5|mana=14|reg=Garlic,Ginseng,Mandrake Root,Spider Silk|tgt=0|eff=heal|pow=30-45|fx=heal|snd=heal|d=Mend almost anything.",
-	"Summon Frog|circle=5|mana=16|reg=Bloodmoss,Mandrake Root,Spider Silk|tgt=4|eff=summon|fx=magic|snd=ribbit|d=Summon a loyal frog familiar. It is very brave.",
-	"Resurrection|circle=6|mana=25|reg=Bloodmoss,Garlic,Ginseng|tgt=7|eff=res|fx=holy|snd=chime|d=Bring a ghostly friend back to the land of the scaly.",
-	"Flamestrike|circle=6|mana=25|reg=Spider Silk,Sulfurous Ash|tgt=1|eff=fire|pow=30-45|fx=fire|snd=fire|d=A pillar of fire. Stand back.",
-	"Chain Lightning|circle=7|mana=30|reg=Black Pearl,Bloodmoss,Mandrake Root,Sulfurous Ash|tgt=2|eff=dmg|pow=18-30|rad=3|fx=zap|snd=thunder|d=Arcs between every foe near your target.",
-	"Meteor Swarm|circle=8|mana=40|reg=Bloodmoss,Mandrake Root,Spider Silk,Sulfurous Ash|tgt=2|eff=fire|pow=25-40|rad=4|fx=fire|snd=boom|d=Rocks. From. SPACE."
+	"Heal|circle=1|mana=4|reg=Wild Onion,Cattail Root|tgt=0|eff=heal|pow=8-14|fx=heal|snd=heal|d=Knit flesh. Or scales.",
+	"Snap Bolt|circle=1|mana=4|reg=Firefly Dust|tgt=1|eff=dmg|pow=5-10|fx=magic|snd=zap|d=A bolt of pure spite.",
+	"Eyeshine|circle=1|mana=5|reg=Bog Silk,Firefly Dust|tgt=8|eff=eyeshine|pow=1500|fx=magic|snd=chime|d=See in the dark like a proper swamp predator.",
+	"Cure|circle=2|mana=6|reg=Wild Onion,Cattail Root|tgt=0|eff=cure|fx=heal|snd=heal|d=Purge poison.",
+	"Frost Bolt|circle=2|mana=8|reg=Voodoo Lily,Bog Silk|tgt=1|eff=frost|pow=8-15|fx=frost|snd=zap|d=Damage and slow a foe.",
+	"Fireball|circle=3|mana=9|reg=Swamp Pearl|tgt=1|eff=fire|pow=10-18|fx=fire|snd=fire|d=The classic.",
+	"Teleport|circle=3|mana=10|reg=Gatormoss,Gnarlroot|tgt=5|eff=blink|pow=6|fx=warp|snd=warp|d=Blink forward up to six tiles.",
+	"Poison|circle=3|mana=10|reg=Voodoo Lily|tgt=1|eff=poison|pow=40-60|fx=poison|snd=hiss|d=Slow, green, and personal.",
+	"Recall|circle=4|mana=12|reg=Swamp Pearl,Gatormoss,Gnarlroot|tgt=6|eff=recall|fx=warp|snd=warp|d=Return home to your bound shrine.",
+	"Lightning|circle=4|mana=14|reg=Gnarlroot,Firefly Dust|tgt=1|eff=dmg|pow=16-26|fx=zap|snd=thunder|d=Smite.",
+	"Greater Heal|circle=5|mana=14|reg=Wild Onion,Cattail Root,Gnarlroot,Bog Silk|tgt=0|eff=heal|pow=30-45|fx=heal|snd=heal|d=Mend almost anything.",
+	"Summon Frog|circle=5|mana=16|reg=Gatormoss,Gnarlroot,Bog Silk|tgt=4|eff=summon|fx=magic|snd=ribbit|d=Summon a loyal frog familiar. It is very brave.",
+	"Resurrection|circle=6|mana=25|reg=Gatormoss,Wild Onion,Cattail Root|tgt=7|eff=res|fx=holy|snd=chime|d=Bring a ghostly friend back to the land of the scaly.",
+	"Flame Geyser|circle=6|mana=25|reg=Bog Silk,Firefly Dust|tgt=1|eff=fire|pow=30-45|fx=fire|snd=fire|d=A pillar of fire. Stand back.",
+	"Chain Lightning|circle=7|mana=30|reg=Swamp Pearl,Gatormoss,Gnarlroot,Firefly Dust|tgt=2|eff=dmg|pow=18-30|rad=3|fx=zap|snd=thunder|d=Arcs between every foe near your target.",
+	"Meteor Swarm|circle=8|mana=40|reg=Gatormoss,Gnarlroot,Bog Silk,Firefly Dust|tgt=2|eff=fire|pow=25-40|rad=4|fx=fire|snd=boom|d=Rocks. From. SPACE."
 ];
 
-array<string> SPELL_EFF = ["heal", "dmg", "nightsight", "cure", "frost", "fire", "blink", "poison", "recall", "summon", "res"];
+array<string> SPELL_EFF = ["heal", "dmg", "eyeshine", "cure", "frost", "fire", "blink", "poison", "recall", "summon", "res"];
 array<string> FX_NAME = ["sparks", "blood", "splash", "fire", "frost", "zap", "heal", "smoke", "poison", "magic", "gold", "loot", "levelup", "warp", "bubbles", "bones", "dust", "holy"];
 
 array<SpellDef> build_spells() {
@@ -637,19 +637,19 @@ array<string> MON_SRC = [
 	"The Rat King|hp=260|dmg=8-14|armor=3|spd=3|aspd=7|ai=boss|tier=2|fame=120|gold=80-160|boss|summon=Sewer Rat|drop=Rat King's Crown:1000|spr=ratking|col=gold|quip=MY KINGDOM FOR A CHEESE!",
 	// -- The Bayou (tier 2)
 	"Snapping Turtle|hp=40|dmg=5-10|armor=6|spd=4|aspd=9|ai=melee|move=3|tier=2|fame=12|drop=Turtle Shell Shield:30|spr=turtle|col=moss|snd=snap",
-	"Voodoo Toad|hp=30|dmg=2-5|spd=3|aspd=10|ai=caster|move=3|spell=Poison|tier=2|fame=14|gold=5-20|drop=Nightshade:700,Bloodmoss:400|spr=toad|col=purple|quip=Hex-ribbit!",
+	"Voodoo Toad|hp=30|dmg=2-5|spd=3|aspd=10|ai=caster|move=3|spell=Poison|tier=2|fame=14|gold=5-20|drop=Voodoo Lily:700,Gatormoss:400|spr=toad|col=purple|quip=Hex-ribbit!",
 	"Crawdad Knight|hp=45|dmg=6-11|armor=5|spd=3|aspd=8|ai=melee|move=3|tier=2|fame=15|gold=5-25|drop=Crawdad:900|spr=crawknight|col=red|quip=En garde, mudling!",
 	"Bog Zombie|hp=35|dmg=5-9|spd=5|aspd=9|ai=melee|move=3|tier=2|fame=10|undead|drop=Bone:600|spr=zombie|col=moss|snd=groan",
 	"Big Mama Snapper|hp=420|dmg=12-22|armor=8|spd=3|aspd=8|ai=boss|move=3|tier=3|fame=300|gold=200-400|boss|summon=Snapping Turtle|drop=Mossy Relic Scale:1000,Big Mama's Shell:1000|spr=bigmama|col=moss|light=2|quip=WHO'S BEEN SWIMMING IN MY BAYOU?",
 	// -- Sunken City of Sogg (tier 3)
 	"Drowned Sailor|hp=50|dmg=7-13|spd=3|aspd=8|ai=melee|move=3|tier=3|fame=18|undead|gold=10-30|drop=Bone:500|spr=skeleton|col=bone|quip=Yo ho... ho...",
 	"Electric Eel|hp=35|dmg=5-12|spd=1|aspd=6|ai=melee|move=2|tier=3|fame=16|spr=eel|col=cyan|light=2|snd=zap",
-	"Merrow Spearman|hp=60|dmg=8-14|armor=3|spd=2|aspd=8|ai=pack|move=3|tier=3|fame=20|gold=10-30|drop=Kelp:600,Black Pearl:300|spr=merrow|col=teal",
-	"Sea Witch|hp=55|dmg=3-6|spd=3|aspd=10|ai=caster|move=3|spell=Frost Bolt|tier=3|fame=24|gold=20-50|drop=Black Pearl:800,Scroll of Frost Bolt:80|spr=witch|col=teal|quip=Such pretty scales. MINE.",
+	"Merrow Spearman|hp=60|dmg=8-14|armor=3|spd=2|aspd=8|ai=pack|move=3|tier=3|fame=20|gold=10-30|drop=Kelp:600,Swamp Pearl:300|spr=merrow|col=teal",
+	"Sea Witch|hp=55|dmg=3-6|spd=3|aspd=10|ai=caster|move=3|spell=Frost Bolt|tier=3|fame=24|gold=20-50|drop=Swamp Pearl:800,Scroll of Frost Bolt:80|spr=witch|col=teal|quip=Such pretty scales. MINE.",
 	"Angler Lurker|hp=70|dmg=10-18|spd=3|aspd=9|ai=ambush|move=2|tier=3|fame=26|light=3|drop=Pearl Necklace:40|spr=angler|col=navy",
 	"The Drowned King|hp=720|dmg=14-24|armor=8|spd=3|aspd=8|ai=boss|move=3|spell=Frost Bolt|tier=4|fame=500|gold=300-600|boss|summon=Drowned Sailor|drop=Pearl Relic Scale:1000,Trident of the Drowned King:1000|spr=drownking|col=pearl|light=3|quip=KNEEL BEFORE THE TIDE!",
 	// -- Gloomfen, the haunted swamp (tier 3)
-	"Will-o'-Wisp|hp=30|dmg=3-6|spd=2|aspd=10|ai=coward|move=4|spell=Magic Arrow|tier=3|fame=16|light=4|drop=Ectoplasm:400|spr=wisp|col=wisp|quip=This way... this way...",
+	"Will-o'-Wisp|hp=30|dmg=3-6|spd=2|aspd=10|ai=coward|move=4|spell=Snap Bolt|tier=3|fame=16|light=4|drop=Ectoplasm:400|spr=wisp|col=wisp|quip=This way... this way...",
 	"Swamp Zombie|hp=55|dmg=8-13|spd=5|aspd=10|ai=pack|move=3|tier=3|fame=14|undead|drop=Bone:600|spr=zombie|col=gray|snd=groan",
 	"Banshee|hp=60|dmg=4-8|spd=2|aspd=11|ai=caster|move=4|spell=Lightning|tier=3|fame=25|undead|drop=Ectoplasm:700|spr=banshee|col=ghost|quip=EEEEEEEEE!",
 	"Ghoul Gator|hp=80|dmg=10-16|spd=3|aspd=8|ai=melee|move=3|tier=3|fame=28|undead|leech=30|drop=Bone:500|spr=ghoulgator|col=ghoul|quip=We could have been friends.",
@@ -663,11 +663,11 @@ array<string> MON_SRC = [
 	"Snow Troll|hp=140|dmg=14-24|armor=4|spd=4|aspd=10|ai=melee|tier=4|fame=45|frostproof|regen=2|drop=Hide:800|spr=troll|col=snow",
 	"The Glacier Queen|hp=1100|dmg=15-26|armor=10|spd=3|aspd=8|ai=boss|move=1|spell=Frost Bolt|tier=5|fame=800|gold=500-900|boss|frostproof|summon=Frost Wisp|drop=Frost Relic Scale:1000,Glacier Queen's Tiara:1000|spr=glacierqueen|col=ice|light=4|quip=Your blood will make a lovely sorbet.",
 	// -- Mt. Scorchmaw (tier 5)
-	"Fire Imp|hp=55|dmg=4-8|spd=2|aspd=10|ai=coward|spell=Fireball|tier=5|fame=26|fireproof|light=2|drop=Sulfurous Ash:900|spr=imp|col=lava|quip=Hehehehe, crispy!",
+	"Fire Imp|hp=55|dmg=4-8|spd=2|aspd=10|ai=coward|spell=Fireball|tier=5|fame=26|fireproof|light=2|drop=Firefly Dust:900|spr=imp|col=lava|quip=Hehehehe, crispy!",
 	"Salamander|hp=80|dmg=12-20|spd=2|aspd=8|ai=melee|tier=5|fame=34|fireproof|light=2|drop=Magma Core:120|spr=salamander|col=orange",
 	"Magma Golem|hp=200|dmg=18-30|armor=12|spd=6|aspd=12|ai=melee|tier=5|fame=60|fireproof|light=3|drop=Magma Core:500,Iron Ore:900|spr=golem|col=lava|snd=rumble",
 	"Ash Bat|hp=40|dmg=8-14|spd=1|aspd=6|ai=pack|move=4|tier=5|fame=16|fireproof|spr=bat|col=char|snd=screech",
-	"Cinder Cultist|hp=90|dmg=6-10|spd=3|aspd=10|ai=caster|spell=Flamestrike|tier=5|fame=40|fireproof|gold=30-80|drop=Scroll of Flamestrike:60,Sulfurous Ash:900|spr=cultist|col=crimson|quip=The mountain hungers!",
+	"Cinder Cultist|hp=90|dmg=6-10|spd=3|aspd=10|ai=caster|spell=Flame Geyser|tier=5|fame=40|fireproof|gold=30-80|drop=Scroll of Flame Geyser:60,Firefly Dust:900|spr=cultist|col=crimson|quip=The mountain hungers!",
 	"Emberjaw the Wyrm|hp=1500|dmg=18-30|armor=12|spd=3|aspd=8|ai=boss|spell=Fireball|tier=6|fame=1200|gold=800-1500|boss|fireproof|summon=Fire Imp|drop=Ember Relic Scale:1000,Emberjaw's Fang:1000|spr=emberjaw|col=lava|light=5|quip=A GATOR? I EAT GATORS FOR BRUNCH.",
 	// -- Cloudreach (tier 5)
 	"Harpy|hp=70|dmg=10-16|spd=2|aspd=9|ai=ranged|rng=6|move=4|tier=5|fame=28|drop=Feather:900|spr=harpy|col=tan|quip=SKREEEE!",
@@ -806,22 +806,22 @@ array<string> RECIPE_SRC = [
 	"Arrow|anvil|lumber|0|Log:1,Feather:1|10",
 	"Club|anvil|lumber|0|Log:3|1",
 	"Cooked Fish|fire|cooking|0|Raw Fish:1|1",
-	"Blackened Catfish|fire|cooking|250|Catfish:1,Garlic:1|1",
+	"Blackened Catfish|fire|cooking|250|Catfish:1,Wild Onion:1|1",
 	"Fried Frog Legs|fire|cooking|100|Frog Legs:1|1",
-	"Crawdad Etouffee|fire|cooking|400|Crawdad:2,Garlic:1,Bread:1|1",
+	"Crawdad Etouffee|fire|cooking|400|Crawdad:2,Wild Onion:1,Bread:1|1",
 	"Toasted Marshmallow|fire|cooking|0|Marshmallow:1|1",
 	"Smoked Eel|fire|cooking|600|Lava Eel:1|1",
-	"Bread|fire|cooking|50|Ginseng:1|2",
-	"Minor Heal Potion|anywhere|alchemy|0|Ginseng:1|1|Mortar and Pestle",
-	"Cure Potion|anywhere|alchemy|100|Garlic:2|1|Mortar and Pestle",
-	"Night Sight Potion|anywhere|alchemy|150|Spider Silk:1,Sulfurous Ash:1|1|Mortar and Pestle",
-	"Heal Potion|anywhere|alchemy|300|Ginseng:2,Garlic:1|1|Mortar and Pestle",
-	"Mana Potion|anywhere|alchemy|350|Black Pearl:1,Spider Silk:1|1|Mortar and Pestle",
-	"Swamp Tonic|anywhere|alchemy|400|Kelp:2,Ginseng:1|1|Mortar and Pestle",
-	"Strength Potion|anywhere|alchemy|500|Mandrake Root:2,Bloodmoss:1|1|Mortar and Pestle",
-	"Greater Heal Potion|anywhere|alchemy|650|Ginseng:3,Garlic:1,Mandrake Root:1|1|Mortar and Pestle",
-	"Fire Resist Potion|anywhere|alchemy|700|Magma Core:1,Garlic:2|1|Mortar and Pestle",
-	"Swamp Gas Bomb|anywhere|alchemy|550|Sulfurous Ash:2,Kelp:1|1|Mortar and Pestle",
+	"Bread|fire|cooking|50|Cattail Root:1|2",
+	"Minor Heal Potion|anywhere|alchemy|0|Cattail Root:1|1|Mortar and Pestle",
+	"Cure Potion|anywhere|alchemy|100|Wild Onion:2|1|Mortar and Pestle",
+	"Eyeshine Potion|anywhere|alchemy|150|Bog Silk:1,Firefly Dust:1|1|Mortar and Pestle",
+	"Heal Potion|anywhere|alchemy|300|Cattail Root:2,Wild Onion:1|1|Mortar and Pestle",
+	"Mana Potion|anywhere|alchemy|350|Swamp Pearl:1,Bog Silk:1|1|Mortar and Pestle",
+	"Swamp Tonic|anywhere|alchemy|400|Kelp:2,Cattail Root:1|1|Mortar and Pestle",
+	"Strength Potion|anywhere|alchemy|500|Gnarlroot:2,Gatormoss:1|1|Mortar and Pestle",
+	"Greater Heal Potion|anywhere|alchemy|650|Cattail Root:3,Wild Onion:1,Gnarlroot:1|1|Mortar and Pestle",
+	"Fire Resist Potion|anywhere|alchemy|700|Magma Core:1,Wild Onion:2|1|Mortar and Pestle",
+	"Swamp Gas Bomb|anywhere|alchemy|550|Firefly Dust:2,Kelp:1|1|Mortar and Pestle",
 	"Bandage|anywhere|healing|0|Hide:1|5"
 ];
 
@@ -895,14 +895,14 @@ int W_WARRENS = 8;
 array<string> ROLE_SRC = [
 	"Gus|the Weaponsmith|shop=0|lines=Sharp things! Get your sharp things!;Every gator needs a good blade. Or a frying pan.",
 	"Marguerite|the Armorer|shop=1|lines=Scales are nice, but plate is nicer.;I once made a helm for a frog. Never again.",
-	"Madame Hoodoo|the Alchemist|shop=2|lines=Potions, powders, reagents. No refunds on curses.;Bring me mandrake, cher.",
+	"Madame Hoodoo|the Alchemist|shop=2|lines=Potions, powders, reagents. No refunds on curses.;Bring me gnarlroot, cher.",
 	"Boudreaux|the Provisioner|shop=3|lines=Tools, food, arrows. All you need for the swamp life.;You look hungry. You always look hungry.",
 	"Thibodeaux|the Fishmonger|shop=4|lines=Fish! Fresh-ish fish!;I would give a fortune for a Golden Carp.",
 	"Penny|the Banker|banks|lines=Your gold is safe with Swampton Savings and Loan.;We have not been robbed in almost a week.",
 	"Sister Clementine|the Healer|heals|lines=Bless your scaly heart.;Ghosts to the front, please. No cutting.",
 	"Mayor Beauregard|the Mayor|lines=Welcome to Swampton, finest swamp in the swamp!;We have a rat problem. And a raccoon problem. And a problem problem.",
 	"Captain Fontenot|of the Guard|lines=Keep your claws to yourself in town.;Raccoons. I hate raccoons.",
-	"Oracle Mireweather|the Shrine Keeper|heals|lines=Six realms, six scales, one gator.;The Moongates hum when a hero is near."
+	"Oracle Mireweather|the Shrine Keeper|heals|lines=Six realms, six scales, one gator.;The Lilygates hum when a hero is near."
 ];
 
 array<NpcRole> build_roles() {
@@ -937,7 +937,7 @@ int R_ORACLE = 9;
 array<string> SHOP_SRC = [
 	"Rusty Dagger,Short Sword,Cutlass,Broadsword,Club,Frying Pan,Mace,War Hammer,Short Bow,Long Bow,Arrow,Apprentice Wand",
 	"Straw Hat,Leather Cap,Bucket Helm,Iron Helm,Leather Tunic,Chainmail Shirt,Leather Gloves,Leather Leggings,Chain Leggings,Sandals,Leather Boots,Swamp Waders,Pot Lid,Wooden Shield,Kite Shield",
-	"Minor Heal Potion,Heal Potion,Mana Potion,Cure Potion,Night Sight Potion,Black Pearl,Bloodmoss,Garlic,Ginseng,Mandrake Root,Nightshade,Spider Silk,Sulfurous Ash,Spellbook,Scroll of Heal,Scroll of Magic Arrow,Scroll of Night Sight,Scroll of Cure,Scroll of Frost Bolt,Scroll of Fireball,Scroll of Recall,Mortar and Pestle,Recall Rune",
+	"Minor Heal Potion,Heal Potion,Mana Potion,Cure Potion,Eyeshine Potion,Swamp Pearl,Gatormoss,Wild Onion,Cattail Root,Gnarlroot,Voodoo Lily,Bog Silk,Firefly Dust,Spellbook,Scroll of Heal,Scroll of Snap Bolt,Scroll of Eyeshine,Scroll of Cure,Scroll of Frost Bolt,Scroll of Fireball,Scroll of Recall,Mortar and Pestle,Homeward Rune",
 	"Bread,Cheese Wheel,Moon Pie,Marshmallow,Hot Sauce,Fishing Pole,Pickaxe,Hatchet,Smith Hammer,Bandage,Arrow,Kazoo",
 	"Raw Fish,Catfish,Cooked Fish,Fishing Pole,Kelp"
 ];
@@ -963,11 +963,11 @@ array<string> QUEST_SRC = [
 	"Frog Legs Friday|giver=Boudreaux|type=1|target=Frog Legs|count=5|gold=50|reward=Fried Frog Legs|rq=3|o=Friday is frog leg night and I am plumb out. Bring me 5 Frog Legs?|d=Now THAT is a Friday. Here, have some on the house.",
 	"Gone Fishin'|giver=Thibodeaux|type=5|count=10|gold=100|reward=Fish Slapper|o=Catch 10 fish, any fish, and I will teach you the ancient art of the slap.|d=A natural! Take this. Treat it with respect.",
 	"Iron Will|giver=Gus|type=4|count=1|gold=40|reward=Iron Ingot|rq=10|o=Smelt some ore at the forge and make anything at the anvil. Show me what you have got.|d=Not bad for a gator with no thumbs.",
-	"Reagent Run|giver=Madame Hoodoo|type=1|target=Mandrake Root|count=3|gold=70|reward=Scroll of Fireball|o=Bring me 3 Mandrake Root, cher. Reagents grow wild all over Gatorland.|d=Mmm, fresh. Here is a little something that goes whoosh.",
+	"Reagent Run|giver=Madame Hoodoo|type=1|target=Gnarlroot|count=3|gold=70|reward=Scroll of Fireball|o=Bring me 3 Gnarlroot, cher. Reagents grow wild all over Gatorland.|d=Mmm, fresh. Here is a little something that goes whoosh.",
 	"The Rat King|giver=Mayor Beauregard|type=2|target=The Rat King|count=1|gold=150|reward=Heal Potion|rq=3|need=0|o=The rats have a KING. Down in the deepest sewer. End his reign!|d=Long live... nobody! Swampton owes you.",
-	"Tourist|giver=Oracle Mireweather|type=3|count=8|gold=200|reward=Rubber Duck|o=Walk every realm the Moongates touch. All eight. The swamp wants to be seen.|d=You have seen it all. Take this. It is more powerful than it looks.",
+	"Tourist|giver=Oracle Mireweather|type=3|count=8|gold=200|reward=Rubber Duck|o=Walk every realm the Lilygates touch. All eight. The swamp wants to be seen.|d=You have seen it all. Take this. It is more powerful than it looks.",
 	"Big Mama|giver=Oracle Mireweather|type=2|target=Big Mama Snapper|count=1|gold=250|reward=Greater Heal Potion|rq=3|o=Big Mama Snapper rules the Bayou and she bites. Take her Relic Scale.|d=The first scale. Five remain.",
-	"The Six Scales|giver=Oracle Mireweather|type=1|target=Mossy Relic Scale|count=1|gold=1000|reward=Crown of the Swamp|need=8|o=Gather all six Relic Scales from the realm tyrants and return to the Shrine. Become the Gator Avatar.|d=The swamp crowns you. Rise, Gator Avatar!"
+	"The Six Scales|giver=Oracle Mireweather|type=1|target=Mossy Relic Scale|count=1|gold=1000|reward=Crown of the Swamp|need=8|o=Gather all six Relic Scales from the realm tyrants and return to the Shrine. Become the Grand Gator.|d=The swamp crowns you. Rise, Grand Gator!"
 ];
 
 array<QuestDef> build_quests() {

@@ -857,6 +857,58 @@ out;
             check_true(ok, "script_map agrees with the ordered model through every operation");
         });
 
+        // int keys filled out of order, below the first key and far away keep their addresses, their order and their lookups; a
+        // bound int finds and replaces the int key it equals
+        test("map_int_keys_grow_rebase_erase_and_bound_keys", [this]() {
+            auto e = jai::engine::make();
+            jai::engine* eng = e.get();
+            auto key = [eng](int64_t x) { return jai::script_value(static_cast<jai::script_int>(x), eng); };
+            jai::script_map m;
+            std::vector<int64_t> order;
+            for (int64_t i = 0; i < 1000; ++i) { order.push_back(i); }
+            uint64_t rng = 12345;
+            for (size_t i = order.size(); i > 1; --i) { rng = rng * 6364136223846793005ull + 1442695040888963407ull; std::swap(order[i - 1], order[(rng >> 33) % i]); }
+            std::map<int64_t, const jai::script_map::value_type*> where;
+            for (int64_t x : order) { m[key(x)] = key(x * 2); where[x] = m.lookup(key(x)); }
+            for (int64_t x = -1; x >= -500; --x) { m[key(x)] = key(x * 2); where[x] = m.lookup(key(x)); }
+            for (int64_t x : {int64_t(1) << 40, int64_t(-1) << 40, INT64_MAX, INT64_MIN, int64_t(5000)}) { m[key(x)] = key(7); where[x] = m.lookup(key(x)); }
+            bool ok = m.size() == where.size();
+            for (const auto& [x, addr] : where) { ok = ok && m.lookup(key(x)) == addr && m.count(key(x)) == 1; }
+            check_true(ok, "every key keeps its address through growth and re-basing");
+            check_true(m.lookup(key(1000)) == nullptr && m.lookup(key(-501)) == nullptr && m.lookup(key(4999)) == nullptr, "absent keys stay absent");
+            for (int64_t x = -500; x < 1000; x += 2) { ok = ok && m.erase(key(x)) == 1; where.erase(x); }
+            for (int64_t x = -500; x < 1000; x += 4) { m[key(x)] = key(-x); where[x] = m.lookup(key(x)); }
+            auto wi = where.begin();
+            for (const auto& kv : m) { ok = ok && wi != where.end() && kv.first.as_int() == wi->first && &kv == wi->second; ++wi; }
+            check_true(ok && wi == where.end(), "erase and re-insert keep the order and the remaining addresses");
+            check_eq(int64_t(-8), m.at(key(8)).as_int(), "a re-inserted key holds its new value");
+            check_eq(int64_t(2 * 7), m.at(key(7)).as_int(), "an odd key kept its value");
+
+            int64_t host = 7;
+            jai::script_value bound = jai::script_value::make_cpp_bound(&host, eng);
+            check_eq(int64_t(14), m.at(bound).as_int(), "a bound int finds the int key it equals");
+            m[bound] = key(99);
+            check_eq(int64_t(99), m.at(key(7)).as_int(), "a store through a bound int replaces that key's value");
+            const size_t before = m.size();
+            host = 123456789;
+            m[jai::script_value::make_cpp_bound(&host, eng)] = key(5);
+            check_eq(before + 1, m.size(), "a bound int with a new value adds one key");
+            check_eq(int64_t(5), m.at(key(123456789)).as_int(), "an int key finds the bound key it equals");
+            check_eq(size_t(1), m.erase(key(123456789)), "and erases it");
+            check_eq(before, m.size(), "size after the erase");
+
+            jai::script_map copy(m);
+            ok = copy.size() == m.size();
+            auto ci = copy.begin();
+            for (const auto& kv : m) { ok = ok && ci != copy.end() && kv.first == ci->first && kv.second == ci->second && &*ci != &kv; ++ci; }
+            check_true(ok, "a copy holds the same entries in the same order at its own addresses");
+            jai::script_map moved(std::move(copy));
+            check_eq(m.size(), moved.size(), "a move keeps every entry");
+            check_true(copy.empty() && copy.lookup(key(8)) == nullptr, "the moved-from map is empty");
+            copy[key(8)] = key(1);
+            check_eq(size_t(1), copy.size(), "and usable");
+        });
+
         // maps mixing clustered int keys with sparse ints, floats and strings read, store, iterate and serialize as one
         // ordered map on both backends; a reference into a value survives inserts around it
         test("map_mixed_keys_read_store_iterate_and_serialize", [this, both_mode]() {

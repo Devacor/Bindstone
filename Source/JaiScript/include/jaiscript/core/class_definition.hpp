@@ -15,6 +15,7 @@
 #include <set>
 #include <unordered_set>
 #include <algorithm>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -399,6 +400,15 @@ private:
             return field_cell(p, cell_deleter{false});
         }
         return field_cell(new script_value(std::move(v)), cell_deleter{true});
+    }
+    // A null, int, float, char or bool cell is its bytes: the copy constructor writes exactly the tag, the engine and the payload
+    field_cell make_trivial_cell(const script_value& v) {
+        if (arena_used_ < arena_cells_) {
+            auto* p = arena_ + arena_used_++;
+            std::memcpy(static_cast<void*>(p), static_cast<const void*>(&v), sizeof(script_value));
+            return field_cell(p, cell_deleter{false});
+        }
+        return field_cell(new script_value(v), cell_deleter{true});
     }
     field_table flat_fields_;
     std::unique_ptr<std::unordered_map<uint64_t, script_value>> overflow_fields_;
@@ -4010,7 +4020,14 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
         new_instance->flat_fields_.resize(flat_fields_.size());
         for (size_t slot = 0; slot < flat_fields_.size(); ++slot) {
             const auto& cell = flat_fields_[slot];
-            if (!cell || cell->raw_storage_index() == script_value::TYPEID_INVALID) { continue; }
+            if (!cell) { continue; }
+            const size_t kind = cell->raw_storage_index();
+            if (kind == script_value::TYPEID_INVALID) { continue; }
+            if (kind == script_value::TYPEID_INT || kind == script_value::TYPEID_FLOAT || kind == script_value::TYPEID_BOOL ||
+                kind == script_value::TYPEID_CHAR || kind == script_value::TYPEID_NULL) {
+                new_instance->flat_fields_[slot] = new_instance->make_trivial_cell(*cell);
+                continue;
+            }
             new_instance->flat_fields_[slot] = new_instance->make_cell(cell->clone_element());
         }
         copy_native(*new_instance);

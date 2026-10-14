@@ -129,13 +129,6 @@ file: source/tests/vm/spec_attack_tests.cpp
 			// (ch. 3) makes it stop the script; one text on both backends
 >>>
 
-file: source/tests/vm/vm_backend_tests.cpp
-<<<
-		// (internal/flatstack_design.md §4 — lifetime pins land BEFORE stage 2's atomic core)
-===
-		// (lifetime pins land BEFORE stage 2's atomic core)
->>>
-
 file: include/jaiscript/stdlib/reflection.hpp
 <<<
 // The reflect:: namespace (docs/site/guide/12-reflection.html — the front door; internal/reflection_design.md —
@@ -152,6 +145,20 @@ file: source/tests/language/review_regression_tests.cpp
 ===
         // ---- by-reference binding of C++ properties (bind the MEMBER ITSELF). Every row runs
         // both backends. ----
+>>>
+
+file: source/tests/language/review_regression_tests.cpp
+<<<
+        // ---- Stage 2: fused subscript stores + flat operator table ----
+===
+        // ---- fused subscript stores + flat operator table ----
+>>>
+
+file: source/tests/language/review_regression_tests.cpp
+<<<
+        // ---- Stage 3: fused subscript-read operands + interp subscript-compound ----
+===
+        // ---- fused subscript-read operands + interp subscript-compound ----
 >>>
 
 file: source/tests/semantics/spec_conformance_tests.cpp

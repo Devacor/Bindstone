@@ -90,7 +90,7 @@ namespace { struct cell_cost_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; 
 #endif
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_borrow_subscript_read (captured reads)
 #include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
-#include <jaiscript/debug/controller.hpp>   // step-debugger statement hook (phase 5)
+#include <jaiscript/debug/controller.hpp>   // step-debugger statement hook
 #include <cassert>
 #include <cmath>
 #include <cstring>
@@ -407,7 +407,7 @@ void vm_backend::value_stack::reserve(size_t want) {
 	}
 }
 
-// Growth chokepoint (stage 2): the pushed value detours through the temp param so
+// Growth chokepoint: the pushed value detours through the temp param so
 // self-referential pushes (op_dup pushing back()) survive the relocation.
 void vm_backend::value_stack::grow_push(script_value x) {
 	relocate_to(cap < 2048 ? 4096 : cap * 2);
@@ -837,11 +837,11 @@ struct vm_backend::vm_coroutine_state : coroutine_backend_state {
 	                                        // ip survives suspends, try_record.owner stays valid
 	std::shared_ptr<environment> entry_env;
 	std::shared_ptr<environment> current_env;
-	// Stage 4 per-fiber stacks: the fiber OWNS its value/try/iter/cfor stacks; a resume
+	// Per-fiber stacks: the fiber OWNS its value/try/iter/cfor stacks; a resume
 	// swaps them whole with the vm's live ones (O(1)) and the exit guard swaps back on
 	// every path. Absolute indices inside (window_base, try stack_size, bases) are
-	// fiber-stack absolute and stay valid across suspends - the old copy-out/copy-in
-	// and rebase arithmetic is gone. Nested resumes nest LIFO through the same guard.
+	// fiber-stack absolute and stay valid across suspends, with no copying or rebasing.
+	// Nested resumes nest LIFO through the same guard.
 	value_stack stack_storage;              // owner stays null: the vm's stack_ keeps the rebase identity
 	std::vector<try_record> try_storage;
 	std::vector<iter_state> iter_storage;
@@ -966,7 +966,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	coroutine_handle* prev_active = active_coroutine_;
 	active_coroutine_ = &handle;
 
-	// Stage 4: activate the fiber's OWN stacks by whole-vector swap (O(1)); the guard
+	// Activate the fiber's OWN stacks by whole-vector swap (O(1)); the guard
 	// swaps back on EVERY exit (yield, completion, error, throw), leaving the fiber's
 	// state parked in its storage and the resumer's stacks live again. Nested resumes
 	// nest LIFO. call_records_ and frames_ stay shared: in-fiber script calls pop
@@ -3501,7 +3501,7 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 		}
 	}
 	if (ins.c & load_flag_type_ctor) {
-		// nullable-pointer probe (checked_result stage 1): same ladder as get(), the
+		// nullable-pointer probe: same ladder as get(), the
 		// miss is a null instead of a fat error result nobody reads
 		if (script_value* ctor = environment_->get_value_ptr(type_ctor_base_symbol(sym));
 		    ctor && ctor->is_function()) {
@@ -5299,7 +5299,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 		}
 	}
 	if (operand.load_flags & load_flag_type_ctor) {
-		// nullable-pointer probe (checked_result stage 1): same ladder, null miss
+		// nullable-pointer probe: same ladder, null miss
 		if (script_value* ctor = environment_->get_value_ptr(type_ctor_base_symbol(sym));
 		    ctor && ctor->is_function()) {
 			scratch.emplace(*ctor);
@@ -5864,7 +5864,7 @@ bool vm_backend::typed_binary_head(frame& f, const fused_binary_proto& p, Sink& 
 	}
 }
 
-// The ONE fused-binary computation, sink-templated (flatstack stage 6): op_binary_fused
+// The ONE fused-binary computation, sink-templated: op_binary_fused
 // pushes; the dest-addressed variants land the result in a slot/decl with no push and
 // no second dispatch. One body, every sink - parity by construction.
 template <typename Sink>
@@ -21460,7 +21460,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				continue;
 			}
 
-			// Return superinstructions (stage 6): entry frames mirror op_return's entry
+			// Return superinstructions: entry frames mirror op_return's entry
 			// branch; record frames return without the stack round trip. A compute that
 			// set script unwinding falls to the loop bottom exactly like op_binary would.
 			case opcode::op_return_ident: JAI_OP_LABEL(op_return_ident) {
@@ -21944,7 +21944,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 		function.backend_return_conv = static_cast<uint8_t>(classify_return_conv(function.return_type));
 	}
 	rec.return_conv_class = function.backend_return_conv;
-	// Stage 2: stack callees stay in their slot below the window — the slot IS the pin
+	// Stack callees stay in their slot below the window — the slot IS the pin
 	// (hot reload can't kill the executing function; pop truncation releases it).
 	// Pooled-vector callees still pin through the record.
 	const bool args_on_stack = args_are_stack(args);
@@ -21966,7 +21966,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	               (!function.closure_env ||
 	                (!function.closure_env->is_method_env() && !function.closure_env->is_static_method_env()));
 	if (rec.env_lazy && !function.closure_env && (function.block_defined || !environment_ || !environment_->block_scope())) {
-		// Stage 3: the callee runs in the caller's env and the env stack does not move
+		// The callee runs in the caller's env and the env stack does not move
 		// AT ALL — nothing saved (prev_env stays null), nothing restored at pop
 		rec.env_untouched = true;
 	} else if (rec.env_lazy && !function.closure_env) {
@@ -22001,7 +22001,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	// frames (plain non-closure functions are lexically top-level - no class context,
 	// no closure chain); closure-lazy frames carry their closure env (chain is correct)
 	rec.f.entry_env = rec.env_untouched || (rec.env_lazy && !function.closure_env) ? nullptr : environment_;
-	// Frame window (stage 2): zero-copy callers' args ARE slots 0..argc-1 in place;
+	// Frame window: zero-copy callers' args ARE slots 0..argc-1 in place;
 	// pooled-vector callers build the window at the stack top during binding. stack_base
 	// is the callee slot (zero-copy) / the window base (pooled), so every pop/unwind
 	// truncation destroys the window (+pin) exactly where the old locals clear did.
@@ -22077,7 +22077,7 @@ op_status vm_backend::enter_script_method_sliced(frame& caller, script_value&& m
 // non-null = the receiver rides in from a thunk payload (moved into env, pinned via
 // rec.locals this). frame_base = where this frame's stack territory begins (the
 // receiver/callee slot below the window, or args_base when nothing sits below) — pop
-// truncation destroys territory + pin exactly like stage 2's callee slot.
+// truncation destroys territory + pin exactly like a function frame's callee slot.
 op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& method_val,
                                                const script_method_dispatch& dispatch,
                                                const std::shared_ptr<function_decl>& ast,
@@ -22309,7 +22309,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	rec.locals.scope_static = dispatch.cls.get();   // the declaring class: a lazy frame's bare statics resolve through it
 	rec.cells.reset_call(body_chunk->max_cells);
 	rec.f.cells = &rec.cells;
-	// Method-lazy (flatstack stage 5, this-in-frame): a body whose ops never park
+	// Method-lazy (this-in-frame): a body whose ops never park
 	// state in an env runs with environment_ = the DEFINITION env (globals chain,
 	// lexically correct) and NO method env at all — 'this', fields, and the access
 	// context all resolve through the frame (current_this / frame_access_context).
@@ -22876,7 +22876,7 @@ JAI_NOINLINE op_status vm_backend::return_with_conversion(frame*& fp, script_val
 	return {};
 }
 
-// Fused `return <ident>;` (stage 6): resolution mirrors op_load byte-for-byte via
+// Fused `return <ident>;`: resolution mirrors op_load byte-for-byte via
 // fused_ident_value (same errors, same order - the fusion is adjacent, nothing is
 // reordered); the value takes ONE copy exactly like op_load's push did, then the
 // by-value materialization moves the own slot out or deep-copies another lvalue.
@@ -22911,7 +22911,7 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	return finish(std::move(value));
 }
 
-// Fused `return <a op b>;` (stage 6): computes exactly like exec_binary's general tail (custom operator dispatch
+// Fused `return <a op b>;`: computes exactly like exec_binary's general tail (custom operator dispatch
 // included), then returns without the push+pop round trip. A custom operator that THROWS leaves the result pushed and the
 // ip parked here so the dispatch loop's unwind handling sees the same state op_binary
 // would have produced one op earlier (same statement, same trace line).

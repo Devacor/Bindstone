@@ -318,7 +318,7 @@ namespace jai::vm {
         }
         void set_engine_reference(engine* engine_ref) override;
 
-        // Phase 5 (live): run_dispatch detects statement boundaries via chunk::stmt_nodes
+        // run_dispatch detects statement boundaries via chunk::stmt_nodes
         // and drives the SAME controller as the interpreter. The per-op path tests one
         // plain cached pointer (debug_hook_); transport state is pulled in only at the
         // debug sync points (prepare_for_execution, the 1024-tick budget sample, park exit).
@@ -497,11 +497,10 @@ namespace jai::vm {
             // the call_record). class 0 = no door conversion (top-level / default-arg chunks).
             type_info_ptr return_type;
             uint8_t return_conv_class = 0;
-            // Stage-2 frame window: slot k lives at stack_[window_base + k] when
-            // window_backed (record frames + native entries). window_live replicates
+            // Frame window: slot k lives at stack_[window_base + k] when window_backed
+            // (record frames, native entries, fibers). window_live replicates
             // call_frame's grow-on-declare semantics: reads at/above it answer nullptr
-            // ("reserved capacity only: not live yet"). Fiber frames stay call_frame-
-            // backed (window_backed false) until per-fiber stacks land (stage 4).
+            // ("reserved capacity only: not live yet").
             size_t window_base = 0;
             uint32_t window_live = 0;
             bool window_backed = false;
@@ -591,14 +590,14 @@ namespace jai::vm {
 
         struct frame_guard;
 
-        // Flat value stack with a growth CHOKEPOINT (stage 2): the vm caches raw
+        // Flat value stack with a growth CHOKEPOINT: the vm caches raw
         // script_value* into frame windows across dispatch iterations (counted-for fast
         // states — the ONE sanctioned cross-op raw-pointer cache, invariants §2b), so
         // every reallocation rebases them (rebase_window_pointers). Deliberately flat,
         // NOT segmented: operand push/pop is the hot-loop path and must stay pure index
         // arithmetic. push_back self-alias (op_dup pushing back()) is grow-safe: the
         // value detours through a temp on the grow branch only.
-        // Stage 5 (owned raw buffer): truncation ELIDES the destructor for slots it can
+        // Owned raw buffer: truncation ELIDES the destructor for slots it can
         // prove effect-free — trivial-band payload (null/int/float/bool/char; string sits
         // mid-band and the mask excludes it) AND no canonical type tag. Such a dtor is a
         // no-op by construction (storage's trivial branch + null strong_ptr decref + raw
@@ -693,10 +692,10 @@ namespace jai::vm {
         void rebase_window_pointers(const script_value* old_begin, const script_value* old_end,
                                     script_value* new_begin);
 
-        // === Slot-accessor funnel (stage 2a) — stage-2 window implementation ===
+        // === Slot-accessor funnel: the frame window implementation ===
         // EVERY read/write of a frame's slot-local storage in this backend goes through
-        // these. Window-backed frames address stack_[window_base + slot]; legacy frames
-        // (fibers) forward to call_frame. Callers keep their own slot-validity/top_level
+        // these. Window-backed frames address stack_[window_base + slot]; frames without
+        // a window forward to call_frame. Callers keep their own slot-validity/top_level
         // guards — these assume a live locals home.
         // Statement-position results: a call/store op immediately followed by op_pop
         // discards its value, so the landing drops the value and skips the pop dispatch
@@ -808,7 +807,7 @@ namespace jai::vm {
             frame* caller = nullptr;                   // resume target: native entry frame or another record's f
             std::shared_ptr<environment> prev_env;
             bool env_lazy = false;
-            // Stage 3: lazy no-closure frames never touch environment_ (nothing saved,
+            // Lazy no-closure frames never touch environment_ (nothing saved,
             // nothing restored) — the biggest per-call env cost on the fib path gone
             bool env_untouched = false;
             size_t try_base = 0;
@@ -1234,7 +1233,7 @@ namespace jai::vm {
         // in-region return site (op_return_convert), landed as is
         op_status return_with_result(frame*& fp, script_value result, uint32_t mode = 0);
         op_status return_with_conversion(frame*& fp, script_value result, uint32_t mode);
-        // Fused `return <ident>;` / `return <a op b>;` (stage 6): record-frame and
+        // Fused `return <ident>;` / `return <a op b>;`: record-frame and
         // native-entry variants (the entry twins set return_value_ like op_return's
         // entry branch)
         template <bool Entry> op_status exec_return_ident(frame*& fp, const vm_instruction& ins);   // Entry: the entry frame's return door
@@ -1329,7 +1328,7 @@ namespace jai::vm {
                                       host_slot* slot_out = nullptr);
         // Kernel caller-view over a frame: window frames hand the resolver their raw
         // window span (lawful: resolve_ref_lvalue never runs script, so the stack
-        // cannot grow mid-resolve); fiber/legacy frames keep the call_frame read.
+        // cannot grow mid-resolve); frames without a window keep the call_frame read.
         // Defined in vm_backend.cpp (ref_lvalue.hpp stays out of this header).
         detail::caller_frame_view caller_view(frame* f) const;
         // Box-in-place + share for env-variable storage (decl refs, [&] captures, ref
@@ -1996,8 +1995,8 @@ namespace jai::vm {
         int math_alias_verdict(frame& f, const call_site& site, uint8_t fn, size_t cache_slot);   // 1 builtin, 0 parked, -1 raised
         op_status park_callee(frame& f, const call_site& site, size_t argc, const script_value& callee_value);
         op_status exec_unary_temp(frame& f, const vm_instruction& ins);
-        // The ONE fused-binary computation, sink-templated (flatstack stage 6 dest-
-        // addressing): op_binary_fused pushes, the _decl/_store variants land the
+        // The ONE fused-binary computation, sink-templated (dest-addressing):
+        // op_binary_fused pushes, the _decl/_store variants land the
         // result without a push or a second dispatch. Defined in vm_backend.cpp.
         template <typename Sink>
         op_status binary_fused_compute(frame& f, uint32_t proto_index, Sink&& sink);

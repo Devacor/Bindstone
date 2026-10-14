@@ -3609,8 +3609,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	}
 
 	// THE RANGE. A primitive-kind typed range the body may write demotes IN PLACE at the
-	// barrier (STAGE-2a BRIDGE, internal/typed_array_design.md - node identity preserved) so the
-	// hetero kernel below stays correct until stage 3's raw typed worker reads/writes land;
+	// barrier (node identity preserved; internal/typed_array_design.md) so the hetero kernel
+	// below, which has no raw typed worker reads or writes, stays correct;
 	// one the body only reads (the transform's input) is boxed ONCE into a private node the
 	// cursor can address instead. An OBJECT-kind range keeps its slots: element references
 	// materialize the slot's handle per touch and the declared class carries the exclusivity

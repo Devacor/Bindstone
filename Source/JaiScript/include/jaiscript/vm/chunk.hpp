@@ -122,7 +122,7 @@ namespace jai::vm {
         uint16_t bi_array = 0xFFFF;
         uint16_t bi_map = 0xFFFF;
         uint16_t bi_string = 0xFFFF;
-        // Monomorphic in-loop callee cache (flat-stack stage 1): keyed on the address of
+        // Monomorphic in-loop callee cache: keyed on the address of
         // the loaded function value's shared script_function payload; ic_pin keeps that
         // object alive so a hit can never be a recycled address (ABA) — a redefined name
         // mints a new script_function, so the site misses and revalidates (at most one
@@ -320,8 +320,8 @@ namespace jai::vm {
     };
 
     // op_binary_fused_decl / op_binary_fused_store: a fused binary whose result lands in
-    // a compile-time-known sink with no push and no second dispatch (dest-addressed,
-    // flatstack stage 6). decl mode uses node_index (the variable_decl); store mode uses
+    // a compile-time-known sink with no push and no second dispatch (dest-addressed).
+    // decl mode uses node_index (the variable_decl); store mode uses
     // symbol/slot/store flags exactly like op_store's instruction fields.
     struct fused_binary_dst_proto {
         uint32_t binary_proto = 0;      // fused_binary_protos index (the computation)

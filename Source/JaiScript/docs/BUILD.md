@@ -182,9 +182,10 @@ JaiScript/
 │   └── tests/              Foundry suites, and the differential fuzzer under fuzz/
 ├── tools/
 │   ├── jaiscript/          The runner / REPL
+│   ├── lsp/                The language server
+│   ├── ci/                 The CI gates (gates.sh)
 │   └── vscode-jaiscript/   The VS Code extension (syntax, debugging)
-├── examples/               GLOOM, GRUBWELL, the demoreel
-├── bench/                  Micro-benchmarks
+├── examples/               GLOOM, GRUBWELL, the demoreel, Gator Quest, JaiDoom, embed_quickstart
 └── docs/                   This directory, and the documentation site under docs/site/
 ```
 

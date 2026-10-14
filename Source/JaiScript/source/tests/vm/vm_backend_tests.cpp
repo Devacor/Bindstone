@@ -3545,8 +3545,7 @@ public:
 			check_eq(i1, v1, "ternary condition parity (no tail cmp fusion)");
 		});
 
-		// === Flat-stack stage 1 pins: callee inline cache + return classification ===
-		// (internal/flatstack_design.md §4 — lifetime pins land BEFORE stage 2's atomic core)
+		// === Callee inline cache + return classification pins ===
 
 		test("stage1_callee_cache_revalidates_on_redefinition", [this, run_both_backends]() {
 			// The same call site runs the old body, then the redefined body (with a

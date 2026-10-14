@@ -2209,7 +2209,7 @@ public:
             )", "20", "fused int fast path");
         });
 
-        // ===== TYPED CONTAINER BOUNDARIES ARE ELEMENT-CHECKED (typed-array stage 0) =====
+        // ===== TYPED CONTAINER BOUNDARIES ARE ELEMENT-CHECKED =====
         // An array/map value crossing into a concretely-typed container binding (decl,
         // assign, field write) validates every element with push's rules: exact match
         // passes, int<->float converts, anything else raises. The stored value is
@@ -3081,8 +3081,7 @@ public:
         });
 
         test("typed_storage_parallel_bridge", [check_quad]() {
-            // stage-2a bridge: a typed parallel source demotes in place at the barrier
-            // (stage 3 replaces this with raw typed worker reads) — results identical
+            // a typed parallel source demotes in place at the barrier: results identical
             check_quad(R"(
                 array<int> a = [1, 2, 3, 4];
                 parallel_for (auto& x : a) { x = x * 2; }

@@ -271,7 +271,7 @@ namespace detail { struct argument_capture_storage; }
         // borrow survives the join. `source` must be a (deref'd) array or map.
         static script_value make_parallel_borrow(const script_value& source, engine* eng);
         // Viewed container accessors (nullptr when the borrow is of the other kind).
-        // Arrays hand back the NODE (its address is the identity; kind dispatch in stage 2).
+        // Arrays hand back the NODE (its address is the identity; callers dispatch on its kind).
         const script_array* parallel_borrow_array() const noexcept;
         const script_map* parallel_borrow_map() const noexcept;
 

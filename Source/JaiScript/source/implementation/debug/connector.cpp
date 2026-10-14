@@ -626,7 +626,7 @@ struct debug_connector::impl {
             ctrl_->request_pause();
             enqueue(make_response(req_seq, cmd, true, ""));
         } else if (cmd == "evaluate") {
-            // Phase 4 does real evaluation; answer benignly so watch/hover don't error-spam.
+            // No expression evaluation: answer benignly so watch/hover don't error-spam.
             enqueue(make_response(req_seq, cmd, true, "{\"result\":\"\",\"variablesReference\":0}"));
         } else if (cmd == "disconnect") {
             enqueue(make_response(req_seq, cmd, true, ""));

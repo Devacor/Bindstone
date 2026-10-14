@@ -62,7 +62,7 @@ template<typename T>
 script_value engine::make_object(std::shared_ptr<T> data) {
     // Prefer the DYNAMIC type's registration: handles cross boundaries as their base
     // static type (signal signatures, vector elements) but script wants the most-derived
-    // surface (ServerCreature::agent through a shared_ptr<Creature>). dynamic_cast<void*>
+    // surface (a Derived member reached through a shared_ptr<Base>). dynamic_cast<void*>
     // yields the complete-object pointer, so registry extractors keyed by the dynamic
     // type name cast correctly regardless of base offsets.
     // An object's script layer IS its identity: hand it back instead of a fresh wrapper, so

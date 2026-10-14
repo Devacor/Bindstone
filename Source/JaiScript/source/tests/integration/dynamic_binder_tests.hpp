@@ -147,8 +147,8 @@ public:
     bool operator>=(const Counter& other) const { return value >= other.value; }
 };
 
-// Polymorphic pair for the dynamic-type make_object test (the ServerCreature-through-
-// shared_ptr<Creature> shape).
+// Polymorphic pair for the dynamic-type make_object test (a derived object held through
+// shared_ptr<base>).
 class base_shape {
 public:
     virtual ~base_shape() = default;
@@ -1475,7 +1475,7 @@ public:
         });
 
         // A handle typed as its BASE must expose the most-derived registered surface —
-        // creature AI receives shared_ptr<Creature> yet calls ServerCreature::agent().
+        // code holding a shared_ptr<Base> still reaches the Derived methods.
         test("handles_expose_dynamic_type_surface", [this]() {
             auto eng = make_engine();
             dynamic_binder<base_shape>(*eng, "BaseShape")

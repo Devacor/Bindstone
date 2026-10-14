@@ -36,6 +36,22 @@ Unchanged: the games (`JaiScript/examples/*`), `JaiScript/bench/kernels/jai/` an
 | `kernels/` | the kernel suite's Lua side and `run.py`, the cross-language runner |
 | `third_party/` | where the Lua, sol2 and Squirrel checkouts go |
 
+## Dependencies
+
+None of the compared languages ship here. Supply the sources yourself; the configure step looks for each one, prints
+what it found, and skips a benchmark comparison whose sources are missing (all four libraries are MIT-licensed):
+
+| comparison | expected location | variable |
+|---|---|---|
+| Lua 5.4 + sol2 | `third_party/lua/src/lua.h` and `third_party/sol2/include/sol/sol.hpp` | `COMPARISONS_THIRD_PARTY` |
+| Squirrel 3 | `third_party/squirrel/include/squirrel.h` | `COMPARISONS_THIRD_PARTY` |
+| ChaiScript 6.1.0 | `include/chaiscript/chaiscript.hpp` under the given folder | `COMPARISONS_CHAISCRIPT_ROOT` |
+
+Both variables are cache paths, so `-DCOMPARISONS_THIRD_PARTY=<dir>` or `-DCOMPARISONS_CHAISCRIPT_ROOT=<dir>` points
+elsewhere. The GLOOM and demoreel ports read the same locations behind their own options (`GLOOM_PORT_LUA`,
+`GLOOM_PORT_SQUIRREL`, `GLOOM_PORT_CHAI`, `DEMOREEL_PORT_LUA`, `DEMOREEL_PORT_SQUIRREL`, all OFF); unlike the
+benchmarks, a port option that is ON with its sources missing is a configure error rather than a skip.
+
 ## Building
 
 ```

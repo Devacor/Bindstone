@@ -115,8 +115,6 @@ ON when JaiScript is the top-level project and OFF when it is added to another p
 | `JAISCRIPT_LTCG` | top-level | Whole-program optimization for MSVC Release (`/GL`, `/LTCG`). The measured performance numbers use it. OFF as a subproject: a `/GL` library would turn every consumer's Release link into a whole-program link (about a minute per edit instead of seconds) |
 | `JAISCRIPT_EXPERIMENT_VM_NO_GS` | OFF | Measurement only: `/GS-` on `vm_backend.cpp` (MSVC). Never ship with it |
 | `JAISCRIPT_RUNNER_PADDING_CONTROL` | OFF | A code-placement control build of the runner, for benchmarking |
-| `GLOOM_PORT_LUA`, `GLOOM_PORT_SQUIRREL`, `GLOOM_PORT_CHAI`, `GLOOM_PORT_LUA55`, `GLOOM_PORT_LUAJIT`, `JAIDOOM_PORT_LUA`, `DEMOREEL_PORT_LUA`, `DEMOREEL_PORT_SQUIRREL` | OFF | The comparison ports of the examples (see Comparison benchmarks) |
-| `GLOOM_COMPARISON_PADDING_CONTROLS`, `DEMOREEL_PADDING_CONTROLS`, `JAIDOOM_PADDING_CONTROLS`, `JAIDOOM_PORT_TOOLS` | OFF (`JAIDOOM_PADDING_CONTROLS` ON) | Placement controls and tools for the comparison ports |
 
 ```bash
 cmake -S . -B build -DJAISCRIPT_BUILD_EXAMPLES=OFF -DJAISCRIPT_ENABLE_DEBUGGER=OFF
@@ -165,28 +163,9 @@ Adding a **new** test `.cpp` requires re-running CMake — the test list is a
 
 ## Comparison benchmarks
 
-`JAISCRIPT_ENABLE_BENCHMARKS=ON` adds the performance suites. Some of them compare JaiScript
-against other embedded languages, and **those sources are not distributed here** — nothing
-third-party ships in this repository. The configure step looks for each one and prints what it
-found:
-
-| comparison | expected location |
-|---|---|
-| Lua 5.4 + sol2 | `lua/src/lua.h` and `sol2/include/sol/sol.hpp` at the repository root |
-| Squirrel 3 | `squirrel/include/squirrel.h` at the repository root |
-| ChaiScript 6.1.0 | `include/chaiscript/chaiscript.hpp` under `CHAISCRIPT_ROOT` (see below) |
-
-Missing ones are skipped with a configure message, and the rest of the benchmark suites build
-and run normally. All four are MIT-licensed and easy to drop in if you want the comparison
-numbers; you are just supplying them yourself. The paths are fixed in
-`source/tests/CMakeLists.txt` (`CHAISCRIPT_ROOT`, `SQUIRREL_ROOT`, `LUA_ROOT`, `SOL2_ROOT`);
-there is no cache variable to point elsewhere. ChaiScript's default points outside the
-repository, so edit that one line to where your copy lives.
-
-The GLOOM example has ports in the same languages behind their own options —
-`GLOOM_PORT_LUA`, `GLOOM_PORT_SQUIRREL`, `GLOOM_PORT_CHAI` (all OFF) — reading the same
-locations. Unlike the benchmarks, a port option that is ON with its sources missing is a
-configure error rather than a skip.
+`JAISCRIPT_ENABLE_BENCHMARKS=ON` adds the performance suites, which time JaiScript alone. The cross-language
+comparisons (Lua, Squirrel, ChaiScript and the game ports) are a separate harness with its own build and its own
+dependency list (see `JaiScriptComparisons/README.md` beside this package); nothing third-party ships here.
 
 ## Layout
 

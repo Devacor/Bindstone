@@ -314,7 +314,7 @@ public:
 			}
 
 			// --- combat: nearest visible enemy inside 12 tiles. Below 40 hp the
-			// pilot disengages unless cornered � navigation will chase medkits.
+			// pilot disengages unless cornered — navigation will chase medkits.
 			bool desperate = hp < 40;
 			bool found = false;
 			float tgt_x = 0.0;

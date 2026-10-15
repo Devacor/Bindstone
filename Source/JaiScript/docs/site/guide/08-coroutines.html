@@ -93,7 +93,7 @@ wave 11
 wave 12
 20 30
 1 2</code></pre></div>
-<p>The type you write describes what the body <em>yields and returns</em> (it is never the type of the call, which is always a handle), and at run time only the final <code>return</code> converts to it (see the last sample in this chapter). There is no coroutine lambda, and a coroutine cannot return a reference; both are parse errors. A <code>namespace</code> body cannot declare a coroutine (a parse error); declare it at program scope or as a static method.</p>
+<p>The type you write describes what the body <em>yields and returns</em> (it is never the type of the call, which is always a handle), and at run time each <code>yield</code> and the final <code>return</code> convert to it (see the last sample in this chapter). There is no coroutine lambda, and a coroutine cannot return a reference; both are parse errors. A <code>namespace</code> body declares coroutines like any other function (<code>namespace ns { coroutine int g() { ... } }</code>, called as <code>ns::g()</code>).</p>
 <h2 id="each-call-is-an-independent-instance">Each call is an independent instance<a class="hlink" href="#each-call-is-an-independent-instance" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int letters() { yield 1; yield 2; yield 3; }
 auto x = letters();

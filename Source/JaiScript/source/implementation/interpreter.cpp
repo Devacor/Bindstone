@@ -698,6 +698,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             const auto& strs = node->strs();
             size_t total = strs.size() > 1 ? sep.size() * (strs.size() - 1) : 0;
             for (const auto& h : strs) { total += h->size(); }
+            if (!detail::builtin_memory_charge(eng, total)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
             std::string result;
             result.reserve(total);
             for (size_t i = 0; i < strs.size(); ++i) {
@@ -710,6 +711,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         // hetero elements read in place, typed kinds box once per element
         size_t total = node->size() > 1 ? sep.size() * (node->size() - 1) : 0;
         node->for_each(eng, [&](const script_value& e) { total += e.is_string() ? e.unchecked_as_string().size() : 8; });
+        if (!detail::builtin_memory_charge(eng, total)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
         std::string result;
         result.reserve(total);
 
@@ -930,6 +932,9 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			const auto& other = a_args[0].deref();
 			if (!other.is_array()) { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "append/concat() requires an array argument"); }
 			auto* eng = a_context.get_engine();
+			if (!detail::builtin_memory_charge(eng, other.unchecked_get_array_storage()->size(), sizeof(script_value))) [[unlikely]] {
+				return detail::builtin_memory_cap(eng);
+			}
 			script_value result = a_context.copy_array_result ? a_self.clone() : script_value(a_self);
 			const auto target = result.unchecked_get_array_storage();
 			const auto input = other.unchecked_get_array_storage();
@@ -1222,6 +1227,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 				if (!argument.is_text()) { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "append() requires text arguments"); }
 				extra += argument.unchecked_text().size();
 			}
+			if (!detail::builtin_memory_charge(a_context.get_engine(), extra)) [[unlikely]] { return detail::builtin_memory_cap(a_context.get_engine()); }
 			auto& text = a_self.unchecked_text_ref();
 			text.reserve(text.size() + extra);
 			for (const auto& argument : a_args) { text.append(argument.unchecked_text()); }
@@ -1755,6 +1761,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
             auto& str = self.unchecked_text_ref();
             if (target_len > static_cast<script_int>(str.size())) {
+                if (!detail::builtin_memory_charge(ctx.get_engine(), static_cast<size_t>(target_len) - str.size())) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
                 str.insert(0, static_cast<size_t>(target_len) - str.size(), pad_char);
             }
             return self;
@@ -1786,6 +1793,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
             auto& str = self.unchecked_text_ref();
             if (target_len > static_cast<script_int>(str.size())) {
+                if (!detail::builtin_memory_charge(ctx.get_engine(), static_cast<size_t>(target_len) - str.size())) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
                 str.append(static_cast<size_t>(target_len) - str.size(), pad_char);
             }
             return self;
@@ -1818,6 +1826,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             auto& str = self.unchecked_text_ref();
             if (target_len > static_cast<script_int>(str.size())) {
                 size_t total_pad = static_cast<size_t>(target_len) - str.size();
+                if (!detail::builtin_memory_charge(ctx.get_engine(), total_pad)) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
                 size_t left_pad = total_pad / 2;
                 size_t right_pad = total_pad - left_pad;
                 str.insert(0, left_pad, pad_char);
@@ -1884,12 +1893,24 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "replace_all() search string cannot be empty");
             }
 
+            // One pass builds the result: replacing in place shifts the tail at every hit, quadratic in the hits
             auto& str = self.unchecked_text_ref();
-            size_t pos = 0;
-            while ((pos = str.find(old_str, pos)) != std::string::npos) {
-                str.replace(pos, old_str.size(), new_str);
-                pos += new_str.size();  // Move past the replacement to avoid infinite loop
+            size_t hits = 0;
+            for (size_t at = str.find(old_str); at != std::string::npos; at = str.find(old_str, at + old_str.size())) { ++hits; }
+            if (hits == 0) { return self; }
+            if (new_str.size() > old_str.size() && !detail::builtin_memory_charge(ctx.get_engine(), hits, new_str.size() - old_str.size())) [[unlikely]] {
+                return detail::builtin_memory_cap(ctx.get_engine());
             }
+            std::string out;
+            out.reserve(str.size() - hits * old_str.size() + hits * new_str.size());
+            size_t at = 0;
+            for (size_t hit = str.find(old_str); hit != std::string::npos; hit = str.find(old_str, at)) {
+                out.append(str, at, hit - at);
+                out += new_str;
+                at = hit + old_str.size();
+            }
+            out.append(str, at, std::string::npos);
+            str = std::move(out);
             return self;
         }},
 
@@ -2020,17 +2041,12 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
             auto& str = self.unchecked_text_ref();
             // engine::memory_cap chokepoint: deny the growth before it exists
-            if (count > 1) {
-                if (engine* eng = ctx.get_engine()) {
-                    auto& limits = eng->execution_limits();
-                    if (!limits.memory_charge(str.size() * static_cast<size_t>(count - 1))) [[unlikely]] {
-                        return detail::raise_memory_cap(limits);
-                    }
-                }
+            if (count > 1 && !detail::builtin_memory_charge(ctx.get_engine(), str.size(), static_cast<size_t>(count - 1))) [[unlikely]] {
+                return detail::builtin_memory_cap(ctx.get_engine());
             }
             std::string original = str;
             str.clear();
-            str.reserve(original.size() * static_cast<size_t>(count));
+            str.reserve(detail::saturating_text_size(original.size(), static_cast<size_t>(count)));
             for (script_int i = 0; i < count; ++i) {
                 str += original;
             }
@@ -2073,6 +2089,14 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
             script_value array_val = script_value::make_array(eng->get_type_info_string(), eng);
             script_array& result = *array_val.unchecked_get_array_storage();   // array<string> is a handle buffer: push through the node
+            // each piece is the array's growth (engine::memory_cap): a denied piece is never added
+            auto& limits = eng->execution_limits();
+            auto push_piece = [&](size_t a_at, size_t a_count) {
+                const size_t length = std::min(a_count, str.size() - a_at);
+                if (!limits.memory_charge(sizeof(script_value) + length)) [[unlikely]] { return false; }
+                result.push(ctx.make_value(str.substr(a_at, length)));
+                return true;
+            };
 
             if (whitespace) {
                 // runs of whitespace separate the pieces and no piece is empty; past max_splits the rest is the last piece
@@ -2081,28 +2105,31 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 while (true) {
                     while (at < str.size() && is_string_whitespace(str[at])) { ++at; }
                     if (at == str.size()) { break; }
-                    if (max_splits >= 0 && splits == max_splits) { result.push(ctx.make_value(str.substr(at))); break; }
+                    if (max_splits >= 0 && splits == max_splits) {
+                        if (!push_piece(at, std::string::npos)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
+                        break;
+                    }
                     size_t end = at;
                     while (end < str.size() && !is_string_whitespace(str[end])) { ++end; }
-                    result.push(ctx.make_value(str.substr(at, end - at)));
+                    if (!push_piece(at, end - at)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
                     at = end;
                     ++splits;
                 }
             } else if (delim.empty()) {
                 // Split into individual characters
-                for (char c : str) {
-                    result.push(ctx.make_value(std::string(1, c)));
+                for (size_t at = 0; at < str.size(); ++at) {
+                    if (!push_piece(at, 1)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
                 }
             } else {
                 size_t start = 0;
                 size_t end;
                 script_int splits = 0;
                 while ((max_splits < 0 || splits < max_splits) && (end = str.find(delim, start)) != std::string::npos) {
-                    result.push(ctx.make_value(str.substr(start, end - start)));
+                    if (!push_piece(start, end - start)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
                     start = end + delim.size();
                     ++splits;
                 }
-                result.push(ctx.make_value(str.substr(start)));
+                if (!push_piece(start, std::string::npos)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
             }
 
             return array_val;

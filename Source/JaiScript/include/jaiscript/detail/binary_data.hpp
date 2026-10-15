@@ -429,7 +429,13 @@ namespace jai::binary {
 			}
 			pos_ = static_cast<size_t>(to);
 		}
+		// The engine whose memory cap the buffer's growth is charged to (each method call names it)
+		writer& charged_to(engine* a_engine) noexcept {
+			engine_ = a_engine;
+			return *this;
+		}
 		unsigned char* room(size_t n) {
+			if (pos_ + n > charged_) { charge_growth(pos_ + n); }
 			if (pos_ == out_.size()) { out_.append(n, '\0'); }
 			else if (pos_ + n > out_.size()) { out_.resize(pos_ + n); }
 			unsigned char* p = reinterpret_cast<unsigned char*>(out_.data()) + pos_;
@@ -520,9 +526,20 @@ namespace jai::binary {
 		}
 
 	private:
+		// a 4 KiB step at a time, so small writes charge rarely
+		void charge_growth(size_t a_end) {
+			if (!engine_) { return; }
+			const size_t step = std::max<size_t>(a_end - charged_, 4096);
+			auto& limits = engine_->execution_limits();
+			if (!limits.memory_charge(step)) [[unlikely]] { jai::detail::throw_memory_cap(limits); }
+			charged_ += step;
+		}
+
 		std::string out_;
 		size_t pos_ = 0;
 		bool big_ = false;
+		engine* engine_ = nullptr;
+		size_t charged_ = 0;
 	};
 
 	inline const layout* as_layout(const script_value& v, uint64_t layout_type_id) {
@@ -644,24 +661,25 @@ namespace jai::binary {
 			return r->unpack(make_layout(args.data() + 1, args.size() - 1, "unpack", r->get_engine(), width_id));
 		});
 
+		engine* const writes_for = &eng;
 		dynamic_binder<writer>(eng, "binary::writer")
 			.strict_signatures()
-			.method("int8", [](writer& w, script_int v) -> writer& { w.integer(kind::int8, v); return w; })
-			.method("int16", [](writer& w, script_int v) -> writer& { w.integer(kind::int16, v); return w; })
-			.method("int32", [](writer& w, script_int v) -> writer& { w.integer(kind::int32, v); return w; })
-			.method("int64", [](writer& w, script_int v) -> writer& { w.integer(kind::int64, v); return w; })
-			.method("uint8", [](writer& w, script_int v) -> writer& { w.integer(kind::uint8, v); return w; })
-			.method("uint16", [](writer& w, script_int v) -> writer& { w.integer(kind::uint16, v); return w; })
-			.method("uint32", [](writer& w, script_int v) -> writer& { w.integer(kind::uint32, v); return w; })
-			.method("float32", [](writer& w, script_float v) -> writer& { w.floating(kind::float32, v); return w; })
-			.method("float64", [](writer& w, script_float v) -> writer& { w.floating(kind::float64, v); return w; })
-			.method("text", [](writer& w, const std::string& s) -> writer& { w.text(s); return w; })
-			.method("text", [](writer& w, const std::string& s, script_int n) -> writer& { w.text(s, n); return w; })
-			.method("bytes", [](writer& w, const script_value& b) -> writer& { w.bytes(b); return w; })
-			.method("pack", [layout_id](writer& w, const script_value& l, const script_value& values) -> writer& {
+			.method("int8", [writes_for](writer& w, script_int v) -> writer& { w.charged_to(writes_for).integer(kind::int8, v); return w; })
+			.method("int16", [writes_for](writer& w, script_int v) -> writer& { w.charged_to(writes_for).integer(kind::int16, v); return w; })
+			.method("int32", [writes_for](writer& w, script_int v) -> writer& { w.charged_to(writes_for).integer(kind::int32, v); return w; })
+			.method("int64", [writes_for](writer& w, script_int v) -> writer& { w.charged_to(writes_for).integer(kind::int64, v); return w; })
+			.method("uint8", [writes_for](writer& w, script_int v) -> writer& { w.charged_to(writes_for).integer(kind::uint8, v); return w; })
+			.method("uint16", [writes_for](writer& w, script_int v) -> writer& { w.charged_to(writes_for).integer(kind::uint16, v); return w; })
+			.method("uint32", [writes_for](writer& w, script_int v) -> writer& { w.charged_to(writes_for).integer(kind::uint32, v); return w; })
+			.method("float32", [writes_for](writer& w, script_float v) -> writer& { w.charged_to(writes_for).floating(kind::float32, v); return w; })
+			.method("float64", [writes_for](writer& w, script_float v) -> writer& { w.charged_to(writes_for).floating(kind::float64, v); return w; })
+			.method("text", [writes_for](writer& w, const std::string& s) -> writer& { w.charged_to(writes_for).text(s); return w; })
+			.method("text", [writes_for](writer& w, const std::string& s, script_int n) -> writer& { w.charged_to(writes_for).text(s, n); return w; })
+			.method("bytes", [writes_for](writer& w, const script_value& b) -> writer& { w.charged_to(writes_for).bytes(b); return w; })
+			.method("pack", [layout_id, writes_for](writer& w, const script_value& l, const script_value& values) -> writer& {
 				const layout* lay = as_layout(l, layout_id);
 				if (!lay) { raise("pack expects a binary::layout, got " + value_kind_name(l)); }
-				w.pack(*lay, values);
+				w.charged_to(writes_for).pack(*lay, values);
 				return w;
 			})
 			.method("seek", [](writer& w, script_int to) -> writer& { w.seek(to); return w; })
@@ -766,7 +784,7 @@ namespace jai::binary {
 	template <kind K> bool write_integer_lane(void* s, const script_value& recv, const script_value* args, size_t argc, script_value& out) {
 		script_int v;
 		if (!lane_int(args, argc, v)) { return false; }
-		static_cast<writer*>(s)->integer(K, v);
+		static_cast<writer*>(s)->charged_to(recv.get_engine()).integer(K, v);
 		out = recv;
 		return true;
 	}
@@ -843,7 +861,7 @@ namespace jai::binary {
 			if (argc != 1) { return false; }
 			const script_value& a = args[0].deref();
 			if (a.raw_storage_index() != script_value::TYPEID_STRING) { return false; }
-			static_cast<writer*>(s)->text(a.unchecked_as_string());
+			static_cast<writer*>(s)->charged_to(recv.get_engine()).text(a.unchecked_as_string());
 			out = recv;
 			return true;
 		});

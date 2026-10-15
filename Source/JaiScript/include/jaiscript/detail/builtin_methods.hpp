@@ -4,6 +4,7 @@
 #define __JAISCRIPT_DETAIL_BUILTIN_METHODS_HPP__
 
 #include <jaiscript/core/value.hpp>
+#include <jaiscript/detail/execution_limits.hpp>
 #include <functional>
 #include <unordered_map>
 #include <unordered_set>
@@ -74,6 +75,24 @@ namespace jai {
     };
 
     using builtin_method = std::function<checked_result<script_value>(const builtin_method_context&, script_value&, const std::vector<script_value>&)>;
+
+    namespace detail {
+        // engine::memory_cap chokepoint for a builtin that grows a value by count items of `each` bytes: false when the
+        // growth is denied (nothing was charged; the caller raises builtin_memory_cap). Templates so the engine is complete
+        // where they are used.
+        template<typename Engine>
+        bool builtin_memory_charge(Engine* a_engine, size_t a_count, size_t a_each = 1) {
+            return !a_engine || a_engine->execution_limits().memory_charge_items(a_count, a_each);
+        }
+        template<typename Engine>
+        error_propagator builtin_memory_cap(Engine* a_engine) {
+            return raise_memory_cap(a_engine->execution_limits());
+        }
+        // count copies of a text of `size` bytes, saturated: a reserve past max_size reports like any oversized text
+        inline size_t saturating_text_size(size_t a_size, size_t a_count) noexcept {
+            return a_size != 0 && a_count > SIZE_MAX / a_size ? SIZE_MAX : a_size * a_count;
+        }
+    }
 
     namespace detail {
         // Same-kind scalars answer without the backend; everything else is the language's == (a user operator==, memberwise)

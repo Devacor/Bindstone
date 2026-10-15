@@ -3,11 +3,14 @@
 #ifndef __JAISCRIPT_DETAIL_EXECUTION_LIMITS_HPP__
 #define __JAISCRIPT_DETAIL_EXECUTION_LIMITS_HPP__
 
+#include <jaiscript/jaiscript_fwd.hpp>
 #include <jaiscript/core/checked_result.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
+#include <string>
 
 namespace jai::detail {
 
@@ -66,6 +69,12 @@ namespace jai::detail {
 			if (memory_used + bytes > memory_limit) [[unlikely]] { return false; }
 			memory_used += bytes;
 			return true;
+		}
+		// The denial-style charge for count items of `each` bytes. A total past size_t is past any cap; with no cap the
+		// allocation itself reports it.
+		bool memory_charge_items(size_t count, size_t each) noexcept {
+			if (each != 0 && count > (SIZE_MAX - memory_used) / each) [[unlikely]] { return memory_limit == SIZE_MAX; }
+			return memory_charge(count * each);
 		}
 		// Count-only charge for sites that cannot deny in place (environment growth,
 		// internal clones); the raise happens at the next loop back-edge / call entry.
@@ -129,6 +138,15 @@ namespace jai::detail {
 		if (++limits.memory_raises >= 2) { limits.terminal_error = true; }
 		return error_propagator{ make_error_code(runtime_error_code::memory_cap_exceeded),
 			k_memory_cap_message, limits.memory_cap_symbol_id };
+	}
+
+	// The same raise for a native writer that reports by throwing (the text a script catches is the same)
+	[[noreturn]] JAI_NOINLINE inline void throw_memory_cap(execution_limits& limits) {
+		const size_t cap = limits.memory_cap;
+		(void)raise_memory_cap(limits);
+		std::string text(k_memory_cap_message);
+		text.replace(text.find("{0}"), 3, std::to_string(cap));
+		throw std::runtime_error(text);
 	}
 
 } // namespace jai::detail

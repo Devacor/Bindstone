@@ -764,6 +764,12 @@ Regions are per loop and per straight-line span, not whole-body: every edge of a
 guards and resolves every site and environment value, including those of loops that do not run in that call; each landing
 after a door call re-checks every site it can reach; a boundary resyncs every cell).
 
+A jump layout over the copy (a jump onto a back edge or an exit becomes a copy of it, a jump onto the next instruction goes, a
+compare or truth test over a jump takes the jump's target with its sense inverted, and every ip-keyed table is renumbered) was
+built and measured on top of the compare-kind pins and is not in the compiler. Against the pins alone (fresh-copy medians, n=9):
+GLOOM +0.4%, GLOOM with workers -0.7%, OSSUARY -0.9%, OSSUARY parallel -0.8%, JaiDOOM -0.7%, Gator Quest -0.1% (two bots and
+four), the call and tree kernels within noise. A later attempt has to beat 1.5% on GLOOM or 3% on a targeted kernel on its own.
+
 ### The region IR module
 
 The canonical operations of a closed loop and the analyses over them live in `include/jaiscript/vm/region_ir.hpp`

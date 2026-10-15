@@ -627,6 +627,104 @@ public:
             check_throws([&]() { eng->execute("s.onTicked.emit(1);"); },
                 "the consumer view grants no emission rights");
         });
+
+        // A receiver may destroy the emitter: the emit stops there and returns normally (the emit state outlives the emitter)
+        test("a_receiver_destroying_the_emitter_ends_the_emit", [this]() {
+            auto board = std::make_unique<emit_board>();
+            int later = 0;
+            auto kills = board->onTicked.connect([&](int) { board.reset(); });
+            auto after = board->onTicked.connect([&](int) { ++later; });
+            board->onTickedSignal.emit(1);
+            check_true(board == nullptr, "the receiver destroyed the emitter");
+            check_eq(0, later, "the receivers after it do not run");
+            check_false(kills->connected(), "its receivers are disconnected once the emit unwinds");
+
+            auto nested = std::make_unique<emit_board>();
+            int depth = 0;
+            auto reenter = nested->onTicked.connect([&](int v) {
+                ++depth;
+                if (v > 0) { nested->onTickedSignal.emit(v - 1); } else { nested.reset(); }
+            });
+            nested->onTickedSignal.emit(3);
+            check_eq(4, depth, "a reentrant emit destroying the emitter unwinds every level");
+
+            signal_emitter<bool(int)>* gate = new signal_emitter<bool(int)>();
+            auto stop = gate->connect([&](int) { delete gate; gate = nullptr; return true; });
+            auto never = gate->connect([&](int) { ++later; return true; });
+            check_true(gate->emit_while(1), "emit_while returns the destroying receiver's verdict");
+            check_eq(0, later);
+
+            auto blocked = std::make_unique<emit_board>();
+            blocked->onTickedSignal.set_blocked_callback([&](int) { blocked.reset(); });
+            blocked->onTickedSignal.block();
+            blocked->onTickedSignal.emit(1);
+            check_true(blocked == nullptr, "the blocked callback may destroy the emitter too");
+        });
+
+        test("a_script_receiver_dropping_the_last_reference_ends_the_emit", [this]() {
+            auto eng = jai::foundry::make_engine();
+            bind_signal_type<void(int)>(*eng, "SignalInt");
+            dynamic_binder<emit_board>(*eng, "EmitBoard")
+                .constructor<>()
+                .property("onTicked", &emit_board::onTicked)
+                .property("onTickedEmitter", &emit_board::onTickedSignal)
+                .build();
+            auto board = std::make_shared<emit_board>();
+            std::weak_ptr<emit_board> watch = board;
+            eng->add_global("s", eng->make_object(board));
+            eng->execute("int seen = 0; s.onTicked.connect(\"drop\", [](var v) { s = null; }); s.onTicked.connect(\"count\", [](var v) { seen += 1; });");
+            emit_board* raw = board.get();
+            board.reset();
+            raw->onTickedSignal.emit(5);
+            check_true(watch.expired(), "the script dropped the last reference mid-emit");
+            check_eq((int64_t)0, eng->execute("seen").as_int());
+            check_eq((int64_t)3, eng->execute("1 + 2").as_int(), "engine stays usable");
+        });
+
+        test("a_oneshot_fires_once_when_it_reemits", [this]() {
+            signal_emitter<void(int)> sig;
+            int fired = 0;
+            int plain = 0;
+            auto once = sig.connect_oneshot([&](int v) { ++fired; if (v < 5) { sig.emit(v + 1); } });
+            auto every = sig.connect([&](int) { ++plain; });
+            sig.emit(1);
+            check_eq(1, fired, "the nested emit skips the one-shot that is firing");
+            check_eq(2, plain, "the nested emit reaches the other receivers");
+            sig.emit(1);
+            check_eq(1, fired);
+            check_false(once->connected());
+        });
+
+        // A fired one-shot leaves while dropped receivers sit before it in the list (the cleanup erased past its own index)
+        test("a_oneshot_after_dropped_receivers_leaves_cleanly", [this]() {
+            signal_emitter<void(int)> sig;
+            int fired = 0;
+            auto first = sig.connect([](int) {});
+            auto second = sig.connect([](int) {});
+            auto once = sig.connect_oneshot([&](int) { ++fired; });
+            auto last = sig.connect([](int) {});
+            first.reset();
+            second.reset();
+            sig.emit(1);
+            sig.emit(1);
+            check_eq(1, fired);
+            check_eq((size_t)1, sig.observer_count());
+        });
+
+        test("a_oneshot_an_emit_while_stopped_short_of_still_fires", [this]() {
+            signal_emitter<bool(int)> sig;
+            int fired = 0;
+            auto stop = sig.connect([](int) { return false; });
+            auto once = sig.connect_oneshot([&](int) { ++fired; return true; });
+            check_false(sig.emit_while(1));
+            check_eq(0, fired);
+            check_true(once->connected(), "it has not fired, so it stays");
+            stop.reset();
+            check_true(sig.emit_while(1));
+            check_eq(1, fired);
+            check_true(sig.emit_while(1));
+            check_eq(1, fired);
+        });
     }
 };
 

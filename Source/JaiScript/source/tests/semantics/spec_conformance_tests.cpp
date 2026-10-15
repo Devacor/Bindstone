@@ -3810,6 +3810,17 @@ private:
 				t([]() { var m = {}; m["k"] += 1; return m.size(); }) + "|" + t([]() { map<string, int> m = {}; m[5] += 1; return m.size(); });
 			)", "51-23|1.5|s|312|raised:Cannot apply '+=' to null and int|raised:Cannot use 'int' as a key of type 'string'", check_mode::warn);
 		});
+		test("a_compound_on_a_missing_key_of_a_temporary_typed_map_meets_the_rvalue_target", [this]() {
+			// the default enters the temporary, the compound applies, and the store finds no lvalue
+			expect("temporary map compound", R"(
+				function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = "raised:" + e; } return r; }
+				function fresh() -> map<string, int> { map<string, int> m = {}; return m; }
+				function held() -> map<string, int> { map<string, int> m = {"k": 1}; return m; }
+				t([]() { fresh()["k"] += 1; }) + "|" + t([]() { fresh()["k"]++; }) + "|" + t([]() { held()["k"] += 1; }) + "|" +
+				t([]() { fresh()[5] += 1; });
+			)", "raised:Cannot assign to rvalue expression|raised:Cannot assign to rvalue expression|raised:Cannot assign to rvalue expression|"
+			    "raised:Cannot use 'int' as a key of type 'string'", check_mode::off);
+		});
 	}
 
 	void signed_zero_keys() {

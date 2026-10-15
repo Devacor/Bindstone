@@ -4003,6 +4003,16 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                 // Transient map read: copy branch below (never inserts, never mints)
                 const bool transient_read = expr->transient_element_read && !want_lvalue_write && !has_custom_binary_ops_;
 
+                // A compound's own target on a typed-value map inserts the value type's default first, on a temporary too
+                // (C++ operator[]; KEEP BYTE-PARALLEL with vm_backend::exec_index_compound_fused)
+                if (expr == compound_map_target_ && !(is_lvalue && want_lvalue_write)) {
+                    auto map_tag = left.get_type_info();
+                    type_info_ptr key_type = map_tag ? map_tag->key_type() : nullptr;
+                    if (key_type && key_type->base_type != script_value_type::jai_any_type && right.deref().type() != key_type->base_type) {
+                        return detail::element_type_error(string_symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", right.deref(), key_type);
+                    }
+                    (void)detail::map_compound_insert_default(left, right, engine_);
+                }
                 if (is_lvalue && want_lvalue_write) {
                     // Assignment target (m[k] = v): auto-insert a slot so the
                     // assignment has somewhere to write through. The key is COPIED into
@@ -4047,17 +4057,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     // lvalue-shaped but a READ (e.g. x = m[k], or the inner m[k]
                     // of m[k][i] / m[k].field): return a reference to the EXISTING
                     // entry so nested in-place mutation still works, but NEVER
-                    // insert a missing key — reading must not grow the map. A compound's
-                    // own target on a typed-value map inserts the value type's default first
-                    // (C++ operator[]; KEEP BYTE-PARALLEL with vm_backend::exec_index_compound_fused)
-                    if (expr == compound_map_target_) {
-                        auto map_tag = left.get_type_info();
-                        type_info_ptr key_type = map_tag ? map_tag->key_type() : nullptr;
-                        if (key_type && key_type->base_type != script_value_type::jai_any_type && right.deref().type() != key_type->base_type) {
-                            return detail::element_type_error(string_symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", right.deref(), key_type);
-                        }
-                        (void)detail::map_compound_insert_default(left, right, engine_);
-                    }
+                    // insert a missing key: reading must not grow the map.
                     auto it = map.find(right);
                     if (it != map.end()) {
                         script_value& value_ref = const_cast<script_value&>(it->second);

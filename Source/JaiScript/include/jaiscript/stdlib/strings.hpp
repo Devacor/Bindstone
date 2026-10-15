@@ -97,6 +97,7 @@ namespace stdlib {
 				if (!argument->is_text()) { return type_error("string::append expects text arguments"); }
 				size += argument->unchecked_text().size();
 			}
+			if (!detail::builtin_memory_charge(a_engine, size)) [[unlikely]] { return detail::builtin_memory_cap(a_engine); }
 			std::string result;
 			result.reserve(size);
 			for (const auto* argument : a_args) { result.append(argument->unchecked_text()); }
@@ -124,18 +125,25 @@ namespace stdlib {
             if (!a[0]->is_array()) return type_error("string::join expects an array of strings");
             std::string sep;
             if (a.size() == 2) { if (!a[1]->is_text()) return type_error("string::join separator must be a string"); sep = a[1]->unchecked_text(); }
-            std::string out; bool first = true, bad = false, utf8 = a.size() == 2 && a[1]->is_utf8_string();
+            std::string out; bool first = true, bad = false, denied = false, utf8 = a.size() == 2 && a[1]->is_utf8_string();
             if (const script_array* node = a[0]->unchecked_array_node(); node->kind() == script_array::kind_t::str) {   // the texts where they are
-                for (const auto& h : node->strs()) { if (!first) out += sep; out += *h; first = false; }
+                for (const auto& h : node->strs()) {
+                    if (!detail::builtin_memory_charge(e, (first ? 0 : sep.size()) + h->size())) [[unlikely]] { return detail::builtin_memory_cap(e); }
+                    if (!first) out += sep;
+                    out += *h; first = false;
+                }
                 return utf8 ? script_value::make_utf8(std::move(out), e) : script_value(std::move(out), e);
             }
             a[0]->unchecked_array_node()->for_each(e, [&](const script_value& el) {
                 const script_value& v = el.deref();
+                if (bad || denied) { return; }
                 if (!v.is_text()) { bad = true; return; }
+                if (!detail::builtin_memory_charge(e, (first ? 0 : sep.size()) + v.unchecked_text().size())) [[unlikely]] { denied = true; return; }
                 if (!first) out += sep;
                 out += v.unchecked_text(); first = false; utf8 = utf8 || v.is_utf8_string();
             });
             if (bad) return type_error("string::join expects an array of strings");
+            if (denied) [[unlikely]] { return detail::builtin_memory_cap(e); }
             return utf8 ? script_value::make_utf8(std::move(out), e) : script_value(std::move(out), e);
         });
         def("trim", [=](engine* e, const std::vector<const script_value*>& a) -> R {
@@ -154,7 +162,11 @@ namespace stdlib {
             const std::string& s = a[0]->unchecked_text(); const std::string& from = a[1]->unchecked_text(); const std::string& to = a[2]->unchecked_text();
             if (from.empty()) return a[0]->is_utf8_string() ? script_value::make_utf8(s, e) : script_value(s, e);
             std::string out; size_t at = 0, hit;
-            while ((hit = s.find(from, at)) != std::string::npos) { out.append(s, at, hit - at); out += to; at = hit + from.size(); }
+            while ((hit = s.find(from, at)) != std::string::npos) {
+                if (!detail::builtin_memory_charge(e, (hit - at) + to.size())) [[unlikely]] { return detail::builtin_memory_cap(e); }
+                out.append(s, at, hit - at); out += to; at = hit + from.size();
+            }
+            if (!detail::builtin_memory_charge(e, s.size() - at)) [[unlikely]] { return detail::builtin_memory_cap(e); }
             out.append(s, at, std::string::npos);
             return a[0]->is_utf8_string() ? script_value::make_utf8(std::move(out), e) : script_value(std::move(out), e);
         });
@@ -164,7 +176,8 @@ namespace stdlib {
             if (!a[1]->is_int()) return type_error("string::repeat count must be an integer");
             const std::string& s = a[0]->unchecked_text(); const script_int n = a[1]->unchecked_as_int();
             if (n < 0) return R(make_error_code(runtime_error_code::invalid_operation), "string::repeat count cannot be negative");
-            std::string out; out.reserve(s.size() * static_cast<size_t>(n));
+            if (!detail::builtin_memory_charge(e, s.size(), static_cast<size_t>(n))) [[unlikely]] { return detail::builtin_memory_cap(e); }
+            std::string out; out.reserve(detail::saturating_text_size(s.size(), static_cast<size_t>(n)));
             for (script_int k = 0; k < n; ++k) out += s;
             return a[0]->is_utf8_string() ? script_value::make_utf8(std::move(out), e) : script_value(std::move(out), e);
         });
@@ -183,6 +196,7 @@ namespace stdlib {
                 if (a[0]->is_utf8_string()) { len = 0; for (size_t at = 0; at < s.size(); ++len) { at += detail::utf8::decode(s, at).length; } }   // a utf8_string pads to a width in characters
                 if (w > static_cast<script_int>(len)) {
                     const size_t pad = static_cast<size_t>(w) - len;
+                    if (!detail::builtin_memory_charge(e, pad)) [[unlikely]] { return detail::builtin_memory_cap(e); }
                     if (pt.left) s.insert(0, pad, fill); else s.append(pad, fill);
                 }
                 return a[0]->is_utf8_string() ? script_value::make_utf8(std::move(s), e) : script_value(std::move(s), e);

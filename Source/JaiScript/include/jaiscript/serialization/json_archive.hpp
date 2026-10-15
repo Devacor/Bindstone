@@ -32,6 +32,8 @@ public:
     json_archive_writer(int indent = 2) : archive_writer_impl<json_archive_writer>(), indent_(indent), json_depth_(0) {}
     json_archive_writer(int indent, engine* eng) : archive_writer_impl<json_archive_writer>(eng), indent_(indent), json_depth_(0) {}
     explicit json_archive_writer(engine* eng) : archive_writer_impl<json_archive_writer>(eng), indent_(2), json_depth_(0) {}
+    // A script's to_json: indentation counts against the engine's memory cap
+    void charge_indentation() { charges_indentation_ = true; }
 
     static constexpr bool needs_property_keys = false;
     static constexpr bool is_text_format = true;
@@ -374,7 +376,7 @@ private:
     void close_value(char bracket, bool empty) {
         --json_depth_;
         if (indent_ > 0 && !empty) {
-            oss_ << '\n' << std::string(static_cast<size_t>(json_depth_) * static_cast<size_t>(indent_), ' ');
+            oss_ << '\n' << indentation();
         }
         oss_ << bracket;
     }
@@ -382,8 +384,18 @@ private:
     void write_value_separator(bool comma) {
         if (comma) oss_ << ',';
         if (indent_ > 0) {
-            oss_ << '\n' << std::string(static_cast<size_t>(json_depth_) * static_cast<size_t>(indent_), ' ');
+            oss_ << '\n' << indentation();
         }
+    }
+
+    // One line's indentation. A wide indent is the layout's amplifier (every line pays it): a script's to_json charges it
+    // to the engine's memory cap.
+    std::string indentation() {
+        const size_t width = detail::saturating_text_size(static_cast<size_t>(json_depth_), static_cast<size_t>(indent_));
+        if (charges_indentation_ && engine_ref_ && !engine_ref_->execution_limits().memory_charge_items(1, width)) [[unlikely]] {
+            detail::throw_memory_cap(engine_ref_->execution_limits());
+        }
+        return std::string(width, ' ');
     }
 
     void write_value_key(std::string_view key, bool comma) {
@@ -530,6 +542,7 @@ private:
     }
     
     int indent_;
+    bool charges_indentation_ = false;
     int json_depth_;  // JSON nesting depth (separate from serialization depth tracking in base)
     std::ostringstream oss_;
     std::stack<ContainerType> container_stack_;
@@ -539,7 +552,7 @@ private:
 
     void write_indent() {
         if (indent_ > 0) {
-            oss_ << std::string(json_depth_ * indent_, ' ');
+            oss_ << indentation();
         }
     }
     

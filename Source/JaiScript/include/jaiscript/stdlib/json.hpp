@@ -425,6 +425,7 @@ namespace stdlib {
             } else if (args.size() == 2) {
                 int indent = static_cast<int>(args[1].as_int());
                 serialization::json_archive_writer writer(indent, eng);
+                writer.charge_indentation();
                 writer.write_value(args[0]);
                 return script_value(writer.str(), eng);
             } else {

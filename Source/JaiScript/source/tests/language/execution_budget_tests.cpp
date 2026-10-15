@@ -1,5 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 #include <chrono>
 #include <thread>
 
@@ -324,6 +325,78 @@ public:
 				caught;
 			)");
 			check_eq((int64_t)1, r.as_int());
+		});
+
+		// Every builtin that grows a value past its inputs is a chokepoint: the growth is denied before it exists
+		test("memory_cap_charges_every_growing_builtin", [this]() {
+			const std::string cap_text = "Script memory cap exceeded (1048576 bytes) - raise engine::memory_cap or break up the work";
+			const char* growths[] = {
+				"string s = \"x\"; s.pad_left(64000000);",
+				"string s = \"x\"; s.pad_right(64000000, \"ab\");",
+				"string s = \"x\"; s.pad_center(64000000);",
+				"utf8_string u = utf8_string(\"x\"); u.pad_left(64000000);",
+				"string s = string::pad_left(\"x\", 64000000);",
+				"string s = string::repeat(\"x\", 64000000);",
+				"string s = \"abcd\"; s.repeat(4611686018427387905);",
+				"string s = \"x\".repeat(500000); s.append(s, s, s);",
+				"string s = \"x\".repeat(500000); string t = string::append(s, s, s);",
+				"var a = [1]; for (int i = 0; i < 30; i++) { a.concat(a); }",
+				"var a = [1]; for (int i = 0; i < 30; i++) { a.append(a); }",
+				"var a = [\"a\", \"b\", \"c\"]; string sep = \"x\".repeat(500000); a.join(sep);",
+				"var a = [\"a\", \"b\", \"c\"]; string sep = \"x\".repeat(500000); string::join(a, sep);",
+				"string s = \"x\".repeat(500000); s.replace_all(\"x\", \"yyyy\");",
+				"string s = \"x\".repeat(500000); string::replace_all(s, \"x\", \"yyyy\");",
+				"string s = \"x\".repeat(500000); var parts = s.split(\"\");",
+				"string s = \"x\".repeat(500000); var parts = s.utf8_chars();",
+				"string s = \"x\\n\".repeat(300000); var parts = s.lines();",
+				"var w = binary::writer(); w.text(\"x\", 64000000);",
+				"var w = binary::writer(); for (int i = 0; i < 1000000; i++) { w.int64(i); }",
+				"var deep = [[[[[[1]]]]]]; to_json(deep, 10000000);",
+			};
+			for (const char* growth : growths) {
+				auto e = make_engine();
+				stdlib::register_all(*e);
+				e->execution_budget(30.0);
+				e->memory_cap(1024 * 1024);
+				std::string caught;
+				try {
+					auto r = e->execute(std::string("string msg = \"none\"; try { ") + growth + " } catch (err) { msg = err; } msg");
+					caught = r.as<std::string>();
+				} catch (const std::exception& ex) {
+					caught = std::string("escaped: ") + ex.what();
+				}
+				check_eq(cap_text, caught, growth);
+				check_eq((int64_t)4, e->execute("2 + 2").as_int(), std::string("engine usable after ") + growth);
+			}
+		});
+
+		// A repeat whose byte count passes size_t reports like any oversized text instead of reserving the wrapped size and
+		// appending forever
+		test("an_overflowing_repeat_reports_at_once", [this]() {
+			auto e = make_engine();
+			stdlib::register_all(*e);
+			e->execution_budget(10.0);
+			const auto start = std::chrono::steady_clock::now();
+			for (const char* source : {"string s = \"abcd\"; s.repeat(4611686018427387905);", "string s = string::repeat(\"abcd\", 4611686018427387905);"}) {
+				check_throws([&]() { e->execute(source); }, source);
+			}
+			check_true(std::chrono::steady_clock::now() - start < std::chrono::seconds(5), "no step appends the wrapped size");
+			check_eq((int64_t)4, e->execute("2 + 2").as_int());
+		});
+
+		// replace_all builds its result in one pass (replacing in place shifted the tail at every hit: two million hits ran
+		// for minutes, out of the budget's reach inside one builtin)
+		test("replace_all_is_linear_in_the_hits", [this]() {
+			auto e = make_engine();
+			stdlib::register_all(*e);
+			e->execution_budget(60.0);
+			const auto start = std::chrono::steady_clock::now();
+			check_eq((int64_t)4000000, e->execute("string s = \"x\".repeat(2000000); s.replace_all(\"x\", \"yy\"); s.size()").as_int());
+			check_eq((int64_t)4000000, e->execute("string s = \"x\".repeat(2000000); string::replace_all(s, \"x\", \"yy\").size()").as_int());
+			check_eq(std::string("a-b-c"), e->execute("string s = \"a, b, c\"; s.replace_all(\", \", \"-\")").as<std::string>());
+			check_eq(std::string("xxyxxy"), e->execute("string s = \"xyxy\"; s.replace_all(\"x\", \"xx\")").as<std::string>());
+			check_eq(std::string("q"), e->execute("string s = \"aaaa\"; s.replace_all(\"aa\", \"\"); s + \"q\"").as<std::string>());
+			check_true(std::chrono::steady_clock::now() - start < std::chrono::seconds(10), "two million hits finish at once");
 		});
 	}
 };

@@ -1036,8 +1036,8 @@ namespace jai {
         // (main thread; the local elision's test observable) and that elision's kill switch (default on)
         // Set when the first instance armed with a script destructor is minted: until then no destructor can run, so
         // destruction-order work (a frame's reverse release) costs nothing in programs without one
-        bool destructors_armed() const;
-        void note_destructors_armed();
+        bool destructors_armed() const noexcept { return destructors_armed_; }
+        void note_destructors_armed() noexcept { destructors_armed_ = true; }
         // The release stack (detail/release_machine.hpp); _here is null while a parallel region runs (workers release natively)
         detail::release_machine& release_machine();
         detail::release_machine* release_machine_here();
@@ -1126,7 +1126,9 @@ namespace jai {
         void set_cell_cycle_registry_teardown(void (*teardown)(void*));
         // True while a parallel region's workers run (main thread parked). Worker-side
         // mints must not touch the single-threaded pool.
-        bool parallel_region_active() const;
+        bool parallel_region_active() const noexcept { return parallel_region_active_; }
+        // the region guard's record of its region (on while workers run, back to the enclosing region's state after)
+        void note_parallel_region(bool active) noexcept { parallel_region_active_ = active; }
         // Workers copy and construct class instances (by-value bindings, whole reads): the
         // class-definition instance registry they register into is engine-shared, so its
         // mutations serialize on this lock while a region runs (unlocked otherwise).
@@ -1298,6 +1300,8 @@ namespace jai {
 
         size_t hot_reload_field_migrations_ = 0;
         bool hot_reload_reporting_ = false;
+        bool destructors_armed_ = false;
+        bool parallel_region_active_ = false;
         std::vector<field_migration_report> hot_reload_reports_;
         void register_location_builtins();   // engine-core script builtins: root/current_script_dir, resolve_path, app dirs
         void register_privilege_builtins();

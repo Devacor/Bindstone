@@ -1619,7 +1619,6 @@ struct engine::implementation {
     uint64_t parameter_alias_binds_ = 0;
     bool parameter_alias_ = true;
     uint64_t local_alias_binds_ = 0;
-    bool destructors_armed_ = false;
     bool local_alias_ = true;
 
     // Empty result = caching inactive for this source (a .jaibite loaded as source
@@ -1917,10 +1916,6 @@ void engine::set_vec_node_pool_teardown(void (*teardown)(void*)) {
     impl->vec_node_pool_.teardown = teardown;
 }
 
-bool engine::parallel_region_active() const {
-    return impl->parallel_ && impl->parallel_->active_region;
-}
-
 std::unique_lock<std::mutex> engine::parallel_instance_registry_lock() {
     return std::unique_lock<std::mutex>(parallel_state().instance_registry_mutex);
 }
@@ -2083,14 +2078,14 @@ engine::~engine() {
         }
         // Program-scope variables die in reverse construction order while the engine still runs their destructors;
         // a destructor's error is reported through the script error handler, never propagated
-        if (impl->backend && impl->destructors_armed_ && impl->global_environment_) {
+        if (impl->backend && destructors_armed_ && impl->global_environment_) {
             try { impl->global_environment_->release_values_in_reverse(); } catch (...) {}
         }
         impl->tearing_down = true;
         impl->backend.reset();
         // Without a destructor nothing a value releases runs script: program-scope values die while their classes still
         // reach the engine, so a long chain releases on the release stack
-        if (!impl->destructors_armed_ && impl->global_environment_) { impl->global_environment_->clear_values(); }
+        if (!destructors_armed_ && impl->global_environment_) { impl->global_environment_->clear_values(); }
         // Definitions a host or a captured environment keeps alive past this point must not
         // consult the engine from an instance destructor (registry_lock reads it)
         for (auto& [name, def] : impl->classes) { if (def) { def->detach_for_teardown(); } }
@@ -3986,13 +3981,6 @@ void engine::release_recursion_limit(uint32_t levels) { impl->release_.depth_lim
 
 uint32_t engine::release_recursion_limit() const { return impl->release_.depth_limit; }
 
-bool engine::destructors_armed() const {
-    return impl->destructors_armed_;
-}
-
-void engine::note_destructors_armed() {
-    impl->destructors_armed_ = true;
-}
 
 uint64_t engine::local_alias_binds() const {
     return impl->local_alias_binds_;

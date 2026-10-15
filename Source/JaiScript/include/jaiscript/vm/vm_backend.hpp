@@ -2160,7 +2160,7 @@ namespace jai::vm {
             return true;
         }
         op_status cells_run_raw(frame& entry, op_status st, bool run_first);
-        const script_value* env_operand_value(frame& f, const chunk::cell_loop::env_operand_ref& er);   // the binding, or an enum member's entry   // the raw chain from a block run (run_first false: the block already ran and switched)
+        const script_value* env_operand_value(frame& f, const chunk::cell_loop::env_operand_ref& er, const script_value** binding = nullptr);   // the binding's value (through a plain cell), or an enum member's entry; binding: what the name resolved to   // the raw chain from a block run (run_first false: the block already ran and switched)
         op_status cells_resume(frame& f, const vm_instruction& ins);   // the dispatcher's entry after a callee returned to the parked caller
         // boundary operations (internal/typed_regions_design.md "Boundary operations"): the block parks for a statement the general form runs, and a
         // CELLS_RESUME or a block's back-edge entry at the statement's end resumes it; the re-read is cells_resync

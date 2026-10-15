@@ -412,6 +412,8 @@ share, written by the declared-type rule against the stamp read at entry (an int
 widens, a var lands any kind); the flush writes the payload back through the resolution the reads use, in place
 when the storage still holds that kind and stamp, and a call, which may read or rewrite the environment, has the
 written cells flushed ahead of its probe and re-read after its return.
+A name bound to a plain cell (a lambda's view of a program global) is an environment cell over the cell's value: the entry, the
+landings and the flush read and write through the cell, as the general form does; any other reference stays general.
 
 A bool is a cell kind beside int and float (payload 0 or 1, the canonical bool stamp): a bool local, environment value
 or compiler value enters, lands and flushes like the numeric kinds, and a bool cell takes bools only (an int

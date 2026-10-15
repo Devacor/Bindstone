@@ -59,27 +59,8 @@ public:
         return engine_ref_;
     }
     
-    // === Built-in Type Conversions (from engine's type_conversion_registry) ===
-    
-    struct BuiltinConversion {
-        script_value_type from;
-        script_value_type to;
-        int cost; // Conversion cost for overload resolution
-        std::function<script_value(const script_value&)> converter;
-    };
-    
-    // Register a conversion between JaiScript built-in types
-    void register_builtin_conversion(script_value_type from, script_value_type to, int cost, 
-                                   std::function<script_value(const script_value&)> converter);
-    
-    // Check if a built-in conversion exists
-    bool can_convert_builtin(script_value_type from, script_value_type to) const;
-    
-    // Get conversion cost for overload resolution
+    // The overload-scoring cost of an implicit conversion between built-in kinds (0 for the same kind, 1000 for none)
     int get_builtin_conversion_cost(script_value_type from, script_value_type to) const;
-    
-    // Perform built-in type conversion
-    script_value convert_builtin(const script_value& value, script_value_type targetType) const;
     
     // === Custom Type Conversions ===
     
@@ -101,9 +82,6 @@ public:
     // Convert from T to script_value using registered conversion
     template<typename T>
     script_value convert_to_script(const T& value) const;
-    
-    // Try to convert using custom conversions (type-erased version for internal use)
-    bool try_custom_conversion(const script_value& v, const std::type_info& target_type, script_value& out) const;
     
     // === Custom Object Extractor (replaces static extractor in script_value) ===
     
@@ -129,9 +107,6 @@ public:
     }
     
 private:
-    // Built-in type conversions
-    std::vector<BuiltinConversion> builtin_conversions_;
-    
     // Custom type conversions
     std::map<type_id, from_script_func> from_conversions_;
     std::map<type_id, to_script_func> to_conversions_;
@@ -181,10 +156,6 @@ public:
         std::function<T(const script_value&)> from_func,
         std::function<script_value(const T&)> to_func
     );
-    
-    // Register built-in type conversion
-    void add_builtin_conversion(script_value_type from, script_value_type to, int cost,
-                               std::function<script_value(const script_value&)> converter);
     
 private:
     std::shared_ptr<conversion_registry> registry_;

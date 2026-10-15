@@ -115,78 +115,15 @@ namespace conversions {
     throw std::runtime_error(std::string(prefix) + type_name);
 }
 
-void conversion_registry::register_builtin_conversion(script_value_type from, script_value_type to, int cost,
-                               std::function<script_value(const script_value&)> converter) {
-    auto it = std::find_if(builtin_conversions_.begin(), builtin_conversions_.end(),
-        [from, to](const BuiltinConversion& c) { 
-            return c.from == from && c.to == to; 
-        });
-    
-    if (it != builtin_conversions_.end()) {
-        *it = {from, to, cost, converter};
-    } else {
-        builtin_conversions_.push_back({from, to, cost, converter});
-    }
-}
-
-bool conversion_registry::can_convert_builtin(script_value_type from, script_value_type to) const {
-    if (from == to) return true;
-    
-    return std::any_of(builtin_conversions_.begin(), builtin_conversions_.end(),
-        [from, to](const BuiltinConversion& c) { 
-            return c.from == from && c.to == to; 
-        });
-}
-
 int conversion_registry::get_builtin_conversion_cost(script_value_type from, script_value_type to) const {
+    using t = script_value_type;
     if (from == to) return 0;
-    
-    auto it = std::find_if(builtin_conversions_.begin(), builtin_conversions_.end(),
-        [from, to](const BuiltinConversion& c) { 
-            return c.from == from && c.to == to; 
-        });
-    
-    return (it != builtin_conversions_.end()) ? it->cost : 1000;
-}
-
-script_value conversion_registry::convert_builtin(const script_value& value, script_value_type targetType) const {
-    if (value.type() == targetType) return value;
-    
-    auto it = std::find_if(builtin_conversions_.begin(), builtin_conversions_.end(),
-        [&](const BuiltinConversion& c) { 
-            return c.from == value.type() && c.to == targetType; 
-        });
-    
-    if (it != builtin_conversions_.end()) {
-        return it->converter(value);
-    }
-    
-    throw std::runtime_error("No conversion available from " + 
-                          std::to_string(static_cast<int>(value.type())) + 
-                          " to " + std::to_string(static_cast<int>(targetType)));
-}
-
-bool conversion_registry::try_custom_conversion(const script_value& v, const std::type_info& target_type, script_value& out) const {
-    auto it = from_conversions_.find(type_id::of_type(target_type));
-    if (it != from_conversions_.end()) {
-        void* result_ptr = it->second(v);
-        auto to_it = to_conversions_.find(type_id::of_type(target_type));
-        if (to_it != to_conversions_.end()) {
-            out = to_it->second(result_ptr);
-            auto destructor_it = destructors_.find(type_id::of_type(target_type));
-            if (destructor_it != destructors_.end()) {
-                destructor_it->second(result_ptr);
-            }
-            return true;
-        }
-    }
-    return false;
-}
-
-void conversion_manager::add_builtin_conversion(script_value_type from, script_value_type to, int cost,
-                           std::function<script_value(const script_value&)> converter) {
-    if (registry_) {
-        registry_->register_builtin_conversion(from, to, cost, converter);
+    switch (from) {
+        case t::jai_bool_type: return to == t::jai_int_type ? 1 : to == t::jai_float_type ? 3 : 1000;
+        case t::jai_char_type: return to == t::jai_int_type ? 1 : to == t::jai_float_type ? 3 : 1000;
+        case t::jai_int_type: return to == t::jai_float_type ? 1 : (to == t::jai_char_type || to == t::jai_bool_type) ? 2 : 1000;
+        case t::jai_float_type: return to == t::jai_int_type ? 2 : (to == t::jai_bool_type || to == t::jai_char_type) ? 3 : 1000;
+        default: return 1000;
     }
 }
 

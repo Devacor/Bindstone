@@ -1383,6 +1383,30 @@ public:
             }
         });
 
+        // C++ `p.reset()`: the handle's reset() empties the storage its receiver names (a variable, a field, an element, a map
+        // entry, a weak_ptr) and leaves the object to its other owners; a call result is a temporary it leaves alone
+        test("handle_reset_empties_the_receiver", [this]() {
+            const std::string prelude =
+                "class C { int v = 1; } class H { shared_ptr<C> p; } "
+                "var keep = new C(); function make() -> shared_ptr<C> { return keep; } ";
+            const std::pair<const char*, const char*> cases[] = {
+                {"var c = new C(); var d = c; c.reset(); to_string(c == null) + \" \" + to_string(d.v) + \" \" + to_string(d == null)", "true 1 false"},
+                {"shared_ptr<C> e = new C(); e.reset(); bool was = e == null; e = new C(); to_string(was) + \" \" + to_string(e.v)", "true 1"},
+                {"var h = H(); h.p = new C(); h.p.reset(); to_string(h.p == null)", "true"},
+                {"var arr = [new C(), new C()]; arr[0].reset(); to_string(arr[0] == null) + \" \" + to_string(arr[1] == null)", "true false"},
+                {"var m = {\"k\": new C()}; m[\"k\"].reset(); to_string(m[\"k\"] == null) + \" \" + to_string(m.size())", "true 1"},
+                {"var d = new C(); weak_ptr<C> w = weak_ptr<C>(d); w.reset(); to_string(w.lock() == null) + \" \" + to_string(d.v)", "true 1"},
+                {"make().reset(); to_string(keep == null) + \" \" + to_string(keep.v)", "false 1"},
+                {"function local() -> bool { var x = new C(); x.reset(); return x == null; } to_string(local())", "true"},
+                {"var c = new C(); string m = \"\"; try { c.reset(1); } catch (err) { m = err; } m + \" \" + to_string(c == null)", "reset() takes no arguments false"},
+            };
+            for (const auto& [source, expected] : cases) {
+                auto e = make_engine();
+                stdlib::register_all(*e);
+                check_eq(std::string(expected), e->execute(prelude + source).as<std::string>(), source);
+            }
+        });
+
         test("shared_ptr_construction_across_hot_reload", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();

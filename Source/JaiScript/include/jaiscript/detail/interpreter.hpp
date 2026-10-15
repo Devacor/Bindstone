@@ -866,6 +866,7 @@ namespace jai {
         uint64_t shared_from_this_id_;
         uint64_t coroutine_handle_type_id_;
         uint64_t next_id_;
+        uint64_t handle_reset_id_ = 0;
         uint64_t done_id_;
         uint64_t same_as_id_;
         uint64_t eq_method_id_ = 0;   // "==" interned at construction (worker probes must not intern)

@@ -343,6 +343,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		same_as_id_ = symbolizer_->intern("same_as");
 		coroutine_handle_type_id_ = symbolizer_->intern("coroutine_handle");
 		next_id_ = symbolizer_->intern("next");
+		handle_reset_id_ = symbolizer_->intern("reset");
 		done_id_ = symbolizer_->intern("done");
 		class_definition_type_id_ = symbolizer_->intern("class_definition");
 		hot_reload_migrate_id_ = symbolizer_->intern("hot_reload_migrate");
@@ -17004,6 +17005,27 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 
 	script_value object = std::move(stack_.back());
 	stack_.pop_back();
+
+	// A handle's reset() writes null into the receiver LVALUE (C++ `p.reset()`; detail/string_mutator_receiver.hpp); a class
+	// that declares reset() keeps its method (KEEP BYTE-PARALLEL with interpreter::member_read_on's handle reset)
+	if (member->member_id == handle_reset_id_ && !(member->object && member->object->get_type() == node_type::super_expr) &&
+	    detail::handle_reset_applies(object.deref(), handle_reset_id_)) [[unlikely]] {
+		if (!arguments.empty()) {
+			return raise_(make_error_code(runtime_error_code::argument_count_mismatch), "reset() takes no arguments");
+		}
+		if (!object.is_reference()) {
+			ensure_frame_member_scope(f, environment_.get());   // the kernel reads the frame's member scope
+		}
+		detail::string_mutator_binding binding = detail::bind_string_mutator_receiver(
+			object, member->object.get(), caller_view(&f), environment_.get(), engine_, symbolizer_);
+		script_value* ident_cell = site.receiver_symbol != UINT64_MAX
+			? string_receiver_cell(f, site, static_cast<identifier_expr*>(member->object.get())) : nullptr;
+		object = make_null();
+		detail::reset_handle_storage(detail::handle_reset_storage(binding, ident_cell), engine_);
+		binding.commit();
+		stack_.push_back(make_null());
+		return {};
+	}
 
 	// Script-class instance methods enter the dispatch loop directly. The gate mirrors
 	// member_access_value's precedence exactly (super/coroutine/builtin/same_as/getter/

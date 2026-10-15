@@ -1149,8 +1149,8 @@ print(reflect::invoke(Orc(), &quot;add&quot;, 2, 3));</code></pre></div>
 <section class="api-group"><h2 id="group-shared-ptr-t">shared_ptr&lt;T&gt;</h2>
 <div class="api-entry" data-provider="core" data-search="shared_ptr&lt;t&gt;.cpp_ref_count() -&gt; int observe  every engine"><h3 id="api-2ca9df142699"><code>shared_ptr&lt;T&gt;.cpp_ref_count() -&gt; int</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="shared_ptr&lt;t&gt;.reset() -&gt; void mutate releases this handle&#x27;s ownership. every engine"><h3 id="api-5659aded5fa7"><code>shared_ptr&lt;T&gt;.reset() -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Releases this handle&#x27;s ownership.</p>
+<div class="api-entry" data-provider="core" data-search="shared_ptr&lt;t&gt;.reset() -&gt; void mutate empties the handle its receiver names (a variable, field, element or map entry), as c++ p.reset() does; the object stays with its other owners, and a call result is a temporary it leaves alone. every engine"><h3 id="api-5659aded5fa7"><code>shared_ptr&lt;T&gt;.reset() -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Empties the handle its receiver names (a variable, field, element or map entry), as C++ p.reset() does; the object stays with its other owners, and a call result is a temporary it leaves alone.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="shared_ptr&lt;t&gt;.same_as(other: var) -&gt; bool observe true when both handles share one object. same_object(x, y) asks the same question of any two values. every engine"><h3 id="api-939cea7bd1cb"><code>shared_ptr&lt;T&gt;.same_as(other: var) -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>True when both handles share one object. same_object(x, y) asks the same question of any two values.</p>
@@ -1619,7 +1619,8 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 <div class="api-entry" data-provider="core" data-search="weak_ptr&lt;t&gt;.lock() -&gt; shared_ptr&lt;t&gt; or null observe pins a surviving target. every engine"><h3 id="api-1fab7a0f524f"><code>weak_ptr&lt;T&gt;.lock() -&gt; shared_ptr&lt;T&gt; or null</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Pins a surviving target.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="weak_ptr&lt;t&gt;.reset() -&gt; void mutate  every engine"><h3 id="api-5a6cdfcc3a13"><code>weak_ptr&lt;T&gt;.reset() -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="weak_ptr&lt;t&gt;.reset() -&gt; void mutate empties the weak handle its receiver names, as c++ w.reset() does; the object is untouched. every engine"><h3 id="api-5a6cdfcc3a13"><code>weak_ptr&lt;T&gt;.reset() -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Empties the weak handle its receiver names, as C++ w.reset() does; the object is untouched.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="weak_ptr&lt;t&gt;.same_as(other: var) -&gt; bool observe  every engine"><h3 id="api-3dcbafae7ec3"><code>weak_ptr&lt;T&gt;.same_as(other: var) -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>

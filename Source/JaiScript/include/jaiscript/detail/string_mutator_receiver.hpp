@@ -113,6 +113,42 @@ namespace jai::detail {
 		return storage;
 	}
 
+	// A handle's reset() (C++ `p.reset()`) binds its receiver the same way and writes null into it, keeping the storage's type
+	// tag: an identifier receiver's variable cell (ident_cell, resolved by the backend), a reference, field or property
+	// receiver's pinned storage. A call result or a chain is a temporary the reset leaves as it is.
+	inline script_value* handle_reset_storage(string_mutator_binding& b, script_value* ident_cell) {
+		if (ident_cell) { return &ident_cell->deref(); }
+		if (b.root_ident || b.chain) { return nullptr; }
+		return b.pinned_storage();
+	}
+
+	inline bool is_resettable_handle(const script_value& v) noexcept {
+		if (v.raw_storage_index() == script_value::TYPEID_WEAK_PTR) { return true; }
+		return v.get_type_info() && v.get_type_info()->base_type == script_value_type::jai_shared_ptr_type;
+	}
+
+	// A call of reset() on this receiver value is the handle's: a weak_ptr, or a live object held through shared_ptr<T> whose
+	// class declares no reset() of its own (a class's method wins over the builtin)
+	inline bool handle_reset_applies(const script_value& v, uint64_t reset_id) {
+		if (v.raw_storage_index() == script_value::TYPEID_WEAK_PTR) { return true; }
+		if (v.is_null() || !is_resettable_handle(v)) { return false; }
+		if (auto instance = const_cast<script_value&>(v).get_class_instance()) {
+			if (const class_definition* cd = instance->get_class_definition(); cd && cd->defines_method(reset_id)) { return false; }
+		}
+		return true;
+	}
+
+	inline void reset_handle_storage(script_value* storage, engine* eng) {
+		if (!storage || !is_resettable_handle(*storage)) { return; }
+		if (storage->raw_storage_index() == script_value::TYPEID_WEAK_PTR) {   // an empty weak_ptr, as the weak builtin leaves it
+			storage->get_weak_ptr_storage().reset();
+			return;
+		}
+		const type_info_ptr tag = storage->get_type_info();
+		*storage = script_value(std::monostate{}, eng);
+		storage->set_type_info(tag);
+	}
+
 } // namespace jai::detail
 
 #endif // __JAISCRIPT_DETAIL_STRING_MUTATOR_RECEIVER_HPP__

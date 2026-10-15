@@ -2991,6 +2991,7 @@ interpreter::interpreter()
     shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
     coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
     next_id_ = string_symbolizer_->intern("next");
+    handle_reset_id_ = string_symbolizer_->intern("reset");
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
@@ -3063,6 +3064,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
     coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
     next_id_ = string_symbolizer_->intern("next");
+    handle_reset_id_ = string_symbolizer_->intern("reset");
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
@@ -3135,6 +3137,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
     coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
     next_id_ = string_symbolizer_->intern("next");
+    handle_reset_id_ = string_symbolizer_->intern("reset");
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
@@ -8657,6 +8660,26 @@ checked_result<void> interpreter::method_value_error(const member_expr* expr, co
 
 checked_result<void> interpreter::member_read_on(member_expr* expr, script_value objectValue, bool as_callee) {
     const bool is_super_access = expr->object->get_type() == node_type::super_expr;
+
+    // A handle's reset() writes null into the receiver LVALUE (C++ `p.reset()`; detail/string_mutator_receiver.hpp); a class
+    // that declares reset() keeps its method (KEEP BYTE-PARALLEL with vm_backend::exec_call_method's handle reset)
+    if (as_callee && expr->member_id == handle_reset_id_ && !is_super_access && detail::handle_reset_applies(objectValue.deref(), handle_reset_id_)) {
+        detail::string_mutator_binding binding = detail::bind_string_mutator_receiver(objectValue, expr->object.get(),
+            detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
+            environment_.get(), engine_, string_symbolizer_);
+        const identifier_expr* ident = expr->object->get_type() == node_type::identifier_expr
+            ? static_cast<const identifier_expr*>(expr->object.get()) : nullptr;
+        script_function boundMethod = [this, binding = std::move(binding), ident](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+            if (!args.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reset() takes no arguments");
+            }
+            detail::reset_handle_storage(detail::handle_reset_storage(binding, ident ? string_receiver_cell(ident) : nullptr), engine_);
+            binding.commit();
+            return make_value();
+        };
+        push_value(script_value::make_function(boundMethod, engine_));
+        return {};
+    }
 
     // A string MUTATOR called on a non-identifier receiver binds the receiver LVALUE
     // (detail/string_mutator_receiver.hpp; C++ `string& to_upper()`): the popped reference,

@@ -442,8 +442,8 @@ The idiom is safe by construction, not by luck. And <code>!=</code> worked witho
 If you register none, <code>build()</code> adds a default constructor for default-constructible types.</li>
 <li><code>.method(name, &amp;T::fn)</code>: member function pointer, const or not.</li>
 <li><code>.method(name, lambda)</code>: a lambda whose first parameter is <code>T&amp;</code> or
-<code>const T&amp;</code> becomes a method (that parameter is <code>self</code>). The first parameter must be
-the receiver: a function that ignores the instance is a <code>.static_method</code>. Same-arity overloads of one name resolve by C++ parameter signature: registering
+<code>const T&amp;</code> becomes a method (that parameter is <code>self</code>); any other lambda is a method that
+ignores its receiver (<code>.method("twice", [](int64_t k) { return k * 2; })</code> answers <code>obj.twice(4)</code>). Same-arity overloads of one name resolve by C++ parameter signature: registering
 <code>set(double, double)</code> after <code>set(int64_t, int64_t)</code> adds an overload rather than
 clobbering it. Passing a member <em>data</em> pointer here is a compile error that tells you to use
 <code>.property()</code>. The ordinary call and the VM&#x27;s direct lane invoke one copy of the lambda, so a
@@ -455,9 +455,9 @@ with <code>void add(int64_t&amp; target, int64_t by)</code> leaves the sum in <c
 <li><code>.method("+", ...)</code>: operator overloading by token, <code>+ - * / % == != &lt; &lt;= &gt;
 &gt;= &lt;=&gt;</code> and <code>[]</code>. Script classes can overload operators from the other side, so a
 type can start in script and graduate to C++ without call sites changing.</li>
-<li><code>.static_method(name, fn)</code>: free function or stateless lambda, called as
+<li><code>.static_method(name, fn)</code>: free function or lambda (stateful lambdas included), called as
 <code>Vec2::axes()</code>. Bound-class arguments work (<code>Vec2::dot(a, b)</code> above); returning a bound
-class from the <em>lambda</em> form doesn't compile. See the last section.</li>
+class doesn&#x27;t compile in either form. See the last section.</li>
 <li><code>.property(name, &amp;T::member)</code>: read/write field access. Setters are only generated for
 copy-assignable member types. A <code>std::vector&lt;E&gt;</code> member binds as a zero-copy live view with
 array-like methods (<code>size/push/pop/at/[]</code>). Members whose type is a registered class bind by
@@ -474,9 +474,6 @@ binds <code>next</code> before <code>Node</code> itself is registered.</li>
 class-level values. The pointer form binds the live variable: <code>Class::name</code> reads it and
 <code>Class::name = v</code> writes it, so a change on either side is the other side&#x27;s value. The
 lambda form reads through the getter and stores through the setter, which takes the one new value.</li>
-<li><code>.method(name, lambda)</code>: a lambda whose first parameter is <code>T&amp;</code> or
-<code>const T&amp;</code> receives the object; any other lambda is a method that ignores its receiver
-(<code>.method("twice", [](int64_t k) { return k * 2; })</code> answers <code>obj.twice(4)</code>).</li>
 <li><code>.base_class&lt;Base&gt;()</code>: inheritance edge. Methods and properties of the base become
 callable on the derived, virtual dispatch preserved, and the polymorphic-load type check learns that a
 <code>Base</code> slot may hold this type. <code>static_assert</code>-guarded; diamond inheritance throws.</li>
@@ -616,7 +613,7 @@ re-exposure on the derived binder. Auto-materialized bases are named by the shar
 class declares one, else the bare C++ class name, the same name serialization uses for
 <code>$type</code>, so a type carries one identity everywhere. (Plain non-<code>property_owner</code>
 bases keep the explicit <code>.base_class&lt;B&gt;()</code> spelling, and a base whose name is already
-taken by a different type simply waits for its own registration, exactly as before.)</p>
+taken by a different type simply waits for its own registration.)</p>
 <p>Script classes extending C++ classes (<code>class SmartSpawner : Spawner</code>, with
 <code>super(...)</code> calling the bound constructor) were demonstrated in the hot-reload section. That
 direction works with zero extra registration.</p>
@@ -685,9 +682,9 @@ callbacks fire live but are skipped on save, by design. For handlers that should
 persistent state, connect named script-text receivers (<code>connect("logger",
 "print(\"...\");")</code>) and pass the engine as load context (<code>from_json(eng, json, eng)</code>) so
 they re-arm.</li>
-<li><strong><code>static_method</code> lambdas can't return a bound class.</strong> Returning
-<code>Vec2</code> from a <code>static_method</code> lambda is a compile error in the return-conversion path.
-Return primitives or strings from static lambdas; for factories, register a constructor overload or an
+<li><strong>A <code>static_method</code> can't return a bound class.</strong> Returning
+<code>Vec2</code> from a <code>static_method</code>, function pointer or lambda, is a compile error in the
+return-conversion path. Return primitives or strings from static methods; for factories, register a constructor overload or an
 engine-level function instead.</li>
 <li><strong><code>property_owner</code> types round-trip as <code>shared_ptr</code>, not by value.</strong>
 Their property managers hold pointers into the object, so the types are deliberately move-pinned:

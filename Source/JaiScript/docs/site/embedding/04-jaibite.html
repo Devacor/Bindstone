@@ -127,7 +127,7 @@ mismatch, or corrupt data (<code>jaibite: failed to open file: level.jaibite</co
 <code>jaibite: truncated header</code>, ...).</p>
 <p>The format is <strong>versioned</strong>, and the number moves whenever the
 parser gains a node, so a bite is readable only by builds that share its format version. An explicit
-<code>jaibite_load*</code> of a file from another version throws (<code>jaibite: unsupported format version 9 (expected 40)</code> from a build whose version is 40; the build's number is <code>jai::detail::k_jaibite_version</code>);
+<code>jaibite_load*</code> of a file from another version throws <code>jaibite: unsupported format version M (expected N)</code>, where M is the file&#x27;s version and N the build&#x27;s, <code>jai::detail::k_jaibite_version</code>;
 a stale <em>sibling</em> in the automatic disk cache is simply reparsed and rewritten, silently. Practical
 rule: ship bites from the same build you ship the engine from, and never hand-carry a
 <code>.jaibite</code> across versions.</p>

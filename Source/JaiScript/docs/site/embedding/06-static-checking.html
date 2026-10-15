@@ -140,7 +140,7 @@ parameters, returns, instance and static field stores, and the container element
 <tr><td><code>bool</code></td><td>anything</td><td>truthy conversion</td></tr>
 <tr><td><code>string</code></td><td>anything</td><td><code>to_string</code> conversion; objects use their own <code>to_string()</code> when they define one</td></tr>
 <tr><td><code>char</code></td><td>char, an object with <code>to_char()</code></td><td><code>char c = 65</code> is an error at load and at run time; <code>cast&lt;char&gt;(65)</code> is the spelling</td></tr>
-<tr><td><code>array</code> / <code>map</code></td><td>array / map</td><td>the checker rejects a literal element, a <code>push</code> or an element store it can see (<code>cannot push into 'array&lt;int&gt;': expected 'int', got 'string'</code>); map keys, <code>var</code>-sourced values and untyped containers meet the runtime element boundary, which runs on every path (<code>Cannot store string in array&lt;int&gt;</code>)</td></tr>
+<tr><td><code>array</code> / <code>map</code></td><td>array / map</td><td>the checker rejects a literal element, a <code>push</code> or an element store it can see (<code>cannot push into 'array&lt;int&gt;': expected 'int', got 'string'</code>); map keys, <code>var</code>-sourced values and untyped containers meet the runtime element boundary, which runs on every path: an element store says <code>Cannot assign 'string' to element of type 'int'</code>, a push <code>Cannot push 'string' to array&lt;int&gt;</code>, a whole container or literal <code>Cannot store string in array&lt;int&gt;</code>, a map key <code>Cannot use 'int' as a key of type 'string'</code></td></tr>
 <tr><td>object <code>C</code></td><td>null (a typed null); the same class; derived to base; a <code>shared_ptr&lt;C or derived&gt;</code> handle; a converting constructor <code>C(src)</code> through exactly one one-parameter constructor that takes <code>src</code> directly; on plain assignment, a user <code>operator=</code> of <code>C</code> (or an in-script base) that accepts <code>src</code></td><td>an unrelated class with no viable one-argument constructor or <code>operator=</code> = error; array/map/function into an object = error; a registered ancestor's <code>operator=</code> is lenient</td></tr>
 <tr><td><code>shared_ptr&lt;C&gt;</code> / <code>weak_ptr&lt;C&gt;</code></td><td>null, a handle or an instance of <code>C</code> or a subclass</td><td><code>null</code> stores a typed null on every path; an unrelated class or a primitive is an error</td></tr>
 <tr><td><code>function</code></td><td>a callable or null</td><td>a number, string or container is an error</td></tr>
@@ -208,10 +208,13 @@ Box maybe(int a) { if (a &gt; 0) { return Box(); } }  // a class result may be n
         ^
 &lt;script&gt;:3:14: error: &#x27;none&#x27; declared to return &#x27;int&#x27; returns no value here (declared at 3:5)
     int none() { return; }                           // bare return from an int function
-                 ^</code></pre></div>
-<p>The warning for <code>maybe</code> (<code>may reach the end of its body without returning (returns null)</code>)
-waits in <code>last_check_diagnostics()</code>. Under <code>warn</code> and <code>off</code> such a function runs
-as written.</p>
+                 ^
+&lt;script&gt;:4:5: warning: &#x27;maybe&#x27; declared to return &#x27;Box&#x27; may reach the end of its body without returning (returns null)
+    Box maybe(int a) { if (a &gt; 0) { return Box(); } }  // a class result may be null: a warning
+        ^</code></pre></div>
+<p>The listing carries every diagnostic, warnings included: the errors fail the load and the warning for
+<code>maybe</code> rides along. <code>last_check_diagnostics()</code> holds the same entries. Under
+<code>warn</code> and <code>off</code> such a function runs as written.</p>
 <p>The run-time half matters when the value came through <code>var</code>: the conversion is part of the
 <code>return</code> statement itself, C++ style. A <code>try</code> around the <code>return</code> inside the
 callee catches the failure, and when nothing catches it the callee is the top frame of the stack trace with
@@ -384,7 +387,7 @@ another source, so none is printed).</p>
 check, so a leaf re-parsed on its own after a hot edit still knows the names of the program it belongs to. The
 memory is a superset by construction: a name it admits is never a false error, only a typo the checker
 cannot catch. A unit the closure cannot resolve, read or parse contributes no names and is skipped; the runtime
-reports it exactly as before, when the unit executes. Names the program never declares (a host global
+reports it when the unit executes. Names the program never declares (a host global
 bound after load, a value injected at run time) are outside the closure by definition, which is what
 <code>extern</code> is for.</p>
 

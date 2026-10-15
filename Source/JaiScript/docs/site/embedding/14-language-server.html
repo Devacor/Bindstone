@@ -39,7 +39,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <div class="callout"><p><strong>One checker, two places.</strong> The server does not reimplement the language. It parses with the engine&#x27;s parser, checks with the checker that gates <code>execute()</code> (<a href="06-static-checking.html">Static Checking</a>), and builds navigation from the same parse and the checker&#x27;s inferred types. A clean program shows no diagnostics in the editor for the same reason it loads: the checker&#x27;s false-positive contract.</p></div>
 <h2 id="quick-start">Quick start<a class="hlink" href="#quick-start" aria-label="link">&#8203;</a></h2>
 <ol><li>Build the server from the JaiScript folder: <code>cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release</code>, then <code>cmake --build build --target jaiscript_lsp</code>. The executable is <code>build/bin/jaiscript_lsp</code> (<code>.exe</code> on Windows).</li>
-<li>Open <code>tools/vscode-jaiscript</code> in VS&nbsp;Code and press F5, or link or install the extension (<a href="#vs-code">below</a>). Set <code>jaiscript.languageServer.path</code> to the executable, or put its folder on <code>PATH</code>.</li>
+<li>Open <code>tools/vscode-jaiscript</code> in VS&nbsp;Code and press F5, or link or install the extension (<a href="#vs-code">below</a>). Run from <code>tools/vscode-jaiscript</code>, the extension finds the server step 1 built without any setting; otherwise set <code>jaiscript.languageServer.path</code> to the executable, or put its folder on <code>PATH</code>.</li>
 <li>Open a <code>.jai</code> file. Diagnostics appear as you type; F12 goes to a definition, Shift+F12 lists references, F2 renames.</li>
 <li>Scripts written for your own host: declare its names with <code>extern</code>, or build a server with your registrations (<a href="#host-surface">The host surface</a>).</li></ol>
 <p>If the server is not found the extension says so (<code>jaiscript_lsp was not found</code>); point <code>jaiscript.languageServer.path</code> at the executable.</p>
@@ -87,7 +87,7 @@ cd tools/vscode-jaiscript
 npm install
 npx @vscode/vsce package             # jaiscript-0.2.0.vsix
 code --install-extension jaiscript-0.2.0.vsix</code></pre></div>
-<p>The extension finds the server in this order: <code>jaiscript.languageServer.path</code> when it is set; <code>server/jaiscript_lsp.exe</code> inside the extension folder (where a packaged build carries it); the build trees Visual Studio&#x27;s CMake integration creates under the JaiScript folder (Release before Debug); a server built anywhere else, such as <code>build/bin</code> above, needs the <code>jaiscript.languageServer.path</code> setting or a directory on <code>PATH</code>; then <code>PATH</code>. Rebuilding the extension itself is <code>npm install</code> and <code>npm run compile</code> (a type check, then the bundle).</p>
+<p>The extension finds the server in this order: <code>jaiscript.languageServer.path</code> when it is set; <code>server/jaiscript_lsp</code> (<code>.exe</code> on Windows) inside the extension folder, where a packaged build carries it; the JaiScript folder&#x27;s build trees, two levels above the extension folder (so found when the extension runs from <code>tools/vscode-jaiscript</code>): <code>build/bin</code>, then <code>build-debug/bin</code>, then the trees Visual Studio&#x27;s CMake presets create there (Release before Debug); then <code>PATH</code>. Rebuilding the extension itself is <code>npm install</code> and <code>npm run compile</code> (a type check, then the bundle).</p>
 <div class="tablewrap"><table>
 <thead><tr><th>setting</th><th>default</th><th>meaning</th></tr></thead>
 <tbody>
@@ -108,7 +108,7 @@ code --install-extension jaiscript-0.2.0.vsix</code></pre></div>
 </ul>
 <h2 id="performance">Performance<a class="hlink" href="#performance" aria-label="link">&#8203;</a></h2>
 <p>A change re-parses the edited file and re-checks it against its program&#x27;s tables. The other files&#x27; parses stay cached, the program&#x27;s tables are rebuilt from cached per-file declarations only when a file&#x27;s declarations change, and only such a change sends the rest of the program to be re-checked, one file at a time between requests. Navigation reads a per-file model built from the same check and kept until the file or its program changes.</p>
-<p>Measured on Gator Quest (<code>examples/gatorquest</code>: 36 files, 13,700 lines; a Release build on a desktop Windows machine; times from the request sent to the answer received, over stdio):</p>
+<p>Measured on Gator Quest (<code>examples/gatorquest</code>: 36 files, 13,980 lines; a Release build on a desktop Windows machine; times from the request sent to the answer received, over stdio):</p>
 <div class="tablewrap"><table>
 <thead><tr><th>operation</th><th>time</th></tr></thead>
 <tbody>

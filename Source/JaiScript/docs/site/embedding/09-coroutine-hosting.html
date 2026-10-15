@@ -75,10 +75,10 @@ print(to_string(ticks().next()) + " " + names().next() + " " +
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 a 2.5 true</code></pre></div>
 <p>The bare form drops <code>function</code> as well (<code>coroutine g() { … }</code> and
 <code>coroutine g() -&gt; int { … }</code>), and the same prefix works on methods, static ones
-included. Coroutines cannot return references, and they are not allowed inside a namespace body
-(both are parse errors). Every spelling is listed in the guide&#x27;s
+included, and inside a namespace body. Coroutines cannot return references (a parse error). Every spelling is listed in the guide&#x27;s
 <a href="../guide/08-coroutines.html#spellings">Spellings</a>; the language-side tour, covering independent instances per call, receiver pinning (a method coroutine keeps its object alive while suspended) and the edges, is
-the guide&#x27;s <a href="../guide/08-coroutines.html">Coroutines</a> chapter.</p>
+the guide&#x27;s <a href="../guide/08-coroutines.html">Coroutines</a> chapter. Hosts moving from Lua coroutines or a C++20 scheduler have a mapping in
+<a href="../bridges/12-from-coroutines.html">From Lua Coroutines and C++20 Schedulers</a>.</p>
 <p>Coroutine <strong>methods</strong> work too. The handle pins the receiver alive across suspension, <code>this</code> stays bound, and mutations through the receiver are visible to the outside world while the coroutine is parked (<code>examples/crawler</code>&#x27;s boss is built this way):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Boss {
     int phase = 0;
@@ -113,7 +113,7 @@ auto handle = std::static_pointer_cast&lt;jai::coroutine_handle&gt;(holder-&gt;d
 while (!handle-&gt;done()) {
     jai::checked_result&lt;jai::script_value&gt; step = handle-&gt;next(eng.get());
     if (!step) break;                     // error channel (checked_result)
-    step.value().as_int();                // 10, 20, then -1 (the return value)
+    std::cout &lt;&lt; &quot;C++ next -&gt; &quot; &lt;&lt; step.value().as_int() &lt;&lt; &quot;\n&quot;;   // 10, 20, then -1 (the return value)
 }</code></pre></div>
 <p>Output: <code>C++ next -&gt; 10</code>, <code>C++ next -&gt; 20</code>, <code>C++ next -&gt; -1</code>.</p>
 <p>API notes (<code>coroutine.hpp</code>):</p>

@@ -36,7 +36,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Embedding</a><span class="sep" aria-hidden="true">/</span>13</nav>
 <article class="chapter"><h1 id="script-extensible-objects-extend">Script-Extensible Objects: <code>extend</code><a class="hlink" href="#script-extensible-objects-extend" aria-label="link">&#8203;</a></h1>
 <p><strong>A script class can derive a bound C++ class, and the script decides which object becomes which class.</strong>
-The host constructs and owns its objects exactly as before; a script hands one of them a class with
+The host constructs and owns its objects; a script hands one of them a class with
 <code>extend(object, Class)</code>, and from that moment the object <em>is</em> that class everywhere (typed
 fields, overrides, methods), no matter which road brings it back into script. This chapter covers the script
 surface, the one-line host surface, who owns what, and how it serializes. The host-side examples below are
@@ -47,7 +47,7 @@ taken from <code>source/tests/serialization/polymorphic_serialization_tests.cpp<
 <div class="callout cpp"><p>A base pointer to a derived object is the derived object, as in C++: once extended, the object reaches script as its script class through every <code>shared_ptr&lt;Base&gt;</code>, never as a sliced base.</p></div>
 <p>The shape this exists for is a game whose C++ spawns creatures and whose scripts define what each kind of
 creature does. C++ never names a script class; it hands the creature over and the script extends it:</p>
-<div class="codeblock cb-jai" data-host="Creature registration + self"><span class="cb-label">jaiscript &middot; needs the host&#x27;s classes</span><pre><code class="lang-jai">extern self;                       // the host binds `self` (its callback slots) after load
+<div class="codeblock cb-jai" data-host="Creature registration + self"><span class="cb-label">jaiscript &middot; needs the host&#x27;s classes</span><pre><code class="lang-jai">extern self;                       // the host provides `self` (its callback slots) before the script runs
 
 class Slime : Creature {        // Creature is the host's bound C++ class
     int size = 3;
@@ -147,8 +147,8 @@ initializer; and <code>Pt</code> is refused because it does not derive <code>p</
 the same three rules the C++ case obeys.</p>
 
 <h3 id="what-the-checker-sees">What the checker sees<a class="hlink" href="#what-the-checker-sees" aria-label="link">&#8203;</a></h3>
-<p>Extension is decided at run time, so <a href="06-static-checking.html">the checker</a> deliberately
-stops gating on it. Any name passed to <code>extend(...)</code> anywhere in a unit is <strong>open</strong>
+<p>Extension is decided at run time, so <a href="06-static-checking.html">the checker</a> does not
+gate on it. Any name passed to <code>extend(...)</code> anywhere in a unit is <strong>open</strong>
 for that whole unit (flow-insensitively, by name), and a bound C++ class stays open once any
 script layer has been extended over it. A member the checker cannot find on such a receiver is not an
 error; the ones it <em>can</em> find are still typed and still checked.</p>

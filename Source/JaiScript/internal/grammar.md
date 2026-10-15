@@ -3,8 +3,7 @@
 ## Overview
 
 JaiScript uses a C++-like syntax with RAII semantics and built-in support for hot-reloading and
-serialization. This reference is regenerated from the shipped lexer/parser (`detail/lexer.hpp`,
-`lexer.cpp` keyword table, `parser.cpp`); when in doubt, those are the ground truth.
+serialization. The lexer (`lexer::keywords_` in `lexer.cpp`) and `parser.cpp` are the ground truth.
 
 ## Lexical Elements
 
@@ -15,20 +14,22 @@ Exactly the lexer's keyword table (`lexer::keywords_` in `lexer.cpp`):
 ```
 array auto bool break case cast catch char class const continue coroutine
 default else enum extern fallthrough false float for function if import
-include inline int map namespace new null nullptr override private public
-return shared_ptr static string super switch this throw true try var
-void weak_ptr while yield
+include inline int let map namespace new nocopy null nullptr override
+parallel_for private protected public return shared_ptr static string super
+switch this throw true try var void weak_ptr while yield
 ```
 
 Notes:
-- `nullptr` is an alias for `null` (both lex to the null literal).
+- `nullptr` is an alias for `null` (both lex to the null literal); `let` is an alias for `var`.
+- `do` (in `do { } while (cond);`) and `using` (in `using ns::name;`) are contextual: they lex as
+  identifiers and the parser recognizes them at statement start.
 - `new T(args)` is **pure sugar for `shared_ptr<T>(args)` construction** — the
   reference-semantics opt-in (see "new expressions" below). Plain value-semantics
   construction stays `Type(args)` / `Type{args}`.
 - `cast<T>(e)` / `cast<T&>(e)` / `cast<shared_ptr<T>>(e)` is the explicit typed-boundary
   spelling (see "cast expressions" below).
-- `const` is accepted only where documented below (range-`for` bindings). It does not apply to
-  parameters or general variable declarations.
+- `const` applies to variables, parameters, class constants and range-`for` bindings
+  (internal/const.md).
 - A leading `#` before `include`/`import` is skipped by the lexer, so `#include "x"` and
   `include "x"` are identical.
 - `extern` declares a name defined outside the program to the static checker (see "extern
@@ -183,8 +184,9 @@ declaration = classDeclaration
             | statement
             | checkModeAttribute declaration       // see "check-mode attributes"
 
-// Class declarations
-classDeclaration = "class" IDENTIFIER (":" classBaseList)? "{" classMember* "}" ";"?
+// Class declarations: at program scope or in a namespace, never in a function body.
+// `nocopy` makes copying an instance an error (inherited by subclasses).
+classDeclaration = "nocopy"? "class" IDENTIFIER (":" classBaseList)? "{" classMember* "}" ";"?
 
 classBaseList = qualifiedName ("," qualifiedName)*   // Multiple inheritance; a base may be qualified (ns::Base, binary::writer)
 qualifiedName = IDENTIFIER ("::" IDENTIFIER)*
@@ -220,7 +222,7 @@ operatorName = "operator" ("=" | "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" |
 fieldDeclaration = "static"? type IDENTIFIER ("=" expression)? ";"
                  | classConstant
 
-// a class-level constant (docs/const.md): static, one value for every instance, initialized where it is declared
+// a class-level constant (internal/const.md): static, one value for every instance, initialized where it is declared
 classConstant = ("const" "static"? | "static" "const") (type IDENTIFIER | IDENTIFIER) "=" expression ";"
 
 // Function declarations. `type` is ANY type — builtin, container, or a user class
@@ -241,7 +243,7 @@ parameterList = parameter ("," parameter)*
 // static and instance methods, constructors (incl. this()/super() delegation),
 // and namespace overloads (a callable with N params, K defaulted, accepts N-K..N
 // arguments; within a resolution tier the candidate using fewest defaults wins).
-parameter = "const"? type "&"? IDENTIFIER ("=" expression)?     // classic:  int x, Creature& c, const T& p (docs/const.md)
+parameter = "const"? type "&"? IDENTIFIER ("=" expression)?     // classic:  int x, Creature& c, const T& p (internal/const.md)
           | IDENTIFIER ("=" expression)?               // untyped -> auto: foo(x), foo(x = 3)
           | type ":" IDENTIFIER ("=" expression)?      // typed shorthand: int: n (no '&' form)
           | ":" IDENTIFIER ("=" expression)?           // auto shorthand: :x (like `auto x`)
@@ -249,7 +251,7 @@ parameter = "const"? type "&"? IDENTIFIER ("=" expression)?     // classic:  int
 // Variable declarations (reference declarations alias the initializer's storage).
 // `function name = expr;` / `function name;` declares a callable-or-null variable;
 // also legal as a class field and in namespaces.
-variableDeclaration = "const" (type "&"? IDENTIFIER | IDENTIFIER) ("=" expression)? ";"   // const: set once (docs/const.md); an initializer is required
+variableDeclaration = "const" (type "&"? IDENTIFIER | IDENTIFIER) ("=" expression)? ";"   // const: set once (internal/const.md); an initializer is required
                     | type "&"? IDENTIFIER ("=" expression)? ";"
                     | type IDENTIFIER "{" argumentList? "}" ";"      // brace construction
                     | "function" IDENTIFIER ("=" expression)? ";"    // function-typed variable
@@ -306,6 +308,7 @@ statement = expressionStatement
           | blockStatement
           | ifStatement
           | whileStatement
+          | doWhileStatement
           | forStatement
           | forRangeStatement
           | parallelForStatement
@@ -314,6 +317,7 @@ statement = expressionStatement
           | breakStatement
           | continueStatement
           | tryStatement
+          | usingDeclaration
           | variableDeclaration
           | checkModeAttribute statement
 
@@ -325,12 +329,18 @@ ifStatement = "if" "(" expression ")" statement ("else" statement)?
 
 whileStatement = "while" "(" expression ")" statement
 
+// the body runs once before the first test; `do` is contextual (an identifier followed by "{")
+doWhileStatement = "do" blockStatement "while" "(" expression ")" ";"
+
+// from here to the end of the unit, `name` spells ns::name (`using` is contextual)
+usingDeclaration = "using" qualifiedName ("," qualifiedName)* ";"   // each name has at least one "::"
+
 forStatement = "for" "(" (variableDeclaration | expression)? ";" expression? ";" expression? ")" statement
 
 forRangeStatement = "for" "(" "const"? type "&"? IDENTIFIER ":" expression ")" statement
 
 // One loop variable per array, arrays of the SAME length walked in lockstep, the body a
-// fresh function scope (docs/parallel_design.md): `parallel_for (auto& v, auto& o : vecs, outs)`
+// fresh function scope (internal/parallel_design.md): `parallel_for (auto& v, auto& o : vecs, outs)`
 parallelForStatement = "parallel_for" "(" loopVariable ("," loopVariable)* ":" expression ("," expression)* ")" blockStatement
 loopVariable = "const"? type "&"? IDENTIFIER
 
@@ -443,10 +453,9 @@ literal = INTEGER_LITERAL
 
 lambdaExpression = "[" captureList? "]" "(" parameterList? ")" ("->" type?)? blockStatement
 
-// Anonymous function expression — desugars to a NO-CAPTURE lambda ([]-equivalent
-// auto-capture: enclosing-function locals snapshot by value at creation, globals
-// resolve live). There is no coroutine form (coroutine lambdas do not exist), and
-// no named form (`function g(x) {...}` in expression position stays an error).
+// Anonymous function expression — desugars to a [&] lambda (it closes over its scope by
+// reference, as JavaScript does). There is no coroutine form (coroutine lambdas do not
+// exist), and no named form (`function g(x) {...}` in expression position is an error).
 anonymousFunctionExpression = "function" "(" parameterList? ")" ("->" type?)? blockStatement
 
 captureList = captureDefault ("," capture)*    // [=] / [&] with optional explicit exceptions
@@ -490,6 +499,7 @@ CHAR_LITERAL = "'" (escape_sequence | [^'\\]) "'"
 BOOLEAN_LITERAL = "true" | "false"
 
 escape_sequence = "\\" [nrt"'\\]               // template strings also allow \` and \$
+                | "\\x" [0-9a-fA-F] [0-9a-fA-F]  // exactly two hex digits
 ```
 
 ## Example Programs
@@ -502,7 +512,6 @@ public:
     int health = 100;
 
     // Initializer lists are super(...)/this(...) only; init fields in the body.
-    // Parameters cannot be const.
     Creature(string n) { name = n; }
 
     void takeDamage(int amount) {
@@ -604,16 +613,14 @@ int f() -> int { return 4; }                // leading + matching trailing: redu
                                             //  int f() -> string  ==> "Conflicting return types")
 int f() -> { return 4; }                    // leading + bare arrow: keeps the leading type
 coroutine function f() { yield 1; }         // coroutine variants of every form above
-coroutine int f() { yield 1; }              //   (top level and class methods; NOT
-coroutine f() -> auto { yield 1; }          //    yet inside namespaces); the bare form
-coroutine f() { yield 1; }                  //    needs neither a type nor `function`
+coroutine int f() { yield 1; }              //   (top level, namespaces and class
+coroutine f() -> auto { yield 1; }          //    methods); the bare form needs
+coroutine f() { yield 1; }                  //    neither a type nor `function`
 ```
 
-The same catalog applies verbatim INSIDE CLASSES — including `var`/`auto` returns.
-(GLOOM's feel notes claimed `var name() { ... }` methods silently vanished; the full
-form family is verified and pinned in gloom_feedback_tests.cpp var_auto_method_forms —
-if a method ever "disappears," suspect a recoverable parse error in the BODY, not the
-`var` spelling):
+The same catalog applies verbatim INSIDE CLASSES — including `var`/`auto` returns
+(pinned in gloom_feedback_tests.cpp var_auto_method_forms; a method that "disappears" points
+at a recoverable parse error in its BODY, not the `var` spelling):
 
 ```cpp
 class G {
@@ -661,7 +668,7 @@ void heal(Creature& c, int amount) { c.health += amount; }
 heal(party[0], 25);            // lvalue arguments bind by reference: arr[i], obj.field, locals
 ```
 
-Reference returns (shipped with the reference-cells rework):
+Reference returns:
 
 ```cpp
 int& pick(array<int>& a, int i) { return a[i]; }   // leading form: free functions
@@ -706,7 +713,7 @@ coroutine counter(int limit) -> int {        // `coroutine` prefixes any functio
         yield i;                       // yield is an expression; bare `yield` also legal
     }                                         //   counter(...) -> int, coroutine counter(...)
 }
-// Coroutines are NOT yet supported inside namespace bodies (parse error).
+// Namespace bodies declare coroutines with the same spellings.
 
 for (auto n : counter(3)) { print(n); }   // range-for drives the coroutine
 
@@ -962,27 +969,30 @@ string healthLevel = health > 75 ? "healthy" :
     read mints a STRING-ELEMENT reference pinned through the base (its own reference, a
     field/property reference, or the boxed variable cell) and the write goes through the
     copy-on-write gate (`internal/invariants.md` 11; `detail/string_element.hpp`). `char`
-    supports the full comparison set including ordering (`c >= '1' && c <= '9'`);
-    char-vs-int ordering is deliberately an error (no silent promotion).
+    supports the full comparison set including ordering (`c >= '1' && c <= '9'`); against an
+    int, a char compares as its code point 0..255 (`'A' < 66` is true).
 15. **Parallel Builtins and the `parallel_for` statement**: `parallel_transform(arr, fn)` and
     `parallel_transform(arr, fn, weight_fn)` are ordinary builtin CALLS — the optional
     weight hint is simply the third argument. `parallel_for (auto& x : arr) { ... }` iterates
-    an array in place (each thread a contiguous segment; `continue`/`return` = next element,
-    a loop-level `break` is rejected), and the zip form `parallel_for (auto& x, auto& o : xs, outs)`
-    walks further arrays of the same length in lockstep - the pre-allocated output written
-    in place (docs/parallel_design.md). `fn` must be a script-defined
+    an array in place (`continue`/`return` = next element, a loop-level `break` is rejected),
+    and the zip form `parallel_for (auto& x, auto& o : xs, outs)` walks further arrays of the
+    same length in lockstep - the pre-allocated output written in place
+    (internal/parallel_design.md). Without a weight hint the iterations are dealt to the
+    workers in blocks of consecutive elements, round-robin; a weight hint splits the range
+    into contiguous spans of equal cumulative weight. `fn` must be a script-defined
     function of one value parameter whose body passes the parallel admission walk
-    (no unwhitelisted host calls, no lambdas/classes/yield); elements and results must
-    be value-semantic (null/int/float/string/char/bool + arrays/maps of the same).
-    **Captured reads (v0.5)**: the body may READ enclosing globals — scalars, strings,
+    (no unwhitelisted host calls, no lambdas, object construction or yield). Elements and
+    results may be class instances as well as values (`parallel_transform` returns copies,
+    independent of the source).
+    **Captured reads**: the body may READ enclosing locals and globals — scalars, strings,
     and value-semantic containers — seeing barrier-time content, identical at every
     worker count (an all-primitive container touched only by subscript reads is a
     zero-copy "borrow"; everything else is copied per worker at the barrier and
-    charged to memory_cap). WRITES to enclosing state stay errors in every shape:
+    charged to memory_cap). WRITES to enclosing state are errors in every shape:
     direct assigns, subscript/compound/incdec stores, mutating (or unknown) methods
     on captured receivers, `var&` aliases, by-reference arguments, and by-reference
-    iteration over captured containers. Violations raise
-    "parallel_transform: <reason> at line:col" — never silently serial.
+    iteration over captured containers. Violations raise "parallel_for: <reason> at
+    line:col" (or "parallel_transform: ..." for the builtin) — never silently serial.
     `thread_count()` reports the worker count a region will use.
 16. **Typed shared_ptr declarations enforce their pointee**:
     `shared_ptr<Bar> wrong = Foo();` and wrong-class sp-aliasing error ("type must match
@@ -992,8 +1002,8 @@ string healthLevel = health > 75 ? "healthy" :
     (construct-and-share `shared_ptr<auto> v = T();` included) — a missing, null, or
     non-class initializer has nothing to infer and errors (use `var`, or an explicit
     `shared_ptr<T>`). Inference is a DECLARATION feature: `shared_ptr<auto>` fields infer
-    from their default (field writes keep the pre-existing lenient field-store semantics,
-    same as explicit `shared_ptr<T>` fields); `shared_ptr<auto>` parameters are not
+    from their default (field writes keep the lenient field-store semantics of explicit
+    `shared_ptr<T>` fields); `shared_ptr<auto>` parameters are not
     supported (they error at call time — a plain `auto`/untyped parameter already binds
     anything, or use an explicit `shared_ptr<T>`). The ladder has exactly three handle
     spellings: `shared_ptr<T>` (enforced pointee), `shared_ptr<auto>` (infer then
@@ -1008,7 +1018,7 @@ string healthLevel = health > 75 ? "healthy" :
     (`p = Bar();`) or a PRIMITIVE (`p = 5;`) REBINDS to an independent copy — this is
     var's one added power, exactly where a typed holder would error. `Foo()` (a value)
     assigns-into; `new Foo()` (a handle) rebinds — same distinction as the typed tiers.
-    The typed/auto/`shared_ptr<T>`/`shared_ptr<auto>` tiers are UNCHANGED (enforce, and a
+    The typed/auto/`shared_ptr<T>`/`shared_ptr<auto>` tiers enforce (a
     value rhs copy-assigns INTO the underlying object with its checks; an incompatible
     value errors); `auto` copies of a var-held handle re-lock to the plain spelling.
     `shared_ptr<var>`
@@ -1033,4 +1043,4 @@ string healthLevel = health > 75 ? "healthy" :
     only through the cast: `cast<int>(c)` / `cast<float>(c)` are the code point (0..255),
     `cast<string>(c)` the one-character string, `cast<char>(e)` takes an int in 0..255 or a
     one-character string and raises `Cannot cast 'int' to 'char'` / `Cannot cast 'string' to
-    'char'` otherwise; `char c = 65` stays a type mismatch (docs/char_semantics.md "Casts").
+    'char'` otherwise; `char c = 65` is a type mismatch (internal/char_semantics.md "Casts").

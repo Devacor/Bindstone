@@ -1,18 +1,22 @@
 # Typed regions: proven code pays nothing
 
-The VM executes proven scalar code on raw 8-byte slots with opcodes that cannot fail, and
-leaves everything the checker cannot prove on the general path it has today. The general
+The VM executes proven scalar code through typed lanes (guarded typed opcodes, and cell blocks
+over raw 8-byte cells), and leaves everything the checker cannot prove on the general path. The general
 path is the specification; a typed region is a lane through it that produces the same
 values, the same errors and the same side effects, byte for byte. The interpreter never
 gains typed slots: it is the oracle the differential gates run the VM against.
 
-This is the structure behind the 2026-07 ruling (registers plus typed lanes), connected end
-to end. The pieces it composes already exist: parse-time type proofs
-(`type_proofs_design.md`), typed array buffers (`typed_array_design.md`), frame slots
-that hold temporaries (register-file wave 1), the field-shape epoch, and the definition
-epoch that parameter aliasing invalidates against.
+It composes parse-time type proofs (`type_proofs_design.md`), typed array buffers
+(`typed_array_design.md`), compiler temps in frame slots, the field-shape epoch and the
+definition epoch.
+
+The sections from here through "Flat records" are the original proposal; what is built starts
+at "The typed scalar set".
 
 ## What Lua spends and what we spend
+
+Not built: the typed-region column's opcodes (`add_ii`, `load_i64`, ...) and flat records; the
+built forms are the typed scalar set, the cell blocks and the frame programs below.
 
 | cost | Lua 5.4 | JaiScript VM | typed region |
 |---|---|---|---|
@@ -24,8 +28,7 @@ epoch that parameter aliasing invalidates against.
 | result checking | none | every operation | none inside a region |
 
 The general path keeps every check. A region removes them where the checker proved them
-redundant, which is the `checked_result` ruling (optimize by starving it) applied
-structurally.
+redundant.
 
 ## Eligibility
 
@@ -51,6 +54,10 @@ slot only if a later use needs a value, which the same liveness walk decides.
 
 ## Instruction set
 
+Not built: none of the opcodes listed below exist. Typed opcodes are entries in the same
+`opcode` enum: the typed scalar set (`op_t_*`), the dynamic slot-operand set (`op_d_*`) and the
+cell-block set (`op_c_*`, `op_cells_*`), described from "The typed scalar set" on.
+
 The instruction stays `op, a, b, c`. Typed opcodes are new entries in the same enum and run
 in the same loop; there is no second dispatcher. First set:
 
@@ -59,12 +66,12 @@ in the same loop; there is no second dispatcher. First set:
 - element: `load_i64 store_i64 load_f64 store_f64 len_typed`, with the bounds test and the
   memory-cap deferral inside the opcode;
 - flow: `jmp_if_b`, `loop_back` (carries the budget tick and the debugger sync exactly like
-  today's back edge);
+  the general back edge);
 - boundary: `box_i box_f box_b unbox_i unbox_f unbox_b` between a typed slot and its general
   slot;
-- records (stage 3): `load_field_i64 store_field_f64` with the shape-epoch guard folded into
+- records: `load_field_i64 store_field_f64` with the shape-epoch guard folded into
   region entry, not into each access;
-- calls (stage 2): `call_typed` with a signature id, `ret_i ret_f`.
+- calls: `call_typed` with a signature id, `ret_i ret_f`.
 
 Every typed opcode has one failure mode at most (overflow, bounds, division by zero) and
 raises the same catalog text the general opcode raises for the same input
@@ -73,6 +80,9 @@ builds wrap, through the same `jai::ints` helpers.
 
 ## Frame layout
 
+Not built: a separate typed area beside every frame; raw cells live in the call record's raw
+area while a cell block or frame program runs.
+
 A frame keeps its `script_value` slots and adds a typed area of raw 8-byte cells. The
 compiler assigns each typed slot one cell; the general slot for the same variable exists
 only if the variable ever crosses a boundary. The frame program, the raw frame's layout and
@@ -80,22 +90,28 @@ where its values become `script_value`s again are in "Raw typed frames" below.
 
 ## Invalidation
 
+Not built: recompile on an epoch mismatch. The built forms guard at run time and refuse or miss
+onto the general form; they never recompile.
+
 A compiled function records the epochs its regions assumed: the definition epoch (callee
 identities and signatures), the class shape epochs of every record it touches, and the
 operator-table epoch. A mismatch on entry recompiles the function on the general path and
 retries; nothing runs on a stale assumption. Hot reload therefore costs one recompile per
 affected function, which the `parameter_alias` machinery already does for its proofs.
 
-## Calling convention (stage 2)
+## Calling convention
+
+Built as the frame programs' raw calls ("Raw typed frames") and the inlined leaves; not built:
+methods with `this` as a record pointer.
 
 A call is typed when the checker resolves the callee to one script function whose parameter
 and return types are declared scalars, and the call site's arguments are typed slots or
 literals. The raw call writes the arguments into the callee's typed cells and enters the
 frame without an environment; the callee's return lands in the caller's typed cell ("Raw
 typed frames" below has the protocol). Methods
-qualify with `this` as a record pointer once stage 3 exists. Small proven callees inline at
+would qualify with `this` as a record pointer once flat records exist. Small proven callees inline at
 compile time: the body is grafted into the caller's region the way `parallel_transform`
-grafts its function body today, with the callee's slots renamed into the caller's frame.
+grafts its function body, with the callee's slots renamed into the caller's frame.
 Evaluation order and observable copies hold because the graft happens on the AST the
 checker already ordered.
 
@@ -104,7 +120,9 @@ payload is trivial (null, int, float, char, bool) whatever its stamp: the type t
 pointer, so a typed local's value pops as free as a tagless temp; only strings, containers, objects, functions, references and
 handles run theirs.
 
-## Flat records (stage 3)
+## Flat records
+
+Not built.
 
 A class is **flat** when every field is a declared scalar or a flat class, it has no user
 accessor, is not `nocopy`, has no `var` field, and no class in its chain violates these. Its
@@ -117,21 +135,21 @@ representation for its instances, which the migration path already knows how to 
 ## Parity and gates
 
 - The interpreter is unchanged and remains the oracle. The differential fuzz gate runs every
-  generator program on both backends with regions on, and again with regions off
-  (`engine::typed_regions(false)`, the same shape as `type_proofs(false)`).
-- Every increment lands with a hash-gated GLOOM run (300 ticks, seed 666, frame
-  `7fecc09815bb64e0`, state `3580805725`) and the JaiDOOM timedemo (state `1746772898`).
-- Credit is an interleaved A/B on GLOOM ms/tick and the timedemo ms/tic; a micro loop is a
-  development gauge only and carries the padding control (`PERF_PASS_2026-09-02.md` row 48).
+  generator program on both backends with the passes on, and again with them off
+  (`engine::ir_passes(false)`, `jaiscript_fuzz --no-passes`, beside `type_proofs(false)` and
+  `--no-proofs`).
+- The gates are `tools/ci/gates.sh` (GLOOM 300 ticks, seed 666, frame `7fecc09815bb64e0`, state
+  `3580805725`, plus the other example hashes).
+- Credit is an interleaved A/B on whole programs; a micro loop is a development gauge only.
 - Both backends must raise the same texts for the same inputs on every typed opcode; the
   catalog tests extend to each new opcode.
 
-## The typed scalar set (stage 1 as it stands)
+## The typed scalar set
 
-The first set runs on the existing `script_value` frame slots, not on a separate raw-cell
+The set runs on the existing `script_value` frame slots, not on a separate raw-cell
 area: the guard is one tag compare per operand, and what the instruction removes is the
 proto decode, the generic operand ladders, the push and pop round trips and the second
-dispatch of the fused forms. Thirty-one opcodes, `op_t_*` in `vm/opcode.hpp`:
+dispatch of the fused forms. Thirty-three opcodes, `op_t_*` in `vm/opcode.hpp`:
 
 - arithmetic: `add sub mul div mod and or xor shl shr` on int/int, `add sub mul div mod` on
   float/float; `a` is the destination slot with its kind in the top bits (temp, decl, store,
@@ -139,7 +157,22 @@ dispatch of the fused forms. Thirty-one opcodes, `op_t_*` in `vm/opcode.hpp`:
   `k_typed_const_bit`;
 - compare-and-jump-if-false: the six comparisons on int/int and on float/float; `a` left,
   `b` right, `c` target;
-- moves: `T x = y`, `T x = lit`, `x = y;`, `x = lit;` as one instruction each.
+- moves: `T x = y`, `T x = lit`, `x = y;`, `x = lit;` as one instruction each;
+- `op_t_push`: `recv.push(v);` with a slot receiver and a slot or constant value;
+- `op_t_load`: `T x = arr[index]` on the proven shape, the container, the index fold and the
+  landing facts in `chunk::typed_sites`.
+
+The dynamic slot-operand set (`op_d_*`, `vm_compiler::lower_dynamic_ops`) takes a fused binary or
+compare-jump still general after the typed lowering and the cell translation whose operands are
+both frame slots or literals: each execution reads both tags and runs the general kernel's
+numeric rows in place, and any other kind, a property reference, an overflow, a zero divisor or
+a shift out of range runs the original instruction from `chunk::typed_sites`.
+
+Inside a cell block, operations whose operand cells are pinned to one kind take per-kind forms
+that read no kind: `op_c_add_ii`, `op_c_sub_ff` and their constant (`k`) forms, the pinned
+compare-jumps (`op_c_jlt_ff`, `op_c_jge_iik`, ...), the pinned moves `op_c_mov_p` / `op_c_mov_k`,
+`op_c_sin_f` / `op_c_cos_f` / `op_c_sqrt_f`, `op_c_jtruth` (a call's landed int, float or bool as a
+branch) and `op_c_load_f` (a float element read in place into a float cell).
 
 The compiler lowers in place after a callable's body is complete
 (`vm_compiler::lower_typed_ops`; the moves lower at emission, where the LOAD or CONST just
@@ -359,7 +392,7 @@ counted loop whose bound or step is an environment scalar enters the block (the 
 through a pointer at every back edge and no cell instruction writes a global, so the environment cell read once
 at entry holds the same value).
 
-A call inside a body is one operation of the block (the design note's section 9). Its arguments are values: a cell
+A call inside a body is one operation of the block. Its arguments are values: a cell
 boxed at the call, a constant or an environment name pushed as the general instruction pushes it, or a computed
 argument (a fused binary, an element read, a math call or a unary over a slot) landing in a compiler value of its
 own ahead of the call. The callee probe, the pushes and the call run the general executors verbatim over three
@@ -441,7 +474,7 @@ hold re-reads the environment cells through their bindings and checks each site'
 same array node behind the slot or binding, a plain-cell reference dereferenced); any difference resolves the sites
 in full again and misses only if that fails.
 
-A landing re-checks only the sites and inlined leaves the block can reach from it before the next landing (each call's lists come from the region's graph at compile time); the probe's effect point checks everything, since the arguments run before the landing. The checks are not skipped by a binding epoch. The one structural choke point for every binding a landing protects (environment cells, frame slots, field cells, hetero elements, map values) is `script_value`'s assignment over a heavy value (an array, map, object, function, reference or handle), and the same assignment overwrites every heavy temporary the VM recycles: counted on Gator Quest, 82-92% of call landings see one, against 1.0-1.6% that see an operation-level binding store (an environment or field store of a heavy value, a non-typed element store, a container builtin). An epoch on the operation-level stores would skip almost every check, but its completeness would be a list of operation sites (host functions, member-cache rows, object-slot buffers, map erasure, re-classing, workers), not a structural guarantee, so the landings keep their checks.
+A landing re-checks only the sites and inlined leaves the block can reach from it before the next landing (each call's lists come from the region's graph at compile time); the probe's effect point checks everything, since the arguments run before the landing. Landings keep per-site checks: an epoch on binding stores could not be made structurally complete.
 
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
@@ -451,34 +484,19 @@ reference, a var slot, an overflow, a zero divisor, a shift out of range) runs t
 instruction, so error texts, evaluation order and post-states are the general kernel's by
 construction and the interpreter stays the oracle unchanged.
 
-What this set does not yet do, in the order the rest of this document gives it: raw cells
-(the slot is still 32 bytes with a tag), regions with boundary boxing, typed element
-instructions in the same encoding (element reads and stores run through the proven lanes of
-the fused index ops), typed calls, flat records.
-
-## Order of work
-
-1. Typed slots and the scalar arithmetic set, with boxing at boundaries. Measured on GLOOM's
-   per-pixel loops; no new runtime data structures.
-2. Typed element access on `array<int>` / `array<float>` and the loop back edge.
-3. Typed calls between proven functions, then inlining of small proven callees.
-4. Flat records and `array<Flat>`.
-5. Throughout: reprofile after each stage; the standing profile shows `array.push` and
-   indexed reads at roughly a sixth each, and those numbers move as stages land.
+Not built: raw cells outside cell blocks and frame programs, and flat records.
 
 ## What this is not
 
-It is not a JIT. Every stage is interpreter-level: new opcodes, new slot storage, the same
+It is not a JIT. Every form is interpreter-level: new opcodes, new slot storage, the same
 run loop. Bindstone ships on iOS, where runtime code generation is not permitted, so native
 code would be an ahead-of-time step and a separate decision. LuaJIT is a valid reference
 point for the ceiling of the technique and is measured as such, labeled as a JIT.
 
 ## Comparison suite
 
-The reference numbers are the GLOOM ports under bit-exact conformance hashes
-(`JaiScriptComparisons/gloom/ports`). The suite carries Lua 5.4 today; it gains Lua 5.5 (array storage
-and collector changed between the two) and LuaJIT, each run warmed, with the core count
-stated, on the same 600-tick workload. Whole-application numbers (GLOOM, the JaiDOOM
+The GLOOM ports (`Source/JaiScriptComparisons/gloom/ports`: Lua, LuaJIT, ChaiScript, Squirrel,
+Python) run under the same conformance hashes. Whole-application numbers (GLOOM, the JaiDOOM
 timedemo) are reported separately from native-bound object workloads.
 
 ## Closed typed loops run as cell blocks
@@ -507,8 +525,7 @@ interpreter is untouched, so texts and post-states are the general form's by con
 
 Controls: suites `Closed Typed Loops` and `Cell Loops` (interpreter parity on every shape). Profile
 builds count entries, refusals, cell iterations, unboxes, exits, misses by step, cell instructions,
-flushes in place and replaced, and the resident raw area. Measured on GLOOM's render column loop
-(21% of the tick's dispatches, zero misses): see `PERF_PASS_2026-09-02.md` rows 92 to 98.
+flushes in place and replaced, and the resident raw area.
 
 A cell's kind is the contract of the copy's operations (a pinned operation reads the payload as that kind without a check).
 A live-in cell's slot proves it at the entry; a local the body declares proves it at its landings: a typed declaration lands
@@ -580,11 +597,9 @@ environment and its env-resident reads keep the two-compare fast head across cal
 ### The block loop's registers
 
 The block loop (`cells_run`) reads the run's registers once (`cell_regs`: the cells' payloads and kinds, the dirty mask, the chunk's
-constants, the copy's code and the loop) and every executor on its switch takes them by reference; before, each operation re-derived
-frame, cell state, vector and data pointer on its own, and the optimizer, unable to prove the stores kept those unchanged, reloaded
-them per operation. The vectors never move during a run (the entry sizes them), so the registers hold until the exit. The call
-door and the member sites (`cells_run_cold`) keep the frame form. Nothing else changes: the same memory, the same guards, the same
-misses.
+constants, the copy's code and the loop) and every executor on its switch takes them by reference, so the optimizer need not
+reload frame, cell state, vector and data pointer per operation. The vectors never move during a run (the entry sizes them), so
+the registers hold until the exit. The call door and the member sites (`cells_run_cold`) keep the frame form.
 
 The entry walks the cells once: each cell's guard (the slot's kind, its canonical stamp and its engine, or the environment binding's
 kind) and then its unboxing, in one pass; the four canonical stamps are cached with the engine rather than asked of it per cell. A
@@ -595,7 +610,7 @@ A landing after a call re-reads the environment cells and re-borrows the string 
 `string_candidates`, recorded when the block is built) instead of scanning every cell twice; a block of a hundred cells landing
 once per column paid the scan on every column.
 
-The block switch is one large function, and what stays inline in it is measured, not assumed: each executor kept inline grows the switch, and past a point the compiler stops inlining the small helpers (buffer sizes, the dirty mask) into the hot cases. The executors run inline or out of line by how often whole programs reach them. Moving the move executor (`C_MOV`) out of line costs OSSUARY 13.8% (a worker runs 1.4M moves a run) and the head compare (`C_CMP_P`) costs JaiDOOM 2%, so both stay inline. The push executor runs out of line (Gator Quest 5-6% and OSSUARY 2.9% faster) with its common row, an int or float cell into a frame-slot array's own typed buffer, kept in the switch, since GLOOM pushes 2.5M times a run and loses 1.3% when every push pays the call. A dispatch tail replicated into every case (each case jumping to its successor through its own small switch) makes the switch slower on every measured program, 1 to 12%.
+The block switch is one large function: each executor kept inline grows the switch, and past a point the compiler stops inlining the small helpers (buffer sizes, the dirty mask) into the hot cases. Executors stay inline or out of line by measured whole-program frequency: the move (`C_MOV`) and the head compare (`C_CMP_P`) stay inline, and the push runs out of line with its common row, an int or float cell into a frame-slot array's own typed buffer, kept in the switch. The switch has one dispatch point, not a dispatch tail replicated into every case.
 
 ### Fused cell pairs
 
@@ -741,14 +756,9 @@ instructions), since the general continuation reads them; a bail holds the same 
 A door's probe at a region's first instruction reads the trampoline's copy of that instruction: the entry replaced it in the
 general form.
 
-Whole-body regions (one region from a function's first instruction to its HALT, its loops inner loops, its calls doors) were
-tried and measured slower. Every edge of a block costs the whole block: the entry guards and resolves every site and
-environment value, including those of loops that do not run in that call; each landing after a door call re-checks every site
-it can reach; a boundary resyncs every cell. OSSUARY's per-pixel function (28 loops, 626 cells) went from 9.25 entries per
-call to one, and ran 45% slower: about 3.0G cycles of block overhead against 0.58G for its per-loop blocks, from a 5K-cycle
-entry, 4.7 landings per call at 6K cycles each and a 12K-cycle resume. A whole-body block needs edges that cost what runs
-(sites and environment values resolved lazily, a boundary that writes back and resyncs only the cells its statement touches,
-an entry that guards only live-ins) before it can pay.
+Regions are per loop and per straight-line span, not whole-body: every edge of a block costs the whole block (the entry
+guards and resolves every site and environment value, including those of loops that do not run in that call; each landing
+after a door call re-checks every site it can reach; a boundary resyncs every cell).
 
 ### The region IR module
 
@@ -877,18 +887,21 @@ exception converts at that frame too). A block that makes no raw call pays one p
   raw frame lives across a yield; a raw chain a coroutine starts ends before its next yield.
 - **Hot reload**: the probe reads the callee's binding at every call; a running frame keeps its function pinned; a reload that
   changes a parameter's kind fails the kind check and takes the door.
-- **Parallel workers**: a worker takes the door (a worker's function copies are compiled at the barrier; raw entry there is a
-  later step).
+- **Parallel workers**: a worker takes the door (a worker's function copies are compiled at the barrier); raw entry is not
+  used on parallel workers.
 
 ### How raw frames and cell blocks compose
 
 A frame program is a cell region, so a raw frame's values are the block machinery's cells: the raw entry writes the parameters'
 payloads into them directly and the region runs from its first instruction, with no guard and no unboxing. A raw call from any
 block (a loop in a general function, a program-scope loop, another frame program) parks the block exactly as the door does and
-resumes it past the landing, re-validating nothing when no general code ran. A frame program's own loops are the next form:
-inside a raw frame a loop's cells are the frame's, so the loop needs no entry and no flush of its own.
+resumes it past the landing, re-validating nothing when no general code ran. A body with a loop is not a frame-program
+candidate.
 
 ### Typed locals fast everywhere
+
+Not built: this section's frame-program form (loops inside a frame program, boundary operations and per-operation misses
+inside one). Boundary operations exist for cell blocks ("Boundary operations" below).
 
 The cell blocks made typed code fast by admission: a loop runs as a block only when every construct in it has a cell form, and
 one construct without one drops the whole loop to the general form. Raw frames are the structural answer.
@@ -942,59 +955,27 @@ is the testing lever that pins the shape.
 
 ### The call floor
 
-A call that stays a call pays for bookkeeping, not for work: on `fib_recursive` the general call costs about 245 cycles to
-push, 250 to return and 45 to resolve the callee, against about 60 cycles of body (Lua's whole call is under a quarter of
-that). The rule is the campaign's: every decision the compiler and the checker can make is made once, at compile time, and
-the run time keeps only the guards that keep those decisions safe against rebinding and hot reload.
+A call that stays a call pays for bookkeeping, not for work. Every decision the compiler and the checker can make is made
+once, at compile time, and the run time keeps only the guards that keep those decisions safe against rebinding and hot reload.
 
-- **The frame's shape is the chunk's.** The compiler knows whether a body has a try, a range-for, a counted-for state, a
-  closure environment, a member scope, a unit other than its caller's, a debugger statement table; the record's push writes
-  the hot header (code, ip, caller, window base, depth) and touches a cold field only when the chunk's flags name it. A raw
-  entry is the first instance: no environment, no binder, no argument vector, no window fill.
-- **The site holds the plan.** A call site caches its callee's identity and the definition epoch it was resolved under, with
-  the plan compiled for that pair: the window size, the bind plan (which parameters need a conversion, which a reference
-  bind, which nothing), the return conversion. One compare against the site's identity replaces resolution and per-call
-  classification; a rebinding or a reload fails the compare and re-plans. Arguments the checker proves of the parameter's type
-  bind with no check (a raw site's arguments are such arguments: their kinds are the cells' pinned kinds).
-- **Initialization is proven, not filled.** A slot the compiler proves written before read is not initialized; only the slots
-  a read can reach before their write take the null placeholder (a raw frame fills nothing; its window is built only when the
-  general form needs it).
-- **The result goes where it is used.** The call instruction names its destination (a cell, a slot, the stack); the callee's
-  return writes there, with the conversion the compiler resolved when the declared types prove it (a raw return lands its
-  payload in the caller's destination cell and skips the landing).
-- **Typed values travel raw** between frames whose signatures are proven scalar (the protocol above).
-- **One slow-path flag.** The depth limit, the budget tick and the debugger's hook share one armed test on the call's path; the
-  budget's exhaustion and a debugger attach arm it, and the call's fast path tests nothing else.
-- **Callbacks and host calls.** A builtin that calls script repeatedly (a sort comparator, a `map`/`filter` lambda) runs the
-  callee on one reused frame, re-binding only the arguments; a host function whose signature is scalar is called through a
-  typed thunk that takes and returns raw values, with no `script_value` built on either side.
+- **Raw entry.** A raw-entered frame has no environment, no binder, no argument vector and no window fill; its site keeps
+  its plan, and typed values travel raw between frames whose signatures are proven scalar (the protocol above).
+- **The result goes where it is used.** `op_call_typed` lands an int or float result straight into its declaration or
+  compiler temp (by `chunk::typed_sites`, skipping the consumer that follows); a raw return lands its payload in the caller's
+  destination cell and skips the landing.
+- **Callbacks.** A builtin that calls script repeatedly (a sort comparator, a `map`/`filter` lambda) runs the callee through
+  one reused callback session (`callback_session`), re-binding only the arguments.
 - **Sibling methods.** A bare call of a method of the frame's own class (`step(i)`, `down(n - 1)` inside a method) caches, per
   site, the class and its method epoch with the class's dispatcher: a hit (the receiver's class and epoch unchanged, no field and
   no local of the name) parks the dispatcher and the frame's receiver and enters the method as the bound method it would have
-  minted; a miss runs the member ladder. The method micro (a recursive method kept a call) went from 32.6 to 9.8 ms.
+  minted; a miss runs the member ladder.
 - **Host methods.** `dynamic_binder::method` derives a direct lane (`class_definition::native_lane`) from each binding whose
   parameters are values that convert without failing (bool, integers in range, numbers for a floating parameter, strings, any
   `script_value`): the vm calls the bound method with the ordinary conversions, the receiver and the arguments read in place, no
   bound method minted and no argument vector built. An argument of another kind or count declines to the ordinary call; an
   overloaded name, a guarded binding (a privilege) or a class parameter has no lane; a field of the name keeps the ordinary call.
 
-The target is a typed call and return within about 1.5x of Lua's. The scoreboard, each increment measured interleaved
-against master and compared with Lua where a port exists: `fib_recursive` typed and dynamic, `tree`, a method-call micro, a
-closure-call micro, a sort-with-comparator micro and a host-call micro (each with the call kept a call), plus OSSUARY, GLOOM
-and JaiDOOM.
-
-### Order of increments
-
-1. Frame programs for loop-free bodies, raw calls from any block, raw returns (the call protocol above).
-2. The lean raw entry: the site's cached plan (identity and epoch, the callee's frame program, the parameter kinds checked at
-   compile time against the argument cells' pinned kinds), the record's hot header only, one armed flag for depth, budget and
-   debugger, and the probe folded into the arguments instruction when nothing between them can run.
-3. Loops inside frame programs: the loop's cells are the frame's; no entry, no flush.
-4. Boundary operations: an instruction without a cell form boxes and lands only the slots it names, so a frame program covers the
-   whole body whatever it holds.
-5. Raw entry of frame programs with environment values, container sites and graft guards (the entry's reads as the loop entry
-   has them, without the parameters' unboxing).
-6. The general call floor: compile-time frame shapes and site plans for every script call (`CALL_TYPED` to a frame program from
-   the general form included), destination-directed returns, proven initialization; then reused callback frames and typed host
-   thunks, and raw calls on parallel workers.
-7. Flat records (stage 3): `this` and typed fields as raw cells of a record.
+Not built: typed host thunks for scalar host functions, one armed slow-path flag for depth, budget and debugger, compile-time
+frame shapes and site plans for general calls, proven initialization (a slot written before read still takes the null
+placeholder), loops inside frame programs, raw entry of frame programs that read environment values, container sites or graft
+guards, raw calls on parallel workers, and flat records.

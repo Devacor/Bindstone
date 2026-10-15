@@ -1,24 +1,36 @@
 # Portability status
 
 Scope: the library proper — `include/jaiscript/` + `source/implementation/`. The `examples/`
-programs are Windows console demos (guarded `#ifdef _WIN32` + `<conio.h>`/`SetConsoleMode`) and
-are exempt by design; same for the fuzz driver's `_popen`/`popen` split
-(`source/tests/fuzz/fuzz_main.cpp:182-195`, which already carries a POSIX branch).
+programs guard their console code (`<windows.h>`, `<conio.h>`, VT mode) with `#ifdef _WIN32`;
+the fuzz driver splits `_popen`/`popen` (`source/tests/fuzz/fuzz_main.cpp`).
 
-## 1. The library's entire OS/compiler-specific surface
+## 1. The library's OS/compiler-specific surface
 
-Three sites. Everything else is standard C++20 (`std::filesystem`/iostreams for file IO — no
-path-separator assumptions, no Win32 calls, no MSVC pragmas).
+Everything outside the sites below is standard C++20 (`std::filesystem`/iostreams for file IO, no
+path-separator assumptions). Every site is guarded and carries a portable branch.
 
-- **`detail/integer_ops.hpp` — `mul_ovf`** (:58-76): three-way split.
-  `__builtin_mul_overflow` (GCC/Clang), `_mul128` (MSVC, the only `<intrin.h>` user), and a
-  generic division-check fallback. The GCC/Clang path **compiles and is exercised** (clang 18
-  sweep, §3). The generic fallback is correct: `a == 0` short-circuit, both `±1 × INT64_MIN`
-  overflow cases handled before the `out / a` probe, and that probe can never hit the
-  `INT64_MIN / -1` hardware trap (the only `out == INT64_MIN, a == -1` shape is caught by the
+- **`detail/integer_ops.hpp` — `mul_ovf`**: three-way split.
+  `__builtin_mul_overflow` (GCC/Clang), `_mul128` (MSVC, behind `<intrin.h>`), and a
+  generic division-check fallback. The generic fallback is correct: `a == 0` short-circuit, both
+  `±1 × INT64_MIN` overflow cases handled before the `out / a` probe, and that probe can never hit
+  the `INT64_MIN / -1` hardware trap (the only `out == INT64_MIN, a == -1` shape is caught by the
   explicit case above it).
-- **`<intrin.h>` containment holds**: `integer_ops.hpp` is included by exactly five impl
-  files (engine, interpreter, interpreter_dispatch, parser, vm_backend .cpp) and by no header.
+- **`<intrin.h>` containment**: `integer_ops.hpp` reaches engine.cpp, interpreter.cpp,
+  parser.cpp and vm_backend.cpp directly, and interpreter.cpp, interpreter_dispatch.cpp and
+  vm_backend.cpp through `detail/scalar_ops.hpp` (included by `detail/binary_handlers.hpp`); no
+  public header includes those two. The other `<intrin.h>` includes sit in .cpp files behind
+  diagnostic build flags (`JAISCRIPT_VM_COVERAGE`, `JAISCRIPT_VM_PROFILE`,
+  `JAISCRIPT_VM_COARSE_PROFILE`). `detail/thread_pool.hpp` includes `<immintrin.h>` on x86 only,
+  for `_mm_pause`.
+- **OS calls in `engine.cpp`**: file stat for the `execute_file` fast lane
+  (`GetFileAttributesExW` / `stat`), the process id in jaibite temporary names, environment
+  lookups (`_dupenv_s` / `getenv`), the per-platform app data and cache directories, and
+  `engine::executable_path()` (Windows, macOS, `/proc/self/exe`).
+- **`debug/connector.cpp`**: Winsock vs BSD sockets for the DAP connector.
+- **`stdlib/time.hpp`**: `localtime_s` vs `localtime_r`.
+- **Compiler attributes**: `__declspec(noinline)` vs `__attribute__((noinline))` in
+  `vm/vm_backend.hpp` and the cold-path macros (`JAI_MATH_COLD`, `JAI_VM_COLD_PATH`);
+  `vm_coverage.cpp` (a diagnostic build) uses `dbghelp` on MSVC.
 - **`native_stack_low()`** (`source/implementation/environment.cpp`): the `windows.h`
   dependency stays `.cpp`-local, `WIN32_LEAN_AND_MEAN`+`NOMINMAX` guarded. The Windows
   implementation queries the current thread's stack bounds and checks a 256 KiB headroom
@@ -31,10 +43,10 @@ path-separator assumptions, no Win32 calls, no MSVC pragmas).
   and traversal limits still apply, but do not establish safety for every native
   recursion path or host stack size. A POSIX implementation needs platform-specific
   stack-bound discovery (there is no pure-std way to read stack bounds).
-- **`JAI_FORCEINLINE`** (`detail/interpreter.hpp:29-37`) and **`static_type_name.hpp`**
-  (:17-23, `__FUNCSIG__` vs `__PRETTY_FUNCTION__`) both carry correct three-way splits.
-  Unknown-compiler behavior: plain `inline`, and an empty type-name signature (degrades
-  binder diagnostics, not correctness).
+- **`JAI_FORCEINLINE`/`JAI_NOINLINE`** (`jaiscript_fwd.hpp`) and **`static_type_name.hpp`**
+  (`__FUNCSIG__` vs `__PRETTY_FUNCTION__`) carry three-way splits. Unknown-compiler behavior:
+  plain `inline`, and an empty type-name signature (degrades binder diagnostics, not
+  correctness). `jaiscript_fwd.hpp` also refuses an MSVC build without exception unwinding.
 
 Call-depth caps are engine-owned: interpreter 256 and VM 250000 by default.
 `eng->max_call_depth(jai::backend_type::interpreter, depth)` and the equivalent VM
@@ -51,7 +63,7 @@ and recursive assignment and type parsing are not covered by that counter.
 
 ## 2. Layout / representation assumptions
 
-- **`strong_ptr` control-block derivation** (`strong_ptr.hpp:93`,
+- **`strong_ptr` control-block derivation** (`strong_ptr.hpp` `cb_storage_offset`,
   `offsetof(control_block<T>, storage)`): `control_block<T>` is NOT standard-layout (data
   members in both base and derived class), so this `offsetof` is *conditionally-supported*
   ([support.types.layout]/1). MSVC, GCC, and Clang all support it for this shape; Clang/GCC
@@ -64,80 +76,37 @@ and recursive assignment and type parsing are not covered by that counter.
   the warning without reading invariants.md §2 first.
 - **jaibite format** (`detail/ast_serializer.hpp`): the header comment says "little-endian,
   x64 only", but the code is **host-endian-independent** — every multi-byte primitive is
-  built/split with byte shifts (`fixed_u32/64` :67-72/:536-547, varint, zigzag), and `f64`
-  round-trips through `uint64_t` via `memcpy` (:81-84, :561-565; no type-punning). The real
+  built/split with byte shifts (`fixed_u32/64`, varint, zigzag), and `f64`
+  round-trips through `uint64_t` via `memcpy` (no type-punning). The real
   format requirements are: little-endian *on disk* (by definition, either host order works),
   IEEE-754 `double`, 64-bit `script_int`. A big-endian host would interoperate correctly.
-- **No other punning**: `value.hpp` has zero `memcpy`/`union`/`bit_cast` reinterpretation;
+- **No other punning**: `script_value::storage` is a tagged union read only through its active
+  alternative; its `memcpy`s relocate whole payload words, and a math value reaches a host type by
+  `memcpy` of its component words into the trivially-copyable `math_adapter<T>::native_type`.
   cpp-bound reads decode through `unchecked_as_int()/unchecked_as_float()` over pointers to
   genuinely-typed host variables.
 
-## 3. Second-compiler smoke — clang 18 + libc++
+## 3. Compilers
 
-No clang-cl ships with this VS 2026 install, and the VS 2026 MSVC STL hard-rejects
-clang < 20 (`yvals_core.h` STL1000), so the clang-cl/MS-STL combination is untestable here.
-Instead all 18 library TUs were compiled with the NDK's **clang 18.0.3 + libc++,
-`--target=x86_64-linux-android33`, `-std=c++20 -Wall -Wextra -fsyntax-only`** — a stronger
-probe than clang-cl: different STL, and no `_WIN32`/`_MSC_VER`, so it exercises the
-`__builtin_mul_overflow` path and the `native_stack_low` fallback for real.
+The library builds with MSVC, GCC and Clang. `.github/workflows/ci.yml` builds and tests
+windows-msvc, linux-gcc (g++-14) and linux-clang, each in Debug and Release, through
+`tools/ci/gates.sh`. libc++ ships no `std::from_chars` for `double`, so
+`serialization/json_archive.hpp` keys `from_chars_double` on `__cpp_lib_to_chars` and falls back
+to `strtod` (locale decimal point swapped in, ERANGE → `result_out_of_range`).
+GCC/Clang warn `-Winvalid-offsetof` at the one `strong_ptr` site (§2); the offset is correct.
 
-Result: after one fix (below), **16 of 18 TUs compile with 0 errors**; the remaining two hit
-a single structural issue. Findings, ranked:
+## 4. JAISCRIPT_WRAP_ON_OVERFLOW
 
-1. **FIXED — `std::from_chars(const char*, const char*, double&)` does not exist on libc++**
-   (`serialization/json_archive.hpp`, two call sites in `parse_number_flat`). libc++ ships
-   integer-only `from_chars` and — being incomplete — leaves `__cpp_lib_to_chars` undefined,
-   which is the feature-test now keyed on: a `from_chars_double` shim falls back to `strtod`
-   (locale decimal-point swapped in, ERANGE → `result_out_of_range`, full-consumption `ptr`
-   preserved). This un-broke engine.cpp, interpreter.cpp, and value.cpp under clang.
-   `stdlib/json.hpp:329` (`std::stod`) is unaffected — it compiles everywhere, though it
-   inherits the host locale like any `stod` (pre-existing on MSVC too).
-2. **OPEN — include cycle leaves `class_definition` incomplete in `engine_impl.hpp`**
-   (environment.cpp, vm_compiler.cpp — the two TUs whose first effective include is
-   `class_definition.hpp`). Cycle: `class_definition.hpp:6` → `engine.hpp` → (tail, :853)
-   `engine_impl.hpp` → `#include "class_definition.hpp"` is a guard no-op, so the
-   *non-dependent* member accesses `class_def->get_name()/create_instance()/get_type_id()`
-   (`engine_impl.hpp:57,69,73`) name members of an incomplete class. MSVC's lenient template
-   parsing accepts this; two-phase-lookup compilers (GCC/Clang) reject it. Fix belongs in the
-   `class_definition.hpp`/`engine.hpp` layering (forward-decls instead of the engine.hpp
-   include, or hoist the class_definition-dependent templates out of engine_impl.hpp) — not
-   applied here because class_definition.hpp is under active surgery on this branch.
-
-Warning classes (none load-bearing):
-
-| class | unique sites | where |
-|---|---|---|
-| `-Wunused-parameter` | many | binder/interpreter internals (style) |
-| `-Winvalid-offsetof` | 1 | strong_ptr.hpp:93 — expected, see §2 |
-| `-Wdelete-non-abstract-non-virtual-dtor` | 1 | `jai::engine` has a virtual `execute` (engine.hpp:103) but a non-virtual dtor (:76). Harmless today (nothing derives from engine); becomes UB the day a consumer subclasses engine and deletes through `engine*`. Either virtualize the dtor or de-virtualize `execute` (no overriders exist). |
-| `-Wpessimizing-move` | 6 | ref_lvalue.hpp:551,:557; interpreter.cpp:4723,:5220,:5536,:6024 — `return std::move(x)` / `T v = std::move(f())` shapes that *block* copy elision (mild perf smell, relevant on this branch) |
-| `-Wreorder-ctor` | 1 | environment.hpp:70 (member init order; benign) |
-| `-Wunused-variable`(+set) | 7 | interpreter.cpp:3357,:4016,:6215; parser.cpp:370,:658,:1407,:3032 |
-| `-Wmissing-field-initializers` | 1 | script_class.hpp:244 (value-init is the intent) |
-
-`detail/thread_pool.hpp` also compiles clean under the same configuration.
-
-## 4. JAISCRIPT_WRAP_ON_OVERFLOW — first real build
-
-The wrap policy had never been configured before this audit. Built Debug/Ninja with
-`/DJAISCRIPT_WRAP_ON_OVERFLOW=1` and ran the full Foundry suite: **1593 tests green on both
-backends** (81 suites; interpreter and vm). The wrap-mode test branches are real, not
-decorative — ~25 sites across review_regression / release_review_regression / strong_types /
-vm_backend suites key off `engine::throw_on_overflow()` and assert two's-complement wraparound
-results under this config. The identical tree also passed 1593 × 2 under the default checked
-policy in both Debug and Release, so both policies are verified against the same suite.
-
-**CI recommendation**: the wrap config is one compile definition away from silently rotting
-again. Add two cheap gates to whatever CI materializes: (1) Debug + `JAISCRIPT_WRAP_ON_OVERFLOW`,
-full suite, both backends; (2) any clang build (even `-fsyntax-only`) to keep the
-GCC/Clang-only code paths compiling.
+The wrap policy is one compile definition. Suites in review_regression,
+release_review_regression, spec_conformance, strong_types and vm_backend key off `engine::throw_on_overflow()` and
+assert two's-complement wraparound under it. CI builds only the default checked policy, so the
+wrap configuration is verified by a local Debug build with `JAISCRIPT_WRAP_ON_OVERFLOW=1` and the
+full suite on both backends.
 
 ## 5. What is guaranteed vs Windows-only
 
-Guaranteed (standard C++20, verified by §3):
-- Everything in `include/jaiscript/` — including `detail/thread_pool.hpp`
-  (std::thread/mutex/condition_variable only) — and all of `source/implementation/`,
-  modulo §3 item 2 (the one remaining include-order defect; MSVC-only until fixed).
+Guaranteed (standard C++20, built by CI on three compilers):
+- Everything in `include/jaiscript/` and `source/implementation/`, with the guarded sites of §1.
 - jaibite files written on any conforming host load on any other (§2).
 
 Windows-only (all deliberate, all guarded):

@@ -1,7 +1,5 @@
 # Template Binding System for JaiScript
 
-## Status: Implemented ✓
-
 This document describes the template binding system for JaiScript, which enables binding C++ template types to the scripting engine with minimal boilerplate.
 
 ---
@@ -50,19 +48,24 @@ eng->execute("print(p.length_squared());");  // Prints: 25
 - Create instances: `auto p = Point<int32>();`
 - Access the type by name in scripts
 
-**For serialization**: NOT required! If a struct has a template property, it serializes automatically:
+**For serialization**: not required. A `JAI_STATIC_BINDER` serializes exactly the members its `.property()` list
+names (a binder with no list serializes nothing); a listed member of a template type serializes through its
+`JAI_TEMPLATE_BINDER`:
 
 ```cpp
 struct Player {
-    JAI_PROPERTY(std::string, name);
-    JAI_PROPERTY((Point<float>), position);  // Auto-serialized via template_binder_accessor
+    std::string name;
+    Point<float> position;
 };
 
-JAI_STATIC_BINDER(Player, "Player");
+JAI_STATIC_BINDER(Player, "Player",
+    .property("name", &Player::name)
+    .property("position", &Player::position)  // serialized via template_binder_accessor
+);
 
-// Serialization just works - no bind_static_type needed for Point<float>
+// No bind_static_type needed for Point<float>
 Player p;
-jai_static_type<Player>::save(ar, p);  // Point<float> serialized automatically
+jai_static_type<Player>::save(ar, p);
 ```
 
 ---
@@ -98,9 +101,8 @@ JAI_TEMPLATE_BINDER_2_NAMED(MyPair, my::ns::Pair, "Pair",
 
 ### JAI_BIND_TEMPLATE (Optional)
 
-Pre-registers a specific template variant. Use this for:
-- Faster startup (avoids runtime detection)
-- Types that need `jai_static_type<T>` traits directly
+Pre-registers a specific template variant: it specializes `jai_static_type<T>` for that instantiation, for code that
+needs the static-type traits directly.
 
 ```cpp
 // Simple form
@@ -165,14 +167,15 @@ Accessor::bind_to(eng);
 
 ## Type Name Helper
 
-Clean type names for script binding. JaiScript's native `int` is 64-bit:
+The script spelling of a C++ type as a template argument. JaiScript's native `int` and `float` are 64-bit, so a
+narrower width carries its size:
 
 ```cpp
 // Native types (what script users expect)
 jai::type_name_helper<int64_t>::name()      // "int" (JaiScript's native int)
 jai::type_name_helper<uint64_t>::name()     // "uint" (JaiScript's native uint)
-jai::type_name_helper<float>::name()        // "float"
-jai::type_name_helper<double>::name()       // "double"
+jai::type_name_helper<double>::name()       // "float" (JaiScript's native float)
+jai::type_name_helper<float>::name()        // "float32"
 jai::type_name_helper<std::string>::name()  // "string"
 
 // Explicit-width integers (C++ int is typically 32-bit)
@@ -185,11 +188,15 @@ jai::type_name_helper<uint16_t>::name()     // "uint16"
 jai::type_name_helper<uint32_t>::name()     // "uint32"
 ```
 
+Math-adapted types, `std::vector`, `std::map` and smart-pointer handles spell through their contents; a type with no
+script spelling is a compile error unless `jai::type_name_helper<T>` is specialized for it.
+
 ---
 
-## Auto Integer Variant Binding
+## Native-Width Sibling Binding
 
-When you bind a template with an integer type parameter, **both 32-bit and 64-bit variants are automatically bound**:
+When you bind a template with a 32- or 64-bit integer or floating type parameter, **both widths are bound**
+(`native_width_sibling`, `width_variant_binder`):
 
 ```cpp
 // Bind Point<int> (which is Point<int32_t> in C++)
@@ -203,7 +210,7 @@ eng->execute("auto p64 = Point<int>();");    // 64-bit variant (JaiScript native
 This works bidirectionally:
 - Binding `Point<int>` or `Point<int32_t>` → also binds `Point<int64_t>`
 - Binding `Point<int64_t>` → also binds `Point<int32_t>`
-- Same for `uint32_t` ↔ `uint64_t`
+- Same for `uint32_t` ↔ `uint64_t` and `float` ↔ `double` (script `Point<float32>` ↔ `Point<float>`)
 
 This ensures script users can naturally write `Point<int>` (64-bit) while C++ code using `Point<int>` (32-bit) still works.
 
@@ -211,7 +218,7 @@ This ensures script users can naturally write `Point<int>` (64-bit) while C++ co
 
 ## CRTP Auto-Registration (Optional)
 
-For templates you control, inherit from `auto_bind_template` to trigger registration on instantiation:
+For templates you control, inherit from `auto_bind_template` to declare every instantiation for binding:
 
 ```cpp
 template<typename T>
@@ -225,20 +232,29 @@ JAI_TEMPLATE_BINDER(Point, "Point",
     .property("y", &Point<T>::y)
 );
 
-// Now instantiation marks the type as registered
-Point<int> p;  // Automatically marks Point<int> in static_type_registry
+// A compile-time fact, no state:
+static_assert(jai::static_type_registry::is_registered<Point<int>>());
 ```
+
+What an engine has bound is engine state: `static_type_registry::is_registered<T>(eng)`.
 
 ---
 
 ## Dispatch Priority
 
-When serializing or binding, the system checks in this order:
+`engine::bind_static_type<T>()` checks, in order (`static_binder_impl.hpp`):
 
 1. **`has_static_type_v<T>`** - Explicit `JAI_STATIC_BINDER` or `JAI_BIND_TEMPLATE`
-2. **`has_any_template_binder_v<T>`** - Auto-detected from `JAI_TEMPLATE_BINDER`
-3. **`has_any_save_v<T>` / `has_any_load_v<T>`** - Free functions or member save/load
-4. **Static assert** - No serialization support
+2. **`has_any_template_binder_v<T>`** - Auto-detected from `JAI_TEMPLATE_BINDER` (then binds the native-width sibling)
+3. **Static assert** - Not registered
+
+A listed property (`static_property::save`/`load`) serializes in this order:
+
+1. Primitives (`is_direct_serializable_v`)
+2. `std::vector`, then `std::map`
+3. `has_static_type_v<P>`
+4. `has_any_template_binder_v<P>`
+5. Otherwise the archive's own `ar(value)` dispatch (member or ADL `save`/`load`/`serialize`)
 
 This means `JAI_BIND_TEMPLATE` takes precedence, but auto-detection works as fallback.
 
@@ -275,12 +291,16 @@ JAI_TEMPLATE_BINDER_NAMED(GameVec2, game::Vec2, "Vec2",
 // === player.hpp ===
 
 struct Player {
-    JAI_PROPERTY(std::string, name);
-    JAI_PROPERTY((game::Vec2<float>), position);  // Template type as property
-    JAI_PROPERTY(int, health, 100);
+    std::string name;
+    game::Vec2<float> position;  // Template type as property
+    int health = 100;
 };
 
-JAI_STATIC_BINDER(Player, "Player");
+JAI_STATIC_BINDER(Player, "Player",
+    .property("name", &Player::name)
+    .property("position", &Player::position)
+    .property("health", &Player::health)
+);
 
 // === game.cpp ===
 
@@ -298,7 +318,7 @@ void setup_engine() {
     eng->execute(R"(
         auto player = Player();
         player.name = "Hero";
-        player.position = Vec2<float>();
+        player.position = Vec2<float32>();
         player.position.x = 100.0;
         player.position.y = 200.0;
 
@@ -328,16 +348,17 @@ void serialize_player(const Player& p) {
 | Define binding for template | `JAI_TEMPLATE_BINDER` |
 | Use in script | `eng->bind_static_type<T>()` |
 | Serialize as nested property | Nothing extra (auto-detected) |
-| Pre-register for faster startup | `JAI_BIND_TEMPLATE` (optional) |
+| Pre-register a `jai_static_type<T>` | `JAI_BIND_TEMPLATE` (optional) |
 | CRTP auto-registration | Inherit `auto_bind_template` (optional) |
 | Namespaced templates | Use `*_NAMED` variants |
 | Get both `int` and `int32` variants | Automatic (bind either, get both) |
 
 The key insight is that **`JAI_TEMPLATE_BINDER` alone is sufficient** for most use cases. You only need:
 - `bind_static_type<T>()` when scripts need to create/access the type
-- `JAI_BIND_TEMPLATE` for performance or when you need `jai_static_type<T>` traits
+- `JAI_BIND_TEMPLATE` when you need `jai_static_type<T>` traits
 
 **Integer Type Mapping:**
 - JaiScript `int` = C++ `int64_t` (64-bit native)
 - JaiScript `int32` = C++ `int` / `int32_t` (32-bit explicit)
-- Binding either variant automatically binds the other
+- JaiScript `float` = C++ `double`; JaiScript `float32` = C++ `float`
+- Binding either width automatically binds the other

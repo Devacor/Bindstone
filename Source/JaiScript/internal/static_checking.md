@@ -23,7 +23,7 @@ const check_report& d = engine->last_check_diagnostics();   // last checked exec
   `try`/`catch` sees them. Examples include a computed float outside the int range
   and a missing map key returning null.
 - **warn** — diagnostics collected and retrievable; execution proceeds and the runtime's
-  own conversion errors apply unchanged (the pre-checker behavior, selectable per engine).
+  own conversion errors apply (selectable per engine).
 - **off** — zero behavior change. No diagnostics collected anywhere.
 
 `what()` under strict is the full accumulated, location-sorted, deduplicated listing
@@ -96,7 +96,7 @@ return conversion is part of the `return` statement (C++ semantics): a `try` aro
 a converting constructor or `to_X()` that throws during the conversion is caught the same
 way, and so is a reference return's "must return an lvalue reference". Uncaught, the
 returning function is the top frame of the stack trace with the call site below it (lambdas,
-methods and resumed coroutines alike; a coroutine's frame sits above the resumer's) and the
+methods and coroutines advanced by `next()` alike; a coroutine's frame sits above its caller's) and the
 error surfaces in the caller.
 
 **Compound assign**: typed targets follow C++ rules —
@@ -214,7 +214,7 @@ getter's type too and is lenient without one). Two getter (or setter) overloads 
 the chain, a `var`/`auto`-returning getter, a getter with parameters, a coroutine getter, a
 reference or untyped setter parameter, or a chain that reaches a REGISTERED ancestor carrying
 the accessor (a binder property, a class from an earlier execute: no declaration in view) all
-leave the member unknown - lenient, as before. A bare `x` inside the class keeps the field's
+leave the member unknown - lenient. A bare `x` inside the class keeps the field's
 declared type. A binder property registered with a getter only (a `nullptr` setter, or a
 member pointer whose type is not copy-assignable) is READ-ONLY: `h.ro = 5`, `h.ro += 1`,
 `h.ro++`, a hybrid method's bare `ro = 5` / `ro++` and `this.ro = 5` are the error
@@ -269,14 +269,14 @@ code) - is the error `Cannot access private member 'secret' of class 'Wallet'`, 
 text, and the member's field proof is withheld. A `var` receiver stays lenient and raises the
 same text when it runs.
 
-**Const** (docs/const.md) — a `const` declaration, a `const T&` / `const T` parameter, a const loop variable or structured
+**Const** (internal/const.md) — a `const` declaration, a `const T&` / `const T` parameter, a const loop variable or structured
 binding, a class constant, an `extern const`, and a reference that deduces const (`auto&` over a const, a range-for `auto&`
 over a const's elements) are const names. A write is a store, a compound store or `++`/`--` whose path from a const name
 crosses no handle (a declared `shared_ptr` / `weak_ptr` step ends the const), a call of a method that certainly writes its
 receiver (`detail/const_rules.hpp` `receiver_write_analysis`: a field store, a mutating builtin on a field, a writing call on
 the receiver, every override the checker sees), a mutating builtin on a string, array or map, a `T&` / `var&` / `shared_ptr<T>`
 binding, `cast<T&>` / `cast<shared_ptr<T>>`, a `-> T&` return, and a const passed to a reference parameter its callee writes
-through (a `const T&` parameter takes it). Each is an error with the run time's text, lowercase (docs/diagnostics.md
+through (a `const T&` parameter takes it). Each is an error with the run time's text, lowercase (internal/diagnostics.md
 "Const"); a path through a `var` or an untyped field is no error and the run time decides it. The walk stamps the verdict on
 the node in every mode, so the backends raise what the checker would report. The constness of another unit's global comes
 from the program table or from the engine's marked cell. Program-scope functions defined twice in one unit, and methods,
@@ -400,7 +400,7 @@ undeclared). Under strict the root's `execute()` throws that `parse_error` befor
 runs; under warn - and in `engine->check()` - the report holds the parse error alone, as an
 error diagnostic with the text as its message, and the import raises it when it executes. A
 fix to the file is seen on the next run. A unit the closure cannot resolve or read contributes
-no names and is skipped; the runtime reports it exactly as before, when the unit executes. A **dynamic-path**
+no names and is skipped; the runtime reports it when the unit executes. A **dynamic-path**
 `import(expr)`/`include(expr)`, or an include below the top level (a literal include in a function
 body is spliced into it instead), can define anything: that unit keeps warning severity for undeclared identifiers. Names the program never declares —
 a host global bound after load, a value injected at run time — are outside the closure by
@@ -582,7 +582,7 @@ re-stamp at their next execute.
 
 **Switch** — `engine::type_proofs(bool)`, default on. Off: the pass does not run for fresh
 entries, and cached entries/jaibites already carrying proofs are stripped at their next
-execute, so an engine toggled off is observationally the old engine. `engine::last_proof_stats()`
+execute, so an engine toggled off behaves as one that never stamped proofs. `engine::last_proof_stats()`
 counts the stamps of the most recent pass (stores/decls/args/returns/members/calls) for tests.
 Proofs are never serialized: a loaded jaibite re-derives them like the parser marking passes.
 
@@ -670,9 +670,8 @@ Warning severity ALWAYS (never gates strict — shadowing is legal). Shapes:
   tier: `local 'total' shadows global 'total' used earlier in this function`.
   (Plain local-over-global with no earlier use is silent — too common to flag.)
 
-Related inference fix shipped with this: runtime bare-name resolution reaches GLOBALS
-before this-fields (see the classes guide chapter, "Name resolution in methods"), so a
-name that is both a global and a field is flow-order-ambiguous to the static walk —
-member hits on such names degrade to unknown instead of trusting the field's declared
-type (the old field-first inference produced a strict-mode false positive, pinned in
-`field_global_ambiguity_is_lenient`).
+At run time a bare name in a method resolves locals, then enclosing scopes and captures,
+then members, then globals (see the classes guide chapter, "Name resolution in methods").
+A name that is both a global and a field still degrades to unknown in the static walk
+instead of taking the field's declared type (the checker keeps the field/global ambiguity
+lenient: `field_global_ambiguity_is_lenient`).

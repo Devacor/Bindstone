@@ -129,7 +129,8 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
 include/jaiscript/  core/ (value, engine, dynamic_binder, class_definition)  detail/ (lexer, parser, AST, shared kernels)
                     vm/ (opcodes, compiler, backend, disassembler)  stdlib/  signals/  properties/  serialization/  testing/
 source/implementation/   library .cpp files (one TU each)       source/tests/   Foundry suites, fuzz/
-tools/   runner, lsp, vscode-jaiscript, ci/gates.sh             examples/   GLOOM, GRUBWELL, demoreel, Gator Quest
+tools/   jaiscript (runner), lsp, vscode-jaiscript, ci/gates.sh
+examples/   GLOOM, GRUBWELL (crawler), demoreel, Gator Quest, JaiDOOM, embed_quickstart
 docs/    BUILD.md, site/ (the specification), site_tools/
 ```
 

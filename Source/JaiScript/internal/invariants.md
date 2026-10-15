@@ -5,12 +5,12 @@ one, read the anchor first. Background: `thin_value_spec.md` / `thin_value_rebas
 
 ## 1. script_value layout gates
 
-`value.hpp:1858-1860`: `static_assert(sizeof(script_value) == 32 && alignof(script_value) == 8)`
-plus nothrow-move; `value.hpp:1671-1672` additionally pins every variant alternative as
-nothrow-move (`valueless_by_exception` + the noexcept move ctor depend on it). Layout is
-8B `type_info_ptr` + 8B `engine*` + 16B variant (8B max payload + index). The `engine_` and
+`value.hpp` static_asserts `sizeof(script_value) == 32`, `alignof == 8` and nothrow move.
+`script_value::storage` is a hand-written tagged union (8-byte payload plus index byte, 16 bytes),
+with asserts pinning its size and nothrow move (the noexcept move contract depends on it). Layout is
+8B `type_info_ptr` + 8B `engine*` + 16B storage. The `engine_` and
 `type_info_` members are **the language**, not fat: zero-statics/multi-engine and the
-var/auto/int type ladder live in them — never evict either to buy payload bytes. A new variant
+var/auto/int type ladder live in them — never evict either to buy payload bytes. A new storage
 alternative must be pointer-sized and nothrow-move or the asserts fire. The math vectors are one
 alternative, a copy-on-write `script_vec_node` handle: every relocation shape that carried a 12-byte
 inline payload measured 1-6% whole-program (`internal/math_types_design.md` 4.1).
@@ -23,13 +23,13 @@ offset (`cb_from_object`, via `cb_storage_offset = offsetof(control_block<T>, st
 Sound only because `make_strong` and `detail::adopt_pooled` are the only producers of a non-null
 handle: the raw-`T*` ctor is deleted and the cross-type converting ctors are deleted by design
 (a Derived→Base conversion would adjust the pointer off the storage head AND slice the
-static-type destroy). `adopt_pooled` exists solely for the per-engine block pools (value.cpp:
-`script_value::reference_holder_pool` and the `script_vec_node` pool): pooled blocks derive `control_block<T>`
+static-type destroy). `adopt_pooled` exists solely for the per-engine block pools
+(`detail::holder_block_pool` in value.cpp, for `reference_holder`, `object_holder` and `script_vec_node`): pooled blocks derive `control_block<T>`
 without moving `storage`'s offset (static_assert-gated) and reset counts + Debug magic on reuse,
 so the derivation invariant is preserved. `ptr_` MUST always be exactly `control_block<T>::storage`'s head.
-Enforced: negative `is_constructible` static_asserts (strong_ptr_tests.cpp:224-225),
-`sizeof == sizeof(void*)` gates (strong_ptr.hpp:412-414), and a Debug canary
-`cb_magic_live = 0x5B0CB10C` (:22) asserted at every derivation (:106) and scrambled to
+Enforced: negative `is_constructible` static_asserts (strong_ptr_tests.cpp),
+`sizeof == sizeof(void*)` gates (strong_ptr.hpp), and a Debug canary
+`cb_magic_live = 0x5B0CB10C` asserted at every derivation (`cb_from_object`) and scrambled to
 `0x0DEADCB0` on dealloc — a canary assert means a dead/foreign block, i.e. someone minted a
 handle outside make_strong or used it after free.
 
@@ -45,11 +45,13 @@ byte-offset rebase of exactly that enumerated pointer set — before the push. T
 never cache a raw pointer into stack/window storage across anything that can push, unless
 you add it to `rebase_window_pointers` in the same commit; references never qualify
 (owner-pinned holders, §3). Windows are created FULL (null placeholders up to `local_count`
-behind `window_live`), so operand temps always start above the whole window. Fiber frames
-(`vm_coroutine_state::locals`) still use `call_frame` vectors and keep the pre-stage-2 rule:
-reserve the full `local_count` up front, never reallocate mid-frame (the demoreel
-finding-2 failure mode was silent wrong loop counts in Release). The interpreter's
-`call_stack_` frames keep the old rule unchanged.
+behind `window_live`), so operand temps always start above the whole window. A fiber frame
+is a window frame over the fiber's own value stack (`vm_coroutine_state::stack_storage`).
+Resuming swaps it whole with the VM's stack (`value_stack::swap_payload`), so window indices
+stay valid without rebasing. A raw-entered frame (`frame::raw`) reserves its window and builds
+it (`build_raw_window` / `materialize_raw_window`) before the general form touches it. The
+interpreter's `call_stack_` frames reserve the full `local_count` up front and never
+reallocate mid-frame (a violation shows as silent wrong loop counts in Release).
 
 ## 2c. A released value, or a host call, may run script that re-enters the VM
 
@@ -86,23 +88,24 @@ parks the unwinding flag, exception, value and trace around it). Pinned by Spec 
 `reentrant_destructors_and_operand_order` and Reentrant Callbacks (the ASan build shows the
 heap-use-after-free when broken).
 
-## 3. Reference cells (mode 1 is DELETED)
+## 3. Reference cells
 
-The old ref-anchor rule is dead machinery: `reference_holder` no longer has a raw
-`target` pointer or a `weak_ptr<environment> sourceEnv` — a reference NEVER holds a
-raw address + lifetime guess. Exactly six owner-pinned holder modes exist
+A reference never holds a raw address. Eight owner-pinned holder modes exist
 (`reference_holder`, value.hpp; long-form: internal/reference_model.md): CELL (the holder
-OWNS the value in inline storage — Lua upvalue), vector element (container+index
-re-resolve), instance field (owner+id re-resolve), map entry (pinned map + key
-re-resolve), CPP-MEMBER (receiver + C++ object pinned; the inline storage is a
-cpp_bound box aimed at the member) and PROPERTY (receiver pinned; getter into the
-inline scratch per touch, setter on assign-through). Rules:
+OWNS the value in inline storage — Lua upvalue), ELEMENT (container+index re-resolve;
+typed-buffer elements read through scratch), FIELD (owner+id re-resolve), MAP ENTRY (pinned
+map + key re-resolve), CPP-MEMBER (receiver + C++ object pinned; the inline storage is a
+cpp_bound box aimed at the member), PROPERTY (receiver pinned; getter into the
+inline scratch per touch, setter on assign-through), STRING-ELEMENT (`string_base` plus
+index) and COMPONENT (`component_base` plus a vector component index). Rules:
 
 - Holder blocks come from the per-engine pool (`script_value::acquire_reference_holder`,
   value.cpp — one pop + placement-new per mint, memory_cap-charged for cells). The pool is
   single-threaded: parallel workers DO mint cell references inside their bodies, so acquire
   falls back to plain self-deleting `make_strong` blocks while a region is active (blocks
-  self-describe their release via `dealloc_fn`, so both kinds coexist). Cells are minted
+  self-describe their release via `dealloc_fn`, so both kinds coexist). A block released on
+  a foreign thread is deleted there and counted (`foreign`), so an orphaned pool frees itself
+  once drained. Cells are minted
   ONLY by `make_cell_reference`; the boxed value is never itself a reference.
 - Subscript reads whose consumer provably discards identity skip the holder mint entirely
   (`detail/transient_read.hpp`, parse-time classifier consumed by BOTH backends; runtime
@@ -111,7 +114,7 @@ inline scratch per touch, setter on assign-through). Rules:
   declarations (`parser.cpp` ref_escape_marker) box at decl/bind; unmarked storage
   boxes ON DEMAND at the first ref bind through the ONE box-in-place + share kernel
   pair (`vm_backend::share_env_ref` / interpreter `share_boxed_env_storage`; ref-param
-  binds ride it via `bind_reference_to_storage`). The vm kernel must demote active
+  binds ride it via `bind_site_reference` on both backends). The vm kernel must demote active
   counted-for fast states (they cache raw payload pointers).
 - Escape is LEGAL: a reference returned (incl. typed ref returns `int& f()`), stored,
   captured, or held across yields/executes keeps its target alive through the holder.
@@ -123,7 +126,7 @@ inline scratch per touch, setter on assign-through). Rules:
   other — a stored `script_value*` into a container/frame is the bug class this
   section exists to prevent.
 - Reference binding is STATELESS: the call site travels as an argument
-  (vm `bind_parameters(site, caller_locals, caller_code)`; interpreter
+  (vm `bind_parameters(..., site, caller_frame, caller_code, ...)`; interpreter
   `call_site_context`). Opaque `std::function` boundaries hand it over via a single
   consumed-once pending pointer (`pending_site_ctx_` / `pending_call_ctx_`), shelved
   across external invocations by `external_call_guard`. Never add a second stateful
@@ -145,22 +148,28 @@ inline scratch per touch, setter on assign-through). Rules:
 
 ## 4. S8 bound-operand prologue (TYPEID_CPP_BOUND = 14)
 
-Since the thin-value fold, cpp-bound values report raw storage index 14, not their semantic
+Cpp-bound values report raw storage index 14, not their semantic
 shadow index. Any NEW binary/unary/compound handler that dispatches on `raw_storage_index()`
-MUST normalize bound operands first via `bound_decoded_temp()` (value.hpp:350) — copy the
-prologue shape from an existing handler (e.g. `handle_add`, interpreter_dispatch.cpp:47-49, and
-its VM twin). The failure mode is SILENT: index 14 falls into an erroring `type_mismatch`
+MUST normalize bound operands first via `bound_decoded_temp()` (value.hpp) — copy the
+prologue from `detail::binary_arithmetic` (detail/binary_handlers.hpp) or `vm_backend::handle_add`.
+The failure mode is SILENT: index 14 falls into an erroring `type_mismatch`
 default, or worse a wrong-constant default (`same_as` → false). Raw-index *fast-path guards*
 (`idx == TYPEID_INT`) are safe as-is — they exclude bound values and fall through.
 
+A compound assignment or `++`/`--` on a bound variable writes through to the C++ variable
+(`assign_through`). On a bound value held as an array element, map value, member or field, it
+stores a detached plain result in that slot. A non-const by-ref extraction (`as_int_ref` family)
+aliases only on an exact width and signedness match; otherwise it throws `jai::runtime_error`.
+
 ## 5. VM run_dispatch MSVC Debug frame ceiling
 
-`run_dispatch` (vm_backend.cpp:7101) executes calls in-loop, so its native frame sits on the
-`JAI_MAX_CALL_DEPTH` recursion path in Debug. Each `VM_TRY_OP` case adds a temp to that frame;
-the ceiling was reached, so ops added since go through the grouped `exec_extended` dispatch
-(:7203-7226) with `VM_TRY_OP_SHARED` (:7060), which reuses one function-scope temp. Follow that
-pattern for new opcodes — do NOT add fresh `VM_TRY_OP` cases to the main switch. Canary:
-`recursion_depth_error` (vm_backend_tests.cpp:246) must fail *catchably*; if the Debug frame
+`run_dispatch` (vm_backend.cpp) executes calls in-loop, so its native frame sits on the
+recursion path (capped by `engine::max_call_depth`) in Debug. Handlers return `op_status`;
+`VM_TRY_OP` / `VM_TRY_OP_SHARED` (identical) add no `checked_result` temp to `run_dispatch`'s
+frame. Each case in the main switch still grows that frame, so the ops outside the main set
+share one case that calls the grouped `exec_extended` dispatch. Follow that pattern for new opcodes — do
+NOT add fresh cases to the main switch for them. Canary:
+`recursion_depth_error` (vm_backend_tests.cpp) must fail *catchably*; if the Debug frame
 grows too big, that test instead kills the exe with a native stack overflow (0xC00000FD,
 surfaces in the shell as exit code 127) mid-suite.
 
@@ -169,25 +178,27 @@ surfaces in the shell as exit code 127) mid-suite.
 Interpreter and VM must produce identical results AND identical error codes/messages; the suite
 runs green on both (`--backend=vm`). Preferred mechanism: shared kernels in `detail/` used
 verbatim by both backends — `detail/ref_lvalue.hpp` ("shared VERBATIM ... parity by
-construction") is the model, `detail/builtin_methods.hpp` the older one. Legacy mechanism:
-byte-parallel twins (`is_truthy` in interpreter.hpp:872 vs vm_backend.cpp:965; the nine
-arithmetic/ordering handlers in interpreter_dispatch.cpp vs vm_backend.cpp) — if you touch one
+construction") is the model, `detail/builtin_methods.hpp` the older one. Legacy twins remain:
+`is_truthy` (interpreter.hpp vs vm_backend.cpp) and the VM's `handle_*` operators, which mirror
+`detail/binary_handlers.hpp` (the interpreter's `handle_*` forward to that kernel) — if you touch one
 twin, touch the other in the same commit. New shared logic goes in `detail/`; don't grow the
 twin population.
 
 ## 7. Benchmark methodology
 
 The Foundry benchmark harness (Release BENCHMARKS config) reports **integer µs/iteration with
-±50% run-to-run variance** (Source/JaiScript/CLAUDE.md "Benchmarks"). Compare min-of-3 runs,
-and never claim a sub-µs win from it — anything under ~1 µs needs a dedicated ns micro-bench
-(see `execution_mode_metrics.md` for the methodology that resolved the 0.4 µs regime).
+±50% run-to-run variance** (the `x64-Release BENCHMARKS` preset, `JAISCRIPT_ENABLE_BENCHMARKS=ON`;
+results print under `--verbose`). Compare min-of-3 runs,
+and never claim a sub-µs win from it — anything under ~1 µs needs a dedicated ns micro-bench.
 
 ## 8. Typed array representation follows the declared type
 
 - `array<int>` / `array<float>` / `array<bool>` / `array<char>` / `array<string>` are raw
-  buffers by construction (`script_array::kind_t` i64/f64/b8/c8/str) and `array<UserType>`
-  is a buffer of `obj_slot{handle, tag}` (kind obj, exact-class homogeneous, the slot tag
-  reproduces the boxed value on read); `array<var>` (and a literal with no spelled or
+  buffers by construction (`script_array::kind_t` i64/f64/b8/c8/str; u8 and i8 share the
+  byte buffer with b8/c8, and v2/iv2/v3/iv3/v4/rgba are component-word buffers at the
+  vector's stride) and `array<UserType>`
+  is a buffer of `obj_slot{handle, tag}` (kind obj, the per-slot
+  tag reproduces the boxed value on read); `array<var>` (and a literal with no spelled or
   inferable element type) is the ONLY `script_value`-vector form.
   A uniform `auto` literal infers its element type. There is no flag and no Debug/Release
   difference; converting between forms is an explicit assignment, nothing demotes silently.
@@ -199,11 +210,10 @@ and never claim a sub-µs win from it — anything under ~1 µs needs a dedicate
   `is_typed()` — byte and string kinds are typed too and must take the enforcing `get`/`set`
   path (fuzz seed 129 stored an int into a string buffer through an `is_typed()` lane).
 - A `checked_result` message is a NON-OWNING view for literals: dynamic text (a caught
-  exception's `what()`, a built string) is interned through the engine's symbolizer and the
-  result holds a view of that stable copy (`intern_exception_text`), never the source buffer.
+  exception's `what()`, a built string) rides an error's `{0}` as a symbol from
+  `engine::park_error_text` (`string_symbolizer::park`); the result never views the source buffer.
 - Parallel workers never borrow string handles raw: the "all primitive" short-circuit excludes
-  the str kind, and a typed primitive/string input is read through a boxed snapshot (stage-3
-  raw reads pending); an object-kind input lends its slots (`parallel_worker_slot::typed_input`)
+  the str kind, and a typed primitive/string input is read through a boxed snapshot; an object-kind input lends its slots (`parallel_worker_slot::typed_input`)
   to both forms.
 - Neither form demotes an object-kind source: exclusivity comes from the ONE element proof
   (`prove_elements`, parallel_transform.cpp) - the declared class (`declared_class_exclusive`)
@@ -230,9 +240,9 @@ arms the same index. A fused store's `ip * 3` is armed for the STORE TARGET; its
 resolvers must not probe a read IC at that index for a different symbol - the entry answers
 the target's cell and the operand reads the wrong field. The value resolvers survive because
 they re-stamp class and slot on every miss; a pointer resolver that trusts the entry does not.
-Adding an IC probe to a resolver requires either an exclusively owned slot (the string-builtin
-receiver gate reads the receiver LOAD's own slot, recorded at compile time as
-`call_site::receiver_cache_slot`) or a symbol check on the entry. Pinned by
+Adding an IC probe to a resolver requires either an exclusively owned slot or a symbol check on
+the entry (the string-builtin receiver cell resolves through `call_site::receiver_slot` /
+`receiver_symbol` with no IC probe). Pinned by
 `Strong Types :: bare_field_store_then_read_in_loops_battery` (the Foundry field-write shape,
 which the whole suite otherwise missed).
 
@@ -260,16 +270,17 @@ Pinned by `Lambda Captures :: *_over_same_named_global` and the method-shadowing
 
 String copies share ONE `strong_ptr<script_string>` node (`clone()` and
 `clone_for_assignment` are shallow for strings by design - O(1) copies), so an in-place
-write through a shared node would reach every holder: `string b = a; b.to_upper()` used
-to uppercase `a`, and `for (auto kv : m) kv.first.to_upper()` rewrote the MAP KEY under
-the ordering invariant. Value semantics are restored at exactly one place:
-`script_value::unchecked_as_string_ref()` (value.hpp) is the ONLY mutable string
-accessor, and it unshares first - a node with `use_count() > 1` is replaced by a private
+write through a shared node would reach every holder: `string b = a; b.to_upper()` would
+uppercase `a`, and `for (auto kv : m) kv.first.to_upper()` would rewrite the MAP KEY under
+the ordering invariant. Value semantics hold at exactly one place per string kind:
+`script_value::unchecked_as_string_ref()` (value.hpp) is the only mutable accessor for a byte
+string and `unchecked_as_utf8_ref()` for a utf8_string (`unchecked_text_ref` routes through
+them); each unshares first - a node anyone else holds is replaced by a private
 copy (`unshare_string_node`, memory_cap charged deferred) before the reference is handed
 out. Bound (`cpp_bound`) strings return the live C++ member (write-through) and skip the
 gate. Rules:
 
-- Every in-place string write goes through the gate: the 17 mutators in the shared
+- Every in-place string write goes through the gate: the 18 mutators in the shared
   registry (`k_string_mutator_method_names`, `detail/builtin_methods.hpp` - ONE list feeds
   the registry's id set and index table), the `+=` in-place sites in both backends, and
   the host `as_string_ref()` / `std::string&` door. Never read the node handle mutably by
@@ -351,7 +362,7 @@ argument may run user code:
   capture instruction above `capture_place_shift`); the reference rides beside the evaluated value
   (`hold_minted_reference`, `argument_capture_storage::minted`) and the binding takes it as it is
   (`early_bound_reference`: the parameter binding in both binders, a host `T&` through `host_reference_argument`). An
-  unstamped argument binds at the call as before, which is the same place: nothing runs between its evaluation and the
+  unstamped argument binds at the call, which is the same place: nothing runs between its evaluation and the
   binding. On the VM a probed call's field argument a frame-slot local names (`o.left`) compiles to `op_place_arg`: when the
   parked callee is one script function whose parameter is a `T&`, the reference is minted in place of the member read (the
   same plain-field step, `detail::plain_field_reference`), else the read runs as `op_get_member`; a place argument that
@@ -360,7 +371,7 @@ argument may run user code:
   receiver, `new` class, builtin).
 - A binding conversion that may run user code (`binding_may_run_code`) captures the later arguments first, and binds
   the places of the later reference parameters (`bind_later_places`), in both binders; a coroutine captures its
-  arguments in `coroutine_handle::set_function`, since it binds them at the first resume. A graft refuses an element
+  arguments in `coroutine_handle::set_function`, since it binds them at the first `next()`. A graft refuses an element
   reference argument a later argument may move.
 - A VM graft stages an enclosing call's callee and earlier arguments at their original evaluation points. The ordinary
   capture instruction takes any required value snapshot, and the call retains its original argument-source metadata for
@@ -372,6 +383,10 @@ argument may run user code:
   aliases; host callables retain their existing opaque binding contract. Constructors and new expressions carry the same
   argument-source metadata as ordinary calls.
 
+A call resolves its callee before its arguments (C++17 order). On the VM, `op_probe_callee` resolves an identifier
+callee into the per-fiber pending-callee stack (`pending_callees_`) and `op_call_from_scratch` calls it; `op_probe_member`
+raises a member or computed callee's lookup error at the same point (emitted when an argument is non-trivial), leaving
+the stack untouched. Pinned by the `callee_first_*` tests in vm_backend_tests.cpp.
 
 A new call form must stamp its arguments and capture on both backends; an operand held across a later operand's
 evaluation must leave the interpreter's value stack (statements clear it at their boundaries). Suite `Call Argument

@@ -6,8 +6,8 @@ load-bearing rules live in `invariants.md` §3, the runtime shapes in
 
 ## A reference is an owner-pinned handle
 
-`script_value` variant index 10 holds `strong_ptr<reference_holder>` (value.hpp). The
-holder is in exactly ONE of seven modes, each of which OWNS or PINS what it refers to —
+`script_value` storage index 10 (`TYPEID_REFERENCE`) holds `strong_ptr<reference_holder>` (value.hpp). The
+holder is in exactly ONE of eight modes, each of which OWNS or PINS what it refers to —
 there is no raw-pointer mode and no "is my target still alive?" question:
 
 | mode | pin | resolution per touch |
@@ -18,6 +18,7 @@ there is no raw-pointer mode and no "is my target still alive?" question:
 | MAP-ENTRY | `strong_ptr` to the owning map + key in the inline storage | `find(key)` (erased entry errors) |
 | CPP-MEMBER | the receiver handle + the C++ object (the instance's native object, an extended object's weak handle locked, a raw holder's data or anchor) | the inline storage holds a `cpp_bound` box aimed at the C++ member itself: reads decode it live, writes are the box's typed memory store |
 | PROPERTY | the receiver handle + the property's field id | the getter, re-run into the inline scratch (`materialize_property`); assignment re-resolves and runs the setter - for a read-only property that setter IS the rejection, `Cannot assign to 'x': it is read-only`, exactly what `obj.name = v` raises |
+| STRING-ELEMENT | `strong_ptr` to the holder of the string's storage (`string_base`) + the byte (string) or character (utf8_string) index | the character read into the inline scratch (`materialize_string_element`); a store replaces it with the stored char or string through `detail/string_element.hpp` (`s[2] = "ll"` grows the string) and the copy-on-write gate. Minted only for a string subscript as a store target (`s[i] = v`, `s[i] op= v`) |
 | COMPONENT | `strong_ptr` to the holder of the math value's storage (any of the modes above) + the component index | the component read into the inline scratch (`materialize_component`); assignment is the component store `v.x = value` makes (`store_component`: the component's narrowing and texts) into the value the base names now, then the base commits its own scratch (a typed vector element, a PROPERTY's setter) |
 
 CPP-MEMBER / PROPERTY are the two shapes a `dynamic_binder` `.property()` binds to
@@ -69,7 +70,7 @@ allocates except the first boxing of a variable.
 
 ## What binds (decls, ref params, ref returns)
 
-Binding is two-tiered; both tiers land in the same four holder modes:
+Binding is two-tiered; both tiers land in the same holder modes:
 
 - **Tier 1 (structural, bind-time)**: bare identifiers (share/box the storage) and
   chains of plain member steps with identifier/int-literal subscript indices resolve
@@ -87,7 +88,7 @@ Binding is two-tiered; both tiers land in the same four holder modes:
   field reads evaluate to copies.
 
 What stays a non-lvalue: rvalues (arithmetic, calls, literals), string subscripts
-(chars are values), map KEYS (`kv.first` — ordering invariant), script fields with a
+(chars are values; a string subscript is a store target only, never a binding), map KEYS (`kv.first` — ordering invariant), script fields with a
 user `_get_`/`_set_` anywhere in their chain, member METHOD names, missing map keys
 (reads never insert), member-final chains over COMPUTED subscripts (`objs[i+1].v` —
 bind a `var&` row first), and any property bind inside a parallel region (workers reach
@@ -103,7 +104,7 @@ Another `T&` parameter takes a temporary only when the callee never writes throu
   (ident ⇒ share/box; chain ⇒ resolver; call ⇒ pass-through) and the epilogue hands
   the HANDLE out via `detail::ref_return_pass_through` — non-lvalues and referent
   base-type mismatches reject there. Coroutines cannot return references (parse
-  error). Value-returning functions still FLATTEN references at the epilogue.
+  error). Value-returning functions FLATTEN references at the epilogue.
 
 ## Escape is legal
 
@@ -111,7 +112,7 @@ The pin is the lifetime: a reference returned, stored in a global, captured by `
 or held across `yield`s and separate `execute()`s keeps its target alive. Frames and
 scope envs dying underneath a reference is a non-event. Engine teardown with live
 cells is clean (cells are reachable only through engine-owned storage or host-held
-`script_value`s). "Reference target environment has been destroyed" no longer exists.
+`script_value`s).
 
 Deliberate boundaries:
 - Plain assignment (`x = r`, `m[k] = r`) stores a VALUE (deref + detach/clone rules) —
@@ -152,8 +153,8 @@ hand back a scratch); compound assignment routes those refs through
 
 A string `script_value` holds one `strong_ptr<script_string>` node and every copy
 boundary shares it (O(1) copies; `clone()` / `clone_for_assignment` stay shallow for
-strings). Value semantics hold because every in-place string write - the 17 mutators
-(`to_upper`, `trim`, `replace_all`, ...), `+=` on a variable or bare field, a host
+strings). Value semantics hold because every in-place string write - the mutators in
+`k_string_mutator_method_names` (`to_upper`, `trim`, `replace_all`, ...), `+=` on a variable or bare field, a host
 `std::string&` - goes through ONE gate, `script_value::unchecked_as_string_ref()`: a node
 any other holder shares is replaced by a private copy first (copy-on-write, memory_cap
 charged deferred), so the write lands in the storage the script named and nowhere else.

@@ -1,8 +1,9 @@
 # Script-side reflection — the companion (machinery, rulings, proofs)
 
-**Status: DESIGN, ready to build.** The front door is [reflection.md](reflection.md) — the
-A+B+C read that tells users everything they need. THIS doc is the D+E companion: the probe
-inventory, entry shapes, the access model, retention work, parity proofs, staging, and costs.
+The front door is [reflection.md](reflection.md) — the A+B+C read that tells users everything
+they need; `reflect::` is built in `include/jaiscript/stdlib/reflection.hpp`. THIS doc is the D+E
+companion: the probe inventory, entry shapes, the access model, retention, parity, and the
+original staging and cost estimate.
 The two documents cross-reference; when they could disagree, the front door states the contract
 and this one explains the mechanism.
 
@@ -11,20 +12,19 @@ types, method ASTs, access labels, host binding signatures) — script just has 
 about it beyond `type_of`/`to_json`/`from_json`. Reflection v1 is a set of ordinary builtins over
 data that (almost entirely) already exists.
 
-**Naming (ruling, 2026-07-14):** everything lives in the **reserved `reflect::` namespace** —
+**Naming:** all builtins live in the **reserved `reflect::` namespace** —
 C++-registered only; script declarations into it error at declaration time on both backends
 (the shared predicate also reserves `jai` and both roots' qualified subnames;
 namespace contents remain engine-owned). Contrast `math::`, which is
 deliberately OPEN to script extension (intrinsics claim their names, user functions coexist;
 intrinsic wins a collision) — reflection is engine truth and must not be impersonatable.
 Sigils (`$`, `^`) were considered and rejected on grammar collisions (template-string
-substitution, XOR). Spelling is decoupled from dispatch: registry functions in v1, intrinsic
-promotion later without script changes. Earlier drafts of this doc used flat names
-(`fields_of`, `type_name_of`); the namespaced spellings below are canonical.
+substitution, XOR). Spelling is decoupled from dispatch: the builtins are registry functions,
+and an intrinsic promotion would need no script changes.
 
 ---
 
-## 1. What exists today (probe inventory, 2026-07)
+## 1. Probe inventory
 
 ### THERE — retained at runtime, reachable now
 
@@ -96,15 +96,15 @@ arrays/maps minted at call time, never live views (§4).
 ```cpp
 reflect::fields(v | "Class")     // -> array<map>: [{name, type, kind, access, static, from}, ...]
 reflect::methods(v | "Class")    // -> array<map>: [{name, arity, static, access, from, params}, ...]
-reflect::reflect::has_field(v | "Class", "name")   // -> bool (inherited included; host properties included)
-reflect::reflect::has_method(v | "Class", "name")  // -> bool (inherited included)
+reflect::has_field(v | "Class", "name")   // -> bool (inherited included; host properties included)
+reflect::has_method(v | "Class", "name")  // -> bool (inherited included)
 reflect::get(v, "name")              // read like `v.name` from the call site (see §3)
 reflect::get("Class", "name")        // static field read (Class::name)
 reflect::set(v, "name", value)       // write like `v.name = value` — full type + access enforcement
 reflect::set("Class", "name", value)
 reflect::invoke(v, "name", args...)  // call like `v.name(args...)` — overloads, defaults, access
-reflect::reflect::construct("Class", args...) // == Class(args...) — value semantics
-reflect::reflect::construct_shared("Class", args...) // == new Class(args...) — reference semantics
+reflect::construct("Class", args...) // == Class(args...) — value semantics
+reflect::construct_shared("Class", args...) // == new Class(args...) — reference semantics
 reflect::classes()                   // -> array<string>, sorted (script + host-bound classes)
 reflect::bases(v | "Class")          // -> array<string>, declaration order (MI-aware); [] at a root
 reflect::type_name(v)                // precise type: "Creature", "array<int>", "map<string,int>", "int"
@@ -148,16 +148,14 @@ semantic index — reflection must never report storage wrappers (the var-flatte
   `__cpp_object__` runtime field is excluded (same rule as to_json, json_archive.hpp:329).
 - **Host-bound types:** `.property()` entries — name from the binder's field placeholder, type
   from the serialization registry's `property_metadata.type`, `access: "public"` (host members
-  have no labels), plus `read_only` reported as `access: "public"` with no setter → `reflect::set`
-  errors with the setter-missing family text. (Alternative considered: a fifth `read_only` key
-  for host properties only; recommended — it's one bool we already retain.)
+  have no labels). Host property entries carry no `read_only` key.
 - **Arrays / maps / primitives / functions:** empty array. Fields are a class concept; the
   element/key/value types are `reflect::type_name`'s job (`"array<int>"`). Not an error — a property
   grid should be able to call `reflect::fields` on anything.
 - **Opaque host tokens** (unregistered `make_value(T*)` pass-throughs): empty array, consistent
   with `is_registered_type` answering false (io.hpp:336-347 §13 ruling).
 
-### Deterministic field order (the ruling this doc proposes)
+### Deterministic field order
 
 Declaration order: **base-class fields first (in base declaration order), then own fields in
 source order; statics after instance fields, in source order.** Base-first matches what the
@@ -169,12 +167,12 @@ overload** (host same-arity type-overloads produce multiple entries).
 
 ### reflect::methods entry shape
 
-`{name, arity, static, access, from, params}` where `params` is an array of
-`{name, type, ref}` for script methods (full `function_decl` fidelity: ast.hpp:92-104,
-defaults reported as `arity_min`/`arity` if we want the window — recommended:
-`arity` = param count, `defaults` = number of trailing defaulted params) and `{type}` for host
-methods (param_type_info; `std::type_index` mapped to the registered class name where possible,
-else the base-type kind name). Synthesized members are filtered: `_get_*`/`_set_*` accessors,
+`{name, arity, static, access, from, params}` where `arity` is the parameter count and `params`
+is an array of `{name, type, default}` (`default` is a bool: the parameter has a default value).
+Host methods name their parameters `arg0`, `arg1`, ...; the type comes from `param_type_info`
+(`std::type_index` mapped to the registered class name where possible, else the base-type kind
+name). A host method registered with no signature reports `arity: -1` and empty `params`.
+Synthesized members are filtered: `_get_*`/`_set_*` accessors,
 the constructor (reported by `construct`ability, not as a method), `~destructor`,
 `hot_reload_migrate`/`post_load` hooks stay visible (they're real methods). Operator methods
 (`operator+` → name `"+"`) are included — they're introspectable like any method.
@@ -185,10 +183,11 @@ Consistent family text, mirroring `parallel_transform:`'s prefix style (grammar.
 
 ```
 reflect::construct: unknown class 'Gremlin'
-reflect::get: unknown field 'hp' on class 'Creature'
-reflect::set: unknown field 'hp' on class 'Creature'
-reflect::invoke: unknown method 'roar' on class 'Creature'
+reflect::get: 'Creature' has no member 'hp'
+reflect::set: 'Creature' has no member 'hp'
+reflect::invoke: 'Creature' has no method 'roar'
 reflect::fields: unknown class 'Gremlin'
+reflect::call: unknown function 'spawn_wave'
 ```
 
 All raise ordinary catchable runtime errors (reusing the nearest existing
@@ -200,7 +199,7 @@ produce the exact `enforce_member_access` text ("Cannot access private member 'x
 
 ---
 
-## 3. Access model — RECOMMENDATION (Dev ruling pending)
+## 3. Access model
 
 **Reads see everything, with access reported; writes and invokes enforce exactly like direct
 syntax; a separate host-side C++ API stays unrestricted.**
@@ -210,7 +209,7 @@ syntax; a separate host-side C++ API stays unrestricted.**
   script-class path walks raw `instance->get_fields()` with no access filter
   (json_archive.hpp:324-335; verified: `nonpublic_members_` is consulted nowhere in
   serialization). The debugger's Locals view likewise shows everything in scope. grammar.md
-  design note 12 records the ruling: "the host C++ API (`reflect::get`/`reflect::set`, serialization,
+  design note 12 records the rule: "the host C++ API (`get_field`/`set_field`, serialization,
   reflection) is deliberately unrestricted." Reflection *reads* are tooling (property grids,
   save systems, debuggers) — hiding private state from them makes the features impossible, and
   the information already leaks through `to_json` anyway. The `access` key keeps the label
@@ -225,7 +224,8 @@ syntax; a separate host-side C++ API stays unrestricted.**
   private fields of that class — same as direct syntax. This keeps one security story:
   *the access rules are a property of the language, not of the spelling.*
 - **Host-side privileged API (editors): `jai::reflect` namespace in C++, not script-reachable.**
-  Shape:
+  Not built: no `jai::reflect::host_*` functions exist; the host uses `class_instance` directly.
+  Proposed shape:
 
   ```cpp
   namespace jai::reflect {
@@ -237,7 +237,7 @@ syntax; a separate host-side C++ API stays unrestricted.**
   }
   ```
 
-  This adds **no new capability** — `class_instance::set_field`/`reflect::get` are already public
+  This adds **no new capability** — `class_instance::set_field`/`get_field` are already public
   and unrestricted (note 12) — it just gives editor/tooling code a blessed, stable name so
   in-engine editors don't reach into `class_instance` internals directly. The MV editor's
   property grid uses this; script-side reflection never routes through it.
@@ -269,7 +269,7 @@ doesn't have anyway.
   reflect::methods = sorted. Never expose raw unordered_map iteration order — symbol interning order
   differs per engine, so it is not reproducible across engines/backends (this is the §2 parity
   argument).
-- **Results are snapshots, not live views.** `reflect::fields`/`reflect::methods`/`classes`/`bases_of`
+- **Results are snapshots, not live views.** `reflect::fields`/`reflect::methods`/`classes`/`bases`
   return ordinary value-semantic arrays/maps minted at call time; a later hot reload or
   `reflect::set` does not mutate a result you already hold. `reflect::get` returns exactly what
   reading `v.name` returns (heavy types are O(1) shallow `strong_ptr` copies — normal value
@@ -339,7 +339,7 @@ for (auto row : wave) {
     spawned.push_back(reflect::construct_shared(row["type"], row["hp"]));
 }
 print("{} spawned, first hp {}", spawned.size(), spawned[0].hp);   // 3 spawned, first hp 25
-// reflect::construct("NoSuchClass") -> catchable: "construct: unknown class 'NoSuchClass'"
+// reflect::construct("NoSuchClass") -> catchable: "reflect::construct: unknown class 'NoSuchClass'"
 ```
 
 ### 5.3 Save-system sketch: persist public non-static fields only
@@ -356,7 +356,7 @@ function save_public(obj) {
 
 function load_public(json) {
     var data = from_json(json);            // yields a plain map (keep _type_ a string key)
-    var obj = construct(data["_type_"]);
+    var obj = reflect::construct(data["_type_"]);
     for (auto kv : data) {
         if (kv.first == "_type_") { continue; }
         if (reflect::has_field(obj, kv.first)) { reflect::set(obj, kv.first, kv.second); }

@@ -455,6 +455,8 @@ pinned to its kind (constants of that kind included) is emitted in its unchecked
 `C_JCMP_P`), the same handler with the per-read kind checks folded away; an adopted kind (a `var`, an unproven slot)
 keeps the checked form.
 
+The checker's class pins operands the typed lowering left general: a comparison or arithmetic classed int_int or float_float whose typed operation exists gives its operand cells that kind as their contract, so an environment value (its kind checked at the entry and again at every landing, where a call is the only way a typed global changes inside the block: a host define, a host reference, a script callback, a reload of the unit, a parallel region whose writes are an error in safe mode and run inside the call otherwise) and a load's compiler value read unchecked. A compiler value's load lands its contract: an int contract takes the int row and misses on any other element, a contract the site's own proof expects lands as the general temp landing does, and any other contract lands through the landing rule. A truth test inside the body is `C_JTRUTH`, the cell's int, float or bool tested inline (a string, which an adopted cell may hold, misses).
+
 `engine::ir_passes(bool)` is the switch over every proof-based elision and pass of the region compiler (the pinned
 forms first); off, a region runs its checked canonical form, observationally identical, and `jaiscript_fuzz
 --no-passes` is the differential gate, as `--no-proofs` is for the typed lowering.

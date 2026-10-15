@@ -8079,8 +8079,9 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 // the injection points: the cell instructions whose own miss re-runs their original instruction (loop.origin); the back
 // edges, the iteration head and its landing (a miss there refuses the block for the call), the call door, a bail, an
 // exit and a rebind carry their own protocols and keep their own misses
-static bool cells_miss_plain(opcode op) {
-	switch (op) {
+static bool cells_miss_plain(const vm_instruction& ci) {
+	if (ci.op == opcode::op_c_jtruth) return ci.b == 1;   // a truth test re-runs its load; a call's landed branch never misses
+	switch (ci.op) {
 	case opcode::op_c_cmp: case opcode::op_c_cmp_p: case opcode::op_c_jcmp: case opcode::op_c_jcmp_p:
 	case opcode::op_c_arith: case opcode::op_c_arith_p: case opcode::op_c_arith_any:
 	case opcode::op_c_load: case opcode::op_c_load_any: case opcode::op_c_index_store:
@@ -8124,7 +8125,7 @@ next_frame:
 		const uint64_t prof_c0 = __rdtsc();
 #endif
 #ifdef JAISCRIPT_MISS_INJECTION
-		if (miss_every_ && cells_miss_plain(ci.op) && --miss_countdown_ == 0) {
+		if (miss_every_ && cells_miss_plain(ci) && --miss_countdown_ == 0) {
 			miss_countdown_ = miss_every_;
 			const uint32_t origin = loop.origin[ip - loop.copy_head];
 			if (loop.iter_proto == k_invalid_u32 || origin != loop.head) { cells_miss_ip(f, ip, loop, origin, 7); return {}; }
@@ -8200,7 +8201,9 @@ next_frame:
 		case opcode::op_c_mov_p: hot.payload[ci.a] = hot.payload[ci.b]; hot.kinds[ci.a] = hot.kinds[ci.b]; hot.dirty->set(ci.a); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_sin_f: cell_put_float(hot, ci.a, std::sin(cell_float_of_bits(hot.payload[ci.b]))); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_jtruth: {
-			const bool truthy = hot.kinds[ci.a] == static_cast<uint8_t>(script_value::TYPEID_FLOAT) ? cell_float_of_bits(hot.payload[ci.a]) != 0.0 : hot.payload[ci.a] != 0;
+			const uint8_t tk = hot.kinds[ci.a];
+			if (tk != static_cast<uint8_t>(script_value::TYPEID_INT) && tk != static_cast<uint8_t>(script_value::TYPEID_BOOL) && tk != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) [[unlikely]] { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 3); break; }   // an adopted cell holding a string
+			const bool truthy = tk == static_cast<uint8_t>(script_value::TYPEID_FLOAT) ? cell_float_of_bits(hot.payload[ci.a]) != 0.0 : hot.payload[ci.a] != 0;
 			if (truthy != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; }
 			JAI_CELL_NEXT;
 		}
@@ -9790,7 +9793,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, size_t& ip, const vm
 		const script_value& el = node->values()[at];
 		const size_t ei = el.raw_storage_index();
 		if (ei == script_value::TYPEID_INT && expect == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = el.unchecked_as_int(); }
-		else if (ei == script_value::TYPEID_INT && expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && site.cont_slot != chunk::k_iter_container) { bits = cell_bits_of_float(static_cast<script_float>(el.unchecked_as_int())); }
+		else if (ei == script_value::TYPEID_INT && expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && site.cont_slot != chunk::k_iter_container && !site.temp) { bits = cell_bits_of_float(static_cast<script_float>(el.unchecked_as_int())); }   // a temp keeps a boxed int, as the general temp landing does
 		else if (ei == script_value::TYPEID_FLOAT && expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { bits = cell_bits_of_float(el.unchecked_as_float()); }
 		else if (ei == script_value::TYPEID_BOOL && expect == static_cast<uint8_t>(script_value::TYPEID_BOOL)) { bits = el.unchecked_as_bool() ? 1 : 0; }
 		else if (ei == script_value::TYPEID_STRING && expect == static_cast<uint8_t>(script_value::TYPEID_STRING) && loop.cells[ins.a].string_borrow) { bits = reinterpret_cast<int64_t>(el.unchecked_string_handle().get()); }   // borrowed for the statement: the append pair's temp only

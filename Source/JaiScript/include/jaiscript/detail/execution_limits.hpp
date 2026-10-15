@@ -111,6 +111,10 @@ namespace jai::detail {
 			"Native stack exhausted before the call-depth cap: the host thread's stack bounds this recursion" };
 	}
 
+	// A started coroutine keeps its state (frames, environment, stack) while it is suspended: each start counts this much
+	// against the memory cap on both backends (the vm's fiber stack growth past its first block counts as well)
+	inline constexpr size_t k_coroutine_state_charge = 2048;
+
 	// The vm charges its frames' storage to the memory allowance once per this many levels of depth
 	inline constexpr int k_frame_charge_levels = 10000;
 

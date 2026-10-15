@@ -368,6 +368,10 @@ vm_backend::value_stack::~value_stack() {
 // effectful ctor/dtor; the strong_ptr refcounts ride the bytes), then the sanctioned
 // cross-op raw-pointer cache (counted-for fast states, invariants 2b) rebases.
 void vm_backend::value_stack::relocate_to(size_t new_cap) {
+	// a coroutine's stack is per suspended fiber, so its growth counts against the memory cap (the raise comes at the next check)
+	if (owner && owner->active_coroutine_ && new_cap > cap) {
+		owner->limits_->memory_charge_deferred((new_cap - cap) * sizeof(script_value));
+	}
 	script_value* fresh = static_cast<script_value*>(::operator new(new_cap * sizeof(script_value)));
 	if (slots) {
 		std::memcpy(fresh, slots, count * sizeof(script_value));
@@ -389,7 +393,7 @@ void vm_backend::value_stack::reserve(size_t want) {
 // Growth chokepoint: the pushed value detours through the temp param so
 // self-referential pushes (op_dup pushing back()) survive the relocation.
 void vm_backend::value_stack::grow_push(script_value x) {
-	relocate_to(cap < 2048 ? 4096 : cap * 2);
+	relocate_to(grown_capacity(cap));
 	new (slots + count) script_value(std::move(x));
 	++count;
 }
@@ -888,6 +892,7 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 	handle.set_status(coroutine_handle::status::running);
 
 	if (prev_status == coroutine_handle::status::created) {
+		limits_->memory_charge_deferred(detail::k_coroutine_state_charge);
 		auto function = handle.get_function();
 		if (!function) {
 			handle.set_status(coroutine_handle::status::failed);

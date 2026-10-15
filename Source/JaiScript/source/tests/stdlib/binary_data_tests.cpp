@@ -291,6 +291,13 @@ public:
             expect(caught(layout + "class One { int a; } var k = One; \"abcdefgh\".reader().read(k, L)"), "Cannot read One from a layout of 2 fields: One has 1 field", "a field count mismatch");
             expect(caught(layout + "class Two { int name; int pos; } var k = Two; \"abcdefgh\".reader().read(k, L)"), "Cannot read field 'name' (text(4)) into Two.name (declared int)", "a field kind mismatch");
             expect(caught(layout + "\"abcdefgh\".reader().read(5, L)"), "read expects a class, got int", "not a class");
+            // widths whose total wraps would size a pack's staging below what its fields write
+            const std::string huge = "binary::text(9223372036854775807)";
+            const std::string too_big = "binary::layout fields total more than 9223372036854775807 bytes";
+            expect(caught("binary::layout(\"a\", " + huge + ", \"b\", " + huge + ", \"c\", binary::bytes(2))"), too_big, "a total that wraps size_t");
+            expect(caught("binary::layout(\"a\", " + huge + ", \"b\", binary::int8)"), too_big, "a total past the int range");
+            expect(caught("binary::writer w; \"hello\".reader().unpack(\"a\", " + huge + ", \"b\", " + huge + ", \"c\", binary::bytes(2))"), "unpack fields total more than 9223372036854775807 bytes", "an inline layout");
+            expect("to_string(binary::layout(\"a\", " + huge + ").size())", "9223372036854775807", "one width of the whole range");
         });
 
         test("direct_lanes_agree_with_the_bound_methods", [this, run]() {

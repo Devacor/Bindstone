@@ -119,6 +119,16 @@ CODE_MIGRATIONS = [
      "Moving a ChaiScript host to JaiScript: functions, classes, constructors, members, overloads, bases, globals, modules, calls into script and errors, from a real host's binding code, and the script habits that get a different answer."),
     ("07-from-sol2.html", "From sol2 (Lua) Bindings",
      "Moving a Lua host built on sol2 to JaiScript: usertypes, constructors, properties, overloads, bases, globals, protected calls and errors, from a real host's binding code, and the Lua habits that get a different answer (copies, 0-based indexing, division, truthiness)."),
+    ("08-from-squirrel.html", "From Squirrel Bindings",
+     "Moving a Squirrel host from the stack-based C API to JaiScript: natives, classes with type tags, globals, calls into script and errors, from a real host's binding code, and the Squirrel habits that get a different answer (shared instances, the empty string, generators)."),
+    ("09-from-pybind11.html", "From pybind11 and Boost.Python",
+     "Moving class_ bindings from pybind11 or Boost.Python to dynamic_binder: constructors, methods, fields, properties, overloads, operators, holders, exceptions and calls into script, with what has no counterpart (keyword arguments, trampolines, the GIL)."),
+    ("10-from-nlohmann-json.html", "From nlohmann::json",
+     "Moving JSON code from nlohmann::json to JaiScript: types through the archives' serialize functions, the archive record format, plain JSON documents in script with to_json and from_json, and reaching them from the host."),
+    ("11-from-qt-properties.html", "From Qt Properties, RTTR and refl-cpp",
+     "Moving C++ reflection from Q_PROPERTY, RTTR or refl-cpp to JAI_PROPERTY: declaring, enumerating, reading and writing by name, change notification through observable properties, script access, and what has no counterpart (metadata, compile-time iteration, dynamic properties)."),
+    ("12-from-coroutines.html", "From Lua Coroutines and C++20 Schedulers",
+     "Moving per-entity behaviour from Lua coroutines or a C++20 coroutine scheduler to JaiScript coroutines: yield, next, next(n) and done, a patrol converted three ways, hosting handles from C++, budgets and hot reload."),
 ]
 
 BRIDGES = LANGUAGE_BRIDGES + CODE_MIGRATIONS
@@ -127,7 +137,7 @@ SECTION_INDEX_DESC = {
     "tour/index.html":
         "Ten minutes, one small game: value semantics, the strict checker, a swarm, coroutines, hot reload and parallel_for, every line run on both backends.",
     "bridges/index.html":
-        "Language bridges for programmers arriving from JavaScript, C++ or C#, and code migrations for C++ hosts moving from Cereal, Boost.Signals2, ChaiScript or sol2 to JaiScript's equivalents.",
+        "Language bridges for programmers arriving from JavaScript, C++ or C#, and code migrations for C++ code moving to JaiScript from Cereal, Boost.Signals2, ChaiScript, sol2, Squirrel, pybind11, nlohmann::json, Qt properties or C++20 coroutines.",
     "guide/index.html":
         "Fifteen chapters covering the whole core language - every standalone sample runs on both backends, with the output it prints.",
     "embedding/index.html":

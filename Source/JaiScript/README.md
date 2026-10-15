@@ -234,7 +234,7 @@ It is a fan project, not affiliated with or endorsed by id Software.
   first script to modules, reflection and strict checking.
 - [`docs/site/bridges/index.html`](docs/site/bridges/index.html) — language bridges from
   JavaScript, C++ and C#, and code migrations from Cereal, Boost.Serialization, Boost.Signals2,
-  ChaiScript and sol2.
+  ChaiScript, sol2, Squirrel, pybind11, nlohmann::json, Qt properties and coroutine schedulers.
 - [`docs/site/reference/index.html`](docs/site/reference/index.html) — operators, conversions,
   builtin methods, the engine API, and every run-time error text (byte-identical on both
   backends).

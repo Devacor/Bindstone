@@ -19,6 +19,7 @@
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <bit>
+#include <limits>
 #include <charconv>
 #include <cmath>
 #include <cstring>
@@ -269,6 +270,10 @@ namespace jai::binary {
 			for (const auto& f : out.fields) {
 				if (f.key.unchecked_as_string() == text) { raise(std::string(who) + " repeats the field name '" + text + "'"); }
 			}
+			// the total is a script int (layout.size()) and the bound every read and pack trusts: it must not wrap
+			if (w->size() > static_cast<size_t>(std::numeric_limits<script_int>::max()) - out.bytes) {
+				raise(std::string(who) + " fields total more than " + std::to_string(std::numeric_limits<script_int>::max()) + " bytes");
+			}
 			out.fields.push_back(field{script_value(text, eng), *w});
 			out.bytes += w->size();
 		}
@@ -512,6 +517,7 @@ namespace jai::binary {
 			const script_value& m = values.deref();
 			if (!m.is_map()) { raise("pack expects a map of field values, got " + value_kind_name(m)); }
 			const script_map& map = m.as_map();
+			if (pos_ + l.bytes > charged_) { charge_growth(pos_ + l.bytes); }   // the staging is the growth: charged before it exists
 			std::string staged(l.bytes, '\0');
 			unsigned char* p = reinterpret_cast<unsigned char*>(staged.data());
 			std::string why;

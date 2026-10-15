@@ -13492,7 +13492,23 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 
 	std::shared_ptr<environment> final_closure_env;
 
-	if (needs_capture_env) {
+	// [this] alone: the instance scope is the whole closure env (what the general path builds and then keeps, without the
+	// capture env it builds first)
+	const bool this_only = captures_this && !has_default_capture && outer_refs.empty() && proto.captures.size() == 1 &&
+	                       proto.captures[0].symbol_id == this_id_ && !proto.captures[0].by_reference && !proto.captures[0].init &&
+	                       proto.captures[0].outer_slot == SIZE_MAX;
+	if (this_only) {
+		if (!environment_->contains(this_id_) && !environment_->get(this_id_)) {
+			return raise_(make_error_code(runtime_error_code::capture_undefined_variable),
+				environment_->undefined_text(this_id_, "Cannot capture undefined variable '{0}'"), this_id_);
+		}
+		auto capture_result = environment_->get(this_id_);
+		if (!capture_result) return raise_from(capture_result);
+		script_value this_obj(capture_result.value().deref());
+		auto method_env = std::make_shared<environment>(closure_env, symbolizer_, this_obj);
+		method_env->define(this_id_, std::move(this_obj));
+		final_closure_env = std::move(method_env);
+	} else if (needs_capture_env) {
 		auto captureEnv = std::make_shared<environment>(detail::lambda_parent_scope(closure_env), symbolizer_);
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_env_births_[4];
@@ -13705,7 +13721,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 	script_function funcWrapper = script_callable_thunk{engine_, std::move(payload)};
 
 	if (init_count) { stack_.truncate(init_base); }
-	stack_.push_back(script_value::make_function(funcWrapper, engine_));
+	stack_.push_back(script_value::make_function(std::move(funcWrapper), engine_));
 	return {};
 }
 
@@ -22739,6 +22755,8 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 
 	if (has_return_value_) {
 		result = std::move(return_value_.value());   // converted at the return door (entry_return_finish)
+	} else if (locals.is_method) {
+		result = std::move(*locals.this_object_ptr);   // the frame's receiver dies with the frame: the result takes it
 	} else {
 		result = implicit_this_result(locals);
 	}

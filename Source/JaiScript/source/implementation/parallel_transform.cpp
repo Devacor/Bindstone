@@ -3822,6 +3822,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			state.pending_registration_retry = true;
 			if (freeze_symbols) { eng.get_symbolizer()->set_frozen(true); }
 			state.active_region = &table;
+			eng.note_parallel_region(true);
 			active = true;
 		}
 		void join() {
@@ -3833,6 +3834,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		void restore() noexcept {
 			if (active) {
 				state.active_region = previous_region;
+				eng.note_parallel_region(previous_region != nullptr);
 				eng.get_symbolizer()->set_frozen(previous_frozen);
 				active = false;
 			}

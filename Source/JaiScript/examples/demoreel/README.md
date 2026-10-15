@@ -1,19 +1,20 @@
 # jai_demoreel — a demoscene tech reel written in JaiScript
 
-Sixteen auto-advancing truecolor scenes, five kinds of transition, pixel-font
+Seventeen auto-advancing truecolor scenes, five kinds of transition, pixel-font
 title cards, and a finale where the word JAISCRIPT ignites out of a wall of
 rainbow fire — every effect coded in `scenes/*.jai`, every frame drawn at
 **double vertical resolution** with half-block pixels. A ray tracer, a sphere
 tracer, a Menger-sponge raymarcher, a textured Wolfenstein raycaster, a
 VoxelSpace terrain flight, Verlet cloth, metaballs, a falling-sand toy, a
-murmuration, a texture tunnel and the classics. The C++ host (`demoreel_host.cpp`) is a
+murmuration, a texture tunnel, a skull-headed spider crawling a morphing gyroid
+labyrinth and the classics. The C++ host (`demoreel_host.cpp`) is a
 thin shell: a VT console, a monotonic clock, non-blocking keys, a seeded rng
 class, and the frame pump. Everything you see is script.
 
 The reel is also an engine showcase: it keeps **two live engines** warm — one
 tree-walking interpreter, one bytecode VM — running the same scripts, and lets you
 flip between them mid-run. It doubles as a parity test: in `--smoke` mode both
-backends must produce **byte-identical** frame streams. Five scenes trace their
+backends must produce **byte-identical** frame streams. Six scenes trace their
 rows across every core with `parallel_transform`, and the streams stay
 byte-identical anyway.
 
@@ -116,7 +117,7 @@ Keys while running:
 | `h` | toggle the HUD (scene, ACTIVE BACKEND, frame ms, fps, pixel size) |
 | `f` | freeze the clock (render keeps running) |
 | `n` / `p` / space / arrows | next / previous scene |
-| `1`..`9`, `0` | jump straight to a scene (`0` = scene 16, the finale) |
+| `1`..`9`, `0` | jump straight to a scene (`0` = scene 17, the finale) |
 | `q` / `ESC` | quit |
 
 The HUD shows the active backend and its frame cost, plus the last measured cost
@@ -141,7 +142,8 @@ of the other backend — press TAB and watch the ms number move.
 | 13 | BANNERFALL | Verlet cloth: a 26x11 grid (structural + shear, Jakobsen sqrt-free relaxation, topology as index arithmetic) flying a rainbow weave with the gold JAI sigil; each quad rasterized as two triangles by edge functions at pixel centers from subpixel positions, lit by edge cross products; the hoist seam tears thread by thread, the banner tumbles and bursts into ember scraps |
 | 14 | CHROME | the Amiga Juggler's grandchild: a ray tracer, one ray per pixel across every core — three tinted chrome spheres bounce on a checkerboard running to a hazy horizon, one reflection bounce, hard shadows, a sun glint; the ray returns WHAT IT SAW as a class and each sphere looks that up in its own tinted copy of the class table |
 | 15 | FIRE | convection fire with the Doom fire's random sideways jitter at full resolution, 73 heat levels, sparks breaking off and drifting up; ignites into RAINBOW fire mid-scene (house signature) |
-| 16 | FINALE | the fire scene's subclass: a wall of fire out of which "JAISCRIPT" ignites in double-size pixel letters (a heat-source mask), burns in rolling rainbow flame, and remains white-hot as the fire dies while the credits come up |
+| 16 | OSSUARY | a horned, three-eyed skull on a spider's body crawls a raymarched field that morphs between three triply periodic surfaces (gyroid, Schwarz P, Schwarz D) under a flowing domain warp; the body re-projects onto the moving level set every frame, eight two-bone IK legs step in a tetrapod gait, three tendrils writhe behind, and the camera orbits with the surface normal as up; a crown of flame under a spinning ruby, embers and orbiting blood gems are depth-tested against the traced scene; rows in parallel |
+| 17 | FINALE | the fire scene's subclass: a wall of fire out of which "JAISCRIPT" ignites in double-size pixel letters (a heat-source mask), burns in rolling rainbow flame, and remains white-hot as the fire dies while the credits come up |
 
 Between scenes: dissolve (hashed per pixel), slant wipe and iris (both with a
 glowing seam), blinds, and the Doom screen melt — two grids merged per pixel
@@ -150,24 +152,12 @@ scene.
 
 ## Measured numbers
 
-Standalone runner (Release `jaiscript`), 100x40 cells =
-100x80 = 8,000 pixels per frame, seed 20260705, fixed dt 1/30, the whole
-16-scene reel incl. transitions (`-- frames 1700`, smoke durations of 3 s per
-scene), two runs each. "render" is `demo_frame` alone (update + render +
-presentation); "incl. hashing" adds the shim's per-byte script hash of every
-frame:
-
-| backend | render ms/frame | incl. hashing | bytes/frame (mean) |
-| ------- | --------------- | ------------- | ------------------ |
-| **VM** | **3.5 - 3.8** | 8.9 - 9.1 | 52 KB |
-| interpreter | 20.1 - 20.7 | 29.9 - 30.6 | 52 KB |
-
-The earlier cell renderer (one pixel per cell, 4,000 per frame, thirteen scenes)
-measured 1.8 / 11.8 ms render on the same runner: the reel now draws twice the
-pixels with far heavier effects for about twice the script cost, and the VM
-spends about a ninth of the 33 ms frame budget. The five `parallel_transform`
-scenes are what keep it there — CHROME traced serially cost 30.6 ms/frame on
-the VM, 4.0 ms across the cores.
+The whole reel on the standalone runner (100x40 cells = 100x80 = 8,000 pixels
+per frame, seed 20260705, fixed dt 1/30, transitions included, smoke durations
+of 3 s per scene) reports its own timing: `jaiscript demoreel.jai -- frames 1700`
+prints the render cost per frame (`demo_frame` alone: update, render and
+presentation), the cost including the shim's per-byte script hash of every
+frame, and the mean frame size (52 KB). Measure it on a quiet Release build.
 
 Per scene, mid-flight (`-- bench 60`, no transitions, same size):
 
@@ -190,13 +180,14 @@ Per scene, mid-flight (`-- bench 60`, no transitions, same size):
 | FIRE | 2.7 | 16.1 | 54 |
 | FINALE | 3.1 | 24.5 | 96 |
 
-Every scene holds 30 fps on the VM with room to spare (mean 2.8 ms, worst
-5.8 ms); on the interpreter every scene stays under 26 ms (mean 15.7 ms).
+The table covers the sixteen scenes it lists; OSSUARY is not in it. Every scene
+in it holds 30 fps on the VM with room to spare (mean 2.8 ms, worst 5.8 ms); on
+the interpreter each stays under 26 ms (mean 15.7 ms).
 
 - Parity: frame streams **byte-identical** across backends over 1,700 frames,
-  every one of the sixteen scene entries plus the wrap back to PLASMA: shim
-  stream hash `3352695962` on both. The C++ host's `--smoke` hash is FNV-1a 64
-  over the same frames: `23505cc87911c46d` on both backends (the host's HUD
+  every one of the seventeen scene entries: shim stream hash `4219879756` on
+  both. The C++ host's `--smoke` hash is FNV-1a 64 over the same frames:
+  `006d304a70772e5f` on both backends (the host's HUD
   is off in smoke, so its frames are the shim's bytes).
 - `--reload-test` re-executes every scene file into both engines. The
   presenter's globals live in `util.jai`, so a reload resets them and the reel
@@ -224,9 +215,8 @@ jai_demoreel --perf 30 --backend vm --workers 1 --scenes /tmp/natural_scenes  # 
 
 ## Console performance
 
-Half-block frames carry two colors per cell, so a frame is bigger than the old
-one-pixel-per-cell stream (52 KB on average, 139 KB for PLASMA, whose 256-entry
-palette changes nearly every pixel; KINSTEIN and CANYONRUN stay near 20-30 KB).
+Half-block frames carry two colors per cell: 52 KB on average, 139 KB for PLASMA, whose
+256-entry palette changes nearly every pixel, while KINSTEIN and CANYONRUN stay near 20-30 KB.
 Legacy conhost parses VT ~16x slower than Windows Terminal, which is what the
 host's post-processing in `demoreel_host.cpp` is for (scenes and the `--smoke` stream
 are untouched by it, so parity hashes don't move):
@@ -396,7 +386,7 @@ DONUT (`shot 4 at 4` — the frosted torus, specular highlight on the icing):
 ................................::::::::::::::..:........          .................................
 ```
 
-FINALE afterglow (`shot 16 at 12` — the fire has died, the word stays white-hot):
+FINALE afterglow (`shot 17 at 12` — the fire has died, the word stays white-hot):
 
 ```
 :::::::::::::::::::::-::::::::::::::::::::::::::::::::::::-:::::::::::::::::::::::::::::::::::::::::
@@ -417,190 +407,16 @@ FINALE afterglow (`shot 16 at 12` — the fire has died, the word stays white-ho
                                        -                               -        .
 ```
 
-## Language feedback (dogfooding notes — recorded honestly)
+## Idioms
 
-Everything below was hit while writing this demo.
-Minimal repros were extracted for each; the workarounds ship in the scene
-comments. The single biggest lesson first:
-
-**JaiScript is value-semantic everywhere.** Assignment, method/function/lambda
-parameters, returns, and even array-element reads deep-copy — for arrays AND
-script-class objects. (`docs` say "copy = shallow", which describes the C++
-`script_value` handle, not language-level assignment.) Mutation flows through
-`var&` reference parameters / reference declarations, or through the owning
-object's own fields. The first draft of this reel silently rendered
-palette-entry-0 washes for every scene because `render(var grid)` mutated a
-copy — and `--smoke` stayed green because both backends produced identical
-blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
-
-**Bugs worked around (each with a small repro):**
-
-> **Triage update:** every finding below was
-> reproduced (or bisected) at HEAD and resolved; pinning regression tests live in
-> `source/tests/language/demoreel_regression_tests.cpp`. The reel of that day
-> exercised the fixed paths: the graveyard was gone (scenes are destroyed at
-> every transition), `render_rows` declared `prev` in the loop body again, and
-> plasma passed raw `c[0], c[1], c[2]` element args into typed params.
-
-1. **FIXED** (frame exit clears only the frame's OWN method env).
-   ~~Free-function / lambda calls inside class methods poison implicit-self~~
-   (both backends). After `g = mk();` where `mk` is a free script function,
-   every later field read/write in that method throws `Undefined variable`, and
-   `this` stops being an object. Method calls, constructor calls, builtins, and
-   host calls are safe.
-   ```jaiscript
-   function mk() -> var { return [1]; }
-   class R { var g = null; R() { g = mk(); } }   // Undefined variable 'g'
-   ```
-   Workaround: shared helpers live on a `Gfx` class (global instance `gfx`);
-   scene factories are an if-chain method instead of an array of lambdas.
-
-2. **FIXED** (method frames reserved 0 slots, so a mid-loop DECL_VAR
-   reallocated the locals vector and dangled the counted-for cached pointers).
-   ~~VM: loop-body locals assigned from a nested scope corrupt the enclosing
-   loop~~ (method context only). An inner `for` assigning an outer-loop body
-   local makes the outer loop run once — or forever. A plain `if` (no `else`)
-   assigning a loop-body local does the same; `if/else`, `while`, and range-for
-   are fine. Method-level locals are immune.
-   ```jaiscript
-   class G { int t(int w, int h) {
-       int rows = 0;
-       for (int y = 0; y < h; ++y) {
-           int prev = -1;
-           for (int x = 0; x < w; ++x) { prev = x; }
-           rows = rows + 1;
-       }
-       return rows;   // VM: 1, expected h
-   } }
-   ```
-   Workaround: every local assigned from a deeper scope is hoisted to method
-   level; single-branch clamps became same-level ternaries. Declaring the same
-   local name in sibling if/else branches also aliased slots (nondeterministic
-   across process runs) — hoisted too.
-
-3. **FIXED** (interp ++/-- resolves
-   slot-based locals). ~~Interpreter: `++x` on an enclosing-scope local inside a
-   for body throws `Undefined variable 'x'`~~ (VM fine; `x = x + 1` fine on both).
-
-4. **FIXED** (typed declarations, slot stores and typed fields convert
-   like assignment — `int d = 4.7` truncates to 4, and a declared field type is
-   enforced on every store, on both backends). `cast<int>(x)` is the explicit
-   float→int conversion; the host's `itrunc()`/`ifloor()` remain for the scenes
-   that use them.
-
-5. **FIXED** (overload matching derefs lvalue reference arguments).
-   ~~Raw element / nested-field arguments misresolve against typed parameters~~ —
-   `p.add_bg(c[0], c[1], c[2])` resolves and converts; host candidates too.
-
-6. **NO LONGER REPRODUCES at HEAD** (likely lived in the uncommitted engine state
-   this reel was built against). ~~`var` fields class-lock on script objects —
-   interpreter only.~~ `var` fields stay dynamic on both backends; pinned by
-   `var_field_retypes_across_script_classes` (member and unqualified in-method
-   shapes). The `cur = null;` resets were removed from the reel.
-
-7. **NO LONGER REPRODUCES at HEAD** (verified with the graveyard removed over a
-   2,200-frame Release run on both backends, byte-identical; also re-verified
-   against the pre-fix engine — the crash lived in the uncommitted engine state
-   this reel was built against). ~~Destroying a script-class instance mid-run
-   segfaults the interpreter~~ — the graveyard is gone; scenes are destroyed at
-   every transition now.
-
-8. **BELIEVED FIXED** (same root as finding 2: method frames
-   reserved 0 slots, so many-block-scope methods reallocated their locals vector
-   mid-frame — any held pointer/reference into it dangled with exactly this
-   delayed-detonation signature). ~~Progressive corruption with delayed
-   detonation~~ — not reproducible at HEAD (the original pre-workaround scene
-   shapes no longer exist to retest byte-for-byte); the split methods stay.
-
-9. **Host-callable poisoning NO LONGER REPRODUCES at HEAD** (fixed by
-   reentrant execute isolation — saved call/value stacks, no mid-run
-   pool reset); pinned by `coroutine_in_host_callable_no_state_leak`. Coroutine
-   *methods* work (`coroutine` prefixes a method or static method like a free
-   function); the finale drives its sequence off scene time.
-
-10. **NEW (interpreter only).** Plain
-    *assignment* of a bare array-element read into an int-typed local throws
-    `Cannot assign ... to 'x' (declared int)`; the *declaration* shape is fine, and the VM
-    accepts both. Hit in KINSTEIN's DDA loop; likely the new element-ref
-    (ref_lvalue) surface.
-    ```jaiscript
-    var a = [7];
-    int x = 0;
-    x = a[0];        // interpreter: Cannot assign ... to 'x' (declared int)
-    int y = a[0];    // fine on both backends
-    ```
-    Workaround (ships in kinstein.jai): read into a declared local, then assign.
-
-11. **FIXED** (a bail inside a statement flushes the values the statement
-    defined before it; an inlined call's fallback keeps the caller's statement).
-    ~~Found while rewriting DONUT (its splat
-    version): inside a large render method of an IMPORTED unit (the shim's
-    `import "scenes/donut.jai"`), the fused int expression
-    `mt[mrow + i] + itrunc(d * 15.99) * 4 + itrunc(s16 * s8 * 3.99)` (`itrunc`
-    a script function defined by the importing file) evaluated to a wrong value
-    on the VM — 17,908 wrong evaluations a frame against 0 on the interpreter.
-    The same program pasted into one file is correct, and splitting the
-    expression into three typed locals is correct. The sphere-traced DONUT no
-    longer has the shape; the three-file reproduction (a host stub, `util.jai`,
-    the reduced scene) was handed to the engine side.~~ Pinned by
-    `a_bail_inside_a_statement_flushes_its_spills_and_graft_values`.
-
-**Paper cuts:** error text reaching the host keeps `{0}` placeholders and drops
-script context; `override` is required to redefine a base method (good check,
-surprising the first time).
-
-**Perf lesson (PIPEDREAM):** a script *method call* costs on the
-order of tens of microseconds — an empty-bodied helper invoked ~1,500x per frame
-cost ~60 ms before its body ran a single op (measured by gutting the method).
-Fine-grained helpers in per-cell loops are a trap; either inline the work or
-restructure so the call count collapses. PIPEDREAM's fix was architectural: the
-canon-accurate static camera makes the screen image persistent, so the scene
-splats only the ~dozen voxels grown per frame into a kept buffer instead of
-re-projecting the whole volume (160+ ms -> fire-scene cost). KINSTEIN keeps its
-per-blob helper but does one sqrt per sprite ROW instead of float math per cell.
-
-**Perf lessons (the technical climax block — all A/B-measured with
-throwaway micro-scenes in a scratch copy of the reel):**
-
-- **Array assignment deep-copies — `var&` reference declarations are the hot-loop
-  idiom.** `var alias = field_array;` copies the whole array (value semantics,
-  exactly as the notes above warn), so writes through it silently vanish:
-  SPONGEWORKS' persistent pixel buffer stopped persisting and BANNERFALL's
-  physics froze, while every parity hash stayed green (consistently wrong again).
-  `var& alias = field_array;` binds a true reference — writes land, and element
-  access through it costs about HALF a field access (see next point). All three
-  new scenes bind every hot array this way at the top of update/render.
-- **Field access resolves through the environment chain — ~2x a local slot.**
-  20k field-array reads cost ~1.8 us each vs ~0.9 us through a `var&` local
-  (Release, VM). Hot scalars (`w`, `h`, masks, camera vectors) are worth copying
-  to locals too; SPONGEWORKS' ray loop reads 11 camera fields per ray otherwise.
-- **A declaration costs ~0.3-0.7 us — hoist or inline in tight loops.** The
-  cloth solver dropped from ~13 locals per constraint to 5 (element reads inlined
-  into expressions, corrections written as compound stores) for a measurable win
-  across its ~2.2k solves x 2 passes per frame.
-- **Compound element stores (`arr[i] += v`) are ~2x cheaper than read+write
-  pairs** (~0.7 us vs ~1.4 us) — one lvalue resolve instead of two. The Verlet
-  relaxation writes all six endpoint corrections that way.
-- **Temporal reprojection works in script.** SPONGEWORKS caches each pixel's
-  last hit distance and warm-starts the next march 15% short of it — most
-  surface rays converge in a few steps. Free real speedup, but it broke
-  step-count AO (step counts stop correlating with occlusion, adjacent pixels
-  speckle) — the fix was one extra SDF probe along the normal instead.
-- **Shift operators exist and floor correctly for non-negative operands** —
-  CANYONRUN's fixed-point inner loop keeps its coordinates offset positive so
-  `>> 16` is an exact floor with no host `ifloor` calls (the whole depth-march
-  inner loop runs without a single host call or float op).
-
-**What carried the demo:** parity discipline is real — thousands of frames
-byte-identical across two completely different execution engines, in Debug and
-Release. Hot reload with instance migration works exactly as advertised. jaibite
-save/load worked on the first try, including cross-engine symbol relocation.
-`var&` reference parameters, once discovered, are exactly the right tool —
-`f(obj.field)` and `f(arr[i])` lvalue refs included. Template literals,
-switch-on-string, and the builtin container methods (`push`, `join`, `clear`,
-`repeat`, `substr`) are pleasant, and `dynamic_binder` made the seeded rng a
-one-liner per method. A full scripted render pipeline — simulation, palette
-lookup, half-block run-length escape assembly, string join — moves 8,000
-truecolor pixels in about 3.5 ms a frame on the VM, and `parallel_transform`
-spreads the five heaviest scenes across the cores without costing a byte of
-parity.
+- **`var&` for hot arrays and the frame grid.** Assignment copies arrays and objects, so
+  `var alias = field_array;` is a copy and writes through it never reach the field.
+  `var& alias = field_array;` binds a reference; the scenes bind their hot arrays this way at
+  the top of `update` and `render`, and a scene paints through `render(var& grid)`.
+- **Compound element stores.** `arr[i] += v` resolves the element once, where a read followed
+  by a write resolves it twice; BANNERFALL's Verlet relaxation writes its endpoint corrections
+  that way.
+- **Temporal reprojection.** SPONGEWORKS keeps each pixel's last hit distance and starts the
+  next march 15% short of it, so most surface rays converge in a few steps. Step counts stop
+  tracking occlusion under warm starts, so its ambient occlusion is one SDF probe along the
+  normal.

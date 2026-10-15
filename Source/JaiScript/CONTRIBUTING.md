@@ -7,8 +7,8 @@ longer build reference — options, generators, where binaries land.
 ## Configure once per configuration
 
 ```bash
-cmake -S . -B out/build/x64-Debug   -G Ninja -DCMAKE_BUILD_TYPE=Debug
-cmake -S . -B out/build/x64-Release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake -S . -B build       -G Ninja -DCMAKE_BUILD_TYPE=Release
 ```
 
 Iterate in Debug. It has no link-time code generation, so an incremental link is about five
@@ -17,13 +17,13 @@ with `0xDD`, which turns a dangling reference into a loud crash instead of a qui
 answer. Do a Release pass before you call a change done; Release is the configuration that
 ships, and optimizer-dependent bugs only show up there.
 
-(Any directory name works. `out/build/<config>` is what Visual Studio's Open Folder mode uses,
-so the two agree if you switch between the IDE and the command line.)
+(`cmake --preset debug` and `cmake --preset release` configure the same two trees. Visual
+Studio's Open Folder mode uses the `x64-*` presets, which build under `out/build/<preset>/`.)
 
 ## Build
 
 ```bash
-cmake --build out/build/x64-Debug --target jaiscript_tests
+cmake --build build-debug --target jaiscript_tests
 ```
 
 Adding a **new** test `.cpp` needs a reconfigure — the test list is a `file(GLOB_RECURSE)`
@@ -35,8 +35,8 @@ to an existing file needs nothing.
 Every change is run twice:
 
 ```bash
-out/build/x64-Debug/bin/jaiscript_tests
-out/build/x64-Debug/bin/jaiscript_tests --backend=vm
+build-debug/bin/jaiscript_tests
+build-debug/bin/jaiscript_tests --backend=vm
 ```
 
 Both must be green, and "green" means more than a pass count: the tree-walking interpreter and
@@ -215,6 +215,7 @@ Ubuntu 24.04 — and each of the six builds runs:
 - a 300-program differential-fuzz run (`jaiscript_fuzz --isolate`)
 - the example hash gates: GLOOM and GRUBWELL (and, in Release, demoreel and Gator Quest) must
   reproduce their reference hashes on both backends
+- the embedding quickstart's host (`embed_quickstart`), whose checks must all hold on both backends
 - the language server's protocol tests (`tools/lsp/tests/lsp_test.py`: golden fixtures and the
   Gator Quest checks, plus its edit-latency budget in Release)
 

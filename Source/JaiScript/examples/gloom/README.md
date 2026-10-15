@@ -129,100 +129,60 @@ Weapons: pistol (accurate, honest), **SCATTERGUN** (6 pellets, crowd opinions),
 **HEXCASTER** (a projectile that detonates into a particle bloom and area damage —
 including yours, standing in your own spell is a choice).
 
-## parallel_transform, honestly
+## parallel_transform
 
 Three systems run through `parallel_transform` every tick — two pure bodies in
 `pure.jai` (element + locals only, math whitelist) and one captured-reads body
 in `render.jai`:
 
-- **Wall rays** — written pre-capture: shared inputs ride inside every element,
-  so elements are column *chunks* (16 of them), each carrying the map snapshot
-  packed 15-tiles-per-int64; the DDA inner loop is pure shift/mask. One ray per
-  cell column; sprites and particles keep full sub-cell resolution. (This is
-  the pair idiom — with captured reads it could read a global snapshot instead;
-  kept as-is as the hand-chunking reference shape.)
+- **Wall rays** — shared inputs ride inside every element, so elements are
+  column *chunks* (16 of them), each carrying the map snapshot packed
+  15-tiles-per-int64; the DDA inner loop is pure shift/mask. One ray per cell
+  column; sprites and particles keep full sub-cell resolution. This is the
+  hand-chunking reference shape; a body with captured reads could read a global
+  snapshot instead.
 - **Particles** — the 288-slot pool is a flat value array stepped by one pure
   function (fixed timestep baked in as a literal).
 - **Glyph rows (quad)** — `gloom_row_quad(ry)` reads the CAPTURED pixel grid
   (borrow tier: zero-copy) and palette tables (per-worker snapshots); see
-  "Captured reads dissolve the glyph wall" below.
+  "Captured reads in the glyph rows" below.
 
-`--workers 0` runs the same pure functions in a plain serial loop — determinism
-across worker counts is checked by construction (`--smoke` hashes are identical
-at any `--workers`).
+`--workers 0` runs the same functions in a plain serial loop — determinism
+across worker counts holds by construction (`--smoke` hashes are identical at
+any `--workers`).
 
-Measured (i7-6920HQ 4C/8T, Release, 100x40 console, seed 666, quiet machine,
-`--smoke` headless ms/tick, 300-tick runs; every row hash-identical):
-
-| pixels \ backend | VM | interpreter |
-|---|---|---|
-| half (100x68) | 22.2 | 27.4 |
-| **quad (200x68, default)** | **31.3** | 39.5 |
-| sext (200x102) | 42.3 | 51.7 |
+Measured (min of 3 interleaved runs, quad, seed 666, 300 ticks, `--smoke`
+headless ms/tick, on a loaded development machine; every row hash-identical):
 
 | workers (quad) | VM ms/tick | interp ms/tick |
 |---|---|---|
-| 0 (serial script loops) | 34.1 | 42.0 |
-| 1 | 33.6 | 39.0 |
-| 2 | 37.4 | 41.6 |
-| 4 | 31.3 | 39.5 |
-| 8 | 34.1 | 43.2 |
+| 0 (serial script loops) | 45.3 | 58.3 |
+| 1 | 37.3 | 45.4 |
+| 4 | 35.3 | 40.5 |
+| 8 | 33.0 | 37.3 |
 
-Single 300-tick runs; treat ±10% as machine noise (a thermal-loaded rerun of
-this table once showed serial interp at 64 ms — measure quiet or measure twice).
+Treat ±10% as machine noise: measure on a quiet machine, or measure twice. The
+[performance guide](../../docs/site/embedding/11-performance.html) covers
+measuring JaiScript.
 
-The tables above are an older laptop; the [performance guide](../../docs/site/embedding/11-performance.html)
-covers measuring JaiScript.
+At four workers what stays serial is the per-frame palette snapshots, the
+barrier's all-primitive scan of the 13.6k-int grid, and the paint stages.
+`--pix half` emits more bytes per frame than quad (35.6 KB vs 21.5 KB): a flat
+quad cell is a 1-byte space on background, while every half-mode cell is a
+3-byte half-block glyph.
 
-Stage ablation (VM, quad, W=4, measured by early-returning the pipeline):
-sim ~2 ms, ray chunk build ~1 ms, ray transform ~1.5 ms (2.2x over its serial
-cost at W=4), wall paint ~6 ms, sprites+particles ~3 ms, **glyph-row building
-~16 ms**.
-
-Without captured reads, the *parallel* parts were cheap and
-scaled (the ray stage alone ran 2.2x at W=4), but they were a small slice — the
-serial consumption of the pixel grid was the wall. An element read through the
-VM costs ~0.5 µs, and the row builder must read all 13.6k sub-pixels per frame;
-that one stage cost more than rays, paint, and sim combined, so total ms/tick
-barely moved with worker count (Amdahl, working as advertised). A value-only
-contract cannot touch it, because the pixel grid would have had to
-ride inside the elements. One curiosity: `--pix half` emits MORE bytes per
-frame than quad (35.6 KB vs 21.5 KB) because flat quad cells are a 1-byte space
-on background while every half-mode cell is a 3-byte half-block glyph.
-
-### Captured reads dissolve the glyph wall
+### Captured reads in the glyph rows
 
 `parallel_transform` captured reads (docs/site/guide/09-containers-strings.html, "Parallel loops") let a body
 READ enclosing globals, so the quad glyph-row builder is a per-row function
 over `ROWIDX` reading the pixel grid as a captured **borrow** (`PIX` is a flat
 all-primitive int array touched only by subscript — zero copies, raw element
 reads; the escape-string palettes `PAL_FG`/`PAL_BG` snapshot per worker per
-frame). `--workers 0` runs the same row function in a serial loop; frame bytes
-are **byte-identical** to the old serial builder at every worker count and
-STATE_HASH is untouched (all reference checkpoints re-verified, incl. 3000 →
-4080154357 and seed 7 → 1696980843).
-
-Before/after on the same binary (min-of-3 interleaved runs, quad, seed 666,
-300 ticks, loaded dev machine — absolute numbers differ from the quiet-machine
-table above; the DELTA is the claim):
-
-| workers (quad) | VM before | VM after | interp before | interp after |
-|---|---|---|---|---|
-| 0 (serial) | 46.6 | 45.3 | 53.3 | 58.3 |
-| 1 | 39.1 | 37.3 | 47.5 | 45.4 |
-| 4 | 46.3 | **35.3** | 50.6 | 40.5 |
-| 8 | 41.1 | **33.0** | 51.9 | 37.3 |
-
-Reading it honestly: at W=4 the vm drops ~11 ms/tick — the ~16-23 ms glyph
-stage roughly halves (Amdahl residue: the per-frame palette snapshots, the
-barrier's all-primitive scan of the 13.6k-int grid, and the serial paint stages
-that still dominate). Serial (`--workers 0`) is a wash on the vm and a few ms
-slower on the interpreter — the row function allocates its parts array per row
-and reads globals instead of `var&`-cached aliases (captured names may not be
-aliased), the small price of one implementation serving both paths. Residual
-restructuring cost beyond the capture itself: moving the grid from a `Game`
-field to the global `PIX` (captures resolve global names), plus `VW`/`VH`/
-`ROWIDX` globals — a ~20-line diff, no algorithm changes.
+frame). Captures resolve global names, so the grid is the global `PIX`, with
+`VW`, `VH` and `ROWIDX` beside it. `--workers 0` runs the same row function in
+a serial loop; frame bytes are **byte-identical** at every worker count, and
+the STATE_HASH reference checkpoints hold (3000 ticks → 4080154357, seed 7 →
+1696980843).
 
 ## Determinism
 
@@ -247,7 +207,6 @@ words with the landlord.
 gloom_host.hpp/.cpp thin SHARED host: console, held keys, Rng, clock, flags,
                     smoke/bench harness; language-agnostic
 gloom_adapter_jai.cpp  the JaiScript adapter + main() (this exe)
-gloom_adapter_{chai,squirrel,lua}.cpp  port scaffolds (opt-in CMake targets)
 scripts/state.jai   RNG global
 scripts/util.jai    math helpers, mix32, the truecolor palette intern
 scripts/defs.jai    weapons, bestiary, pickups, ALL sprite art, weapon HUD art

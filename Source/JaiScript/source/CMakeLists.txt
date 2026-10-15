@@ -4,6 +4,7 @@
 set(JAISCRIPT_SOURCES
     implementation/aggregate_lowering.cpp
     implementation/class_registry.cpp
+    implementation/construction.cpp
     implementation/conversion_registry.cpp
     implementation/coroutine.cpp
     implementation/debug/connector.cpp

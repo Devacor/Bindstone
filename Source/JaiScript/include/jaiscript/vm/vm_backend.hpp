@@ -255,10 +255,8 @@ namespace jai::vm {
         uint64_t profile_new_count_ = 0;
         uint64_t profile_new_resolve_cyc_ = 0;
         uint64_t profile_new_invoke_cyc_ = 0;
-        // construct_instance sections: [0]=overload resolve [1]=create_instance +
-        // init_env + param binds [2]=initializer chains (super/this) [3]=field inits
-        // [4]=method_env + ctor body (execute_method_ast)
-        uint64_t profile_ctor_cyc_[5] = {};
+        // construct_instance sections: [0]=everything ahead of the body (detail::begin_construction) [1]=method_env + ctor body
+        uint64_t profile_ctor_cyc_[2] = {};
         uint64_t profile_ctor_count_ = 0;
         std::map<std::string, uint64_t> profile_env_walk_names_;   // full-walk symbols by name
         // Result-consumer histograms (lanes stage-1 targeting): the opcode FOLLOWING
@@ -1554,27 +1552,17 @@ namespace jai::vm {
         checked_result<script_value> construct_instance(std::shared_ptr<script_class_definition> class_def,
                                                         std::shared_ptr<environment> definition_env,
                                                         const std::vector<script_value>& args, bool check_access = true);
-        // Everything before the ctor body (overload resolve, instance, init_env + binds,
-        // initializer chains, field inits); success value = the new instance ('this');
-        // captured_out = the arguments taken ahead of that code, when it runs any (the body binds them)
+        // detail::begin_construction under this backend: success value = the new instance ('this'); captured_out = the
+        // arguments taken ahead of the code the construction runs before the body, when it runs any (the body binds them);
+        // caller = the frame whose class a private constructor's access is checked against (null: the current context)
         checked_result<script_value> construct_instance_pre_body(const std::shared_ptr<script_class_definition>& class_def,
                                                         const std::shared_ptr<environment>& definition_env,
                                                         const std::vector<script_value>& args,
                                                         std::shared_ptr<function_decl>& matching_ctor_out,
                                                         std::vector<script_value>& captured_out,
                                                         const frame* caller, bool check_access);
-        // `ctor`'s member initialization on an instance under construction: its initializer list (a base constructor, or the
-        // whole delegated-to constructor) and then the field initializers; the body is the caller's. captured_out (the
-        // outermost constructor only): the arguments taken ahead of that code, when it runs any
-        checked_result<script_value> initialize_members(const std::shared_ptr<script_class_definition>& class_def,
-                                                        const std::shared_ptr<environment>& definition_env,
-                                                        const std::shared_ptr<class_instance>& instance,
-                                                        const script_value& this_value,
-                                                        const std::shared_ptr<function_decl>& matching_ctor,
-                                                        const std::vector<script_value>& args,
-                                                        std::optional<detail::call_depth_guard>& initializer_depth,
-                                                        size_t delegation_depth,
-                                                        std::vector<script_value>* captured_out);
+        // What the vm lends the construction kernel (detail/construction.hpp)
+        struct construction_lender;
         // Construction protocol native, ctor BODY on the dispatch loop (op_new + direct
         // ctor calls); result_stamp = the shared_ptr arm's post-call type stamp
         op_status enter_constructor_in_loop(frame& f,
@@ -1589,9 +1577,6 @@ namespace jai::vm {
         // op_new's class name resolved now: the cell, and the constructor's thunk read once per value at the site
         script_value* new_class_cell(frame& f, const vm_instruction& ins, const type_info& cls);
         const script_callable_thunk* new_constructor_thunk(const call_site& site, const script_value& ctor);
-        void stamp_literal_field_initializers(const std::shared_ptr<class_instance>& instance,
-                                              const std::shared_ptr<script_class_definition>& class_def,
-                                              bool skip_parent_recursion);
         checked_result<void> evaluate_field_initializers(std::shared_ptr<class_instance> instance,
                                          std::shared_ptr<script_class_definition> class_def,
                                          std::shared_ptr<environment> init_env,

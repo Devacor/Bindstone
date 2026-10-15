@@ -1083,6 +1083,8 @@ namespace jai {
         type_info* get_type_info_reference(type_info* referenced_type);
         type_info* get_type_info_declared_reference(type_info* referenced_type);
         type_info* get_type_info_function(type_info* return_type, const std::vector<type_info*>& arg_types);
+        // the type every function value carries (void(), interned once per engine)
+        type_info* get_type_info_untyped_function();
 
         // Get or create type_info for object types (uses class_definition's type_info)
         type_info* get_type_info_object(const std::string& class_name);

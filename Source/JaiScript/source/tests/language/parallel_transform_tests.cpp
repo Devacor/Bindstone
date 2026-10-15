@@ -2028,6 +2028,31 @@ public:
 			check_true(msg.find("custom operator dispatch on class instances is not admitted in a parallel body") != std::string::npos);
 		});
 
+		test("custom_arithmetic_comparison_and_unary_operators_deny_with_the_verdict", [this]() {
+			// the operator wall never dispatches a class operator on a worker: one the class declares raises the verdict instead
+			// of falling to the builtin meaning's 'Invalid operands'
+			auto e = make_engine();
+			auto r = e->execute(R"(
+				class Vo {
+					int v = 1;
+					Vo operator+(Vo o) { Vo r; r.v = v + o.v; return r; }
+					bool operator<(Vo o) { return v < o.v; }
+					Vo operator-() { Vo r; r.v = -v; return r; }
+				}
+				class Plain { int v = 1; }
+				array<Vo> vs = [Vo(), Vo()];
+				function t(function f) -> string { string r = "none"; try { f(); } catch (err) { r = err; } return r; }
+				string a = t([&]() { parallel_for (auto& v : vs) { v = v + v; } });
+				string c = t([&]() { parallel_for (auto& v : vs) { if (v < v) { v.v = 3; } } });
+				string d = t([&]() { parallel_for (auto& v : vs) { v = -v; } });
+				array<Plain> ps = [Plain(), Plain()];
+				string p = t([&]() { parallel_for (auto& q : ps) { q.v = q.v + 1; } });
+				a + "|" + c + "|" + d + "|" + p + "|" + ps[0].v;
+			)");
+			const std::string verdict = "custom operator dispatch on class instances is not admitted in a parallel body";
+			check_eq(verdict + "|" + verdict + "|" + verdict + "|none|2", r.as<std::string>());
+		});
+
 		test("class_changing_assignment_denied_with_verdict", [this]() {
 			// An assignment of another class into a by-value slot re-classes the slot's object (no
 			// slicing): its dropped levels' destructors and the class registry are not worker territory

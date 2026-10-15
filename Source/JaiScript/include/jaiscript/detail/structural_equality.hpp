@@ -18,6 +18,24 @@ namespace jai::detail {
     inline constexpr std::string_view structural_equality_depth_text =
         "Cannot compare: the values nest deeper than 200 levels";
 
+    inline constexpr const char* parallel_operator_verdict_text =
+        "custom operator dispatch on class instances is not admitted in a parallel body";
+
+    // The class of a class-instance operand (null for anything else); the parallel operator wall reads it without copying a
+    // method value
+    inline const class_definition* operand_instance_class(const script_value& v) {
+        const script_value& d = v.is_reference() ? v.deref() : v;
+        if (!d.is_object()) { return nullptr; }
+        auto holder = const_cast<script_value&>(d).get_object_holder();
+        if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return nullptr; }
+        return static_cast<class_instance*>(holder->data.get())->get_class_definition();
+    }
+
+    inline bool instance_declares_operator(const script_value& v, uint64_t id) {
+        const class_definition* cd = operand_instance_class(v);
+        return cd && cd->defines_method(id);
+    }
+
     struct equality_depth_scope {
         size_t& depth;
         explicit equality_depth_scope(size_t& d) : depth(d) { ++depth; }

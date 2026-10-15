@@ -20,20 +20,24 @@ working set is evicted between lookups: the slot line (`slots_[i].e`) and the en
 entry). In the JaiDoom timedemo map lookup is 4.6% of samples; the int-key probe is 3.4%, of which 1.7% is the entry's
 key read and 1.0% the slot load, and the hash and compare arithmetic about 0.2%. Probe counts are 1.3 to 2.0.
 
-The window removes the probe: a 124-key map's window is 124 pointers (1 KB) that stay resident, and a hit reads no key.
+A window removes the probe: a 124-key map's window is 124 pointers (1 KB) that stay resident, and a hit reads no key.
 The entry is still touched for its value, so the window recovers the slot and probe share, not the entry line. Values
-held where the window points (stage B) are what removes the second miss.
+held where the window points (stage B) are what removes the second miss. Neither is built.
 
 ## What does not change
 
-- Key order where it is observed (iteration, serialization), hashed lookup everywhere else (the map-order ruling).
-- Keys never coerce: an int key 1 and a float key 1.0 stay distinct; `map<string,int>` rejects an int key as today.
+- Key order where it is observed (iteration, serialization), hashed lookup everywhere else.
+- Keys never coerce: an int key 1 and a float key 1.0 stay distinct; `map<string,int>` rejects an int key.
 - `map<var,var>` stays fully dynamic.
 - Entries never move: a pointer or reference to a key or value stays valid until that entry is erased.
 - The lane memo stays invisible; map+key references re-resolve by key.
 - No Debug/Release difference; both backends at parity; hot reload keeps live maps.
 
-## Stage A: the window (parked; its code lives on branch `typed-map-a`, not on master)
+## Stage A: the int-key window (prototyped, not adopted)
+
+An int-key window (entry pointers indexed by `k - base`, opened at rehash when int keys are dense) was prototyped and
+not adopted: it slowed every map that did not qualify. A later attempt must add no field reads or insert bookkeeping for
+maps without a window. `script_map`'s int-key path is `find_int_entry`. The prototype's shape:
 
 Same TYPEID, same `strong_ptr<script_map>` node identity, same entries.
 
@@ -54,39 +58,18 @@ Same TYPEID, same `strong_ptr<script_map>` node identity, same entries.
   for the next rehash.
 - **Erase** clears the key's window slot. **Copy** takes the source's window shape and indexes its own entries.
   **Move** and **clear** move or drop the window with the entries.
-- **Lookup lanes**: `find_int` (the int key path of `find_entry`, `lookup`, `lookup_int`, `recall`, `find_or_insert`)
-  tests the window first; the probe is unchanged. String and other keys take exactly the path they took before.
+- **Lookup lanes**: the int key path of `lookup`, `lookup_int`, `recall` and `find_or_insert` tests the window first;
+  the probe is unchanged. String and other keys take the ordinary path.
 
 Placement inside the window does not depend on insertion order: a clustered set filled in any order ends indexed at the
 rehash after it becomes quarter-dense, and every later key in range joins at once.
 
-## Stage A measured: parked
+Why it lost: the window wins only where it applies and costs every other map: the extra fields lengthen the map object
+every lookup reads, and every int insert pays the bookkeeping. JaiDoom never opens a window: its sprite maps fill lazily
+in first-use order, so their lump keys sit near 10% of their span, under the quarter density a window needs. A placement
+rule that catches lazily filled sparse key sets is the open problem.
 
-Stage A is parked on branch `typed-map-a` and does not land. Fresh-copy micros (9 alternating rounds, every run from a
-fresh copy of its exe, paired medians) against its base:
-
-| case | change |
-|---|---|
-| clustered `map<int>` reads (124 keys over 400) | -5.4% to -5.6% |
-| sparse int reads | +3.9% |
-| short / long string-key reads | +2.0% / +2.3% |
-| building 100 dense keys | +8.5% |
-| building 100 sparse keys | +10.1% |
-| building a 2-key map | +3.2% |
-| JaiDoom timedemo (whole program, 9 rounds) | +0.7% |
-| Gator Quest, 4 bots (whole program, 9 rounds) | +0.25% |
-
-The window wins only where it applies and costs every other map: the extra fields lengthen the map object every lookup
-reads, and every int insert pays the bookkeeping. JaiDoom, the workload it was meant for, never opens a window: its
-sprite maps fill lazily in first-use order, so their lump keys sit near 10% of their span, under the quarter density a
-window needs. DOOM's map-lookup share also swings between single sampled runs (1.6% to 7.2% of in-exe samples on the same
-build) with the box's cache pressure, which marks it as miss-bound and makes one profile no verdict; the timing A/B is.
-
-What a later attempt has to beat: a lookup path no longer than today's for maps that never qualify (no field reads past
-the probe's, no insert bookkeeping on a map without a window), and a placement rule that catches lazily filled sparse
-key sets, which a density window cannot.
-
-## Stage B: values held inline (after stage A is measured)
+## Stage B (proposal): values held inline
 
 Typed values (int, float, bool) in raw storage, and a window that reaches the value without touching an 88-byte entry,
 so a hit is one resident line. Hard parts:
@@ -102,12 +85,12 @@ so a hit is one resident line. Hard parts:
    documents; inline values need storage that never moves (pages) or a holder audit of every `&it->second` user that
    keeps the pointer across a store.
 4. **Hot read lanes**: only the fast check (int key, inside the window, present) stays inline in the VM's map-read
-   lanes; the rest goes out of line (`JAI_NOINLINE`). A first stage-A attempt that stored pairs in dense pages and
-   placed keys only on admission (no migration) left a scrambled clustered fill mostly in the hash part and slowed string
-   reads through the larger inline lookup; the window replaced it.
-5. **Parallel.** A window hit is pure loads: no allocation, no counts. Worker stores follow today's rules.
+   lanes; the rest goes out of line (`JAI_NOINLINE`). Storing pairs in dense pages and placing keys only on admission
+   (no migration) leaves a scrambled clustered fill mostly in the hash part and slows string reads through the larger
+   inline lookup.
+5. **Parallel.** A window hit is pure loads: no allocation, no counts. Worker stores follow the ordinary rules.
 
-**Stage C (only if measured worthwhile): typed string keys** (a raw `strong_ptr<script_string>` with no `script_value`
+**Stage C (proposal, only if measured worthwhile): typed string keys** (a raw `strong_ptr<script_string>` with no `script_value`
 around it). Short string keys already compare 8 bytes beside the hash; their remaining cost is the slot and entry loads.
 
 ## Gates

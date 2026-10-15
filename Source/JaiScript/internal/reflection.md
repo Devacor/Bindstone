@@ -1,8 +1,8 @@
 # Script-side reflection: the `reflect::` API
 
-**Status: DESIGN — the front door.** This doc is the whole story for using reflection.
-The machinery behind it (access enforcement mechanics, retention work, entry-shape details,
-parity proofs, staging, costs) lives in the companion: [reflection_design.md](reflection_design.md).
+The `reflect::` API as built (`include/jaiscript/stdlib/reflection.hpp`). This doc is the whole
+story for using reflection. The machinery behind it (access enforcement mechanics, retention,
+entry-shape details, parity) lives in the companion: [reflection_design.md](reflection_design.md).
 Read this one first; dip into the companion only when you need the *why*.
 
 Reflection is three small groups of builtins over data the runtime already keeps: registered
@@ -84,8 +84,8 @@ reflect::is_enabled(jai::filesystem) // -> bool: may this engine perform gated f
 ```
 
 Namespaces need no machinery of their own: `reflect::functions()` returns qualified names, so
-a namespace listing is a prefix filter (`f.starts_with("combat::")`). A dedicated
-`reflect::functions("combat")` overload is sugar the companion stages for v2.
+a namespace listing is a prefix filter (`f.starts_with("combat::")`). `reflect::functions()`
+takes no arguments.
 
 `instances` and `generation` are the tool loop: an editor polls one integer, and re-enumerates
 only when it moved. Queries concern **this engine**, not another engine's host registrations.

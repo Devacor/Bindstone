@@ -108,7 +108,7 @@ same file executed again for another context rewrites it in place.
 **The rule for deferred closures (signal receivers, stored hooks): reference only Tier 1
 names.** Receive the context as a hook *parameter* and let closures capture that; never
 read injected globals or module-scope vars from inside a closure that outlives the file's
-execution. (Pinned by `module_scope_var_is_shared_across_executes` and
+execution. (Pinned by `module_scope_var_is_shared_across_executes_of_the_same_unit` and
 `function_local_capture_survives_and_pins`.)
 
 ## Diagnostics

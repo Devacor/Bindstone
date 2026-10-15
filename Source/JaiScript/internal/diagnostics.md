@@ -3,11 +3,11 @@
 Every runtime error text is byte-identical on both backends (the interpreter and the vm raise
 through the same kernels or through byte-parallel twins). This catalog lists the texts a script
 can observe, and an uncaught error's `what()` is the same text (the error code's category message stands in only
-for an error that carries no text), grouped by family. Four families were redesigned
-in one pass (null receiver, "no member", arity/overloads, typed boundary); the rest are listed
-with a one-line recommendation each and are otherwise untouched.
+for an error that carries no text), grouped by family. Families A-D (null receiver, "no member",
+arity/overloads, typed boundary) share one voice; the other families are listed with a one-line
+recommendation each.
 
-Conventions the redesigned families follow (the static checker's voice, with the runtime's
+Conventions families A-D follow (the static checker's voice, with the runtime's
 capitalized first word):
 
 - names are quoted (`'x'`, `'fib'`, `'Vec2.dot'`), types are not (`int`, `string`, `Vec2`,
@@ -62,44 +62,44 @@ raise the refusal above. Host-supplied source and bytecode bytes remain usable.
 
 ## Family A - null receiver (`member_access_on_null`, kernel `detail/null_member_diagnostic.hpp`)
 
-| receiver shape | before | after (access) | after (call) |
-|---|---|---|---|
-| named (`v8.push`) | `Member 'push' accessed on null: 'v8' is null` | `Cannot access 'push' on null ('v8' is null)` | `Cannot call 'push' on null ('v8' is null)` |
-| call result (`f().x`) | `Member 'x' accessed on null: 'f(...)' returned null` | `Cannot access 'x' on null ('f(...)' returned null)` | `Cannot call 'x' on null ('f(...)' returned null)` |
-| unnamed (`a[i].x`, `(c ? a : b).x`) | `Member 'x' accessed on null value` | `Cannot access 'x' on null` | `Cannot call 'x' on null` |
+| receiver shape | access | call |
+|---|---|---|
+| named (`v8.push`) | `Cannot access 'push' on null ('v8' is null)` | `Cannot call 'push' on null ('v8' is null)` |
+| call result (`f().x`) | `Cannot access 'x' on null ('f(...)' returned null)` | `Cannot call 'x' on null ('f(...)' returned null)` |
+| unnamed (`a[i].x`, `(c ? a : b).x`) | `Cannot access 'x' on null` | `Cannot call 'x' on null` |
 
 Call vs access: the interpreter's generic call path marks the callee lookup
 (`member_callee_lookup_`, consumed at `visit_member_expr` entry); the vm's `op_probe_member`
-and `exec_call_method` pass `as_callee` to `member_access_value`. The message no longer restates "member".
+and `exec_call_method` pass `as_callee` to `member_access_value`.
 
 Sites: `interpreter.cpp` visit_member_expr; `vm_backend.cpp` exec_probe_member,
 member_access_value.
 
 ## Family B - "no member" (`member_not_found` / string exceptions)
 
-| receiver | before | after |
-|---|---|---|
-| int/float/bool/char/function | `int has no member 'nosuch'` | unchanged |
-| string | `String has no method 'foo'` | `string has no member 'foo'` |
-| array | `Array has no method 'foo'` | `array has no member 'foo'` |
-| map | `Map has no method or key 'foo'` | `map has no member or key 'foo'` |
-| weak_ptr | `weak_ptr has no method 'x'` | `weak_ptr has no member 'x'` |
-| coroutine_handle | `coroutine_handle has no member 'x'` | unchanged |
-| object of class Vec2 | `Object has no member 'x'` | `Vec2 has no member 'x'` (`object has no member 'x'` when no class is known) |
-| `super.x` | `Parent class has no method 'x'` | `parent class Base has no member 'x'` |
-| `C::s` | `Class 'C' has no static member 's'` | `class C has no static member 's'` |
-| `C.s`, `C.f()`, `C.s = v` on a class name (a dot reaches an instance's members) | `function has no member 's'` (a store: `Cannot assign to member of non-object type`) | `'C' is a class; use C::s` (a read or call: code `member_not_found`; a store raises the text alone); a parallel worker reads `A class's members are reached with '::'`; the strict checker reports the same text at load (`detail/null_member_diagnostic.hpp` `class_dot_member_text`) |
-| `E::v` on an enum (C++ scoped access; `E.v` reads the same value) | `Class 'E' not found` | the value; a name the enum does not declare raises `No value 'v' in enum 'E'` (the checker: `no value 'v' in enum 'E'`; `detail/enum_value.hpp`) |
-| store to a missing member | `Cannot assign to non-existent member 'x'` | `Cannot assign to 'x': Vec2 has no such member` |
-| store to a read-only C++ property (binder `.property()` with a getter only / a `nullptr` setter / a member pointer whose type is not copy-assignable, e.g. a signal), or to a host-registered namespace entry (`string::to_lower = v`; `internal/namespaces.md`) | (silent no-op; `Class 'string' not found` for the namespace entry) | `Cannot assign to 'value': it is read-only` - every spelling: `obj.value = v`, `this.value = v`, a bare `value = v` in a hybrid method, compound and `++`/`--` (the getter and the arithmetic run first), stores through a PROPERTY reference (`auto& r = value; r = v`, `f(value)` into a `T&` parameter), `reflect::set`; a script `_set_value` override or a same-named script field in the chain takes the store instead; serialization loads (`from_json`, the binary archive) keep discarding the setter's result and skip silently. The static checker reports the same mistake at load on a closed class (`cannot assign to read-only property 'value'`, `internal/static_checking.md` Members) |
-| mutating or aliasing a map KEY through a range-for pair (`for (auto kv : m)` / `for (auto& kv : m)` over a statically known map, C++ `pair<const K, V>`: a string mutator on `kv.first` - `kv.first.to_upper()`, `insert`, `erase`, ... (`k_string_mutator_method_names`) - a store `kv.first = v`, compound `kv.first += "hey"`, `++`/`--`; or a mutable alias: `var& cheeky = kv.first` / `auto&` / `T&`, `shared_ptr<var> cheeky = kv.first` / `shared_ptr<auto>` / a store into a shared_ptr-declared variable, `cast<T&>` / `cast<shared_ptr<T>>` of the key, `kv.first` passed where every viable same-script overload takes `T&` or `shared_ptr<T>`, `return kv.first` from a `-> T&` / `-> shared_ptr<T>` function; the marker follows the pair through `var p = kv` / `auto& p = kv` and a ternary over keys) | (the key node was rewritten in place: `{"A":1}`, lookups and the ordering invariant broken) | STATIC ONLY: the checker rejects the load under strict (warn mode prints it) with `cannot mutate 'kv.first': map keys are read-only` for the mutation spellings and `cannot alias 'kv.first': map keys are read-only (copy it instead: var k = kv.first)` for the alias spellings (`a map key` replaces the spelling when the operand is a ternary; `internal/static_checking.md`). The runtime raises nothing: strings are copy-on-write at the in-place write gate (`internal/invariants.md` 11), so the copy (`var okay = kv.first`) and the paths the checker cannot see (`var m`, `m.keys()[0].to_upper()`) mutate the copy alone and the map stays intact - `first` is a shared handle in both bindings, no per-iteration copy |
-| calling a plain value (`obj.x(...)`, `f(...)` with `f = 5`) | caught: `` (empty); uncaught: `Cannot call non-function value` | `Cannot call 'x': it is an int, not a function` (member or identifier callee); `Cannot call a value of type int: it is not a function` (computed callee: `fs[0](x)`, `pick()(x)`) |
+| receiver | text |
+|---|---|
+| int/float/bool/char/function | `int has no member 'nosuch'` |
+| string | `string has no member 'foo'` |
+| array | `array has no member 'foo'` |
+| map | `map has no member or key 'foo'` |
+| weak_ptr | `weak_ptr has no member 'x'` |
+| coroutine_handle | `coroutine_handle has no member 'x'` |
+| object of class Vec2 | `Vec2 has no member 'x'` (`object has no member 'x'` when no class is known) |
+| `super.x` | `parent class Base has no member 'x'` |
+| `C::s` | `class C has no static member 's'` |
+| `C.s`, `C.f()`, `C.s = v` on a class name (a dot reaches an instance's members) | `'C' is a class; use C::s` (a read or call: code `member_not_found`; a store raises the text alone); a parallel worker reads `A class's members are reached with '::'`; the strict checker reports the same text at load (`detail/null_member_diagnostic.hpp` `class_dot_member_text`) |
+| `E::v` on an enum (C++ scoped access; `E.v` reads the same value) | the value; a name the enum does not declare raises `No value 'v' in enum 'E'` (the checker: `no value 'v' in enum 'E'`; `detail/enum_value.hpp`) |
+| store to a missing member | `Cannot assign to 'x': Vec2 has no such member` |
+| store to a read-only C++ property (binder `.property()` with a getter only / a `nullptr` setter / a member pointer whose type is not copy-assignable, e.g. a signal), or to a host-registered namespace entry (`string::to_lower = v`; `internal/namespaces.md`) | `Cannot assign to 'value': it is read-only` - every spelling: `obj.value = v`, `this.value = v`, a bare `value = v` in a hybrid method, compound and `++`/`--` (the getter and the arithmetic run first), stores through a PROPERTY reference (`auto& r = value; r = v`, `f(value)` into a `T&` parameter), `reflect::set`; a script `_set_value` override or a same-named script field in the chain takes the store instead; serialization loads (`from_json`, the binary archive) keep discarding the setter's result and skip silently. The static checker reports the same mistake at load on a closed class (`cannot assign to read-only property 'value'`, `internal/static_checking.md` Members) |
+| mutating or aliasing a map KEY through a range-for pair (`for (auto kv : m)` / `for (auto& kv : m)` over a statically known map, C++ `pair<const K, V>`: a string mutator on `kv.first` - `kv.first.to_upper()`, `insert`, `erase`, ... (`k_string_mutator_method_names`) - a store `kv.first = v`, compound `kv.first += "hey"`, `++`/`--`; or a mutable alias: `var& cheeky = kv.first` / `auto&` / `T&`, `shared_ptr<var> cheeky = kv.first` / `shared_ptr<auto>` / a store into a shared_ptr-declared variable, `cast<T&>` / `cast<shared_ptr<T>>` of the key, `kv.first` passed where every viable same-script overload takes `T&` or `shared_ptr<T>`, `return kv.first` from a `-> T&` / `-> shared_ptr<T>` function; the marker follows the pair through `var p = kv` / `auto& p = kv` and a ternary over keys) | STATIC ONLY: the checker rejects the load under strict (warn mode prints it) with `cannot mutate 'kv.first': map keys are read-only` for the mutation spellings and `cannot alias 'kv.first': map keys are read-only (copy it instead: var k = kv.first)` for the alias spellings (`a map key` replaces the spelling when the operand is a ternary; `internal/static_checking.md`). The runtime raises nothing: strings are copy-on-write at the in-place write gate (`internal/invariants.md` 11), so the copy (`var okay = kv.first`) and the paths the checker cannot see (`var m`, `m.keys()[0].to_upper()`) mutate the copy alone and the map stays intact - `first` is a shared handle in both bindings, no per-iteration copy |
+| calling a plain value (`obj.x(...)`, `f(...)` with `f = 5`) | `Cannot call 'x': it is an int, not a function` (member or identifier callee); `Cannot call a value of type int: it is not a function` (computed callee: `fs[0](x)`, `pick()(x)`) |
 
 The callee's type spells the class name for class instances (`it is a Vec2`), the base type
 otherwise; the article follows the spelling (`an int`, `a string`); a null callee reads
 `Cannot call 'f': it is null, not a function` / `Cannot call null: it is not a function`.
-`reflect::` keeps its own host-API texts (`Class 'C' has no method 'm'` in
-`stdlib/reflection.hpp`), outside this pass.
+`reflect::` keeps its own prefixed texts (`reflect::invoke: 'C' has no method 'm'`,
+`reflect::get: 'C' has no member 'x'` in `stdlib/reflection.hpp`).
 
 Sites: `interpreter.cpp` visit_call_expr (method fast path + generic callable check),
 visit_member_expr, assign_member_value; `vm_backend.cpp` exec_probe_callee, exec_probe_member,
@@ -110,38 +110,38 @@ registers a rejecting `_set_<name>` for a getter-only property (`dynamic_binder.
 path), and every store landing on both backends already funnels to that setter
 (`member_scope.hpp` write_cpp_property, assign_member_value / assign_member's user_accessor
 call, `value.cpp` store_property for PROPERTY references, `reflection.hpp` reflect::set), so
-no backend site names the text. `has_property_setter()` / `get_property_setter_id()` answer
-non-zero for a read-only property (the rejection IS the setter); `is_read_only_property()`
-is the writability question.
+no backend site names the text. `get_property_setter_id()` answers non-zero for a read-only
+property (the rejection IS the setter); `is_read_only_property()` answers whether the property
+is read-only.
 
 ## Family C - arity and overloads (`argument_count_mismatch`, `no_constructor_found`)
 
-| case | before | after |
-|---|---|---|
-| script function / method / coroutine | `Function expected 1 arguments but got 2` | `'fib' expects 1 argument, got 2` (methods by name: `'dot' expects 1 argument, got 0`) |
-| lambda | `Function expected 1 arguments but got 0` | `lambda expects 1 argument, got 0` |
-| same, on a parallel worker | (same) | `'fib' expects 1 argument` / `lambda expects 2 arguments` (no composed detail) |
-| script method overloads, none viable | `No matching overload found` | `No overload of 'dot' takes (int, string)` (worker: `No overload of 'dot' matches this call`) |
-| method whose overload list vanished (reload) | `No method overloads found` | `No overload of 'dot' exists` |
-| host function overloads (`engine.cpp` dispatchers) | `No matching overload found for 'f' with <symbol#2> arguments` (the count was passed as a symbol id) | `No overload of 'f' takes (int, string)` |
-| host `[]` overloads | `No matching overload found for '[]' with <symbol> arguments` | `No overload of '[]' takes (string)` |
-| namespace function overloads | `No matching overload in namespace 'ns' for <symbol> arguments` | `No overload of 'f' takes (int)` |
-| a second overload whose parameters differ from an earlier one's only by reference, both defined in one execute context (one host execute and everything it runs, its includes and the first loads of its imports; free, namespace, method, static method, constructor). A definition from another execute, or from a module's re-run, replaces the earlier one instead | (both coexisted, every call tied) | `'f(var x)' differs from 'f(var& x)' (line 3) only by reference; overloads must differ in parameter types or count` (strict reports it at load, same text) |
-| overloads that tie on the arguments (free, namespace, method, constructor) | (the first declared ran) | `Ambiguous call to 'hit' with (int, int): 'hit(int, float)' and 'hit(float, int)' match equally` (worker: `Ambiguous call to 'hit'`; strict reports it at load, lowercase) |
-| script constructor overloads | `No constructor found with matching arguments` | `No constructor of 'Vec2' takes (string)`; when no overload is viable and exactly one takes that many arguments, that one binds (its parameter converts the argument or raises family D's parameter text), and with several (`V(int)` and `V(bool)` called `V("s")`) none does: the overload miss. The same rule picks an ancestor initializer's and a delegation's target (`detail::sole_arity_candidate`). Among several method or constructor overloads a string never makes a `bool` parameter viable (the runtime scorer and the strict checker, which reports `no overload of 'm' matches this call` at load); a lone function's `bool` slot still takes a string's truthiness, and a program's free functions of one name are redefinitions (the last takes every call), not an overload set |
-| a class without a constructor called with arguments | `Default constructor takes no arguments` | an aggregate (every class in the chain constructor-less, no private or reference instance field) takes one initializer per field: `Too many initializers for 'Bare': it has 1 field, got 2`; any other class: `No constructor of 'Bare' takes (int, int)` (the strict checker reports the same texts at load with a lowercase first letter, `too many initializers for 'Bare': ...`, `no constructor of 'Bare' takes (int, int)`, when it knows the arguments) |
-| `: Base(...)` / ancestor initializer | `No matching constructor for ancestor class` | `No constructor of 'Base' takes (string)` |
-| an empty or implied `super()` (a constructor naming no initializer, a class declaring no constructor) over a base without a default constructor | (the base was never constructed) | `Base 'Cat' has no default constructor; call super(...)` (the strict checker reports it at load over script bases) |
-| `: this(...)` delegation | `No matching constructor found for this() delegation` | `No constructor of 'Vec2' takes (string)` |
-| C++ method overloads by count | `Method argument count mismatch: no overload accepts this number of arguments` | `No overload of 'dot' takes (int, string)` |
-| C++ method overloads by type | `No method overload matches the argument types` | `No overload of 'dot' takes (int, string)` |
+| case | text |
+|---|---|
+| script function / method / coroutine | `'fib' expects 1 argument, got 2` (methods by name: `'dot' expects 1 argument, got 0`) |
+| lambda | `lambda expects 1 argument, got 0` |
+| same, on a parallel worker | `'fib' expects 1 argument` / `lambda expects 2 arguments` (no composed detail) |
+| script method overloads, none viable | `No overload of 'dot' takes (int, string)` (worker: `No overload of 'dot' matches this call`) |
+| method whose overload list vanished (reload) | `No overload of 'dot' exists` |
+| host function overloads (`engine.cpp` dispatchers) | `No overload of 'f' takes (int, string)` |
+| host `[]` overloads | `No overload of '[]' takes (string)` |
+| namespace function overloads | `No overload of 'f' takes (int)` |
+| a second overload whose parameters differ from an earlier one's only by reference, both defined in one execute context (one host execute and everything it runs, its includes and the first loads of its imports; free, namespace, method, static method, constructor). A definition from another execute, or from a module's re-run, replaces the earlier one instead | `'f(var x)' differs from 'f(var& x)' (line 3) only by reference; overloads must differ in parameter types or count` (strict reports it at load, same text) |
+| overloads that tie on the arguments (free, namespace, method, constructor) | `Ambiguous call to 'hit' with (int, int): 'hit(int, float)' and 'hit(float, int)' match equally` (worker: `Ambiguous call to 'hit'`; strict reports it at load, lowercase) |
+| script constructor overloads | `No constructor of 'Vec2' takes (string)`; when no overload is viable and exactly one takes that many arguments, that one binds (its parameter converts the argument or raises family D's parameter text), and with several (`V(int)` and `V(bool)` called `V("s")`) none does: the overload miss. The same rule picks an ancestor initializer's and a delegation's target (`detail::sole_arity_candidate`). Among several method or constructor overloads a string never makes a `bool` parameter viable (the runtime scorer and the strict checker, which reports `no overload of 'm' matches this call` at load); a lone function's `bool` slot still takes a string's truthiness, and a program's free functions of one name are redefinitions (the last takes every call), not an overload set |
+| a class without a constructor called with arguments | an aggregate (every class in the chain constructor-less, no private or reference instance field) takes one initializer per field: `Too many initializers for 'Bare': it has 1 field, got 2`; any other class: `No constructor of 'Bare' takes (int, int)` (the strict checker reports the same texts at load with a lowercase first letter, `too many initializers for 'Bare': ...`, `no constructor of 'Bare' takes (int, int)`, when it knows the arguments) |
+| `: Base(...)` / ancestor initializer | `No constructor of 'Base' takes (string)` |
+| an empty or implied `super()` (a constructor naming no initializer, a class declaring no constructor) over a base without a default constructor | `Base 'Cat' has no default constructor; call super(...)` (the strict checker reports it at load over script bases) |
+| `: this(...)` delegation | `No constructor of 'Vec2' takes (string)` |
+| C++ method overloads by count | `No overload of 'dot' takes (int, string)` |
+| C++ method overloads by type | `No overload of 'dot' takes (int, string)` |
 
 The argument list spells the payload's type per argument (class names for objects, `null`,
-`array`, `map`, the primitives), at most 6 listed then `...`. Class qualification of method
-names (`'Vec2.dot'`) was NOT adopted: the vm's arity site (`call_script_function`) has no class
+`array`, `map`, the primitives), at most 6 listed then `...`. Method names are not
+class-qualified (`'Vec2.dot'`): the vm's arity site (`call_script_function`) has no class
 context, so both backends name the method alone (byte parity).
 
-Untouched in this family (builtin arity texts are their own consistent shape):
+Other texts in this family (builtin arity texts are their own consistent shape):
 `push() takes exactly one argument`, `size() takes no arguments`, ... (`{name}() takes ...`,
 ~90 texts in `interpreter.cpp`'s builtin registry, shared by both backends),
 `math::pow expects 2 arguments` (`math_intrinsics.hpp`), `weak_from_this() takes no arguments`,
@@ -154,20 +154,20 @@ Untouched in this family (builtin arity texts are their own consistent shape):
 One conversion table (`detail/typed_slot.hpp`), one text kernel
 (`class_definition.hpp` `detail::typed_slot_rejection`), the site names the slot.
 
-| site | before | after | slot-less shape (worker / unnamed site) |
-|---|---|---|---|
-| by-value parameter | `Type mismatch: expected int but got string` | `Cannot pass string to parameter 'n' of 'fib' (declared int)` (`of lambda` for lambdas); a `T&` parameter spells its reference: `Cannot pass float to parameter 'x' of 'inc' (declared int&)` | `Cannot pass string to an int parameter` |
-| typed return | `Type mismatch: expected int but got string` | `Cannot return string from 'f' (declared -> int)` | `Cannot return string from a function declared -> int` |
-| coroutine yield (a yield takes the declared type like a return; a bare `yield;` hands out nothing) | (yielded as is) | `Cannot yield string from 'g' (declared -> int)` | `Cannot yield string from a coroutine declared -> int` |
-| `=` / compound | `Type mismatch in assignment` | `Cannot assign string to 'x' (declared int)`; a store through a reference variable names it: `int& ry = y; ry = s` reads `Cannot assign string to 'ry' (declared int&)` | `Cannot assign string to a variable declared int` |
-| declaration | `Type mismatch in assignment` | `Cannot initialize 'x' (declared int) with string` | `Cannot initialize a variable declared int with string` |
-| reference declaration over storage of another type (`float& r = v` with `v` a var holding an int: a reference must reference) | (bound, stored the var's way) | `Cannot initialize 'r' (declared float&) with int`; a class reference takes T or a subclass (`Cannot initialize 'e' (declared Enemy&) with int`); strict reports a statically known one at load (`cannot initialize 'r' declared 'float&' with 'int'`) | `Cannot initialize a variable declared float& with int` |
-| instance field store (script, `set_field` host store) | `Type mismatch in assignment` | `Cannot assign string to field 's' of Vec2 (declared int)` | `Cannot assign string to a field declared int` |
-| static field store | `Type mismatch in assignment` | `Cannot assign string to static 's' of C (declared int)` | `Cannot assign string to a static declared int` |
-| class into class at `=` / field | `Incompatible class types` | the named shape (`Cannot assign B to 'x' (declared A)`) | as above |
-| handle variable (`weak_ptr<T> w`, `shared_ptr<T> p`) at declaration / `=` | `Cannot initialize weak_ptr<{}> from value-semantic object: use shared_ptr<T>`, `Cannot initialize weak_ptr<{}> with {}: use shared_ptr<T>`, `Cannot initialize weak_ptr<{}> from shared_ptr<{}>: type must match or be a subclass`, `Cannot assign value-semantic object to weak_ptr<{}>: use shared_ptr<T>`, `Cannot assign {} to weak_ptr<{}>: use shared_ptr<T>`, `Cannot assign shared_ptr<{}> to weak_ptr<{}>: type must match or be a subclass` (the `{}` placeholders never rendered), `Cannot assign any to shared_ptr<Foo>: no operator=({0}) defined` (a var-held payload spelled `any`, the second `{0}` never rendered) | the declaration / `=` shapes with the payload's type: `Cannot initialize 'w' (declared weak_ptr<Foo>) with Foo` / `with int` / `with Bar` (a `shared_ptr<Bar>` payload spells its class, like every handle source), `Cannot assign Foo to 'w' (declared weak_ptr<Foo>)`, `Cannot assign string to 'p' (declared shared_ptr<Foo>)` (no `operator=(string)` on the pointee), `Cannot initialize 'sp' (declared shared_ptr<P>) with int` (a primitive or container initializer; was `Cannot initialize shared_ptr with this type`); the field and parameter rows already read this way | `Cannot initialize a variable declared weak_ptr<Foo> with Foo`, `Cannot assign string to a variable declared Foo` (the kernel's slot-less shape spells a shared_ptr target by its pointee) |
-| class conversion at parameter / return | `Cannot convert B to A (no suitable single-argument constructor)` | unchanged (checked once: it names both classes and the missing conversion) | - |
-| container element boundary (every site) | `Cannot store 'string' in 'array<int>'` | `Cannot store string in array<int>` (types unquoted, like the rest of the family) | - |
+| site | text | slot-less shape (worker / unnamed site) |
+|---|---|---|
+| by-value parameter | `Cannot pass string to parameter 'n' of 'fib' (declared int)` (`of lambda` for lambdas); a `T&` parameter spells its reference: `Cannot pass float to parameter 'x' of 'inc' (declared int&)` | `Cannot pass string to an int parameter` |
+| typed return | `Cannot return string from 'f' (declared -> int)` | `Cannot return string from a function declared -> int` |
+| coroutine yield (a yield takes the declared type like a return; a bare `yield;` hands out nothing) | `Cannot yield string from 'g' (declared -> int)` | `Cannot yield string from a coroutine declared -> int` |
+| `=` / compound | `Cannot assign string to 'x' (declared int)`; a store through a reference variable names it: `int& ry = y; ry = s` reads `Cannot assign string to 'ry' (declared int&)` | `Cannot assign string to a variable declared int` |
+| declaration | `Cannot initialize 'x' (declared int) with string` | `Cannot initialize a variable declared int with string` |
+| reference declaration over storage of another type (`float& r = v` with `v` a var holding an int: a reference must reference) | `Cannot initialize 'r' (declared float&) with int`; a class reference takes T or a subclass (`Cannot initialize 'e' (declared Enemy&) with int`); strict reports a statically known one at load (`cannot initialize 'r' declared 'float&' with 'int'`) | `Cannot initialize a variable declared float& with int` |
+| instance field store (script, `set_field` host store) | `Cannot assign string to field 's' of Vec2 (declared int)` | `Cannot assign string to a field declared int` |
+| static field store | `Cannot assign string to static 's' of C (declared int)` | `Cannot assign string to a static declared int` |
+| class into class at `=` / field | the named shape (`Cannot assign B to 'x' (declared A)`) | as above |
+| handle variable (`weak_ptr<T> w`, `shared_ptr<T> p`) at declaration / `=` | the declaration / `=` shapes with the payload's type: `Cannot initialize 'w' (declared weak_ptr<Foo>) with Foo` / `with int` / `with Bar` (a `shared_ptr<Bar>` payload spells its class, like every handle source), `Cannot assign Foo to 'w' (declared weak_ptr<Foo>)`, `Cannot assign string to 'p' (declared shared_ptr<Foo>)` (no `operator=(string)` on the pointee), `Cannot initialize 'sp' (declared shared_ptr<P>) with int` (a primitive or container initializer); the field and parameter rows read the same way | `Cannot initialize a variable declared weak_ptr<Foo> with Foo`, `Cannot assign string to a variable declared Foo` (the kernel's slot-less shape spells a shared_ptr target by its pointee) |
+| class conversion at parameter / return | `Cannot convert B to A (no suitable single-argument constructor)` (it names both classes and the missing conversion) | - |
+| container element boundary (every site) | `Cannot store string in array<int>` (types unquoted, like the rest of the family) | - |
 
 Hot-reload migration never raises (an unconvertible value falls back to the new default), so
 no text there. `value.cpp`'s two `Type mismatch in assignment` throws are unreachable defensive
@@ -200,12 +200,9 @@ text only - a string, a char, a utf8_string; `string += int` raises by design, u
 `+`), `float f; f += "x"` is `Cannot apply '+=' to float and string`. Catchable, identical on
 both backends. `++`/`--` on a target that is not a
 number (any spelling: a variable, a member, an element, a bare field) is `Cannot apply '++' to
-string` / `Cannot apply '--' to bool` (`invalid_numeric_operand`, `detail::incdec_mismatch`),
-which a `catch` used to see as an empty string. An element or map entry target
-(`names[i] += 5`) evaluates `names[i] + 5` and stores it, so a string element concatenates.
-Before: the variable and static sites raised a bare `Type mismatch` (a `catch` saw an empty
-string), the member sites `Invalid operands for +=`, and a float target with a non-numeric
-operand escaped every `try` as a C++ exception (`script_value is not a float or integer`).
+string` / `Cannot apply '--' to bool` (`invalid_numeric_operand`, `detail::incdec_mismatch`).
+An element or map entry target (`names[i] += 5`) evaluates `names[i] + 5` and stores it, so a
+string element concatenates.
 
 ## Checked float-to-integer conversion (`invalid_numeric_operand`)
 
@@ -224,9 +221,8 @@ be in `[0, 2^64)`. Integer seeds retain their existing modulo-2^64 interpretatio
 The upper bounds are exclusive because converting either maximum integer to a
 double rounds up. These checks apply even in a wrapping integer-arithmetic build.
 
-This is a scalar/script-boundary change, not a redefinition of every host or
-container conversion. The public C++ `script_value::as_int()` accessor retains its
-existing saturating policy (NaN to zero).
+The check covers scalar and script boundaries, not every host or container
+conversion. The public C++ `script_value::as_int()` accessor saturates (NaN to zero).
 
 ## Reserved engine namespaces (`type_mismatch`)
 
@@ -429,7 +425,7 @@ Each is recognized only in that position, so a script using one of these words a
 
 ## Const (family B, `type_mismatch`; kernel `detail/const_rules.hpp`, internal/const.md)
 
-A write through a const (docs/const.md 2.2-3) is a load error under strict, a warning under warn, and under warn and off
+A write through a const (internal/const.md 2.2-3) is a load error under strict, a warning under warn, and under warn and off
 the node raises its run-time text when it is reached, before any of it runs. The checker's walk stamps the verdict in every
 mode (the proof pass), so both backends raise the same text at the same node. A path through a `var` is decided when it runs:
 its values are walked without running code, and a write that crosses a handle runs.
@@ -449,7 +445,7 @@ its values are walked without running code, and a write that crosses a handle ru
 | a const without an initializer | - | parse error: `const 'x' needs an initializer: const int x = value;` |
 | `engine::add_global` / `add_global_ref` over a const | `Cannot assign to 'LIMIT': it is read-only` (thrown to the host) | - |
 
-The general redefinition rule (docs/const.md 4.3) reports two definitions of one signature in one unit as `'m' is already
+The general redefinition rule (internal/const.md 4.3) reports two definitions of one signature in one unit as `'m' is already
 defined with parameters (int&) at 4:5` (a program-scope function: `'f' is already defined at 4:5`), and a function another
 unit already defined as the warning `'f' redefines the function defined in <file>:4`.
 
@@ -497,7 +493,7 @@ same rule.
 A caught error's `e.stack` and a host's `format_stack_trace()` list the innermost 64 frames; a deeper stack ends with one
 line `... N more frames` (`stack_frame::elided`, `cap_stack_trace` in `core/types.hpp`, both backends).
 
-## Untouched families (one-line recommendation each)
+## Other families (one-line recommendation each)
 
 | family | representative texts | recommendation |
 |---|---|---|
@@ -509,7 +505,7 @@ line `... N more frames` (`stack_frame::elided`, `cap_stack_trace` in `core/type
 | `auto` container inference | `Array 'auto' requires homogeneous elements - type mismatch at index 3`, `Array 'auto' requires homogeneous class types - mismatch at index 3`, `Map 'auto' requires homogeneous values - type mismatch at index 3`, `Map 'auto' requires homogeneous class types - mismatch at index 3` (the index rides the pre-interned count table; past 63 it is interned on the main thread, and a worker gets the index-free lead, `... - type mismatch`; texts in `detail/arity_diagnostic.hpp`), `Map 'auto' requires homogeneous keys`, `Map 'auto' requires homogeneous values` | keep; name the two types seen (`int at 0, string at 3`) |
 | iteration | `Cannot iterate int: not an array, map, string or coroutine` (range-`for` over anything else; the type spelled like family D's source - `Foo`, `null`, `float`; `detail/range_for_diagnostic.hpp`), `'pair' type not registered - make sure stdlib is loaded` | keep |
 | arithmetic | `Division by zero` (`/` and `/=` on every kind and destination, code `division_by_zero`), `Modulo by zero` (`%` and `%=`, code `modulo_by_zero`), `Integer overflow in '/'`, `Invalid operands for + operator`, `Cannot compare: the values nest deeper than 200 levels` (memberwise `==` safety cap), `Left operand must be numeric`, `Bitwise & requires integer operands`, `Shift amount must be between 0 and 63`, `Unary minus requires numeric operand`, `Unary plus requires numeric operand`, `Invalid operands for < operator` (and `<=`, `>`, `>=`; also a C++20-rewritten `a < b` whose `operator<=>` returns no number); parse: `operator! cannot be declared: !v is !to_bool(v); declare bool to_bool()`; member: `'heal' is a method of Player; call it with player.heal() or bind it with reflect::bind(player, "heal")` (a value type's method: `... or wrap the call in a lambda`; a bare name inside a method: `'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, "heal")`; runtime and the strict checker, `detail/method_value.hpp`; the checker reports a builtin method of a declared array, map, string or utf8_string read without a call too, `'push' is a method of array; call it with a.push() or wrap the call in a lambda`, a builtin name winning over a map key as at run time) | `Invalid operands for + operator` should name the operand types (`Cannot apply + to string and map`); the rest keep |
-| indexing | `Array index 5 out of bounds for array of size 3`, `Array index must be an integer`, `String index must be an integer`, `Cannot assign int to a string character (it takes a char or a string)` (a string or utf8_string subscript store of anything but a char or text; `detail/string_element.hpp`), `Subscript can only be used on arrays, maps, or types with [] operator`, `at() index out of bounds`, `Cannot pop from empty array`, `Cannot get front of empty array`; a compound / `++` / `--` whose subscript read yields no lvalue (an rvalue base `f()[i] += 1`, a missing map key `m[k] += "s"`) raises `Cannot assign to rvalue expression` after the arithmetic, both backends (the interpreter used to re-dispatch a synthetic `=` there: a silent insert) | keep (named and specific) |
+| indexing | `Array index 5 out of bounds for array of size 3`, `Array index must be an integer`, `String index must be an integer`, `Cannot assign int to a string character (it takes a char or a string)` (a string or utf8_string subscript store of anything but a char or text; `detail/string_element.hpp`), `Subscript can only be used on arrays, maps, or types with [] operator`, `at() index out of bounds`, `Cannot pop from empty array`, `Cannot get front of empty array`; a compound / `++` / `--` whose subscript read yields no lvalue (an rvalue base `f()[i] += 1`, a missing map key `m[k] += "s"`) raises `Cannot assign to rvalue expression` after the arithmetic, both backends | keep (named and specific) |
 | builtin argument checks | `find() first argument must be a string`, `sort() comparator must be a function`, `pad_left() padding character cannot be empty`, `to_int() base must be 0 or between 2 and 36` | keep; consistent `name() ... must be ...` shape |
 | strings and UTF-8 | `code() needs a string of exactly one UTF-8 character`, `partition() separator cannot be empty`, `split() second argument must be an integer`, `string::from_code expects a Unicode code point (0 to 0x10FFFF, no surrogate)`, `string::join expects an array of strings`, `string::repeat count cannot be negative`, `string::pad_left fill must be a char or a non-empty string`; an unknown namespace member names itself: `Undefined variable 'string::join'` (a namespace with no such entry and no class of the namespace's name); a utf8_string names its kind: `utf8_string has no member 'to_utf8'`, `Cannot iterate a utf8_string by reference: its characters are not lvalues (use for (auto c : s))`, and shares the string subscript texts (`String index 4 out of bounds for string of size 4` counts characters) | keep; the `string::` texts spell the qualified name |
 | time and dates | `time::now expects no arguments`, `time::sleep expects a number of seconds`, `time::date_from_unix: the instant is outside the supported range (years 1 to 9999)`, `time::date: month must be 1 to 12, got 13`, `time::date: day 31 does not exist in 2024-04` (a refused field store leaves the date unchanged), `time::date: hour takes an int, got float`, `time::date::add_days expects a whole number`, `time::date::format: unknown placeholder '${bogus}'` (`time::date_now:` for the namespace call), `time::date::format: format spec ':05' does not apply to string value`; the parallel wall `time:: calls are not allowed in a parallel body (engine-owned clock)` | keep; every text spells the qualified name |
@@ -522,5 +518,5 @@ line `... N more frames` (`stack_frame::elided`, `cap_stack_trace` in `core/type
 | parallel walls | `method 'm' was not admitted in this parallel body (...)`, `only direct field stores on class instances are allowed in a parallel body (...)`, `custom operator dispatch on class instances is not admitted in a parallel body (...)`, `an assignment that changes an object's class is not admitted in a parallel body` | keep (they carry the remedy) |
 | script layers | `Script layer 'C' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object`, `Cannot copy an instance of nocopy class 'C'`, `No copy constructor available for class C` | keep |
 | static stores | `Static member assignment requires a class name`, `'C' is not a class`, `'C' is not a valid class`, `Cannot assign to static member: field 's' not found` | `Cannot assign to static member: field 's' not found` -> family B's `class C has no static member 's'` (same fact, second spelling) |
-| casts | `Cannot cast 'X' to 'T'`, char range texts (`detail/cast_kernel.hpp`) | keep; the quoted-type spelling is this family's own contract (documented in CLAUDE.md) |
+| casts | `Cannot cast 'X' to 'T'`, char range texts (`detail/cast_kernel.hpp`) | keep; the quoted-type spelling is this family's own contract (the reference's Run-time errors table) |
 | internal | `Unknown expression type in dispatch_expr`, `Unknown callable kind`, `this_id_ mismatch with symbolizer` | internal invariants; keep |

@@ -1,11 +1,8 @@
 # JaiScript Exception Handling Design
 
-> **DONE as of 2026-07 — shipped in BOTH backends** (interpreter and bytecode VM, full try/catch/
-> throw parity; see `records_base` catchability in `vm_backend` and commit 94311244). The design
-> below is the original sketch; where it disagrees with the addendum, the addendum wins.
+> Exceptions behave identically on both backends; the VM decides catchability by `records_base`.
 >
-> **Since this doc:**
-> - **A caught error is an error value** (Dev ruling 2026-09-28). `catch (e)` binds the error's message as a
+> - **A caught error is an error value.** `catch (e)` binds the error's message as a
 >   string - every string operation reads it unchanged (printing, `to_string(e)`, `e + "..."`, `e == "text"`, a
 >   `string` slot, the string methods, `type_of(e)` is `"string"`) - that also answers `e.message`, `e.file`,
 >   `e.line`, `e.column`, `e.stack` (the script call stack at the error, `file:line` per frame, innermost first) and
@@ -22,25 +19,22 @@
 >   catchable); a `memory_cap` denial is catchable on its FIRST raise per execute, terminal on the
 >   second. A latched terminal error skips every script `catch` to the host boundary
 >   (`detail/execution_limits.hpp`, the catch-skip in the interpreter's try handling).
-> - **Propagation mechanism.** The `is_unwinding_` flag sketch was superseded by
->   `checked_result<void>` propagation through the visitors.
+> - **Propagation: two channels.** A script `throw` sets `is_unwinding_` and `current_exception_`; a run-time
+>   error returns a failed `checked_result`; `try` catches either (interpreter `visit_try_stmt`).
 > - **The catch variable is a block-scoped local of the catch body** (C++ `catch (e)`
->   semantics; the `push_block_scope`/`add_variable` sketch below is what shipped, 2026-09-04).
->   The parser allocates it a frame slot (`try_stmt::catch_var_id` / `catch_slot_index`, the
->   range-for variable's pattern; `.jaibite` v12) and the handler entry binds the thrown
->   value there (interpreter `visit_try_stmt`, vm `unwind_to_handler` through
->   `op_try_push`'s `c` operand); a top-level catch binds it in a scope env that
->   `op_catch_end` / the statement's exit pops. It resolves locals -> members -> globals
+>   semantics). It takes the parser-assigned slot `try_stmt::catch_slot_index` (with its name in
+>   `catch_var_id`, the range-for variable's pattern), or at top level a pushed scope env; the handler
+>   entry binds the caught value there (interpreter `visit_try_stmt`, vm `unwind_to_handler` through
+>   `op_try_push`'s `c` operand), and `op_catch_end` / the statement's exit pops a top-level scope env.
+>   It resolves locals -> members -> globals
 >   like any local, shadows an outer name for the block only, is invisible to callees and
 >   after the block (`Undefined variable 'e'`), is captured by lambdas like any local, and
->   survives suspension like any local (frame slots ride the fiber / saved frames). The old
->   backend-global name intercept (`current_catch_var_id_` matched on every identifier load)
->   is gone from the load paths; the field survives only as the "inside a catch" marker of
->   the rethrow protocol (a nested `try` inside a catch keeps the caught exception live for
->   `throw;`).
+>   survives suspension like any local (frame slots ride the fiber / saved frames).
+>   `current_catch_var_id_` marks only "inside a catch" for rethrow (a nested `try` inside a catch keeps
+>   the caught exception live for `throw;`).
 > - **Coroutines park the exception trio.** `current_exception_` / `active_exception_value_`
 >   / the in-catch marker are fiber state (vm `vm_coroutine_state`, interpreter
->   `interpreter_coroutine_state`): a resume installs the fiber's parked trio (a fresh
+>   `interpreter_coroutine_state`): each `next()` installs the fiber's parked trio (a fresh
 >   coroutine starts with no active exception - a bare `throw;` outside any catch in the
 >   body raises `Bare throw with no active exception thrown.` even when the resumer sits inside a catch), a
 >   yield parks it, and the resumer's trio comes back on every exit except an escaping
@@ -63,7 +57,9 @@
 >   it at the call site.
 > - **A bare `throw;` with no active exception** raises the catchable runtime error
 >   `Bare throw with no active exception thrown.` (`invalid_operation`) where it stands.
-> - `finally` remains unimplemented (still-future, as designed).
+> - Not built: `finally`.
+
+The sketch below predates the built design; the paragraphs above are authoritative.
 
 ## Overview
 Simple, effective exception handling that integrates cleanly with C++.

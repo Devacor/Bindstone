@@ -7,9 +7,9 @@ escape hatches). Benchmark rows: `source/tests/performance/benchmark_suite.cpp`
 result.
 
 **Methodology** (per `invariants.md` §7): Release BENCHMARKS, jaibite-precompiled
-bodies, integer µs/row, **min-of-5** full runs per backend, i7-6920HQ, 2026-07.
-Rows are 200 script calls each; per-call = row / 200. Deltas under ~5% are below the
-harness noise floor — treat them as ties.
+bodies, integer µs/row, **min-of-5** full runs per backend. Absolute µs depend on the
+machine; the ratios are the finding. Rows are 200 script calls each; per-call = row / 200.
+Deltas under ~5% are below the harness noise floor — treat them as ties.
 
 ## Benchmark A — read-only compute (no aliasing *needed*)
 
@@ -88,21 +88,19 @@ Rule of thumb: **values by default; `&` when a call needs the real thing;
 holder, refcount bumps on call paths, upcast checks making shared_ptr method
 calls dearer than `&`) do not materialize above the noise floor on either
 backend: shared_ptr tracks `&` within ~2–4% on read-compute, mutation, and
-method-call rows. One smoke run showed sp-held method calls at 1680 µs vs ~950 —
-it did not reproduce in any of 5×2 measured runs (min 947 vs 945/948): the ±50%
-first-run variance the methodology warns about, not a signal. The two real,
+method-call rows. The two real,
 stable deltas are both **structural and already documented**: by-value's deep
 copy (that *is* value semantics — the escape hatches exist for exactly this) and
 the BST handle-shape delta (algorithm shape, not holder overhead).
 
-## Suite retune (this study)
+## Comparison suite shape
 
-- `chaiscript_comparison.cpp`: `binarySearch` / `bubbleSort` retuned to
-  `array<int>&` params — the old `auto arr` spelling deep-cloned the array per
-  call (per recursion *level* for binarySearch) against reference-semantic
-  ChaiScript arrays, measuring the clone instead of the algorithm. Gates added
-  (found index 5; sorted-in-place `[0] == 1`). Fairness: ChaiScript side already
-  passes by reference natively — both sides now do the same work.
+- `Source/JaiScriptComparisons/benchmarks/chaiscript_comparison.cpp`: `binarySearch` /
+  `bubbleSort` take `array<int>&` params — a by-value `auto arr` would deep-clone the
+  array per call (per recursion *level* for binarySearch) against reference-semantic
+  ChaiScript arrays, measuring the clone instead of the algorithm. Gates check the
+  result (found index 5; sorted-in-place `[0] == 1`). Both sides pass by reference and
+  do the same work.
 - The deliberate naive rows are kept and labeled: `BST ... [naive by-value]`
   in `benchmark_suite.cpp` and the JaiScript side of every comparison suite's
   "Pure Script" BST pair — they are the feature-cost number for value

@@ -34,12 +34,13 @@ eng->set_backend(jai::backend_type::interpreter);  // BEFORE the first execute; 
   statement lines). The `VM Backend` suite has smoke tests using it.
 - Chunk encoding invariant: instruction operands reference chunk-local tables (symbols, constants,
   call sites) only — never raw interned ids. Interned ids are engine-local and non-deterministic;
-  this invariant is what keeps a future on-disk bytecode cache (.jaibites) possible.
+  this invariant keeps bytecode cacheable on disk the way a `.jaibite` caches the parsed AST.
 
 ## Structural invariants (enforced by tests)
 
-- run()'s dispatch frame stays flat: extended opcodes go through `exec_extended`; the 10000-deep
-  `recursion_depth_error` test guards native-stack headroom in Debug.
+- run()'s dispatch frame stays flat: extended opcodes go through `exec_extended`. The
+  `recursion_depth_error` test drives runaway recursion to `max_recursion_depth` (the VM's
+  `max_call_depth` defaults to 250000); `detail::native_stack_low()` guards native-stack headroom.
 - Both backends share ONE builtin-method registry (`detail/builtin_methods.hpp`) and ONE overload
   resolver (`core/overload_resolution.hpp`) — semantics and error text cannot drift.
 - Coroutines: interpreter uses AST continuation replay; the VM suspends fibers (saved frame + ip +

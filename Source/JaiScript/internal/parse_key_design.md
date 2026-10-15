@@ -1,20 +1,18 @@
 # Parse-key design: the parse-avoidance ladder (+ hot-reload structural identity)
 
-Status: Dev-approved and implemented on VM-perf ("let's go ahead and do all that").
-This memo documents the taxonomy, the measurements that justify each rung, what the old
-content-hash was actually paying for, and the compatibility analysis. Numbers: Release
+This note documents the taxonomy, the measurements that justify each rung, what a
+content-hash key would pay for, and the compatibility analysis. Numbers: Release
 BENCHMARKS, dedicated min-of-5 ns harness (`source/tests/performance/parse_key_bench.cpp`
-— the Foundry µs suite cannot resolve this regime, invariants.md §7), quiet machine,
-2026-07-08. "OLD" = pre-ladder HEAD (measured by stash-rebuilding the same bench).
+— the Foundry µs suite cannot resolve this regime, invariants.md §7), quiet machine.
+"OLD" = a hashed `(path + content)` key; "NEW" = the ladder.
 
 ## 1. The question
 
-Every `execute(str)` built a `(len(path) ":" path + content)` key string (a memcpy of the
-whole source into a reused buffer) and hashed it (MSVC `std::hash` = FNV-1a, ~1 B/cycle)
-to look up a parse the engine almost always already had. Dev: "why hash every string
-coming in? We know the filename if we load a file, we know the embedded string if we pull
-an embedded string." The observation that settled the design: **the hash was only the
-map's index — the map's equality already memcmps.** An index needs a cheap discriminator,
+A hashed key builds a `(len(path) ":" path + content)` string on every `execute(str)` (a
+memcpy of the whole source into a reused buffer) and hashes it (MSVC `std::hash` = FNV-1a,
+~1 B/cycle) to look up a parse the engine almost always already has. A file is known by its
+name, an embedded literal by its address. The observation that settles the design: **the
+hash is only the map's index — the map's equality already memcmps.** An index needs a cheap discriminator,
 not a digest. A memcmp-verified discriminator preserves the semantics that matter: a
 CHANGED string is still noticed byte-exactly (hot reload).
 
@@ -43,8 +41,8 @@ char array fails loudly and clearly (MSVC VS18):
 
 Dynamics wrap in `std::string_view` (implicit ctor, `literal_ = false`) and fall through
 to the content lane. The array ctor is **explicit** on purpose: bare `execute("...")`
-keeps its historical `std::string` overload — an implicit array ctor would have made
-every existing `execute("...")` call in the codebase ambiguous (two rival user-defined
+takes the `std::string` overload — an implicit array ctor would make every
+`execute("...")` call ambiguous (two rival user-defined
 conversions). Call sites opt in: `execute(script_source("..."))`. `std::string` args
 still route to `execute(const std::string&)` (identity reference binding beats any UDC;
 pinned by static_asserts + behavior tests in engine_tests). MSVC `/GF` pooling merges
@@ -65,19 +63,19 @@ misses the fast lane, so attribution (the path stamped on AST nodes, error text,
 breakpoints) stays byte-identical to the read path. A read stamps only when the stat taken
 after it agrees with the one before (a save landing mid-read is not remembered); the jaibite
 disk cache judges its sibling by the source identity it records; the fast lane's one stat is the only per-execute
-filesystem cost. (Note: on this machine a metadata stat is ~25 µs — Defender-inflated —
-which is now the file-lane floor; still 3.5-3.8× better than read+2 stats+key.)
+filesystem cost. (A metadata stat measured ~25 µs, Defender-inflated; that is the
+file-lane floor, 3.5-3.8× better than read+2 stats+key.)
 
-### 2.3 Dynamic lane (the discriminator swap — replaces the hash everywhere)
-`(path_len, content_len, head8, mid8, tail8)` + flat vector of ≤64 nodes (the old LRU
+### 2.3 Dynamic lane (the discriminator — no hash anywhere)
+`(path_len, content_len, head8, mid8, tail8)` + flat vector of ≤64 nodes (the LRU
 bound), linear scan of five u64 compares per node, then path+content memcmp on the
 candidate. Exact change detection — the memcmp is the arbiter; a discriminator collision
-(contrived) just keeps scanning the short bucket. This REPLACED the hash map: no
-key-string build (was a full memcpy of the source), no FNV walk (~1 B/cycle over
-path+content), and the map's final key-equality compare is now the ONLY full-content
-pass. The earlier MRU+memcmp idea is subsumed (no special case needed). `engine::check`
-and `execute_source` share the same two functions (`find_cached_script` /
-`store_cached_script`), so every entry point swapped at once.
+(contrived) just keeps scanning the short bucket. No key-string build, no FNV walk
+(~1 B/cycle over path+content): the final key-equality compare is the ONLY full-content
+pass. `engine::check` and `execute_source` share the same two functions
+(`find_cached_script` / `store_cached_script`), so every entry point uses one lane. A
+cache hit re-stats the files spliced into the unit at parse time (`spliced_stamps`) and
+re-parses when one changed.
 
 ## 3. What the measurements say
 
@@ -120,7 +118,7 @@ allocation churn variance; the comment-shape table is the clean keying signal.)
 
 Decomposition (OLD, 4 KB): raw read 102 µs + fs stat pair 63 µs + keying 5 µs + execution
 ~50 µs. NEW: one GetFileAttributesEx (~25 µs) + execution. The jaibite sibling stats and
-the full file read are gone from the warm path.
+the full file read are not on the warm path.
 
 ### 3.4 Cold (never-seen 4 KB string)
 OLD 913 µs → NEW 726 µs (parse dominates both; the ladder does not tax the cold path —
@@ -134,12 +132,12 @@ the delta is store-side churn plus run variance).
   10 KB — **~1.8% of a 16.67 ms frame recovered** per per-frame entry script.
 - The class-redefinition half is the bigger per-frame story: see §5.
 
-## 4. What relied on the content hash — the downstream checklist
+## 4. What a content key would touch — the downstream checklist
 
-Verified consumers of the old key/hash (grep + call-graph):
-- `find_cached_script` / `store_cached_script` — the ONLY consumers. Swapped.
+Consumers of the memory-cache key:
+- `find_cached_script` / `store_cached_script` — the ONLY consumers.
 - jaibite disk cache: keyed by SIBLING PATH + mtime freshness + registration
-  fingerprint — never by content hash. Unaffected. (If a future string-keyed disk cache
+  fingerprint — never by content hash. (If a string-keyed disk cache
   wants `<hash>.jaibite` filenames, that hash is computed once at WRITE time, not per
   execute — a different budget; no conflict.)
 - `registration_fingerprint`: hashes the C++ registration surface, not script content.
@@ -148,27 +146,22 @@ Verified consumers of the old key/hash (grep + call-graph):
   bytes and content are memcmp-verified → identical text under two paths still gets two
   ASTs, each stamped with its own filename. Attribution holds exactly. File lane pins the
   as-given spelling explicitly.
-- Static-check cache, epoch invalidation, LRU: live on the entry, not the key. Unchanged
+- Static-check cache, epoch invalidation, LRU: live on the entry, not the key
   (epoch re-checked on every hit in all lanes; LRU stamp bumped in all lanes; literal and
   file lanes drop stale entries on epoch bumps).
-- Dev's network-string position: wire strings are dynamics → discriminator lane (exact,
-  cheap — one memcmp). The EXPLICIT zero-rekey lane for hosts is `engine::jaibite(content)`
-  (parse once, hold the handle) — already shipped; nothing breaks.
+- Network strings: wire strings are dynamics → discriminator lane (exact, cheap — one
+  memcmp). The EXPLICIT zero-rekey lane for hosts is `engine::jaibite(content)` (parse
+  once, hold the handle).
 
-## 5. Hot-reload half: structural AST identity at redefinition (Part 4)
+## 5. Hot-reload half: structural AST identity at redefinition
 
-### What the old mechanism actually was (the finding)
-`class_definition::compute_fingerprint` hashed sorted field ids + method ids +
-**`reinterpret_cast<size_t>(&func)` — the heap ADDRESS of each method's std::function**.
-Every reload mints fresh function objects, so the fingerprint could never match for any
-class with methods (or typed-field setter thunks) — the "identical" fast path was dead
-code for real classes. Actual savings came only from the separate `fields_changed`
-detection; identical reloads still paid O(instances) `set_class_definition` loops and
-derived-class propagation every time. The `identical_class_fingerprint` test asserted a
-wall-clock inequality (1 ms tolerance) between two runs of the SAME slow path — the
-known flake, pinning nothing.
+### Why not a fingerprint
+A fingerprint over field ids, method ids and each method's `std::function` address never
+matches across reloads: every reload mints fresh function objects, so an identical class
+with methods (or typed-field setter thunks) would always look changed and pay
+O(instances) `set_class_definition` loops and derived-class propagation.
 
-### The replacement (landed)
+### Structural identity
 - Identity = **structural AST equality**: the incoming class_decl subtree serialized
   WITHOUT source locations (`detail::structural_node_key`, a mode of the battle-tested
   jaibite writer — one flag suppresses the two `location()` writes; symbol ids persist
@@ -187,19 +180,17 @@ known flake, pinning nothing.
 - On match: **the new AST is adopted anyway** — methods were already re-minted from the
   fresh parse (add_script_method), and `redefine_class(..., structurally_identical=true)`
   swaps the method/static/field-default maps in — so debugger/error line info tracks
-  cosmetic shifts. This fixes the latent staleness the old fast path had. What's skipped:
+  cosmetic shifts. What's skipped:
   per-instance migration, per-instance `set_class_definition` re-pointing (same
   definition object), and derived-class propagation.
 - Deterministic observability: `class_definition::identical_redefinitions()` counter.
-  The flaky test is now `identical_class_structural_identity`: counter == 0 after the
+  The test `identical_class_structural_identity` pins it: counter == 0 after the
   seeding redefinition, == 1 after a byte-identical re-execute, == 2 after a
   comment-shifted re-execute, still == 2 after a real body change — with the changed
-  method proven live. Wall-clock assertions deleted (the documented right-direction
-  test change; `fields_unchanged_performance` remains timing-based but exercises the
-  unchanged fields_changed mechanism).
+  method proven live. It asserts no wall-clock times (`fields_unchanged_performance` is
+  timing-based and exercises the fields_changed mechanism).
 - Both backends share the mechanism verbatim (twin call sites in
-  `interpreter::visit_class_decl` / `vm_backend::exec_class_decl_node`); suites are green
-  on both, byte-parity preserved.
+  `interpreter::visit_class_decl` / `vm_backend::exec_class_decl_node`).
 - Top-level FUNCTION redefinition: no analogous heavy path exists — a function redefine
   is an env-slot overwrite + overload-set rebuild, O(1) in instances. Nothing to gate.
 
@@ -211,24 +202,23 @@ known flake, pinning nothing.
 | large class (24 methods), 1000 live instances | 807 µs | 69.6 µs | **11.6×** |
 | (vm) large class, 1000 instances | 811 µs | 69.7 µs | 11.6× |
 
-A Bindstone-shaped per-frame re-execute of a class-bearing entry script no longer scans
-every live instance every frame: with 1000 instances that was 4.8% of frame budget,
-now 0.4%.
+A Bindstone-shaped per-frame re-execute of a class-bearing entry script does not scan
+every live instance every frame: with 1000 instances the scan costs 4.8% of frame budget,
+the structural path 0.4%.
 
-## 6. Recommendation / migration
+## 6. Recommendations
 
-- The ladder as landed IS the design; the hash is gone from every per-execute path and
-  nothing downstream consumed it. No host source changes required anywhere; semantics
-  byte-identical (memcmp-exact change detection in both content lanes).
-- **Literal lane: keep.** Even with the hash gone it's the only rung with a flat cost —
+- No per-execute path hashes source text; change detection is memcmp-exact in both
+  content lanes.
+- **Literal lane: keep.** It's the only rung with a flat cost —
   ~700 ns (interp) / ~340 ns (vm) at ANY size vs 2.4 µs disc-lane at 32 KB — and its API
   also documents intent (a tagged compiled-in script). It's opt-in and zero-cost when
   unused. Ergonomics extension if wanted later: a `_jai` UDL or an `execute(script_source,
   instance_variables)` companion.
-- Remaining floor: the file lane's single stat (~25 µs machine-dependent) now dominates
+- Remaining floor: the file lane's single stat (~25 µs machine-dependent) dominates
   its warm path; if that ever matters, the next rung is a host-driven "trust window"
   (skip the stat within a frame) — deliberately NOT built (freshness rule stays uniform).
-- The reload fast path currently re-walks the new AST per redefinition (~µs); if a
+- The reload fast path re-walks the new AST per redefinition (~µs); if a
   profile ever shows it, the next rung is caching the encoding on the class_decl node
   (same-node re-execution = zero walks), but per-node mutable caches interact with
   parallel workers — not built until proven needed.

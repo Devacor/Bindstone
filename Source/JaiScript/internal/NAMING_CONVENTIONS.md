@@ -4,15 +4,6 @@
 
 JaiScript follows C++ standard library naming conventions throughout the codebase, using snake_case for consistency and familiarity to C++ developers.
 
-## Migration Status
-
-**Completed (January 2025):**
-- ✅ Complete migration from PascalCase to snake_case
-- ✅ All class names converted: `Engine` → `engine`, `Lexer` → `lexer`, `Parser` → `parser`
-- ✅ Type aliases standardized with `script_` prefix
-- ✅ Member variables and method names converted
-- ✅ Test suite updated to match new naming
-
 ## Naming Rules
 
 ### Classes and Types
@@ -50,11 +41,12 @@ script_int line_number;
 script_string file_name;
 std::vector<token> token_list;
 
-// Member variables
-class token {
-    token_type type_;
-    script_string text_;
-    script_int line_number_;
+// Data members of a plain struct carry no suffix (detail/lexer.hpp)
+struct token {
+    token_type type;
+    std::string_view lexeme;
+    uint64_t symbol_id = 0;
+    source_location location;
 };
 ```
 
@@ -89,21 +81,8 @@ namespace jai {
 }
 ```
 
-## API Examples
+## API Example
 
-### Before (PascalCase)
-```cpp
-jai::Engine engine;
-jai::Value result = engine.Execute("2 + 2");
-Int val = result.As<Int>();
-
-jai::make_dynamic_binder<MyClass>(engine, "MyClass")
-    .Constructor<Int, Float>()
-    .Method("setValue", &MyClass::SetValue)
-    .Build();
-```
-
-### After (snake_case)
 ```cpp
 auto engine = jai::engine::make();   // ctor is private; engines are always shared_ptr
 jai::script_value result = engine->execute("2 + 2");
@@ -121,8 +100,3 @@ jai::dynamic_binder<MyClass>(engine, "MyClass")
 2. **Familiarity**: Natural for C++ developers
 3. **Clarity**: `script_` prefix clearly identifies JaiScript types
 4. **Namespace Harmony**: `jai::script_int` vs `jai::jai_int` (redundant)
-
-## Migration History
-
-The January 2025 PascalCase→snake_case migration was completed with one-off scripts (long since
-deleted); all tests were updated and verified at the time.

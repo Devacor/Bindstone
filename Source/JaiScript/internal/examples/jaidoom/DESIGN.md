@@ -8,21 +8,21 @@ freely distributable, md5-verified) and Freedoom 0.13 (BSD) — both gitignored.
 
 ## Ground rules
 
-- **Pure JaiScript first.** Everything that CAN be script IS script. The only C++ we accept
-  (when P4 needs interactivity) is a small generic console block in `tools/jaiscript/main.cpp`:
-  `read_key()/key_down(name)/term_size()` — capabilities a script cannot express, useful to
-  any terminal game, no engine changes (clocks and sleeps are the stdlib's `time::`). Until
-  then every phase gate runs batch (fixed-dt autopilot frames, files or stdout).
+- **Pure JaiScript first.** Everything that CAN be script IS script. The only C++ is the
+  runner's small generic console block in `tools/jaiscript/main.cpp`:
+  `key_down(name)/read_key()/term_cols()/term_rows()` — capabilities a script cannot express,
+  useful to any terminal game, no engine changes (clocks and sleeps are the stdlib's `time::`).
+  The gate scripts run batch (fixed-dt autopilot frames, files or stdout).
 - **GLOOM discipline throughout** (it is the proven architecture): flat typed `array<int>`/
   `array<float>` globals for all hot state, `var&` for every hot array argument, free functions
   on the hot path, palette-index framebuffer + interned escape strings, one frame = one string,
   parallel admission rules respected so `parallel_for`/`parallel_transform` stay available.
 - **Fidelity target**: faithful 16.16 fixed-point playsim + BAM angles on int64 (checked
   overflow is safe: 16.16×16.16 products stay < 2^62). Trig tables generated at boot via
-  `math::` (low-bit deviation from id's tables — visually identical; demo-lump sync would need
-  exact tables + rndtable and is a P7 option, not a P0 constraint).
+  `math::` (low-bit deviation from id's tables — visually identical; vanilla demo-lump sync
+  would need exact tables + rndtable, so JaiDOOM's demos are its own format, `demo.jai`).
 
-## Byte access (see Source/JaiScript/docs/char_semantics.md and guide ch. 9, "Binary data")
+## Byte access (see Source/JaiScript/internal/char_semantics.md and guide ch. 9, "Binary data")
 
 The WAD is one string. Structured reads go through `binary::reader` (`lump_reader(idx)` puts one
 at a lump's first byte; little-endian, the format's order): map lumps read record by record, the
@@ -35,11 +35,6 @@ reads the unsigned byte). Texture compositing is a `parallel_transform` body, wh
 method calls, so each patch's column table is decoded ahead of it (`tex_patches_prepare`) into
 typed arrays. Decode stays lazy per-lump into cached typed arrays; never eager whole-WAD.
 
-History, for the war story: before promotion existed, `wad.jai` self-bootstrapped a decoder by
-collecting all 256 distinct chars from the WAD itself, insertion-sorting them by comparison
-(char order = byte order up to sign) with `'A'==65` anchoring away signedness, and later a
-base64-LUT variant. Retired in full once the contract landed.
-
 ## Rendering (doom-cli method)
 
 Palette-index framebuffer `PIX` (`array<int>`, subpixel resolution) -> character cells packing
@@ -48,75 +43,80 @@ partition by luma vs cell mean, glyph by bright bitmask, doom-cli's algorithm) -
 with escape elision (emit fg/bg only on change — GLOOM's improvement over doom-cli's
 full-SGR-per-cell). Light diminishing goes through COLORMAP (authentic banding), palette
 flashes switch PLAYPAL banks (all 14 banks pre-interned at boot). Render resolution = terminal
-subpixel grid (ARGS-set width, default ~100 cols; no term-size query in the runner yet);
+subpixel grid (`term_cols()`/`term_rows()`, or a width set by ARGS);
 projection is width-parameterized exactly like every source port.
 
 ## Module map (scripts/)
 
-wad.jai      WAD directory, byte decode bootstrap, lump cache            [DONE P1]
-map.jai      map lumps -> flat parallel typed arrays                     [DONE P2]
-vid.jai      palette intern, utf8, framebuffer, cell blitters            [DONE P2 half]
-tables.jai   finesine/finetangent/tantoangle/xtoviewangle, fixed helpers [P3]
-defs.jai     lump-derived constants, mobj/state tables (own authoring)   [P5]
-render.jai   BSP walk, seg clip/project, visplanes, masked/sprites       [P3/P5]
-tex.jai      PNAMES/TEXTURE1 composite cache, flats, picture decode      [P3]
-sim.jai      35Hz tics, P_TryMove-family collision, slide, blockmap      [P4]
-spec.jai     lifts/floors/stairs/teleports/lights/damage/secrets/boss    [DONE P4/P6]
-things.jai   mobj pool, states machine, monster AI, combat               [P5]
-hud.jai      status bar, fonts, automap, menus, intermission             [DONE P6]
-game.jai     game state, episode flow, autopilot harness                 [P4]
-main.jai     entry: boot, mode select (batch gates / interactive)        [P4]
-demo.jai     demo record/playback + state hash (determinism harness)     [DONE R2]
-sound.jai    DS* -> wav cache, positional stereo variants                 [DONE R2]
-mus.jai      MUS -> MIDI transcode, MAPxx music table, looping player     [DONE R2]
-anim.jai     switch pairs, animated flats                                 [DONE R2]
-save.jai     whole-sim JSON save/load                                     [DONE R2]
-p*_*.jai     phase gates (each phase proves itself before the next)
+jaidoom.jai        entry: playable game, title/menus, CLI modes (selftest, flowtest, record,
+                   playdemo, freedoom2, host, join)
+boot.jai           fetches and SHA-256-verifies Freedoom and the shareware WAD, unpacks, decodes
+                   sound and music into cache/
+wad.jai            WAD directory and lump access through binary::reader, lump cache
+map.jai            map lumps -> flat parallel typed arrays
+tex.jai            PLAYPAL/COLORMAP, flats, patches, TEXTURE1 composites, PALCM
+render.jai         BSP walk, textured walls and flats, COLORMAP light, sky, sprites
+vid.jai            palette intern, framebuffer, cell blitters, BMP/utf8 output, melt wipe
+game.jai           playsim: 35Hz tics, movement, blockmap collision and slide, doors, use lines
+spec.jai           specials: Mover class + lifetime coroutines, teleports, stairs, lights,
+                   damage floors, secrets, boss triggers
+things.jai         sprites, mobj pool, monster AI (per-mobj brain coroutine), combat, decor
+hud.jai            status bar, face, automap, title, menus, intermission, episode end
+anim.jai           switch pairs, animated flats
+sound.jai          DS* -> WAV, positional stereo variants
+mus.jai            MUS -> MIDI transcode, MAPxx music table
+demo.jai           demo record/playback + state hash (determinism harness)
+save.jai           whole-sim JSON save/load
+netplay.jai        up to 16 players: Player/Session class hierarchy over NetServer/NetChannel
+jaidoom_demo.jai   scripted fly-through demo on the stock runner
+extract_audio.jai  standalone sound/music extraction into cache/
+jaidoom_net.json   persisted lobby address and last demo name
+p1_verify .. p9_netplay   gate scripts (below)
+p10_timedemo.jai   uncapped demo replay with a per-stage time split (profiling)
 
-## Phase gates
+## Gate scripts
 
-P1 WAD loader ......... GREEN (p1_verify.jai: 1264 lumps, PLAYPAL/COLORMAP exact, E1M1 counts exact)
-P2 map data + automap . GREEN (p2_automap.jai: E1M1 silhouette unmistakable, things placed, player @)
-P3 BSP renderer ....... GREEN (p3_view.jai: textured E1M1 view, 0 unfilled columns, p3_view.bmp)
-P4 playsim ............ GREEN (jaidoom.jai -- selftest: movement/collision/doors;
-                        p4_smoke.jai: interactive boot order + level transition)
-P5 things ............. GREEN (p5_view.jai: sprites/hitscan/AI/drops/infighting/barrels/lost souls, p5_view.bmp)
-P6 presentation ....... GREEN (p6_hud.jai: STBAR/menus/intermission; p6_specials.jai: lifts/floors/
-                        stairs/teleports/secrets/tag-666; jaidoom.jai -- flowtest: full screen flow)
-P7 perf + feel ........ GREEN (p7_bench.jai: 9.7 ms/frame @ 120x78 autopilot vs 28.5 budget, p7_view.bmp;
-                        weapon bob, viewz easing on stairs/lifts, muzzle-flash light boost, FPS counter)
-P8 legacy ............. GREEN (p8_doom2.jai: freedoom2 MAP01 + doom2 monsters/music/skies/progression,
-                        p8_doom2.bmp; flowtest grew the demo-determinism hash pin + nightmare checks)
+p1_verify.jai ..... WAD loader: 1264 lumps, PLAYPAL/COLORMAP exact, E1M1 counts exact
+p2_automap.jai .... E1M1 top-down: silhouette, things placed, player @
+p3_view.jai ....... first-person E1M1 view, 0 unfilled columns, p3_view.bmp
+jaidoom.jai -- selftest   movement/collision/doors
+p4_smoke.jai ...... interactive boot order + level transition
+p5_view.jai ....... sprites/hitscan/AI/drops/infighting/barrels/lost souls, decor, p5_view.bmp
+p6_hud.jai ........ STBAR/menus/intermission, WAITING FOR HOST footer, mid-melt composite
+p6_specials.jai ... lifts/floors/stairs/teleports/secrets/tag-666
+jaidoom.jai -- flowtest   full screen flow, menu/address persistence, demo-determinism hash pin,
+                   nightmare checks, wipe pins
+p7_bench.jai ...... headless autopilot frame time at 120x78 against the 28.5 ms (35fps) budget;
+                   weapon bob, viewz easing, muzzle-flash light boost, FPS counter
+p8_doom2.jai ...... freedoom2 MAP01 + doom2 monsters/music/skies/progression, p8_doom2.bmp
+p9_netplay.jai .... deathmatch + co-op + exit-sync rounds, plus a real ClientSession against a
+                   scripted fake host with ~150ms-late deliveries
 
-## Language showcase pass
-
-Post-P7 sweep making the codebase demonstrate JaiScript's marquee features without moving the
-perf band (measurements in PERF_BASELINE.md's showcase-pass table):
+## Language features in the codebase
 
 - things.jai .... `monster_brain` coroutine per mobj (handles are values, stored in a hetero array)
 - spec.jai ...... `Mover` class + `mover_run` coroutine drive lifts/floors/stairs (cold path)
 - game.jai ...... `Door`/`Weapon` classes; jaidoom.jai `Tally` class for intermission records
 - vid.jai ....... `vid_row_half` = shared serial/parallel blit row body; `blit_half` runs it through
                   `parallel_transform(ROWIDX, ...)` when `BLIT_WORKERS != 0` (GLOOM's pattern, byte-
-                  identical output). Measured honestly: loses at 120x78 (region barrier > 39 rows of
-                  work), wins the stage at 200x140 — default serial, knob kept
+                  identical output). Default serial: at play size the region barrier costs more
+                  than the rows; the parallel form pays off at large terminals
 - tex.jai ....... `tex_composite` pure parallel body single-sources lazy `tex_prepare` AND the
                   map-start warm pass
 - render.jai .... `tex_warm_map` composites every referenced wall texture at map start via
-                  `parallel_transform` (~1.7x vs serial; first-sight frame spikes moved into load)
-- Hot paths stay flat typed-array free functions (per IDIOMATIC_COST: classes/coroutines are
-  for cold paths; the mobj pool, PIX, clip arrays keep parallel admission)
+                  `parallel_transform`, so first-sight frame spikes move into load
+- Hot paths stay flat typed-array free functions: classes and coroutines are for cold paths,
+  and the mobj pool, PIX and clip arrays keep parallel admission
 
-## Round 2: the full game
+## The full game
 
-Tracks 1-3: rocket launcher (weapon 5, MISL projectile + radius damage + rocket-jump shove),
+Rocket launcher (weapon 5, MISL projectile + radius damage + rocket-jump shove),
 powerups (berserk/invis/radsuit/allmap/goggles/soul/backpack with palette tints and wear-off
 warnings), sector light effects (blink/strobe/glow/flicker), player gravity (real z, air arcs,
 landing thud/dip), positional audio (pure-script stereo wav variants by distance tier + pan),
 classic typed cheats (iddqd/idkfa/idfa/idclip/idclev/idbehold*/iddt), whole-sim JSON save/load
 (quicksave Z / quickload X + menu entries), STBAR ARMS panel.
 
-Track 4 (legacy):
 - **Demos** (`demo.jai`): `-- record demo.json` / `-- playdemo demo.json`, and the same
   machinery from the menu — DEMOS -> RECORD NEW GAME (arms the tape, then the normal skill
   pick; a REC badge shows top-right; the tape writes at level exit or quit, then disarms) and
@@ -130,8 +130,8 @@ Track 4 (legacy):
   its own LCG so presentation can't perturb the sim stream. flowtest records 200 scripted
   tics, replays them, and asserts the mix32 state hash (positions/hp/tic/sectors) is
   identical — the project's determinism pin — and drives the whole menu path end to end
-  (arm, disarm-on-esc, write-at-exit, prefill, replay-to-identical-hash). A demo browser
-  would need a host list_files() builtin; the editable-name field is the design until then.
+  (arm, disarm-on-esc, write-at-exit, prefill, replay-to-identical-hash). Demos are chosen
+  through the editable-name field; there is no demo browser.
 - **DOOM II / freedoom2** (`-- freedoom2 MAP01`): MAPxx naming end to end (progression
   MAP01..MAP30, secret 15->31->32->16), MAPxx music table (D_RUNNIN.., 11+ cyclic), skies by
   map third (SKY1/2/3), INTERPIC intermission fallback, doom2 end text. New monsters admitted
@@ -180,12 +180,12 @@ deathmatch spawns cycle by slot+deaths with an occupancy nudge (no telefrag). Ro
 VISIBLE remotely: the shooter announces PROJ {id, spr, snd, pos, momenta} once at spawn and
 EXPL at the pop — remote machines fly a streamed no-damage twin by dead reckoning (doom
 projectiles are straight lines, so the spawn packet is the whole flight) and snap it to the
-EXPL point; damage stays shooter-resolved exactly as before.
+EXPL point; damage stays shooter-resolved.
 
 **Co-op** (host-authoritative): both machines walk the same THINGS lump, so map-placed
 things share pool indices — the client spawns its monsters as state-12 PUPPETS at the same
 slots, driven by the host's MONS stream (~9Hz dirty-tracked, ~2s keyframes, flat
-space-joined int strings — nested containers can't ride from_json, see below). The host
+space-joined int strings). The host
 owns doors/movers/exits/items/monster AI: client USE/crossings replay on the host at the
 client's borrowed pose — a TELE snap comes back ONLY when a genuine teleport special
 (39/97) moved that borrowed pose (the echo is double-gated: moved-vs-borrowed baseline AND
@@ -219,13 +219,7 @@ one killed a packet earlier — EXPL reconciles within a net tick); puppet inter
 rubber-bands past ~150ms latency (client-to-client sees two hops of it); light shows and
 secret tallies are per-machine (NEXT carries the host's numbers); with 16 players on
 classic maps the handful of DM spawns forces the occupancy nudge often — expect
-spawn-adjacent chaos by design. Engine edges worth knowing:
-maps/arrays read OUT of a from_json result cannot be cloned or passed as script-function
-arguments ("missing engine pointer") — the protocol hoists primitives at the dispatch site
-(consecutively: interleaving a foreign container read between from_json reads trips it too)
-and ships batches as flat strings; and a bare typed-array read as a map-literal VALUE
-(`{"x": MO_X[i]}`) serializes as a reference wrapper — hoist pool reads into locals before
-building actions. Bandwidth at 29 awake monsters ~ 1.2KB per MONS keyframe; 16-player STATE
+spawn-adjacent chaos by design. Bandwidth at 29 awake monsters ~ 1.2KB per MONS keyframe; 16-player STATE
 relay ~ 16 x 17Hz x ~90B = ~25KB/s at the host, trivial on LAN.
 
 Decorations: the THINGS walk spawns map decor as state-10 mobjs from the DECOR table
@@ -241,15 +235,9 @@ the departing frame slides down in ragged, neighbor-correlated columns over the 
 intermission/end screen). It runs only in play()'s draw path on its own LCG; gates and the
 sim never see it (flowtest pins termination, monotonic fall, and math::random isolation).
 
-Final gate roster, all GREEN: p1_verify, jaidoom selftest, p4_smoke, p5_view (incl. the
-decoration census/collision/render section), p6_specials, p6_hud (incl. WAITING FOR HOST
-footer + mid-melt composite), jaidoom flowtest (menu/address/persistence + wipe pins),
-p7_bench, p8_doom2, p9_netplay (dm + co-op + exit-sync rounds + the INVERTED harness: a
-real ClientSession vs a scripted fake host with ~150ms-late deliveries).
-
 ## Verification culture
 
-Every phase has a machine-checkable gate script (counts vs known-good, hashes, file previews)
-plus an eyeball artifact (ANSI frame / ASCII silhouette). Determinism: fixed TICK, one seeded
-RNG, GLOOM-style state hash once the sim exists; interpreter-vs-vm parity via --backend once
-hot. Perf on the Release runner only (`out/build/x64-Release BENCHMARKS/bin/jaiscript.exe`).
+Every subsystem has a machine-checkable gate script (counts vs known-good, hashes, file
+previews) plus an eyeball artifact (ANSI frame / ASCII silhouette). Determinism: fixed TICK, one
+seeded RNG, GLOOM-style state hash; interpreter-vs-vm parity via --backend. JaiDOOM is not one
+of the `tools/ci/gates.sh` gates. Perf on the Release runner only (`out/build/x64-Release BENCHMARKS/bin/jaiscript.exe`).

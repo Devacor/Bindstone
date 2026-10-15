@@ -56,8 +56,9 @@ Script signal receivers are invoked with their parameters delivered as `instance
 arguments and the receiver's parameter names). This is the pattern the feature exists for:
 passing per-invocation parameters without polluting the global namespace.
 
-## Known gap
+## Tests
 
-No Foundry test currently exercises `instance_variables` directly — the only coverage is
-indirect, through the signal tests. Treat behavioral changes here as untested until that gap
-is closed.
+Spec Conformance `an_instance_variable_overlay_lives_for_one_execution`
+(`spec_conformance_tests.cpp`) pins the overlay rules on every configuration: shadowing for one
+execution, a top-level declaration dying with the overlay, the overlay gone afterwards, and a
+function parsed in the same execute reading it. The signal tests cover the receiver path.

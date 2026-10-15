@@ -1,7 +1,7 @@
 # const (design)
 
-Status: **implemented**: a narrow `const`, for parameters, variable declarations and expressiveness; the decisions on
-the open questions are listed in section 14. Section 9.3 lists what is not enforced yet.
+`const` covers parameters, variable declarations and class constants; section 14 lists the decisions and section 9.3
+what is not enforced.
 
 `const` marks a binding that is set once and then only read. The rules are C++'s, cut down to the declaration:
 
@@ -27,11 +27,10 @@ the open questions are listed in section 14. Section 9.3 lists what is not enfor
 | `inline` and `extern` | `inline const T x = e;` `extern const T x;` | 6.3 |
 | destructuring | `const auto [a, b] = e;` | every name is const |
 | parameter (functions, methods, constructors, lambdas, arrow functions with parentheses) | `const T& p` `const T p` `const auto& p` `const var p` | section 4 |
-| range-for and parallel_for loop variable | `for (const auto& x : c)` `for (const auto x : c)` `for (const auto& [k, v] : m)` `parallel_for (const auto& x : xs)` | these already parse; today `const` is ignored there, and with this design it takes effect |
+| range-for and parallel_for loop variable | `for (const auto& x : c)` `for (const auto x : c)` `for (const auto& [k, v] : m)` `parallel_for (const auto& x : xs)` | every name is const |
 
 `const` comes first and precedes everything except `static`, `inline` and `extern`. It appears at most once
-(`const const int x` is a parse error). The lexer already reserves `const` as a keyword, so no script uses it as a
-name.
+(`const const int x` is a parse error). The lexer reserves `const` as a keyword, so no script uses it as a name.
 
 **JavaScript spelling:** `const x = e;` reads as `const auto x = e;`, and an untyped
 `const x` parameter reads as `const auto x`. This follows `let` (a `var` synonym), with C++'s deep meaning: once
@@ -58,10 +57,10 @@ word) would otherwise fail to parse:
 | `const_cast<T&>(x)` | `JaiScript has no 'const_cast': a const stays const; copy it (auto x = c) for a writable value` |
 | `constexpr int N = 4;` | `JaiScript has no 'constexpr': a const whose initializer is a constant expression is folded at compile time: const int N = 4;` |
 | `mutable int cache;` (a field) | `JaiScript has no 'mutable' fields: every field of a const object is read-only; keep state that must change behind a shared_ptr field` |
-| `catch (const e)` | the existing typed-catch text |
+| `catch (const e)` | the typed-catch text |
 
-The current `const_declaration` and `const_parameter` texts are retired. The new words (`const_method`, `const_return`,
-`const_type_argument`, `pointer_to_const`, `const_cast`, `constexpr`, `mutable_field`) join the `foreign_word` enum.
+The `foreign_word` enum carries `const_method`, `const_return`, `const_type_argument`, `pointer_to_const`,
+`const_cast_call`, `constexpr_declaration`, `mutable_field` and `const_misplaced` (`detail/foreign_keyword.hpp`).
 
 ## 2. What a const is
 
@@ -90,7 +89,7 @@ pointee's, which a const handle does not own.
 | `const Foo` (by value) | error | field stores (`f.hp = 5`, `f.inv.items.push(x)`) and a call of a method that writes its receiver (3.3): errors. A `shared_ptr` field can't be rebound, but its pointee is writable |
 | `const math::vec2` (and the other math values) | error | component stores, mutating methods: errors |
 | `const shared_ptr<Foo>`, `const weak_ptr<Foo>` | error | none: `h.hp = 5` and `h.move()` write the pointee |
-| `const function`, `const coroutine_handle` | error | none (calling or resuming is not a write, as C++'s `std::coroutine_handle::resume` is `const`) |
+| `const function`, `const coroutine_handle` | error | none (calling a function or advancing a coroutine with `next()` is not a write, as C++'s `std::coroutine_handle::resume` is `const`) |
 
 ### 2.3 `const var` and `const auto`
 
@@ -149,9 +148,9 @@ A method call on a const-rooted receiver is an error exactly when the method wri
 - **Builtin methods** on strings, arrays and maps. Mutators are writes, and the registry's reading methods
   (`ref_write_reading_method`) are not. Dot transforms that have a copying namespace twin say so in the error
   (`array::filter(xs, f)` returns a filtered copy). A builtin whose callback takes the element by `T&` (`for_each`,
-  `find`, ...) is a reading builtin; a callback that writes through that parameter is not caught yet (9.3).
+  `find`, ...) is a reading builtin; a callback that writes through that parameter is not caught (9.3).
 - **Host methods** run: the binder could tell a `const` member function from its signature, which it does not record
-  yet (9.3). A host property's setter is a store, and a store through a const raises.
+  (9.3). A host property's setter is a store, and a store through a const raises.
 - Constructors and destructors of a const object run normally.
 
 ### 3.4 Not writes
@@ -170,19 +169,19 @@ A method call on a const-rooted receiver is an error exactly when the method wri
 
 This is the explicit form of the inferred-const reference parameter. It binds a variable without a copy, and binds a
 literal or temporary to a temporary cell that lives for the call. It does this whatever the body does, lambdas
-included (today a lambda's `T&` refuses temporaries). A write through the parameter is a load error under strict and
+included. A write through the parameter is a load error under strict and
 raises at run time otherwise. Passing a const name to it is fine.
 
 ### 4.2 `const T` by value
 
 The caller copies as for `T`, and the callee can't write the parameter (deep, under 2.2). This guarantees the "callee
-never mutates" half of the read-only parameter alias proof (docs/parallel_design.md §15). Using it to elide more copies
-is a later performance change and is not part of these semantics.
+never mutates" half of the read-only parameter alias proof (internal/parallel_design.md §15). Eliding copies from it is
+not part of these semantics.
 
 ### 4.3 Not part of the signature
 
 `f(const T& x)` and `f(T& x)` have the same signature, as do `f(const T x)` and `f(T x)`. `const` never enters
-overload viability or scoring (`core/overload_resolution.hpp` is unchanged), and declarations that differ only by
+overload viability or scoring (`core/overload_resolution.hpp` never reads it), and declarations that differ only by
 `const` follow the general redefinition rule, with nothing special for `const`:
 
 - Two definitions of one signature in the same unit are a load error: two methods (or two static methods, or two
@@ -249,8 +248,7 @@ constness. A re-run that changes its own declaration between const and plain con
 - `extern const T x;` promises that this unit doesn't write `x`. Its own writes are errors, whether or not the defining
   unit declared `x` const.
 - The host reads a const like any global. `engine::add_global` / `add_global_ref` over a const cell throws
-  `Cannot assign to 'MAX': it is read-only`. A host-defined constant (`engine::add_constant`) would be a separate,
-  later addition.
+  `Cannot assign to 'MAX': it is read-only`. The host has no API that declares a constant.
 
 ## 7. Interactions
 
@@ -279,8 +277,8 @@ name, as in C++.
 - `for (const auto x : c)` takes a const copy per iteration.
 - Over a const container, `for (auto& x : c)` binds const references (deduction, 7.2), `for (T& x : c)` /
   `for (var& x : c)` are errors, and `for (auto x : c)` copies writable values.
-- Map pairs follow: over a const map, `kv.second` is const as well as `kv.first`. The map-key rules are unchanged:
-  keys stay read-only by the static checker alone, with their own texts.
+- Map pairs follow: over a const map, `kv.second` is const as well as `kv.first`. The map-key rules hold as for any
+  map: keys are read-only by the static checker alone, with their own texts.
 
 ### 7.4 Structured bindings
 
@@ -290,7 +288,7 @@ name, as in C++.
 
 ### 7.5 Captures
 
-C++'s rules, applied to JaiScript's capture model (docs/closures_and_captures.md):
+C++'s rules, applied to JaiScript's capture model (internal/closures_and_captures.md):
 
 - `[x]` and `[=]` copy a const local into a const member: the lambda's `x` is const (C++ [expr.prim.lambda.capture]:
   the member has the entity's type, `const T`).
@@ -300,7 +298,7 @@ C++'s rules, applied to JaiScript's capture model (docs/closures_and_captures.md
 - A default capture never captures a program-scope const: the lambda reads it when it runs, and its constness comes
   from the cell. An explicit `[G]` copies it at creation into a const member, by the first rule.
 
-One existing difference from C++ stays as it is: a JaiScript lambda's copy captures and init-captures are writable in
+One difference from C++: a JaiScript lambda's copy captures and init-captures are writable in
 its body (C++ needs `mutable` for that), so JaiScript lambdas behave as C++ `mutable` lambdas. A copy of a const is
 const in a `mutable` lambda too, so the rules above are C++'s exactly.
 
@@ -315,12 +313,12 @@ re-initializes const declarations as part of the replay, which is not a store.
 - Program-scope consts read in a body are provisioned like any global read. No unit runs during a region, so their
   value is fixed while it runs, and a folded use is a constant in the body's chunk.
 - `parallel_for (const auto& x : xs)` closes the loop's output channel for `x`.
-- A write to a const remains an error (the existing walls still apply to everything else).
+- A write to a const is an error (the parallel walls apply to everything else).
 
 ### 7.8 `reflect::`
 
 - `reflect::set(x, "f", v)` raises `Cannot assign to 'f': it is read-only` when `f` is a class constant.
-- `reflect::fields(x)` rows carry no `const` key yet, and `reflect::set` on a const-rooted value and `reflect::bind` of a
+- `reflect::fields(x)` rows carry no `const` key, and `reflect::set` on a const-rooted value and `reflect::bind` of a
   writing method on a const run (9.3).
 - `reflect::get` reads.
 
@@ -338,21 +336,20 @@ and the debugger's refusal of `setVariable` on a const are not done (9.3).
 
 ### 7.11 jaibite
 
-Version 41: `variable_decl::is_const`, `destructuring_decl::is_const` and `extern_decl::is_const` are serialized. The
-const verdicts are not: every load runs the checker's walk, which stamps them. `parameter::is_const` and
-`range_for_stmt::is_const` were serialized before and ignored; now they mean const, so a sibling written before version
-41 re-parses.
+Version 41: `variable_decl::is_const`, `destructuring_decl::is_const`, `extern_decl::is_const`, `parameter::is_const`
+and `range_for_stmt::is_const` are serialized. The const verdicts are not: every load runs the checker's walk, which
+stamps them. A sibling of an older version re-parses.
 
 ## 8. Diagnostics
 
-Every run-time error is `type_mismatch`, in the read-only family (docs/diagnostics.md family B, section "Const"). The
+Every run-time error is `type_mismatch`, in the read-only family (internal/diagnostics.md family B, section "Const"). The
 checker reports the same fact at load, lowercase, with the declaration as the related location (`(declared at 3:1)`); warn
 mode reports it as a warning. A stamped node raises its text when it is reached, before any part of it runs (the right side
 of an assignment included), so the error is the same whichever operand would have failed first.
 
 | case | run time | checker |
 |---|---|---|
-| store, compound store or `++`/`--` of the const itself: a local, a parameter, a global, a namespace const, a class constant | `Cannot assign to 'MAX': it is read-only` (the existing text) | `cannot assign to const 'MAX'` (`'C::K'`, `'cfg::W'` when scoped) |
+| store, compound store or `++`/`--` of the const itself: a local, a parameter, a global, a namespace const, a class constant | `Cannot assign to 'MAX': it is read-only` (family B's text) | `cannot assign to const 'MAX'` (`'C::K'`, `'cfg::W'` when scoped) |
 | store through a const (2.2) | `Cannot assign to 'c.hp': it is read-only ('c' is const)` (the target spelled by `detail/lvalue_shape.hpp`) | `cannot assign to 'c.hp': 'c' is const` |
 | method that writes its receiver | `Cannot call 'move' on 'p': 'p' is const and 'move' writes its receiver (line 12)` | the same, lowercase |
 | mutating builtin | `Cannot call 'push' on 'xs': 'xs' is const and 'push' changes it` | the same, lowercase |
@@ -411,7 +408,7 @@ and the backends never depend on the diagnostics.
 
 Known places where a write through a const runs without an error:
 
-- **Host methods.** A call of a host (C++) method on a const value runs whatever the method does: the binder does not yet
+- **Host methods.** A call of a host (C++) method on a const value runs whatever the method does: the binder does not
   record which methods are `const` member functions.
 - **Paths the run time can only walk by running code**: a step through a property getter, a computed index (`c[i + 1].x`)
   or a call result. The checker reports such a path when it can type it; otherwise the write runs.
@@ -419,10 +416,10 @@ Known places where a write through a const runs without an error:
   import or include connects them) sees no const; the write is caught when that unit is checked again.
 - **Callbacks**: a builtin's callback that writes through its `T&` element parameter (`xs.for_each((int& x) => x = 1)`
   over a const `xs`) writes the element.
-- **`reflect::`**: `reflect::fields` rows have no `const` key yet; `reflect::set` raises only for a class constant, and
+- **`reflect::`**: `reflect::fields` rows have no `const` key; `reflect::set` raises only for a class constant, and
   `reflect::bind` of a writing method on a const runs.
 - **Tooling**: the debugger's `setVariable` does not refuse a const, and the language server has no const hover or
-  `readonly` semantic token yet.
+  `readonly` semantic token.
 
 ## 10. Compile-time folding
 
@@ -466,12 +463,11 @@ JaiScript's:
   constant, and an enum declaration that runs again patches every folded value or rewrites the read back.
 - A cell block reads an enum member it holds (`Fx.fire` as an operand) at its entry. The entry finds the member's map
   entry once per enum map and keeps it while the enum's name holds the same map: the map is const, so the same node
-  holds the same entries. This removes the per-entry string hash the copy census measured (3.2M lookups per Gator Quest
-  run).
-- An enum declared in a function or a block stays local (docs/global_shadowing.md) and is never folded.
-- A missing value (`E::zzz`) raises `No value 'zzz' in enum 'E'` as before; the checker reports it.
+  holds the same entries, so a read costs no string hash.
+- An enum declared in a function or a block stays local (internal/global_shadowing.md) and is never folded.
+- A missing value (`E::zzz`) raises `No value 'zzz' in enum 'E'`; the checker reports it.
 
-## 12. What changed where
+## 12. Where it lives
 
 - **Parser:** `const` at the 1.1 positions, the initializer rule, the foreign words of 1.3 (`detail/foreign_keyword.hpp`).
 - **AST:** `variable_decl::is_const`, `destructuring_decl::is_const`, `extern_decl::is_const`, and a `const_site` verdict on
@@ -495,9 +491,8 @@ JaiScript's:
   structured bindings, captures, class constants, other units and the host, namespaces, folding with hot reload (a
   value change, constness removal, a running frame) and enums.
 - The foreign-keyword samples in `Bridge Additions`.
-- Gates: the Debug suites on both backends, the Release game hashes (GLOOM 7fecc09815bb64e0 / 3580805725, demoreel
-  006d304a70772e5f, crawler 3849293868, Gator Quest 3218840367, JaiDOOM 1746772898), fuzz 3000 with no divergence, and
-  `verify_site.py` for the guide. The fuzz generator does not write const declarations yet.
+- Gates: the Debug suites on both backends, the example hash gates (`tools/ci/gates.sh`), the differential fuzzer
+  with no divergence, and `verify_site.py` for the guide. The fuzz generator does not write const declarations.
 
 ## 14. Decisions
 
@@ -506,13 +501,13 @@ JaiScript's:
    constructor sets a const. `const T&` / `const T` parameters are allowed on constructors like on any function.
 3. Enum member values are compile-time constants and fold; variables holding enum values stay ordinary variables.
 4. A re-run that switches a name between const and plain applies live: folded code is patched or rewritten to the
-   general load in place. Hot reload never requires a restart (standing rule).
+   general load in place. Hot reload never requires a restart.
 5. Declarations that differ only by `const` follow the general redefinition rule: two definitions of one signature in
    the same unit are an error, a definition from another unit is a redefinition with a warning, uniformly for methods,
    constructors and functions. Program-scope functions of one name and different signatures are overloads; an
    `override` declaration replaces on purpose.
 6. `const Foo f;` default-constructs a class; every other type needs an initializer.
 7. Captures follow C++ exactly: a copy of a const is const, a reference to a const is a const reference, an
-   init-capture deduces by `auto`. JaiScript lambdas behave as C++ `mutable` lambdas (an existing difference, kept).
+   init-capture deduces by `auto`. JaiScript lambdas behave as C++ `mutable` lambdas (a deliberate difference).
 8. `auto&` over a const deduces a const reference.
 9. `add_global` / `add_global_ref` over a const throws the read-only text.

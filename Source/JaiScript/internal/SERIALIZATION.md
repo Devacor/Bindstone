@@ -6,7 +6,7 @@ This document describes the JaiScript serialization architecture, dispatch prior
 
 JaiScript provides a dual-format serialization system supporting both **binary** and **JSON** formats through a unified archive interface. The system is designed to:
 
-1. **Interoperate with Cereal** - Types can support both JaiScript and Cereal serialization via `if constexpr` branching
+1. **Interoperate with other archive libraries** - A type can serve another library too by branching on the `jai::serialization::jai_archive<Archive>` concept
 2. **Support property-based serialization** - Types using `property_owner<T>` get automatic serialization
 3. **Handle complex scenarios** - Non-default-constructible types, shared_ptr deduplication, weak_ptr reconstruction
 4. **Remain extensible** - Custom serialization logic can compose with automatic property serialization
@@ -14,130 +14,90 @@ JaiScript provides a dual-format serialization system supporting both **binary**
 > **Scope note:** this doc covers the C++ **value** archive system (`jai_archive`). Serializing
 > parsed **scripts** (AST + compiled bytecode) is a separate subsystem — jaibite save/load
 > (`engine::jaibite()`, `jaibite::save()`, `engine::jaibite_load()`); see
-> `execution_mode_metrics.md`.
+> `docs/site/embedding/04-jaibite.html`.
 
 ## Quick Reference: Dispatch Priority
 
 ```
-SAVING                              LOADING (smart_ptr<T> without default ctor)
-──────                              ──────────────────────────────────────────
-1. Native types (containers, ptrs)  1. T::load_and_construct (member)
-2. T::save (member)                 2. load_and_construct (free via ADL)
-3. T::serialize (member fallback)   Then normal load dispatch...
-4. save (free via ADL)
-5. serialize (free via ADL)         LOADING (default-constructible)
-6. JAI_STATIC_BINDER                ─────────────────────────────────
-7. property_owner (auto fallback)   1. Native types (containers, ptrs)
-                                    2. T::load (member)
-                                    3. T::serialize (member fallback)
-                                    4. load (free via ADL)
-                                    5. serialize (free via ADL)
-                                    6. JAI_STATIC_BINDER
-                                    7. property_owner (auto fallback)
+SAVING (archive_writer_impl)          LOADING (archive_reader_impl)
+────────────────────────────          ─────────────────────────────
+1. T::save (member)                   1. T::load (member)
+2. T::serialize (member)              2. T::serialize (member)
+3. property_owner (whole chain)       3. property_owner (whole chain)
+4. primitives                         4. primitives
+5. smart pointers, std containers     5. smart pointers, std containers
+6. jai::property                      6. jai::property
+7. serialize (free via ADL)           7. serialize (free via ADL)
+8. save (free via ADL)                8. load (free via ADL)
+otherwise: run-time serialization_error
 ```
 
-## Future Work (TODO)
-
-### Top-Level Keyless Serialization
-
-Currently all serialization requires named properties. A future enhancement will support keyless top-level serialization:
-
-```cpp
-// Current (requires wrapping)
-ar("PlayerData", playerSaveData);
-
-// Future (top-level object without extra nesting)
-ar(playerSaveData);  // When saving to player_save_data.json, the filename IS the key
-```
-
-This is useful when serializing a single root object to a file where the filename itself provides context.
+A top-level `ar(obj)` with no key works: at array or root context the writer wraps the object in
+`begin_object`/`end_object` itself.
 
 ## Serialization Method Dispatch Priority
 
-When serializing or deserializing a type `T`, JaiScript checks for serialization support in the following priority order. The design follows Cereal's model where you provide **either** `serialize()` **or** a `save()`/`load()` pair - not both.
+When serializing or deserializing a type `T`, JaiScript checks for serialization support in the following priority order. You provide **either** `serialize()` **or** a `save()`/`load()` pair - not both.
 
-### For Saving (archive_writer)
+The archives are `archive_writer_impl<Derived>` and `archive_reader_impl<Derived>` (`archive_impl.hpp`), instantiated as
+`json_archive_writer`/`json_archive_reader` and `binary_archive_writer`/`binary_archive_reader`. The examples below write
+`Archive&` for any of them.
+
+### For Saving
 
 ```
-Priority 1: STL Containers & Smart Pointers (native handling)
-            - std::vector, std::map, std::unordered_map, std::array, std::pair
-            - std::shared_ptr, std::weak_ptr, std::unique_ptr
-            - Direct primitives (int, float, string, bool, enum)
-
-Priority 2: T::save(archive_writer&) const
-            - Member function with explicit save logic
+Priority 1: T::save(Archive&, std::uint32_t) const or T::save(Archive&) const
+            - Member function with explicit save logic (protected is fine with friend jai::access)
             - Can compose with property_mgr.save() internally
 
-Priority 3: T::serialize(archive_writer&)
-            - Bidirectional member function (fallback if no save())
-            - Same function handles both save and load
+Priority 2: T::serialize(Archive&, std::uint32_t) or T::serialize(Archive&)
+            - Bidirectional member function (used when there is no save())
 
-Priority 4: save(archive_writer&, const T&) via ADL
-            - Free function in T's namespace
-
-Priority 5: serialize(archive_writer&, T&) via ADL
-            - Bidirectional free function (fallback if no free save())
-
-Priority 6: JAI_STATIC_BINDER (compile-time properties)
-            - Uses jai_static_type<T>::save(ar, obj)
-
-Priority 7: property_owner<T> (automatic fallback)
-            - Calls T::property_mgr.save(ar)
+Priority 3: property_owner<T>
+            - save_owned_properties walks every level of the inheritance chain
             - Serializes all JAI_PROPERTY fields automatically
-            - Only used if NO other serialization method exists
 
-If none match: static_assert compile-time error
+Priority 4: Primitives (arithmetic, enum, std::string)
+
+Priority 5: Smart pointers and std containers
+            - std::shared_ptr, std::weak_ptr, std::unique_ptr
+            - std::pair, std::optional, std::variant, std::tuple, std::array
+            - map-like, set-like and sequence containers
+
+Priority 6: jai::property<T> (writes the wrapped value)
+
+Priority 7: serialize(Archive&, T&) via ADL
+
+Priority 8: save(Archive&, const T&) via ADL
+
+If none match: a run-time jai::serialization_error naming the type
 ```
 
-### For Loading (archive_reader)
-
-For types held in `std::shared_ptr<T>` or `std::unique_ptr<T>` that lack default constructors, `load_and_construct` is checked first (see next section).
-
-For default-constructible types or direct values:
+### For Loading
 
 ```
-Priority 1: STL Containers & Smart Pointers (native handling)
-            - Same as save, handles deserialization natively
+Priority 1: T::load(Archive&, std::uint32_t) or T::load(Archive&)
+Priority 2: T::serialize(Archive&, std::uint32_t) or T::serialize(Archive&)
+Priority 3: property_owner<T> (load_owned_properties, whole chain)
+Priority 4: Primitives
+Priority 5: Smart pointers and std containers
+Priority 6: jai::property<T>
+Priority 7: serialize(Archive&, T&) via ADL
+Priority 8: load(Archive&, T&) via ADL
 
-Priority 2: T::load(archive_reader&)
-            - Member function with explicit load logic
-
-Priority 3: T::serialize(archive_reader&)
-            - Bidirectional member function (fallback if no load())
-
-Priority 4: load(archive_reader&, T&) via ADL
-            - Free function in T's namespace
-
-Priority 5: serialize(archive_reader&, T&) via ADL
-            - Bidirectional free function (fallback if no free load())
-
-Priority 6: JAI_STATIC_BINDER (compile-time properties)
-            - Uses jai_static_type<T>::load(ar, obj)
-
-Priority 7: property_owner<T> (automatic fallback)
-            - Calls T::property_mgr.load(ar)
-            - Deserializes all JAI_PROPERTY fields automatically
-            - Only used if NO other serialization method exists
-
-If none match: static_assert compile-time error
+If none match: a run-time jai::serialization_error naming the type
 ```
 
-### For Smart Pointers to Non-Default-Constructible Types
+`JAI_STATIC_BINDER` is not part of this dispatch: it feeds the type-erased property path
+(`property_serialization.hpp`, `static_binder_impl.hpp`).
 
-When deserializing `std::shared_ptr<T>` or `std::unique_ptr<T>` where `T` lacks a default constructor, `load_and_construct` is checked **before** normal load dispatch:
+### Shared Pointers and load_and_construct
 
-```
-Priority 1: T::load_and_construct(archive_reader&, construct<T>&)
-            - Static member function (requires friend jai::access)
-
-Priority 2: load_and_construct(archive_reader&, construct<T>&) via ADL
-            - Free function in T's namespace
-
-If neither exists: Fall back to default construction + normal load dispatch
-                   (will fail at compile time if T has no default constructor)
-```
-
-This pattern matches Cereal's approach - `load_and_construct` is specifically for **smart pointers to types without default constructors**, not a general factory pattern for all types.
+When deserializing a `std::shared_ptr<T>` record, a static member `T::load_and_construct(Archive&, construct<T>&)`
+(reached through `friend jai::access`) is used whenever it exists, before default construction. Without it, `T` is
+default-constructed and loaded through the normal dispatch; a type with neither raises `serialization_error`.
+`std::unique_ptr<T>` always default-constructs and raises `serialization_error` for a type without a default
+constructor.
 
 ```cpp
 // Member function (with jai::access friendship)
@@ -147,21 +107,20 @@ class MyType {
     // Private constructor - no default
     MyType(int id, std::string name);
 
-    static void load_and_construct(archive_reader& ar, construct<MyType>& c) {
+    template<class Archive>
+    static void load_and_construct(Archive& ar, construct<MyType>& c) {
         int id = ar.read_int32();
         std::string name = ar.read_string();
         c(id, name);  // Construct the object
         c->post_init_stuff();  // Access via operator->
     }
 
-    void save(archive_writer& ar) const {
+    template<class Archive>
+    void save(Archive& ar) const {
         ar.write_int32(m_id);
         ar.write_string(m_name);
     }
 };
-
-// Or as a free function via ADL
-void load_and_construct(archive_reader& ar, construct<OtherType>& c);
 ```
 
 ### Limitation: Nested Non-Default-Constructible Types
@@ -188,7 +147,8 @@ The problem is that `JAI_PROPERTY` requires the member to exist when `MyCat` is 
 
 3. **Don't use JAI_PROPERTY** for that member - serialize it manually in `load_and_construct`:
    ```cpp
-   static void load_and_construct(archive_reader& ar, construct<MyCat>& c) {
+   template<class Archive>
+   static void load_and_construct(Archive& ar, construct<MyCat>& c) {
        int age = ar.read_int32();
        std::string hairStr = ar.read_string();
        c(age, HairColor(hairStr));  // Construct everything at once
@@ -225,12 +185,14 @@ class Entity {
     float m_health_percent;  // Computed, don't serialize
 
 public:
-    void save(archive_writer& ar) const {
+    template<class Archive>
+    void save(Archive& ar) const {
         ar.serialize("health", m_health);
         ar.serialize("maxHealth", m_max_health);
     }
 
-    void load(archive_reader& ar) {
+    template<class Archive>
+    void load(Archive& ar) {
         ar.serialize("health", m_health);
         ar.serialize("maxHealth", m_max_health);
         m_health_percent = static_cast<float>(m_health) / m_max_health;
@@ -266,7 +228,8 @@ public:
     // Custom fields not using JAI_PROPERTY
     std::vector<Entity> entities;
 
-    void save(archive_writer& ar) const {
+    template<class Archive>
+    void save(Archive& ar) const {
         // Serialize JAI_PROPERTY fields automatically
         property_mgr.save(ar);
 
@@ -274,16 +237,17 @@ public:
         ar.serialize("entities", entities);
     }
 
-    void load(archive_reader& ar) {
+    template<class Archive>
+    void load(Archive& ar) {
         property_mgr.load(ar);
         ar.serialize("entities", entities);
     }
 };
 ```
 
-### Pattern 5: Dual Cereal/JaiScript Support
+### Pattern 5: Serving Another Archive Library
 
-For types that must work with both serialization systems:
+A type that another archive library also serializes branches on the `jai_archive` concept:
 
 ```cpp
 class MyComponent {
@@ -292,32 +256,18 @@ class MyComponent {
     template<class Archive>
     void save(Archive& ar, std::uint32_t version) const {
         if constexpr (jai::serialization::jai_archive<Archive>) {
-            // JaiScript path
             ar.serialize("value", m_value);
         } else {
-            // Cereal path
-            ar(cereal::make_nvp("value", m_value));
-        }
-    }
-
-    template<class Archive>
-    void load(Archive& ar, std::uint32_t version) {
-        if constexpr (jai::serialization::jai_archive<Archive>) {
-            ar.serialize("value", m_value);
-        } else {
-            ar(cereal::make_nvp("value", m_value));
+            // the other library's form
         }
     }
 };
 ```
 
-Cereal-style versioned signatures — `save(Archive&, std::uint32_t)` / `load(Archive&,
-std::uint32_t)` — are **detected natively and preferred**: the detection traits
-(`has_versioned_save_method` / `has_simple_save_method`, combined in `has_save_method` in
-`archive_impl.hpp`, via the `jai::access` wrappers) probe both arities and dispatch the
-versioned overload with the archive's version when it exists. One-parameter forwarders
-(`save(Archive& ar) const { save(ar, 0); }`) are **no longer required** — they're optional
-legacy shims and can be deleted.
+Versioned signatures — `save(Archive&, std::uint32_t)` / `load(Archive&, std::uint32_t)` — are detected natively and
+preferred: the detection traits (`has_versioned_save_method` / `has_simple_save_method`, combined in `has_save_method`
+in `archive_impl.hpp`, via the `jai::access` wrappers) probe both arities and call the versioned overload with version
+0 when it exists. A one-parameter forwarder is not needed.
 
 ### Pattern 6: Free Functions via ADL
 
@@ -330,13 +280,15 @@ namespace third_party {
 
 // In third_party namespace for ADL to find:
 namespace third_party {
-    void save(jai::serialization::archive_writer& ar, const Vector3& v) {
+    template<class Archive>
+    void save(Archive& ar, const Vector3& v) {
         ar.serialize("x", v.x);
         ar.serialize("y", v.y);
         ar.serialize("z", v.z);
     }
 
-    void load(jai::serialization::archive_reader& ar, Vector3& v) {
+    template<class Archive>
+    void load(Archive& ar, Vector3& v) {
         ar.serialize("x", v.x);
         ar.serialize("y", v.y);
         ar.serialize("z", v.z);
@@ -346,7 +298,7 @@ namespace third_party {
 
 ## Archive API Reference
 
-### archive_writer Methods
+### Writer Methods
 
 ```cpp
 // Named property serialization (preferred)
@@ -379,7 +331,7 @@ ar.begin_map(size);
 ar.end_map();
 ```
 
-### archive_reader Methods
+### Reader Methods
 
 ```cpp
 // Named property deserialization
@@ -487,7 +439,8 @@ class Entity : public jai::property_owner<Entity> {
 For complex migrations, use explicit save/load with version checking:
 
 ```cpp
-void load(archive_reader& ar) {
+template<class Archive>
+void load(Archive& ar) {
     uint32_t version = ar.get_version();
 
     ar.serialize("health", m_health);
@@ -524,52 +477,16 @@ try {
    - Version migration
    - Computed/cached fields
 
-3. **Add one-parameter forwarders** when supporting both Cereal and JaiScript
+3. **Use load_and_construct** for types without default constructors held by `shared_ptr`
 
-4. **Use load_and_construct** for types without default constructors
+4. **Test both formats** - serialization bugs often manifest differently in binary vs JSON
 
-5. **Test both formats** - serialization bugs often manifest differently in binary vs JSON
+5. **Consider serialize_mode::transient** for computed/cached properties that shouldn't be serialized
 
-6. **Consider serialize_mode::transient** for computed/cached properties that shouldn't be serialized
+## Design Notes
 
-## Implementation Status
+1. **serialize() as fallback**: If you have `save()` but no `load()`, the system uses `serialize()` for load (and vice versa).
 
-### Priority Order Alignment ✓
+2. **Member before free**: Member functions take priority over free functions, so class-specific logic overrides ADL-provided serialization.
 
-The implementation in `property_serialization.hpp` now matches the documented priority order:
-
-| Priority | Dispatch Order |
-|----------|----------------|
-| 1 | Native types (containers, smart ptrs, primitives) ✓ |
-| 2 | T::save/load (member) ✓ |
-| 3 | T::serialize (member fallback) ✓ |
-| 4 | save/load (free via ADL) ✓ |
-| 5 | serialize (free via ADL fallback) ✓ |
-| 6 | JAI_STATIC_BINDER ✓ |
-| 7 | property_owner (last resort) ✓ |
-
-### Design Notes
-
-1. **serialize() as fallback**: If you have `save()` but no `load()`, the system will use `serialize()` for load (and vice versa). This allows incremental migration from bidirectional to split functions.
-
-2. **Member before free**: Member functions always take priority over free functions, allowing you to override ADL-provided serialization with class-specific logic.
-
-3. **property_owner is truly last resort**: Only used if NO other serialization method exists. If you inherit from `property_owner<T>` but also provide `save()`/`load()`, your explicit methods take priority.
-
-## Comparison with Cereal
-
-| Feature | JaiScript | Cereal |
-|---------|-----------|--------|
-| serialize() | Supported | Supported |
-| save/load split | Supported | Supported |
-| load_and_construct | Supported | Supported |
-| Minimal save/load | Not supported | Supported |
-| Property-based auto | Yes (property_owner) | No |
-| Self-describing binary | Yes | No (fixed layout) |
-| Archive detection | `jai_archive<Archive>` concept | Archive traits |
-| Versioning | In-format + explicit | Explicit only |
-
-## Sources
-
-- [Cereal Serialization Functions](https://uscilab.github.io/cereal/serialization_functions.html)
-- [Cereal C++ Library](https://github.com/USCiLab/cereal)
+3. **Explicit methods before property_owner**: If you inherit from `property_owner<T>` but also provide `save()`/`load()` or `serialize()`, your explicit methods take priority.

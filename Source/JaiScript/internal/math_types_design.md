@@ -1,65 +1,63 @@
 # Native math types: design
 
 JaiScript owns a small family of math types (`math::vec2`, `math::vec3`, `math::vec4`, `math::ivec2`, `math::ivec3`,
-`math::color` with `math::hsv` / `math::hsl`, `math::mat3`, `math::mat4`), native to the language rather than script
-classes or C++-bound objects. A vector is a compile-time aggregate: typed vector variables, parameters and fields lower
+`math::color`; `math::hsv` / `math::hsl`, `math::mat3` and `math::mat4` are designed in section 6 and not built), native
+to the language rather than script classes or C++-bound objects. A vector is a compile-time aggregate: typed vector variables, parameters and fields lower
 to their component scalars before either backend runs, and a vector that must exist dynamically is one boxed value kind.
 A host engine maps its own C++ types onto them with one adapter line per type. This document covers the decisions, the
 measured baseline, the representation, the semantics, the API, the binding layer, the VM, the checker, the Bindstone
-migration and the plan with its gates. The measurements come from throwaway harnesses described in "Measurements".
+migration and what is built. The measurements come from throwaway harnesses described in "Measurements".
 
-Items needing a ruling are marked **[Dev]** and collected in the last section. Dev accepted the first fourteen
-recommendations of section 13 on 2026-09-27 and ruled item 15 on 2026-09-30; the **[Dev]** marks record where each ruling applies.
+**[Dev]** marks the points that took a ruling; section 13 lists the rulings.
 
-## 1. Decisions already made (Dev, 2026-09-27 and 2026-09-28)
+## 1. Decisions
 
 - JaiScript owns the math types, in the `math::` namespace: `vec2`, `vec3`, `vec4`, `ivec2`, `ivec3`, `color`, matrix
   types hoisted from MV's `matrix.hpp`, and possibly `quat` and an AABB/rect if MV's usage justifies them.
 - Field aliases: `vec3`'s `x`/`y`/`z` are also `width`/`height`/`depth`, and `vec2`'s `x`/`y` are also
   `width`/`height`. Both spellings read and write the same component, in script and in the checker. MV's `Size` maps onto
   `vec3` this way.
-- `math::color` supports HSV and HSL, hex in/out, normalize and lerp, plus the usual operators.
+- `math::color` supports HSV and HSL, hex in/out, normalize and lerp, plus the usual operators (built: the operators
+  and the mix family; the rest is 6.3's not-built rows).
 - The standard types are as fast and native as possible: not script classes, and not cpp-bound objects on the hot path.
 - Host binding is one adapter line per host type (for example `JAI_BIND_VEC3((MV::Point<float>), x, y, z)`). Every
   binder boundary converts implicitly: parameters, returns, properties, signals and containers.
-  - A layout-identical host type aliases C++ memory, so `node.pos.x = 5` writes the C++ member.
+  - A layout-identical host type aliases C++ memory, so `node.pos.x = 5` writes the C++ member (not built, 8.4).
   - Any other host type falls back to a copy-in/write-back proxy.
-  - Genuinely different types, such as double vectors, use explicit converters.
+  - A host with other component types (double vectors) binds through the same member macros, which `static_cast` each
+    component (8.2).
 - Naming: every JaiScript name is lower snake_case, as in std C++. So color's fields are `r`, `g`, `b`, `a`, with no
   uppercase aliases, and methods are spelled `normalized()`, `at_origin()`, `from_hex()`, `to_hsv()`.
 - Migration: MV's types bind to the native types through adapters, and C++ keeps using MV types. Bindstone's scripts and
   script-facing assets migrate once to the `math::` names. There are no transitional `Point` / `Size` / `Color` script
   aliases.
-- Representation (2026-09-28): vectors are compile-time aggregates, not an inline value kind. `script_value`'s layout
+- Representation: vectors are compile-time aggregates, not an inline value kind. `script_value`'s layout
   stays as it is (4.1 measures why). A boxed node kind carries every dynamic vector (4.2), and a post-check rewrite
-  scalar-replaces typed vectors (4.3). Order: the boxed kind, then the lowering, then typed buffers, then host adapters
-  (section 12).
+  scalar-replaces typed vectors (4.3).
 
 ## 2. Answers in brief
 
 1. **Representation.**
    - A vector that must exist dynamically is one boxed kind: a pooled copy-on-write node holding the component count,
      the element type and up to four components (4.2).
-   - A typed vector variable, parameter or field is its components: a post-check AST rewrite scalar-replaces it, so both
-     backends run float and int slots (4.3).
+   - A typed vector variable or parameter is its components: a post-check AST rewrite scalar-replaces it, so the
+     lowered tree runs float and int slots (4.3; fields, 4.3.1, are not lowered).
    - `script_value`'s layout does not change. Moving vec3 inline slowed every program by 1 to 6% (4.1).
    - `ivec` components are int32: reads widen exactly, and a store out of range follows the build's integer-overflow
      policy. `vec` components are float32 and every component operation is a binary32 operation.
 2. **VM speed.**
    - Lowered vectors run on the existing typed scalar instruction set, typed regions and cells, at the float-local floor.
    - Boxed vectors run through one shared kernel on both backends.
-   - Today an MV-style bound Point costs 885 ns to construct and 127 ns per field read, and 722 ns on top of the call to
+   - Bound through `dynamic_binder`, an MV-style Point costs 885 ns to construct and 127 ns per field read, and 722 ns on top of the call to
      return from C++. A script class costs 618 ns to construct and 5 ns per field read. Three float locals cost 18 ns
      and about 3 ns per use; the lowering targets that floor, since a lowered vector is float locals (section 9).
 3. **The adapter.**
-   - The adapter is a traits specialization, `jai::math_adapter<Host>`, generated by `JAI_BIND_VEC3` / `JAI_BIND_COLOR`
-     / `JAI_BIND_MAT4` / `JAI_BIND_MATH` macros. It supplies the native type, the conversions and a compile-time
-     component layout.
+   - The adapter is a traits specialization, `jai::math_adapter<Host>`, generated by the `JAI_BIND_VEC2/3/4`,
+     `JAI_BIND_IVEC2/3` and `JAI_BIND_COLOR` macros. It supplies the native type, the script kind and the conversions.
    - The binder's `value_converter` / `create_argument` / `property_impl` / `make_value` / container paths gain one
      `if constexpr` branch each, so parameters, returns, properties, signals, `std::vector` and `std::map` all convert.
-   - A `.property()` member with an aliasable layout becomes a CPP-MEMBER reference, writing through to C++ memory with
-     the receiver pinned. Getter/setter properties become PROPERTY references, which are the copy-in/write-back proxy.
-     Both modes exist today.
+   - Bound members and getter/setter properties read a copy and store through the property's setter, the
+     copy-in/write-back proxy (PROPERTY). Not built: aliasing a layout-compatible member as a CPP-MEMBER reference (8.4).
    - Observable fields and fluent method pairs never alias.
 4. **API.**
    - The API surface is in section 6.
@@ -67,13 +65,9 @@ recommendations of section 13 on 2026-09-27 and ruled item 15 on 2026-09-30; the
      power-of-two and random-string helpers move into `math::`. Filesystem, timing, byte order, containers and MV's
      naming counter stay in the engine.
 5. **Migration.**
-   - Script text names the old types in four lines of one file (`creatureKind.script`) and the four generator lines
-     that emit them.
-   - Everything else flows through 84 bound methods and 5 signals, which convert automatically once `points.h` carries
-     the adapters and the old registrars are deleted.
-   - Assets are untouched: they hold MV's C++ serialization, and C++ keeps MV types.
-   - The gates are: build `BindstoneClient_Windows`, `-verifyassets`, `-loginshot`, `-workbenchsmoke`, plus an arena
-     sweep identical to the pre-migration baseline (section 11).
+   - MV's Point/Size, Color and TexturePoint bind through adapters in `points.h`; the scripts name `math::` types.
+   - The bound methods and signals that carry those types convert through the adapters.
+   - Assets are untouched: they hold MV's C++ serialization, and C++ keeps MV types (section 11).
 6. **Checker.**
    - `math::` types are builtin types to the parser (`jaibite` version bump) and to the checker, via one new ctype kind
      with a sub-kind.
@@ -83,7 +77,7 @@ recommendations of section 13 on 2026-09-27 and ruled item 15 on 2026-09-30; the
 
 ## 3. Measurements
 
-### 3.1 The baseline: what a Point costs today
+### 3.1 The baseline: what a `dynamic_binder` Point costs
 
 Harness (throwaway, not committed):
 - `mathbench_host.cpp` is the kernel suite's host, `bench/kernels/host/jai_kernel_host.cpp`, extended with two types:
@@ -92,7 +86,7 @@ Harness (throwaway, not committed):
   - `BNode`, which carries MV `Node`'s fluent `position()` / `position(p)` pair and a plain `pos` member property.
 - `mathbench.jai` has one function per kernel. Each loops 200,000 times over frame-slot locals, and the time reported
   is the best of three calls.
-- Build: master `3eaa84f3`, Release lib (`/O2 /GL`, `/MT`), and the host linked with `/LTCG`, exactly as
+- Build: Release lib (`/O2 /GL`, `/MT`), and the host linked with `/LTCG`, exactly as
   `bench/kernels/host/build.cmd` does it.
 - Timing: taken under the shared timing lock after four quiet 15 s checks. There were 5 rounds, interleaving the VM and
   interpreter processes. Each cell below is the median of the 5 rounds.
@@ -129,7 +123,7 @@ What the numbers say:
 - Returning a Point from C++ costs about 722 ns on top of the call (1,190.7 − 469.0).
   - `convert_custom_type_with_registry` → `make_object` does a `make_shared<Point>`, a `class_instance`, two
     `object_holder`s and a symbolizer lookup of `_cpp_object` (`engine_impl.hpp:63-120, 155-180`).
-  - Exchanging components at a statically resolved call (step 4) makes that return cost only the crossing.
+  - Exchanging components at a statically resolved call (not built) would make that return cost only the crossing.
 - Taking a Point by `const&` is already cheap (+20 ns over three floats): it aliases the live object.
 - The baseline to beat is therefore:
   - construction under ~20 ns;
@@ -150,10 +144,10 @@ These findings are not the design's to fix, but they bear on it:
   `shared_ptr<Self>` through the same path. The harness node is not polymorphic; MV's polymorphic nodes add a
   script-layer lookup first.
 - **`var nd = NODE;` copies the C++ object** (aggregate copy semantics). Only `shared_ptr<BNode> nd = NODE;` shares it.
-  The harness uses the shared spelling. This is correct per the aggregate-copy ruling, but a script author moving
+  The harness uses the shared spelling. This is correct aggregate-copy semantics, but a script author moving
   from MV may not expect it.
-- **`NODE.position().x = 55;` silently edits a temporary** on both backends. C++ rejects assignment to a member of a
-  prvalue. Section 10 makes it an error.
+- **`NODE.position().x = 55;` stores into a temporary.** C++ rejects assignment to a member of a prvalue. For a math
+  value it raises `Cannot assign to a member of a temporary` on both backends (5.5, section 10).
 - **Latent bugs in MV code** that hoisting fixes (section 7):
   - `angle2D(int...)` and `angle2DRad(int...)` compute `x2 - y2` instead of `x2 - x1` (`generalUtility.h:318, 330`).
   - `wrappingDistance` calls `wrap(val, lo, hi)`, but `wrap` takes `(lo, hi, val)` (`:380-381`).
@@ -161,13 +155,12 @@ These findings are not the design's to fix, but they bear on it:
   - `BoxAABB::centerPoint` returns `min + (min + max) / 2` (`boxaabb.h:63`).
   - `makeBounds` is declared `void` but returns a value (never instantiated).
   - `floatEqualImplementation` type-puns through pointer casts.
-- **Floating-point contraction is not pinned anywhere** (no `-ffp-contract` / `/fp:` flag in any build file). MSVC does
-  not contract under its default `/fp:precise`. Clang contracts `a*b + c` into FMA by default on targets that have it,
-  and ARM64 (iOS) always does. So a C++ kernel written as one expression (for example `dx*dx + dy*dy` in
-  `math::distance`) can produce different bits on iOS than on Windows.
-  - The float32 vector kernels need `-ffp-contract=off` for cross-backend and cross-platform identity.
-  - Existing double kernels (the `mix` family, `distance`) have the same exposure today.
-  - This is a judgment from compiler defaults, not a measured divergence.
+- **Floating-point contraction is pinned off.** MSVC does not contract under its default `/fp:precise`. Clang contracts
+  `a*b + c` into FMA by default on targets that have it, and ARM64 (iOS) always does, so a C++ kernel written as one
+  expression (for example `dx*dx + dy*dy` in `math::distance`) could produce different bits per target. JaiScript's
+  CMakeLists.txt adds `-ffp-contract=off` to every non-MSVC build, which keeps the float32 vector kernels and the double
+  kernels (the `mix` family, `distance`) identical across backends and platforms. A host that compiles the library
+  with its own build files must pass the same flag.
 
 ### 3.3 Representation micro-measurements
 
@@ -175,7 +168,7 @@ These findings are not the design's to fix, but they bear on it:
 
 | operation | ns |
 |---|---|
-| copy + move + destroy per value, today's layout (index at byte 8, 8-byte relocation), one value in eight a refcounted handle | 4.80 |
+| copy + move + destroy per value, the kept layout (index at byte 8, 8-byte relocation), one value in eight a refcounted handle | 4.80 |
 | the same with the proposed layout (index at byte 15, 16-byte relocation) | 3.96 |
 | 16-byte node: `make_strong` + one handle copy + release | 20.13 |
 | 16-byte node from a free-list pool (get + put) | 0.59 |
@@ -187,7 +180,7 @@ loop, and `make_strong` costs 20 ns.
 
 ## 4. Representation
 
-A math vector is a compile-time aggregate (Dev ruling, 2026-09-28). A typed vector variable, parameter or field lowers
+A math vector is a compile-time aggregate. A typed vector variable, parameter or field lowers
 to its component scalars before either backend runs (4.3), and a vector that must exist dynamically is one boxed value
 kind (4.2). `script_value`'s layout does not change.
 
@@ -204,8 +197,8 @@ storage             [ payload 8 | index 1 | padding 7 ]
 ```
 
 That layout passed the whole Foundry suite on both backends, but it slows every program, whether or not it uses a
-vector. Every relocation shape that carries 12 bytes was measured against master (whole-program ABBA, medians of six;
-master 7ea57b09's Release binaries against the same source with only the storage changed):
+vector. Every relocation shape that carries 12 bytes was measured against the unchanged layout (whole-program ABBA,
+medians of six; Release binaries of the same source with only the storage changed):
 
 | relocation | GLOOM serial | GLOOM 8 workers | JaiDOOM | OSSUARY |
 |---|---|---|---|---|
@@ -214,10 +207,10 @@ master 7ea57b09's Release binaries against the same source with only the storage
 | the tail copied only for the 12-byte kinds (a branch) | +1.16% | +3.77% | +2.91% | +6.51% |
 | one meta word (tail, spare, index) stored and copied whole, index in its top byte | +2.90% | +3.69% | +2.92% | +3.04% |
 | the same meta word, index in its low byte (byte 8, an imm32 per writer) | +3.40% | +5.07% | +2.91% | +6.04% |
-| control: master rebuilt from the same source in another folder | -0.01% | +2.77% | -0.57% | -0.07% |
+| control: the unchanged layout rebuilt from the same source in another folder | -0.01% | +2.77% | -0.57% | -0.07% |
 
 The control holds the serial workloads within 0.6%; GLOOM with 8 workers moves about 3% between two builds of the same
-source. Every 12-byte relocation costs 1 to 6% on the serial workloads, above the 1.5% bar, although the synthetic copy
+source. Every 12-byte relocation costs 1 to 6% on the serial workloads, paid by programs that use no vector, although the synthetic copy
 benchmark of 3.3 favors it. Both meta words cost about the same whichever byte holds the index, so the cost follows from
 carrying bytes 8..15 through every relocation, not from one encoding of them (an inference from these five shapes; the
 mechanism is not isolated). The layout therefore stays, and vectors reach native speed by not being values at all where
@@ -230,9 +223,9 @@ reference or `[&]` capture target, an argument to or result from a dynamic host 
 
 | | |
 |---|---|
-| storage index | `TYPEID_VEC` (17), the one alternative for every vector kind |
-| alternative | `strong_ptr<script_vec_node>`; `script_vec_node` is `{ uint8_t count; uint8_t integral; uint32_t words[4]; }` |
-| kinds | `math::vec2`, `vec3`, `vec4` (binary32 words), `math::ivec2`, `ivec3` (int32 words); the kind is the node's count and element type, and `script_value_type` names it (`jai_vec2_type` ... `jai_vec4_type`) |
+| storage index | one per kind over the same node: `TYPEID_VEC2` (17), `TYPEID_IVEC2` (18), `TYPEID_VEC3` (19), `TYPEID_IVEC3` (20), `TYPEID_VEC4` (21), `TYPEID_COLOR` (22) |
+| alternative | `strong_ptr<script_vec_node>`; `script_vec_node` is `{ uint8_t count; uint8_t integral; uint8_t color; uint32_t words[4]; }` |
+| kinds | `math::vec2`, `vec3`, `vec4` (binary32 words), `math::ivec2`, `ivec3` (int32 words), `math::color` (four binary32 channels, `color` set); `script_value_type` names each (`jai_vec2_type` ... `jai_color_type`) |
 | type stamps | one canonical `type_info` per kind (`engine::get_type_info_math`), registered after the older canonical types so their interned ids stay put |
 | copy | shares the node (one refcount); a component store unshares a node whose count is above one first (`script_value::unchecked_set_vec_word`), so a copy never sees the write |
 | allocation | a per-engine block pool (`script_value::acquire_vec_node`, value.cpp) with the `reference_holder` pool's discipline: the free list is owner-thread only, a parallel region's workers take plain self-deleting blocks, a block released off the owner thread is deleted, and engine teardown orphans the pool until its last block returns |
@@ -243,8 +236,8 @@ typed-slot conversions, the operator rows, equality, ordering, hashing and text 
 layer and both backends. Only programs that box vectors pay: the alternative adds one case to the copy and destroy
 switches, and no scalar path changes.
 
-`math::color`, `math::hsv`, `math::hsl` and the matrices join later on the same pattern (their own node kinds, section
-12).
+`math::color` is the sixth kind on the same node (`TYPEID_COLOR`, r g b a). Not built: `math::hsv`, `math::hsl` and
+the matrices (section 6).
 
 ### 4.3 Compile-time aggregates: scalar replacement
 
@@ -313,7 +306,7 @@ rewrites.
   the proof pass and both backends the lowered one. The debugger's locals view folds `p$x`, `p$y`, `p$z` back into `p`
   and drops the rewrite's temporaries. Error texts never name a component slot: every lowered store is of the slot's
   own type, and the fallback stores name the source local.
-- **Later.** Class fields (4.3.1), multi-cell returns at grafted calls, and component parameters on raw typed frames.
+- **Not built.** Class fields (4.3.1), multi-cell returns at grafted calls, and component parameters on raw typed frames.
 
 #### 4.3.1 Fields
 
@@ -342,7 +335,7 @@ whose type changed. The work is the accessor's single entry for every observer, 
   vector's storage index). They live on the byte buffer the one-byte kinds use: element i is its components' words
   (binary32, or int32 for ivec) at offset `i * stride * 4`. The declared element type picks the kind (`make_array`,
   `kind_for_element`), so the tag and the kind agree as for every typed array. `get` boxes an element, and `set`/`push`
-  take a value the element boundary already converted to the exact kind. Raw sort does not apply (vectors currently use the generic lexicographic comparator), and `==` compares elementwise through the element rows.
+  take a value the element boundary already converted to the exact kind. Raw sort does not apply (vectors use the generic lexicographic comparator), and `==` compares elementwise through the element rows.
 - **Element references.** `var& r = a[i]` is a typed element reference: a component store through it writes the
   reference's scratch and commits it back to the buffer, whether the store names the reference directly or the alias's
   variable (`r.x = 7`).
@@ -360,7 +353,7 @@ whose type changed. The work is the accessor's single entry for every observer, 
 ### 4.5 Invariant changes
 
 - Invariant 1 keeps its layout; the vectors are one pointer-sized, nothrow-move alternative.
-- Invariant 2 (strong_ptr): `adopt_pooled` serves the per-engine block pools, now two (`reference_holder`,
+- Invariant 2 (strong_ptr): `adopt_pooled` serves the per-engine block pools (`reference_holder`, `object_holder`,
   `script_vec_node`).
 - Invariant 4 (the S8 prologue): `bound_decoded_temp()` decodes a vector cpp-bound box into a boxed vector (section
   8.4), so every handler that normalizes bound operands reaches the math rows with a native value.
@@ -393,9 +386,9 @@ whose type changed. The work is the accessor's single entry for every observer, 
   - Compound math kernels (`dot`, `magnitude`, `normalized`, `lerp`, the `mix` family, HSV/HSL conversion) spell a
     fixed operation order. Both backends and the cell lowering use that order; for example `dot` is
     `((ax*bx) + (ay*by)) + (az*bz)`, each step rounded to binary32.
-  - The kernel TU compiles without contraction (3.2).
+  - The kernels compile without contraction (3.2).
 - **Division by zero.** A zero divisor component raises `Division by zero` (`%` on ivec: `Modulo by zero`), the texts and
-  codes of scalar `/` and `%` (docs/diagnostics.md). MV's `/`
+  codes of scalar `/` and `%` (internal/diagnostics.md). MV's `/`
   substitutes 1 for a zero divisor component and prints an error for a zero scalar. JaiScript does not reproduce that
   quirk.
 
@@ -403,12 +396,12 @@ whose type changed. The work is the accessor's single entry for every observer, 
 
 - `==` and `!=` compare componentwise and exactly, with the rule a float scalar follows at each level. MV's `Point ==`
   uses a 1-ULP tolerance (`equals()`); approximate equality is not transitive and cannot be `==` while `==`, `<=>` and
-  `map_key_hash` stay consistent (a CRITICAL rule in `Source/JaiScript/CLAUDE.md`). The tolerant compare is
+  `map_key_hash` stay consistent (a code rule in `Source/JaiScript/AGENTS.md`). Not built: the tolerant compare
   `a.approx_equal(b, ulps)`.
 - Script ordering (`<`, `<=`, `>`, `>=`, `<=>`) compares components lexicographically. Vectors compare across numeric vector families/dimensions; colors compare with colors. Float components use the public total `<=>` order (signed zeros equivalent, NaNs last). This is separate from private map-key ordering. MV's `Point <` compares `x + y` sums; script does not reproduce that rule.
 - The C++-level `<=>` is the lexicographic order of components with the float rules (`std::strong_order`), and
   `map_key_hash` hashes the component bits consistently. So `map<math::ivec2, Tile>` works as a grid map with hashed
-  lookup and observed key order, per the map-order ruling.
+  lookup and observed key order.
 - Container structural equality (`detail/structural_equality.hpp`) compares math elements by value.
 
 ### 5.3 Conversions at typed slots
@@ -419,13 +412,13 @@ kernel. **[Dev]** The recommendation mirrors it:
 
 - `ivec2 ↔ vec2` and `ivec3 ↔ vec3` convert implicitly, per component, float-to-int through the checked kernel.
 - Dimensions never convert implicitly. A `vec2` in a `vec3` slot is an error; write `math::vec3(v, 0.0)`. A `vec3` in a
-  `vec2` slot is an error; write `v.xy()`.
+  `vec2` slot is an error; write `math::vec2(v.x, v.y)`.
 - `color` and `vec4` never convert implicitly: write `math::vec4(c.r, c.g, c.b, c.a)` or
-  `math::color(v.x, v.y, v.z, v.w)`. `hsv` and `hsl` convert only through `to_hsv()` / `from_hsv()`.
+  `math::color(v.x, v.y, v.z, v.w)`.
 - A string slot takes a math value through `to_string`, as it takes every type.
 - A `bool` slot and a condition take truthiness, which `is_truthy` defines for every kind (arrays by emptiness, objects
-  through `to_bool`). **[Dev]** The recommendation for math kinds is "not all zero", the numeric rule
-  (`!v.at_origin()`), with a matrix always truthy. It goes into both `is_truthy` twins (interpreter and VM; invariant 6).
+  through `to_bool`). **[Dev]** A math value is truthy when not all its components are zero, the numeric rule, in both
+  `is_truthy` twins (interpreter and VM; invariant 6).
 - `cast<math::ivec3>(v)` is the explicit spelling of the checked conversion. `cast<math::vec3&>` does not apply: math
   values are values, and references to them are ordinary references.
 
@@ -437,7 +430,7 @@ kernel. **[Dev]** The recommendation mirrors it:
 | `vec3`, `ivec3` | `x`=`width`, `y`=`height`, `z`=`depth` |
 | `vec4` | `x`, `y`, `z`, `w` |
 | `color` | `r`, `g`, `b`, `a` |
-| `hsv` / `hsl` | `h`, `s`, `v` / `l`, `a` |
+| `hsv` / `hsl` (not built) | `h`, `s`, `v` / `l`, `a` |
 
 An alias is the same component: `v.width = 4; v.x` is 4. JSON and the debugger show canonical names only.
 `to_string` never names components (5.7).
@@ -457,12 +450,12 @@ place:
 | hetero element | the boxed element |
 | reference (`var& r = v; r.x = 1`) | resolved by mode; scratch-backed modes (typed element, PROPERTY) commit afterwards, as string mutators do (invariant 11) |
 | CPP-MEMBER box (`node.pos.x = 1`) | the host memory at the component's offset |
-| component reference (`auto& r = v.x; r = 1`, `f(v.x)` with `float&`; Dev ruling 2026-09-30) | the COMPONENT holder over the base's reference: the same component store into the value the base names, then the base's commit (`internal/reference_model.md`) |
+| component reference (`auto& r = v.x; r = 1`, `f(v.x)` with `float&`) | the COMPONENT holder over the base's reference: the same component store into the value the base names, then the base's commit (`internal/reference_model.md`) |
 | PROPERTY (`obj.prop.x = 1`, getter/setter) | getter into scratch, component store, setter (the copy-in/write-back proxy) |
 | temporary (`f().x = 1`, `node.position().x = 1`) | error: `Cannot assign to a member of a temporary` (C++ [expr.ass] rejects assignment to a member of a class prvalue) |
 
 A boxed store goes through the unsharing accessor first. The assignment expression's value is the component's
-stored value (read back as a float or int, per the 2026-09-08 ruling), and statement position reads nothing back.
+stored value (read back as a float or int), and statement position reads nothing back.
 
 ### 5.6 Arrays and maps
 
@@ -478,36 +471,39 @@ stored value (read back as a float or int, per the 2026-09-08 ruling), and state
 kind. Floats use the shortest text that round-trips the binary32 value, so `0.1f` prints `0.1`, not
 `0.10000000149011612`. Examples:
 - `(1.0, 2.5, 3.0)`, `(4, -2, 0)`, `(1.0, 0.5, 0.0, 1.0)` for a color;
-- a `mat4` prints four rows `[a, b, c, d]`, as MV's `operator<<` does.
+- a `mat4` (not built) prints four rows `[a, b, c, d]`, as MV's `operator<<` does.
 
 `type_of(v)` is `math::vec3`. **[Dev]** The alternative is a constructor-shaped `math::vec3(1.0, 2.5, 3.0)`, which is
 longer but round-trips through the language.
 
 ## 6. API
 
-Names are snake_case: the geometry library's (`length`, `normalized`, `dot`, `cross`, `distance_to`, `rotated`; Dev,
-2026-09-29), and MV's vocabulary for the rest (`at_origin`, `set`, `translate`, `scale`).
+Names are snake_case: the geometry library's (`length`, `normalized`, `dot`, `cross`, `distance_to`, `rotated`), and
+MV's vocabulary for the rest (`at_origin`, `set`, `translate`, `scale`).
 - Pure methods return a new value.
-- Mutators (marked **m**) write the storage the receiver names under the string mutator receiver rule: `self` is the
-  named storage, never a copy (`detail/string_mutator_receiver.hpp`, invariant 11), and a temporary receiver's mutation
-  stays in the temporary. Mutators return the updated value. **[Dev]** Keep the mutators, or ship the pure API only.
+- The built method set on a vector is the geometry methods of 6.1 (`vec_method_fn`, `detail/math_intrinsics.hpp`); a
+  color has no methods. Every row marked "Not built" below is design.
+- Not built: mutators (marked **m**), which would write the storage the receiver names under the string mutator
+  receiver rule: `self` is the named storage, never a copy (`detail/string_mutator_receiver.hpp`, invariant 11), a
+  temporary receiver's mutation stays in the temporary, and a mutator returns the updated value. **[Dev]**
 - `math::` free functions are intrinsics (`detail/math_intrinsics.hpp`, `math_fn`), which the VM evaluates inline.
 
 ### 6.1 `math::vec2`, `math::vec3`, `math::vec4` (f32)
 
 | group | members |
 |---|---|
-| construct | `math::vec3()` zero; `math::vec3(x, y)` z = 0, MV's `Point`/`Size` default **[Dev]** (GLSL has no two-argument vec3); `math::vec3(x, y, z)`; `math::vec3(v2, z)`; `math::vec4(v3, w)`; `math::vec3::zero()`, `::one()`, `::splat(s)` |
+| construct | `math::vec3()` zero; `math::vec3(x, y)` z = 0, MV's `Point`/`Size` default **[Dev]** (GLSL has no two-argument vec3); `math::vec3(x, y, z)`; `math::vec3(v2, z)`; `math::vec4(v3, w)` |
 | fields | 5.4 |
 | operators | unary `-`; `+ - * /` with the same kind (componentwise) and with a scalar on either side; `+= -= *= /=`; `== !=` |
 | methods | `length()`, `length_squared()`, `normalized()`, `dot(o)`, `cross(o)`, `distance_to(o)`, `rotated(angle)` (vec2), `rotated(axis, angle)` (vec3): the geometry library below with the receiver first |
 | free functions | the geometry library and the component-wise family below; `mix` and its family stay free functions |
-| later: 2D helpers (MV `generalUtility`) | `angle_2d(o)` (degrees in [0, 360) of `o - self`), `angle_2d_rad(o)`, `move_toward(goal, max_distance)`, `at_origin()`, `approx_equal(o, ulps = 1)` |
-| later: per component | `to_degrees()`, `to_radians()` |
-| later: reshape | `xy()` (vec3, vec4), `xyz()` (vec4), `with_x(v)` / `with_y(v)` / `with_z(v)` / `with_w(v)` |
-| later: mutators (**m**) | `set(x, y[, z[, w]])`, `translate(dx, dy[, dz])`, `scale(s)`, `normalize()`, `clear()` |
+| not built: constants | `math::vec3::zero()`, `::one()`, `::splat(s)` |
+| not built: 2D helpers (MV `generalUtility`) | `angle_2d(o)` (degrees in [0, 360) of `o - self`), `angle_2d_rad(o)`, `move_toward(goal, max_distance)`, `at_origin()`, `approx_equal(o, ulps = 1)` |
+| not built: per component | `to_degrees()`, `to_radians()` |
+| not built: reshape | `xy()` (vec3, vec4), `xyz()` (vec4), `with_x(v)` / `with_y(v)` / `with_z(v)` / `with_w(v)` |
+| not built: mutators (**m**) | `set(x, y[, z[, w]])`, `translate(dx, dy[, dz])`, `scale(s)`, `normalize()`, `clear()` |
 
-**The geometry library** (Dev, 2026-09-29): `math::dot(a, b)`; `math::cross(a, b)` (vec3, and the scalar 2D cross
+**The geometry library**: `math::dot(a, b)`; `math::cross(a, b)` (vec3, and the scalar 2D cross
 `a.x * b.y - a.y * b.x` on vec2); `math::length(v)`, `math::length_squared(v)`; `math::normalize(v)`;
 `math::distance(a, b)` and `math::distance_squared(a, b)` over two vectors (the four-number forms stay); `math::reflect(v,
 n)` (`v - 2 dot(v, n) n`, `n` taken as a unit normal, as GLSL's); `math::project(a, onto)`; `math::angle_between(a, b)`
@@ -526,7 +522,7 @@ the receiver first:
 - in the aggregate rewrite each is a known intrinsic that lowers to scalar operations on the components (no call, no
   box), with the kernel's order of operations.
 
-**The component-wise family** (Dev, 2026-09-29): `math::lerp`, `mix`, `unmix`, `mix_in`, `mix_out`, `mix_in_out`,
+**The component-wise family**: `math::lerp`, `mix`, `unmix`, `mix_in`, `mix_out`, `mix_in_out`,
 `mix_out_in`, `unmix_in`, `unmix_out`, `unmix_in_out`, `unmix_out_in`, `remap(v, in_lo, in_hi, out_lo, out_hi)`,
 `clamp`, `min`, `max`, `abs`, `floor`, `ceil`, `round`, as MV's `Point` overloads (`points.h`) do them. The scalar
 forms keep their meaning (`round` rounds half away from zero; `remap` over an empty input range is `out_lo`, as `unmix`
@@ -546,27 +542,28 @@ from a scalar row's type failure, so the scalar path is unchanged):
 
 | group | members |
 |---|---|
-| construct | `math::ivec3()`, `(x, y)` z = 0 **[Dev]**, `(x, y, z)`, `(v2, z)`; from floats through the checked kernel: `math::ivec3::trunc(v)`, `::round(v)`, `::floor(v)`, `::ceil(v)` (MV `round<int>` / `cast<int>`) |
+| construct | `math::ivec3()`, `(x, y)` z = 0 **[Dev]**, `(x, y, z)`, `(v2, z)`; from floats through the checked kernel: `cast<math::ivec3>(v)` |
 | operators | unary `-`; `+ - *` with the same kind and an int scalar; `/`, `%` (truncating; a zero divisor raises); compound forms; `== !=` |
-| methods | the geometry methods of 6.1: `dot`, `length_squared` and `cross` exact ints, `length`, `normalized`, `distance_to` and `rotated` floats and vecs; later `to_vec()` (exact below 2^24 per component), `manhattan(o)`, `chebyshev(o)`; `approx_equal` not provided (exact type) |
+| methods | the geometry methods of 6.1: `dot`, `length_squared` and `cross` exact ints, `length`, `normalized`, `distance_to` and `rotated` floats and vecs |
 | free functions | the geometry library (exact where 6.1 says so), `min/max/abs/clamp` exact |
-| mutators (**m**) | `set`, `translate`, `clear` |
+| not built | `math::ivec3::trunc(v)`, `::round(v)`, `::floor(v)`, `::ceil(v)` (MV `round<int>` / `cast<int>`); `to_vec()` (exact below 2^24 per component), `manhattan(o)`, `chebyshev(o)`; mutators (**m**) `set`, `translate`, `clear`; `approx_equal` is not provided (exact type) |
 
 ### 6.3 `math::color`, `math::hsv`, `math::hsl` (f32)
 
 | group | members |
 |---|---|
-| construct | `math::color()` opaque white, MV's default **[Dev]**; `math::color(r, g, b)` a = 1; `math::color(r, g, b, a)`. Floats in 0..1; int arguments are values (`math::color(1, 0, 0)` is red), which removes MV's trap where the int overload divides by 255 and the float one does not. `math::color::from_bytes(r, g, b[, a = 255])` for 0..255, `::from_hex(0xAARRGGBB[, allow_full_alpha = false])` with MV's rule (alpha 1 when the top byte is 0 unless `allow_full_alpha`), `::from_hsv(h)`, `::from_hsl(h)` |
+| construct | `math::color()` opaque white, MV's default **[Dev]**; `math::color(r, g, b)` a = 1; `math::color(r, g, b, a)`. Floats in 0..1; int arguments are values (`math::color(1, 0, 0)` is red), which removes MV's trap where the int overload divides by 255 and the float one does not |
 | operators | `+ - * /` componentwise over all four channels (MV), with a color or a scalar; `== !=` |
-| methods | `to_hex()` → int `0xAARRGGBB` (MV `hex()`, rounded channels), `to_hsv()`, `to_hsl()`, `normalized()` (clamped to 0..1), `lerp(o, t)`, `with_alpha(a)`, `premultiplied()`, `approx_equal(o, ulps)` |
-| mutators (**m**) | `normalize()` (MV), `set(r, g, b[, a])` |
-| `math::hsv` | fields `h` (degrees), `s`, `v`, `a`; `percent_hue()`, `inverted_percent_hue()`, `with_percent_hue(p)` (MV `HSV` helpers); `to_color()` |
-| `math::hsl` | fields `h`, `s`, `l`, `a`; `to_color()` (new: MV has no HSL; standard formulas, written in binary32 like the rest) |
+| not built: construct | `math::color::from_bytes(r, g, b[, a = 255])` for 0..255, `::from_hex(0xAARRGGBB[, allow_full_alpha = false])` with MV's rule (alpha 1 when the top byte is 0 unless `allow_full_alpha`), `::from_hsv(h)`, `::from_hsl(h)` |
+| not built: methods | `to_hex()` → int `0xAARRGGBB` (MV `hex()`, rounded channels), `to_hsv()`, `to_hsl()`, `normalized()` (clamped to 0..1), `lerp(o, t)`, `with_alpha(a)`, `premultiplied()`, `approx_equal(o, ulps)` |
+| not built: mutators (**m**) | `normalize()` (MV), `set(r, g, b[, a])` |
+| not built: `math::hsv` | fields `h` (degrees), `s`, `v`, `a`; `percent_hue()`, `inverted_percent_hue()`, `with_percent_hue(p)` (MV `HSV` helpers); `to_color()` |
+| not built: `math::hsl` | fields `h`, `s`, `l`, `a`; `to_color()` (MV has no HSL; standard formulas, written in binary32 like the rest) |
 
-**Color interpolation** (Dev, 2026-09-29). `math::mix(color, color, t)` and the whole eased mix family on colors blend
+**Color interpolation**. `math::mix(color, color, t)` and the whole eased mix family on colors blend
 in OKLab: both endpoints convert from gamma-encoded sRGB to linear sRGB to OKLab, L, a and b interpolate linearly, and
 the result converts back and clamps to the sRGB gamut. Alpha blends linearly and straight (not premultiplied), since
-`math::color` holds straight alpha; a premultiplied color is a separate value (`premultiplied()`). The matrices are Björn
+`math::color` holds straight alpha. The matrices are Björn
 Ottosson's published OKLab matrices with float32-stable constants. Named alternatives:
 - `math::mix_rgb(color, color, t)`: plain per-channel, what `MV::Color`'s `mix` does;
 - `math::mix_hsv(color, color, t)`: the shortest hue arc, saturation, value and alpha linear, and an achromatic endpoint
@@ -578,7 +575,7 @@ for `mix_hsv`, and alpha. The `MV::Color` adapter maps to `math::color`.
 
 ### 6.4 `math::mat3`, `math::mat4` (f32, column-major, column vectors)
 
-Step 1e with `math::quat` (6.5), designed here and built after the aggregate lowering. `m.at(col, row)`, as MV's
+Not built: the matrices and `math::quat` (6.5) are design. `m.at(col, row)`, as MV's
 `access(x, y)` indexes it. `M * v` transforms a column vector (MV's `Matrix<4,4> * Point`).
 Products compose right to left, as glm.
 
@@ -592,12 +589,12 @@ Products compose right to left, as glm.
 
 Script matrices use standard semantics. MV's `TransformMatrix::translate` adds to column 3, which is a
 pre-multiplication, and its `scale` multiplies only the diagonal, which is correct only without rotation. Neither quirk
-is copied. The adapter converts storage only, and C++ keeps MV's methods. No script uses matrices today (section 11),
-so this has no migration cost.
+is copied. The adapter would convert storage only, and C++ keeps MV's methods. No Bindstone script uses matrices, so
+this has no migration cost.
 
 ### 6.5 Deferred
 
-- `math::quat` (step 1e, with the matrices): fields `x y z w`; `math::quat()` identity, `::from_axis_angle(axis,
+- `math::quat` (with the matrices): fields `x y z w`; `math::quat()` identity, `::from_axis_angle(axis,
   angle)`, `::from_euler(v3)` (radians, MV's `AxisAngles` order); `q * q`, `q * v3` (rotates the vector); `normalized()`,
   `conjugate()`, `inverse()`, `to_mat4()`, `math::slerp(a, b, t)` and the transform helpers of 6.4. MV has no
   quaternion; its rotation is Euler `AxisAngles`, an alias of `Point<float>`.
@@ -607,7 +604,10 @@ so this has no migration cost.
 
 ## 7. Hoist list
 
-Each MV utility, where it goes, and why.
+Each MV utility, where it goes, and why. Built: the rows marked "exists", `math::wrap(lo, hi, v)` (float result) and
+the vector rows of the interpolation family. Not built: the other destinations (`percent_of_range`, `angle_2d`,
+`wrapping_distance`, `approx_equal`, the power-of-two helpers, `move_toward`, `random_string`, `array.shuffle()`,
+`insert_sorted`, the matrices).
 
 | MV utility | goes to | reason |
 |---|---|---|
@@ -645,24 +645,22 @@ Each MV utility, where it goes, and why.
 
 ### 8.1 C++ types
 
-`include/jaiscript/math/types.hpp` defines plain aggregates with no engine, the C++ face of each kind:
+`include/jaiscript/math/types.hpp` defines plain aggregates with no engine, the C++ face of each kind (each also
+defaults `operator==`):
 
 ```cpp
 namespace jai {
-    struct vec2  { float x = 0, y = 0; };
-    struct vec3  { float x = 0, y = 0, z = 0; };
-    struct vec4  { float x = 0, y = 0, z = 0, w = 0; };
+    struct vec2  { float x = 0.0f, y = 0.0f; };
+    struct vec3  { float x = 0.0f, y = 0.0f, z = 0.0f; };
+    struct vec4  { float x = 0.0f, y = 0.0f, z = 0.0f, w = 0.0f; };
+    struct color { float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f; };   // straight alpha, opaque white
     struct ivec2 { int32_t x = 0, y = 0; };
     struct ivec3 { int32_t x = 0, y = 0, z = 0; };
-    struct color { float r = 1, g = 1, b = 1, a = 1; };
-    struct hsv   { float h = 0, s = 0, v = 0, a = 1; };
-    struct hsl   { float h = 0, s = 0, l = 0, a = 1; };
-    struct mat3  { float m[9]  = {1, 0, 0,  0, 1, 0,  0, 0, 1}; };                        // column-major
-    struct mat4  { float m[16] = {1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1}; };
 }
 ```
 
-A binding may take these directly (`void f(jai::vec3)`), with no adapter involved.
+A binding may take these directly (`void f(jai::vec3)`): `math/adapter.hpp` specializes `math_adapter` for each.
+Not built: `hsv`, `hsl`, `mat3`, `mat4`.
 
 ### 8.2 The adapter
 
@@ -676,9 +674,9 @@ compiles.
 JAI_BIND_VEC3((MV::Point<float>), x, y, z)   // at global scope, beside the host type
 ```
 
-What an adapted type does today:
+What an adapted type does:
 - **Parameters and returns** cross as math values: by value, `const T&` and `T&`. A `T&` parameter gets a copy whose
-  final value is stored back into the argument's lvalue, the rule every value kind follows (Dev ruling 2026-09-30). The
+  final value is stored back into the argument's lvalue, the rule every value kind follows. The
   copy is a pooled vector node; no class instance is created.
 - **Overloads.** The overload scorer takes an adapted parameter's own kind exactly and the other precision at a
   conversion cost.
@@ -688,54 +686,39 @@ What an adapted type does today:
 - **Host API.** `engine::make_value` and `script_value::as<Host>()` convert to and from the math value.
 - **Double registration** is rejected: a `dynamic_binder<T>` of an adapted `T` does not compile.
 
-Two parts of the design are not built yet. A statically resolved call site does not yet exchange components with slots
-(the typed host calls of the raw-typed-frames campaign), and bound members are not yet aliased through a cpp-bound
-vector box (8.4). The traits below list the full design.
+Not built: a statically resolved call site exchanging components with slots, and bound members aliased through a
+cpp-bound vector box (8.4).
 
 ```cpp
 namespace jai {
     template <class Host> struct math_adapter;                 // no primary definition
-    template <class Host> concept math_adapted = requires { typename math_adapter<std::remove_cv_t<Host>>::native_type; };
-
-    struct component_layout {
-        bool aliasable;            // standard layout, every component the native component type
-        bool contiguous;           // offsets are 0, 4, 8(, 12): the host object IS the native value's bytes
-        uint8_t offset[4];         // byte offset of each component (aliasable only)
-    };
+    template <class Host> concept math_adapted =
+        requires { typename math_adapter<std::remove_cv_t<std::remove_reference_t<Host>>>::native_type; };
     // A specialization provides:
     //   using native_type = jai::vec3;
+    //   static constexpr script_value_type kind = script_value_type::jai_vec3_type;
     //   static native_type to_native(const Host&) noexcept;
     //   static void assign(Host&, const native_type&) noexcept;
     //   static Host from_native(const native_type&);
-    //   static constexpr component_layout layout;
 }
 
-// One line per host type, at global scope in the header that defines the host type (8.3):
-JAI_BIND_VEC3((MV::Point<float>), x, y, z);
-JAI_BIND_IVEC3((MV::Point<int>), x, y, z);
-JAI_BIND_VEC3((MV::Size<float>), width, height, depth);
-JAI_BIND_IVEC3((MV::Size<int>), width, height, depth);
-JAI_BIND_VEC2((MV::TexturePoint), textureX, textureY);
-JAI_BIND_COLOR((MV::Color), R, G, B, A);
-JAI_BIND_HSV((MV::Color::HSV), H, S, V, A);
-JAI_BIND_MAT4((MV::TransformMatrix), mv_to_mat4, mv_from_mat4);   // function form: storage order is the engine's
-JAI_BIND_MATH((glm::dvec3), jai::vec3, dvec3_to_native, dvec3_from_native);   // explicit converter for a different type
+// One line per host type, at global scope in the header that defines the host type (MV's points.h):
+JAI_BIND_VEC3((MV::Point<MV::PointPrecision>), x, y, z)
+JAI_BIND_IVEC3((MV::Point<int>), x, y, z)
+JAI_BIND_VEC3((MV::Size<MV::PointPrecision>), width, height, depth)
+JAI_BIND_IVEC3((MV::Size<int>), width, height, depth)
+JAI_BIND_COLOR((MV::Color), R, G, B, A)
+JAI_BIND_VEC2((MV::TexturePoint), textureX, textureY)
 ```
 
-- **Member forms** (`JAI_BIND_VEC2/3/4`, `IVEC2/3`, `COLOR`, `HSV`, `HSL`) take the host's member names.
-  - They build `to_native` / `assign` from member pointers.
-  - They compute `layout` at compile time: `offsetof(Host, X)`... is a constant expression for standard-layout hosts.
-  - A host is aliasable when it is standard layout and every member is exactly the component type (`float`, or
-    `int32_t` for the int kinds).
-  - All MV math types qualify, and all are contiguous.
-- **Function forms** (`JAI_BIND_MAT4`, `JAI_BIND_MATH`) take the host's own conversion functions. They are never
-  aliasable.
-  - This is how matrices bind, since "representations differ between engines": MV's `Matrix<4,4>` is column-major
-    `std::array<float,16>` behind a protected member, exposed by `getMatrixArray()`.
-  - This is also how genuinely different types bind (double vectors, SDL-style byte colors). The host spells the
-    narrowing, so the conversion is explicit.
-- **Parenthesized host type.** The host type is parenthesized, as every `JAI_PROPERTY` type is (`JAI_REMOVE_PARENS`,
-  `properties/macros.hpp:9`), so template arguments with commas (`(MV::Matrix<4, 4>)`) pass through.
+- **The macros** are `JAI_BIND_VEC2/3/4`, `JAI_BIND_IVEC2/3` and `JAI_BIND_COLOR`. Each takes the host's member names
+  and builds `to_native` / `assign` (and `from_native` through `assign`) with a `static_cast` per component, so a host
+  whose members are another arithmetic type (double, int) binds through the same line and narrows on the way in.
+- **Parenthesized host type.** The host type is parenthesized (`JAI_MATH_UNPAREN`), so template arguments with commas
+  pass through.
+- Not built: a compile-time component layout (`aliasable`, `contiguous`, offsets) and function forms taking the host's
+  own conversion functions (`JAI_BIND_MAT4`, `JAI_BIND_MATH`, `JAI_BIND_HSV`, `JAI_BIND_HSL`), which matrices would
+  need: MV's `Matrix<4,4>` is column-major `std::array<float,16>` behind a protected member.
 - **Scope.** The macros expand to `template<> struct jai::math_adapter<...>` at global scope, like `FOUNDRY_REGISTER`.
 - **Runtime registry.** `conversion_registry` (`register_conversion<T>(from, to)`, a `std::function` behind a type_id
   map) stays for types known only at run time (plugins). It costs a type-erased call per crossing. Hosts should prefer
@@ -743,36 +726,36 @@ JAI_BIND_MATH((glm::dvec3), jai::vec3, dvec3_to_native, dvec3_from_native);   //
 
 ### 8.3 Where the binder picks it up
 
-Each point below is one `if constexpr (math_adapted<U>)` branch placed first, so unadapted types compile exactly as
-today:
+Each point below is one `if constexpr (math_adapted<U>)` branch, so unadapted types compile unchanged:
 
 | binder path | adapted behaviour |
 |---|---|
-| `detail::value_converter<T>::from/to` (by value) | decode the script value to `native_type` then `from_native`; `to` builds a boxed vector (one pooled node), with no `make_shared`, `class_instance` or holders; a statically resolved call exchanges components with slots instead |
-| `value_converter<const T&>::from` | decode into a parameter-storage temporary (12 bytes), as primitives do today |
+| `detail::value_converter<T>::from/to` (by value) | decode the script value to `native_type` then `from_native`; `to` builds a boxed vector (one pooled node), with no `make_shared`, `class_instance` or holders (not built: a statically resolved call exchanging components with slots instead) |
+| `value_converter<const T&>::from` | decode into a parameter-storage temporary (12 bytes), as primitives do |
 | `value_converter<T&>::to` (a `T&` return) | v1: by value. Aliasing reaches C++ memory only through `.property` members and `add_global_ref`, whose lifetimes are pinned or host-guaranteed |
-| `FunctionBinder::create_argument` (non-const `T&` parameter) | a host-aliased box passes the live host object; a plain script value passes a copy whose final value is stored back into the argument's lvalue after the call (Dev ruling 2026-09-30, every value kind: `int&`, `float&`, `vec3&`; `detail::host_writes_back`), a component argument (`v.x`) through the component store |
-| `dynamic_binder::property_impl` | `cpp_bound_encoding<P>::capable` is true for an aliasable adapted `P`, so the member binds CPP-MEMBER (write-through, receiver pinned; `internal/reference_model.md`); reads return a boxed copy (components at a lowered site); stores convert with the typed-slot table. A non-aliasable `P` registers getter and setter only, so references bind PROPERTY: the proxy |
+| `FunctionBinder::create_argument` (non-const `T&` parameter) | a host-aliased box passes the live host object; a plain script value passes a copy whose final value is stored back into the argument's lvalue after the call (every value kind: `int&`, `float&`, `vec3&`; `detail::host_writes_back`), a component argument (`v.x`) through the component store |
+| `dynamic_binder::property_impl` | an adapted `P` registers getter and setter only (`cpp_bound_encoding<P>::capable` is false for it), so references bind PROPERTY: the proxy; reads return a boxed copy, stores convert with the typed-slot table. Not built: CPP-MEMBER write-through for a layout-compatible `P` (`internal/reference_model.md`) |
 | `property(name, getter, setter)` | PROPERTY: `obj.prop.x = 5` is getter, component store, setter |
 | reflected `JAI_PROPERTY` / `JAI_NAMED_PROPERTY` of an adapted type (`auto_bind`, which every registrar runs) | PROPERTY with no per-property binding: the schema entry carries a `math_property_bridge` (`math_bridge_of<T>()`, filled by the macros), the getter reads the member into a vector, and whole, component and compound stores assign through the property's own assignment, so an observable property notifies. A method bound on the class under the property's script name (Palette's `color()` / `color(c)`) is the class's spelling: the property is reached through it and no accessor is registered |
-| `make_cpp_bound` / `add_global_ref(name, hostVec)` | a vector box: host memory, host-guaranteed lifetime, as for primitives |
+| `make_cpp_bound` / `add_global_ref(name, hostVec)` | not built: a vector box over host memory, as for primitives (8.4) |
 | `engine::make_value`, `convert_custom_type_with_registry`, `convert_reference_with_registry` | a boxed vector |
-| `std::vector<Host>` params/returns | a typed buffer of the kind; bulk `memcpy` when `contiguous` |
-| `bound_array<Host>&` | a zero-copy view over a `v3f`-style buffer when `contiguous` |
+| `std::vector<Host>` params/returns | a typed buffer of the kind |
+| `bound_array<Host>&` | not built: a zero-copy view over a vector buffer (`bound_array` views arithmetic, string and object kinds only) |
 | `std::map<K, Host>` | map of native values |
 | signal arguments (`jai::signal<void(..., const Point<>&)>`) | through `value_converter`: script receivers get native values, and script emissions to C++ receivers convert back |
 | overload scoring (`overload_resolution.hpp`, the one scorer) | an adapted parameter accepts its native kind exactly, and the typed-slot conversions (5.3) at their cost |
 | `dynamic_binder<T>` / `registrar<T>` | `static_assert(!math_adapted<T>, "T binds as a native math type; delete its dynamic_binder registration")`, so a type cannot bind both ways |
 
 **ODR rule.** An adapter must be visible in every TU that binds a function using the host type. The host type's own
-header is therefore the only correct home: `points.h` for Point/Size/Color, `matrix.hpp` for matrices. A TU that did
+header is therefore the only correct home: `points.h` for Point/Size/Color/TexturePoint. A TU that did
 not see the adapter would instantiate `value_converter<Point>` as a class conversion, which is a silent ODR violation.
-The `dynamic_binder` static_assert catches the double registration, not a missing include, so the plan puts the
-adapters in the defining headers.
+The `dynamic_binder` static_assert catches the double registration, not a missing include, so the adapters live in the
+defining headers.
 
 ### 8.4 The cpp-bound box for vectors
 
-`cpp_bound_holder` is `{void* ptr; uint8_t size_and_sign; uint8_t semantic_index}` (`value.hpp:1878`).
+Not built: the design below. `cpp_bound_holder` is `{void* ptr; uint8_t size_and_sign; uint8_t semantic_index}`
+(`value.hpp`).
 - `semantic_index` gains the vector kinds.
 - `size_and_sign` gives the component width and sign.
 - A 4-byte `offset[4]` table uses padding that already exists, so the holder does not grow.
@@ -782,8 +765,8 @@ Reads decode into a detached native value (`bound_decoded_temp()`, the S8 prolog
 
 ### 8.5 Aliasing safety
 
-- **CPP-MEMBER** references pin the receiver and the C++ object, as they do for primitive members today.
-  `var& p = node.pos;` and `node.pos.x = 5` cannot outlive the object.
+- **CPP-MEMBER** references (the aliasing of 8.4, not built) would pin the receiver and the C++ object, as they do for
+  primitive members. `var& p = node.pos;` and `node.pos.x = 5` cannot outlive the object.
 - **Values copy.** `math::vec3 p = node.pos;` copies. A plain read never lets an alias escape.
 - **Const.** A `const` member, or a member of a type whose adapter says read-only, registers the rejecting setter
   (`Cannot assign to 'pos': it is read-only`). A component store through it raises the same text.
@@ -792,22 +775,22 @@ Reads decode into a detached native value (`bound_decoded_temp()`, the S8 prolog
   - getter/setter properties;
   - fluent method pairs (MV's `position()` / `position(p)`, whose setters mark transforms dirty).
   These go through PROPERTY or stay method calls.
-- **Parallel bodies.** Host-aliased boxes in parallel bodies keep today's cpp-bound verdicts: accessor reads and stores
+- **Parallel bodies.** Host-aliased boxes in parallel bodies keep the cpp-bound verdicts: accessor reads and stores
   are worker walls. Inline values and raw buffers are value types to the admission walk.
 - **Callbacks.** A C++ callee handed a live host object (a `T&` parameter from an aliased box) must not re-enter script
-  in a way that frees that object. This is today's contract for `int&` into a cpp-bound variable.
+  in a way that frees that object. This is the contract for `int&` into a cpp-bound variable.
 
 ### 8.6 Hot reload, engines, serialization, debugger
 
 - **Hot reload.**
   - Native kinds have no class definitions, so a reload has nothing to migrate.
-  - A script field declared `math::vec3` migrates like a scalar field. A field-type change resets under the Phase 3
-    hot-reload rule.
+  - A script field declared `math::vec3` migrates like a scalar field. A field-type change resets under the
+    hot-reload field-type-change rule.
   - Adapters are compile-time, so a reload cannot change them.
 - **Multiple engines.**
   - Adapters are engine-free. Inline values carry no engine-owned pointer, so a value crosses engines by re-boxing,
     like a primitive.
-  - Node kinds use `make_strong` nodes until pooling lands. After that, pooled nodes release through `dealloc_fn` and
+  - Vector nodes come from the per-engine pool (`script_value::acquire_vec_node`), release through `dealloc_fn`, and
     the pool orphans at engine teardown, as `reference_holder` blocks do.
 - **JSON.**
   - A typed context (a declared field, a typed element, a typed parameter) writes `{"x": 1.0, "y": 2.0, "z": 3.0}`,
@@ -819,8 +802,8 @@ Reads decode into a detached native value (`bound_decoded_temp()`, the S8 prolog
     `{"$type": "math::vec3", "$val": {...}}`, the polymorphic convention, so `from_json` restores the kind.
 - **Binary.** Binary archives write a kind tag and the raw little-endian components.
 - **`.jaibite`.**
-  - The version bumps (21 → 22) when the parser starts reading `math::` types, so a sibling that parsed `math::vec3(...)`
-    as a call re-parses. `utf8_string` did the same at version 19.
+  - Reading `math::` types changes what the parser writes, which bumps `k_jaibite_version`, so a sibling written by a
+    parser that read `math::vec3(...)` as a call re-parses.
   - If the compiler later folds literal constructor calls into constants, constants of math kinds join the manifest's
     exact-bits listing (`vm/chunk_manifest.hpp`).
 - **Debugger.** Locals show type `math::vec3`, value `(1.0, 2.5, 3.0)`, and expandable canonical components.
@@ -841,7 +824,7 @@ Parity is by construction: shared kernels in `detail/`, used verbatim by both ba
     a `math::` type, as with int + int.
 - `detail/math_component_store.hpp`: the one component-store kernel over every lvalue kind of 5.5, used verbatim by the
   interpreter's member store and the VM's `SET_MEMBER` family, on the `ref_lvalue.hpp` model.
-- `detail/math_intrinsics.hpp`: `math_fn` carries the constructors, and gains the vector rows (`dot`, `cross`,
+- `detail/math_intrinsics.hpp`: `math_fn` carries the constructors and the vector rows (`dot`, `cross`,
   `distance`, `lerp`, `mix*`, `min`, `max`, `clamp`, `abs`, `floor`, `ceil`).
 
 The interpreter needs nothing else; it stays the oracle.
@@ -850,38 +833,36 @@ The interpreter needs nothing else; it stays the oracle.
 
 Typed vectors never reach either backend as values (4.3): after the rewrite a vector local is its component slots, a
 vector operation is scalar operations, and the existing typed scalar instruction set, typed regions and cells already
-run those at the float-local floor. No vector-specific VM rows are needed for typed code; fused vector cell
-instructions are an optional last step (section 12) held to the 1.5% bar.
+run those at the float-local floor. No vector-specific VM rows are needed for typed code. Not built: fused vector
+cell instructions.
 
-### 9.3 Targets (projections, verified at the step gates)
+### 9.3 Targets
 
-| operation | today (bound / class) | target |
+| operation | `dynamic_binder` Point / script class (3.1) | target |
 |---|---|---|
 | construct a typed vector | 885 / 618 ns | its components' stores (≈ the 17.8 ns float-local kernel), no allocation |
 | component read | ~127 / ~5 ns | one float slot read (≈ 3 ns per use) |
 | `a + b` on typed vectors | 1,683 / 1,181 ns | three float adds (13.5 ns kernel) |
-| C++ return by value | +722 ns over the call | components exchanged at a statically resolved call (step 4) |
-| a boxed vector (`var`) | — | one pooled node per new value; the no-cliff ratio is reported at step 2 |
+| C++ return by value | +722 ns over the call | components exchanged at a statically resolved call (not built) |
+| a boxed vector (`var`) | — | one pooled node per new value |
 
 ## 10. Checker and language
 
 - **Parsing.**
-  - `math::vec3` (and every kind) is a builtin type to the parser. `parse_type` (`parser.cpp:1567`) gets a rule before
-    the user-defined-type rule: identifier `math`, `::`, a kind name.
-  - The lexer reads `math::vec2`, `math::vec3`, `math::ivec2` and `math::ivec3` spelled contiguously as one identifier token,
+  - `math::vec3` (and every kind) is a builtin type to the parser.
+  - The lexer reads `math::vec2`, `vec3`, `vec4`, `ivec2`, `ivec3` and `color` spelled contiguously as one identifier token,
     so every rule that takes a class name (declarations, fields, parameters, returns, `array<...>`, `cast<...>`) takes
     a math type with no new lookahead, and expression position rewrites the token to the static member `math::K`.
   - `math::vec3(...)` in expression position is a constructor call, resolved like `math::` intrinsics and cached on the
     AST.
   - `array<math::vec3>` and `map<math::ivec2, T>` nest through `parse_type`.
-  - `.jaibite` version 27.
 - **Names.**
   - Script cannot declare the kind names in `math::`. `math::` stays open for script functions, per
     `script_namespace.hpp`, but these names are reserved.
   - Kinds are reachable only qualified. **[Dev]** `vec3` bare, or a `using` spelling. The recommendation is qualified
     only, since bare `color` would collide with MV's `color()` methods and ordinary variable names.
   - `using math::vec3;` (several names: `using math::vec3, math::dot;`) makes the bare name the qualified one for the
-    rest of the unit's text, rewritten at parse time (Dev ruling 2026-09-30; `internal/namespaces.md` \"Using declarations\"):
+    rest of the unit's text, rewritten at parse time (`internal/namespaces.md` \"Using declarations\"):
     file-local and not transitive, any namespace, the name cannot be declared again, and `using namespace` does not exist.
 - **ctype.**
   - One new kind `math_k`, with a sub-kind naming the math type.
@@ -893,169 +874,113 @@ instructions are an optional last step (section 12) held to the 1.5% bar.
       `ivec3 / int → ivec3`, `vec3 + ivec3` an error).
 - **Diagnostics** (catalog family texts, byte-identical on both backends):
   - `math::vec3 has no member 'w'`;
-  - `'magnitude' expects 0 arguments, got 1`;
+  - `'length' expects 0 arguments`;
   - `Cannot pass math::vec2 to parameter 'p' of 'f' (declared math::vec3)`;
   - `Cannot assign math::vec3 to 'c' (declared math::color)`;
   - `Cannot assign to a member of a temporary`;
   - the int32 overflow and float-to-int texts.
   - Strict mode reports these at load time. The runtime raises the same texts.
-- **Assignment to a member of a temporary.** This is currently silent. It becomes an error on both backends and in
-  the checker, for every kind and for class values, since the rule is C++'s. **[Dev]** Confirm, since it also applies
-  to class values returned by value.
+- **Assignment to a member of a temporary.** For a math value it raises `Cannot assign to a member of a temporary` on
+  both backends, the C++ rule. **[Dev]** C++'s rule covers class values returned by value too; JaiScript does not
+  reject a store into a member of a class temporary (`f().x = 5`).
 - **Proof flow.** The checker's vector types drive the aggregate rewrite (4.3); component reads type as float or int.
 
 ## 11. Bindstone migration
 
-MV's types keep their C++ definitions and serialization. Scripts see only `math::` types. The inventory below comes from
-a sweep of `Source/` (excluding `Source/JaiScript`), `Assets/` and `Tools/`.
+MV's types keep their C++ definitions and serialization. Scripts see only `math::` types.
 
-### 11.1 Script text naming the old types
+### 11.1 Script text
 
-`Point`, `Pointi`, `Size`, `Sizei`, `Color`, `TexturePoint`, `BoxAABB`, the `.R/.G/.B/.A` fields and the camelCase
-math methods appear in script text only here:
+`creatureKind.script` builds cells and positions with `math::ivec3` / `math::vec3` (the two-argument constructors,
+z = 0). `Tools/Creatures/generate_creatures.py` emits those lines and is the source of truth for `creatureKind.script`
+and every creature's `main.script` / `mainClient.script`. The flight interpolation stays component arithmetic on
+purpose: script floats (binary64) narrowed once at construction. `math::lerp(flightFrom, flightTo, eased)` would compute
+in binary32 and can change bits, so that rewrite needs the arena gate.
 
-| file:line | today | becomes |
-|---|---|---|
-| `Assets/Creatures/Shared/creatureKind.script:213` | `Pointi landing = Pointi(round(here.x + dx * step), round(here.y + dy * step));` | `math::ivec3 landing = math::ivec3(round(here.x + dx * step), round(here.y + dy * step));` |
-| `…creatureKind.script:251` | `agent().localPosition(Point(flightFrom.x + (flightTo.x - flightFrom.x) * eased, flightFrom.y + (flightTo.y - flightFrom.y) * eased));` | `agent().localPosition(math::vec3(flightFrom.x + (flightTo.x - flightFrom.x) * eased, flightFrom.y + (flightTo.y - flightFrom.y) * eased));` |
-| `…creatureKind.script:358` | `return teleportToCell(Pointi(round(center.x), round(center.y)), maxRadius);` | `return teleportToCell(math::ivec3(round(center.x), round(center.y)), maxRadius);` |
-| `…creatureKind.script:376` | `Pointi candidate = Pointi(cx + dx, cy + dy);` | `math::ivec3 candidate = math::ivec3(cx + dx, cy + dy);` |
-| `Tools/Creatures/generate_creatures.py:232, 270, 377, 395` | emits the four lines above | emits the new lines; the generator is the source of truth for `creatureKind.script` and every creature's `main.script` / `mainClient.script` |
+### 11.2 Values moving through bindings
 
-- These rewrites use the two-argument `ivec3` / `vec3` constructors. If the ruling rejects them (6.1), each gains `, 0`.
-- Line 251 stays component arithmetic on purpose: script floats (binary64) narrowed once at construction, which is
-  bit-identical to today's `Point(float, float)` path. Rewriting it as `math::lerp(flightFrom, flightTo, eased)` would
-  compute in binary32 and can change bits. That rewrite is a follow-up behind the arena gate.
-
-### 11.2 Script text that moves values through bindings without naming them
-
-This text does not change; the values become native. It covers:
-- `creatureKind.script`: the `gridPosition()` / `localPosition()` / `localFromGrid()` / `inBounds()` / `blocked()` /
-  `gridPosition(p)` / `enemyWell()` / `target()` uses at 101, 168-170, 180, 187-189, 194-198, 203, 214, 218-219, 241,
-  306, 311-312, 327, 339-340, 357, 364-367, 377-378;
-- `Assets/Creatures/Void_T1/main.script:47-51, 77-80, 92-94`;
-- `Water_DropletHeal/main.script:38` and `Water_DropletHurt/main.script:38`;
-- the generator lines that emit them (120, 187-397, 505-522, 574-578, 717, 748).
-
-Every use is `.x` / `.y` reads, pass-through, or a typed local, and each keeps its meaning. No script compares whole
-points with `==`, orders them, calls `normalized` / `magnitude` / `hsv` / `hex`, or builds a color. So the exact-`==`,
-lexicographic-ordering and color-constructor changes are unobservable in Bindstone today.
+The other script uses (`gridPosition()`, `localPosition()`, `localFromGrid()`, `inBounds()`, `blocked()`,
+`enemyWell()`, `target()` in `creatureKind.script` and the creatures' scripts) are `.x` / `.y` reads, pass-through, or
+typed locals, and carry native values through the adapters.
 
 ### 11.3 Assets
 
-No `.scene`, `.bindsnap`, `.json` or `.jai` file names a script math type. The 34 reflected math-typed fields (for
-example `translateTo` in 30 asset files) are written by MV's C++ `serialize()` as `{"x":..,"y":..,"z":..}`. C++ keeps MV
-types, so assets are untouched. `-verifyassets` round-trips them as the proof.
+No `.scene`, `.bindsnap`, `.json` or `.jai` file names a script math type. Reflected math-typed fields (for example
+`translateTo`) are written by MV's C++ `serialize()` as `{"x":..,"y":..,"z":..}`. C++ keeps MV types, so assets are
+untouched; `-verifyassets` round-trips them.
 
-### 11.4 C++ changes
+### 11.4 C++
 
-- **`Source/MV/Render/points.h`.** Add the adapter lines of 8.2 after the class definitions: Point<float>, Point<int>,
-  Size<float>, Size<int>, TexturePoint, Color, Color::HSV.
-  - `AxisAngles` and `AxisMagnitude` are aliases of `Point<float>` and need nothing.
-- **`Source/MV/Render/points.cpp`.** Delete `hookPointType`, `hookSizeType` and the registrars `_hookPoint`,
-  `_hookPointi`, `_hookSize`, `_hookSizei`, `_hookColor`, `_hookTexturePoint`.
-- **`Source/MV/Render/matrix.hpp`.** Add `JAI_BIND_MAT4` for `Matrix<4,4>` and `TransformMatrix` when matrices land. No
-  binding uses them today.
-- **`Source/MV/Render/boxaabb.cpp`.** The `BoxAABB` / `BoxAABBi` registrations stay.
-  - Their `Point` / `Size` constructor parameters convert through the adapters.
-  - `minPoint` / `maxPoint` become CPP-MEMBER vector aliases.
-  - `size()` / `centerPoint()` return native values.
-- **No C++ change** for the 84 bindings that carry the types: Node 5, Component 4, Drawable 4, Sprite 1, Clipped 5,
-  Grid 10, Palette 5, Parallax 8, PathMap 11, PathAgent 12, Spine 1, PathNode 2, NavigationAgent 8, Collider 2,
-  TargetPolicy 3, Team 3. The same holds for the signals: `Collider.onContactStart` and `onShouldCollide`, and the
-  Clickable `onRelease` / `onDrop` / `onDrag` inherited by Button, Scroller and Slider. The adapters convert all of
-  them.
-  - By type: Point 45 crossings, Pointi 16, Size 9, Sizei 2, Color 6, BoxAABB 7, BoxAABBi 2.
-- **Unchanged, not covered:**
-  - `Grid.padding()` / `margin()` return `std::pair<Point, Point>`, and no pair conversion exists today either.
-  - `Drawable.getPoints` returns `vector<DrawPoint>`, and `DrawPoint` is unregistered.
-- **Removing the registrars also removes the doubled `auto_bind` registrations** of `==` / `!=` / `empty` that the
-  sweep found on these types.
+- **`Source/MV/Render/points.h`** carries the adapter lines of 8.2 after the class definitions: Point<PointPrecision>,
+  Point<int>, Size<PointPrecision>, Size<int>, Color, TexturePoint. `AxisAngles` and `AxisMagnitude` are aliases of
+  `Point<>` and need nothing. `points.cpp` registers none of these types.
+- **`Source/MV/Render/boxaabb.cpp`** keeps the `BoxAABB` / `BoxAABBi` registrations: their `Point` / `Size` parameters,
+  returns and `minPoint` / `maxPoint` members convert through the adapters (members as PROPERTY copies).
+- The bound methods and signals that carry the adapted types (Node, Component, Drawable, Sprite, Clipped, Grid,
+  Palette, Parallax, PathMap, PathAgent, PathNode, NavigationAgent, Collider, Clickable and its subclasses, ...)
+  convert through the adapters with no per-binding code.
+- Not covered: `Grid.padding()` / `margin()` return `std::pair<Point, Point>`, and no pair conversion exists;
+  `Drawable.getPoints` returns `vector<DrawPoint>`, and `DrawPoint` is unregistered.
 
-### 11.5 What breaks, and for whom
+### 11.5 Behavior
 
-- Script code that names `Point`, `Pointi`, `Size`, `Sizei`, `Color` or `TexturePoint`: the four lines above.
-- Script code that reads `.R/.G/.B/.A` or calls the camelCase methods: none in Bindstone.
-- `type_of(p)` answers `math::vec3`. No script branches on it.
-- `NODE.position().x = 5`-style stores into temporaries become errors. `-verifyassets`'s strict static check finds any
-  that exist; the sweep found none.
-- Hosts outside Bindstone that bound MV types through `dynamic_binder` must switch to the adapters. The static_assert
-  of 8.3 makes that a compile error, not a silent change.
+- `type_of(p)` answers `math::vec3`.
+- `NODE.position().x = 5`-style stores into math temporaries raise.
+- A host that binds an adapted type through `dynamic_binder` fails to compile (the static_assert of 8.3).
 
-### 11.6 Steps and acceptance
+### 11.6 Gates for a change here
 
-1. Land JaiScript phases 1–3 (section 12). The vectors, color/hsv and the adapters are needed together, since Drawable
-   and Palette return colors.
-2. In Bindstone, add the adapters to `points.h` and delete the registrars (11.4).
-3. Rewrite the four generator lines, run `generate_creatures.py`, and confirm the generated `creatureKind.script`
-   matches the hand-edited one byte for byte.
-4. Build `BindstoneClient_Windows`, and `MutedVision_Windows` first, with the msbuild CLI in `CLAUDE.md`.
-5. Run the gates, from `<repo>`, each exiting 0:
-   - `Bindstone.exe -verifyassets`: every scene, bindsnap and catalog round-trips; gameplay scripts evaluate;
-     interface scripts pass the strict check, which now knows `math::` types.
-   - `Bindstone.exe -loginshot 60`: the Login page renders, and `login_shot.bmp` is compared to the pre-migration shot.
-   - `Bindstone.exe -workbenchsmoke`: the 120-frame Workbench self-test.
-6. Run the arena sweep (`Tools/Balance/arena.py`, 784 matchups, exact rulings). Its results must be identical to a
-   baseline taken just before step 2. It is the determinism check that creature movement through `ivec3` / `vec3` is
-   unchanged.
-7. Run `Source/MV/Tests/mv_tests.exe --verbose`.
+Build `MutedVision_Windows` and `BindstoneClient_Windows` (root `AGENTS.md`, "Building"), then from `<repo>`, each
+exiting 0: `Bindstone.exe -verifyassets`, `Bindstone.exe -loginshot 60`, `Bindstone.exe -workbenchsmoke`. The arena sweep
+(`Tools/Balance/arena.py`, 784 matchups, exact rulings) must match a baseline taken before the change: it is the
+determinism check that creature movement through `ivec3` / `vec3` is unchanged. Then
+`Source/MV/Tests/mv_tests.exe --verbose`.
 
-## 12. Plan
+## 12. Status
 
-Every step lands on master with its own full battery, per the atomic-jobs ruling. Every step carries the standing
-gates:
-- the Debug and Release suites on both backends;
-- the XTHREAD parallel suites and the miss-injection suites;
-- fuzz 3000, 1500 `--no-proofs`, the ordering band (`--order-band`, `--order-args`) and the math band (`--math-band`,
-  with and without proofs);
-- the GLOOM 300/600, crawler, demoreel, Gator Quest and JaiDOOM timedemo hashes held on both backends.
+Built:
+- the boxed kinds (4.2): `vec2`, `vec3`, `vec4`, `ivec2`, `ivec3` and `color` over the pooled copy-on-write
+  `script_vec_node`, with constructors, components and aliases, component stores over every lvalue kind (5.5),
+  operators, equality/`<=>`/hash, truthiness, typed-slot and container-element conversions, text, JSON and binary
+  archives, debugger locals, reflection and the checker's vector types;
+- the component-wise family on vectors (`eval_vec_math`), `math::round` and `math::remap`;
+- color blending: `math::mix` and the eased mixes in OKLab on colors, `math::mix_rgb`, `math::mix_hsv`;
+- the geometry library and the vector methods (`eval_geometry`);
+- the aggregate lowering of locals and parameters (4.3), `engine::aggregate_lowering`;
+- the typed vector buffers (4.4, 5.6) and the VM element lanes;
+- the host adapters (`jai::math_adapter`, section 8) and MV's adapters (section 11).
 
-Performance credit follows the 1.5% bar (whole program), or more than 3% on a targeted microbenchmark with no
-whole-program regression.
+Not built: field lowering (4.3.1), statically resolved component exchange and the cpp-bound vector box (8.4), the rest
+of 6.3's color API and `math::hsv` / `math::hsl`, the matrices and `quat` (6.4, 6.5), `aabb`, the methods and mutators
+marked "not built" in section 6, the lowering of user by-value classes, and fused vector cell instructions.
 
-| step | content | extra gates |
-|---|---|---|
-| 1. The boxed kind | 4.2: `TYPEID_VEC` with the pooled copy-on-write `script_vec_node`; `vec2`, `vec3`, `vec4`, `ivec2`, `ivec3`: `script_value_type`, `type_info` stamps, the fused type token, constructors, components with aliases, component stores over every lvalue kind (5.5), operators, equality/`<=>`/hash, truthiness, typed-slot and container-element conversions, text, JSON and binary archives, debugger locals, reflection, the checker's vector ctype (components typed for diagnostics; assignability; unknown components) | suite `Math Types` on both backends, proofs on and off (the 5.1 edges, copy independence, node churn); the math fuzz band; whole-program A/B: programs without vectors flat against master |
-| 1b. The component-wise library | 6.1's component-wise family on vectors (`eval_vec_math`), `math::round` and `math::remap` for scalars and vectors, checker and typed-store classification of vector results | pinned values for vec2/vec3/vec4/ivec inputs and float/vector `t` on both backends; the math band draws the family; whole-program A/B flat (the scalar rows are unchanged) |
-| 1c. `math::color` | 6.3's color as a sixth boxed kind (the same node, r g b a channels, opaque white by default, straight alpha), `math::mix` and the eased mixes in OKLab on colors, `math::mix_rgb`, `math::mix_hsv`; a color never converts to or equals a vec4 | the 6.3 reference values on both backends |
-| 1d. The geometry library | 6.1's geometry library (`dot`, `cross`, `length`, `length_squared`, `normalize`, `distance` and `distance_squared` over vectors, `reflect`, `project`, `angle_between`, `perpendicular`, `rotate`) and the methods (`length`, `length_squared`, `normalized`, `dot`, `cross`, `distance_to`, `rotated`) on the boxed path, one kernel (`eval_geometry`); the checker types the results and a method's arity | pinned values, exact ivec results and the zero-vector rules on both backends; the math band draws the functions and the methods, and colors |
-| 1e. Matrices and quaternions (design) | 6.4 and 6.5: `mat3`, `mat4`, `quat` and the transform helpers as node kinds | design only here; built after step 2 |
-| 2. Aggregate lowering | 4.3: the post-check rewrite (locals, parameters, operators, constructors, the component-wise family and the geometry rows, boundaries, conservative escape), `engine::aggregate_lowering`, the source view for diagnostics, `.jaibite` and the debugger; fields and their hot-reload mapping in a later increment | the lowering differential fuzz (math band, lowering on and off, byte-identical); whole-program A/B plus a vector-heavy microbenchmark and a no-cliff pair: the same loop over a `var` vector and a typed vector, with the ratio reported (node pooling is the first mitigation if it is above 3x) |
-| 3. Typed buffers | 4.4 and 5.6: the vector buffer kinds, element stores and unpacking reads | typed-kind fuzz for the vector kinds; the element-argument band |
-| 4. Host adapters | section 8: `jai::vec_adapter`, component exchange at statically resolved binder call sites, boxed values at dynamic ones; MV's vector-shaped bindings through adapters (Bindstone scripts at scale only with Dev) | suite `Math Adapters`; MutedVision builds from the CLI; `mv_tests`; the Bindstone client gates of section 11 |
-| 5. User classes (design) | the same lowering for user by-value classes with typed scalar fields; user operator bodies grafted | design document only |
-| 6. Fused vector cells (optional) | vector operations as cell instructions | only if it clears the 1.5% bar |
-| later | the rest of 6.3's color API (`from_hex`, `to_hsv`, `math::hsv`, `math::hsl`); `aabb` (6.5) | per kind |
+The suites are `Math Types` (every row lowered and boxed on both backends) and `Math Adapters`; the fuzz has the math
+band (`--math-band`) and the lowering switches (`--no-lowering`, `--lowered-interp`).
 
-## 13. Decisions needed from Dev
+## 13. Rulings
 
-1. **float32 narrowing overflow** (5.1): a finite double beyond binary32's range becomes ±infinity (recommended,
-   matching float arithmetic's silent overflow), or raises.
+1. **float32 narrowing overflow** (5.1): a finite double beyond binary32's range becomes ±infinity, matching float
+   arithmetic's silent overflow.
 2. **int32 component overflow** (5.1): follows the build's integer policy, raising in checked builds and wrapping in
-   wrap builds (recommended).
-3. **The 16-byte kinds** (`vec4`, `color`, `hsv`, `hsl`, later `quat`) as copy-on-write nodes (4.1, 4.2; every boxed vector is a node since 2026-09-28): accept, given the
-   rejected alternatives. Arrays and cells keep them allocation-free where it matters.
-4. **Two-argument `vec3` / `ivec3` constructors with z = 0** (6.1, 6.2): allow, as MV's `Point` / `Size` do
-   (recommended, 2D game), or require three arguments, as GLSL does.
-5. **Implicit `ivec ↔ vec` conversions** at typed slots (5.3): mirror the scalar table, both ways and checked
-   (recommended), or explicit only.
-6. **Defaults and truthiness**: `math::color()` opaque white (MV, recommended) or zero; `math::mat4()` identity (MV's
-   `TransformMatrix`, recommended) or zero. Math values are truthy when not all zero (recommended, the numeric rule;
-   5.3), or always truthy.
-7. **Mutating methods** (6): keep `set` / `translate` / `scale` / `normalize` / `clear` under the string mutator
-   receiver rule (recommended; MV's vocabulary), or ship the pure API only.
-8. **Host `T&` parameters** (8.3): ruled 2026-09-30: every value kind writes the callee's final value back into the
-   argument's lvalue (C++ semantics); a temporary stays a copy.
-9. **Assignment to a member of a temporary** (5.5, 10): make it an error on both backends and in the checker, for math
-   and class values alike (recommended, C++'s rule; today it is silent).
-10. **Bare names** (10): `math::` qualified only (recommended; bare `color` collides with MV's methods and common
-    variable names), or bare `vec3` / a `using` spelling.
-11. **Text format** (5.7): `(1.0, 2.5, 3.0)` (recommended, MV's style) or `math::vec3(1.0, 2.5, 3.0)`.
-12. **Script matrix semantics** (6.4): standard, glm-like (recommended); MV's pre-multiplying `translate` and
-    diagonal-only `scale` stay MV's C++.
-13. **`quat` and `aabb`** (6.5): defer until a consumer arrives (recommended), and name the box type.
-14. **Floating-point contraction** (3.2): pin `-ffp-contract=off` for Clang/GCC builds (including Xcode for iOS). The
-    vector kernels need it, and today's double kernels have the same exposure. The finding comes from compiler
-    defaults, not a measured divergence.
-15. **A `using` declaration** (10; ruled 2026-09-30): `using ns::name;` rewritten at parse time, file-local, not
-    transitive, for any namespace; no `using namespace`.
+   wrap builds.
+3. **The 16-byte kinds** (`vec4`, `color`, later `quat`) are copy-on-write nodes like every boxed vector (4.1, 4.2).
+   Arrays and cells keep them allocation-free where it matters.
+4. **Two-argument `vec3` / `ivec3` constructors with z = 0** (6.1, 6.2), as MV's `Point` / `Size` do.
+5. **Implicit `ivec ↔ vec` conversions** at typed slots (5.3) mirror the scalar table, both ways and checked.
+6. **Defaults and truthiness**: `math::color()` is opaque white (MV); `math::mat4()` would be identity (MV's
+   `TransformMatrix`). Math values are truthy when not all zero (the numeric rule; 5.3).
+7. **Mutating methods** (6): `set` / `translate` / `scale` / `normalize` / `clear` under the string mutator receiver
+   rule (MV's vocabulary); not built.
+8. **Host `T&` parameters** (8.3): every value kind writes the callee's final value back into the argument's lvalue
+   (C++ semantics); a temporary stays a copy.
+9. **Assignment to a member of a temporary** (5.5, 10): an error, C++'s rule. It raises for math values on both
+   backends; class values do not enforce it (section 10).
+10. **Bare names** (10): `math::` qualified only (bare `color` collides with MV's methods and common variable names),
+    with `using` as the opt-in spelling (item 15).
+11. **Text format** (5.7): `(1.0, 2.5, 3.0)`, MV's style.
+12. **Script matrix semantics** (6.4): standard, glm-like; MV's pre-multiplying `translate` and diagonal-only `scale`
+    stay MV's C++.
+13. **`quat` and `aabb`** (6.5): deferred until a consumer arrives; the box type's name is open.
+14. **Floating-point contraction** (3.2): `-ffp-contract=off` on Clang/GCC builds (including Xcode for iOS).
+15. **A `using` declaration** (10): `using ns::name;` rewritten at parse time, file-local, not transitive, for any
+    namespace; no `using namespace`.

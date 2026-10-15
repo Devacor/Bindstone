@@ -47,14 +47,14 @@ Both directions of the char↔int door are open:
   we skip). `"\x00"` embeds a real NUL. Malformed (`\xZ`, `\x4`) is a lex error.
 - **`to_char(n)`** (stdlib) — explicit int → char, range-checked 0..255, throws outside.
   `out += to_char(b)` appends the byte to a string: the binary-writer shape.
-- `string += char` appends as text (chars are text units). `string += int` still raises
-  by pinned Strong Types design — stringify explicitly if you mean it. The promotion makes
+- `string += char` appends as text (chars are text units). `string += int` raises
+  by the Strong Types design — stringify explicitly if you mean it. The promotion makes
   `to_char(a) + to_char(b)` an int, so `out += to_char(a) + to_char(b)` and
   `parts.push(to_char(a) + to_char(b))` into an `array<string>` are that same mistake; the
   static checker sees the promoted type and reports both at load (`"" + to_char(a) + to_char(b)`
   builds the text).
 
-There is still **no implicit int→char**: `type_of('a' + 1) == "int"`.
+There is **no implicit int→char**: `type_of('a' + 1) == "int"`.
 
 ## Casts
 
@@ -78,14 +78,14 @@ converts (a reference keeps its referent's type). Round trips are exact —
 (`char c = cast<char>(65);`). `to_char(n)` remains the stdlib function form of the same
 range-checked int→char rule.
 
-## What deliberately does NOT change (additive contract)
+## What promotion leaves alone
 
 - **`char + string` / `string + char` concatenate as text.** Promotion only fires when
   *both* operands are numeric-or-char.
 - **`'a' == "a"` is false** — promotion never crosses into the string domain.
 - **Object custom operators receive the raw char** — promotion never rewrites an operand
   that flows to a user-defined operator.
-- Serialization, `print`, JSON rendering of chars: unchanged. Map keys keep type-rank
+- Serialization, `print` and JSON render a char as a char. Map keys keep type-rank
   ordering (char keys never interleave with int keys).
 
 ## Iterating a string
@@ -115,10 +115,8 @@ out += to_char(len & 0xFF);                  // write a computed byte
 var magic = "\x50\x4B\x03\x04";              // literal byte sequences in source
 ```
 
-Still deferred: `s.byte(i)` garnish (`s[i] + 0` covers it), a stdlib `utf8(cp)`, unary
-`-c`/`~c` (binary `0 - c` / `c ^ 0xFF` work), and the packed byte buffer
-(`bytes`/`array<byte>` storage lane) — the real answer for big formats, parked with the
-lanes work it belongs to.
+Not provided: `s.byte(i)` (`s[i] + 0` covers it), a stdlib `utf8(cp)`, unary `-c`/`~c`
+(binary `0 - c` / `c ^ 0xFF` work), and a packed byte-buffer kind for chars.
 
 ## Implementation map (for language work, not consumers)
 
@@ -134,7 +132,7 @@ ref_lvalue.hpp parity-by-construction pattern:
 - value ordering: `script_value::operator<=>`'s char row compares via `unsigned char`
   (value.cpp) so map ordering agrees with script-level comparisons.
 - lexer: `\xNN` in `scan_string`/`scan_char` (`hex_digit_value`, exactly two digits);
-  jaibite format version bumped v2→v3 per the bump-on-any-parse-change contract.
+  a parse change bumps `k_jaibite_version` (`detail/ast_serializer.hpp`).
 - stdlib: `to_char` registered beside `type_of` (stdlib/io.hpp).
 - casts: `include/jaiscript/detail/cast_kernel.hpp` (`cast_char_rule_applies` +
   `cast_char_value`), consumed verbatim by `interpreter::visit_cast_expr` and
@@ -142,10 +140,9 @@ ref_lvalue.hpp parity-by-construction pattern:
   tests (`cast_char_rules`, `strong_types_tests.cpp`).
 - static checker: `binary_result` types char as numeric under arithmetic/bitwise/spaceship.
 - tests: `"Char Promotion"` suite (19 tests) in
-  `source/tests/language/review_regression_tests.cpp`; the reversed pin is documented in
-  `gloom_feedback_tests.cpp::char_ordering_comparisons`; the Strong Types `string += int`
-  raise stays pinned in `strong_types_tests.cpp`.
+  `source/tests/language/review_regression_tests.cpp`; char ordering (char against char, and
+  char against int by code point) is pinned in `gloom_feedback_tests.cpp::char_ordering_comparisons`;
+  the Strong Types `string += int` raise is pinned in `strong_types_tests.cpp`.
 
-Known gap: the differential fuzz grammar (`source/tests/fuzz/fuzz_generator.hpp`) does not
-yet generate char literals — extend it when the fuzz-gate seeds aren't load-bearing for
-in-flight work.
+The differential fuzz generator (`source/tests/fuzz/fuzz_generator.hpp`) does not generate
+char literals.

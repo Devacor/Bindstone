@@ -58,10 +58,11 @@ for reads, "mirror the map branch," then mirror to VM. **Not shipping it.** The 
   shares the heavy inner `strong_ptr`, survives source realloc; primitives copy refcount-free)
   **only** for immediate operands of a *builtin* value-op / condition — the one context where
   neither refcount nor aliasing is observable.
-- **(c) A real consumer-threaded `wants_lvalue` predicate** (NEW, not a rename of
-  `want_lvalue_write`), default *mint-when-unknown*, true for: store/compound target, ref-param,
-  reference-decl initializer, reference-return, mutating receiver, `++/--`, and any
-  subscript/member that is the base of an outer lvalue chain.
+- **(c) A real consumer-threaded classifier** (not a rename of `want_lvalue_write`), default
+  *mint-when-unknown*, minting for: store/compound target, ref-param, reference-decl
+  initializer, reference-return, mutating receiver, `++/--`, and any subscript/member that is
+  the base of an outer lvalue chain. Built as `detail/transient_read.hpp`, which stamps
+  `binary_expr::transient_element_read` on the transient reads instead.
 
 ## Why Option B is dropped
 
@@ -78,8 +79,8 @@ for reads, "mirror the map branch," then mirror to VM. **Not shipping it.** The 
 
 ## Staged plan
 
-- **STAGE 1 (safe, high-value, both backends, one commit):** the shared `wants_lvalue`
-  classifier as a single predicate consumed by both `vm_compiler` emit and the interpreter
+- **STAGE 1 (safe, high-value, both backends, one commit):** the shared transient-read
+  classifier (`detail/transient_read.hpp`) as a single predicate consumed by both `vm_compiler` emit and the interpreter
   subscript branch (parity by construction, per the `detail/ref_lvalue.hpp` precedent) +
   reference-holder alloc-elision (a) + shallow-copy fast path (b) for builtin-value-op
   operands. Wire reference-decl and reference-return into the predicate in the *same* change.
@@ -132,17 +133,19 @@ Implemented as specified, both backends atomically:
   verified byte-parallel). Unary operands are deliberately excluded (`-arr[i]`/`~arr[i]` do
   not deref references today; marking would tie that pre-existing error to the runtime gate).
 - **(b) Copy fast path**: interpreter subscript branch + `vm_backend::exec_index` take the
-  existing temporary-copy branch when marked, runtime-gated on a new engine-wide
-  `has_custom_binary_ops_` (any binary-operator or `"[]"` global registration flips it via
+  existing temporary-copy branch when marked, runtime-gated on each backend's
+  `has_custom_binary_ops_` (`set_has_custom_binary_ops`; any binary-operator or `"[]"` global
+  registration flips it via
   the `register_overload_impl`/`add_global` chokepoints; `set_has_custom_numeric_operators(true)`
   latches it). Map transient reads use the never-insert copy branch.
 - **(a) Mint elision**: `get_type_info_reference` caches the interned `T&` twin on the
   referenced `type_info` itself (+ an engine slot for null), eliding the intern-map lookup;
   write is skipped inside parallel regions (prewarm fills it beforehand). Holder blocks come
-  from a per-engine free-list pool (`script_value::reference_holder_pool`, value.cpp) via
-  `detail::adopt_pooled` — pop + placement-new instead of malloc; blocks self-describe via
-  `dealloc_fn`; engine death with escaped references orphans the pool (last release frees it).
-  Debug keeps the 0xDD-style canary: parked blocks scramble `cb_magic` (it caught the one
+  from a per-engine `detail::holder_block_pool` (value.cpp, reached through
+  `engine::reference_holder_pool_slot()`), reused by `detail::adopt_pooled` — pop +
+  placement-new instead of malloc; blocks self-describe via `dealloc_fn`; engine death with
+  escaped references orphans the pool (last release frees it). Debug control blocks carry
+  `magic` (`cb_magic_live`, scrambled to `cb_magic_dead` on park or free; it caught the one
   real bug during landing: parallel workers DO mint cell references in their bodies, so
   in-region acquires fall back to plain `make_strong` — the pool stays single-threaded).
 - Pins in `Element Read Elision` suite (review_regression_tests.cpp): operand/condition/RHS

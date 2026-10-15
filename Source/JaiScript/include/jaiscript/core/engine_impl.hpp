@@ -189,6 +189,9 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
             return script_value(std::monostate{}, eng);
         }
         return eng->make_object(t);
+    } else if constexpr (is_specialization_v<NonConstT, std::weak_ptr>) {
+        // a script weak_ptr watches a script handle, and a host weak_ptr has none to watch
+        throw runtime_error("A host function returning std::weak_ptr<T> is not supported; return shared_ptr<T>");
     } else {
         auto registry = eng->get_conversion_registry();
         if (registry && registry->template has_conversion<NonConstT>()) {

@@ -115,6 +115,19 @@ public:
             check_eq(std::string("No overload of 'is_expired' takes (int)"),
                      eng->execute("string m = \"\"; var i = 3; try { is_expired(i); } catch (e) { m = e; } m").as<std::string>());
         });
+
+        // A script weak_ptr watches a script handle, and a host weak_ptr has none to watch: a weak_ptr<T> return is refused
+        // with its own text (it raised Cannot create cpp_object of unregistered class 'std::weak_ptr<...>')
+        test("a_weak_ptr_return_is_refused_plainly", [this]() {
+            auto eng = make_bound_engine();
+            auto kept = std::make_shared<null_handle_hosts::node>();
+            eng->add_function("watch", [kept]() { return std::weak_ptr<null_handle_hosts::node>(kept); });
+            eng->add_function("watch_nothing", []() { return std::weak_ptr<null_handle_hosts::node>(); });
+            const std::string refused = "A host function returning std::weak_ptr<T> is not supported; return shared_ptr<T>";
+            check_eq(refused, eng->execute("string m = \"\"; try { var w = watch(); } catch (e) { m = e; } m").as<std::string>());
+            check_eq(refused, eng->execute("string m = \"\"; try { var w = watch_nothing(); } catch (e) { m = e; } m").as<std::string>());
+            check_eq((int64_t)4, eng->execute("2 + 2").as_int());
+        });
     }
 };
 

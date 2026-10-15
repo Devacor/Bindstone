@@ -151,8 +151,8 @@ print(to_json(values));</code></pre></div>
 print(to_json(array::filter(xs, x =&gt; x &gt; 2)), &quot; &quot;, to_json(xs));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[3,4] [1,2,3,4]</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="array::map(values: array&lt;t&gt;, callback: function(t[, int]) -&gt; r) -&gt; array&lt;r&gt; copy; callback callback declared return type selects result constraints; an undeclared/dynamic return gives array&lt;var&gt;. reference callbacks can mutate input elements. every engine"><h3 id="api-9fd5cdd885a3"><code>array::map(values: array&lt;T&gt;, callback: function(T[, int]) -&gt; R) -&gt; array&lt;R&gt;</code></h3><p><strong>Every engine</strong> &middot; copy; callback</p>
-<p>Callback declared return type selects result constraints; an undeclared/dynamic return gives array&lt;var&gt;. Reference callbacks can mutate input elements.</p>
+<div class="api-entry" data-provider="core" data-search="array::map(values: array&lt;t&gt;, callback: function(t[, int]) -&gt; r) -&gt; array&lt;r&gt; copy; callback a declared callback return type r gives array&lt;r&gt;; an undeclared return gives an array of the results&#x27; type when they all share one, and array&lt;var&gt; when they differ. reference callbacks can mutate input elements. every engine"><h3 id="api-9fd5cdd885a3"><code>array::map(values: array&lt;T&gt;, callback: function(T[, int]) -&gt; R) -&gt; array&lt;R&gt;</code></h3><p><strong>Every engine</strong> &middot; copy; callback</p>
+<p>A declared callback return type R gives array&lt;R&gt;; an undeclared return gives an array of the results&#x27; type when they all share one, and array&lt;var&gt; when they differ. Reference callbacks can mutate input elements.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs = [1, 2, 3];
 auto labels = array::map(xs, [](int x) -&gt; string { return &quot;#&quot; + to_string(x); });
 print(to_json(labels), &quot; &quot;, to_json(xs));</code></pre></div>
@@ -492,8 +492,6 @@ print(w.size(), &quot; &quot;, to_json(w.to_string().to_bytes()));</code></pre><
 </div>
 <div class="api-entry" data-provider="runner" data-search="netserver() -&gt; netserver construct  standalone jaiscript.exe"><h3 id="api-418c46145f3d"><code>NetServer() -&gt; NetServer</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; construct</p>
 </div>
-<div class="api-entry" data-provider="stdlib" data-search="pair(first: var, second: var) -&gt; pair construct  register_all() or area registration"><h3 id="api-04a6f149c7f7"><code>Pair(first: var, second: var) -&gt; Pair</code></h3><p><strong>register_all() or area registration</strong> &middot; construct</p>
-</div>
 <div class="api-entry" data-provider="core" data-search="app_cache_dir(application: string) -&gt; string filesystem creates application cache folder. every engine"><h3 id="api-87d9f4cbaef7"><code>app_cache_dir(application: string) -&gt; string</code></h3><p><strong>Every engine</strong> &middot; filesystem</p>
 <p>Creates application cache folder.</p>
 </div>
@@ -578,6 +576,9 @@ print(v[&quot;hp&quot;], &quot; &quot;, v[&quot;tags&quot;][0]);</code></pre></d
 </div>
 <div class="api-entry" data-provider="runner" data-search="net_local_addresses() -&gt; array&lt;string&gt; observe non-loopback ipv4 addresses. standalone jaiscript.exe"><h3 id="api-4a24dda0f9a6"><code>net_local_addresses() -&gt; array&lt;string&gt;</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; observe</p>
 <p>Non-loopback IPv4 addresses.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="pair(first: var, second: var) -&gt; pair construct the element type of a range-for over a map; pair() holds two nulls. register_all() or area registration"><h3 id="api-d95dce9ea7cb"><code>pair(first: var, second: var) -&gt; pair</code></h3><p><strong>register_all() or area registration</strong> &middot; construct</p>
+<p>The element type of a range-for over a map; pair() holds two nulls.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="parallel_transform(values: array&lt;t&gt;, callback: function(t) -&gt; r, weight: function(t) -&gt; number = default) -&gt; array&lt;r&gt; callback, parallel admission and ordered results follow the parallel contract. every engine"><h3 id="api-ca1e1aead2ea"><code>parallel_transform(values: array&lt;T&gt;, callback: function(T) -&gt; R, weight: function(T) -&gt; number = default) -&gt; array&lt;R&gt;</code></h3><p><strong>Every engine</strong> &middot; callback, parallel</p>
 <p>Admission and ordered results follow the parallel contract.</p>
@@ -988,7 +989,8 @@ print(to_json(stock.to_array()));</code></pre></div>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::trunc(value: number) -&gt; float observe  every engine"><h3 id="api-6185109a928a"><code>math::trunc(value: number) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="math::wrap(value: number, minimum: number, maximum: number) -&gt; float observe  every engine"><h3 id="api-870087a67732"><code>math::wrap(value: number, minimum: number, maximum: number) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<div class="api-entry" data-provider="core" data-search="math::wrap(minimum: number, maximum: number, value: number) -&gt; float observe the bounds may come in either order. every engine"><h3 id="api-5af928d1ee70"><code>math::wrap(minimum: number, maximum: number, value: number) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>The bounds may come in either order.</p>
 </div>
 </section>
 <section class="api-group"><h2 id="group-math-ivec2">math::ivec2</h2>
@@ -1159,8 +1161,8 @@ print(reflect::invoke(Orc(), &quot;add&quot;, 2, 3));</code></pre></div>
 </div>
 </section>
 <section class="api-group"><h2 id="group-string">string</h2>
-<div class="api-entry" data-provider="core" data-search="string::from_bytes(bytes: array&lt;uint8&gt; or array&lt;int8&gt; or array&lt;int&gt; or array&lt;char&gt; or array&lt;var&gt;) -&gt; string copy byte values must fit the accepted byte boundary. every engine"><h3 id="api-82c305d6aca7"><code>string::from_bytes(bytes: array&lt;uint8&gt; or array&lt;int8&gt; or array&lt;int&gt; or array&lt;char&gt; or array&lt;var&gt;) -&gt; string</code></h3><p><strong>Every engine</strong> &middot; copy</p>
-<p>Byte values must fit the accepted byte boundary.</p>
+<div class="api-entry" data-provider="stdlib" data-search="string::append(value: text, part: text, parts: text...) -&gt; self copy returns new text; preserves first input text kind. inputs do not mutate. register_all() or area registration"><h3 id="api-48849930d985"><code>string::append(value: text, part: text, parts: text...) -&gt; Self</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
+<p>Returns new text; preserves first input text kind. Inputs do not mutate.</p>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="string::from_code(codepoint: int) -&gt; string copy utf-8 encoding of a unicode scalar value. register_all() or area registration"><h3 id="api-d3967c77d296"><code>string::from_code(codepoint: int) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
 <p>UTF-8 encoding of a Unicode scalar value.</p>
@@ -1187,8 +1189,8 @@ print(reflect::invoke(Orc(), &quot;add&quot;, 2, 3));</code></pre></div>
 <div class="api-entry" data-provider="stdlib" data-search="string::trim(value: text) -&gt; same_text_kind copy returns a copy without the whitespace class (space, tab, lf, vt, ff, cr) at both ends; a utf8_string argument returns a utf8_string. the method form takes a character set. register_all() or area registration"><h3 id="api-d79dc2ac0d63"><code>string::trim(value: text) -&gt; same_text_kind</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
 <p>Returns a copy without the whitespace class (space, tab, LF, VT, FF, CR) at both ends; a utf8_string argument returns a utf8_string. The method form takes a character set.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.append(parts: text...) -&gt; self mutate appends text in place and returns the receiver; retains receiver text kind. requires at least one part. every engine"><h3 id="api-940049819914"><code>string.append(parts: text...) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Appends text in place and returns the receiver; retains receiver text kind. Requires at least one part.</p>
+<div class="api-entry" data-provider="core" data-search="string.append(part: text, parts: text...) -&gt; self mutate appends text in place and returns the receiver; retains receiver text kind. every engine"><h3 id="api-35ad44bb9c2e"><code>string.append(part: text, parts: text...) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Appends text in place and returns the receiver; retains receiver text kind.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="string.at(index: int) -&gt; char observe returns an inline byte char like []; no temporary string allocation. negative indices count from end; out-of-range raises. every engine"><h3 id="api-b5c09b083fa9"><code>string.at(index: int) -&gt; char</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Returns an inline byte char like []; no temporary string allocation. Negative indices count from end; out-of-range raises.</p>
@@ -1374,8 +1376,8 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 <div class="api-entry" data-provider="core" data-search="string.utf8_length() -&gt; int observe counts decoded utf-8 characters. every engine"><h3 id="api-04c111a97157"><code>string.utf8_length() -&gt; int</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Counts decoded UTF-8 characters.</p>
 </div>
-<div class="api-entry" data-provider="stdlib" data-search="string::append(value: text, parts: text...) -&gt; self copy returns new text; preserves first input text kind. requires at least one part after the first value. inputs do not mutate. standard library registration"><h3 id="api-e27dca89517e"><code>string::append(value: text, parts: text...) -&gt; Self</code></h3><p><strong>Standard library registration</strong> &middot; copy</p>
-<p>Returns new text; preserves first input text kind. Requires at least one part after the first value. Inputs do not mutate.</p>
+<div class="api-entry" data-provider="core" data-search="string::from_bytes(bytes: array&lt;uint8&gt; or array&lt;int8&gt; or array&lt;int&gt; or array&lt;char&gt; or array&lt;var&gt;) -&gt; string copy byte values must fit the accepted byte boundary. every engine"><h3 id="api-f3d8c707af01"><code>string::from_bytes(bytes: array&lt;uint8&gt; or array&lt;int8&gt; or array&lt;int&gt; or array&lt;char&gt; or array&lt;var&gt;) -&gt; string</code></h3><p><strong>Every engine</strong> &middot; copy</p>
+<p>Byte values must fit the accepted byte boundary.</p>
 </div>
 </section>
 <section class="api-group"><h2 id="group-time">time</h2>
@@ -1468,8 +1470,8 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 </div>
 </section>
 <section class="api-group"><h2 id="group-utf8-string">utf8_string</h2>
-<div class="api-entry" data-provider="core" data-search="utf8_string.append(parts: text...) -&gt; self mutate appends text in place and returns the receiver; retains receiver text kind. requires at least one part. every engine"><h3 id="api-771200560edc"><code>utf8_string.append(parts: text...) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Appends text in place and returns the receiver; retains receiver text kind. Requires at least one part.</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.append(part: text, parts: text...) -&gt; self mutate appends text in place and returns the receiver; retains receiver text kind. every engine"><h3 id="api-fdf4e971b7ec"><code>utf8_string.append(part: text, parts: text...) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Appends text in place and returns the receiver; retains receiver text kind.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="utf8_string.at(index: int) -&gt; self observe one byte of string text or one utf-8 character; operator [] on string returns char instead. every engine"><h3 id="api-9053f8c1216e"><code>utf8_string.at(index: int) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>One byte of string text or one UTF-8 character; operator [] on string returns char instead.</p>
@@ -1595,9 +1597,6 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 <div class="api-entry" data-provider="core" data-search="utf8_string.to_upper() -&gt; self mutate ascii case conversion; returns text for chaining. every engine"><h3 id="api-84c0c75b090a"><code>utf8_string.to_upper() -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
 <p>ASCII case conversion; returns text for chaining.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.to_utf8() -&gt; utf8_string copy same bytes with character indexing. every engine"><h3 id="api-40566b4f6991"><code>utf8_string.to_utf8() -&gt; utf8_string</code></h3><p><strong>Every engine</strong> &middot; copy</p>
-<p>Same bytes with character indexing.</p>
-</div>
 <div class="api-entry" data-provider="core" data-search="utf8_string.trim(characters: text = string::whitespace) -&gt; self mutate mutates using the shared whitespace set by default: space, tab, lf, vt, ff and cr. returns the receiver. every engine"><h3 id="api-467e5c0499df"><code>utf8_string.trim(characters: text = string::whitespace) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
 <p>Mutates using the shared whitespace set by default: space, tab, LF, VT, FF and CR. Returns the receiver.</p>
 </div>
@@ -1634,8 +1633,6 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 <tr><td><code>NetServer.on_client_connect</code></td><td>Signal</td><td>receiver view / runner</td><td>Payload starts with client id, then bytes or reason where applicable.</td></tr>
 <tr><td><code>NetServer.on_client_disconnect</code></td><td>Signal</td><td>receiver view / runner</td><td>Payload starts with client id, then bytes or reason where applicable.</td></tr>
 <tr><td><code>NetServer.on_client_packet</code></td><td>Signal</td><td>receiver view / runner</td><td>Payload starts with client id, then bytes or reason where applicable.</td></tr>
-<tr><td><code>Pair.first</code></td><td>var</td><td>read/write / stdlib</td><td>Map iteration keys remain protected from mutation.</td></tr>
-<tr><td><code>Pair.second</code></td><td>var</td><td>read/write / stdlib</td><td>Map iteration keys remain protected from mutation.</td></tr>
 <tr><td><code>binary::float32</code></td><td>binary::width</td><td>constant / core</td><td></td></tr>
 <tr><td><code>binary::float64</code></td><td>binary::width</td><td>constant / core</td><td></td></tr>
 <tr><td><code>binary::int16</code></td><td>binary::width</td><td>constant / core</td><td></td></tr>
@@ -1689,6 +1686,8 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 <tr><td><code>math::vec4.x</code></td><td>float</td><td>read/write / core</td><td>Component narrows to int32 or float32.</td></tr>
 <tr><td><code>math::vec4.y</code></td><td>float</td><td>read/write / core</td><td>Component narrows to int32 or float32.</td></tr>
 <tr><td><code>math::vec4.z</code></td><td>float</td><td>read/write / core</td><td>Component narrows to int32 or float32.</td></tr>
+<tr><td><code>pair.first</code></td><td>var</td><td>read/write / stdlib</td><td>Map iteration keys remain protected from mutation.</td></tr>
+<tr><td><code>pair.second</code></td><td>var</td><td>read/write / stdlib</td><td>Map iteration keys remain protected from mutation.</td></tr>
 <tr><td><code>string::whitespace</code></td><td>string</td><td>constant / stdlib</td><td>Space, tab, LF, VT, FF, CR; split() whitespace sentinel.</td></tr>
 <tr><td><code>time::date.day</code></td><td>int</td><td>read/write / stdlib</td><td>Validated calendar field.</td></tr>
 <tr><td><code>time::date.hour</code></td><td>int</td><td>read/write / stdlib</td><td>Validated calendar field.</td></tr>

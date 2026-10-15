@@ -1824,18 +1824,6 @@
     },
     {
       "owner": "utf8_string",
-      "name": "to_utf8",
-      "signature": "to_utf8() -> utf8_string",
-      "provider": "core",
-      "effect": "copy",
-      "notes": "Same bytes with character indexing.",
-      "source": "source/implementation/interpreter.cpp",
-      "form": "method",
-      "availability": "Every engine",
-      "display": "utf8_string.to_utf8() -> utf8_string"
-    },
-    {
-      "owner": "utf8_string",
       "name": "byte_size",
       "signature": "byte_size() -> int",
       "provider": "core",
@@ -3053,14 +3041,14 @@
     {
       "owner": "math",
       "name": "wrap",
-      "signature": "wrap(value: number, minimum: number, maximum: number) -> float",
+      "signature": "wrap(minimum: number, maximum: number, value: number) -> float",
       "provider": "core",
       "effect": "observe",
-      "notes": "",
+      "notes": "The bounds may come in either order.",
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "namespace",
       "availability": "Every engine",
-      "display": "math::wrap(value: number, minimum: number, maximum: number) -> float"
+      "display": "math::wrap(minimum: number, maximum: number, value: number) -> float"
     },
     {
       "owner": "math",
@@ -5574,11 +5562,11 @@
       "owner": "string",
       "name": "from_bytes",
       "signature": "from_bytes(bytes: array<uint8> or array<int8> or array<int> or array<char> or array<var>) -> string",
-      "provider": "core-namespace",
+      "provider": "core",
       "effect": "copy",
       "notes": "Byte values must fit the accepted byte boundary.",
       "source": "include/jaiscript/detail/binary_data.hpp",
-      "form": "function",
+      "form": "namespace",
       "availability": "Every engine",
       "display": "string::from_bytes(bytes: array<uint8> or array<int8> or array<int> or array<char> or array<var>) -> string"
     },
@@ -6196,15 +6184,15 @@
     },
     {
       "owner": "global",
-      "name": "Pair",
-      "signature": "Pair(first: var, second: var) -> Pair",
+      "name": "pair",
+      "signature": "pair(first: var, second: var) -> pair",
       "provider": "stdlib",
       "effect": "construct",
-      "notes": "",
+      "notes": "The element type of a range-for over a map; pair() holds two nulls.",
       "source": "include/jaiscript/stdlib/containers.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "Pair(first: var, second: var) -> Pair"
+      "display": "pair(first: var, second: var) -> pair"
     },
     {
       "owner": "time",
@@ -6500,7 +6488,7 @@
       "signature": "map(values: array<T>, callback: function(T[, int]) -> R) -> array<R>",
       "provider": "core",
       "effect": "copy; callback",
-      "notes": "Callback declared return type selects result constraints; an undeclared/dynamic return gives array<var>. Reference callbacks can mutate input elements.",
+      "notes": "A declared callback return type R gives array<R>; an undeclared return gives an array of the results' type when they all share one, and array<var> when they differ. Reference callbacks can mutate input elements.",
       "source": "include/jaiscript/detail/array_namespace.hpp",
       "form": "namespace",
       "availability": "Every engine",
@@ -6541,38 +6529,38 @@
     {
       "owner": "string",
       "name": "append",
-      "signature": "append(parts: text...) -> Self",
+      "signature": "append(part: text, parts: text...) -> Self",
       "provider": "core",
       "effect": "mutate",
-      "notes": "Appends text in place and returns the receiver; retains receiver text kind. Requires at least one part.",
+      "notes": "Appends text in place and returns the receiver; retains receiver text kind.",
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.append(parts: text...) -> Self"
+      "display": "string.append(part: text, parts: text...) -> Self"
     },
     {
       "owner": "utf8_string",
       "name": "append",
-      "signature": "append(parts: text...) -> Self",
+      "signature": "append(part: text, parts: text...) -> Self",
       "provider": "core",
       "effect": "mutate",
-      "notes": "Appends text in place and returns the receiver; retains receiver text kind. Requires at least one part.",
+      "notes": "Appends text in place and returns the receiver; retains receiver text kind.",
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "utf8_string.append(parts: text...) -> Self"
+      "display": "utf8_string.append(part: text, parts: text...) -> Self"
     },
     {
       "owner": "string",
       "name": "append",
-      "signature": "append(value: text, parts: text...) -> Self",
+      "signature": "append(value: text, part: text, parts: text...) -> Self",
       "provider": "stdlib",
       "effect": "copy",
-      "notes": "Returns new text; preserves first input text kind. Requires at least one part after the first value. Inputs do not mutate.",
+      "notes": "Returns new text; preserves first input text kind. Inputs do not mutate.",
       "source": "include/jaiscript/stdlib/strings.hpp",
-      "form": "namespace",
-      "availability": "Standard library registration",
-      "display": "string::append(value: text, parts: text...) -> Self"
+      "form": "function",
+      "availability": "register_all() or area registration",
+      "display": "string::append(value: text, part: text, parts: text...) -> Self"
     }
   ],
   "fields": [
@@ -7043,7 +7031,7 @@
       "notes": "float32 component."
     },
     {
-      "owner": "Pair",
+      "owner": "pair",
       "name": "first",
       "type": "var",
       "provider": "stdlib",
@@ -7051,7 +7039,7 @@
       "notes": "Map iteration keys remain protected from mutation."
     },
     {
-      "owner": "Pair",
+      "owner": "pair",
       "name": "second",
       "type": "var",
       "provider": "stdlib",

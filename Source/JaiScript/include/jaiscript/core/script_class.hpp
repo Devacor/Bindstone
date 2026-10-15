@@ -299,17 +299,15 @@ inline checked_result<script_value> script_method_dispatch::invoke(const script_
         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
     }
 
-    script_callable payload;
-    payload.kind = script_callable::kind_type::method;
-    payload.ast = *resolved.value();
-    payload.cls = cls;
-    payload.definition_env = definition_env;
-    payload.this_obj = this_obj;
-    if (backend->is_executing() || backend->is_unwinding()) { return backend->execute_callable_from(payload, args, first); }
-    struct call { const script_callable& payload; const std::vector<script_value>& args; size_t first; } c{payload, args, first};
+    const std::shared_ptr<function_decl>& ast = *resolved.value();
+    if (backend->is_executing() || backend->is_unwinding()) { return backend->execute_method_from(*this, ast, this_obj, args, first); }
+    struct call {
+        const script_method_dispatch& dispatch; const std::shared_ptr<function_decl>& ast; const script_value& this_obj;
+        const std::vector<script_value>& args; size_t first;
+    } c{*this, ast, this_obj, args, first};
     return eng->checked_host_entry([](execution_backend& be, void* ctx) {
         auto* cc = static_cast<call*>(ctx);
-        return be.execute_callable_from(cc->payload, cc->args, cc->first);
+        return be.execute_method_from(cc->dispatch, cc->ast, cc->this_obj, cc->args, cc->first);
     }, &c);
 }
 

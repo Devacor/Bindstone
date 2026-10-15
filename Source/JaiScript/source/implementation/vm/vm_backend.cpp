@@ -21805,42 +21805,43 @@ std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
 	return compiled;
 }
 
+// A destructor a throw's unwinding released runs under its own exception state and the throw resumes after it (C++:
+// destructors run during unwinding); what the destructor raised dies with it (KEEP BYTE-PARALLEL with interpreter::execute_callable)
+struct vm_backend::unwind_park {
+	vm_backend* self;
+	std::optional<script_exception> exception;
+	std::optional<script_value> value;
+	std::vector<stack_frame> trace;
+	bool trace_captured = false;
+	uint64_t catch_var = 0;
+	explicit unwind_park(vm_backend* vm) : self(vm) {
+		exception = std::move(self->current_exception_);
+		self->current_exception_.reset();
+		value = std::move(self->active_exception_value_);
+		self->active_exception_value_.reset();
+		trace = std::move(self->captured_trace_);
+		self->captured_trace_.clear();
+		trace_captured = self->trace_captured_;
+		self->trace_captured_ = false;
+		catch_var = self->current_catch_var_id_;
+		self->current_catch_var_id_ = 0;
+		self->is_unwinding_ = false;
+	}
+	~unwind_park() {
+		self->current_exception_ = std::move(exception);
+		self->active_exception_value_ = std::move(value);
+		self->captured_trace_ = std::move(trace);
+		self->trace_captured_ = trace_captured;
+		self->current_catch_var_id_ = catch_var;
+		self->is_unwinding_ = true;
+	}
+};
+
 checked_result<script_value> vm_backend::execute_callable_from(const script_callable& payload, const std::vector<script_value>& args, size_t first) {
 	if (first != 0 && (payload.kind != script_callable::kind_type::method || !payload.this_obj || payload.ast->is_coroutine)) {
 		return execution_backend::execute_callable_from(payload, args, first);
 	}
 	detail::release_sync release_first(engine_);
-	// A destructor a throw's unwinding released runs under its own exception state and the throw resumes after it (C++:
-	// destructors run during unwinding); what the destructor raised dies with it (KEEP BYTE-PARALLEL with interpreter::execute_callable)
-	struct unwind_park {
-		vm_backend* self;
-		std::optional<script_exception> exception;
-		std::optional<script_value> value;
-		std::vector<stack_frame> trace;
-		bool trace_captured = false;
-		uint64_t catch_var = 0;
-		explicit unwind_park(vm_backend* vm) : self(vm) {
-			exception = std::move(self->current_exception_);
-			self->current_exception_.reset();
-			value = std::move(self->active_exception_value_);
-			self->active_exception_value_.reset();
-			trace = std::move(self->captured_trace_);
-			self->captured_trace_.clear();
-			trace_captured = self->trace_captured_;
-			self->trace_captured_ = false;
-			catch_var = self->current_catch_var_id_;
-			self->current_catch_var_id_ = 0;
-			self->is_unwinding_ = false;
-		}
-		~unwind_park() {
-			self->current_exception_ = std::move(exception);
-			self->active_exception_value_ = std::move(value);
-			self->captured_trace_ = std::move(trace);
-			self->trace_captured_ = trace_captured;
-			self->current_catch_var_id_ = catch_var;
-			self->is_unwinding_ = true;
-		}
-	};
 	std::optional<unwind_park> park;
 	if (is_unwinding_) [[unlikely]] { park.emplace(this); }
 	switch (payload.kind) {
@@ -21886,6 +21887,26 @@ checked_result<script_value> vm_backend::execute_callable_from(const script_call
 		}
 	}
 	return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Unknown callable kind");
+}
+
+checked_result<script_value> vm_backend::execute_method_from(const script_method_dispatch& dispatch, const std::shared_ptr<function_decl>& ast,
+                                                         const script_value& this_obj, const std::vector<script_value>& args, size_t first) {
+	if (ast->is_coroutine) { return execution_backend::execute_method_from(dispatch, ast, this_obj, args, first); }
+	detail::release_sync release_first(engine_);
+	std::optional<unwind_park> park;
+	if (is_unwinding_) [[unlikely]] { park.emplace(this); }
+	const script_defined_function* function;
+	if (!parallel_worker_ && dispatch.backend_function_key == ast.get()) {
+		function = static_cast<const script_defined_function*>(dispatch.backend_function);
+	} else {
+		function = &method_function_for(ast);
+		if (!parallel_worker_) {   // method_functions_ never drops an entry: the pointer lives as long as this backend
+			dispatch.backend_function_key = ast.get();
+			dispatch.backend_function = function;
+		}
+	}
+	const method_entry entry{&dispatch.definition_env, &this_obj, dispatch.cls.get()};
+	return call_script_function(*function, args, nullptr, nullptr, nullptr, &entry, first);
 }
 
 template <class ArgsT>
@@ -22136,8 +22157,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	rec.locals.scope_static = dispatch.cls.get();   // the declaring class: a lazy frame's bare statics resolve through it
 	rec.cells.reset_call(body_chunk->max_cells);
 	rec.f.cells = &rec.cells;
-	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env &&
-	               dispatch.cls && !dispatch.cls->chain_has_nonpublic();
+	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env && dispatch.cls;
 	rec.env_untouched = false;
 	JAI_MPUSH_SECTION(1);
 	try {
@@ -22303,11 +22323,8 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	// Method-lazy (this-in-frame): a body whose ops never park
 	// state in an env runs with environment_ = the DEFINITION env (globals chain,
 	// lexically correct) and NO method env at all — 'this', fields, and the access
-	// context all resolve through the frame (current_this / frame_access_context).
-	// Nonpublic chains stay eager: their access enforcement needs the DECLARING
-	// class, which only the env-kind context carries.
-	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env &&
-	               dispatch.cls && !dispatch.cls->chain_has_nonpublic();
+	// context all resolve through the frame (current_this / frame_access_context, which answers the declaring class).
+	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env && dispatch.cls;
 	rec.env_untouched = false;
 	try {
 		// Net effect of the native wrapper-env round trip: a method scope parented on
@@ -23823,8 +23840,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 
 	// A method whose body needs no frame env runs over its definition env with `this` on the frame, as an in-loop lazy
 	// method frame does; the caller's env moves aside, and stays put when it already is the definition env
-	const bool lazy_method = method && method->access && *method->parent && !body_chunk->needs_frame_env &&
-	                         !method->access->chain_has_nonpublic();
+	const bool lazy_method = method && method->access && *method->parent && !body_chunk->needs_frame_env;
 	bool env_untouched = false;
 	std::shared_ptr<environment> previousEnv;
 	if (lazy_method) {
@@ -23939,7 +23955,7 @@ prepared_callback* vm_backend::prepare_callback(const script_value& callable) {
 		const auto* bound = c.unchecked_as_function().target<bound_method_fn>();
 		if (!bound || !bound->method.is_function()) { return nullptr; }
 		const auto* dispatch = bound->method.unchecked_as_function().target<script_method_dispatch>();
-		if (!dispatch || dispatch->eng != engine_ || !dispatch->cls || !dispatch->definition_env || dispatch->cls->chain_has_nonpublic()) { return nullptr; }
+		if (!dispatch || dispatch->eng != engine_ || !dispatch->cls || !dispatch->definition_env) { return nullptr; }
 		if (detail::native_stack_low()) [[unlikely]] { return nullptr; }
 		if (callback_depth_ == callback_sessions_.size()) { callback_sessions_.push_back(std::make_unique<callback_session>()); }
 		callback_session& s = *callback_sessions_[callback_depth_++];
@@ -23949,6 +23965,7 @@ prepared_callback* vm_backend::prepare_callback(const script_value& callable) {
 		s.dispatch = dispatch;
 		s.receiver = &bound->this_obj;
 		s.scope_static = dispatch->cls.get();
+		s.method = method_entry{&dispatch->definition_env, &bound->this_obj, dispatch->cls.get()};
 		s.method_argc = SIZE_MAX;
 		s.lazy = true;
 		s.closure_env = dispatch->definition_env;
@@ -24010,23 +24027,25 @@ void vm_backend::release_callback(prepared_callback* prepared) {
 // callback's), the lazy environment of an in-loop push, primitive arguments bound by copy
 bool vm_backend::bind_method_session(callback_session& s, const std::vector<script_value>& args) {
 	const class_definition& cls = *s.dispatch->cls;
-	if (s.fn && s.method_argc == args.size() && s.method_epoch == cls.method_epoch()) { return true; }
-	s.fn = nullptr;
-	if (!cls.method_arity_decides(s.dispatch->name_id, args.size())) { return false; }
+	if (s.fn && s.method_arity_decides && s.method_argc == args.size() && s.method_epoch == cls.method_epoch()) { return true; }
+	// the argument types pick the overload (or the count or the class moved): resolve as the dispatcher would; its failure
+	// texts and a coroutine's handle come from the dispatcher itself
 	auto resolved = s.dispatch->resolve(args, 0);
-	if (!resolved || (*resolved.value())->is_coroutine) { return false; }
+	if (!resolved || (*resolved.value())->is_coroutine) { s.fn = nullptr; return false; }
 	const script_defined_function& function = method_function_for(*resolved.value());
+	s.method_argc = args.size();
+	s.method_arity_decides = cls.method_arity_decides(s.dispatch->name_id, args.size());
+	if (s.fn == &function && s.method_epoch == cls.method_epoch()) { return true; }
 	auto body = std::static_pointer_cast<chunk>(function.backend_body_cache);
 	if (!body) {
 		body = chunk_for_body(function.name, function.parameters(), function.body, function.local_count, function.unit);
 		function.backend_body_cache = body;
 	}
-	if (body->needs_frame_env) { return false; }
 	lean_bind_of(function);
 	s.fn = &function;
 	s.body = std::move(body);
-	s.method_argc = args.size();
 	s.method_epoch = cls.method_epoch();
+	s.lazy = !s.body->needs_frame_env;
 	s.locals.function_name = function.name;
 	s.window_slots = std::max(function.local_count, static_cast<size_t>(s.body->local_count));
 	s.f.code = s.body.get();
@@ -24077,7 +24096,7 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 		previous_env = std::move(environment_);
 		if (!s.lazy) {
 			try {
-				setup_callee_env(function, locals, previous_env);
+				setup_callee_env(function, locals, previous_env, s.dispatch ? &s.method : nullptr);
 			} catch (...) {
 				environment_ = std::move(previous_env);
 				throw;

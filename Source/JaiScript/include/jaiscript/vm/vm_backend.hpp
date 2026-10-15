@@ -292,6 +292,9 @@ namespace jai::vm {
             return execute_callable_from(payload, args, 0);
         }
         checked_result<script_value> execute_callable_from(const script_callable& payload, const std::vector<script_value>& args, size_t first) override;
+        checked_result<script_value> execute_method_from(const script_method_dispatch& dispatch, const std::shared_ptr<function_decl>& ast,
+                                                         const script_value& this_obj, const std::vector<script_value>& args, size_t first) override;
+        struct unwind_park;
         prepared_callback* prepare_callback(const script_value& callable) override;
         void release_callback(prepared_callback* prepared) override;
 
@@ -1601,6 +1604,7 @@ namespace jai::vm {
         const class_definition* frame_access_context(const frame& f) const {
             if (f.entry_env) { return environment_->find_access_context(); }
             if (f.locals && f.locals->is_method && f.locals->this_object_ptr) {
+                if (f.locals->scope_static) { return f.locals->scope_static; }   // the declaring class, as a method env's context
                 if (auto inst = f.locals->get_this().get_class_instance()) {
                     return inst->get_class_definition();
                 }
@@ -2305,8 +2309,10 @@ namespace jai::vm {
             const script_method_dispatch* dispatch = nullptr;
             const script_value* receiver = nullptr;
             class_definition* scope_static = nullptr;   // the method's declaring class (a function session's stays null)
+            method_entry method{};   // a body that needs a frame env gets its method env from it
             size_t method_argc = SIZE_MAX;
             uint64_t method_epoch = 0;
+            bool method_arity_decides = false;   // the count alone picks fn: a later call with the same count skips resolution
             checked_result<script_value> call(const std::vector<script_value>& args) override {
                 return dispatch ? vm->run_method_callback(*this, args) : vm->run_callback(*this, args);
             }

@@ -246,6 +246,35 @@ public:
 			check_eq(std::string("6|6|i1sb2|31|16"), r.to_string());
 		});
 
+		// A method declared in a class outside a private member's family is refused that member on an instance of a
+		// subclass inside it, however the method is entered (an in-loop call, a bound method, a builtin's callback); a method
+		// whose body builds a closure over this runs as a builtin's callback too
+		test("method_entries_check_private_access_against_the_declaring_class", [this]() {
+			auto eng = make_engine();
+			stdlib::register_all(*eng);
+			auto r = eng->execute(R"(
+				class Outer { int peek(var o) { return o.secret; } }
+				class Holder : Outer { private: int secret = 7; public: int own() { return secret; } }
+				class Leaf : Holder {}
+				class Maker {
+					int base = 2;
+					int scaled(int v) { var f = [this](int k) -> int { return base * k; }; return f(v); }
+				}
+				Leaf leaf;
+				string got = "";
+				try { leaf.peek(leaf); got += "allowed"; } catch (e) { got += "refused"; }
+				got += "|";
+				try { var p = reflect::bind(leaf, "peek"); p(leaf); got += "allowed"; } catch (e) { got += "refused"; }
+				got += "|";
+				try { array::map([1], [&](int v) -> int { return leaf.peek(leaf); }); got += "allowed"; } catch (e) { got += "refused"; }
+				got += "|" + to_string(leaf.own()) + "|";
+				Maker m;
+				array<var> scaled = array::map([1, 2, 3], reflect::bind(m, "scaled"));
+				got + to_string(scaled[2]);
+			)");
+			check_eq(std::string("refused|refused|refused|7|6"), r.to_string());
+		});
+
 		test("a_bound_method_callback_runs_the_redefined_body_after_a_reload", [this]() {
 			auto eng = make_engine();
 			stdlib::register_all(*eng);

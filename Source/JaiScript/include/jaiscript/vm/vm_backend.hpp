@@ -637,6 +637,8 @@ namespace jai::vm {
                 new (slots + count) script_value(std::move(x));
                 ++count;
             }
+            // doubling from a small first block: a fiber's stack starts empty, and every suspended coroutine keeps its own
+            static constexpr size_t grown_capacity(size_t a_cap) noexcept { return a_cap < 32 ? 64 : a_cap * 2; }
             void grow_push(script_value x);   // out of line: relocate + rebase + push
             void relocate_to(size_t new_cap); // the ONE buffer move (grow_push + reserve)
             script_value& back() noexcept { assert(count); return slots[count - 1]; }
@@ -664,7 +666,7 @@ namespace jai::vm {
             // the window lifecycle tax). No-op when target <= size.
             void fill_null_to(size_t target, class engine* eng) {
                 if (target > cap) [[unlikely]] {
-                    const size_t grown = cap < 2048 ? size_t{4096} : cap * 2;
+                    const size_t grown = grown_capacity(cap);
                     relocate_to(target > grown ? target : grown);
                 }
                 while (count < target) {

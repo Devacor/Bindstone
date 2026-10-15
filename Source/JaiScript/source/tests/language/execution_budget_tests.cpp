@@ -370,6 +370,23 @@ public:
 			}
 		});
 
+		// A suspended coroutine keeps its state (the vm's fiber stack, the interpreter's frames): starting one counts against
+		// the cap, so a script cannot park unbounded coroutines under it
+		test("memory_cap_counts_suspended_coroutines", [this]() {
+			auto e = make_engine();
+			e->execution_budget(30.0);
+			e->memory_cap(1024 * 1024);
+			auto r = e->execute(R"(
+				coroutine int ticker() { int i = 0; while (true) { yield i; i += 1; } return 0; }
+				var parked = [];
+				string msg = "none";
+				try { for (int i = 0; i < 20000; i++) { var h = ticker(); h.next(); parked.push(h); } } catch (err) { msg = err; }
+				msg
+			)");
+			check_eq(std::string("Script memory cap exceeded (1048576 bytes) - raise engine::memory_cap or break up the work"), r.as<std::string>());
+			check_eq((int64_t)4, e->execute("2 + 2").as_int());
+		});
+
 		// A repeat whose byte count passes size_t reports like any oversized text instead of reserving the wrapped size and
 		// appending forever
 		test("an_overflowing_repeat_reports_at_once", [this]() {

@@ -14696,6 +14696,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
 
     auto prev_status = handle.get_status();
     handle.set_status(coroutine_handle::status::running);
+    if (prev_status == coroutine_handle::status::created) { limits_->memory_charge_deferred(detail::k_coroutine_state_charge); }
 
     // Every exit hands the resumer back its coroutine and yield request; a C++ exception escaping the body fails the
     // handle (vm run_fiber parity). Declared ahead of the exception swap, so it runs after it.

@@ -10,6 +10,7 @@
 #include <string>
 #include <algorithm>
 #include <type_traits>
+#include <utility>
 #include <atomic>
 
 #ifndef JAI_SIGNALS_NO_THREADSAFE
@@ -22,7 +23,7 @@ namespace jai {
 // recursive_mutex so callbacks may modify the signal while it fires. Define
 // JAI_SIGNALS_NO_THREADSAFE to drop the lock (single-threaded, max performance).
 #ifndef JAI_SIGNALS_NO_THREADSAFE
-#define JAI_SIGNAL_LOCK() std::lock_guard<std::recursive_mutex> _signal_lock(mutex_)
+#define JAI_SIGNAL_LOCK() std::lock_guard<std::recursive_mutex> _signal_lock(state_->mutex)
 #else
 #define JAI_SIGNAL_LOCK() ((void)0)
 #endif
@@ -172,6 +173,7 @@ private:
 
 	int is_blocked_ = 0;
 	bool oneshot_ = false;
+	bool oneshot_fired_ = false;
 	std::function<T> callback_;
 	std::string script_callback_;
 	std::shared_ptr<std::vector<std::string>> ordered_parameter_names_;
@@ -190,26 +192,60 @@ std::atomic<int64_t> receiver<T>::unique_id_ = 0;
 
 template<typename T>
 class signal_emitter {
+	// What an emit touches after a receiver returns lives here, off the emitter, so a receiver may destroy the emitter.
+	// Emit can run reentrantly (a slot may emit the same signal), so it tracks call DEPTH, not a bool: the deferred
+	// post-emit cleanup runs only when the OUTERMOST emit unwinds. Receivers hold it weakly for connected().
+	struct emit_state {
+#ifndef JAI_SIGNALS_NO_THREADSAFE
+		std::recursive_mutex mutex;
+#endif
+		int depth = 0;
+		bool orphaned = false;
+		std::shared_ptr<emit_state> self;   // the destroyed emitter's hand-off to the outermost emit
+	};
+	// A moved-from emitter keeps a fresh state of its own
+	struct emit_state_handle {
+		std::shared_ptr<emit_state> ptr = std::make_shared<emit_state>();
+		emit_state_handle() = default;
+		emit_state_handle(emit_state_handle&& a_other) : ptr(std::exchange(a_other.ptr, std::make_shared<emit_state>())) {}
+		emit_state_handle& operator=(emit_state_handle&& a_other) {
+			ptr = std::exchange(a_other.ptr, std::make_shared<emit_state>());
+			return *this;
+		}
+		emit_state* operator->() const { return ptr.get(); }
+	};
+
 public:
 	using function_type = std::function<T>;
 	using receiver_type = receiver<T>;
 	using shared_receiver_type = std::shared_ptr<receiver<T>>;
 	using weak_receiver_type = std::weak_ptr<receiver<T>>;
 
-	signal_emitter() : prevent_shared_ownership_(std::make_shared<char>()) {}
-	~signal_emitter() = default;
+	signal_emitter() = default;
+	~signal_emitter() {
+		// Destroyed by one of its own receivers: the emit in progress keeps the state and frees it as it unwinds
+		if (state_->depth > 0) {
+			state_->orphaned = true;
+			state_->self = state_.ptr;
+		}
+	}
 
 	signal_emitter(const signal_emitter&) = delete;
 	signal_emitter& operator=(const signal_emitter&) = delete;
 
+#ifndef JAI_SIGNALS_NO_THREADSAFE
+	signal_emitter(signal_emitter&&) = delete;
+	signal_emitter& operator=(signal_emitter&&) = delete;
+#else
 	signal_emitter(signal_emitter&&) = default;
 	signal_emitter& operator=(signal_emitter&&) = default;
+#endif
 
 	[[nodiscard]]
 	shared_receiver_type connect(std::function<T> callback) {
 		JAI_SIGNAL_LOCK();
 		auto recv = receiver<T>::make(std::move(callback));
-		recv->owner_signal_ = prevent_shared_ownership_;
+		recv->owner_signal_ = state_.ptr;
 		observers_.push_back(recv);
 		return recv;
 	}
@@ -218,7 +254,7 @@ public:
 	shared_receiver_type connect(const std::string& script_callback) {
 		JAI_SIGNAL_LOCK();
 		auto recv = receiver<T>::make(script_callback, script_engine_, ordered_parameter_names_);
-		recv->owner_signal_ = prevent_shared_ownership_;
+		recv->owner_signal_ = state_.ptr;
 		observers_.push_back(recv);
 		return recv;
 	}
@@ -228,7 +264,7 @@ public:
 		JAI_SIGNAL_LOCK();
 		auto recv = receiver<T>::make(std::move(callback));
 		recv->oneshot_ = true;
-		recv->owner_signal_ = prevent_shared_ownership_;
+		recv->owner_signal_ = state_.ptr;
 		observers_.push_back(recv);
 		return recv;
 	}
@@ -238,7 +274,7 @@ public:
 		JAI_SIGNAL_LOCK();
 		auto recv = receiver<T>::make(script_callback, script_engine_, ordered_parameter_names_);
 		recv->oneshot_ = true;
-		recv->owner_signal_ = prevent_shared_ownership_;
+		recv->owner_signal_ = state_.ptr;
 		observers_.push_back(recv);
 		return recv;
 	}
@@ -246,7 +282,8 @@ public:
 	bool connect(shared_receiver_type recv) {
 		JAI_SIGNAL_LOCK();
 		if (recv) {
-			recv->owner_signal_ = prevent_shared_ownership_;
+			recv->owner_signal_ = state_.ptr;
+			recv->oneshot_fired_ = false;
 			observers_.push_back(recv);
 			return true;
 		}
@@ -296,7 +333,7 @@ public:
 		JAI_SIGNAL_LOCK();
 		if (recv) {
 			recv->owner_signal_.reset();
-			if (in_call_depth_ == 0) {
+			if (state_->depth == 0) {
 				remove_observer(recv);
 			} else {
 				disconnect_queue_.push_back(recv);
@@ -321,7 +358,7 @@ public:
 			}
 		}
 		owned_connections_.clear();
-		if (in_call_depth_ == 0) {
+		if (state_->depth == 0) {
 			observers_.clear();
 			loaded_observers_.clear();
 		} else {
@@ -420,7 +457,7 @@ private:
 	void disconnect_unlocked(shared_receiver_type recv) {
 		if (recv) {
 			recv->owner_signal_.reset();
-			if (in_call_depth_ == 0) {
+			if (state_->depth == 0) {
 				remove_observer(recv);
 			} else {
 				disconnect_queue_.push_back(recv);
@@ -449,13 +486,15 @@ private:
 
 		// Remove one-shots only if any fired (skips the scan in the common case).
 		if (has_oneshots_pending_) {
-			for (size_t i = observers_.size(); i > 0; --i) {
-				auto locked = observers_[i - 1].lock();
-				if (locked && locked->is_oneshot()) {
-					locked->owner_signal_.reset();
-					remove_observer(locked);
-				}
-			}
+			const auto fired = [](const shared_receiver_type& a_receiver) { return a_receiver->is_oneshot() && a_receiver->oneshot_fired_; };
+			std::erase_if(observers_, [&fired](const weak_receiver_type& a_observer) {
+				auto locked = a_observer.lock();
+				if (!locked) { return true; }
+				if (!fired(locked)) { return false; }
+				locked->owner_signal_.reset();
+				return true;
+			});
+			if (!loaded_observers_.empty()) { std::erase_if(loaded_observers_, fired); }
 			has_oneshots_pending_ = false;
 		}
 
@@ -467,20 +506,45 @@ private:
 		}
 	}
 
-	// RAII depth guard for emit (see in_call_depth_): increments on entry, and on exit — normal
-	// or via exception — decrements and drains at depth 0. Constructed AFTER JAI_SIGNAL_LOCK so
-	// it destructs first, draining while the lock is still held.
+	// One emit's lock and depth. The outermost exit (normal, or a receiver's throw) drains while still locked; when a
+	// receiver destroyed the emitter it instead unlocks and frees the state the destructor handed over.
 	struct emit_scope {
 		signal_emitter* self;
-		explicit emit_scope(signal_emitter* s) : self(s) { ++self->in_call_depth_; }
-		~emit_scope() { if (--self->in_call_depth_ == 0) self->drain_after_emit(); }
+		emit_state* state;
+#ifndef JAI_SIGNALS_NO_THREADSAFE
+		std::unique_lock<std::recursive_mutex> lock;
+		explicit emit_scope(signal_emitter* a_self) : self(a_self), state(a_self->state_.ptr.get()), lock(state->mutex) { ++state->depth; }
+#else
+		explicit emit_scope(signal_emitter* a_self) : self(a_self), state(a_self->state_.ptr.get()) { ++state->depth; }
+#endif
+		~emit_scope() {
+			if (--state->depth != 0) { return; }
+			if (!state->orphaned) {
+				self->drain_after_emit();
+				return;
+			}
+#ifndef JAI_SIGNALS_NO_THREADSAFE
+			lock.unlock();
+#endif
+			std::shared_ptr<emit_state> last = std::move(state->self);
+		}
+		bool emitter_alive() const { return !state->orphaned; }
 		emit_scope(const emit_scope&) = delete;
 		emit_scope& operator=(const emit_scope&) = delete;
 	};
 
+	// A one-shot fires once: marked before the call, so one that throws or re-emits has fired
+	bool fire_oneshot_once(const shared_receiver_type& a_receiver) {
+		if (!a_receiver->is_oneshot()) { return true; }
+		if (a_receiver->oneshot_fired_) { return false; }
+		a_receiver->oneshot_fired_ = true;
+		has_oneshots_pending_ = true;
+		return true;
+	}
+
 	template<bool ShortCircuit, typename... Args>
 	bool emit_impl(Args&&... args) {
-		JAI_SIGNAL_LOCK();
+		emit_scope scope(this);
 
 		if (blocked()) {
 			called_while_blocked_ = true;
@@ -490,29 +554,27 @@ private:
 			return true;
 		}
 
-		emit_scope guard(this);  // drains queue / one-shots / dead observers on the outermost
-		                         // unwind, even if a slot throws
 		bool result = true;
 
 		for (size_t i = 0; i < observers_.size(); ++i) {
 			auto locked = observers_[i].lock();
 			if (!locked) { has_dead_observers_ = true; continue; }
-
-			if (locked->is_oneshot()) {
-				has_oneshots_pending_ = true;   // before the call: a one-shot that throws has fired
-			}
+			if (!fire_oneshot_once(locked)) { continue; }
 
 			if constexpr (ShortCircuit) {
 				// Pass as LVALUES: forwarding rvalue args inside the loop would let the
 				// first receiver's by-value parameter move-consume them, handing every
 				// later receiver an empty shell (null shared_ptr, empty string, ...).
-				if (!locked->predicate(args...)) {
+				const bool keepGoing = locked->predicate(args...);
+				if (!scope.emitter_alive()) { return keepGoing; }
+				if (!keepGoing) {
 					result = false;
 					has_dead_observers_ = true;  // unscanned tail may hold dead observers
 					break;
 				}
 			} else {
 				locked->notify(args...);
+				if (!scope.emitter_alive()) { return result; }
 			}
 		}
 
@@ -521,7 +583,7 @@ private:
 
 	template<bool ShortCircuit>
 	bool emit_impl_noargs() {
-		JAI_SIGNAL_LOCK();
+		emit_scope scope(this);
 
 		if (blocked()) {
 			called_while_blocked_ = true;
@@ -531,26 +593,24 @@ private:
 			return true;
 		}
 
-		emit_scope guard(this);  // drains queue / one-shots / dead observers on the outermost
-		                         // unwind, even if a slot throws
 		bool result = true;
 
 		for (size_t i = 0; i < observers_.size(); ++i) {
 			auto locked = observers_[i].lock();
 			if (!locked) { has_dead_observers_ = true; continue; }
-
-			if (locked->is_oneshot()) {
-				has_oneshots_pending_ = true;
-			}
+			if (!fire_oneshot_once(locked)) { continue; }
 
 			if constexpr (ShortCircuit) {
-				if (!locked->predicate()) {
+				const bool keepGoing = locked->predicate();
+				if (!scope.emitter_alive()) { return keepGoing; }
+				if (!keepGoing) {
 					result = false;
 					has_dead_observers_ = true;  // unscanned tail may hold dead observers
 					break;
 				}
 			} else {
 				locked->notify();
+				if (!scope.emitter_alive()) { return result; }
 			}
 		}
 
@@ -577,15 +637,8 @@ private:
 	// unnamed script receivers a load rebuilt: nothing outside holds them, so the emitter does (signal_serialization.hpp)
 	std::vector<shared_receiver_type> loaded_observers_;
 
-	// Prevent shared_from_this issues - we use this for connected() tracking
-	std::shared_ptr<char> prevent_shared_ownership_;
+	emit_state_handle state_;
 
-	// Emit can run reentrantly (a slot may emit the same signal), so track call DEPTH, not a
-	// bool: the deferred post-emit cleanup runs only when the OUTERMOST emit unwinds. An RAII
-	// guard (emit_scope) owns the decrement, so a throwing slot can't leave the depth stuck —
-	// which would otherwise wedge the emitter (disconnects queue forever, dead receivers keep
-	// firing). has_oneshots_pending_ accumulates across the reentrant call stack.
-	int in_call_depth_ = 0;
 	bool has_oneshots_pending_ = false;
 	// Set when an emit pass sees an expired observer (or stops early on short-circuit, leaving an
 	// unscanned tail) — gates the post-emit cull so a steady-state emit over live observers skips
@@ -598,10 +651,6 @@ private:
 
 	std::shared_ptr<std::vector<std::string>> ordered_parameter_names_;
 	engine* script_engine_ = nullptr;
-
-#ifndef JAI_SIGNALS_NO_THREADSAFE
-	mutable std::recursive_mutex mutex_;
-#endif
 
 	template<typename U> friend class signal;
 

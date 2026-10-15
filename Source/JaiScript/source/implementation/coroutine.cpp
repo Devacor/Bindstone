@@ -48,11 +48,29 @@ JAI_NOINLINE checked_result<script_value> next_count_range_error() {
 
 checked_result<script_value> coroutine_handle::next(engine* eng, script_int a_count) {
     if (a_count < 1) { return next_count_range_error(); }
-    for (script_int step = 1; step < a_count; ++step) {
-        checked_result<script_value> stepResult = resume_once(eng);
-        if (!stepResult) { return stepResult; }
+    if (a_count == 1) { return resume_once(eng); }
+    execution_backend* backend = eng->get_execution_backend();
+    if (backend->is_executing() || backend->is_unwinding()) { return resume_steps(*backend, a_count); }
+    struct step_request { coroutine_handle* self; script_int count; } request{this, a_count};
+    return eng->checked_host_entry([](execution_backend& a_backend, void* a_request) {
+        auto* steps = static_cast<step_request*>(a_request);
+        return steps->self->resume_steps(a_backend, steps->count);
+    }, &request);
+}
+
+// The steps of one next(n) are one entry: the entry armed the deadline, no step re-arms it, and a step's throw ends them
+checked_result<script_value> coroutine_handle::resume_steps(execution_backend& a_backend, script_int a_count) {
+    struct entry_scope {
+        bool& continues;
+        bool saved;
+        ~entry_scope() { continues = saved; }
+    } scope{continues_host_entry_, continues_host_entry_};
+    continues_host_entry_ = true;
+    for (script_int step = 1;; ++step) {
+        if (done() || status_ == status::running) { return resume_refusal(); }
+        checked_result<script_value> result = a_backend.resume_coroutine(*this);
+        if (step == a_count || !result || a_backend.is_unwinding()) { return result; }
     }
-    return resume_once(eng);
 }
 
 checked_result<script_value> coroutine_handle::next_from_script(engine* eng, const script_value* a_args, size_t a_argCount) {
@@ -62,17 +80,19 @@ checked_result<script_value> coroutine_handle::next_from_script(engine* eng, con
     return next(eng, a_args[0].as_int());
 }
 
-checked_result<script_value> coroutine_handle::resume_once(engine* eng) {
+checked_result<script_value> coroutine_handle::resume_refusal() const {
     if (done()) {
         return checked_result<script_value>(
             make_error_code(runtime_error_code::evaluation_failed),
             "Cannot resume a completed coroutine");
     }
-    if (status_ == status::running) {
-        return checked_result<script_value>(
-            make_error_code(runtime_error_code::evaluation_failed),
-            "Coroutine is already running");
-    }
+    return checked_result<script_value>(
+        make_error_code(runtime_error_code::evaluation_failed),
+        "Coroutine is already running");
+}
+
+checked_result<script_value> coroutine_handle::resume_once(engine* eng) {
+    if (done() || status_ == status::running) { return resume_refusal(); }
 
     execution_backend* backend = eng->get_execution_backend();
     if (backend->is_executing() || backend->is_unwinding()) { return backend->resume_coroutine(*this); }

@@ -11,6 +11,7 @@ class engine;
 class environment;
 class interpreter;
 class function_decl;
+class execution_backend;
 
 // Backend-owned continuation state. Each backend stores its own representation
 // (interpreter: saved environment + AST continuation stack; VM: frames + ip).
@@ -31,6 +32,8 @@ public:
     checked_result<script_value> next_from_script(engine* eng, const script_value* a_args, size_t a_argCount);
     bool done() const { return status_ == status::completed || status_ == status::failed; }
     status get_status() const { return status_; }
+    // A later step of one host next(n): the backend keeps the entry's deadline instead of arming its own
+    bool continues_host_entry() const { return continues_host_entry_; }
 
     // Internal — called by the backend when creating from a coroutine function declaration
     void set_function(std::shared_ptr<function_decl> func,
@@ -61,9 +64,12 @@ private:
     friend class interpreter;
 
     checked_result<script_value> resume_once(engine* eng);
+    checked_result<script_value> resume_steps(execution_backend& a_backend, script_int a_count);
+    checked_result<script_value> resume_refusal() const;
 
     engine* engine_ = nullptr;
     status status_ = status::created;
+    bool continues_host_entry_ = false;
     script_value yield_value_;
 
     std::shared_ptr<function_decl> function_;

@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <chrono>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -1784,6 +1785,49 @@ public:
                        "1|2|3", "a class's own resume method is its method");
             check_executes(gen + "var h = g();", {"h.next();", "h.next(3);", "h.next(9);", "h.done();"},
                            "1|4|ERROR: Cannot resume a completed coroutine|true", "next(n) across executes");
+        });
+
+        // next(n) is one call: a throw in a step ends the steps with that throw, and from C++ the n steps run under one budget
+        test("next_count_is_one_call", [this, check_both]() {
+            check_both("coroutine int k() { yield 5; throw \"boom\"; yield 1; return 0; }\n"
+                       "auto h = k(); string e = \"\"; try { h.next(3); } catch (err) { e = to_string(err.value); } e + \"|\" + to_string(h.done())",
+                       "boom|true", "a later step's throw is what next(n) raises");
+            check_both("coroutine int k() { yield 1; int z = 0; yield 10 / z; return 0; }\n"
+                       "auto h = k(); string e = \"\"; try { h.next(2); } catch (err) { e = err; } e",
+                       "Division by zero", "a later step's run-time error is what next(n) raises");
+            for (bool use_vm : {false, true}) {
+                const std::string be = use_vm ? " (vm)" : " (interpreter)";
+                auto eng = engine::make();
+                eng->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
+                eng->execute("coroutine int forever() { while (true) { yield 1; } return 0; } var h = forever();");
+                auto handle = std::static_pointer_cast<coroutine_handle>(eng->execute("h").get_object_holder()->data);
+                eng->execution_budget(0.05);
+                const auto start = std::chrono::steady_clock::now();
+                auto steps = handle->next(eng.get(), static_cast<script_int>(4000000000LL));
+                const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+                check_true(!steps.has_value() && std::string(steps.message()).find("Script execution budget exceeded") != std::string::npos,
+                           "one host next(n) is one budgeted entry" + be);
+                check_true(seconds < 5.0, "it stops at the budget" + be);
+                eng->execution_budget(5.0);
+                eng->execute("var h2 = forever();");
+                auto fresh = std::static_pointer_cast<coroutine_handle>(eng->execute("h2").get_object_holder()->data);
+                auto again = fresh->next(eng.get(), 3);
+                check_true(again.has_value() && again.value().as_int() == 1, "the next host call arms its own deadline" + be);
+
+                eng->execute("coroutine int k() { yield 1; throw \"late\"; yield 2; } var t = k();");
+                auto thrower = std::static_pointer_cast<coroutine_handle>(eng->execute("t").get_object_holder()->data);
+                auto thrown = thrower->next(eng.get(), 3);
+                eng->execute("var t1 = k();");
+                auto single = std::static_pointer_cast<coroutine_handle>(eng->execute("t1").get_object_holder()->data);
+                (void)single->next(eng.get());
+                auto alone = single->next(eng.get());
+                check_true(!thrown.has_value() && !alone.has_value(), "a later step's uncaught throw is the host call's error" + be);
+                if (!thrown.has_value() && !alone.has_value()) {
+                    check_true(eng->format_error(thrown).find("late") != std::string::npos, eng->format_error(thrown) + be);
+                    check_eq(eng->format_error(alone), eng->format_error(thrown), "next(3) fails as the single next() that throws does" + be);
+                }
+                check_eq((int64_t)3, eng->execute("1 + 2").as_int(), "engine stays usable" + be);
+            }
         });
 
         test("method_coroutine_catch_var_across_yields", [this, check_executes, both_drained]() {

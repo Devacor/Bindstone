@@ -7229,7 +7229,7 @@ JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop
 JAI_FORCEINLINE void vm_backend::env_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k) {
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop::env_operand_ref& er = loop.env_operands[loop.cells[k].env_operand];
-	script_value* p = const_cast<script_value*>(fused_cmp_operand(f, er.operand, er.cache_slot));
+	script_value* p = const_cast<script_value*>(env_operand_value(f, er));
 	if (!p) return;   // the name resolves to nothing here: unreachable without a call, and a call flushes first
 	type_info* stamp = cs.stamp[k];
 	if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_INT)) {
@@ -7940,8 +7940,13 @@ bool vm_backend::cells_sites_reenter(frame& f, const chunk::cell_loop& loop) {
 }
 
 // an environment cell's value: the binding, or for an enum's member the enum map's entry (an int; anything else answers nothing)
-const script_value* vm_backend::env_operand_value(frame& f, const chunk::cell_loop::env_operand_ref& er) {
+const script_value* vm_backend::env_operand_value(frame& f, const chunk::cell_loop::env_operand_ref& er, const script_value** binding) {
 	const script_value* v = fused_cmp_operand(f, er.operand, er.cache_slot);
+	if (binding) { *binding = v; }
+	if (v && v->raw_storage_index() == script_value::TYPEID_REFERENCE) {
+		if (!ref_plain_cell(*v)) return nullptr;
+		v = &v->deref();   // a name bound to a plain cell (a lambda's view of a program global) holds the cell's value, read and written silently
+	}
 	if (er.member_node == k_invalid_u32 || !v) return v;
 	const script_value& base = v->deref();
 	if (base.raw_storage_index() != script_value::TYPEID_MAP || er.member_node >= f.code->nodes.size()) return nullptr;
@@ -8016,7 +8021,8 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 			const env_lookup_cache_entry* ce = armed_env_entry(f, er.cache_slot);
 			// the binding the general form resolved: a reference to a property or an element is never a cell (its getter or its error belongs to every read), read here without dereferencing it
 			if (ce && ce->fast_ptr && ce->fast_env == environment_.get() && ce->fast_serial == env_symbolizer_->env_epoch() && ce->fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*ce->fast_ptr)) { JAI_CELLS_COUNT(1); return false; }
-			const script_value* v = env_operand_value(f, er);
+			const script_value* binding = nullptr;
+			const script_value* v = env_operand_value(f, er, &binding);
 			const uint8_t vk = v ? static_cast<uint8_t>(v->raw_storage_index()) : 0;
 			if (!v || (vk != kint && vk != kflt && vk != kbool && vk != kstr) || (cl.kind != 0 && vk != cl.kind)) {
 				JAI_CELLS_COUNT(1);
@@ -8025,7 +8031,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 #endif
 				return false;
 			}
-			cs.env_ptr[k] = er.member_node == k_invalid_u32 && ce && ce->fast_ptr == v && ce->fast_env == cs.env_of && ce->fast_serial == cs.env_serial ? v : nullptr;   // the binding the lookup cache answered, re-read directly while the environment holds
+			cs.env_ptr[k] = er.member_node == k_invalid_u32 && ce && ce->fast_ptr == binding && ce->fast_env == cs.env_of && ce->fast_serial == cs.env_serial ? v : nullptr;   // the binding the lookup cache answered, re-read directly while the environment holds
 			cs.payload[k] = vk == kint ? static_cast<int64_t>(v->unchecked_as_int()) : vk == kflt ? cell_bits_of_float(v->unchecked_as_float()) : vk == kstr ? reinterpret_cast<int64_t>(v->unchecked_string_handle().get()) : (v->unchecked_as_bool() ? 1 : 0);   // a string: the node, borrowed
 			cs.kind[k] = vk; cs.stamp[k] = const_cast<type_info*>(v->type_info_raw());   // the landing rule for a write judges against the stamp read here
 			continue;

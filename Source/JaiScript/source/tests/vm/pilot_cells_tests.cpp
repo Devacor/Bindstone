@@ -2235,6 +2235,53 @@ function probe(int n, int at, int how) -> string {
 			check(listing.find("C_JCMP_ANY") == std::string::npos, "the classed compares on globals and the truth test are pinned: " + listing.substr(0, 6000));
 			check(listing.find("C_JTRUTH") != std::string::npos, "the truth test runs inline: " + listing.substr(0, 6000));
 		});
+		test("a_lambda_enters_its_block_over_a_program_global", [this]() {
+			// a lambda names a program global through a plain cell: the block reads the cell's value, writes it back through the cell at
+			// its flush and rereads it after a call, as a named function's block does with the global itself; both backends, proofs off
+			const char* defs = R"JAI(
+int G = 3;
+float F = 0.5;
+var bump = function(int i, int at) -> void { if (i == at) { G = G + 10; F = F * 2.0; } };
+var reads = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { if (i < G) { acc = acc + 1; } } return acc; };
+var writes = function(int n) { for (int i = 0; i < n; ++i) { G = G + i; F = F + 0.25; } return to_string(G) + " " + to_string(F); };
+var called = function(int n, int at) { int acc = 0; for (int i = 0; i < n; ++i) { bump(i, at); acc = acc + G; } return to_string(acc) + " " + to_string(F); };
+var retyped = function(int n, int at) { int acc = 0; for (int i = 0; i < n; ++i) { if (i == at) { host_retype(); } acc = acc + 1; if (G > 2) { acc = acc + 100; } } return to_string(acc) + " " + type_of(G); };
+function nreads(int n) -> int { int acc = 0; for (int i = 0; i < n; ++i) { if (i < G) { acc = acc + 1; } } return acc; }
+function nwrites(int n) -> string { for (int i = 0; i < n; ++i) { G = G + i; F = F + 0.25; } return to_string(G) + " " + to_string(F); }
+)JAI";
+			auto run_with = [&](bool vm, const std::string& call, bool proofs, unsigned long long* entries) -> std::string {
+				auto e = engine::make();
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
+				if (!proofs) { e->type_proofs(false); }
+				engine* raw = e.get();
+				e->add_function("host_retype", [raw]() { raw->add_global("G", script_value(script_float{7.5}, raw)); });
+				std::string out;
+				try { out = e->execute(std::string(defs) + " " + call).as_string(); }
+				catch (const std::exception& ex) { out = std::string("throw:") + ex.what(); }
+				if (entries) { *entries = e->cells_counters().entries; }
+				return out;
+			};
+			struct probe { const char* call; const char* expected; const char* twin; };
+			const probe probes[] = {
+				{ "to_string(reads(8));", "3", "to_string(nreads(8));" }, { "writes(5);", "13 1.75", "nwrites(5);" }, { "called(4, 1);", "", nullptr },
+				{ "called(4, 9);", "", nullptr }, { "retyped(6, 2);", "", nullptr },
+			};
+			for (const probe& p : probes) {
+				for (bool proofs : { true, false }) {
+					unsigned long long entries = 0;
+					const std::string interp = run_with(false, p.call, proofs, nullptr), vm = run_with(true, p.call, proofs, &entries);
+					check_eq(interp, vm, std::string(p.call) + (proofs ? "" : " proofs off") + ": both backends");
+					if (p.expected[0] != 0) { check_eq(std::string(p.expected), vm, std::string(p.call) + ": the value"); }
+					if (proofs) { check(entries > 0, std::string(p.call) + ": the lambda's loop enters its block"); }
+					if (p.twin) {
+						unsigned long long twin_entries = 0;
+						check_eq(vm, run_with(true, p.twin, proofs, &twin_entries), std::string(p.twin) + (proofs ? "" : " proofs off") + ": the named twin's value");
+						check_eq(twin_entries, entries, std::string(p.call) + (proofs ? "" : " proofs off") + ": the lambda enters as often as its named twin");
+					}
+				}
+			}
+		});
 		test("call_arguments_and_the_callee_keep_their_source_order_across_a_getter", [this]() {
 			// Regression, with a callee-getter variant: `take(V, G + 1)` where V is a global reference to a native
 			// property whose getter steps G, the same through a local reference slot, and `F(G + 1)` where F is a reference to a

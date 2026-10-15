@@ -1252,6 +1252,12 @@ script_value script_value::make_function(script_function&& func, engine* eng) {
     return v;
 }
 
+namespace {
+    [[noreturn]] JAI_NOINLINE void throw_copy_too_deep() {
+        throw runtime_error("Cannot copy: the value nests too deep for the host thread's stack");
+    }
+}
+
 #ifdef JAISCRIPT_VM_COVERAGE
 namespace {
     // the raw indexes whose copy touches a refcount
@@ -1390,6 +1396,12 @@ script_value script_value::clone() const {
 
     script_value result(std::monostate{}, engine_);  // Preserve engine pointer!
     result.type_info_ = type_info_;
+
+    // A container's deep copy recurses natively per nesting level: a deep enough value raises before the stack runs out
+    const size_t kind = raw_storage_index();
+    if ((kind == TYPEID_ARRAY || kind == TYPEID_MAP || kind == TYPEID_OBJECT) && detail::native_stack_low()) [[unlikely]] {
+        throw_copy_too_deep();
+    }
 
     // Use current_type() to check what's actually stored, not the declared type
     switch (current_type()) {

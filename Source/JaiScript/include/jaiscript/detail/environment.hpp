@@ -72,9 +72,8 @@ namespace jai {
             bump_env_epoch();
         }
 
-        ~environment() {
-            while (!local_storage_.empty()) { local_storage_.pop_back(); }   // reverse declaration order (C++), as clear_values
-        }
+        // reverse declaration order (C++), as clear_values; past the engine's release depth the values die on its release machine
+        ~environment();
 
         // Reference tracking for proper reference parameter support
         struct ref_info {
@@ -323,6 +322,8 @@ namespace jai {
         void bump_env_epoch() noexcept;
 
     private:
+        static environment* sole_closure_env(const script_value& a_value) noexcept;
+
         // === Lazy-Cached Flat Lookup ===
         // Stable storage for THIS scope's values - deque doesn't invalidate pointers on push_back
         std::deque<script_value> local_storage_;

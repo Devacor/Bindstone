@@ -68,6 +68,44 @@ checked_result<slot_conversion> convert_typed_slot_script_rows(slot_conversion p
 
 } // namespace detail
 
+// The environment a dying function value alone keeps alive: a lambda's captures (and its unique enclosing scopes)
+environment* environment::sole_closure_env(const script_value& a_value) noexcept {
+    if (a_value.raw_storage_index() != script_value::TYPEID_FUNCTION || !a_value.release_cascades()) { return nullptr; }
+    const auto* thunk = a_value.unchecked_as_function().target<script_callable_thunk>();
+    if (!thunk || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn || thunk->payload.fn.use_count() != 1) {
+        return nullptr;
+    }
+    const auto& env = thunk->payload.fn->closure_env;
+    return env && env.use_count() == 1 ? env.get() : nullptr;
+}
+
+// A closure's captures live in its environment, so a chain of closures each capturing the last nests one environment per
+// link: the values of an environment only a dying function holds die here, on a work list, instead of inside its destructor
+environment::~environment() {
+    std::vector<script_value> work;
+    std::vector<std::shared_ptr<environment>> emptied;
+    while (!local_storage_.empty()) {
+        if (!sole_closure_env(local_storage_.back())) {
+            local_storage_.pop_back();
+            continue;
+        }
+        work.push_back(std::move(local_storage_.back()));
+        local_storage_.pop_back();
+        while (!work.empty()) {
+            script_value dying = std::move(work.back());
+            work.pop_back();
+            for (environment* env = sole_closure_env(dying); env;) {
+                for (auto& value : env->local_storage_) { work.push_back(std::move(value)); }
+                env->local_storage_.clear();
+                if (!env->parent_ || env->parent_.use_count() != 1) { break; }
+                emptied.push_back(std::move(env->parent_));
+                env = emptied.back().get();
+            }
+        }
+        while (!emptied.empty()) { emptied.pop_back(); }
+    }
+}
+
 void environment::define(const std::string& name, const script_value& value) {
     JAI_CENSUS(env_get_name);
     uint64_t id = symbolizer_->intern(name);

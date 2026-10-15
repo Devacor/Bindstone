@@ -1086,7 +1086,7 @@ public:
         // a Foo (both backends; new desugars to the same shared_ptr<T>(args) node).
         // The key now includes the pointee. Matrix pinned below; the sibling caches
         // were audited clean: class_definition::overload_resolution_cache_ is a
-        // per-class member (class identity inherent) and the flat-stack stage-1
+        // per-class member (class identity inherent) and the call-site
         // callee IC pins script_function identity per call_site.
 
         test("shared_ptr_construction_distinguishes_classes", [this]() {

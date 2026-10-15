@@ -407,7 +407,7 @@ body-locals.
 ## 12. Sequencing sketch
 
 1. **`jai::thread_pool` lands** (DONE — `detail/thread_pool.hpp`, §7) with pinned-worker mode + foundry coverage.
-1.5. **`parallel_transform` v0 lands** (DONE — the prove_or_serial §5 "step 3.5" tier:
+1.5. **`parallel_transform` v0 lands** (DONE — the builtin ahead of the statement:
    value-semantic elements, fail-closed admission walk, per-worker execution contexts
    built at the call and torn down at the join, static chunks + optional weight hint,
    iteration-order error selection, per-worker budget/cap rails, 1-vs-N determinism +

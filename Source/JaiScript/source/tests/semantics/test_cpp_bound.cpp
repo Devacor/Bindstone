@@ -120,8 +120,7 @@ public:
             check_eq(result.template as<bool>(), false, "Comparison with bound values");
         });
 
-        // ---- Stage-0 pin tests (thin_value spec section 6): current cpp_bound semantics
-        // ---- that must survive the 56->32 byte script_value fold, green on HEAD.
+        // ---- cpp_bound semantics: reads, stores, operators, truthiness and identity of bound values
 
         // char is integral, so make_cpp_bound's integral branch wins: a bound char is a
         // width-1 bound INT today (reads as its code point) — pinned as-is.
@@ -266,7 +265,7 @@ public:
             check_false(eng->execute("sa.same_as(8)").as_bool(), "bound same_as unequal int");
         });
 
-        // thin_value spec §12.5: compound on a bound value stored AS an element/member/field
+        // A compound on a bound value stored AS an element/member/field
         // decode-reads the LIVE C++ value, then detach-and-replaces the slot (C++ untouched).
         // All-detach: write-through
         // belongs to the registered NAME (and refs/captures/by-ref params bound to it),
@@ -388,13 +387,13 @@ public:
                 check_eq((int64_t)1, eng->execute("var r3 = 1; if (bfz) { r3 = 2; } r3").as_int(), tag + "0.0 bound float falsy in if");
                 check_true(eng->execute("!bfz").as_bool(), tag + "!zero-bound-float");
                 check_eq((int64_t)2, eng->execute("var r4 = 1; if (bfn) { r4 = 2; } r4").as_int(), tag + "nonzero bound float truthy in if");
-                // thin_value spec §13: opaque bound objects are TRUTHY while the host
+                // Opaque bound objects are TRUTHY while the host
                 // pointer is live (they ARE objects to script).
                 check_eq((int64_t)2, eng->execute("var r5 = 1; if (bop) { r5 = 2; } r5").as_int(), tag + "opaque bound truthy in if");
                 check_false(eng->execute("!bop").as_bool(), tag + "!opaque-bound");
                 check_eq((int64_t)3, eng->execute("var steps = 0; while (bn) { steps = steps + 1; bn = bn - 1; } steps").as_int(), tag + "while on bound int");
                 check_eq((int64_t)0, bn, tag + "loop decrement wrote through");
-                check_eq((int64_t)2, eng->execute("var r7 = 1; while (bop) { r7 = 2; break; } r7").as_int(), tag + "while on opaque bound enters (truthy, §13)");
+                check_eq((int64_t)2, eng->execute("var r7 = 1; while (bop) { r7 = 2; break; } r7").as_int(), tag + "while on opaque bound enters (truthy)");
             };
             runMatrix(false);
             runMatrix(true);
@@ -419,8 +418,7 @@ public:
             check_true(eng->execute("function rc12(int& t) { return t >= 100; } rc12(bg)").as_bool(), "comparison through by-ref param");
         });
 
-        // ---- T2 (rung 1, thin_value spec section 13): write-through/live-read
-        // ---- semantics for bound values (section 12 deltas), both backends.
+        // ---- Write-through and live-read semantics for bound values, both backends
 
         test("t2_compound_writethrough_matrix", [this]() {
             auto runMatrix = [this](bool useVm) {
@@ -729,8 +727,8 @@ public:
         });
 
         test("t2_static_gate_sizeof", [this]() {
-            static_assert(sizeof(jai::script_value) == 32 && alignof(jai::script_value) == 8, "rung-2b gate");
-            check_eq((size_t)32, sizeof(jai::script_value), "script_value is 32 bytes after rung 2b");
+            static_assert(sizeof(jai::script_value) == 32 && alignof(jai::script_value) == 8, "script_value layout gate");
+            check_eq((size_t)32, sizeof(jai::script_value), "script_value is 32 bytes");
         });
 
         test("pin_unregistered_class_bound", [this]() {
@@ -739,7 +737,7 @@ public:
             probe.v = 5;
             auto val = eng->make_value(&probe);
             check_true(val.is_cpp_bound(), "make_value(T*) on unregistered type is bound");
-            // thin_value spec §13: opaque bound objects are NON-null while the pointer
+            // Opaque bound objects are NON-null while the pointer
             // is live; a null host pointer stays null.
             check_false(val.is_null(), "opaque bound is non-null");
             auto& extracted = val.template as<t1_opaque_probe&>();

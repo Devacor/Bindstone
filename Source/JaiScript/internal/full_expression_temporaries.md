@@ -1,10 +1,12 @@
 # Temporaries die at the end of their full-expression
 
+Not built: the table's last column is what both backends do.
+
 C++ ([class.temporary]/4): a temporary is destroyed as the last step of evaluating the full-expression that created it,
 in reverse order of construction. JaiScript destroys a temporary when its last reference drops, which for a temporary
 read only for a member is right after the read:
 
-| program | C++ | today (both backends) |
+| program | C++ | JaiScript (both backends) |
 |---|---|---|
 | `string s = Token("t").name + mark();` | `mt` | `tm` |
 | `use(Token("a").name);` | `ua` (after the call) | `au` |

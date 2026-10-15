@@ -1428,7 +1428,7 @@ bool vm_backend::is_truthy(const script_value& value) {
 			if (value.is_float()) return value.unchecked_as_float() != 0.0;
 			if (value.is_string()) return !value.unchecked_as_string().empty();
 			if (value.is_char()) return true;
-			// Opaque bound: truthy while the host pointer is live (§13)
+			// Opaque bound: truthy while the host pointer is live
 			return value.get_cpp_bound_ptr() != nullptr;
 		case script_value::TYPEID_REFERENCE:
 			// References are transparent to truthiness like every other consumer
@@ -3753,7 +3753,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 			return {};
 		}
 
-		// §12.1 write-through: compound on a bound VARIABLE reads the live value, computes,
+		// Write-through: compound on a bound VARIABLE reads the live value, computes,
 		// and stores back through assign_through (was a silent dead-shadow no-op).
 		// KEEP BYTE-PARALLEL with the interpreter identifier-compound bound branch.
 		if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
@@ -4046,7 +4046,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 		}
 	}
 
-	// S8: bound-alias class fields decode-read LIVE; set_field stores the detached result (§12.5).
+	// S8: bound-alias class fields decode-read LIVE; set_field stores the detached result.
 	// KEEP BYTE-PARALLEL with the interpreter implicit-this compound normalization.
 	if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		currentValue = currentValue.bound_decoded_temp();
@@ -4168,7 +4168,7 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 			stack_.push_back(std::move(stepped.value()));
 			return {};
 		}
-		// §12.1 write-through: ++/-- on a bound VARIABLE decodes the live value and stores
+		// Write-through: ++/-- on a bound VARIABLE decodes the live value and stores
 		// back through assign_through (the type() switch below would mutate a dead shadow).
 		// KEEP BYTE-PARALLEL with the interpreter ++/-- bound branch.
 		if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
@@ -4252,7 +4252,7 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 			} else {
 				currentVal = instance->get_field(sym);
 			}
-			// S8: a bound-alias field decodes live; set_field stores the detached result (§12.5)
+			// S8: a bound-alias field decodes live; set_field stores the detached result
 			if (currentVal.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 				currentVal = currentVal.bound_decoded_temp();
 			const size_t ti = currentVal.raw_storage_index();
@@ -4311,7 +4311,7 @@ op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 
 	// `!` consults truthiness BEFORE the S8 decode: is_truthy handles bound values in
 	// full, and decoding an OPAQUE bound to null would lie about its truthiness
-	// (§13). Identical result for bound primitives. Byte-parallel with the interpreter.
+	// (an opaque bound is truthy while its pointer is live). Identical result for bound primitives. Byte-parallel with the interpreter.
 	if (static_cast<token_type>(ins.a) == token_type::bang) {
 		stack_.push_back(script_value(!is_truthy(operand), engine_));
 		return {};
@@ -6214,7 +6214,7 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 		}
 		resultValue = std::move(result.value());
 	} else {
-		// S8 (NEW-C): a bound rhs decodes before the zero pre-checks so /= and %= keep
+		// S8: a bound rhs decodes before the zero pre-checks so /= and %= keep
 		// today's error codes/texts (byte-parallel with the interpreter compound path)
 		if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 			rightValue = rightValue.bound_decoded_temp();
@@ -15457,7 +15457,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 	}
 
 	// S8: a bound-alias member decode-reads LIVE and assign_member stores the detached
-	// result (§12.5). KEEP BYTE-PARALLEL with the interpreter member-compound normalization.
+	// result. KEEP BYTE-PARALLEL with the interpreter member-compound normalization.
 	if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		currentValue = currentValue.bound_decoded_temp();
 	if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]

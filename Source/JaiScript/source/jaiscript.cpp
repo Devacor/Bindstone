@@ -14,6 +14,7 @@
 #include "implementation/runtime_errors.cpp"
 #include "implementation/conversion_registry.cpp"
 #include "implementation/class_registry.cpp"
+#include "implementation/construction.cpp"
 #include "implementation/parse_errors.cpp"
 #include "implementation/interpreter_dispatch.cpp"
 #include "implementation/type_checker.cpp"

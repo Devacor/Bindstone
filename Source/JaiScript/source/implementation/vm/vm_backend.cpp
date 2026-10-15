@@ -53,6 +53,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/typed_slot.hpp>   // the one typed-slot conversion table (interp parity)
 #include <jaiscript/detail/range_for_diagnostic.hpp>   // range-for texts (interp parity)
 #include <jaiscript/detail/arg_capture.hpp>   // call arguments take their value when evaluated (interp parity)
+#include <jaiscript/detail/construction.hpp>
 #include <jaiscript/detail/function_overloads.hpp>
 #ifdef JAISCRIPT_VM_PROFILE
 #include <intrin.h>   // __rdtsc (diagnostic builds only; keep out of headers)
@@ -253,12 +254,6 @@ namespace {
 	void pop_back_detached(V& v) {
 		auto doomed = std::move(v.back());
 		v.pop_back();
-	}
-
-	// a constructor that completed arms its instance's destructor (KEEP BYTE-PARALLEL with interpreter::construct_instance)
-	void construction_completed(const script_value& instance_value) {
-		const auto holder = instance_value.get_object_holder();
-		if (holder && holder->is_class_instance_wrapper && holder->data) { static_cast<class_instance*>(holder->data.get())->construction_pending(false); }
 	}
 
 } // namespace
@@ -17219,25 +17214,6 @@ checked_result<void> vm_backend::evaluate_field_initializers(std::shared_ptr<cla
 	return {};
 }
 
-// Literal-only twin of evaluate_field_initializers for chains chain_initializers_all_literal
-// proved: same order (parents first, then own), same set_field stamps, no env, no eval
-void vm_backend::stamp_literal_field_initializers(const std::shared_ptr<class_instance>& instance,
-                                                  const std::shared_ptr<script_class_definition>& class_def,
-                                                  bool skip_parent_recursion) {
-	if (!skip_parent_recursion) {
-		for (const auto& parent : class_def->get_parent_classes()) {
-			if (parent && parent->is_script_class()) {
-				stamp_literal_field_initializers(instance, std::static_pointer_cast<script_class_definition>(parent), false);
-			}
-		}
-	}
-	for (const auto& [field_id, initializer_ast] : class_def->get_field_initializer_asts()) {
-		if (initializer_ast) {
-			instance->set_field(field_id, materialize_constant(static_cast<const literal_expr*>(initializer_ast.get())->value));
-		}
-	}
-}
-
 void vm_backend::apply_field_initializers(const std::shared_ptr<class_instance>& instance,
                                           const std::shared_ptr<class_definition>& class_def) {
 	auto script_def = std::dynamic_pointer_cast<script_class_definition>(class_def);
@@ -17250,326 +17226,39 @@ void vm_backend::apply_field_initializers(const std::shared_ptr<class_instance>&
 	if (!initialized) { throw runtime_error(format_error(initialized, *symbolizer_)); }
 }
 
-// Sections 0-3 of construction (overload resolve, instance + init_env + param binds,
-// initializer chains, field inits): everything BEFORE the ctor body runs, shared by
-// the native path and the in-loop ctor-body entry. Success value = the new instance
-// ('this'); the picked overload rides the out-param. Extracted verbatim from
-// construct_instance - every error spelling unchanged.
-checked_result<script_value> vm_backend::initialize_members(const std::shared_ptr<script_class_definition>& class_def,
-                                                            const std::shared_ptr<environment>& definition_env,
-                                                            const std::shared_ptr<class_instance>& instance,
-                                                            const script_value& this_value,
-                                                            const std::shared_ptr<function_decl>& matching_ctor,
-                                                            const std::vector<script_value>& args,
-                                                            std::optional<detail::call_depth_guard>& initializer_depth,
-                                                            size_t delegation_depth,
-                                                            std::vector<script_value>* captured_out) {
-	if (delegation_depth > detail::k_max_constructor_delegation_depth) {
-		return detail::raise_call_depth();   // a delegation cycle (ill-formed in C++) raises instead of recursing without end
-	}
-	if (detail::native_stack_low()) {
-		return detail::raise_native_stack();
-	}
-	// (binding evaluates trailing defaults for omitted args; omitted params are simply
-	// absent here, like C++ field-inits that can't see ctor params)
-	if (!arity_accepts(matching_ctor->parameters, args.size())) {
-		return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-			"Constructor parameter count mismatch");
-	}
-	// The init env serves initializer-list arguments and non-literal field
-	// initializers; a literal-only chain with no initializer list never reads it
-	std::shared_ptr<environment> init_env;
-	const auto& initializers = class_def->effective_initializers(*matching_ctor);
-	if (!initializers.empty() || !class_def->chain_initializers_all_literal()) {
-		init_env = std::make_shared<environment>(definition_env, symbolizer_);
-		init_env->define(symbolizer_->get_this_id(), this_value);
-		init_env->set_access_context(class_def.get());   // field initializers are class-body code
-	}
-	// the construction runs code ahead of the body: the call's arguments are taken first, as the body's parameters (KEEP
-	// BYTE-PARALLEL with interpreter::initialize_members); a delegated-to constructor's arguments were taken as they evaluated
-	const std::vector<script_value>* argv = &args;
-	if (captured_out && init_env && detail::later_capture_candidate(0, args.size(), [&](size_t j) -> const script_value& { return args[j]; })) {
-		*captured_out = args;
-		for (size_t j = 0; j < captured_out->size(); ++j) {
-			detail::capture_argument((*captured_out)[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(matching_ctor->parameters, j));
-		}
-		argv = captured_out;
-	}
-	for (size_t i = 0; i < matching_ctor->parameters.size() && i < argv->size(); ++i) {
-		const auto& param = matching_ctor->parameters[i];
-		if (param.symbol_id == UINT64_MAX) { param.symbol_id = symbolizer_->intern(param.name); }
-		if (init_env) { init_env->define(param.symbol_id, detail::argument_for_binding((*argv)[i], detail::parameter_binding(param))); }
+struct vm_backend::construction_lender final : detail::construction_host {
+	vm_backend& self;
+	const frame* caller;
+
+	explicit construction_lender(vm_backend& a_self, const frame* a_caller = nullptr) :
+		detail::construction_host(a_self.engine_, a_self.symbolizer_, a_self.current_call_depth_, a_self.limits_->vm_depth_gate, a_self.is_unwinding_),
+		self(a_self),
+		caller(a_caller) {
 	}
 
-	bool handled_parent_init = false;
-	// C++ delegating-ctor semantics: the target ctor constructs the members; the
-	// delegating ctor must not re-run field initializers afterward
-	bool delegated_to_this = false;
-
-	for (const auto& initializer : initializers) {
-		if (initializer.target == "super") {
-			if (class_def->get_parent()) {
-				std::vector<script_value> init_args;
-				init_args.reserve(initializer.arguments.size());
-
-				for (const auto& arg_expr : initializer.arguments) {
-					auto result = eval_expression(arg_expr, init_env);
-					if (!result) {
-						if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
-							return result.error_value();
-						}
-						return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
-							"Failed to evaluate constructor initializer argument");
-					}
-					init_args.push_back(std::move(result.value()));
-					detail::capture_initializer_argument(initializer, init_args.size() - 1, !class_def->chain_initializers_all_literal(), init_args.back(),
-					                                     [&] { return detail::constructor_binding(class_def->get_parent().get(), init_args.size() - 1); });
-				}
-
-				auto parent_class = class_def->get_parent();
-				if (parent_class) {
-					auto parent_script_class = std::dynamic_pointer_cast<script_class_definition>(parent_class);
-					if (parent_script_class) {
-						// fewest defaults used wins
-						const auto& parent_ctor_asts = parent_script_class->get_constructor_asts();
-						auto parent_ctor_pick = select_declaration(parent_ctor_asts, init_args, parent_script_class->get_type_id(), engine_);   // typed exact > conversion > var, a tie raises, else the sole arity match
-						if (!parent_ctor_pick) { return parent_ctor_pick.error_value(); }
-						std::shared_ptr<function_decl> parent_ctor = std::move(parent_ctor_pick.value());
-						if (!parent_ctor && parent_ctor_asts.empty() && init_args.empty() && parent_script_class->base_needs_construction()) {
-							parent_ctor = parent_script_class->implicit_default_constructor();   // KEEP BYTE-PARALLEL with the interpreter
-						}
-
-						if (parent_ctor) {
-							struct ctor_chain_entry {
-								std::shared_ptr<script_class_definition> script_class;
-								std::shared_ptr<function_decl> ctor;
-								std::vector<script_value> args;
-							};
-
-							std::vector<ctor_chain_entry> ctor_chain;
-							ctor_chain.push_back({parent_script_class, parent_ctor, init_args});
-
-							size_t chain_idx = 0;
-							while (chain_idx < ctor_chain.size()) {
-								auto& entry = ctor_chain[chain_idx];
-
-								auto level_env = std::make_shared<environment>(definition_env, symbolizer_);
-								level_env->define("this", this_value);
-								level_env->set_access_context(entry.script_class.get());
-								for (size_t pi = 0; pi < entry.ctor->parameters.size() && pi < entry.args.size(); ++pi) {
-									level_env->define(std::string(entry.ctor->parameters[pi].name), entry.args[pi]);
-								}
-
-								for (const auto& init : entry.script_class->effective_initializers(*entry.ctor)) {
-									if (init.target == "super") {
-										auto ancestor = entry.script_class->get_parent();
-										if (ancestor) {
-											std::vector<script_value> ancestor_args;
-											for (const auto& arg_expr : init.arguments) {
-												auto r = eval_expression(arg_expr, level_env);
-												if (!r) {
-													if (r.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
-														return r.error_value();
-													}
-													return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
-														"Failed to evaluate super() argument");
-												}
-												ancestor_args.push_back(std::move(r.value()));
-												detail::capture_initializer_argument(init, ancestor_args.size() - 1, !class_def->chain_initializers_all_literal(), ancestor_args.back(),
-												                                     [&] { return detail::constructor_binding(ancestor.get(), ancestor_args.size() - 1); });
-											}
-
-											auto ancestor_script = std::dynamic_pointer_cast<script_class_definition>(ancestor);
-											if (ancestor_script) {
-												// fewest defaults used wins
-												const auto& ancestor_ctors = ancestor_script->get_constructor_asts();
-												auto ancestor_ctor_pick = select_declaration(ancestor_ctors, ancestor_args, ancestor_script->get_type_id(), engine_);   // typed exact > conversion > var, a tie raises, else the sole arity match
-												if (!ancestor_ctor_pick) { return ancestor_ctor_pick.error_value(); }
-												std::shared_ptr<function_decl> ancestor_ctor = std::move(ancestor_ctor_pick.value());
-												if (!ancestor_ctor && ancestor_ctors.empty() && ancestor_args.empty() && ancestor_script->base_needs_construction()) {
-													ancestor_ctor = ancestor_script->implicit_default_constructor();
-												}
-												if (ancestor_ctor) {
-													ctor_chain.push_back({ancestor_script, ancestor_ctor, std::move(ancestor_args)});
-												} else if (!ancestor_ctors.empty()) {
-													if (ancestor_args.empty()) { return detail::no_default_constructor(ancestor_script->get_type_id()); }
-													return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
-														ancestor_script->get_type_id(), ancestor_args.data(), ancestor_args.size(), engine_, true);
-												}
-											} else {
-												const std::string& cpp_name = ancestor->get_name();
-												auto cpp_ctor_result = environment_->get(cpp_name);
-												if (ancestor_args.empty() && (!cpp_ctor_result || !cpp_ctor_result.value().is_function() || detail::host_lacks_default_constructor(engine_, cpp_name))) {
-													return detail::no_default_constructor(ancestor->get_type_id());
-												}
-												if (cpp_ctor_result && cpp_ctor_result.value().is_function()) {
-													auto cpp_result = cpp_ctor_result.value().as_function()(ancestor_args);
-													if (!cpp_result) {
-														if (ancestor_args.empty() && detail::is_constructor_miss(cpp_result.error())) {
-															return detail::no_default_constructor(ancestor->get_type_id());
-														}
-														return checked_result<script_value>(make_error_code(runtime_error_code::constructor_failed),
-															"Failed to call C++ ancestor constructor");
-													}
-													script_value cpp_obj = std::move(cpp_result.value());
-
-													if (cpp_obj.is_object()) {
-														auto cpp_instance = cpp_obj.as<std::shared_ptr<class_instance>>();
-														if (cpp_instance) {
-															if (const script_value* native = cpp_instance->native()) {
-																instance->set_native(*native);
-															}
-														}
-													}
-												}
-											}
-										}
-										break;
-									}
-								}
-								chain_idx++;
-							}
-
-							// Field initializers then ctor bodies, root to leaf
-							for (auto it = ctor_chain.rbegin(); it != ctor_chain.rend(); ++it) {
-								auto level_init_env = std::make_shared<environment>(definition_env, symbolizer_);
-								level_init_env->define("this", this_value);
-								level_init_env->set_access_context(it->script_class.get());
-								for (size_t pi = 0; pi < it->ctor->parameters.size() && pi < it->args.size(); ++pi) {
-									level_init_env->define(std::string(it->ctor->parameters[pi].name), it->args[pi]);
-								}
-
-								const auto& field_initializers = it->script_class->get_field_initializer_asts();
-								for (const auto& [field_id, initializer_ast] : field_initializers) {
-									if (initializer_ast) {
-										auto r = eval_expression(initializer_ast, level_init_env);
-										if (r) {
-											instance->set_field(field_id, initializer_store_value(std::move(r.value()), initializer_ast.get()));
-										} else if (r.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
-											return r.error_value();
-										}
-									}
-								}
-
-								auto method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
-								method_env->set_access_context(it->script_class.get());
-								method_env->define("this", this_value);
-								initializer_depth.reset();
-								auto ctor_result = execute_method_ast(it->ctor, method_env, it->args);
-								if (!ctor_result) return ctor_result.error_value();
-								initializer_depth.emplace(current_call_depth_);
-							}
-							handled_parent_init = true;
-						} else if (parent_ctor_asts.empty() && init_args.empty()) {
-							// Parent only has the default constructor - nothing to do
-						} else if (!parent_ctor_asts.empty() && !init_args.empty()) {   // KEEP BYTE-PARALLEL with the interpreter
-							return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
-								parent_script_class->get_type_id(), init_args.data(), init_args.size(), engine_, true);
-						} else {
-							if (init_args.empty()) { return detail::no_default_constructor(parent_script_class->get_type_id()); }
-							return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
-								"No matching parent constructor found for super()");
-						}
-					} else {
-						try {
-							const std::string& parent_name = parent_class->get_name();
-							auto ctor_result = environment_->get(parent_name);
-							if (init_args.empty() && (!ctor_result || !ctor_result.value().is_function() || detail::host_lacks_default_constructor(engine_, parent_name))) {
-								return detail::no_default_constructor(parent_class->get_type_id());
-							}
-							if (ctor_result && ctor_result.value().is_function()) {
-								script_value cpp_ctor = std::move(ctor_result.value());
-								auto result = cpp_ctor.as_function()(init_args);
-								if (!result) {
-									if (init_args.empty() && detail::is_constructor_miss(result.error())) {
-										return detail::no_default_constructor(parent_class->get_type_id());
-									}
-									return result.error_value();
-								}
-								script_value cpp_obj = std::move(result.value());
-
-								if (cpp_obj.is_object()) {
-									auto cpp_instance = cpp_obj.as<std::shared_ptr<class_instance>>();
-									if (cpp_instance) {
-										if (const script_value* native = cpp_instance->native()) {
-											instance->set_native(*native);
-										}
-									}
-								}
-							}
-						} catch (const runtime_error&) {
-							return checked_result<script_value>(make_error_code(runtime_error_code::constructor_failed),
-								"Failed to call C++ parent constructor");
-						}
-					}
-				}
-			} else {
-				return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
-					"Cannot call super() - class has no base class");
-			}
-		} else if (initializer.target == "this") {
-			std::vector<script_value> init_args;
-			init_args.reserve(initializer.arguments.size());
-
-			for (const auto& arg_expr : initializer.arguments) {
-				auto result = eval_expression(arg_expr, init_env);
-				if (!result) {
-					if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
-						return result.error_value();
-					}
-					return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed),
-						"Failed to evaluate constructor initializer argument");
-				}
-				init_args.push_back(std::move(result.value()));
-				detail::capture_initializer_argument(initializer, init_args.size() - 1, !class_def->chain_initializers_all_literal(), init_args.back(),
-				                                     [&] { return detail::constructor_binding(class_def.get(), init_args.size() - 1); });
-			}
-
-			// fewest defaults used wins
-			const auto& all_ctor_asts = class_def->get_constructor_asts();
-			// the delegation target through the one scorer (typed exact > conversion > var), else the sole arity match
-			std::vector<std::shared_ptr<function_decl>> other_ctors;
-			for (const auto& ctor_ast : all_ctor_asts) { if (ctor_ast != matching_ctor) { other_ctors.push_back(ctor_ast); } }
-			auto target_ctor_pick = select_declaration(other_ctors, init_args, class_def->get_type_id(), engine_);   // typed exact > conversion > var, a tie raises, else the sole arity match
-			if (!target_ctor_pick) { return target_ctor_pick.error_value(); }
-			std::shared_ptr<function_decl> target_ctor = std::move(target_ctor_pick.value());
-
-			if (!target_ctor) {
-				return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
-					class_def->get_type_id(), init_args.data(), init_args.size(), engine_, true);
-			}
-
-			// C++ delegation: the target constructor runs whole - its own initializer list (a base constructor or a further
-			// delegation), the members, then its body; the delegating constructor re-runs no field initializer afterward
-			auto target_members = initialize_members(class_def, definition_env, instance, this_value, target_ctor, init_args,
-			                                         initializer_depth, delegation_depth + 1, nullptr);   // init_args were taken as they evaluated
-			if (!target_members) { return target_members; }
-			delegated_to_this = true;
-
-			auto target_method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
-			target_method_env->set_access_context(class_def.get());
-			target_method_env->define("this", this_value);
-
-			initializer_depth.reset();
-			auto target_result = execute_method_ast(target_ctor, target_method_env, init_args);
-			if (!target_result) return target_result.error_value();
-			initializer_depth.emplace(current_call_depth_);
-		}
+	checked_result<script_value> evaluate(const expression_ptr& expr, const std::shared_ptr<environment>& env) override {
+		return self.eval_expression(expr, env);
 	}
 
-	if (!delegated_to_this) {
-		if (init_env) {
-			auto initialized = evaluate_field_initializers(instance, class_def, init_env, handled_parent_init);
-			if (!initialized) { return initialized.error_value(); }
-		} else if (!instance->seeded_from_plan() || handled_parent_init) {
-			// A literal-only chain's initializers ARE the defaults create_instance's plan just
-			// seeded (post-conversion); the re-stamp only matters after a parent ctor body ran
-			stamp_literal_field_initializers(instance, class_def, handled_parent_init);
-		}
+	checked_result<script_value> run_constructor_body(const std::shared_ptr<function_decl>& ctor, const std::shared_ptr<environment>& definition_env,
+	                                                  const script_value& this_value, class_definition* access, const std::vector<script_value>& args) override {
+		auto method_env = std::make_shared<environment>(definition_env, self.symbolizer_, this_value);
+		method_env->set_access_context(access);
+		method_env->define(self.symbolizer_->get_this_id(), this_value);
+		return self.execute_method_ast(ctor, method_env, args);
 	}
 
-	return this_value;
-}
+	checked_result<void> evaluate_field_initializers(const std::shared_ptr<class_instance>& instance, const std::shared_ptr<script_class_definition>& cls,
+	                                                 const std::shared_ptr<environment>& init_env, bool skip_parent_recursion,
+	                                                 const detail::aggregate_plan* aggregate) override {
+		return self.evaluate_field_initializers(instance, cls, init_env, skip_parent_recursion, aggregate);
+	}
+
+	std::optional<error_propagator> pass_depth_gate() override { return self.pass_depth_gate(); }
+	std::shared_ptr<environment> current_environment() override { return self.environment_; }
+	std::shared_ptr<environment> global_environment() override { return self.engine_ ? self.engine_->get_global_environment() : self.environment_; }
+	const class_definition* caller_access_context() override { return caller ? self.frame_access_context(*caller) : self.current_access_context(); }
+};
 
 checked_result<script_value> vm_backend::construct_instance_pre_body(const std::shared_ptr<script_class_definition>& class_def,
                                                             const std::shared_ptr<environment>& definition_env,
@@ -17577,68 +17266,18 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(const std::
                                                             std::shared_ptr<function_decl>& matching_ctor_out,
                                                             std::vector<script_value>& captured_out,
                                                             const frame* caller, bool check_access) {
-	// This native phase owns the constructor depth only until a body takes over.
-	if (current_call_depth_ >= limits_->vm_depth_gate) {
-		if (auto blocked = pass_depth_gate()) { return *blocked; }
-	}
-	if (detail::native_stack_low()) {
-		return detail::raise_native_stack();
-	}
+	// This native phase owns the constructor depth only until a body takes over
+	construction_lender host(*this, caller);
 	std::optional<detail::call_depth_guard> initializer_depth;
-	initializer_depth.emplace(current_call_depth_);
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_c0 = __rdtsc();
 #endif
-	const auto& ctor_asts = class_def->get_constructor_asts();
-
-	// The class's constructor overloads through the one script-overload scorer (typed exact > conversion > var; KEEP
-	// BYTE-PARALLEL with interpreter::construct_instance); one constructor is picked once its arity accepts the call
-	std::shared_ptr<function_decl> matching_ctor;
-	if (ctor_asts.size() == 1) {
-		if (arity_accepts(ctor_asts[0]->parameters, args.size())) { matching_ctor = ctor_asts[0]; }
-	} else {
-		// no viable overload: the sole arity match binds (its parameter raises its own text), else the overload miss; a tie raises
-		auto matching_pick = select_declaration(ctor_asts, args, class_def->get_type_id(), engine_);
-		if (!matching_pick) { return matching_pick.error_value(); }
-		matching_ctor = std::move(matching_pick.value());
-	}
-
-	if (!matching_ctor) {
-		return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
-			class_def->get_type_id(), args.data(), args.size(), engine_, true);
-	}
-	if (check_access) {   // KEEP BYTE-PARALLEL with interpreter::construct_instance
-		JAISCRIPT_TRY(enforce_constructor_access(*class_def, matching_ctor.get(), [&]() {
-			return caller ? frame_access_context(*caller) : current_access_context();
-		}));
-	}
-
+	auto result = detail::begin_construction(host, class_def, definition_env, args, initializer_depth, matching_ctor_out, captured_out, check_access);
 #ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_c1 = __rdtsc();
+	++profile_ctor_count_;
+	profile_ctor_cyc_[0] += __rdtsc() - prof_c0;
 #endif
-	auto instance = class_def->create_instance();
-	instance->construction_pending(true);
-
-	auto this_value = script_value::make_class_object(*class_def, instance, engine_);
-
-	auto members = initialize_members(class_def, definition_env, instance, this_value, matching_ctor, args, initializer_depth, 0, &captured_out);
-	if (!members) { return members; }
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_c2 = __rdtsc();
-	const uint64_t prof_c3 = prof_c2;
-#endif
-
-#ifdef JAISCRIPT_VM_PROFILE
-	{
-		++profile_ctor_count_;
-		profile_ctor_cyc_[0] += prof_c1 - prof_c0;
-		profile_ctor_cyc_[1] += prof_c2 - prof_c1;
-		profile_ctor_cyc_[2] += prof_c3 - prof_c2;
-		profile_ctor_cyc_[3] += __rdtsc() - prof_c3;
-	}
-#endif
-	matching_ctor_out = matching_ctor;
-	return this_value;
+	return result;
 }
 
 checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<script_class_definition> class_def,
@@ -17647,7 +17286,7 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 	std::shared_ptr<function_decl> matching_ctor;
 	std::vector<script_value> captured;
 	auto pre = construct_instance_pre_body(class_def, definition_env, args, matching_ctor, captured, nullptr, check_access);
-	if (!pre) {
+	if (!pre || is_unwinding_) {
 		return pre;
 	}
 	script_value this_value = std::move(pre.value());
@@ -17659,10 +17298,10 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 	method_env->define(symbolizer_->get_this_id(), this_value);
 
 	auto result = execute_method_ast(matching_ctor, method_env, captured.empty() ? args : captured);
-	if (result && !is_unwinding_) { construction_completed(this_value); }
+	if (result && !is_unwinding_) { detail::construction_completed(this_value); }
 
 #ifdef JAISCRIPT_VM_PROFILE
-	profile_ctor_cyc_[4] += __rdtsc() - prof_c4;
+	profile_ctor_cyc_[1] += __rdtsc() - prof_c4;
 #endif
 	return result;
 }
@@ -17692,6 +17331,10 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 		return raise_from(pre);
 	}
 	script_value this_value = std::move(pre.value());
+	if (is_unwinding_) [[unlikely]] {
+		stack_.push_back(std::move(this_value));   // a throw ahead of the body ends the construction; dispatch unwinds
+		return {};
+	}
 	if (matching_ctor->is_coroutine) [[unlikely]] {
 		auto method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
 		method_env->set_access_context(class_def.get());
@@ -17700,7 +17343,7 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 		if (!result) {
 			return raise_from(result);
 		}
-		if (!is_unwinding_) { construction_completed(this_value); }
+		if (!is_unwinding_) { detail::construction_completed(this_value); }
 		script_value value = std::move(result.value());
 		if (result_stamp && value.type() == script_value_type::jai_object_type) {
 			value.set_type_info(type_info_ptr{result_stamp});
@@ -17764,57 +17407,11 @@ const script_callable_thunk* vm_backend::new_constructor_thunk(const call_site& 
 
 checked_result<script_value> vm_backend::construct_default_instance(const std::shared_ptr<script_class_definition>& class_def,
                                                                     const std::vector<script_value>& args) {
-	// arguments to a class without a constructor: a copy, or aggregate initialization (KEEP BYTE-PARALLEL with the interpreter)
-	detail::aggregate_plan aggregate;
-	if (!args.empty()) {
-		aggregate = detail::plan_aggregate(*class_def, args);
-		if (!aggregate.fills()) { return detail::aggregate_answer(aggregate, *class_def, args, engine_); }
+	if (auto made = detail::construct_literal_default(class_def, args, engine_, current_call_depth_, limits_->vm_depth_gate)) {
+		return std::move(*made);
 	}
-
-	if (current_call_depth_ >= limits_->vm_depth_gate) {
-		if (auto blocked = pass_depth_gate()) { return *blocked; }
-	}
-	if (detail::native_stack_low()) {
-		return detail::raise_native_stack();
-	}
-	if (!aggregate.fills() && class_def->base_needs_construction()) {
-		// C++: the implicit default constructor constructs the base ahead of the fields (KEEP BYTE-PARALLEL with the interpreter)
-		std::optional<detail::call_depth_guard> member_depth;
-		member_depth.emplace(current_call_depth_);
-		auto instance = class_def->create_instance();
-		instance->construction_pending(true);
-		auto this_value = script_value::make_class_object(*class_def, instance, engine_);
-		auto definition_env = engine_ ? engine_->get_global_environment() : environment_;
-		auto members = initialize_members(class_def, definition_env, instance, this_value, class_def->implicit_default_constructor(),
-		                                  args, member_depth, 0, nullptr);
-		if (!members) { return members; }
-		construction_completed(this_value);
-		return this_value;
-	}
-	detail::call_depth_guard initializer_depth(current_call_depth_);
-
-	auto instance = class_def->create_instance();
-
-	auto this_value = script_value::make_class_object(*class_def, instance, engine_);
-
-	if (!aggregate.fills() && class_def->chain_initializers_all_literal()) {
-		if (!instance->seeded_from_plan()) { stamp_literal_field_initializers(instance, class_def, false); }
-		return this_value;
-	}
-	// Chain root (the global env, or a worker's root): a bounded walk, no visited set
-	auto current_env = environment_;
-	for (int hops = 0; current_env && current_env->get_parent() && hops < 65536; ++hops) {
-		current_env = current_env->get_parent();
-	}
-	auto global_env = current_env ? current_env : environment_;
-
-	auto init_env = std::make_shared<environment>(global_env, symbolizer_);
-	init_env->define(symbolizer_->get_this_id(), this_value);
-	init_env->set_access_context(class_def.get());
-	auto initialized = evaluate_field_initializers(instance, class_def, init_env, false, aggregate.fills() ? &aggregate : nullptr);
-	if (!initialized) { return initialized.error_value(); }
-
-	return this_value;
+	construction_lender host(*this);
+	return detail::construct_default_instance(host, class_def, args);
 }
 
 // ============================================================
@@ -19504,13 +19101,10 @@ void vm_backend::dump_opcode_profile() const {
 			(double)profile_new_invoke_cyc_ / (double)profile_new_count_);
 	}
 	if (profile_ctor_count_) {
-		fprintf(stderr, "[vm-profile] construct_instance sections (%llu ctors, avg cyc): overload %.0f | instance+env+binds %.0f | init-chains %.0f | field-inits %.0f | ctor-body %.0f\n",
+		fprintf(stderr, "[vm-profile] construct_instance sections (%llu ctors, avg cyc): pre-body %.0f | ctor-body %.0f\n",
 			(unsigned long long)profile_ctor_count_,
 			(double)profile_ctor_cyc_[0] / (double)profile_ctor_count_,
-			(double)profile_ctor_cyc_[1] / (double)profile_ctor_count_,
-			(double)profile_ctor_cyc_[2] / (double)profile_ctor_count_,
-			(double)profile_ctor_cyc_[3] / (double)profile_ctor_count_,
-			(double)profile_ctor_cyc_[4] / (double)profile_ctor_count_);
+			(double)profile_ctor_cyc_[1] / (double)profile_ctor_count_);
 	}
 	if (profile_cfs_counts_[0] + profile_cfs_counts_[1] + profile_cfs_counts_[2]) {
 		fprintf(stderr, "[vm-profile] CALL_FROM_SCRATCH exec decomposition (cycles exclude in-loop callee bodies; opaque INCLUDES the native execution):\n");
@@ -21688,7 +21282,7 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 		}
 		if (rec.ctor_frame) [[unlikely]] {
 			result = rec.locals.get_this();   // a constructor call yields its instance (a bare `return;` ends the body early)
-			construction_completed(result);
+			detail::construction_completed(result);
 		} else if (rec.method_result_anchor) {
 			anchor_method_result(result, rec.locals.get_this());
 		}
@@ -21733,7 +21327,7 @@ JAI_NOINLINE op_status vm_backend::return_with_conversion(frame*& fp, script_val
 	}
 	if (rec.ctor_frame) [[unlikely]] {
 		conv.value() = rec.locals.get_this();
-		construction_completed(conv.value());
+		detail::construction_completed(conv.value());
 	}
 	if (rec.ctor_result_stamp && conv.value().type() == script_value_type::jai_object_type) [[unlikely]] {
 		conv.value().set_type_info(type_info_ptr{rec.ctor_result_stamp});
@@ -21815,7 +21409,7 @@ op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) 
 op_status vm_backend::fall_off_script_frame(frame*& fp) {
 	call_record& rec = *call_records_[call_records_top_ - 1];
 	script_value result = rec.ctor_frame ? rec.locals.get_this() : implicit_result_for_record(rec);   // conversion skipped: fall-off parity
-	if (rec.ctor_frame) [[unlikely]] { construction_completed(result); }
+	if (rec.ctor_frame) [[unlikely]] { detail::construction_completed(result); }
 	if (rec.ctor_result_stamp && result.type() == script_value_type::jai_object_type) [[unlikely]] {
 		result.set_type_info(rec.ctor_result_stamp);
 	}

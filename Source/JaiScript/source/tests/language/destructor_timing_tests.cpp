@@ -89,6 +89,29 @@ public:
             )", "ba!");
         });
 
+        test("a_base_constructor_that_throws_leaves_no_destructor_to_run", [this]() {
+            expect_log(R"(
+                class B { B() { throw "boom"; } ~B() { LOG = LOG + "~B"; } }
+                class D : B { int x = 1; ~D() { LOG = LOG + "~D"; } }
+                class E : B { E() {} ~E() { LOG = LOG + "~E"; } }
+                function f() -> void { try { D d; } catch (x) { LOG = LOG + "!"; } try { E e; } catch (x) { LOG = LOG + "?"; } }
+                f(); LOG;
+            )", "!?");
+        });
+
+        test("a_throw_ahead_of_the_body_ends_the_construction", [this]() {
+            expect_log(R"(
+                int note(string s) { LOG = LOG + s; return 1; }
+                int thrower() { throw "t"; return 0; }
+                class A { A(int v) { note("A"); } ~A() { note("~A"); } }
+                class G : A { int k = note("k"); G() : super(thrower()) { note("G"); } ~G() { note("~G"); } }
+                class B { B() { throw "b"; } }
+                class E : B { int k = note("k"); E() { note("E"); } ~E() { note("~E"); } }
+                function f() -> void { try { G g; } catch (x) { LOG = LOG + "|" + x; } try { E e; } catch (x) { LOG = LOG + "|" + x; } }
+                f(); LOG;
+            )", "|t|b");
+        });
+
         test("prvalue_arguments_are_the_parameters", [this]() {
             expect_log(R"(
                 function args(Token p, Token q) -> void { LOG = LOG + "body"; }

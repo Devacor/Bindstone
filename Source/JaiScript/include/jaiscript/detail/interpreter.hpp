@@ -574,24 +574,12 @@ namespace jai {
         static script_value create_bound_method(const script_value& this_obj, const script_value& method);
 
     private:
-        // Full script-class construction (ctor overload selection, field initializers,
-        // super()/this() chains). Bodies were the visit_class_decl ctor thunks.
+        // Script-class construction through detail::begin_construction, then the constructor body
         checked_result<script_value> construct_instance(std::shared_ptr<script_class_definition> class_def,
                                                         std::shared_ptr<environment> definition_env,
                                                         const std::vector<script_value>& args, bool check_access = true);
-        // `ctor`'s member initialization on an instance under construction: its initializer list (a base constructor, or the
-        // whole delegated-to constructor) and then the field initializers; the body is the caller's
-        checked_result<script_value> initialize_members(const std::shared_ptr<script_class_definition>& class_def,
-                                                        const std::shared_ptr<environment>& definition_env,
-                                                        const std::shared_ptr<class_instance>& instance,
-                                                        const script_value& this_value,
-                                                        const std::shared_ptr<function_decl>& matching_ctor,
-                                                        const std::vector<script_value>& args,
-                                                        std::optional<detail::call_depth_guard>& initializer_depth,
-                                                        size_t delegation_depth,
-                                                        std::vector<script_value>* captured_out);
-        checked_result<script_value> construct_default_instance(std::shared_ptr<script_class_definition> class_def,
-                                                                const std::vector<script_value>& args);
+        // What the interpreter lends the construction kernel (detail/construction.hpp)
+        struct construction_lender;
 
         // Binary operator dispatch: flat array indexed by the shared op_slot enum
         // (detail/operator_table.hpp) - direct index, no hashing on the generic path.

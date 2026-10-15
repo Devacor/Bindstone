@@ -2011,9 +2011,10 @@ namespace detail {
             explicit shared_value_holder(std::shared_ptr<script_value> v) noexcept : inner(std::move(v)) {}
         };
 
-        // Reference wrapper for reference types. Four owner-pinned modes, mutually
-        // exclusive - a reference NEVER holds a raw address + lifetime guess (the old
-        // mode 1, raw script_value* + weak env anchor, is deleted; escape is legal):
+        // Reference wrapper for reference types. Owner-pinned modes, mutually exclusive -
+        // a reference NEVER holds a raw address + lifetime guess, so escape is legal (CELL,
+        // MAP-ENTRY and CPP-MEMBER / PROPERTY here; ELEMENT, FIELD, STRING-ELEMENT and
+        // COMPONENT at their members below):
         //
         // CELL (Lua-upvalue box): the holder OWNS the referenced value in inline
         // storage - one make_strong allocation is the whole box. Escape-marked
@@ -2101,7 +2102,7 @@ namespace detail {
             // not): counted in its live_elem_refs like a direct element reference.
             strong_ptr<script_array> elem_root;
 
-            // CPP-MEMBER / PROPERTY modes (null for the four modes above; checked last on
+            // CPP-MEMBER / PROPERTY modes (null in every other mode; checked last on
             // every touch so those pay nothing). resolve_target() answers null for both:
             // a missed consumer fails loudly instead of detaching the box or writing the
             // scratch. value.cpp owns the touch logic (materialize/store re-resolve the

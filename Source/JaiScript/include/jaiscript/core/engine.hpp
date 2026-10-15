@@ -1379,8 +1379,10 @@ namespace jai {
                 // small fixed cost so a concrete-typed overload still ranks ahead.
                 return param_type_info(script_value_type::jai_null_type);
             } else if constexpr (std::is_same_v<decay_t, int> || std::is_same_v<decay_t, int64_t> ||
-                          std::is_same_v<decay_t, script_int>) {
+                          std::is_same_v<decay_t, script_int> || std::is_enum_v<decay_t>) {
                 return param_type_info(script_value_type::jai_int_type);
+            } else if constexpr (is_specialization_v<decay_t, std::function>) {
+                return param_type_info(script_value_type::jai_function_type);
             } else if constexpr (std::is_same_v<decay_t, float> || std::is_same_v<decay_t, double> ||
                                  std::is_same_v<decay_t, script_float>) {
                 return param_type_info(script_value_type::jai_float_type);

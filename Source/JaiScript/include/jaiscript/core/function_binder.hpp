@@ -83,6 +83,8 @@ class engine;
                     using key_type = typename T::key_type;
                     using value_type = typename T::mapped_type;
                     return conversions::convert_script_map_to_stdmap<key_type, value_type>(v, eng);
+                } else if constexpr (std::is_enum_v<T>) {
+                    return static_cast<T>(v.as<script_int>());
                 } else if constexpr (std::is_class_v<T> && !std::is_same_v<T, std::string>) {
                     if (v.is_object()) {
                         // a borrowed object has no owner to share: copy it without the shared attempt's throw
@@ -418,14 +420,19 @@ class engine;
                     return temp;
                 }
                 // Smart-pointer params can't alias script storage (the holder owns T, not
-                // shared_ptr<T>): materialize a temp handle in parameter storage.
-                else if constexpr (is_specialization_v<T, std::shared_ptr> || is_specialization_v<T, std::weak_ptr>) {
+                // shared_ptr<T>), and a callback is built from the script callable: a temp in parameter storage.
+                else if constexpr (is_specialization_v<T, std::shared_ptr> || is_specialization_v<T, std::weak_ptr> ||
+                                   is_specialization_v<T, std::function>) {
                     auto* storage = detail::get_engine_parameter_storage(eng);
                     if (!storage) {
                         throw runtime_error("No parameter storage available for const reference conversion");
                     }
                     T& temp = storage->allocate<T>();
-                    temp = v.as<T>();
+                    if constexpr (is_specialization_v<T, std::function>) {
+                        temp = value_converter<T>::from(v, eng);
+                    } else {
+                        temp = v.as<T>();
+                    }
                     return temp;
                 }
                 // For custom classes, alias the live object (handles class_instance
@@ -622,7 +629,6 @@ class engine;
         template<typename T>
         T writeback_decode(const script_value& v, engine* eng) {
             if constexpr (std::is_same_v<T, script_value>) { return v; }
-            else if constexpr (std::is_enum_v<T>) { return static_cast<T>(v.as<script_int>()); }
             else { return value_converter<T>::from(v, eng); }
         }
 
@@ -991,6 +997,10 @@ class engine;
                 // the tuple element is an lvalue, so const shared_ptr<T>& binds to it.
                 if constexpr (is_specialization_v<base_type, std::shared_ptr> || is_specialization_v<base_type, std::weak_ptr>) {
                     return actual_arg.as<base_type>();
+                }
+                // A callback is built from the script callable
+                else if constexpr (is_specialization_v<base_type, std::function>) {
+                    return detail::value_converter<base_type>::from(actual_arg, eng);
                 }
                 // A math value has no host object to alias: the decoded host value
                 else if constexpr (math_adapted<base_type>) {

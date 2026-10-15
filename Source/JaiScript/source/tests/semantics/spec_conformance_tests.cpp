@@ -3054,6 +3054,28 @@ private:
 			check_eq(std::string("x"), echo(text).as_string(), "a script_value result");
 			check_eq(std::string("x"), eng->make_value(text).as_string(), "make_value of a script_value is that value");
 		});
+		test("a_std_function_parameter_of_a_host_function_takes_a_script_callable", [this]() {
+			every_config("std::function parameter", "12 12 12 ran 8", [&](engine& e) {
+				e.add_function("apply", [](std::function<int64_t(int64_t)> f, int64_t v) { return f(v); });
+				e.add_function("run0", [](std::function<void()> f) { f(); });
+				e.add_function("twice", [](const std::function<int64_t(int64_t)>& f, int64_t v) { return f(f(v)); });
+				return spec::render(e.execute(R"(
+					string ran = "no";
+					int triple(int x) { return x * 3; }
+					run0([&]() { ran = "ran"; });
+					"" + apply(x => x * 3, 4) + " " + apply([](int x) { return x * 3; }, 4) + " " + apply(triple, 4) + " " + ran + " " +
+					twice(x => x * 2, 2);
+				)"));
+			});
+		});
+		test("an_enum_parameter_of_a_host_function_takes_an_int", [this]() {
+			enum class mood { calm = 0, angry = 1 };
+			every_config("enum parameter", "1 0 1", [&](engine& e) {
+				e.add_function("mood_of", [](mood m) { return static_cast<int64_t>(m); });
+				e.add_function("give_mood", []() { return mood::angry; });
+				return spec::render(e.execute("\"\" + mood_of(1) + \" \" + mood_of(0) + \" \" + give_mood();"));
+			});
+		});
 	}
 
 	struct ref_player { int64_t hp = 0; std::string tag; };

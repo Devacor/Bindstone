@@ -59,14 +59,6 @@ file: source/implementation/vm/vm_backend.cpp
 // IN PLACE - zero copies, no op_index
 >>>
 
-file: source/implementation/parallel_transform.cpp
-<<<
-// parallel_transform v0 (internal/parallel_design.md; internal/parallel_prove_or_serial.md §5,
-// contract A). One builtin, three phases, all charged to the call itself:
-===
-// parallel_transform. One builtin, three phases, all charged to the call itself:
->>>
-
 file: include/jaiscript/core/value.hpp
 <<<
             // silent data loss — audited; see internal/typed_array_design.md).

@@ -4228,7 +4228,7 @@ public:
             )");
             check_eq((int64_t)642, r.as_int());   // alias saw the converted 6; x ends 42
         });
-        // §12.1: cpp-bound global targets keep write-through (globals have no slot, so
+        // cpp-bound global targets keep write-through (globals have no slot, so
         // stores to them are never stamped).
         test("cpp_bound_global_write_through_unaffected", [this]() {
             auto e = make_engine();

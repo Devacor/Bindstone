@@ -1,5 +1,4 @@
-// parallel_transform v0 (internal/parallel_design.md; internal/parallel_prove_or_serial.md §5,
-// contract A). One builtin, three phases, all charged to the call itself:
+// parallel_transform (internal/parallel_design.md): one builtin, three phases, all charged to the call itself:
 //
 //   ADMISSION (amortized per body): a fail-closed static walk over fn's AST — every node
 //   kind is whitelisted or the call errors ("parallel_transform: <reason> at line:col").

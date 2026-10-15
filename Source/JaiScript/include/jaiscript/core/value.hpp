@@ -605,7 +605,7 @@ namespace detail {
         // PRIMITIVE stored into a container slot or member detaches to a snapshot —
         // write-through belongs to the registered NAME (and refs/captures/by-ref params
         // bound to it), never to stored copies. Opaque host tokens (semantic NULL) keep
-        // their box (§13: object-like handles; decoding would flatten them to null).
+        // their box (object-like handles; decoding would flatten them to null).
         // Call sites guard on raw_storage_index() == TYPEID_CPP_BOUND first (hot paths).
         script_value detached_for_store() const {
             if (raw_storage_index() == TYPEID_CPP_BOUND && bound_semantic_index() != TYPEID_NULL) {
@@ -618,7 +618,7 @@ namespace detail {
         // Invoke ON THE DEREF'D value (a reference-to-bound holds a reference_holder, so a
         // bare-this lookup would answer TYPEID_NULL). Public: ONE cached semantic-index read
         // then compare beats repeated is_int()/is_float()/... probes (each re-derefs) -
-        // classification sites cache this once (hand-tuned dispatch discipline, §4).
+        // classification sites cache this once.
         size_t bound_semantic_index() const noexcept {
             auto* box = bound_box();
             return box ? box->semantic_index : TYPEID_NULL;
@@ -2736,9 +2736,9 @@ namespace detail {
     }
 
 
-    // Permanent thin-value gates: 8B type_info_ + 8B engine_ + 16B variant (8B max payload + index).
+    // 8B type_info_ + 8B engine_ + 16B variant (8B max payload + index)
     static_assert(sizeof(script_value) == 32 && alignof(script_value) == 8,
-                  "script_value must stay 32 bytes / 8-aligned (thin-value fold)");
+                  "script_value must stay 32 bytes / 8-aligned");
     static_assert(std::is_nothrow_move_constructible_v<script_value>);
 
     // ---- script_array kind-dispatched element access (script_value complete here) ----

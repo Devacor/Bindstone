@@ -4322,7 +4322,7 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
 
     // `!` consults truthiness BEFORE the S8 decode: is_truthy handles bound values in
     // full, and decoding an OPAQUE bound to null would lie about its truthiness
-    // (§13). Identical result for bound primitives. Byte-parallel with exec_unary.
+    // (an opaque bound is truthy while its pointer is live). Identical result for bound primitives. Byte-parallel with exec_unary.
     if (expr->op.type == token_type::bang) {
         push_value(make_value(!is_truthy(operand)));
         return {};
@@ -4412,7 +4412,7 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
                     script_value& target = varPtr->deref();
 
                     const bool isIncrement = (expr->op.type == token_type::plus_plus);
-                    // §12.1 write-through: ++/-- on a bound VARIABLE decodes the live value and
+                    // Write-through: ++/-- on a bound VARIABLE decodes the live value and
                     // stores back through assign_through (the type() switch below would mutate a
                     // dead shadow). KEEP BYTE-PARALLEL with the VM exec_incdec bound branch.
                     if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
@@ -4500,7 +4500,7 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
                             }
                             const bool isIncrement = (expr->op.type == token_type::plus_plus);
                             // S8: a bound-alias field decodes live; set_field stores the detached
-                            // result (§12.5). KEEP BYTE-PARALLEL with the VM this-field fallback.
+                            // result. KEEP BYTE-PARALLEL with the VM this-field fallback.
                             if (currentVal.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
                                 currentVal = currentVal.bound_decoded_temp();
                             const size_t ti = currentVal.raw_storage_index();
@@ -4967,7 +4967,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     return {};
                 }
 
-                // §12.1 write-through: compound on a bound VARIABLE reads the live value, computes,
+                // Write-through: compound on a bound VARIABLE reads the live value, computes,
                 // and stores back through assign_through (was a silent dead-shadow no-op).
                 // KEEP BYTE-PARALLEL with the VM exec_compound_store bound branch.
                 if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
@@ -5310,7 +5310,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
 
                 // Perform the compound operation (using standard path, no in-place mutation for fields)
                 // S8: bound-alias class fields decode-read LIVE; set_field stores the detached
-                // result (§12.5). KEEP BYTE-PARALLEL with the VM implicit-this compound normalization.
+                // result. KEEP BYTE-PARALLEL with the VM implicit-this compound normalization.
                 if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
                     currentValue = currentValue.bound_decoded_temp();
                 if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
@@ -5509,7 +5509,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
 
             // Perform the compound operation
             // S8: a bound-alias member decode-reads LIVE and assign_member_value stores the
-            // detached result (§12.5). KEEP BYTE-PARALLEL with the VM exec_member_compound.
+            // detached result. KEEP BYTE-PARALLEL with the VM exec_member_compound.
             if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
                 currentValue = currentValue.bound_decoded_temp();
             if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
@@ -5809,7 +5809,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 }
                 resultValue = std::move(result.value());
             } else {
-                // S8 (NEW-C): a bound rhs decodes before the zero pre-checks so /= and %= keep
+                // S8: a bound rhs decodes before the zero pre-checks so /= and %= keep
                 // today's error codes/texts (byte-parallel with the VM exec_index_compound)
                 if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
                     rightValue = rightValue.bound_decoded_temp();

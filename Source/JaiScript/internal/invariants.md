@@ -1,7 +1,7 @@
 # Load-bearing invariants
 
 Things that are easy to break silently. Each has a source anchor; if you're about to violate
-one, read the anchor first. Background: `thin_value_spec.md` / `thin_value_rebaseline.md`.
+one, read the anchor first.
 
 ## 1. script_value layout gates
 

@@ -485,9 +485,9 @@ void swap(weaker_ptr<T>& lhs, weaker_ptr<T>& rhs) noexcept {
 
 namespace detail { struct sp_layout_probe { void* a; }; }
 static_assert(sizeof(strong_ptr<detail::sp_layout_probe>) == sizeof(void*),
-              "strong_ptr must stay a single object pointer (rung 2a of the thin-value fold)");
+              "strong_ptr must stay a single object pointer");
 static_assert(sizeof(weaker_ptr<detail::sp_layout_probe>) == sizeof(void*),
-              "weaker_ptr must stay a single object pointer (rung 2a of the thin-value fold)");
+              "weaker_ptr must stay a single object pointer");
 
 } // namespace jai
 

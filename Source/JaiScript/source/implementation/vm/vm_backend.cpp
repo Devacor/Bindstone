@@ -1486,11 +1486,7 @@ checked_result<std::string> vm_backend::value_to_string_with_method(const script
 }
 
 bool vm_backend::object_defines_custom_equality(const script_value& v) const {
-	const script_value& d = v.is_reference() ? v.deref() : v;
-	if (!d.is_object()) { return false; }
-	auto holder = const_cast<script_value&>(d).get_object_holder();
-	if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return false; }
-	auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
+	const class_definition* cd = detail::operand_instance_class(v);
 	return cd && (cd->defines_method(eq_method_id_) || cd->defines_method(op_spaceship_id_));
 }
 
@@ -1530,7 +1526,13 @@ std::optional<checked_result<bool>> vm_backend::object_equality_via_method(const
 // instance against a non-null value of its kind, or any value one of its != overloads takes when the chain declares <=>.
 // KEEP BYTE-PARALLEL with interpreter::object_inequality_via_method
 std::optional<checked_result<bool>> vm_backend::object_inequality_via_method(const script_value& left, const script_value& right) {
-	if (parallel_worker_ || !left.is_object() || right.is_null()) { return std::nullopt; }
+	if (parallel_worker_) [[unlikely]] {
+		if (!right.is_null() && detail::instance_declares_operator(left, op_bang_equal_id_)) {
+			return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
+		}
+		return std::nullopt;
+	}
+	if (!left.is_object() || right.is_null()) { return std::nullopt; }
 	auto target = resolve_member_target(left);
 	if (!target) { return std::nullopt; }
 	script_value method_val = target.method(op_bang_equal_id_);
@@ -1549,7 +1551,12 @@ std::optional<checked_result<bool>> vm_backend::object_inequality_via_method(con
 
 // KEEP BYTE-PARALLEL with the interpreter's three <=> twins
 std::optional<checked_result<bool>> vm_backend::object_comparison_reversed_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-	if (parallel_worker_) [[unlikely]] { return std::nullopt; }
+	if (parallel_worker_) [[unlikely]] {
+		if (detail::instance_declares_operator(right, op_spaceship_id_)) {
+			return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
+		}
+		return std::nullopt;
+	}
 	auto target = resolve_member_target(right);
 	if (!target || !binary_operator_accepts(target.class_def, op_spaceship_id_, left)) { return std::nullopt; }
 	script_value method_val = target.method(op_spaceship_id_);
@@ -1566,7 +1573,12 @@ std::optional<checked_result<bool>> vm_backend::object_comparison_reversed_via_m
 }
 
 std::optional<checked_result<script_value>> vm_backend::object_spaceship_reversed_via_method(const script_value& left, const script_value& right) {
-	if (parallel_worker_) [[unlikely]] { return std::nullopt; }
+	if (parallel_worker_) [[unlikely]] {
+		if (detail::instance_declares_operator(right, op_spaceship_id_)) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
+		}
+		return std::nullopt;
+	}
 	auto target = resolve_member_target(right);
 	if (!target || !binary_operator_accepts(target.class_def, op_spaceship_id_, left)) { return std::nullopt; }
 	script_value method_val = target.method(op_spaceship_id_);
@@ -1618,9 +1630,12 @@ std::optional<checked_result<bool>> vm_backend::object_spaceship_equality_via_me
 }
 
 std::optional<checked_result<bool>> vm_backend::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-	// Safe-mode workers: no operator dispatch (increment B); callers' type-mismatch
-	// fallback is loud, so no divergence gate is needed here
-	if (parallel_worker_) [[unlikely]] { return std::nullopt; }
+	if (parallel_worker_) [[unlikely]] {
+		if (detail::instance_declares_operator(left, op_symbol_id)) {
+			return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
+		}
+		return std::nullopt;
+	}
 	auto target = resolve_member_target(left);
 	if (!target) {
 		return std::nullopt;
@@ -1660,9 +1675,13 @@ std::optional<checked_result<bool>> vm_backend::object_comparison_via_method(con
 }
 
 std::optional<checked_result<script_value>> vm_backend::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-	// Safe-mode workers: no operator dispatch (increment B); callers' type-mismatch
-	// fallback is loud, so no divergence gate is needed here
-	if (parallel_worker_) [[unlikely]] { return std::nullopt; }
+	// A worker never dispatches a class operator: one the class declares raises the verdict, never the builtin meaning
+	if (parallel_worker_) [[unlikely]] {
+		if (detail::instance_declares_operator(left, op_symbol_id)) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
+		}
+		return std::nullopt;
+	}
 	auto target = resolve_member_target(left);
 	if (!target) {
 		return std::nullopt;
@@ -1703,8 +1722,13 @@ script_value vm_backend::call_operator_of(const script_value& callee) {
 
 // A class's unary operator; KEEP BYTE-PARALLEL with interpreter::object_unary_via_method
 std::optional<checked_result<script_value>> vm_backend::object_unary_via_method(const script_value& operand, token_type op) {
-	if (parallel_worker_) [[unlikely]] { return std::nullopt; }
 	const uint64_t id = op == token_type::minus ? op_minus_id_ : op == token_type::plus ? op_plus_id_ : op_tilde_id_;
+	if (parallel_worker_) [[unlikely]] {
+		if (declares_unary_operator(detail::operand_instance_class(operand), id)) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
+		}
+		return std::nullopt;
+	}
 	auto target = resolve_member_target(operand);
 	if (!target || !declares_unary_operator(target.class_def, id)) { return std::nullopt; }
 	script_value method_val = target.method(id);

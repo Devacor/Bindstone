@@ -3120,12 +3120,6 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     init_dispatch_table();
 }
 
-void interpreter::add_globals(const std::unordered_map<std::string, script_value>& globals) {
-    for (const auto& [name, value] : globals) {
-        environment_->define(name, value);
-    }
-}
-
 void interpreter::add_global(const std::string& name, const script_value& value) {
     environment_->define(name, value);
 }
@@ -14281,39 +14275,6 @@ scoped_method_environment::~scoped_method_environment() {
     interp_->release_environment(env_, true);
 }
 
-// Determine parameter binding semantics based on C++ rules
-interpreter::parameter_semantics interpreter::get_parameter_semantics(
-    const parameter& param,
-    const script_value& arg) const
-{
-    // Reference parameters always share
-    if (param.is_reference) {
-        return parameter_semantics::reference;
-    }
-
-    // shared_ptr<T> parameter type means reference semantics
-    if (param.type && param.type->base_type == script_value_type::jai_shared_ptr_type) {
-        return parameter_semantics::reference;
-    }
-
-    // shared_ptr<T> argument means preserve reference semantics
-    if (arg.is_shared_ptr_type()) {
-        return parameter_semantics::reference;
-    }
-
-    // Default: value semantics (clone)
-    return parameter_semantics::value;
-}
-
-// Bind parameter with proper value/reference semantics
-script_value interpreter::bind_parameter(
-    const parameter& param,
-    const script_value& arg) const
-{
-    auto semantics = get_parameter_semantics(param, arg);
-    return (semantics == parameter_semantics::value) ? clone_for_assignment(arg) : arg;
-}
-
 // KEEP BYTE-PARALLEL with vm_backend::bind_bare_cpp_property_ref: the member scope's
 // receiver, else the env's 'this' (lambdas made in methods reach it through the chain).
 // `env` = a CALLER env at a ref-arg bind (the current frame's scope is the callee's).
@@ -15274,94 +15235,6 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // Cleanup and return success
     cleanup();
     return result;
-}
-
-bool interpreter::can_convert_to_type(const script_value& source, type_info_ptr target_type) const {
-    if (!target_type) return true;  // No type specified = any type accepted
-
-    auto source_type = source.type();
-    auto target_base_type = target_type->base_type;
-
-    // Any type accepts anything
-    if (target_base_type == script_value_type::jai_any_type) return true;
-
-    // Exact match - no conversion needed
-    if (source_type == target_base_type) {
-        // For objects, also check the type name
-        if (source_type == script_value_type::jai_object_type) {
-            // First, try to get the type name from type_info
-            auto source_type_info = source.get_type_info();
-            if (source_type_info && !source_type_info->type_name.empty() &&
-                source_type_info->type_name == target_type->type_name) {
-                return true;
-            }
-            // Also check the resolved class name (script classes, cpp_bound references)
-            auto resolved = resolve_member_target(source);
-            if (resolved && resolved.class_name() == target_type->type_name) {
-                return true;
-            }
-            // Different object types - might still be convertible via constructor
-        } else {
-            return true;  // Non-object types match
-        }
-    }
-
-    // shared_ptr<T> handling - storage is object_holder but type_info marks as shared_ptr
-    auto source_type_info = source.get_type_info();
-    if (source_type_info && source_type_info->base_type == script_value_type::jai_shared_ptr_type) {
-        // shared_ptr<T> -> shared_ptr<T>
-        if (target_base_type == script_value_type::jai_shared_ptr_type) {
-            if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
-                return true;  // Inner types match
-            }
-            auto resolved = resolve_member_target(source);
-            if (resolved && resolved.class_name() == target_type->type_name) {
-                return true;
-            }
-        }
-        // shared_ptr<T> -> T
-        if (target_base_type == script_value_type::jai_object_type) {
-            if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
-                return true;
-            }
-            auto resolved = resolve_member_target(source);
-            if (resolved && resolved.class_name() == target_type->type_name) {
-                return true;
-            }
-        }
-    }
-
-    // For object target types, check if constructor conversion is available
-    if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty()) {
-        // Look up the class definition
-        auto eng = engine_;
-        if (eng) {
-            auto class_def = eng->get_class_definition(target_type->type_name);
-            if (class_def) {
-                // Check if there's a constructor that takes 1 argument
-                // For script classes, check constructor ASTs
-                auto script_class = std::dynamic_pointer_cast<script_class_definition>(class_def);
-                if (script_class) {
-                    const auto& ctor_asts = script_class->get_constructor_asts();
-                    for (const auto& ctor_ast : ctor_asts) {
-                        if (ctor_ast->parameters.size() == 1) {
-                            // Has a single-argument constructor - conversion might be possible
-                            // Further type checking could be done here if parameters have types
-                            return true;
-                        }
-                    }
-                }
-                // For C++ classes, the constructor would be in the environment
-                // Try looking it up
-                auto ctor_result = environment_->get(target_type->type_name);
-                if (ctor_result && ctor_result.value().is_function()) {
-                    return true;  // Constructor exists
-                }
-            }
-        }
-    }
-
-    return false;
 }
 
 // The one typed-slot table (detail::convert_for_typed_slot); this site owns the parameter /

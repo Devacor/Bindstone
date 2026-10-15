@@ -147,27 +147,6 @@ namespace {
 		return std::nullopt;
 	}
 
-	std::string vm_type_name_of(script_value_type type) {
-		switch (type) {
-			case script_value_type::jai_null_type: return "null";
-			case script_value_type::jai_int_type: return "int";
-			case script_value_type::jai_float_type: return "float";
-			case script_value_type::jai_string_type: return "string";
-			case script_value_type::jai_char_type: return "char";
-			case script_value_type::jai_bool_type: return "bool";
-			case script_value_type::jai_array_type: return "array";
-			case script_value_type::jai_map_type: return "map";
-			case script_value_type::jai_object_type: return "object";
-			case script_value_type::jai_function_type: return "function";
-			case script_value_type::jai_reference_type: return "reference";
-			case script_value_type::jai_shared_ptr_type: return "shared_ptr";
-			case script_value_type::jai_weak_ptr_type: return "weak_ptr";
-			case script_value_type::jai_any_type: return "any";
-			case script_value_type::jai_invalid_type: return "invalid";
-			default: return "unknown";
-		}
-	}
-
 	// Element compatibility/conversion live in the shared kernel
 	// (detail/container_enforce.hpp, used verbatim by both backends and the field
 	// kernel). These forwards keep the historical local names.
@@ -1222,15 +1201,6 @@ void vm_backend::arm_listing() {
 void vm_backend::note_compiled(const chunk& compiled) {
 	if (!engine_) return;
 	if (const auto& sink = engine_->disassembly_sink()) { sink(disassemble(compiled, symbolizer_), chunk_manifest(compiled, symbolizer_)); }
-}
-
-std::shared_ptr<chunk> vm_backend::compile_only(const std::vector<declaration_ptr>& declarations) {
-	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
-	compiler_.ir_passes(!engine_ || engine_->ir_passes());
-	arm_listing();
-	auto compiled = compiler_.compile_program(declarations);
-	note_compiled(*compiled);
-	return compiled;
 }
 
 void vm_backend::capture_stack_trace() {

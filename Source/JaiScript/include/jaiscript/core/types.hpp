@@ -87,7 +87,6 @@ namespace jai {
         static constexpr size_t vec_stride(kind_t k) noexcept { return k <= kind_t::iv2 ? 2 : k <= kind_t::iv3 ? 3 : 4; }
         static constexpr bool vec_integral(kind_t k) noexcept { return k == kind_t::iv2 || k == kind_t::iv3; }
         static constexpr size_t vec_storage_index(kind_t k) noexcept { return static_cast<size_t>(k) + 8; }
-        static constexpr kind_t vec_kind_of_index(size_t storage_index) noexcept { return static_cast<kind_t>(storage_index - 8); }
         static constexpr kind_t vec_kind_of(script_value_type t) noexcept {
             switch (t) {
                 case script_value_type::jai_vec2_type: return kind_t::v2;

@@ -1105,9 +1105,6 @@ namespace jai {
             return get_type_info(temp);
         }
 
-        // Reference support for function parameters
-        script_value try_create_reference(size_t arg_index, const script_value& fallback);
-
         // Engine-owned deterministic RNG for the math:: intrinsics (zero statics;
         // detail/math_intrinsics.hpp). Seeded via math::random_seed; fixed default seed.
         detail::math_rng_state& math_rng();

@@ -25,15 +25,6 @@ namespace jai::detail {
     // Source spelling for rejection texts: detail::slot_source_type_name (class_definition.hpp,
     // next to the slot texts both wrappers raise through).
 
-    // Target spelling for the parameter/return text: the interned canonical name, with
-    // shared_ptr<T> spelled in full (its canonical name is the class alone).
-    inline uint64_t slot_target_symbol(const type_info& target, string_symbolizer& symbols) {
-        if (target.base_type == script_value_type::jai_shared_ptr_type) {
-            return symbols.intern("shared_ptr<" + target.type_name + ">");
-        }
-        return target.id;
-    }
-
     inline checked_result<slot_conversion> convert_typed_slot_script_rows_impl(slot_conversion pending, const script_value& value_in,
                                                                                 const type_info_ptr& target_type, engine* eng) {
         using verdict = slot_conversion::verdict;

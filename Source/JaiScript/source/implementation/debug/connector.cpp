@@ -126,7 +126,6 @@ struct jval {
     std::string as_str() const { return kind == t::string ? str : std::string(); }
     int as_int() const { return kind == t::number ? static_cast<int>(num) : 0; }
     double as_num() const { return kind == t::number ? num : 0; }
-    std::string get_str(const std::string& k) const { auto* v = find(k); return v ? v->as_str() : std::string(); }
     double get_num(const std::string& k) const { auto* v = find(k); return v ? v->as_num() : 0; }
 };
 

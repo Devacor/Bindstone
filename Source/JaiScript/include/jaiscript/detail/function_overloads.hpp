@@ -82,21 +82,6 @@ namespace jai::detail {
         return overload_miss(make_error_code(runtime_error_code::argument_count_mismatch), set.name_id, args, argc, eng, false);
     }
 
-    // The binding modes the members admitting argc arguments give argument i (detail::arg_binding bits)
-    inline uint8_t overload_set_binding(const function_overload_set& set, size_t i, size_t argc) {
-        uint8_t result = 0;
-        for (const auto& m : set.members) {
-            if (argc != SIZE_MAX && !arity_accepts(m->parameters(), argc)) { continue; }
-            const auto& ps = m->parameters();
-            if (i >= ps.size()) { result |= 1; continue; }
-            const parameter& p = ps[i];
-            if (p.is_reference) { result |= 4; }
-            else if (p.type && (p.type->base_type == script_value_type::jai_shared_ptr_type || p.type->base_type == script_value_type::jai_weak_ptr_type)) { result |= 2; }
-            else { result |= 1; }
-        }
-        return result;
-    }
-
     // A namespace function declaration (both backends' namespace declaration): an earlier run of the declaring unit drops what it
     // declared; a declaration of the same signature that stays collides (the caller raises unless `override`, which erases it), one
     // that differs only by reference is the second definition's error (its text in `error`)

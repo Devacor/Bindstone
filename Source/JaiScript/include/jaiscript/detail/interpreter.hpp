@@ -175,9 +175,6 @@ namespace jai {
         interpreter(string_symbolizer* external_symbolizer, std::shared_ptr<environment> global_env);
         ~interpreter() = default;
         
-        // Add global variables before execution
-        void add_globals(const std::unordered_map<std::string, script_value>& globals);
-        
         // Add a single global variable
         void add_global(const std::string& name, const script_value& value);
         
@@ -570,23 +567,6 @@ namespace jai {
         void apply_field_initializers(const std::shared_ptr<class_instance>& instance,
                                       const std::shared_ptr<class_definition>& class_def) override;
 
-        // Parameter binding semantics
-        enum class parameter_semantics {
-            value,       // Clone the argument (default C++ behavior)
-            reference    // Share the argument (auto&, shared_ptr<T>)
-        };
-
-        // Determine whether a parameter should use value or reference semantics
-        parameter_semantics get_parameter_semantics(
-            const parameter& param,
-            const script_value& arg) const;
-
-        // Bind a parameter according to C++ semantics
-        // Returns cloned value for value semantics, or shared reference for reference semantics
-        script_value bind_parameter(
-            const parameter& param,
-            const script_value& arg) const;
-
         // Helper to create a bound method - binds 'this' as the first argument
         static script_value create_bound_method(const script_value& this_obj, const script_value& method);
 
@@ -774,13 +754,6 @@ namespace jai {
 
             bool empty() const { return top_ == 0; }
             size_t size() const { return top_; }
-
-            const script_value& peek_at(size_t index) const {
-                if (index >= top_) {
-                    throw runtime_error("Internal error: stack index out of range");
-                }
-                return values_[index];
-            }
 
             void clear() {
                 // Actually destroy the values to release references
@@ -1147,13 +1120,6 @@ namespace jai {
             return true;
         }
 
-        template<typename T = void>
-        [[nodiscard]] checked_result<T> execution_budget_error() const {
-            return checked_result<T>(
-                make_error_code(runtime_error_code::execution_budget_exceeded),
-                "Script execution budget exceeded - raise engine::execution_budget or break up the work");
-        }
-
         // Combined limit check at loop back-edges / call entry: the budget tick plus a
         // one-compare memory high-water test (deferred raise point for charge sites
         // that cannot deny in place). KEEP BYTE-PARALLEL with the vm twin.
@@ -1347,9 +1313,6 @@ namespace jai {
         // Returns checked_result with error if conversion fails.
         [[nodiscard]] checked_result<script_value> try_convert_for_parameter(const script_value& arg, type_info_ptr target_type,
                                                                             const detail::slot_site& site = detail::slot_site{});
-
-        // Check if a conversion is possible from source value to target type
-        bool can_convert_to_type(const script_value& source, type_info_ptr target_type) const;
 
         // Static method registries for built-in types
         // Built-in method registries (using interned IDs for O(1) lookup)

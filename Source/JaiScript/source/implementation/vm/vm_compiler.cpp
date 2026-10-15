@@ -5549,14 +5549,6 @@ bool vm_compiler::observing_hoist_in(const expression* e) {
 	return observing_hoist_in(b->left.get()) || observing_hoist_in(b->right.get());
 }
 
-// an environment name the unit does not declare as a value (another unit's global, a host name, a reference declaration at
-// program scope such as `var& P = box.values`): its read may run a getter or raise, so it keeps its place ahead of any
-// hoisted read; a value the unit declares dereferences a cell (the plain-reference proof's rule)
-bool vm_compiler::env_reference_candidate(const expression* e) {
-	if (!env_identifier(e)) return false;
-	return !static_cast<identifier_expr*>(const_cast<expression*>(e))->names_known_value;
-}
-
 // a subtree with a hoisted read, intrinsic or unary of any quietness: it runs ahead of the operation's own operands
 bool vm_compiler::hoist_in(const expression* e) {
 	if (!e) return false;
@@ -7960,21 +7952,6 @@ void vm_compiler::collect_declared_symbols(const statement_ptr& stmt, std::unord
 	body_walker walker;
 	walker.symbolizer = symbolizer_;
 	walker.on_declared = [&out](uint64_t id) { out.insert(id); };
-	walker.stmt(stmt);
-}
-
-void vm_compiler::collect_used_identifiers(const statement_ptr& stmt, const lambda_expr* lambda,
-                                           std::vector<uint64_t>& out, std::unordered_set<uint64_t>& seen) const {
-	std::unordered_set<uint64_t> param_ids;
-	for (const auto& p : lambda->parameters) {
-		param_ids.insert(p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name));
-	}
-	body_walker walker;
-	walker.symbolizer = symbolizer_;
-	walker.on_identifier = [&](identifier_expr* ident) {
-		if (param_ids.count(ident->symbol_id)) return;
-		if (seen.insert(ident->symbol_id).second) out.push_back(ident->symbol_id);
-	};
 	walker.stmt(stmt);
 }
 

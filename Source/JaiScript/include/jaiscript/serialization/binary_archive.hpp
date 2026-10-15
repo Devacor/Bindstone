@@ -995,17 +995,10 @@ private:
                     property_values.push_back(read_value_internal());
                 }
 
-                std::map<std::string, script_value> preread_props;
-                for (uint32_t i = 0; i < property_count; ++i) {
-                    preread_props[property_names[i]] = property_values[i];
-                }
-
                 const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
                 if (metadata && metadata->custom_construct) {
-                    set_preread_properties(preread_props);
                     any_archive_reader any_ar(*this);
                     script_value constructed_obj = metadata->custom_construct(any_ar, version);
-                    clear_preread_properties();
 
                     auto instance = constructed_obj.as<std::shared_ptr<class_instance>>();
                     if (instance) {

@@ -47,12 +47,7 @@ namespace jai {
         return checked_result<T>(make_error_code(runtime_error_code::type_mismatch), "{0}", id);
     }
 
-    // as<T&> bridges (defined in engine.cpp): validate an object holder's registered type
-    // against a requested C++ type, and extract the C++ payload behind a class_instance
-    // wrapper (nullptr when the wrapper carries none, e.g. a pure script-class object).
-    bool engine_holder_matches_type(engine* eng, const std::string& holder_type_name, const std::type_info& requested);
-    std::shared_ptr<void> engine_extract_instance_cpp_object(engine* eng, const std::shared_ptr<void>& instance_data);
-    // Owning form for shared_ptr extraction: locks an extended object's weakly held owner
+    // shared_ptr extraction (engine.cpp): locks an extended object's weakly held owner
     // (null once the object died); an owning native object is returned as is.
     std::shared_ptr<void> engine_lock_instance_cpp_object(engine* eng, const std::shared_ptr<void>& instance_data);
     

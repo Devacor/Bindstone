@@ -4767,14 +4767,6 @@ void engine::pop_external_call_scope() {
     backend()->pop_external_call_scope();
 }
 
-script_value engine::try_create_reference(size_t arg_index, const script_value& fallback) {
-    // Vestigial public API with zero callers. The arg-metadata channel it consulted was
-    // retired by the cell reference model (reference binding is stateless: the call site
-    // travels as an argument to the bind), so this now always answers the fallback.
-    (void)arg_index;
-    return fallback;
-}
-
 conversions::conversion_manager engine::get_conversion_manager() {
     return conversions::conversion_manager(impl->conversions, this);
 }
@@ -5895,45 +5887,5 @@ type_info_ptr object_element_own_tag(const script_value& v, engine* eng) {
     return view.def ? view.def->get_type_info() : nullptr;
 }
 } // namespace detail
-
-std::shared_ptr<void> class_instance_cpp_object(const std::shared_ptr<void>& instance_data) {
-    auto instance = std::static_pointer_cast<class_instance>(instance_data);
-    return instance ? instance->get_cpp_object() : nullptr;
-}
-
-bool engine_holder_matches_type(engine* eng, const std::string& holder_type_name, const std::type_info& requested) {
-    if (!eng) {
-        return true;
-    }
-    auto requested_def = eng->get_class_definition_by_type(std::type_index(requested));
-    if (!requested_def) {
-        return true;  // requested type unregistered - nothing to validate against
-    }
-    if (requested_def->get_name() == holder_type_name) {
-        return true;
-    }
-    auto holder_def = eng->get_class_definition(holder_type_name);
-    return holder_def && holder_def->is_subtype_of(requested_def->get_name());
-}
-
-std::shared_ptr<void> engine_extract_instance_cpp_object(engine* eng, const std::shared_ptr<void>& instance_data) {
-    if (!eng || !instance_data) {
-        return nullptr;
-    }
-    auto instance = std::static_pointer_cast<class_instance>(instance_data);
-    if (instance->script_layer_retired()) { instance->throw_retired_script_layer(); }
-    if (!instance->native_lookup_enabled() || !instance->native()) {
-        return nullptr;
-    }
-    const script_value& cppObjValue = *instance->native();
-    if (!cppObjValue.is_null() && cppObjValue.type() == script_value_type::jai_object_type) {
-        auto objHolder = cppObjValue.get_object_holder();
-        if (!objHolder) { return nullptr; }
-        if (objHolder->data) { return objHolder->data; }
-        // extended object: non-owning alias (the retired check above guarantees it lives)
-        if (objHolder->bound_ptr) { return std::shared_ptr<void>(std::shared_ptr<void>(), objHolder->bound_ptr); }
-    }
-    return nullptr;
-}
 
 } // namespace jai

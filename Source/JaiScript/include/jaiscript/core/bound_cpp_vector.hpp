@@ -33,11 +33,6 @@ private:
     std::vector<T>* vec_;  // Raw pointer to C++ vector (assumes owner stays alive)
     engine* engine_ref_;
 
-    // Helper to get engine reference
-    engine* get_engine_ref() const {
-        return engine_ref_;
-    }
-
 public:
     // Type aliases for STL compatibility
     using value_type = T;

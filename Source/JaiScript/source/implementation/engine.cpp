@@ -693,6 +693,7 @@ struct engine::implementation {
     type_info* type_info_invalid_ = nullptr;
     type_info* type_info_any_ = nullptr;
     type_info* type_info_reference_null_ = nullptr;   // interned "null&" twin (get_type_info_reference fast path)
+    type_info* type_info_untyped_function_ = nullptr;
 
     
     // Template type registry for parsing (stores base template names like "Point", "MyMap")
@@ -3840,6 +3841,13 @@ type_info* engine::get_type_info_function(type_info* return_type, const std::vec
     // Create type_info and use generic get_type_info which handles composite keys
     type_info temp = type_info::make_function(impl->string_symbolizer_, return_type, arg_type_ptrs);
     return get_type_info(temp);
+}
+
+type_info* engine::get_type_info_untyped_function() {
+    if (impl->type_info_untyped_function_) { return impl->type_info_untyped_function_; }
+    type_info* ptr = get_type_info_function(get_type_info_void(), {});
+    if (!parallel_region_active()) { impl->type_info_untyped_function_ = ptr; }
+    return ptr;
 }
 
 type_info* engine::get_type_info(const type_info& temp) {

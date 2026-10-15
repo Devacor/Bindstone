@@ -14642,7 +14642,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
     // Depth alone is not enough: a TOP-LEVEL script statement calling next() also
     // runs at call depth 0, and re-arming there let `for(..){ h.next(); }` push the
     // deadline forever (fuzz livelock seeds 3507/8285/1213/8356/8391).
-    if (current_call_depth_ == 0 && execute_depth_ == 0) {
+    if (current_call_depth_ == 0 && execute_depth_ == 0 && !handle.continues_host_entry()) {
         arm_execution_deadline();
         limits_->reset_for_execute();
     }

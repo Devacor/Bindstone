@@ -14,7 +14,7 @@ namespace jai::detail {
 		uint8_t maximum;
 	};
 
-	inline constexpr std::array<BuiltinArity, 157> BUILTIN_ARITIES{{
+	inline constexpr std::array<BuiltinArity, 156> BUILTIN_ARITIES{{
 		{0, "append", 1, 1},
 		{0, "back", 0, 0},
 		{0, "clear", 0, 0},
@@ -60,7 +60,7 @@ namespace jai::detail {
 		{1, "size", 0, 0},
 		{1, "to_array", 0, 0},
 		{1, "values", 0, 0},
-		{2, "append", 0, 255},
+		{2, "append", 1, 255},
 		{2, "at", 1, 1},
 		{2, "back", 0, 0},
 		{2, "byte_size", 0, 0},
@@ -116,7 +116,7 @@ namespace jai::detail {
 		{2, "trim_right", 0, 1},
 		{2, "utf8_chars", 0, 0},
 		{2, "utf8_length", 0, 0},
-		{3, "append", 0, 255},
+		{3, "append", 1, 255},
 		{3, "at", 1, 1},
 		{3, "back", 0, 0},
 		{3, "byte_size", 0, 0},
@@ -166,7 +166,6 @@ namespace jai::detail {
 		{3, "to_int", 0, 2},
 		{3, "to_lower", 0, 0},
 		{3, "to_upper", 0, 0},
-		{3, "to_utf8", 0, 0},
 		{3, "trim", 0, 1},
 		{3, "trim_left", 0, 1},
 		{3, "trim_right", 0, 1},

@@ -90,6 +90,18 @@ world per save); because of that, the DAP listener is off in watch mode.
                       the embedded-engine default of 5.0s is deliberately lifted —
                       long loops are the user's business in a runner)
 --time                print wall time for each run
+--benchmark-main=N    execute the file as a warm-up, then call its repeatable main() N times
+--disasm=<file>       write every chunk the VM compiles, disassembled with its regions' IR, to <file>
+--manifest=<file>     write the same chunks' semantic manifests (every field, exact constant bits)
+                      to <file>
+--coverage=<file>     write the VM's execution-coverage census (cells / typed / general, the
+                      reasons and their source sites) to <file> at exit (a build with
+                      JAISCRIPT_VM_COVERAGE)
+--miss-every=<n>      the VM misses at every nth plain cell instruction (a build with
+                      JAISCRIPT_MISS_INJECTION)
+--no-param-alias      bind every by-value parameter with a clone (the read-only elision off)
+--no-local-alias      copy every by-value local declaration (the read-only local elision off)
+--no-proofs           run without type proofs, typed ops or cell blocks (the general form)
 --no-debug            don't stand up the DAP debug listener
 --debug-port=N        first port the listener tries (default 52477, probing +10)
 --pause / --no-pause  force / suppress the exit hold after a file run
@@ -138,8 +150,8 @@ take a file. A script dropped onto the executable therefore runs the same from a
 directory. JaiDoom chooses the folder above `scripts/` when it is writable and
 `app_data_dir("JaiDOOM")` otherwise.
 
-and an asynchronous download the script polls from its own loop, the same shape as the
-`NetChannel` binding (`tools/jaiscript/fetch.hpp`):
+The host also binds `Download`, an asynchronous download the script polls from its own loop,
+the same shape as the `NetChannel` binding (`tools/jaiscript/fetch.hpp`):
 
 ```
 auto d = Download();
@@ -148,14 +160,14 @@ while (!d.pump()) { ... }   // d.received(), d.total() (-1 until known), d.fract
 d.success()  d.error()  d.cancel()
 ```
 
-For hosting, `net_host_name()` returns this machine's name and `net_local_addresses()` its IPv4
-addresses (loopback left out), which is what a player hosting a game tells the others to type.
-
 The transport is the platform's own: WinHTTP on Windows, libcurl on Linux and macOS when
 the build found it, otherwise the `curl` executable at run time. A failed transfer leaves no
 partial file. JaiDoom's first run uses this to fetch and verify its own game data.
 
-plus `ARGS` (strings after `--`).
+For hosting, `net_host_name()` returns this machine's name and `net_local_addresses()` its IPv4
+addresses (loopback left out), which is what a player hosting a game tells the others to type.
+
+The strings after `--` are the global `ARGS`.
 
 ## Debugging
 

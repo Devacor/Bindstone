@@ -34,8 +34,9 @@ cmake --build build
 build/bin/jaiscript_tests
 ```
 
-That builds everything: the library, the test suite, the differential fuzzer, the runner, and
-the three example games. Binaries land in `build/bin/`, the library in `build/lib/`.
+That builds everything: the library, the test suite, the differential fuzzer, the runner, the
+language server, the three example games and the embedding quickstart's host
+(`embed_quickstart`). Binaries land in `build/bin/`, the library in `build/lib/`.
 
 `CMakePresets.json` names the same two trees: `cmake --preset release` / `cmake --build --preset release`
 configure and build `build/`, and `debug` does the same in `build-debug/`. Visual Studio's Open Folder lists the
@@ -89,7 +90,7 @@ flags.
 Visual Studio can open this directory directly (**File → Open → Folder**). It detects
 `CMakeLists.txt`, configures with Ninja, and puts build directories under
 `out/build/<config>/`, so the test executable is `out/build/x64-Debug/bin/jaiscript_tests.exe`.
-The configurations it offers come from `CMakeSettings.json`.
+The configurations it offers are the `x64-*` presets in `CMakePresets.json`.
 
 Debug is where you want to live day to day: it has no link-time code generation, so an
 incremental link is seconds rather than minutes. Release links with LTCG (`JAISCRIPT_LTCG`, ON
@@ -106,13 +107,15 @@ ON when JaiScript is the top-level project and OFF when it is added to another p
 | `JAISCRIPT_BUILD_TESTS` | top-level | The Foundry test suite (`jaiscript_tests`) and the fuzzer (`jaiscript_fuzz`) |
 | `JAISCRIPT_BUILD_RUNNER` | top-level | The standalone runner / REPL (`jaiscript_runner`, binary `jaiscript`) |
 | `JAISCRIPT_BUILD_LSP` | top-level | The language server `jaiscript_lsp` the VS Code extension launches |
-| `JAISCRIPT_BUILD_EXAMPLES` | top-level | `jai_gloom`, `jai_crawler`, `jai_demoreel` |
+| `JAISCRIPT_BUILD_EXAMPLES` | top-level | `jai_gloom`, `jai_crawler`, `jai_demoreel`, and in a top-level build `embed_quickstart` (the embedding quickstart's host) |
 | `JAISCRIPT_INSTALL` | top-level | The install rules and the `JaiScript` CMake package (`find_package(JaiScript)`) |
 | `JAISCRIPT_ENABLE_DEBUGGER` | ON | Compiles the DAP-over-TCP debug listener. Turn it OFF for shipping or mobile builds and no socket code is compiled in at all |
 | `JAISCRIPT_ENABLE_BENCHMARKS` | OFF | Adds the performance suites to `jaiscript_tests` (see below) |
 | `JAISCRIPT_NATIVE_ARCH` | OFF | `-march=native` for Release. Faster; the binary stops being portable |
 | `JAISCRIPT_ENABLE_LTO` | OFF | `-flto` for GCC/Clang Release builds |
 | `JAISCRIPT_LTCG` | top-level | Whole-program optimization for MSVC Release (`/GL`, `/LTCG`). The measured performance numbers use it. OFF as a subproject: a `/GL` library would turn every consumer's Release link into a whole-program link (about a minute per edit instead of seconds) |
+| `JAISCRIPT_VM_COVERAGE` | OFF | Diagnostic build: the VM counts every instruction where it runs and why (`engine::vm_coverage_report`, `jaiscript --coverage`) |
+| `JAISCRIPT_MISS_INJECTION` | OFF | Testing build: the VM can force a cell-block miss at every nth plain cell instruction (`engine::cells_miss_every`, `jaiscript --miss-every`) |
 | `JAISCRIPT_EXPERIMENT_VM_NO_GS` | OFF | Measurement only: `/GS-` on `vm_backend.cpp` (MSVC). Never ship with it |
 | `JAISCRIPT_RUNNER_PADDING_CONTROL` | OFF | A code-placement control build of the runner, for benchmarking |
 
@@ -185,7 +188,7 @@ JaiScript/
 │   ├── lsp/                The language server
 │   ├── ci/                 The CI gates (gates.sh)
 │   └── vscode-jaiscript/   The VS Code extension (syntax, debugging)
-├── examples/               GLOOM, GRUBWELL, the demoreel, Gator Quest, JaiDoom, embed_quickstart
+├── examples/               GLOOM and its idiomatic rewrite, GRUBWELL, the demoreel, Gator Quest, JaiDoom, embed_quickstart
 └── docs/                   This directory, and the documentation site under docs/site/
 ```
 

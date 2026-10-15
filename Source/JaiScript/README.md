@@ -4,7 +4,7 @@ JaiScript is an embedded scripting language for C++ engines: C++-flavored syntax
 classes with hot reload, coroutines, a three-rung type ladder (`int` / `auto` / `var`) with a
 static checker that is strict by default, value semantics with references by declaration, and
 two interchangeable backends — a tree-walking interpreter and a bytecode VM — kept at
-byte-for-byte parity by 2,400+ tests and a differential fuzzer. It has no dependencies and
+byte-for-byte parity by 4,000+ tests and a differential fuzzer. It has no dependencies and
 builds as a static library plus headers.
 
 The documentation — a 15-chapter language guide, a 15-chapter embedding guide, language bridges
@@ -124,8 +124,8 @@ accessors, and hot reload that migrates live instances field by field.
 **Coroutines.** `coroutine` functions *and* methods, `yield`, drivable from a range-`for` or
 advanced with `next()` by the host a frame at a time.
 
-**Everything else you reach for.** Lambdas with automatic captures, default and variadic
-arguments, template strings, `include` / `import` with a `.jaibite` disk cache, namespaces,
+**Everything else you reach for.** Lambdas with C++ capture lists, default arguments,
+host functions that take any number of arguments, template strings, `include` / `import` with a `.jaibite` disk cache, namespaces,
 enums, destructuring, `parallel_transform`, JSON and binary serialization, a `reflect::` API,
 a DAP debugger with a VS Code extension, an execution budget, a memory cap, and checked
 integer overflow.
@@ -153,7 +153,7 @@ Release pass.
 | `JAISCRIPT_BUILD_TESTS` | top-level | The Foundry test suite (`jaiscript_tests`) and the fuzzer (`jaiscript_fuzz`) |
 | `JAISCRIPT_BUILD_RUNNER` | top-level | The standalone runner / REPL (`jaiscript`) |
 | `JAISCRIPT_BUILD_LSP` | top-level | The language server (`jaiscript_lsp`) |
-| `JAISCRIPT_BUILD_EXAMPLES` | top-level | `jai_gloom`, `jai_crawler`, `jai_demoreel` |
+| `JAISCRIPT_BUILD_EXAMPLES` | top-level | `jai_gloom`, `jai_crawler`, `jai_demoreel`, and in a top-level build `embed_quickstart` (the embedding quickstart's host) |
 | `JAISCRIPT_INSTALL` | top-level | Install rules and the `find_package(JaiScript)` package |
 | `JAISCRIPT_ENABLE_DEBUGGER` | ON | The DAP-over-TCP debug listener; turn it off for shipping builds |
 | `JAISCRIPT_ENABLE_BENCHMARKS` | OFF | Performance suites inside `jaiscript_tests` |
@@ -209,7 +209,7 @@ the fourth runs on the stock runner alone.
 - **GRUBWELL** (`examples/crawler`) — a step-based first-person dungeon crawler, and the hot
   reload showpiece: run it with `--dev`, edit a script, press `R`, and the dungeon changes
   under you.
-- **demoreel** (`examples/demoreel`) — thirteen truecolor demoscene scenes running on *two*
+- **demoreel** (`examples/demoreel`) — seventeen truecolor demoscene scenes running on *two*
   live engines at once; TAB swaps the backend mid-scene and the picture does not change.
 - **Gator Quest** (`examples/gatorquest`) — a terminal RPG across six realms, with combat, spells,
   crafting, bots and netplay; the world, the art, the sound effects and the music are generated

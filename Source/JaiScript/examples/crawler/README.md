@@ -23,15 +23,14 @@ of the hall. It does not stay small. And, Moraff's World-style, you look four wa
 at once: smaller LEFT, RIGHT and BEHIND views frame the forward one, so the
 Grublin sneaking up your flank shows up in 3D before it shows up in the log.
 
-## Shared logic: copied from the roguelike (now the canonical copy)
+## Shared logic
 
 `combat.jai`, `items.jai`, `entities.jai`, `data.jai`, `ai.jai`, `dungeon.jai`,
-`util.jai`, `state.jai` were **snapshots of the roguelike's committed versions** —
-the game rules are deliberately identical (one key = one turn; the AI plays the
-same grid and does not care where the camera points). The roguelike is retired
-and these copies are now the canonical versions, along with its
-smoke-seed determinism-instrument role. Three small deltas from the originals,
-each marked with a `CRAWLER DELTA` comment at the site:
+`util.jai` and `state.jai` carry the roguelike's game rules unchanged (one key =
+one turn; the AI plays the same grid and does not care where the camera points).
+They are the canonical versions of those rules, and the crawler's smoke seeds are
+their determinism instrument. Three small deltas from the roguelike, each marked
+with a `CRAWLER DELTA` comment at the site:
 
 - `dungeon.jai` — `bfs_step` searches FOUR_DIRS (a facing-locked body cannot step
   diagonally, so the autopilot must not be handed diagonal moves).
@@ -40,7 +39,7 @@ each marked with a `CRAWLER DELTA` comment at the site:
 - `ai.jai` — the boss case mints its coroutine from `G.boss_brain(...)`, a
   **coroutine method** on Game (see language notes below).
 
-New for the crawler: `view.jai` (the raycaster), `ui.jai` (log, character, compass, minimap,
+Crawler-only: `view.jai` (the raycaster), `ui.jai` (log, character, compass, minimap,
 modals), `game.jai` (facing movement, crawler turn loop, saves, autopilot),
 `main.jai`, and the adapted host `main.cpp`.
 
@@ -105,7 +104,7 @@ standalone runner (`build/bin/jaiscript`) and GRUBWELL
 runs with zero example-specific C++. It captures the runner's non-blocking `read_key`
 into a blocking wrapper, re-creates `draw`/`clear_screen`/`chr`/`host_log`,
 the flag globals, and a **bit-exact script-side `Rng`** (xorshift64\* in 16/32-bit
-limbs under checked int64 — same hashes as the C++ host: seed 99's pilot still dies
+limbs under checked int64 — same hashes as the C++ host: seed 99's pilot dies
 on floor 4, turn 341, to the same Grublin Slinger). Flags ride after `--`, dashes
 optional; the save is `crawler_save.json` beside `scripts/`, whatever the working directory:
 
@@ -302,9 +301,8 @@ boxes stay live (with the forward view alone at 64x20 it fills the view exactly)
 a body that must turn before it can walk: BFS to the goal, rotate until the nose
 lines up, step, bump-attack what blocks, skill down corridors, sip when scared.
 (The pilot never opens the map, so map-mode absolute movement is not on
-this path — all hashes below are unchanged from before that control change.)
-The FNV-fold `STATE_HASH` (now also folding the facing) must match across
-backends for a given seed:
+this path.) The FNV-fold `STATE_HASH`, which folds the facing too, must match
+across backends for a given seed:
 
 ```bash
 jai_crawler.exe --smoke --seed 99 --turns 1500 --backend vm
@@ -312,7 +310,7 @@ jai_crawler.exe --smoke --seed 99 --turns 1500 --backend interpreter
 # STATE_HASH must match between the two runs
 ```
 
-Verified at the time of writing: seeds 99 / 7 / 1337 / 4242 hash-identical across
+Verified: seeds 99 / 7 / 1337 / 4242 hash-identical across
 backends (up to 1500 turns; seed 99's pilot dies honestly on floor 4 at turn 341,
 same corpse both backends), and `--god --smoke --turns 3000 --seed 5` reaches
 floor 10 and kills Vexadrach on both (`victory: true`, same hash, turn 1016).
@@ -334,58 +332,35 @@ jaiscript.exe --backend=interp crawler.jai -- smoke turns 250 seed 99 dump f99
 
 ```
 main.cpp            thin host: console, keys, Rng, file IO, flags
-scripts/state.jai   persistent globals (G, RNG, PILOT_CO)            [boss handle moved into G]
-scripts/util.jai    colors, hashing, direction tables                [copied verbatim]
-scripts/data.jai    species/classes/bestiary/items/affixes/flavor    [copied verbatim]
-scripts/entities.jai Entity/Monster/Player/Item + timed effects      [copied verbatim]
-scripts/items.jai   loot gen, inventory, potions/scrolls             [copied verbatim]
-scripts/dungeon.jai rooms+corridors gen, FOV, BFS                    [copied, 4-dir BFS delta]
-scripts/combat.jai  attack resolution, XP, class skills              [copied, facing-target delta]
-scripts/ai.jai      monster behaviors                                [copied, boss-handle delta]
-scripts/view.jai    NEW: pixel raycaster, textures, themes, sprite art, panes + boxes + frames, half-block blit
-scripts/ui.jai      NEW: box contents, panel, minimap, modals, console-fit layout
-scripts/game.jai    NEW: Game class (+boss coroutine method), facing movement, saves, pilot
-scripts/main.jai    NEW: imports + entry + hot reload list
+scripts/state.jai   persistent globals (G, RNG, PILOT_CO)            [shared]
+scripts/util.jai    colors, hashing, direction tables                [shared]
+scripts/data.jai    species/classes/bestiary/items/affixes/flavor    [shared]
+scripts/entities.jai Entity/Monster/Player/Item + timed effects      [shared]
+scripts/items.jai   loot gen, inventory, potions/scrolls             [shared]
+scripts/dungeon.jai rooms+corridors gen, FOV, BFS                    [shared, 4-dir BFS delta]
+scripts/combat.jai  attack resolution, XP, class skills              [shared, facing-target delta]
+scripts/ai.jai      monster behaviors                                [shared, boss-method delta]
+scripts/view.jai    pixel raycaster, textures, themes, sprite art, panes + boxes + frames, half-block blit
+scripts/ui.jai      box contents, panel, minimap, modals, console-fit layout
+scripts/game.jai    Game class (+boss coroutine method), facing movement, saves, pilot
+scripts/main.jai    imports + entry + hot reload list
+scripts/crawler.jai the standalone-runner shim (the host contract in script)
 ```
 
-## Language notes (first project after typed fields + coroutine methods)
+## Language notes
 
-This is the first example written *after* typed class fields enforce (67d248ef)
-and coroutine methods landed (3766da09). Both got used naturally:
-
-- **Typed fields feel right.** `Game` declares `int facing`, `bool show_map`, and
-  friends; the compiler-enforced types caught two pilot bugs at the write site
-  during development instead of three screens later. Typed *local* declarations
-  converting like assignment is quietly the raycaster's best friend — `int lineh =
-  WALL_SCALE / pdist;` is the truncation you want, everywhere, with no `itrunc`
-  helper needed.
-- **Coroutine methods are the right shape for the boss.** `boss_brain` is a
-  `coroutine void` method on `Game`: the handle pins the receiver, the phase
-  state (enraged, mid-telegraph) lives in the coroutine frame, and the body reads
-  `monsters[bi]` / `player` through implicit `this` — including passing
-  `monsters[bi]` to `var&` helpers like `attack()` and `step_toward()`, which
-  resolves through the new lvalue-reference argument path and mutates the real
-  monster. The roguelike's free-function + global-chain version is strictly
-  clumsier.
-- **FIXED: the handle-in-a-field gripe.** This README used to say
-  "handles still refuse to live in fields/containers, so `BOSS_CO` keeps its
-  named global slot". Handles are reference-semantic on copy now — copies share
-  the one live coroutine — so the boss handle moved into a `Game` field where it
-  always belonged (`G.boss_co`, see game.jai/ai.jai) and the `BOSS_CO` global is
-  gone. Field stores, container elements, and by-value params all just work.
-- **Found one live regression** (reported; worked around at one site in
-  `ui.jai`): a **bare container-element read used directly as a condition is
-  always truthy** on BOTH backends — `if (arr[i])` and `if (!arr[i])` see the
-  reference wrapper, not the bool. `var v = arr[i]; if (v)`, typed/`var` function
-  returns, comparisons (`==`, `<`) and bool-typed locals all deref correctly, so
-  game logic built on `is_visible()` was never affected — but it silently
-  defeated the fog of war in any direct `if (G.visible[i])` render path (the
-  retired roguelike's map render had the same shape). Minimal repro:
-  `var a = [false]; if (a[0]) { /* taken! */ }`.
-- Inherited workarounds from the roguelike copies are still honored (save
-  padding for `from_json` engine-pointer holes, hoisted unary-minus on element
-  reads); nothing new tripped in ~1,100 lines of fresh script, including heavy
-  float math, 1,280-cell frame builds, and nested-array sprite records.
+- **Typed fields.** `Game` declares `int facing`, `bool show_map` and friends, and
+  a store of the wrong type fails at the write site. Typed local declarations
+  convert like assignment, so `int lineh = kpx / pdist;` in the raycaster is the
+  truncation it wants, with no `itrunc` helper.
+- **Coroutine methods.** `boss_brain` is a `coroutine void` method on `Game`: the
+  handle pins the receiver, the phase state (enraged, mid-telegraph) lives in the
+  coroutine frame, and the body reads `monsters[bi]` and `player` through implicit
+  `this`, passing `monsters[bi]` to `var&` helpers such as `attack()` and
+  `step_toward()`, which mutate the real monster.
+- **Coroutine handles in fields.** A copied handle shares the one live coroutine,
+  so the boss handle lives in a `Game` field (`G.boss_co`, see game.jai and
+  ai.jai); field stores, container elements and by-value parameters all hold it.
 
 Known scope cuts: monsters do not peek around corners any better than the
 roguelike's greedy-with-slide pathing; the turn sweep interpolates the camera

@@ -21,6 +21,23 @@ private:
     void validate_class_hierarchy(const std::string& class_name);
 };
 
+namespace detail {
+    // What a backend lends the one class-declaration builder both backends run
+    struct class_declaration_host {
+        engine* eng;
+        string_symbolizer* symbols;
+        const std::shared_ptr<environment>& env;   // the definition environment: base lookups and method definition envs
+        uint64_t class_definition_type_id;
+        const std::function<std::shared_ptr<class_definition>(const std::string&)>& class_lookup;
+        unit_stamp unit;
+        std::function<checked_result<script_value>(const expression_ptr&)> eval;   // the backend's evaluation of an initializer
+        std::function<void()> discard_unwinding;   // a migrate hook's error belongs to the migration, not the declaration
+    };
+
+    // A class declaration: a new script class, or a redefinition that migrates the live one in place
+    checked_result<void> declare_script_class(class_decl* decl, const class_declaration_host& host);
+}
+
 // A slot declared `t` can own an instance whose destruction runs a script destructor: a by-value class, array or map whose
 // value tree can hold one, a shared_ptr whose pointee's can (it may hold the last handle), a var or auto slot while any
 // script class declares a destructor; never a primitive, a string, a weak_ptr or a reference. Decides which locals a scope

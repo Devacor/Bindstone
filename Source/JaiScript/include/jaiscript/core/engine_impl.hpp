@@ -44,6 +44,15 @@ namespace detail {
 	};
 }
 
+namespace detail {
+	// A recorded instance stands for an object handed out under a class when its C++ class and that class derive one from the other
+	inline bool same_class_family(const class_definition* a_known, const class_definition* a_handed) {
+		if (!a_known || !a_handed) { return true; }
+		const class_definition* known_cpp = a_known->is_script_class() ? a_known->find_cpp_base_class().get() : a_known;
+		return !known_cpp || known_cpp->derives_from(a_handed) || a_handed->derives_from(known_cpp);
+	}
+}
+
 template<typename Sig>
 std::function<Sig> convert_script_function(const script_value& fn) {
 	return detail::script_function_wrapper<Sig>::wrap(fn);
@@ -72,6 +81,7 @@ script_value engine::make_object(std::shared_ptr<T> data) {
     // A plain wrapper is the object's one identity too (recorded by its complete-object pointer, handed out again for an
     // owner-equivalent handle), so an extend after the object was bound re-classes the instance every holder already has.
     const void* key = nullptr;
+    bool key_held_by_another_object = false;
     if (data) {
         if constexpr (std::is_polymorphic_v<T>) { key = dynamic_cast<const void*>(data.get()); } else { key = static_cast<const void*>(data.get()); }
         if constexpr (std::is_base_of_v<script_extensible, T>) {
@@ -85,9 +95,16 @@ script_value engine::make_object(std::shared_ptr<T> data) {
             auto holder = held ? held->get_object_holder() : nullptr;
             const bool layer = def && def->is_script_class() && !std::is_base_of_v<script_extensible, T>;
             const bool same_object = holder && holder->data && !holder->data.owner_before(data) && !data.owner_before(holder->data);
-            if (def && (layer || same_object)) {
+            // A member at offset 0 shares its enclosing object's address (and, through an aliasing handle, its owner)
+            std::type_index handed_type = std::type_index(typeid(T));
+            if constexpr (std::is_polymorphic_v<T>) { handed_type = std::type_index(typeid(*data)); }
+            std::shared_ptr<detail::first_type_t<class_definition, T>> handed_def = get_class_definition_by_type(handed_type);
+            if (!handed_def && handed_type != std::type_index(typeid(T))) { handed_def = get_class_definition_by_type(std::type_index(typeid(T))); }
+            const bool same_type_family = detail::same_class_family(def, handed_def.get());
+            if (def && (layer || same_object) && same_type_family) {
                 return script_value::make_object(def->get_name(), known, this);
             }
+            key_held_by_another_object = def && !same_type_family;
         }
     }
     if constexpr (std::is_polymorphic_v<T>) {
@@ -97,7 +114,7 @@ script_value engine::make_object(std::shared_ptr<T> data) {
                 std::shared_ptr<void> complete_object(data, dynamic_cast<void*>(data.get()));
                 instance->set_native(
                     script_value::make_cpp_object(dynamic_def->get_name(), dynamic_def->get_type_id(), complete_object, this));
-                note_script_layer(key, instance);
+                if (!key_held_by_another_object) { note_script_layer(key, instance); }
                 return script_value::make_object(dynamic_def->get_name(), instance, this);
             }
         }
@@ -111,7 +128,7 @@ script_value engine::make_object(std::shared_ptr<T> data) {
 
             instance->set_native(
                 script_value::make_cpp_object(type_name, class_def->get_type_id(), std::static_pointer_cast<void>(data), this));
-            if (data) { note_script_layer(key, instance); }
+            if (data && !key_held_by_another_object) { note_script_layer(key, instance); }
 
             return script_value::make_object(type_name, instance, this);
         }

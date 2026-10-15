@@ -1102,6 +1102,22 @@ struct OrderSlot : jai::script_extensible {
 struct OrderPlain {
     int health = 100;
 };
+// A member at offset 0 shares its enclosing object's address and, through an aliasing handle, its owner
+struct NestedPart {
+    int depth = 7;
+};
+struct NestedWhole {
+    NestedPart part;
+    int width = 3;
+};
+struct NestedPolyPart {
+    virtual ~NestedPolyPart() = default;
+    int depth = 8;
+};
+struct NestedPolyWhole {
+    NestedPolyPart part;
+    int width = 4;
+};
 
 struct hybrid_holder {
     std::shared_ptr<HybridCreature> pet;
@@ -1625,6 +1641,41 @@ public:
         });
 
         // An object extended through its base before its own C++ type is bound keeps its layer once the binder registers
+        // The one-identity record is by address: a member at offset 0, handed out through an aliasing handle that shares the
+        // whole's owner, is its own object of its own class (it was handed back as the whole, or as the whole's layer)
+        test("a_member_at_the_wholes_address_is_its_own_object", [&]() {
+            auto eng = order_engine();
+            dynamic_binder<NestedPart>(*eng, "NestedPart").constructor<>().property("depth", &NestedPart::depth).build();
+            dynamic_binder<NestedWhole>(*eng, "NestedWhole").constructor<>().property("width", &NestedWhole::width).build();
+            dynamic_binder<NestedPolyPart>(*eng, "NestedPolyPart").constructor<>().property("depth", &NestedPolyPart::depth).build();
+            dynamic_binder<NestedPolyWhole>(*eng, "NestedPolyWhole").constructor<>().property("width", &NestedPolyWhole::width).build();
+            eng->execute("class WholeKin : NestedWhole { int chomp = 3; WholeKin() : super() {} }");
+
+            auto whole = std::make_shared<NestedWhole>();
+            eng->add_global("whole", whole);
+            eng->add_global("part", std::shared_ptr<NestedPart>(whole, &whole->part));
+            check_eq(std::string("NestedPart"), eng->execute("type_of(part)").as<std::string>());
+            check_eq((script_int)7, eng->execute("part.depth").as_int());
+            eng->add_global("whole_again", whole);
+            check_eq(std::string("NestedWhole"), eng->execute("type_of(whole_again)").as<std::string>());
+            check_true(eng->execute("same_object(whole, whole_again)").as<bool>(), "the whole keeps its one identity");
+
+            auto poly = std::make_shared<NestedPolyWhole>();
+            eng->add_global("poly", poly);
+            eng->add_global("poly_part", std::shared_ptr<NestedPolyPart>(poly, &poly->part));
+            check_eq(std::string("NestedPolyPart"), eng->execute("type_of(poly_part)").as<std::string>());
+            check_eq((script_int)8, eng->execute("poly_part.depth").as_int());
+
+            auto extended = std::make_shared<NestedWhole>();
+            (void)eng->extend(extended, "WholeKin");
+            eng->add_global("kin", extended);
+            eng->add_global("kin_part", std::shared_ptr<NestedPart>(extended, &extended->part));
+            check_eq(std::string("NestedPart"), eng->execute("type_of(kin_part)").as<std::string>(), "the part is not the whole's layer");
+            eng->add_global("kin_again", extended);
+            check_eq(std::string("WholeKin"), eng->execute("type_of(kin_again)").as<std::string>(), "the whole keeps its layer");
+            check_eq((script_int)3, eng->execute("kin_again.chomp").as_int());
+        });
+
         test("extend_before_the_derived_binder_registers", [&]() {
             auto eng = order_engine();
             auto elite = std::make_shared<OrderElite>();

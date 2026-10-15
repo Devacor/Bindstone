@@ -91,6 +91,9 @@ struct script_method_dispatch {
     mutable const std::shared_ptr<function_decl>* resolved_memo = nullptr;
     mutable uint64_t resolved_memo_epoch = 0;
     mutable size_t resolved_memo_argc = 0;
+    // the main backend's compiled function for the overload last entered, keyed by its declaration (the interpreter ignores it)
+    mutable const void* backend_function_key = nullptr;
+    mutable const void* backend_function = nullptr;
     checked_result<script_value> operator()(const std::vector<script_value>& args) const;
     // The overload the arguments args[first..] call
     checked_result<const std::shared_ptr<function_decl>*> resolve(const std::vector<script_value>& args, size_t first) const;
@@ -199,6 +202,17 @@ public:
         if (first == 0) { return execute_callable(payload, args); }
         const std::vector<script_value> rest(args.begin() + static_cast<std::ptrdiff_t>(first), args.end());
         return execute_callable(payload, rest);
+    }
+    // The overload a method dispatcher resolved, entered on this_obj with args[first..]
+    virtual checked_result<script_value> execute_method_from(const script_method_dispatch& dispatch, const std::shared_ptr<function_decl>& ast,
+                                                             const script_value& this_obj, const std::vector<script_value>& args, size_t first) {
+        script_callable payload;
+        payload.kind = script_callable::kind_type::method;
+        payload.ast = ast;
+        payload.cls = dispatch.cls;
+        payload.definition_env = dispatch.definition_env;
+        payload.this_obj = this_obj;
+        return execute_callable_from(payload, args, first);
     }
 
     // Field initializers for an instance created OUTSIDE construction (engine::extend,

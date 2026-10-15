@@ -590,6 +590,23 @@ public:
                 check_eq(msg[0], msg[1], "fold-declined '+' text is byte-identical across backends");
             }
         });
+        // The literal negation fold negated a folded INT64_MIN in C++ (signed-overflow UB, a silent wrap); it now stays a
+        // run-time negation, which raises
+        test("parser_fold_negating_int64_min_defers_to_runtime", [this]() {
+            for (const char* src : {"-(-9223372036854775807 - 1)", "-(0 - 9223372036854775807 - 1)", "int x = -(-9223372036854775807 - 1); x"}) {
+                auto e = make_engine();
+                if (e->throw_on_overflow()) {
+                    std::string text = "<no throw>";
+                    try { e->execute(src); } catch (const std::exception& ex) { text = ex.what(); }
+                    check_eq(std::string("Integer overflow in unary '-'"), text, src);
+                } else {
+                    check_eq((int64_t)INT64_MIN, e->execute(src).as_int(), src);
+                }
+            }
+            auto e = make_engine();
+            check_eq((int64_t)-9223372036854775807LL, e->execute("-9223372036854775807").as_int(), "the largest literal still folds");
+            check_eq((int64_t)5, e->execute("-(-5)").as_int());
+        });
         test("parser_fold_div_min_by_neg1_defers_to_runtime", [this]() {
             auto e = make_engine();
             // Every operand folds to a literal; INT64_MIN / -1 must NOT fold (UB/trap)

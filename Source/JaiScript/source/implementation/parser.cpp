@@ -2520,8 +2520,8 @@ checked_result<expression_ptr> parser::unary() {
             return desugar_incdec(op, right, false);
         }
         // a negated numeric literal is a literal: the sign is part of the number as the language reads it, so -1 and
-        // -1.5 are constants to every consumer (the fused compare, the move rows, the counted head); the lexer's largest
-        // magnitude is INT64_MAX, so the negation always fits, and -0.0 keeps IEEE's sign as the runtime negation would
+        // -1.5 are constants to every consumer (the fused compare, the move rows, the counted head); a folded INT64_MIN
+        // stays a run-time negation (which raises under checked overflow), and -0.0 keeps IEEE's sign as the runtime negation would
         // +x on a number is the number (C++'s unary plus); a class's operator+() is the unary_expr's
         if (op.type == token_type::plus && right->get_type() == node_type::literal_expr) {
             const size_t k = static_cast<literal_expr*>(right.get())->value.raw_storage_index();
@@ -2529,8 +2529,9 @@ checked_result<expression_ptr> parser::unary() {
         }
         if (op.type == token_type::minus && right->get_type() == node_type::literal_expr) {
             const script_value& lv = static_cast<literal_expr*>(right.get())->value;
-            if (lv.raw_storage_index() == script_value::TYPEID_INT) {
-                return std::make_shared<literal_expr>(op.location, script_value(static_cast<script_int>(-lv.unchecked_as_int()), lv.get_engine()));
+            script_int negated = 0;
+            if (lv.raw_storage_index() == script_value::TYPEID_INT && ints::try_neg(lv.unchecked_as_int(), negated)) {
+                return std::make_shared<literal_expr>(op.location, script_value(negated, lv.get_engine()));
             }
             if (lv.raw_storage_index() == script_value::TYPEID_FLOAT) {
                 return std::make_shared<literal_expr>(op.location, script_value(-lv.unchecked_as_float(), lv.get_engine()));

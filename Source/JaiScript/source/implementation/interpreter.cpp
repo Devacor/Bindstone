@@ -3415,8 +3415,8 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
             active_exception_value_ = make_value(std::string(e.what()));
             current_exception_ = e;
             is_unwinding_ = true;
-        } catch (const std::runtime_error& e) {
-            // Convert runtime errors to script exceptions
+        } catch (const std::exception& e) {
+            // a native exception a statement raises (a host error, an allocation failure) is the run's script exception, as on the vm
             active_exception_value_ = make_value(std::string(e.what()));
             current_exception_ = script_exception(e.what());
             is_unwinding_ = true;

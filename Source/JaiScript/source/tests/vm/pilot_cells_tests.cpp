@@ -2151,6 +2151,90 @@ var probe = function(int n, int at) { int i = 0; while (i < n) { retag_at(i, at)
 			check(run_with(true, std::string(defs) + " probe(4, 2);", true, true).find("int") != std::string::npos, "the redeclared int boundary holds after the call when the same unit redeclares: " + run_with(true, std::string(defs) + " probe(4, 2);", true, true));
 			check(run_with(true, std::string(defs) + " probe(4, 2);", true, false).rfind("2.5", 0) == 0, "another unit's redeclaration shadows and the loop keeps its own cell: " + run_with(true, std::string(defs) + " probe(4, 2);", true, false));
 		});
+		test("a_pinned_global_keeps_its_kind_or_leaves_the_block", [this]() {
+			// a comparison the checker classed int_int or float_float pins its environment values to that kind (checked at the entry and
+			// at every landing) and a truth test on a cell runs inline; every way a typed global can change while the block runs is a
+			// call, so the landing after it rereads a same-kind value and misses on another kind or a binding it cannot hold: a host
+			// define of the same kind or another, a host reference, a script callback, a reload of the unit with the same type or
+			// another, a write to the float, and a parallel region (a write there is an error in safe mode; in unsafe mode it runs
+			// inside the call, before the landing)
+			const char* defs = R"JAI(
+int G = 3;
+float F = 0.5;
+array<int> A = [5, 1, 3, 3, 9, 2, 8, 4];
+function hit(int i, int at, int how) -> void { if (i == at) { host_change(how); } }
+function probe(int n, int at, int how) -> string {
+	int acc = 0;
+	bool odd = false;
+	for (int i = 0; i < n; ++i) {
+		hit(i, at, how);
+		if (A[i] == G) { acc = acc + 100; }
+		if (i < G) { acc = acc + 1; }
+		if (F > 0.25) { acc = acc + 10; }
+		odd = !odd;
+		if (odd) { acc = acc + 1000; }
+	}
+	return to_string(acc) + " " + type_of(G) + " " + to_string(G) + " " + type_of(F);
+}
+)JAI";
+			struct outcome { std::string value; unsigned long long misses = 0; };
+			auto run_with = [&](bool vm, const std::string& call, bool proofs) -> outcome {
+				auto e = engine::make();
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
+				if (!proofs) { e->type_proofs(false); }
+				e->disable(jai::filesystem);
+				engine* raw = e.get();
+				script_int host_g = 11;
+				const std::string path = "D:/virtual/pilot/pinned_unit.jai";
+				e->add_function("host_change", [raw, &host_g, path](int how) {
+					switch (how) {
+					case 1: raw->add_global("G", script_value(script_int{7}, raw)); break;
+					case 2: raw->add_global("G", script_value(script_float{2.5}, raw)); break;
+					case 3: raw->add_global_ref("G", host_g); break;
+					case 4: raw->execute("G = G + 2;"); break;
+					case 5: raw->execute_file_source(path, "int G = 1;"); break;
+					case 6: raw->execute_file_source(path, "float G = 4.5;"); break;
+					case 7: raw->add_global("F", script_value(script_float{0.125}, raw)); break;
+					case 8: raw->execute("array<int> xs = [6]; try { parallel_for (auto& x : xs) { G = x; } } catch (err) { }"); break;
+					case 9: raw->allow_unsafe_parallel(true); raw->execute("array<int> xs = [6]; parallel_for (auto& x : xs) { G = x; }"); raw->allow_unsafe_parallel(false); break;
+					default: break;
+					}
+				});
+				outcome result;
+				try { result.value = e->execute_file_source(path, std::string(defs) + " " + call).as_string(); }
+				catch (const std::exception& ex) { result.value = std::string("throw:") + ex.what(); }
+				if (vm) { result.misses = e->cells_counters().misses; }
+				return result;
+			};
+			struct probe { int how; const char* expected; bool misses; };
+			const probe probes[] = {
+				{ 0, "4283 int 3 float", false }, { 1, "", false }, { 2, "", true }, { 3, "", true }, { 4, "", false },
+				{ 5, "", false }, { 6, "", true }, { 7, "", false }, { 8, "4283 int 3 float", false }, { 9, "", false },
+			};
+			std::string seen, observed;
+			for (const probe& p : probes) {
+				const std::string call = "probe(8, 2, " + std::to_string(p.how) + ");";
+				for (bool proofs : { true, false }) {
+					const outcome interp = run_with(false, call, proofs), vm = run_with(true, call, proofs);
+					check_eq(interp.value, vm.value, call + (proofs ? "" : " proofs off") + ": both backends");
+					if (p.expected[0] != 0) { check_eq(std::string(p.expected), vm.value, call + (proofs ? "" : " proofs off") + ": the value"); }
+					if (proofs) { seen += std::to_string(p.how) + (vm.misses != 0 ? "m " : "r ") ; observed += call + " " + vm.value + " misses " + std::to_string(vm.misses) + "; "; }
+				}
+			}
+			std::string expected_seen; for (const probe& p : probes) { expected_seen += std::to_string(p.how) + (p.misses ? "m " : "r "); }
+			check_eq(expected_seen, seen, "each change rereads or misses at the landing: " + observed);
+			std::string listing;
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+				e->add_function("host_change", [](int) {});
+				e->disassembly_sink([&listing](const std::string& l, const std::string&) { listing += l; listing += "\n"; });
+				try { e->execute(std::string(defs) + " probe(8, 2, 0);"); } catch (const std::exception& ex) { listing += std::string("throw:") + ex.what(); }
+			}
+			check(listing.find("-- cell loop ") != std::string::npos, "the loop closes: " + listing.substr(0, 4000));
+			check(listing.find("C_JCMP_ANY") == std::string::npos, "the classed compares on globals and the truth test are pinned: " + listing.substr(0, 6000));
+			check(listing.find("C_JTRUTH") != std::string::npos, "the truth test runs inline: " + listing.substr(0, 6000));
+		});
 		test("call_arguments_and_the_callee_keep_their_source_order_across_a_getter", [this]() {
 			// Regression, with a callee-getter variant: `take(V, G + 1)` where V is a global reference to a native
 			// property whose getter steps G, the same through a local reference slot, and `F(G + 1)` where F is a reference to a

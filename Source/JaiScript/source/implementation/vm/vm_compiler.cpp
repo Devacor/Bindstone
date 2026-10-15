@@ -3444,6 +3444,15 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			return false;
 		};
 		auto slot_read = [&](ir_op& op, uint32_t operand) { if (!(operand & k_typed_const_bit) && op.nreads < 8) { op.reads[op.nreads++] = operand & k_typed_slot_mask; } };
+		// the kind a binary's operands hold under the checker's class (int_int, float_float) when the typed operation exists: their cells
+		// take it as their contract, so an environment value (kind checked at the entry and at every landing) or a load's temp reads
+		// unchecked; a literal of another kind leaves them open
+		auto classed_kind = [&](const fused_binary_proto& bp, opcode fast) -> uint8_t {
+			if (fast == opcode::op_halt || (bp.typed_class != 1 && bp.typed_class != 2)) return 0;
+			const uint8_t k = bp.typed_class == 1 ? kint : kflt;
+			auto fits = [&](const fused_operand& o) { return o.const_index == k_invalid_u32 || (o.const_index < c.constants.size() && c.constants[o.const_index].raw_storage_index() == k); };
+			return fits(bp.left) && fits(bp.right) ? k : 0;
+		};
 		// a site whose container is an alias reads the alias (the must-define dataflow holds it to a defined alias, the liveness keeps the
 		// alias until its last site); a push receiver is resolved at entry, never rebound
 		auto alias_site = [&](ir_op& op, size_t at) -> bool {
@@ -3657,13 +3666,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						const fused_binary_proto& bp = c.fused_binary_protos[st.a];
 						const bool is_cmp = cmp_tok(bp.op);
 						if (!arith_tok(bp.op) && !is_cmp) { refuse(chunk::cell_refusal_translation, ip); break; }
-						if (!value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.b) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
+						const opcode fast = bp.typed_class == 1 || bp.typed_class == 2 ? arith_op(static_cast<token_type>(bp.op), bp.typed_class) : opcode::op_halt;
+						const uint8_t tk = classed_kind(bp, fast);
+						if (!value(op, bp.left, tk, static_cast<uint32_t>(ip * 3), ip, op.b) || !value(op, bp.right, tk, static_cast<uint32_t>(ip * 3 + 1), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
 						const uint32_t t = arg_temp_next++;
-						uint8_t tk = 0;
-						if ((bp.typed_class == 1 || bp.typed_class == 2) && !(op.b & k_ir_env_bit) && !(op.c & k_ir_env_bit)) {
-							const opcode fast = arith_op(static_cast<token_type>(bp.op), bp.typed_class);
-							if (fast != opcode::op_halt) { op.fast = fast; tk = bp.typed_class == 1 ? kint : kflt; use_slot(op.b, tk, false, 0, nullptr, ip); use_slot(op.c, tk, false, 0, nullptr, ip); }
-						}
+						if (tk != 0) { op.fast = fast; }
 						use_slot(t, is_cmp ? kbool : tk, true, k_typed_dst_temp, nullptr, ip);
 						op.kind = is_cmp ? ir::cmpval : ir::arith; op.tok = bp.op; op.a = t; op.writes = t;
 						ret.a = t;
@@ -3719,7 +3726,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				} else if (st.op == opcode::op_fused_cmp_jump) {
 					const fused_binary_proto& bp = c.fused_binary_protos[st.b];
 					op.tok = bp.op; op.target = st.a;
-					if (!cmp_tok(bp.op) || !value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_head, ip); break; }
+					const opcode fast = cmp_tok(bp.op) && (bp.typed_class == 1 || bp.typed_class == 2) ? cmp_op(static_cast<token_type>(bp.op), bp.typed_class) : opcode::op_halt;
+					const uint8_t pk = classed_kind(bp, fast);
+					if (!cmp_tok(bp.op) || !value(op, bp.left, pk, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, bp.right, pk, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_head, ip); break; }
+					if (pk != 0) { op.fast = fast; }
 				} else {
 					const uint8_t head_kind = st.op <= opcode::op_t_jne_ii ? kint : kflt;
 					use_slot(st.a, head_kind, false, 0, nullptr, ip); use_slot(st.b, head_kind, false, 0, nullptr, ip);
@@ -3778,11 +3788,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			} else if (st.op == opcode::op_binary_fused && ip + 1 < back && code[ip + 1].op == opcode::op_to_bool && st.a < c.fused_binary_protos.size() && cmp_tok(c.fused_binary_protos[st.a].op) && inside_chain(ip)) {
 				// the right side of a && / || chain as a value: the comparison into the chain's value cell; the TO_BOOL has no copy
 				const fused_binary_proto& bp = c.fused_binary_protos[st.a];
-				if (!value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.b) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
-				if ((bp.typed_class == 1 || bp.typed_class == 2) && !(op.b & k_ir_env_bit) && !(op.c & k_ir_env_bit)) {
-					const opcode fast = arith_op(static_cast<token_type>(bp.op), bp.typed_class);
-					if (fast != opcode::op_halt) { op.fast = fast; const uint8_t tk = bp.typed_class == 1 ? kint : kflt; use_slot(op.b, tk, false, 0, nullptr, ip); use_slot(op.c, tk, false, 0, nullptr, ip); }
-				}
+				const opcode fast = bp.typed_class == 1 || bp.typed_class == 2 ? arith_op(static_cast<token_type>(bp.op), bp.typed_class) : opcode::op_halt;
+				const uint8_t tk = classed_kind(bp, fast);
+				if (!value(op, bp.left, tk, static_cast<uint32_t>(ip * 3), ip, op.b) || !value(op, bp.right, tk, static_cast<uint32_t>(ip * 3 + 1), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (tk != 0) { op.fast = fast; }
 				if (vslot == k_invalid_u32) { vslot = arg_temp_next++; }
 				use_slot(vslot, kbool, true, k_typed_dst_temp, nullptr, ip);
 				op.kind = ir::cmpval; op.tok = bp.op; op.a = vslot; op.writes = vslot;
@@ -3903,7 +3912,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (site.orig.op == opcode::op_index_fused_decl && site.orig.a < c.fused_index_protos.size() && !array_site(c.fused_index_protos[site.orig.a])) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (site.stamp && stamp_kind(site.stamp) == 0 && site.stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }
 				for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { use_slot(site.operands[k], kint, false, 0, nullptr, ip); slot_read(op, site.operands[k]); }
-				{ const uint8_t ld = site.temp ? k_typed_dst_temp : decl_landing(st.a); use_slot(st.a, classed && stamp_kind(site.stamp) == site.decl_expect ? site.decl_expect : 0, true, ld, ld == k_typed_dst_temp ? nullptr : site.stamp, ip); }
+				{ const uint8_t ld = site.temp ? k_typed_dst_temp : decl_landing(st.a); use_slot(st.a, classed && (site.temp || stamp_kind(site.stamp) == site.decl_expect) ? site.decl_expect : 0, true, ld, ld == k_typed_dst_temp ? nullptr : site.stamp, ip); }
 				op.kind = ir::load; op.a = st.a; op.writes = st.a; op.container = site.cont_slot;
 			} else if (st.op == opcode::op_index_fused && st.a < c.fused_index_protos.size() && (st.b & index_flag_lvalue_shape) && ip + 1 < back && code[ip + 1].op == opcode::op_decl_ref_value
 			           && code[ip + 1].a < c.nodes.size() && c.nodes[code[ip + 1].a] && c.nodes[code[ip + 1].a]->get_type() == node_type::variable_decl) {
@@ -3975,7 +3984,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const uint8_t dk = stamp_kind(fp.decl_type);
 				if (!fp.decl_temp && dk == 0 && fp.decl_type && fp.decl_type->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (!index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
-				{ const uint8_t ld = fp.decl_temp ? k_typed_dst_temp : decl_landing(fp.decl_slot); use_slot(fp.decl_slot, fp.decl_temp ? 0 : dk, true, ld, ld == k_typed_dst_temp ? nullptr : fp.decl_type, ip); }
+				{ const uint8_t ld = fp.decl_temp ? k_typed_dst_temp : decl_landing(fp.decl_slot); use_slot(fp.decl_slot, fp.decl_temp ? (fp.decl_expect == kint || fp.decl_expect == kflt ? fp.decl_expect : 0) : dk, true, ld, ld == k_typed_dst_temp ? nullptr : fp.decl_type, ip); }
 				op.kind = ir::load; op.a = fp.decl_slot; op.proto = st.a; op.writes = fp.decl_slot;
 				op.container = direct_slot(fp.container) || (fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask) ? fp.container.slot : k_invalid_u32;
 			} else if (st.op == opcode::op_index_store_fused && st.a < c.fused_index_protos.size()) {
@@ -4091,12 +4100,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					targeted = t == ip + 1;
 				}
 				if (targeted) { refuse(chunk::cell_refusal_malformed, ip + 1); break; }
-				if (!value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				const opcode fast = bp.typed_class == 1 || bp.typed_class == 2 ? cmp_op(static_cast<token_type>(bp.op), bp.typed_class) : opcode::op_halt;
+				const uint8_t pk = classed_kind(bp, fast);
+				if (!value(op, bp.left, pk, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, bp.right, pk, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.kind = ir::cmp; op.tok = bp.op; op.target = j.a; op.sense = j.op == opcode::op_jump_if_true;
-				if ((bp.typed_class == 1 || bp.typed_class == 2) && !(op.a & k_ir_env_bit) && !(op.b & k_ir_env_bit)) {
-					const opcode t = cmp_op(static_cast<token_type>(bp.op), bp.typed_class);   // the pinned form when the checker classed both operands
-					if (t != opcode::op_halt) { op.fast = t; use_slot(op.a, bp.typed_class == 1 ? kint : kflt, false, 0, nullptr, ip); use_slot(op.b, bp.typed_class == 1 ? kint : kflt, false, 0, nullptr, ip); }
-				}
+				if (pk != 0) { op.fast = fast; }
 				ops.push_back(op);
 				op = ir_op{}; op.kind = ir::skip;   // the jump's place: no copy instruction
 				++ip;
@@ -4104,8 +4112,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (!(st.a > ip)) { refuse(chunk::cell_refusal_effect, ip); break; }   // an edge past the back edge exits the block
 				const fused_binary_proto& bp = c.fused_binary_protos[st.b];
 				if (!cmp_tok(bp.op)) { refuse(chunk::cell_refusal_translation, ip); break; }
-				if (!value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				const opcode fast = bp.typed_class == 1 || bp.typed_class == 2 ? cmp_op(static_cast<token_type>(bp.op), bp.typed_class) : opcode::op_halt;
+				const uint8_t pk = classed_kind(bp, fast);
+				if (!value(op, bp.left, pk, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, bp.right, pk, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.kind = ir::cmp; op.tok = bp.op; op.target = st.a;
+				if (pk != 0) { op.fast = fast; }
 				if (true_sense_leaf(ip, st.a)) { op.target = code[ip + 1].a; op.sense = true; ops.push_back(op); op = ir_op{}; op.kind = ir::skip; ++ip; }
 			} else if (st.op == opcode::op_cfor_prep) {
 				// an inner counted loop's head: `var cmp end`, the exit its false edge (the general form's CFOR_PREP tests once the same way); the var,
@@ -4838,6 +4849,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				opcode fast = op.fast;
 				uint8_t tok = op.tok;
 				if (a2 & k_typed_const_bit) { std::swap(a2, b2); fast = mirror_fast(fast); tok = mirror_tok(tok); }   // a literal on the left: the mirrored comparison (the translation refuses two literals)
+				if (ir_passes_ && !op.head && tok == static_cast<uint8_t>(token_type::bang) && !(a2 & k_typed_const_bit)) { append(vm_instruction{opcode::op_c_jtruth, a2, 1, bits}, ip); break; }   // a truth test inline (b = 1: its miss re-runs the test)
 				if (fast != opcode::op_halt) {
 					const uint8_t k = fast <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
 					const bool p = pinned_operand(a2, k) && pinned_operand(b2, k);
@@ -4882,11 +4894,19 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { if (!(site.operands[k] & k_typed_const_bit)) { site.operands[k] = current[site.operands[k] & k_typed_slot_mask]; } }
 				}
 				site.orig_ip = static_cast<uint32_t>(ip);
+				const uint32_t dst = dst_of(op.a);   // an adopted-kind local lands through the declared-type rule; a pinned local or a compiler value lands in place
+				bool adopted = loop.cells[dst].kind == 0 && !loop.cells[dst].temp;
+				if (const uint8_t contract = loop.cells[dst].temp ? loop.cells[dst].kind : 0; contract != 0 && op.container != chunk::k_iter_container) {
+					// a compiler value under a contract (its site's proof or a typed read) lands only that kind: the int row takes an int element and
+					// misses on any other; a contract the site does not expect lands through the landing rule
+					const uint8_t proven = op.proto != k_invalid_u32 ? c.fused_index_protos[op.proto].decl_expect : site.decl_expect;
+					if (contract == proven || (contract == kint && site.decl_expect == 0xFF)) { site.decl_expect = contract; }
+					else { adopted = true; }
+				}
 				chunk_ = &c;
 				typed_site_at(code.size()) = site;
-				const uint32_t dst = dst_of(op.a);   // an adopted-kind local lands through the declared-type rule; a pinned local or a compiler value lands in place
 				const uint32_t miss_ip = op.origin != k_invalid_u32 ? op.origin : static_cast<uint32_t>(ip);   // a range landing misses onto the general ITER_NEXT, an argument's read onto the first argument instruction (argument values are never flushed)
-				append(vm_instruction{loop.cells[dst].kind == 0 && !loop.cells[dst].temp ? opcode::op_c_load_any : opcode::op_c_load, dst, loop_index, miss_ip}, ip);
+				append(vm_instruction{adopted ? opcode::op_c_load_any : opcode::op_c_load, dst, loop_index, miss_ip}, ip);
 				break;
 			}
 			case ir::store: {

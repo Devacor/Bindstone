@@ -800,13 +800,6 @@ namespace jai {
         void absorb_nested_trace();
         checked_result<void> raise_nested_failure(const std::exception& e);
 
-        // Class parsing context - tracks unresolved identifiers in methods
-        struct class_context {
-            std::string class_name;
-            std::set<uint64_t> unresolved_identifiers;  // Interned IDs of identifiers found in methods but not yet resolved
-            bool in_method = false;
-        };
-        std::optional<class_context> current_class_context_;
         // "Inside a catch block" marker of the rethrow protocol (0 = none); the catch
         // VARIABLE is a frame slot / scope local bound by visit_try_stmt, never resolved
         // through this. Parked per coroutine with the exception pair (resume_coroutine).

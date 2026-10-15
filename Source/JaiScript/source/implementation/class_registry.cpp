@@ -2,6 +2,9 @@
 #include "jaiscript/core/dynamic_binder.hpp"
 #include "jaiscript/core/engine.hpp"
 #include "jaiscript/detail/release_machine.hpp"
+#include "jaiscript/detail/namespace_scope.hpp"
+#include "jaiscript/detail/ast_serializer.hpp"
+#include "jaiscript/detail/builtin_methods.hpp"
 #include <stdexcept>
 #include <set>
 #include <algorithm>
@@ -511,5 +514,400 @@ void class_registry::validate_class_hierarchy(const std::string& class_name) {
         current = current->get_parent();
     }
 }
+
+namespace detail {
+
+namespace {
+    // The synthesized accessors of a field (a user _get_/_set_ keeps its id)
+    script_function field_getter(uint64_t field_id) {
+        return [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                    "Property getter requires 'this' object");
+            }
+            auto instance = args[0].as<std::shared_ptr<class_instance>>();
+            return instance->get_field(field_id);
+        };
+    }
+
+    script_function field_setter(uint64_t field_id) {
+        return [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() != 2) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                    "Property setter requires 'this' and value");
+            }
+            auto instance = args[0].as<std::shared_ptr<class_instance>>();
+            // Typed fields enforce like locals (declared type; auto infers from the initialized value)
+            auto enforced = instance->field_store(field_id, args[1], [&] { return args[1]; });
+            if (!enforced) {
+                return enforced;
+            }
+            instance->set_field_unchecked(field_id, enforced.value());
+            return std::move(enforced.value());
+        };
+    }
+}
+
+checked_result<void> declare_script_class(class_decl* decl, const class_declaration_host& host) {
+    engine* eng = host.eng;
+    string_symbolizer* symbols = host.symbols;
+    const std::shared_ptr<environment>& env = host.env;
+
+    std::shared_ptr<script_class_definition> class_def;
+    bool is_redefinition = false;
+
+    auto [class_var_id, class_var_name_view] = symbols->get_class_var_id_with_view(decl->name_id);
+
+    auto global_env = eng ? eng->get_global_environment() : nullptr;
+    if (!global_env) {
+        return checked_result<void>(make_error_code(runtime_error_code::engine_destroyed));
+    }
+    auto existing_result = global_env->get(class_var_id);
+    if (existing_result) {
+        script_value existing = std::move(existing_result.value());
+        if (!existing.is_null() && existing.is_object()) {
+            auto objHolder = existing.get_object_holder();
+            if (objHolder && objHolder->type_id == host.class_definition_type_id) {
+                class_def = std::static_pointer_cast<script_class_definition>(objHolder->data);
+                is_redefinition = true;
+            }
+        }
+    }
+
+    if (!class_def) {
+        uint64_t type_id = (decl->name_id != UINT64_MAX) ? decl->name_id : symbols->intern(decl->name);
+        class_def = std::make_shared<script_class_definition>(decl->name, type_id, eng);
+    } else {
+        class_def->clear_asts();
+        class_def->clear_instance_method_overloads();
+        class_def->clear_static_method_overloads();
+    }
+
+    class_def->nocopy(decl->nocopy);
+    class_def->set_unit(host.unit);
+
+    std::unordered_map<uint64_t, script_value> new_field_defaults;
+    std::unordered_map<uint64_t, type_info_ptr> new_field_types;    // declared types (typed fields enforce like locals)
+    std::unordered_map<uint64_t, type_info_ptr> new_static_types;   // declared static types ('auto' = null entry)
+    std::unordered_map<uint64_t, script_value> new_methods;
+    std::unordered_map<uint64_t, script_value> new_static_methods;
+    std::set<uint64_t> new_static_field_ids;
+
+    if (!decl->members.empty()) {
+        new_field_defaults.reserve(decl->members.size());
+        new_methods.reserve(decl->members.size());
+        new_static_methods.reserve(decl->members.size());
+    }
+
+    if (!decl->base_classes.empty()) {
+        std::vector<std::shared_ptr<class_definition>> parent_defs;
+        parent_defs.reserve(decl->base_classes.size());
+
+        for (std::string_view base_name : decl->base_classes) {
+            uint64_t base_name_id = symbols->intern(base_name);
+            auto [base_class_var_id, base_class_var_name] = symbols->get_class_var_id_with_view(base_name_id);
+            script_value base_class_var(std::monostate{}, eng);
+            auto base_result = env->get(base_class_var_id);
+            if (base_result) {
+                base_class_var = std::move(base_result.value());
+            }
+
+            std::shared_ptr<class_definition> base_class_def;
+
+            if (!base_class_var.is_null() && base_class_var.is_object()) {
+                auto objHolder = base_class_var.get_object_holder();
+                if (objHolder && objHolder->type_id == host.class_definition_type_id) {
+                    base_class_def = std::static_pointer_cast<class_definition>(objHolder->data);
+                } else {
+                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+                }
+            } else if (auto ns_class = namespace_class(*eng, base_name)) {
+                base_class_def = std::move(ns_class);
+            } else if (host.class_lookup) {
+                if (auto cpp_class_def = host.class_lookup(std::string(base_name))) {
+                    base_class_def = cpp_class_def;
+                } else if (env->contains(base_name_id)) {
+                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                        "Constructor found for '{0}' but no class definition available", base_name_id);
+                } else {
+                    return checked_result<void>(make_error_code(runtime_error_code::class_not_found),
+                        "Base class '{0}' not found", base_name_id);
+                }
+            } else if (env->contains(base_name_id)) {
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                    "Script class inheriting from C++ class '{0}' requires engine integration", base_name_id);
+            } else {
+                return checked_result<void>(make_error_code(runtime_error_code::class_not_found),
+                    "Base class '{0}' not found", base_name_id);
+            }
+
+            if (base_class_def) {
+                parent_defs.push_back(base_class_def);
+                auto script_class = std::dynamic_pointer_cast<script_class_definition>(base_class_def);
+                if (!script_class && parent_defs.size() == 1) {
+                    class_def->set_cpp_base_class(base_class_def);
+                }
+            }
+        }
+
+        if (!parent_defs.empty() && !class_def->set_parents(parent_defs)) {
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+        }
+    }
+
+    apply_member_access_labels(*class_def, *decl, *symbols);
+
+    if (decl->base_classes.size() > 1) {
+        // C++ refuses an ambiguous inherited field; a field the class declares itself shadows its parents'
+        std::unordered_set<uint64_t> derived_field_names;
+        for (const auto& member : decl->members) {
+            if (member.declaration->get_type() == node_type::variable_decl) {
+                auto* var_decl = static_cast<variable_decl*>(member.declaration.get());
+                if (!var_decl->is_static) {
+                    derived_field_names.insert(var_decl->name_id);
+                }
+            }
+        }
+        std::unordered_map<uint64_t, std::vector<std::string>> field_sources;
+        for (const auto& parent : class_def->get_parent_classes()) {
+            for (const auto& [field_id, unused_default] : parent->get_all_field_defaults()) {
+                if (derived_field_names.find(field_id) == derived_field_names.end()) {
+                    field_sources[field_id].push_back(parent->get_name());
+                }
+            }
+        }
+        for (const auto& [field_id, sources] : field_sources) {
+            if (sources.size() > 1) {
+                return checked_result<void>(make_error_code(runtime_error_code::multiple_inheritance),
+                    "Field inherited from multiple parents", field_id, decl->name_id);
+            }
+        }
+    }
+
+    bool found_constructor = false;
+
+    // Reflection's field order: instance fields then statics, each in declaration order
+    std::vector<uint64_t> reflect_field_order_instance;
+    std::vector<uint64_t> reflect_field_order_static;
+    for (const auto& member : decl->members) {
+        auto* var_decl = member.declaration->get_type() == node_type::variable_decl
+            ? static_cast<variable_decl*>(member.declaration.get()) : nullptr;
+        auto* func_decl = member.declaration->get_type() == node_type::function_decl
+            ? static_cast<function_decl*>(member.declaration.get()) : nullptr;
+
+        if (var_decl) {
+            script_value default_val(std::monostate{}, eng);
+            uint64_t field_id = var_decl->name_id;
+            expression_ptr initializer_ast = nullptr;
+
+            if (var_decl->initializer) {
+                auto* assign_expr = var_decl->initializer->get_type() == node_type::assignment_expr
+                    ? static_cast<assignment_expr*>(var_decl->initializer.get()) : nullptr;
+                if (assign_expr) {
+                    if (assign_expr->target->get_type() == node_type::identifier_expr) {
+                        field_id = static_cast<identifier_expr*>(assign_expr->target.get())->symbol_id;
+                    }
+                    initializer_ast = assign_expr->value;
+                } else {
+                    initializer_ast = var_decl->initializer;
+                }
+            }
+
+            if (var_decl->is_static) {
+                if (field_id != 0) {
+                    new_static_field_ids.insert(field_id);
+                    reflect_field_order_static.push_back(field_id);
+                }
+                // A reload preserves a static's runtime value; only NEW statics run their initializer
+                bool preserve_existing = is_redefinition && field_id != 0 && class_def->has_static_field(field_id) && !var_decl->is_const;   // a class constant has no state to keep (internal/const.md)
+
+                if (initializer_ast && !preserve_existing) {
+                    auto init_result = host.eval(initializer_ast);
+                    if (!init_result) {
+                        return init_result.error_value();
+                    }
+                    default_val = initializer_store_value(std::move(init_result.value()), initializer_ast.get());
+                    if (!default_val.has_valid_engine() && eng) {
+                        default_val.set_engine(eng);
+                    }
+                }
+                // Declared type ('auto' parses as null and infers; 'var' stores the any tag); the initializer converts through
+                // the field table like an instance initializer
+                if (field_id != 0) {
+                    new_static_types[field_id] = var_decl->type;
+                }
+                if (!preserve_existing && var_decl->type && var_decl->type->base_type != script_value_type::jai_any_type) {
+                    if (default_val.is_null()) {
+                        default_val.set_type_info(var_decl->type);
+                    } else {
+                        auto converted = field_store_convert(default_val, var_decl->type, eng, field_id, class_def.get(), true);
+                        if (!converted) {
+                            return converted.error_value();
+                        }
+                        default_val = std::move(converted.value());
+                    }
+                }
+
+                if (field_id != 0 && !preserve_existing) {
+                    class_def->add_static_field(field_id, default_val);
+                }
+                if (field_id != 0) { class_def->mark_const_static(field_id, var_decl->is_const); }
+            } else if (field_id != 0) {
+                reflect_field_order_instance.push_back(field_id);
+                if (initializer_ast) {
+                    class_def->add_field_initializer_ast(field_id, initializer_ast);
+                }
+                new_field_defaults[field_id] = default_val;
+                if (var_decl->type) {
+                    new_field_types[field_id] = var_decl->type;
+                }
+            }
+        } else if (func_decl) {
+            auto method_name = func_decl->name;
+
+            if (method_name == decl->name) {
+                found_constructor = true;
+                class_def->add_constructor_from_ast(std::static_pointer_cast<function_decl>(member.declaration));
+            } else if (method_name.size() > 1 && method_name[0] == '~') {   // "~" alone is operator~
+                class_def->add_destructor_from_ast(std::static_pointer_cast<function_decl>(member.declaration), env);
+            } else {
+                uint64_t method_id = func_decl->name_id;
+                auto method_ast = std::static_pointer_cast<function_decl>(member.declaration);
+
+                if (is_redefinition) {
+                    if (method_ast->is_static) {
+                        class_def->add_static_script_method(method_name, method_ast, env);
+                        new_static_methods[method_id] = class_def->get_static_method(method_id, false);
+                    } else {
+                        class_def->add_script_method(method_name, method_ast, env);
+                        new_methods[method_id] = class_def->get_method(method_id, false);
+                    }
+                } else {
+                    try {
+                        if (method_ast->is_static) {
+                            class_def->add_static_script_method(method_name, method_ast, env);
+                        } else {
+                            class_def->add_method_from_ast(method_name, method_ast, env, is_redefinition);
+                        }
+                    } catch (const runtime_error& e) {
+                        std::string error_msg = e.what();
+                        if (error_msg.find("Undefined variable") == std::string::npos) {
+                            throw;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    {
+        // TYPED ctor value: exec_new and the call paths recover the payload through target<script_callable_thunk>() and run
+        // construction and the body without a native re-entry; every other caller goes through operator()
+        script_callable ctor_payload;
+        ctor_payload.kind = script_callable::kind_type::constructor;
+        ctor_payload.cls = class_def;
+        if (found_constructor) {
+            ctor_payload.definition_env = global_env;
+        }
+        global_env->define(decl->name_id, script_value::make_function(script_callable_thunk{eng, std::move(ctor_payload)}, eng));
+    }
+
+    reflect_field_order_instance.insert(reflect_field_order_instance.end(), reflect_field_order_static.begin(), reflect_field_order_static.end());
+    class_def->set_field_order(std::move(reflect_field_order_instance));
+
+    if (is_redefinition) {
+        std::unordered_map<uint64_t, script_value> field_defaults_with_engine;
+        field_defaults_with_engine.reserve(new_field_defaults.size());
+
+        for (const auto& [field_id, value] : new_field_defaults) {
+            auto initializer_ast = class_def->get_field_initializer_ast(field_id);
+            script_value evaluated_value = value;
+
+            if (initializer_ast) {
+                auto init_result = host.eval(initializer_ast);
+                if (!init_result) {
+                    return init_result.error_value();
+                }
+                evaluated_value = initializer_store_value(std::move(init_result.value()), initializer_ast.get());
+            }
+            if (!evaluated_value.has_valid_engine() && eng) {
+                evaluated_value.set_engine(eng);
+            }
+            field_defaults_with_engine[field_id] = evaluated_value;
+        }
+
+        std::unordered_set<uint64_t> synthesized_accessor_ids;
+        for (const auto& [field_id, default_val] : field_defaults_with_engine) {
+            auto [getter_id, getter_view] = symbols->get_getter_id_with_view(field_id);
+            if (!new_methods.count(getter_id)) {
+                new_methods[getter_id] = script_value::make_function(field_getter(field_id), eng);
+                synthesized_accessor_ids.insert(getter_id);
+            }
+            auto [setter_id, setter_view] = symbols->get_setter_id_with_view(field_id);
+            if (!new_methods.count(setter_id)) {
+                new_methods[setter_id] = script_value::make_function(field_setter(field_id), eng);
+                synthesized_accessor_ids.insert(setter_id);
+            }
+        }
+
+        // Declared types install first, so redefine_class flags a retype as fields_changed and migrate_fields converts
+        // against the new types
+        class_def->replace_field_declared_types(std::move(new_field_types), true);
+        class_def->replace_static_declared_types(std::move(new_static_types));
+
+        // An identical reload (position-insensitive AST key) adopts the fresh ASTs and skips per-instance migration
+        std::vector<uint8_t> structural_key;
+        bool structurally_identical = false;
+        if (class_def->structural_key_shape_matches(decl->members.size(), decl->base_classes.size())) {
+            try {
+                structural_key = structural_node_key(decl, *symbols);
+                structurally_identical = (structural_key == class_def->structural_key());
+            } catch (...) {
+                structural_key.clear();
+            }
+        }
+
+        class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, eng, structurally_identical);
+        class_def->set_auto_accessor_ids(std::move(synthesized_accessor_ids));
+
+        if (structural_key.empty()) {
+            try {
+                structural_key = structural_node_key(decl, *symbols);
+            } catch (...) {
+                structural_key.clear();
+            }
+        }
+        if (!structural_key.empty()) {
+            class_def->set_structural_key(std::move(structural_key), decl->members.size(), decl->base_classes.size());
+        }
+
+        class_def->retain_static_fields(new_static_field_ids);
+        host.discard_unwinding();
+        env->clear_all_parent_caches();
+    } else {
+        class_def->replace_field_declared_types(std::move(new_field_types), false);
+        class_def->replace_static_declared_types(std::move(new_static_types));
+        for (const auto& [field_id, default_val] : new_field_defaults) {
+            std::string field_name(symbols->get_string(field_id));
+            class_def->add_field(field_name, default_val);
+            auto [getter_id, getter_view] = symbols->get_getter_id_with_view(field_id);
+            if (!class_def->has_method(getter_id)) { class_def->add_method_by_id(getter_id, field_getter(field_id), true); }
+            auto [setter_id, setter_view] = symbols->get_setter_id_with_view(field_id);
+            if (!class_def->has_method(setter_id)) { class_def->add_method_by_id(setter_id, field_setter(field_id), true); }
+        }
+    }
+
+    auto register_result = eng->get_class_registry().register_script_class(class_def);
+    if (!register_result) {
+        return register_result;
+    }
+    eng->bump_class_definition_epoch();
+    warn_shadowed_handle_builtins(*eng, *class_def);
+
+    global_env->define(class_var_id, script_value::make_object("class_definition", host.class_definition_type_id, class_def, eng, false));
+    return {};
+}
+
+} // namespace detail
 
 } // namespace jai

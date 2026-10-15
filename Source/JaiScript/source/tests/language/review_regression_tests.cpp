@@ -11,6 +11,7 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <string>
 #include <optional>
+#include <atomic>
 #include <thread>
 
 using namespace jai;
@@ -75,6 +76,31 @@ public:
     review_regression_tests() : suite("Review Regressions") {}
 
     void forge_tests() override {
+        test("holders_a_host_drops_on_another_thread_stay_off_the_engine_free_list", [this]() {
+            // A host may hand values to another thread and drop them there while the engine keeps running; a pooled holder
+            // block returns to the engine's free list only on the thread that owns the pool (holder_block_pool::return_block),
+            // so those releases are foreign returns, never a free-list push racing the engine's own mints
+            auto e = jai::engine::make();
+            jai::engine* eng = e.get();
+            std::vector<jai::script_value> handed;
+            for (int i = 0; i < 4000; ++i) {
+                jai::script_value arr = e->execute("[1, 2, 3]");
+                handed.push_back(jai::script_value::make_element_reference(arr.get_array_storage(), 1, eng, nullptr));
+            }
+            jai::script_value mine = e->execute("[4, 5, 6]");   // the engine's last result is this array, not one handed over
+            std::atomic<bool> go{false};
+            std::thread host([&]() { while (!go.load()) {} handed.clear(); });
+            go = true;
+            int64_t sum = 0;
+            for (int i = 0; i < 20000; ++i) {
+                jai::script_value r = jai::script_value::make_element_reference(mine.get_array_storage(), static_cast<size_t>(i % 3), eng, nullptr);
+                sum += r.deref().as_int();
+            }
+            host.join();
+            check_eq(int64_t(99999), sum, "the engine's mints read their elements while the host released its own");
+            check_eq(int64_t(4), e->execute("2 + 2").as_int(), "the engine runs on");
+        });
+
         test("a_compound_target_reference_is_read_after_the_right_hand_side", [this]() {
             // Regression: `value += restore(data)` where `value` is an untyped element
             // or map-entry reference whose element was removed and whose right side restores it. The interpreter

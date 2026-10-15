@@ -1308,6 +1308,28 @@ public:
             check_eq(std::string("reflect::get: 'Probe' has no member 'nosuch149'"), engine->execute("last_reflect").as_string());
             check_eq(std::string("Cannot skip 159 bytes at position 0: the data is 3 bytes"), engine->execute("last_binary").as_string());
         });
+
+        // A native exception a top-level statement raises (an allocation the library refuses) leaves execute as its own
+        // text on both backends; the interpreter let it escape the statement loop and the engine prefixed it
+        test("an_uncaught_native_exception_is_its_text_on_both_backends", [this]() {
+            const char* sources[] = {
+                "string s = \"abc\"; s = s.repeat(9223372036854775807);",
+                "string s = \"abc\".repeat(9223372036854775807);",
+                "function f() -> string { return \"abc\".repeat(9223372036854775807); } f();",
+            };
+            for (const char* source : sources) {
+                std::string texts[2];
+                for (int b = 0; b < 2; ++b) {
+                    auto eng = engine::make();
+                    eng->set_backend(b == 0 ? backend_type::interpreter : backend_type::vm);
+                    try { eng->execute(source); texts[b] = "<no throw>"; } catch (const std::exception& e) { texts[b] = e.what(); }
+                    check_eq((int64_t)3, eng->execute("1 + 2").as_int(), source);
+                }
+                check_eq(texts[1], texts[0], source);
+                check_true(texts[0].find("C++ exception") == std::string::npos, texts[0]);
+                check_true(texts[0] != "<no throw>", source);
+            }
+        });
     }
 };
 

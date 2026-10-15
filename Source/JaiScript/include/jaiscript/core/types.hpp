@@ -80,7 +80,7 @@ namespace jai {
         // str holds shared string handles (the same handle a boxed element would carry)
         // obj holds {object handle, class tag} slots (array<UserType>; 16 bytes vs 32 boxed)
         // v2..rgba are the math vector kinds on the byte buffer too: each element is its components' words (binary32, or
-        // int32 for ivec) at the kind's stride; kind - 8 is the vector's storage index (TYPEID_VEC2 .. TYPEID_COLOR)
+        // int32 for ivec) at the kind's stride; kind + 8 is the vector's storage index (TYPEID_VEC2 .. TYPEID_COLOR)
         enum class kind_t : uint8_t { hetero = 0, i64 = 1, f64 = 2, b8 = 3, c8 = 4, str = 5, obj = 6, u8 = 7, i8 = 8,
                                       v2 = 9, iv2 = 10, v3 = 11, iv3 = 12, v4 = 13, rgba = 14 };
         static constexpr bool is_vec_kind(kind_t k) noexcept { return k >= kind_t::v2 && k <= kind_t::rgba; }

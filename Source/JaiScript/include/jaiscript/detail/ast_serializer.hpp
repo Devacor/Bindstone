@@ -7,7 +7,8 @@
 // non-deterministic, so every symbol/name is written as a string-table index and
 // re-interned into the LOADING engine's symbolizer; type_info is written structurally
 // and re-interned via engine::get_type_info. The compiled VM chunk is never written —
-// a loaded bite recompiles lazily through the normal path. Little-endian, x64 only.
+// a loaded bite recompiles lazily through the normal path. Fixed-width fields and floats
+// are written little-endian on every host; the source hash reads its words in host order.
 //
 // Format: "JBIT" magic, u32 version, u32 flags, u64 registration fingerprint, u64 source
 // size + 1 and u64 source hash (0, 0 = no source), string table (count + length-prefixed strings), declaration count, node tree.

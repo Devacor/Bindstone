@@ -84,8 +84,6 @@ namespace jai {
 
         std::string to_string() const;
         bool is_keyword() const;
-        bool is_operator() const;
-        bool is_literal() const;
     };
     
     class lexer {
@@ -95,7 +93,6 @@ namespace jai {
 
         std::vector<token> tokenize();
         token next_token();
-        token peek_token();
         bool is_at_end() const { return current_ >= source_.length(); }
 
     private:

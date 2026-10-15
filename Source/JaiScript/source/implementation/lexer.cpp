@@ -274,20 +274,6 @@ token lexer::next_token() {
     return error_token("Unexpected character");
 }
 
-token lexer::peek_token() {
-    size_t savedCurrent = current_;
-    size_t savedLine = line_;
-    size_t savedColumn = column_;
-    
-    token token = next_token();
-    
-    current_ = savedCurrent;
-    line_ = savedLine;
-    column_ = savedColumn;
-    
-    return token;
-}
-
 char lexer::advance() {
     column_++;
     return source_[current_++];
@@ -922,18 +908,6 @@ std::string token::to_string() const {
 
 bool token::is_keyword() const {
     return type >= token_type::bool_keyword && type <= token_type::enum_keyword;
-}
-
-bool token::is_operator() const {
-    return (type >= token_type::plus && type <= token_type::tilde) ||
-           type == token_type::left_shift || type == token_type::right_shift ||
-           type == token_type::spaceship ||
-           (type >= token_type::ampersand_equal && type <= token_type::right_shift_equal) ||
-           (type >= token_type::question_question && type <= token_type::fat_arrow);
-}
-
-bool token::is_literal() const {
-    return type >= token_type::integer_literal && type <= token_type::null_literal;
 }
 
 } // namespace jai

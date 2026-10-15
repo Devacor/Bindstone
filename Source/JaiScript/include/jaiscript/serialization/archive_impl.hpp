@@ -778,8 +778,6 @@ protected:
 
     std::map<std::type_index, void*> user_contexts_;
 
-    std::map<std::string, script_value> preread_properties_;
-
     int current_depth_ = 0;
 
     struct depth_guard {
@@ -1308,20 +1306,6 @@ public:
         } else {
             (*self())(value);
         }
-    }
-
-protected:
-    void set_preread_properties(std::map<std::string, script_value> props) {
-        preread_properties_ = std::move(props);
-    }
-
-    void clear_preread_properties() {
-        preread_properties_.clear();
-    }
-
-    const script_value* get_preread_property(const std::string& name) const {
-        auto it = preread_properties_.find(name);
-        return it != preread_properties_.end() ? &it->second : nullptr;
     }
 
 private:

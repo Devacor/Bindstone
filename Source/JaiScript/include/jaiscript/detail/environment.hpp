@@ -160,8 +160,6 @@ namespace jai {
         // Reset for static method environment reuse (sets kind to static_method)
         void reset_as_static_method(std::shared_ptr<environment> parent, std::shared_ptr<class_definition> class_def);
 
-        // Environment kind accessors
-        env_kind get_kind() const { return kind_; }
         bool is_method_env() const { return kind_ == env_kind::method; }
         bool is_static_method_env() const { return kind_ == env_kind::static_method; }
 

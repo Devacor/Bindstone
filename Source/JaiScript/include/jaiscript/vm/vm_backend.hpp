@@ -351,9 +351,6 @@ namespace jai::vm {
         std::string get_backend_name() const override { return "vm"; }
         checked_result<std::string> text_of(const script_value& v) override { return value_to_string_with_method(v.deref()); }
 
-        // Compiles without executing (disassembler/tests)
-        std::shared_ptr<chunk> compile_only(const std::vector<declaration_ptr>& declarations);
-
         // === Parallel worker setup (parallel_transform v0) ===
         // Pins this instance to a worker context built at the region barrier: root
         // environment (parent = nullptr, the hard partition), a private env-epoch sink
@@ -724,12 +721,6 @@ namespace jai::vm {
             if (next == opcode::op_c_land && caller.code->cell_loops[code[ip + 1].b].calls[code[ip + 1].a].consumer == 0) { ++caller.ip; return; }   // a statement call inside a block: the landing has nothing to consume
             stack_.push_back(std::move(v));
             ++caller.ip;
-        }
-        bool block_landing_discards_result(const frame& caller) const noexcept {
-            const auto& code = caller.code->code;
-            if (caller.ip + 1 >= code.size() || code[caller.ip + 1].op != opcode::op_c_land) return false;
-            const vm_instruction& land = code[caller.ip + 1];
-            return caller.code->cell_loops[land.b].calls[land.a].consumer == 0;
         }
         script_value* frame_slot(frame& f, size_t slot) noexcept {
             if (f.window_backed) {

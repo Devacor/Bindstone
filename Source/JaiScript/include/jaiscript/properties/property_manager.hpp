@@ -451,14 +451,6 @@ namespace jai {
 		template<typename Base>
 		void try_post_load_base(...) {}
 
-		template<typename Base, typename Fn>
-		auto try_visit_base(Fn&& fn) const
-			-> decltype(static_cast<const Base*>(this)->visit_owned_properties(fn), void()) {
-			static_cast<const Base*>(this)->visit_owned_properties(fn);
-		}
-		template<typename Base>
-		void try_visit_base(...) const {}
-
 		template<typename Base>
 		auto try_collect_base(std::vector<std::pair<const std::string*, property_base*>>& out) const
 			-> decltype(static_cast<const Base*>(this)->collect_owned_properties(out), void()) {

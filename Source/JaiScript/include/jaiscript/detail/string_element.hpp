@@ -18,11 +18,6 @@
 
 namespace jai::detail {
 
-	inline bool string_element_base(const script_value& v) noexcept {
-		const size_t k = v.raw_storage_index();
-		return k == script_value::TYPEID_STRING || k == script_value::TYPEID_UTF8_STRING;
-	}
-
 	JAI_NOINLINE inline checked_result<void> string_element_out_of_bounds(size_t index, size_t size, engine* eng) {
 		string_symbolizer* symbolizer = eng->get_symbolizer();
 		if (symbolizer->frozen()) {   // a parallel worker cannot intern the numbers: the same text without them

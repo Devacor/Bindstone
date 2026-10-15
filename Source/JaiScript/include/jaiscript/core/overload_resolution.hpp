@@ -319,8 +319,6 @@ inline auto score_overloads(const Range& overloads, Params&& params_of, const sc
     return verdict;
 }
 
-inline const std::vector<parameter>& overload_parameters(const std::shared_ptr<function_decl>& fn) { return fn->parameters; }
-
 inline overload_verdict<std::shared_ptr<function_decl>> score_declarations(
     const std::vector<std::shared_ptr<function_decl>>& overloads, const script_value* args, size_t argc) {
     return score_overloads(overloads, [](const std::shared_ptr<function_decl>& fn) -> const std::vector<parameter>& { return fn->parameters; }, args, argc);

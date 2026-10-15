@@ -9,10 +9,8 @@ namespace jai {
 
     // Must be defined after engine.hpp is included
     std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng);
-    // engine.cpp: the class type_info registered for a C++ type (null when unbound), and a
-    // class_instance's owned C++ object - both kept out of this header's type set
+    // engine.cpp: the class type_info registered for a C++ type (null when unbound), kept out of this header's type set
     type_info* get_engine_class_type_info_for(engine* eng, const std::type_info& cpp_type);
-    std::shared_ptr<void> class_instance_cpp_object(const std::shared_ptr<void>& instance_data);
     namespace detail { bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id); }
 
 namespace conversions {

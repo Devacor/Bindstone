@@ -144,7 +144,6 @@ namespace jai::vm {
         bool quiet_read(const expression* e);          // a hoisted read that cannot run user code (a private container of proven element class over a quiet index; a unary or an intrinsic over a quiet operand)
         bool quiet_index(const expression* e);         // a literal, a private local or a quiet read (never a binary: a custom numeric operator is user code)
         bool observing_hoist_in(const expression* e);  // a subtree holding a hoisted read that may run user code
-        bool env_reference_candidate(const expression* e);   // an environment name this unit does not declare as a value: its read may run a getter (a reference to a property) or raise
         bool hoist_in(const expression* e);            // a subtree holding a hoisted read, intrinsic or unary, quiet or not
         // a call to a one-argument math:: intrinsic, or a scalar pair row, whose result a compiler temp can carry (none = not one)
         detail::math_fn math_temp_operand(const expression* e) const;
@@ -333,8 +332,6 @@ namespace jai::vm {
         // current point and target_region (SIZE_MAX = all regions, for return)
         void emit_region_exits(size_t target_region);
         void collect_declared_symbols(const statement_ptr& stmt, std::unordered_set<uint64_t>& out) const;
-        void collect_used_identifiers(const statement_ptr& stmt, const lambda_expr* lambda,
-                                      std::vector<uint64_t>& out, std::unordered_set<uint64_t>& seen) const;
         void collect_outer_slot_candidates(const statement_ptr& stmt,
                                            const std::unordered_set<uint64_t>& declared,
                                            std::vector<std::pair<uint64_t, size_t>>& out,

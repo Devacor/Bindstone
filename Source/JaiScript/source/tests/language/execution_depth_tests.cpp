@@ -2,7 +2,14 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/reflection.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <functional>
 #include <limits>
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace jai::foundry::tests {
 
@@ -299,6 +306,60 @@ public:
 			check_eq(script_int(0), eng->execute(
 				"int descend(int n) { if (n == 0) { return 0; } return descend(n-1); } descend(100000);").as_int());
 		});
+
+		test("a_copy_too_deep_for_the_stack_raises", [this]() {
+#if defined(_WIN32)
+			// a host thread of the default 1 MB (the suite's own thread has 128 MB, deep enough to make the copies slow)
+			struct small_stack_run {
+				std::function<void()> body;
+				static DWORD WINAPI entry(LPVOID self) { static_cast<small_stack_run*>(self)->body(); return 0; }
+			};
+			small_stack_run run{[&]() { copy_too_deep_checks(); }};
+			HANDLE thread = CreateThread(nullptr, 1024 * 1024, &small_stack_run::entry, &run, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+			check_true(thread != nullptr, "the small-stack thread starts");
+			if (thread) {
+				WaitForSingleObject(thread, INFINITE);
+				CloseHandle(thread);
+			}
+#endif
+		});
+
+		// A chain of closures each capturing the last nests one environment per link; its release ran one native frame per
+		// link (a process kill at teardown). Its environments release on a work list now
+		test("a_long_closure_chain_releases_without_native_depth", [this]() {
+			for (const char* drop : {"f = null;", ""}) {
+				auto eng = make_engine();
+				eng->execution_budget(0);
+				eng->execute(std::string("var f = null; for (int i = 0; i < 100000; i++) { var g = f; f = [g]() { return g; }; } int length = 0; var at = f; "
+				                         "while (at != null && length < 3) { at = at(); length += 1; } ") + drop);
+				check_eq(script_int(3), eng->execute("length").as_int());
+			}
+		});
+	}
+
+	// A deep copy recurses natively per nesting level: x = [x] two thousand times overflowed a 1 MB host stack (a process
+	// kill); the copy that would exhaust it raises instead, catchably, and the engine keeps working
+	void copy_too_deep_checks() {
+		const char* builds[] = {
+			"var x = []; for (int i = 0; i < 100000; i++) { x = [x]; }",
+			"var x = {}; for (int i = 0; i < 100000; i++) { x = {\"k\": x}; }",
+			"class Link { var next; Link() {} Link(var n) { next = n; } } var x = null; for (int i = 0; i < 100000; i++) { x = Link(x); }",
+		};
+		for (const char* build : builds) {
+			auto eng = make_engine();
+			eng->execution_budget(0);
+			std::string caught;
+			try {
+				caught = eng->execute(std::string("string msg = \"none\"; try { ") + build + " } catch (err) { msg = err; } msg").as<std::string>();
+			} catch (const std::exception& e) {
+				caught = std::string("escaped: ") + e.what();
+			}
+			check_eq(std::string("Cannot copy: the value nests too deep for the host thread's stack"), caught, build);
+			check_eq(script_int(4), eng->execute("2 + 2").as_int(), build);
+		}
+		auto eng = make_engine();
+		check_eq(script_int(100), eng->execute("var x = []; for (int i = 0; i < 100; i++) { x = [x]; } int d = 0; var at = x; while (at.size() > 0) { at = at[0]; d += 1; } d").as_int(),
+		         "a copy of ordinary depth is whole");
 	}
 };
 

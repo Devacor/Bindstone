@@ -3042,6 +3042,18 @@ private:
 				return out + spec::render(e.execute("40 + 2"));
 			}, check_mode::warn);
 		});
+		// A script_value crosses a callback's parameters and result as itself, as make_value hands one back unchanged
+		test("a_callback_passes_script_values_through", [this]() {
+			auto eng = make_engine();
+			eng->execute("function count_of(var v) -> int { return v.size(); } function echo(var v) { return v; }");
+			script_value arr = eng->execute("var arr = [1, 2, 3]; arr");
+			auto count_of = convert_script_function<int64_t(script_value)>(eng->get_variable("count_of"));
+			check_eq((int64_t)3, count_of(arr), "a script_value argument");
+			auto echo = convert_script_function<script_value(const script_value&)>(eng->get_variable("echo"));
+			script_value text = eng->make_value(std::string("x"));
+			check_eq(std::string("x"), echo(text).as_string(), "a script_value result");
+			check_eq(std::string("x"), eng->make_value(text).as_string(), "make_value of a script_value is that value");
+		});
 	}
 
 	struct ref_player { int64_t hp = 0; std::string tag; };

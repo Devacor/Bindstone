@@ -599,6 +599,10 @@ namespace jai {
 
         // Convenient script_value creation methods
         // Usage: engine->make_value(42) instead of script_value(42, engine)
+        script_value make_value(const script_value& value) { return value; }
+        script_value make_value(script_value& value) { return value; }
+        script_value make_value(script_value&& value) { return std::move(value); }
+
         template<typename T>
         requires (std::is_arithmetic_v<std::remove_cvref_t<T>> ||
                   std::is_same_v<std::remove_cvref_t<T>, script_string> ||

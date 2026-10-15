@@ -1168,7 +1168,9 @@ namespace detail { struct argument_capture_storage; }
         // ============================================================================
         template<typename T>
         checked_result<T> checked_as() const {
-            if constexpr (math_adapted<T> && !std::is_reference_v<T> && !std::is_pointer_v<T>) {
+            if constexpr (std::is_same_v<T, script_value>) {
+                return checked_result<T>(deref());
+            } else if constexpr (math_adapted<T> && !std::is_reference_v<T> && !std::is_pointer_v<T>) {
                 using adapter = math_adapter<std::remove_cv_t<T>>;
                 typename adapter::native_type native{};
                 static_assert(sizeof(native) <= 16 && std::is_trivially_copyable_v<decltype(native)>);

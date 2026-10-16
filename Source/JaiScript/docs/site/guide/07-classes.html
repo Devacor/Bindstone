@@ -197,7 +197,7 @@ Cat c = t;
 type_of(c);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ROAR! (base said: meow 5)
 == result: Tiger</code></pre></div>
-<p>Redefining a base method <strong>without</strong> <code>override</code> is an error: the checker reports it at load, and with checking off the class declaration raises it when it runs (<code>Method &#x27;speak&#x27; redefines &#x27;Cat::speak&#x27;: mark it &#x27;override&#x27;</code>). An <code>override</code> with no base method to redefine is the same kind of error (<code>Method &#x27;speak&#x27; marked as override but no base class method found</code>).</p>
+<p>Redefining a base method <strong>without</strong> <code>override</code> is an error: the checker reports it at load, and with checking off the class declaration raises it when it runs (<code>Method &#x27;speak&#x27; redefines &#x27;Cat::speak&#x27;: mark it &#x27;override&#x27;</code>). An <code>override</code> with no base method to redefine is the same kind of error (<code>Method &#x27;speak&#x27; marked as override but no base class method found</code>), and so is a base class nothing defines (<code>Base class &#x27;Feline&#x27; not found</code>). The checker sees them before anything runs, so a module or an import group with one applies none of its declarations.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat { auto speak() { return "meow"; } }
 class Tiger : Cat { auto speak() { return "ROAR"; } }   // no override
 Tiger().speak();</code></pre></div>

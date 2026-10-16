@@ -11,6 +11,7 @@
 #include <jaiscript/properties/property_serialization.hpp>
 #include <jaiscript/serialization/convenience.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -196,6 +197,41 @@ public:
 			};
 			run(true);
 			run(false);
+		});
+
+		// A receiver redefines the functions and the class its siblings reach, mid-emit: receivers still to run see the new
+		// bodies, the instance migrates under a receiver bound to its method, and a script class deriving the emitting C++
+		// object is redefined while its C++ method emits
+		test("a_reload_mid_emit_reaches_the_receivers_still_to_run", [this]() {
+			auto eng = make_bound_engine();
+			jai::engine* raw = eng.get();
+			eng->add_function("reload_now", [raw]() {
+				raw->execute(R"(
+					function on_b(int v) { log += "B" + to_string(v); }
+					class Mon { string pad = "p"; float hp = 0.0; void hit(int v) { hp = hp - v; log += "H" + to_string(v); } }
+					class Board : Scoreboard { int seen = 0; string tag = "v2"; }
+					function on_a(int v) { log += "A" + to_string(v); }
+				)");
+			});
+			jai::stdlib::register_all(*eng);
+			auto r = eng->execute(R"(
+				string log = "";
+				function on_a(int v) { log += "a" + to_string(v); reload_now(); }
+				function on_b(int v) { log += "b" + to_string(v); }
+				class Mon { int hp = 10; void hit(int v) { hp = hp - v; log += "h" + to_string(v); } }
+				class Board : Scoreboard { int seen = 0; }
+				var mon = new Mon();
+				var s = new Board();
+				s.on_scored.connect("a", [](var v) { on_a(v); });
+				s.on_scored.connect("b", [](var v) { on_b(v); });
+				s.on_scored.connect("c", reflect::bind(mon, "hit"));
+				s.on_scored.connect("d", [](var v) { s.seen = s.seen + v; });
+				s.on_scored.connect("t", "log += \"t\";");
+				s.score(1);
+				s.score(2);
+				log + " | " + to_string(mon.hp) + " " + type_of(mon.hp) + " " + mon.pad + " | " + to_string(s.seen) + " " + s.tag;
+			)");
+			check_eq(std::string("a1B1H1tA2B2H2t | 7.0 float p | 3 v2"), r.as<std::string>());
 		});
 	}
 };

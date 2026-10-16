@@ -894,15 +894,17 @@ private:
         }
     }
 
-    void report_namespace_redefinitions(const namespace_decl* n) {
-        std::vector<const function_decl*> fns;
+    // Every block of one namespace in the unit is one scope: a reopening's function collides like one in the first block
+    void collect_namespace_functions(const namespace_decl* n, const std::string& prefix,
+                                     std::map<std::string, std::vector<const function_decl*>>& by_namespace) {
+        const std::string path = prefix.empty() ? std::string(n->name) : prefix + "::" + std::string(n->name);
+        auto& fns = by_namespace[path];
         for (const auto& d : n->declarations) {
             if (!d) { continue; }
             if (d->get_type() == node_type::function_decl) { fns.push_back(static_cast<const function_decl*>(d.get())); }
-            else if (d->get_type() == node_type::namespace_decl) { report_namespace_redefinitions(static_cast<const namespace_decl*>(d.get())); }
+            else if (d->get_type() == node_type::namespace_decl) { collect_namespace_functions(static_cast<const namespace_decl*>(d.get()), path, by_namespace); }
             else if (d->get_type() == node_type::class_decl) { report_class_redefinitions(static_cast<const class_decl*>(d.get())); }
         }
-        report_redefinitions(fns, /*by_name=*/false);
     }
 
     void report_class_redefinitions(const class_decl* cd) {
@@ -945,10 +947,9 @@ private:
     // A method redefining a base class method says 'override', and an 'override' redefines one (the run time raises both when
     // the class declaration runs)
     void report_override_markers(const class_decl* cd, const std::vector<const function_decl*>& fns) {
-        if (cd->base_classes.empty()) { return; }
         for (const function_decl* fn : fns) {
             if (fn->is_static || fn->name == cd->name || (fn->name.size() > 1 && fn->name[0] == '~')) { continue; }
-            const base_method base = find_base_method(cd, fn->name, fn->is_override);
+            const base_method base = cd->base_classes.empty() ? base_method{} : find_base_method(cd, fn->name, fn->is_override);
             std::string text;
             if (!fn->is_override && base.found) { text = detail::missing_override_text(fn->name, base.owner); }
             else if (fn->is_override && !base.found && base.certain) { text = detail::override_without_base_text(fn->name); }
@@ -960,12 +961,14 @@ private:
 
     void warn_duplicate_top_level_functions() {
         std::vector<const function_decl*> fns;
+        std::map<std::string, std::vector<const function_decl*>> namespace_fns;
         for (const auto& d : decls_) {
             if (!d) { continue; }
             if (d->get_type() == node_type::function_decl) { fns.push_back(static_cast<const function_decl*>(d.get())); }
             else if (d->get_type() == node_type::class_decl) { report_class_redefinitions(static_cast<const class_decl*>(d.get())); }
-            else if (d->get_type() == node_type::namespace_decl) { report_namespace_redefinitions(static_cast<const namespace_decl*>(d.get())); }
+            else if (d->get_type() == node_type::namespace_decl) { collect_namespace_functions(static_cast<const namespace_decl*>(d.get()), {}, namespace_fns); }
         }
+        for (const auto& [path, members] : namespace_fns) { report_redefinitions(members, /*by_name=*/false); }
         report_redefinitions(fns, /*by_name=*/true);
         if (!program_functions_) { return; }
         std::unordered_set<std::string> warned;
@@ -5134,7 +5137,20 @@ private:
              "' in methods means the member; spell ::" + std::string(name) + " for the global");
     }
 
+	// A base class no unit, include, extern or host can bring is the definition's error, reported at load in the run time's
+	// words so a module that would stop half-defined applies nothing
+	void check_class_bases(const class_decl* cd) {
+		if (!namespace_scopes_.empty() || has_includes_) { return; }
+		for (std::string_view base : cd->base_classes) {
+			if (find_sclass(base) || engine_class(base) || base.find("::") != std::string_view::npos || global_var_names_.count(base) ||
+			    engine_knows_name(std::string(base))) { continue; }
+			diag(diag_level::error, cd->location, "Base class '" + std::string(base) + "' not found");
+			return;
+		}
+	}
+
 	void walk_class(const class_decl* cd) {
+		check_class_bases(cd);
 		auto it = classes_.find(cd->name);
 		if (it == classes_.end()) { return; }
 		sclass* prev_class = class_ctx_;

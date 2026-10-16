@@ -266,6 +266,41 @@ public:
 				to_string(keep.x) + "|" + to_string(v.x);
 			)", "9|3");
 		});
+		// docs/site/guide/07-classes.html and 06-functions.html: a method redefining a base method says override (reported at load
+		// under strict, raised when the declaration runs without the checker); a second definition of one signature in one program
+		// text raises on both backends, while another execute redefining it is a hot reload
+		test("override_markers_and_same_signature_definitions", [this]() {
+			auto load_error = [](engine& e, const std::string& src) {
+				try { e.execute(src); } catch (const static_check_error& ex) { return std::string(ex.what()); } catch (const std::exception& ex) { return std::string("runtime:") + ex.what(); }
+				return std::string("loaded");
+			};
+			every_config("the checker reports override markers at load", "1|1|0", [&](engine& e) {
+				const std::string missing = load_error(e, "class B { void f() {} }\nclass D : B { void f() {} }");
+				const std::string unmatched = load_error(e, "class B2 { void f() {} }\nclass D2 : B2 { void g() override {} }");
+				const std::string duplicate = load_error(e, "int g(int a) { return 1; }\nint g(int a) { return 2; }\nint r = g(1);");
+				return std::to_string(missing.find("error: method 'f' redefines 'B::f': mark it 'override'") != std::string::npos) + "|" +
+					std::to_string(unmatched.find("error: method 'g' marked as override but no base class method found") != std::string::npos) + "|" +
+					std::to_string(duplicate.find("ambiguous") != std::string::npos);
+			});
+			auto raised = [](engine& e, const std::string& src) {
+				try { e.execute(src); } catch (const std::exception& ex) { return std::string(ex.what()); }
+				return std::string("ran");
+			};
+			every_config("the run time raises the same verdicts", "Method 'f' redefines 'B::f': mark it 'override'|"
+			             "Method 'g' marked as override but no base class method found|'g(int a)' is already defined (line 1)|"
+			             "'m(int a)' is already defined (line 1)|'s(int a)' is already defined (line 1)", [&](engine& e) {
+				return raised(e, "class B { void f() {} }\nclass D : B { void f() {} }") + "|" +
+					raised(e, "class B2 { void f() {} }\nclass D2 : B2 { void g() override {} }") + "|" +
+					raised(e, "int g(int a) { return 1; }\nint g(int a) { return 2; }") + "|" +
+					raised(e, "class K { int m(int a) { return 1; } int m(int a) { return 2; } }") + "|" +
+					raised(e, "class S { static int s(int a) { return 1; } static int s(int a) { return 2; } }");
+			}, check_mode::off);
+			every_config("another execute redefines (hot reload)", "2|2", [&](engine& e) {
+				e.execute("int g(int a) { return 1; }\nclass K { int m(int a) { return 1; } }");
+				e.execute("int g(int a) { return 2; }\nclass K { int m(int a) { return 2; } }");
+				return std::to_string(e.execute("g(0)").as_int()) + "|" + std::to_string(e.execute("K().m(0)").as_int());
+			});
+		});
 		test("nested_member_regions_preserve_reads_stores_and_callbacks", [this]() {
 			expect("nested scalar updates", R"(
 				class Position { float x = 1.0; }

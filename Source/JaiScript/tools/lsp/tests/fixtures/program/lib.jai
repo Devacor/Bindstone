@@ -20,7 +20,7 @@ class Hero : Actor {
 		hp = h;
 	}
 
-	void heal(int amount) { hp = hp + amount * 2; }
+	void heal(int amount) override { hp = hp + amount * 2; }
 }
 
 namespace util {

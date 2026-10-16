@@ -12553,7 +12553,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
 
     // Define the function in current environment: alone, or in the overload set of its name (KEEP BYTE-PARALLEL with
     // vm_backend::exec_func_decl)
-    auto declared = detail::declare_function_overload(*environment_, decl->name_id, scriptFunc, std::move(functionValue), engine_);
+    auto declared = detail::declare_function_overload(*environment_, decl->name_id, scriptFunc, std::move(functionValue), engine_, decl->is_override);
     if (!declared) { return declared.error_value(); }
     environment_->define(decl->name_id, std::move(declared.value()));
     return {};

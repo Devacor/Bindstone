@@ -17,6 +17,17 @@
 
 namespace jai {
 
+namespace detail {
+    // Every method dispatches dynamically, so redefining a base class method says so with 'override' (the run time's text;
+    // the checker reports it at load with a lowercase first letter)
+    inline std::string missing_override_text(std::string_view name, std::string_view owner) {
+        return "Method '" + std::string(name) + "' redefines '" + std::string(owner) + "::" + std::string(name) + "': mark it 'override'";
+    }
+    inline std::string override_without_base_text(std::string_view name) {
+        return "Method '" + std::string(name) + "' marked as override but no base class method found";
+    }
+}
+
 // Forward declarations - class_definition is available since we're included after it's defined
 class function_decl;
 
@@ -49,15 +60,8 @@ public:
         
         // Validate override usage (skip for constructors/destructors)
         if (!is_constructor && !is_destructor && ast->is_override) {
-            // Debug output
-            // std::cerr << "DEBUG: Checking override for method '" << name << "'\n";
-            // std::cerr << "  method_info.owner_class: " << (method_info.owner_class ? "exists" : "null") << "\n";
-            // if (method_info.owner_class) {
-            //     std::cerr << "  owner is this: " << (method_info.owner_class.get() == this) << "\n";
-            // }
-            
             if (!method_info.owner_class || method_info.owner_class.get() == this) {
-                throw runtime_error("Method '" + std::string(name) + "' marked as override but no base class method found");
+                throw runtime_error(detail::override_without_base_text(name));
             }
             
             // Promote the entire hierarchy to virtual
@@ -83,14 +87,7 @@ public:
             // a base's SYNTHESIZED field accessor is invisible to shadowing
             if (method_info.owner_class && method_info.owner_class.get() != this &&
                 !method_info.owner_class->owns_auto_accessor(name_id)) {
-                // Method exists in parent
-                if (method_info.metadata && method_info.metadata->is_virtual) {
-                    // Parent method is virtual, MUST use override
-                    throw runtime_error("Method '" + std::string(name) + "' overrides virtual method from base class. Must use 'override' keyword");
-                } else {
-                    // Parent method exists but isn't virtual - this is shadowing
-                    throw runtime_error("Method '" + std::string(name) + "' shadows base class method. Use 'override' keyword if this is intentional");
-                }
+                throw runtime_error(detail::missing_override_text(name, method_info.owner_class->get_name()));
             }
         }
         
@@ -327,6 +324,9 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
     // Store the AST in method_overloads_ for type-based resolution
     if (auto stamping = get_engine()) { ast->unit = stamping->current_unit(); }
     for (const auto& earlier : method_overloads_[name_id]) {
+        if (detail::same_run_redefinition(*earlier, *ast)) [[unlikely]] {
+            throw runtime_error(detail::duplicate_definition_text(name, ast->parameters, earlier->location.line));
+        }
         if (detail::differs_only_by_reference(ast->parameters, earlier->parameters)) [[unlikely]] {
             throw runtime_error(detail::reference_only_overload_text(name, ast->parameters, earlier->parameters, earlier->location.line));
         }
@@ -402,6 +402,9 @@ inline void class_definition::add_static_script_method(std::string_view name, st
     }
     if (auto stamping = get_engine()) { ast->unit = stamping->current_unit(); }
     for (const auto& earlier : static_method_overloads_[method_name_id]) {
+        if (detail::same_run_redefinition(*earlier, *ast)) [[unlikely]] {
+            throw runtime_error(detail::duplicate_definition_text(name, ast->parameters, earlier->location.line));
+        }
         if (detail::differs_only_by_reference(ast->parameters, earlier->parameters)) [[unlikely]] {
             throw runtime_error(detail::reference_only_overload_text(name, ast->parameters, earlier->parameters, earlier->location.line));
         }

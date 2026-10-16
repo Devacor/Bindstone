@@ -408,6 +408,15 @@ namespace detail {
                std::to_string(first_line) + ") only by reference; overloads must differ in parameter types or count";
     }
 
+    // a second definition of one signature in the same run of one program text (a function, a method)
+    inline std::string duplicate_definition_text(std::string_view name, const std::vector<parameter>& params, size_t first_line) {
+        return "'" + declaration_spelling(name, params) + "' is already defined (line " + std::to_string(first_line) + ")";
+    }
+    template <class Earlier, class Later>
+    inline bool same_run_redefinition(const Earlier& earlier, const Later& later) {
+        return earlier.unit.id == later.unit.id && earlier.unit.seq == later.unit.seq && same_signature(earlier.parameters, later.parameters);
+    }
+
     // two overloads tie on these arguments: {0} = the callee, {1} = the arguments and the two signatures,
     // composed only while the symbolizer is unfrozen (a parallel worker gets the list-free shape)
     JAI_NOINLINE inline error_propagator ambiguous_call(uint64_t name_id, const std::vector<parameter>& best, const std::vector<parameter>& rival,

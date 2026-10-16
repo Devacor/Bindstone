@@ -285,6 +285,7 @@ public:
         
         test("multiple_override_errors_in_one_class", [this]() {
             auto engine = make_engine();
+            engine->static_checking(jai::check_mode::off);   // the run time reports the first (the checker lists both at load)
             
             engine->execute(R"(
                 class Base {
@@ -305,7 +306,7 @@ public:
             } catch (const runtime_error& e) {
                 // Should catch the first error encountered
                 check_true(
-                    std::string(e.what()).find("shadows base class method") != std::string::npos ||
+                    std::string(e.what()).find("redefines 'Base::foo': mark it 'override'") != std::string::npos ||
                     std::string(e.what()).find("no base class method found") != std::string::npos,
                     "Should report override error"
                 );

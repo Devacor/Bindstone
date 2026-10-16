@@ -21,18 +21,30 @@ namespace jai::detail {
         return thunk && thunk->eng == eng ? &thunk->payload : nullptr;
     }
 
+    JAI_NOINLINE inline checked_result<script_value> duplicate_definition_error(const script_defined_function& fn, size_t first_line, engine* eng) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "{0}",
+            eng->symbolize(duplicate_definition_text(fn.name, fn.parameters(), first_line)));
+    }
+
     // The value a function declaration defines its name to in `env`: the function itself, or the overload set it joins with the
     // declarations of other signatures `env` already holds under the name (a variable, a lambda or a host callable is replaced);
-    // a declaration that differs from one of them only by reference is the second definition's error
+    // a declaration that differs from one of them only by reference is the second definition's error, and so is one of the same
+    // signature from the same run of the same unit (one program text; `override` replaces on purpose, and another execute or a
+    // re-run unit is a hot reload that replaces)
     inline checked_result<script_value> declare_function_overload(environment& env, uint64_t name_id, const std::shared_ptr<script_defined_function>& fn,
-                                                                  script_value value, engine* eng) {
+                                                                  script_value value, engine* eng, bool is_override = false) {
         const script_value* existing = env.get_own_value_ptr(name_id);
         const script_callable* held = existing ? script_callable_of(*existing, eng) : nullptr;
         if (!held) { return value; }
         auto set = std::make_shared<function_overload_set>();
         set->name_id = name_id;
+        const script_defined_function* duplicate = nullptr;
         auto keep = [&](const std::shared_ptr<script_defined_function>& member, const script_value& member_value) {
-            if (member == fn || earlier_run(member->unit, fn->unit) || same_signature(member->parameters(), fn->parameters())) { return; }
+            if (member == fn || earlier_run(member->unit, fn->unit)) { return; }
+            if (same_signature(member->parameters(), fn->parameters())) {
+                if (!is_override && member->unit.id == fn->unit.id && member->unit.seq == fn->unit.seq) { duplicate = member.get(); }
+                return;
+            }
             set->members.push_back(member);
             set->values.push_back(member_value);
         };
@@ -41,6 +53,7 @@ namespace jai::detail {
         } else if (held->kind == script_callable::kind_type::overload_set && held->overloads) {
             for (size_t i = 0; i < held->overloads->members.size(); ++i) { keep(held->overloads->members[i], held->overloads->values[i]); }
         }
+        if (duplicate) [[unlikely]] { return duplicate_definition_error(*fn, duplicate->line, eng); }
         // one that differs only by reference: within one execute context the second definition's error, else a redefinition that
         // replaces it (another host entry, or a re-run of the declaring unit)
         const bool redefines = eng->unit_rerun(fn->unit);

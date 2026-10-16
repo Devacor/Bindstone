@@ -13420,7 +13420,7 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 		script_function(script_callable_thunk{eng, std::move(payload)}), engine_);
 
 	// alone, or in the overload set of its name (KEEP BYTE-PARALLEL with interpreter::visit_function_decl)
-	auto declared = detail::declare_function_overload(*environment_, proto.decl->name_id, proto.fn, std::move(functionValue), engine_);
+	auto declared = detail::declare_function_overload(*environment_, proto.decl->name_id, proto.fn, std::move(functionValue), engine_, proto.decl->is_override);
 	if (!declared) { return raise_from(declared); }
 	environment_->define(proto.decl->name_id, std::move(declared.value()));
 	engine_->bump_definition_epoch();

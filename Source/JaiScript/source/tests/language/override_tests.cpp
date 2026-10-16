@@ -37,7 +37,7 @@ public:
         test("override_keyword_required_for_virtual_methods", [this]() {
             auto engine = make_engine();
             
-            // Base class with method that becomes virtual
+            engine->static_checking(jai::check_mode::off);   // the run time's verdict (the checker reports it at load)
             engine->execute(R"(
                 class Animal {
                     auto speak() { return "..."; }
@@ -57,13 +57,13 @@ public:
                 )");
                 throw test_failure("Expected exception for missing override keyword");
             } catch (const runtime_error& e) {
-                check_true(std::string(e.what()).find("Must use 'override' keyword") != std::string::npos,
-                          "Exception message should contain 'Must use 'override' keyword'");
+                check_eq(std::string("Method 'speak' redefines 'Animal::speak': mark it 'override'"), std::string(e.what()));
             }
         });
         
         test("override_without_base_method_throws", [this]() {
             auto engine = make_engine();
+            engine->static_checking(jai::check_mode::off);
             
             engine->execute(R"(
                 class Base {
@@ -86,6 +86,7 @@ public:
         
         test("shadowing_without_override_throws", [this]() {
             auto engine = make_engine();
+            engine->static_checking(jai::check_mode::off);
             
             engine->execute(R"(
                 class Base {
@@ -101,8 +102,7 @@ public:
                 )");
                 throw test_failure("Expected exception for shadowing without override");
             } catch (const runtime_error& e) {
-                check_true(std::string(e.what()).find("shadows base class method") != std::string::npos,
-                          "Exception message should contain 'shadows base class method'");
+                check_eq(std::string("Method 'compute' redefines 'Base::compute': mark it 'override'"), std::string(e.what()));
             }
         });
         

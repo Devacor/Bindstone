@@ -3551,15 +3551,20 @@ public:
 			// The same call site runs the old body, then the redefined body (with a
 			// DIFFERENT return type: the per-function conversion class must re-derive
 			// on the new function object, and the site's cached callee must miss)
-			auto [i1, v1] = run_both_backends(R"(
-				[[warn_mode]]
-				function f(auto n) -> int { return n + 1; }
-				var a = 0;
-				for (var i = 0; i < 3; i += 1) { a = f(a); }
-				function f(auto n) -> string { return "s" + n; }
-				var b = f(a);
-				"" + a + ":" + b;
-			)");
+			// The redefinition is a separate execute, a hot reload (one program text defining a signature twice is an error)
+			std::string out[2];
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				e->static_checking(jai::check_mode::warn);
+				try {
+					e->execute("function f(auto n) -> int { return n + 1; }\nvar call_f(var x) { return f(x); }\nvar a = 0;\nfor (var i = 0; i < 3; i += 1) { a = call_f(a); }");
+					e->execute("function f(auto n) -> string { return \"s\" + n; }");
+					out[use_vm ? 1 : 0] = e->execute("var b = call_f(a);\n\"\" + a + \":\" + b;").to_string();
+				} catch (const std::exception& ex) { out[use_vm ? 1 : 0] = std::string("ERROR: ") + ex.what(); }
+			}
+			const std::string& i1 = out[0];
+			const std::string& v1 = out[1];
 			check_eq(std::string("3:s3"), i1, "interp redefinition at a warm call site");
 			check_eq(i1, v1, "redefinition parity (vm cache revalidates)");
 		});

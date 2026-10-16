@@ -158,6 +158,114 @@ public:
 				t + "|" + (S() + "y");
 			)", "S+y|S+y");
 		});
+		// docs/site/guide/03-value-semantics.html "Escape hatch 6": cast<T&>(h) is a reference to the object h holds (C++ *h), an
+		// lvalue whose store copy-assigns that object, and a member of it binds by reference
+		test("cast_reference_of_a_handle_names_the_shared_object", [this]() {
+			expect("a store reaches every alias", R"(
+				class C { int x = 1; }
+				shared_ptr<C> h = new C(); shared_ptr<C> alias = h;
+				C n = C(); n.x = 5;
+				cast<C&>(h) = n;
+				n.x = 6;
+				to_string(alias.x) + "|" + to_string(h.x) + "|" + to_string(same_object(h, alias));
+			)", "5|5|true");
+			expect("a var holding a handle", R"(
+				class C { int x = 1; }
+				var w = new C(); var w2 = w;
+				C m = C(); m.x = 7;
+				cast<C&>(w) = m;
+				to_string(w2.x) + "|" + to_string(same_object(w, w2));
+			)", "7|true");
+			expect("members bind by reference through the cast", R"(
+				class C { int x = 1; }
+				class D : C { int y = 2; }
+				void bump(int& v) { v += 100; }
+				shared_ptr<C> h = new C(); shared_ptr<C> a = h;
+				bump(cast<C&>(h).x);
+				auto& rx = cast<C&>(a).x; rx += 3;
+				shared_ptr<C> hd = new D(); shared_ptr<C> ad = hd;
+				auto& ry = cast<D&>(hd).y; ry = 41;
+				string bad = "";
+				try { shared_ptr<C> hc = new C(); auto& r = cast<D&>(hc).y; } catch (e) { bad = e; }
+				to_string(h.x) + "|" + to_string(cast<D&>(ad).y) + "|" + bad;
+			)", "104|41|Cannot cast 'C' to 'D&'");
+			expect("a value variable keeps its copy assignment", R"(
+				class C { int x = 1; }
+				C v = C(); C& alias = v;
+				C m = C(); m.x = 7;
+				cast<C&>(v) = m;
+				to_string(alias.x);
+			)", "7");
+		});
+		// docs/site/guide/03-value-semantics.html: a call returning T& and a conditional of lvalues are lvalues, so an element
+		// or member of them is one too (C++: getref()["a"] = 5); a by-value result stays a temporary
+		test("an_element_of_an_lvalue_container_expression_is_an_lvalue", [this]() {
+			expect("calls returning references", R"(
+				map<string,int> m = {"a": 1};
+				map<string,int>& getref() { return m; }
+				array<int> arr = [1,2,3];
+				array<int>& geta() { return arr; }
+				array<array<int>> grid = [[1,2],[3,4]];
+				array<array<int>>& gg() { return grid; }
+				string s = "abc";
+				string& gs() { return s; }
+				getref()["a"] = 5; getref()["new"] = 3;
+				geta()[0] = 7; geta()[1] += 10;
+				gg()[1][0] = 30;
+				gs()[0] = 'x';
+				to_string(m["a"]) + "|" + to_string(m["new"]) + "|" + to_string(arr[0]) + "|" + to_string(arr[1]) + "|" +
+					to_string(grid[1][0]) + "|" + s;
+			)", "5|3|7|12|30|xbc");
+			expect("a method returning a reference", R"(
+				class Box { array<int> items = [0,0]; array<int>& all() { return items; } }
+				Box b = Box();
+				b.all()[1] = 9;
+				to_string(b.items[1]);
+			)", "9");
+			expect("a conditional of lvalues", R"(
+				class P { int x = 1; }
+				array<int> a1 = [1]; array<int> a2 = [2];
+				P o1 = P(); P o2 = P();
+				bool pick = true;
+				(pick ? a1 : a2)[0] = 50;
+				(pick ? o1 : o2).x = 5;
+				to_string(a1[0]) + "|" + to_string(o1.x);
+			)", "50|5");
+			expect("a by-value result stays a temporary", R"(
+				array<int> arr = [1,2,3];
+				array<int> byval() { return arr; }
+				string r = "";
+				try { byval()[0] = 7; } catch (e) { r = e; }
+				r + "|" + to_string(arr[0]);
+			)", "Cannot assign to rvalue expression|1");
+		});
+		// docs/site/guide/03-value-semantics.html and C++ [expr.ass]: built-in assignment to a member of a class prvalue is
+		// ill-formed, so a store into a member of a class value no storage holds raises the math temporary's text
+		test("a_member_store_into_a_class_temporary_raises", [this]() {
+			expect("every temporary shape", R"(
+				class P { int x = 1; P operator+(P o) { return P(); } }
+				P make() { return P(); }
+				function untyped() { return P(); }
+				P keep = P();
+				string t(function f) { string r = "stored"; try { f(); } catch (e) { r = e; } return r; }
+				t([]() { make().x = 4; }) + "|" + t([]() { P().x = 4; }) + "|" + t([]() { make().x += 4; }) + "|" +
+					t([]() { make().x++; }) + "|" + t([]() { (P() + P()).x = 4; }) + "|" + t([]() { untyped().x = 4; }) + "|" +
+					t([]() { cast<P>(keep).x = 4; });
+			)", "Cannot assign to a member of a temporary|Cannot assign to a member of a temporary|Cannot assign to a member of a temporary|"
+			    "Cannot assign to a member of a temporary|Cannot assign to a member of a temporary|Cannot assign to a member of a temporary|"
+			    "Cannot assign to a member of a temporary");
+			expect("handles, references and storage store", R"(
+				class P { int x = 1; }
+				shared_ptr<P> mkh() { return new P(); }
+				P keep = P();
+				P& mkr() { return keep; }
+				mkh().x = 4;
+				(new P()).x = 4;
+				mkr().x = 9;
+				var v = P(); v.x = 3;
+				to_string(keep.x) + "|" + to_string(v.x);
+			)", "9|3");
+		});
 		test("nested_member_regions_preserve_reads_stores_and_callbacks", [this]() {
 			expect("nested scalar updates", R"(
 				class Position { float x = 1.0; }
@@ -2357,7 +2465,7 @@ private:
 				class O { int f = 1; static int s = 1; int self_add() { this.f += (f = 10); return f; } }
 				namespace ns { int x = 1; }
 				O G = O();
-				function obj() -> O { LOG += "t" + K; return G; }
+				O& obj() { LOG += "t" + K; return G; }
 				class H { int f = 1; int _get_g() { LOG += "g" + K; return f; } void _set_g(int v) { LOG += "s" + K; f = v; } }
 				H hh = H();
 				function t(function f) -> string { LOG = ""; K = 0; f(); return LOG; }

@@ -12,7 +12,7 @@
 namespace jai::detail {
 
 	// Structural classifier for ref-bindable lvalue arguments: chains of plain member
-	// steps (no ::, ?., ->) and subscripts with int-literal or identifier indices over
+	// steps (no ::, ?., ->), cast<T&> links and subscripts with int-literal or identifier indices over
 	// an identifier or `this` base, at least one step deep. Bare identifiers keep the
 	// existing slot/env metadata path; everything else keeps the non-lvalue error.
 	inline bool is_ref_bindable_lvalue(const expression* e) {
@@ -41,6 +41,9 @@ namespace jai::detail {
 				}
 				e = b->left.get();
 				has_step = true;
+			} else if (t == node_type::cast_expr && static_cast<const cast_expr*>(e)->by_reference &&
+			           !static_cast<const cast_expr*>(e)->implicit_ref && has_step) {
+				e = static_cast<const cast_expr*>(e)->operand.get();   // cast<T&>(x).f names x's object, as x.f does
 			} else if (t == node_type::identifier_expr || t == node_type::this_expr) {
 				return has_step;
 			} else {
@@ -48,6 +51,12 @@ namespace jai::detail {
 			}
 		}
 		return false;
+	}
+
+	// A subscript names an element when its container is an lvalue: a name, member or element by shape, or any container
+	// expression that evaluated to a reference (a call returning T&, cast<T&>, a conditional of lvalues)
+	inline bool subscript_base_is_lvalue(bool lvalue_shape, const script_value& container_raw) {
+		return lvalue_shape || container_raw.is_reference();
 	}
 
 	// Member-FINAL subset of the classifier: the ref-DECL gate (var&/auto& = obj.field

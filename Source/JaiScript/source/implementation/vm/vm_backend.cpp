@@ -5898,7 +5898,6 @@ op_status vm_backend::exec_index(frame& f, const vm_instruction& ins) {
 }
 
 op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
-	const bool lvalue_shape = (ins.a & index_flag_lvalue_shape) != 0;
 	const bool lvalue_write = (ins.a & index_flag_lvalue_write) != 0;
 	// Transient read (transient_read.hpp): the consumer provably discards identity, so
 	// skip the reference mint and push a shallow element copy. Overrides re-enable the
@@ -5911,6 +5910,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 	script_value left_raw = std::move(stack_.back());
 	stack_.pop_back();
 	script_value& left = left_raw.deref();
+	const bool lvalue_shape = detail::subscript_base_is_lvalue((ins.a & index_flag_lvalue_shape) != 0, left_raw);
 
 	if (left.raw_storage_index() == script_value::TYPEID_PARALLEL_BORROW) {
 		// Parallel captured-read borrow: element reads go through the shared kernel
@@ -14952,6 +14952,7 @@ op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, ui
 		if (want_result) { stack_.push_back(make_null()); }
 		return {};
 	}
+	if (detail::class_temporary_member_store(member, objectValue)) [[unlikely]] { return raise_from(detail::class_temporary_member_error()); }
 
 	if (auto landed = member_field_write_fast(f, ins_index, proof, member, dereferenced, value)) {
 		if (*landed == op_status::failed) { return op_status::failed; }
@@ -15523,6 +15524,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 		stack_.push_back(make_null());
 		return {};
 	}
+	if (detail::class_temporary_member_store(member, objectValueRaw)) [[unlikely]] { return raise_from(detail::class_temporary_member_error()); }
 
 	if (auto landed = member_field_write_fast(f, ins_index, ins.b, member, objectValue, resultValue)) {
 		if (*landed == op_status::failed) { return op_status::failed; }

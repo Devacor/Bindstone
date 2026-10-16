@@ -2789,6 +2789,26 @@ expression_ptr parser::lvalue_target(const expression_ptr& target) {
             node->yields_reference = true;
             return node;
         }
+        case node_type::binary_expr:
+        case node_type::member_expr: {
+            // an element or member of a conditional of lvalues names storage in the arm it picks: (c ? a : b)[i] = v
+            jai::expression* container = target.get();
+            while (true) {
+                if (container->get_type() == node_type::binary_expr && static_cast<binary_expr*>(container)->op.type == token_type::left_bracket) {
+                    container = static_cast<binary_expr*>(container)->left.get();
+                } else if (container->get_type() == node_type::member_expr && !static_cast<member_expr*>(container)->is_static) {
+                    container = static_cast<member_expr*>(container)->object.get();
+                } else {
+                    break;
+                }
+            }
+            if (container->get_type() == node_type::ternary_expr && detail::lvalue_capable(container)) {
+                auto* c = static_cast<ternary_expr*>(container);
+                c->then_expression = bound_reference(c->then_expression);
+                c->else_expression = bound_reference(c->else_expression);
+            }
+            return target;
+        }
         default:
             return target;
     }

@@ -50,7 +50,6 @@ namespace jai::detail {
 		return t == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket;
 	}
 
-	inline constexpr std::string_view cast_error_text = "Cannot cast '{0}' to '{1}'";
 	inline constexpr std::string_view cast_non_lvalue_text =
 		"Cannot take reference of non-lvalue expression in cast<T&> (computed properties, "
 		"C++-backed members and non-object receivers are not ref-bindable)";
@@ -66,68 +65,6 @@ namespace jai::detail {
 			return t.element_type().get();
 		}
 		return &t;
-	}
-
-	inline std::string cast_target_spelling(const cast_expr& c) {
-		std::string out;
-		if (c.target->base_type == script_value_type::jai_shared_ptr_type) {
-			const type_info* pointee = c.target->element_type().get();
-			out = "shared_ptr<" + (pointee ? pointee->canonical_name() : std::string("auto")) + ">";
-		} else {
-			out = c.target->canonical_name();
-		}
-		if (c.by_reference) {
-			out += "&";
-		}
-		return out;
-	}
-
-	// The operand's DYNAMIC class (the instance, never the value tag: a T stored in an
-	// S-typed field carries S's tag and is still a T)
-	inline const class_definition* cast_dynamic_class(const script_value& seen) {
-		auto holder = seen.get_object_holder();
-		if (!holder || !holder->is_class_instance_wrapper) {
-			return nullptr;
-		}
-		auto* instance = static_cast<class_instance*>(holder->data.get());
-		return instance ? instance->get_class_definition() : nullptr;
-	}
-
-	inline std::string cast_source_spelling(const script_value& seen) {
-		if (seen.is_null()) {
-			return "null";
-		}
-		if (const class_definition* def = cast_dynamic_class(seen)) {
-			return def->get_name();
-		}
-		const type_info_ptr tag = seen.get_type_info();
-		if (tag && (tag->base_type == script_value_type::jai_object_type ||
-		            tag->base_type == script_value_type::jai_shared_ptr_type) && !tag->type_name.empty()) {
-			return tag->type_name;
-		}
-		return container_base_type_name(seen.type());
-	}
-
-	// a parallel worker cannot intern a spelling it has not seen: the same text without them
-	inline constexpr std::string_view cast_error_text_slotless = "Cannot cast the value to the target type";
-
-	JAI_NOINLINE inline error_propagator cast_error_propagator(const script_value& seen, const cast_expr& c, string_symbolizer* sym) {
-		const std::string source = cast_source_spelling(seen);
-		const std::string target = cast_target_spelling(c);
-		if (sym->frozen()) {
-			const auto source_id = sym->find(source);
-			const auto target_id = sym->find(target);
-			if (!source_id || !target_id) {
-				return error_propagator{make_error_code(runtime_error_code::type_mismatch), cast_error_text_slotless, 0, 0};
-			}
-			return error_propagator{make_error_code(runtime_error_code::type_mismatch), cast_error_text, *source_id, *target_id};
-		}
-		return error_propagator{make_error_code(runtime_error_code::type_mismatch), cast_error_text, sym->intern(source), sym->intern(target)};
-	}
-
-	template <typename T = script_value>
-	inline checked_result<T> cast_error(const script_value& seen, const cast_expr& c, string_symbolizer* sym) {
-		return cast_error_propagator(seen, c, sym);
 	}
 
 	// Class target on a non-null operand: an object or handle whose dynamic class is T or
@@ -254,6 +191,16 @@ namespace jai::detail {
 		const bool ok = reference_binding_admits(c.target.get(), seen, eng);   // the one admission kernel of every binding form
 		if (!ok) {
 			return cast_error(seen, c, sym);
+		}
+		// a handle's referent is the object it holds (C++ *h): a store copy-assigns that object, which every alias sees,
+		// where a store through the handle's own variable would rebind it
+		if (c.target->base_type == script_value_type::jai_object_type && seen.raw_storage_index() == script_value::TYPEID_OBJECT) {
+			const type_info* tag = seen.type_info_raw();
+			if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) {
+				script_value object = seen;
+				object.set_type_info(c.target);
+				return script_value::make_cell_reference(std::move(object), eng);
+			}
 		}
 		return ref;
 	}

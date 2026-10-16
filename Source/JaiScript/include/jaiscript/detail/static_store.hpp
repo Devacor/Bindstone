@@ -69,7 +69,7 @@ namespace jai::detail {
 	                                                                         const class_definition* access_context) {
 		using result = checked_result<script_value*>;
 		if (!member || !member->is_static) { return std::nullopt; }
-		if (auto ns = resolve_namespace_store(eng, member, symbols)) {
+		if (auto ns = resolve_namespace_store(eng, member, symbols); ns && !ns->missing) {
 			if (!ns->cell) {
 				return result(make_error_code(runtime_error_code::invalid_reference), "Cannot pass non-lvalue to reference parameter");
 			}

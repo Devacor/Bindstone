@@ -301,6 +301,44 @@ public:
 				return std::to_string(e.execute("g(0)").as_int()) + "|" + std::to_string(e.execute("K().m(0)").as_int());
 			});
 		});
+		// docs/site/reference/index.html "Run-time errors": a store through null names the member and the receiver as the read
+		// does; a store to a member a namespace lacks is the read's undefined name; a vector constructor names the shape it takes
+		test("store_and_constructor_texts_name_what_failed", [this]() {
+			expect("null receivers", R"(
+				class V { int x = 1; }
+				V v = null;
+				var w = null;
+				var nothing() { return null; }
+				string t(function f) { string r = "stored"; try { f(); } catch (e) { r = e; } return r; }
+				t([]() { w.x = 4; }) + "|" + t([]() { v.x = 4; }) + "|" + t([]() { nothing().x = 4; }) + "|" + t([]() { w.x += 4; });
+			)", "Cannot assign to 'x' on null ('w' is null)|Cannot assign to 'x' on null ('v' is null)|"
+			    "Cannot assign to 'x' on null ('nothing(...)' returned null)|Cannot access 'x' on null ('w' is null)", check_mode::off);
+			expect("namespace members", R"(
+				namespace ns { int x = 1; }
+				string t(function f) { string r = "stored"; try { f(); } catch (e) { r = e; } return r; }
+				t([]() { math::pi = 3.0; }) + "|" + t([]() { ns::y = 3; }) + "|" + t([]() { math::PI = 3.0; });
+			)", "Undefined variable 'math::pi'|Undefined variable 'ns::y'|Cannot assign to 'PI': it is read-only", check_mode::off);
+			expect("vector constructors", R"(
+				string t(function f) { string r = "built"; try { f(); } catch (e) { r = e; } return r; }
+				t([]() { math::vec3(5); }) + "|" + t([]() { math::vec3(math::vec2(1, 2)); }) + "|" + t([]() { math::vec4(math::vec2(1, 2), 3); }) + "|" +
+					t([]() { math::color(5); }) + "|" + t([]() { math::vec2("a", 1); });
+			)", "math::vec3 expects one vector of 3 components|math::vec3 expects one vector of 3 components|"
+			    "math::vec4 expects a narrower vector followed by scalars that complete 4 components|math::color expects one color|"
+			    "math::vec2 expects numeric components", check_mode::off);
+			every_config("spellings from other languages", "1|1|1", [&](engine& e) {
+				auto parse_error_of = [&](const std::string& src) {
+					try { e.execute(src); } catch (const std::exception& ex) { return std::string(ex.what()); }
+					return std::string("parsed");
+				};
+				const std::string lambda = parse_error_of("int n = 1; auto f = [n]() mutable { return n; };");
+				const std::string dot = parse_error_of("class B { void m() {} }\nclass D : B { void m() override { super.m(); } }");
+				const std::string call = parse_error_of("class B { void m() {} }\nclass D : B { void m() override { super(1); } }");
+				return std::to_string(lambda.find("A lambda takes no 'mutable': its copied captures are already its own, writable and kept between calls") != std::string::npos &&
+				                      lambda.find("Expected expression") == std::string::npos) + "|" +
+					std::to_string(dot.find("A base class method is called with super::name(args), not super.name") != std::string::npos) + "|" +
+					std::to_string(call.find("super(...) constructs the base only in a constructor's initializer list (: super(args)); call a base method with super::name(args)") != std::string::npos);
+			});
+		});
 		test("nested_member_regions_preserve_reads_stores_and_callbacks", [this]() {
 			expect("nested scalar updates", R"(
 				class Position { float x = 1.0; }

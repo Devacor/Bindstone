@@ -65,6 +65,26 @@ inline std::string non_object_member_store_text(std::string_view cls, std::strin
     return cls.empty() ? std::string("Cannot assign to member of non-object type") : class_dot_member_text(cls, member);
 }
 
+// The spelling null_member_receiver_symbol names: `obj` for obj.m, `creature` for game().creature(id).m
+inline std::string_view null_member_receiver_name(const expression* receiver) {
+    if (!receiver) { return {}; }
+    switch (receiver->get_type()) {
+        case node_type::identifier_expr: return static_cast<const identifier_expr*>(receiver)->name;
+        case node_type::member_expr: return static_cast<const member_expr*>(receiver)->member;
+        case node_type::call_expr: return null_member_receiver_name(static_cast<const call_expr*>(receiver)->callee.get());
+        default: return {};
+    }
+}
+
+// `x.m = v` through a null receiver: the read's shapes (null_member_message) with the store's verb
+inline std::string null_member_store_text(const expression* receiver, std::string_view member) {
+    std::string out = "Cannot assign to '" + std::string(member) + "' on null";
+    const std::string_view name = null_member_receiver_name(receiver);
+    if (name.empty()) { return out; }
+    if (receiver->get_type() == node_type::call_expr) { return out + " ('" + std::string(name) + "(...)' returned null)"; }
+    return out + " ('" + std::string(name) + "' is null)";
+}
+
 // The raise's (text, symbol): a frozen symbolizer (a parallel worker) gets the name-free shape
 template <class Symbolizer>
 inline std::pair<std::string_view, uint64_t> class_dot_member_error(Symbolizer& symbols, bool frozen, std::string_view cls,

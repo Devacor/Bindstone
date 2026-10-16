@@ -57,10 +57,11 @@ namespace jai::detail {
 
 	struct namespace_store_target {
 		script_value* cell = nullptr;   // the scope's own cell; null names a host-registered entry
+		bool missing = false;           // the path names a namespace that has no such member
 	};
 
-	// `path::member` as a namespace member for a store: the scope's cell, a host entry (cell null), or
-	// nothing (the path names no namespace, or the namespace has no such member: the class ladder decides).
+	// `path::member` as a namespace member for a store: the scope's cell, a host entry (cell null), a namespace without the
+	// member (missing: the read's undefined-name text), or nothing (the path names no namespace: the class ladder decides).
 	// Reads only: no name is interned on this path.
 	inline std::optional<namespace_store_target> resolve_namespace_store(engine& eng, const member_expr* member, const string_symbolizer& symbols) {
 		const std::string path = static_path_of(member->object.get());
@@ -85,7 +86,16 @@ namespace jai::detail {
 		if (ns.variables.count(member->member_id) != 0) {
 			return namespace_store_target{};
 		}
-		return std::nullopt;
+		return namespace_store_target{nullptr, true};
+	}
+
+	// `ns::x = v` where ns declares no x: the text a read of ns::x raises
+	JAI_NOINLINE inline error_propagator namespace_member_missing(const member_expr* member, string_symbolizer& symbols) {
+		if (symbols.frozen()) {
+			return error_propagator{make_error_code(runtime_error_code::undefined_variable), "Undefined variable", 0, 0};
+		}
+		return error_propagator{make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}'",
+			symbols.intern(static_path_of(member->object.get()) + "::" + std::string(member->member)), 0};
 	}
 
 } // namespace jai::detail

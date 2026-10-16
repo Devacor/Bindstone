@@ -6520,7 +6520,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             // Check if it's an object
             if (!dereferenced.is_object()) {
                 // Set exception state instead of throwing
-                raise_script_text(non_object_member_store_text(class_named_by_dot_receiver(memberExpr->object.get(), dereferenced, engine_),
+                raise_script_text(dereferenced.is_null() ? null_member_store_text(memberExpr->object.get(), memberExpr->member) : non_object_member_store_text(class_named_by_dot_receiver(memberExpr->object.get(), dereferenced, engine_),
                                                                        memberExpr->member), memberExpr->location);
                 push_value(make_value());
                 return {};
@@ -7340,6 +7340,9 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
 // enforcement an environment variable gets, a reference-declared variable stores through, a host-registered
 // entry is read-only. KEEP BYTE-PARALLEL with vm_backend::store_namespace_cell.
 checked_result<script_value> interpreter::store_namespace_cell(const detail::namespace_store_target& target, const member_expr* member, script_value incoming) {
+    if (target.missing) {
+        return detail::namespace_member_missing(member, *string_symbolizer_);
+    }
     if (!target.cell) {
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
             "Cannot assign to '{0}': it is read-only", member->member_id);

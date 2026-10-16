@@ -14947,7 +14947,8 @@ op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, ui
 			if (want_result) { stack_.push_back(assignment_result_used(f) ? std::move(stored) : std::move(value)); }
 			return {};
 		}
-		raise_script_exception(non_object_member_store_text(class_named_by_dot_receiver(member->object.get(), dereferenced, engine_), member->member),
+		raise_script_exception(dereferenced.is_null() ? null_member_store_text(member->object.get(), member->member)
+		                                              : non_object_member_store_text(class_named_by_dot_receiver(member->object.get(), dereferenced, engine_), member->member),
 		                       member->location);
 		if (want_result) { stack_.push_back(make_null()); }
 		return {};
@@ -15270,6 +15271,9 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 // enforcement an environment variable gets, a reference-declared variable stores through, a host-registered
 // entry is read-only. KEEP BYTE-PARALLEL with interpreter::store_namespace_cell.
 op_status vm_backend::store_namespace_cell(const detail::namespace_store_target& target, member_expr* member, script_value incoming, script_value* stored_out) {
+	if (target.missing) {
+		return raise_from(detail::namespace_member_missing(member, *symbolizer_));
+	}
 	if (!target.cell) {
 		return raise_(make_error_code(runtime_error_code::type_mismatch), "Cannot assign to '{0}': it is read-only", member->member_id);
 	}

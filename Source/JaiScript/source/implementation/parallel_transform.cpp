@@ -1334,15 +1334,15 @@ namespace {
 			// access-context check — the barrier proves both moot instead
 			if (cls->find_field_declaring_class(name_id) != nullptr) {
 				return unpinnable("'" + std::string(name) + "' names both a field and a method on class '" +
-				                  cls->get_name() + "' — not admitted in a parallel body (v1)");
+				                  cls->get_name() + "' — not admitted in a parallel body");
 			}
 			if (cls->defines_method(sym.get_getter_id_with_view(name_id).first)) {
 				return unpinnable("method '" + std::string(name) + "' is shadowed by a property getter on class '" +
-				                  cls->get_name() + "' — not admitted in a parallel body (v1)");
+				                  cls->get_name() + "' — not admitted in a parallel body");
 			}
 			if (cls->chain_has_nonpublic()) {
 				return unpinnable("class '" + cls->get_name() +
-				                  "' has non-public members — its methods are not admitted in a parallel body (v1)");
+				                  "' has non-public members — its methods are not admitted in a parallel body");
 			}
 			if (!visited_methods.insert(decl.get()).second) { return true; }   // recursion / already admitted
 			// Pre-mint the shared parameter storage (a mutable lazy cache on the AST
@@ -1538,7 +1538,7 @@ namespace {
 				return true;
 			}
 			case node_type::function_decl:
-				return wall(s.get(), "function declarations are not allowed in a parallel body (v0)");
+				return wall(s.get(), "function declarations are not allowed in a parallel body");
 			case node_type::class_decl:
 				return wall(s.get(), "class declarations are not allowed in a parallel body");
 			case node_type::namespace_decl:
@@ -1549,7 +1549,7 @@ namespace {
 			case node_type::import_decl:
 				return wall(s.get(), "include/import is not allowed in a parallel body");
 			default:
-				return fail(s.get(), "statement is not allowed in a parallel body (v0)");
+				return fail(s.get(), "statement is not allowed in a parallel body");
 			}
 		}
 
@@ -1621,7 +1621,7 @@ namespace {
 				if (proof_mode && global_rooted(e.get()) && proof_chain_type(e.get())) { return walk_chain_indexes(e.get()); }   // a serial proof reads program state in place: no accessor, no write
 				return walk_local_member_chain(static_cast<member_expr*>(e.get()), "member access");
 			case node_type::lambda_expr:
-				return fail(e.get(), "lambdas are not allowed in a parallel body (v0)");
+				return fail(e.get(), "lambdas are not allowed in a parallel body");
 			case node_type::new_expr:
 				return fail(e.get(), "'new' is not allowed in a parallel body");
 			case node_type::this_expr:
@@ -1665,7 +1665,7 @@ namespace {
 			case node_type::import_expr:
 				return wall(e.get(), "import is not allowed in a parallel body");
 			default:
-				return fail(e.get(), "expression is not allowed in a parallel body (v0)");
+				return fail(e.get(), "expression is not allowed in a parallel body");
 			}
 		}
 
@@ -1702,7 +1702,7 @@ namespace {
 					if (chain_root_is_element(t)) { adm.element_mutated = true; }
 					return walk_local_member_chain(static_cast<member_expr*>(t.get()), "member store");
 				}
-				return fail(t.get(), "member stores are not allowed in a parallel body (v0)");
+				return fail(t.get(), "member stores are not allowed in a parallel body");
 			default:
 				return fail(t.get(), std::string(what) + " target is not allowed in a parallel body");
 			}
@@ -1792,12 +1792,12 @@ namespace {
 				return true;
 			}
 			if (!call->callee || call->callee->get_type() != node_type::identifier_expr) {
-				return wall(call, "call target is not statically resolvable in a parallel body (v0)");
+				return wall(call, "call target is not statically resolvable in a parallel body");
 			}
 			auto* callee = static_cast<identifier_expr*>(call->callee.get());
 			const std::string callee_name(callee->name);
 			if (is_local(callee->symbol_id)) {
-				return wall(callee, "call target '" + callee_name + "' is not statically resolvable in a parallel body (v0)");
+				return wall(callee, "call target '" + callee_name + "' is not statically resolvable in a parallel body");
 			}
 			// Bare sibling-method calls resolve through the env→bound-method seam at
 			// runtime (the engine-backend escape the pins exist to prevent); the
@@ -1810,7 +1810,7 @@ namespace {
 			// would mutate the cached admission per call — not admitted (v1)
 			if (method_class && !primitive_ctor_name(callee->name)) {
 				return fail(callee, "global function call '" + callee_name +
-				               "' from a parallel method body is not admitted (v1)");
+				               "' from a parallel method body is not admitted");
 			}
 			// Resolve the callee BEFORE walking arguments so the caller sees the most
 			// useful violation first (e.g. a nested parallel_transform names itself,
@@ -1828,7 +1828,7 @@ namespace {
 				}
 				if (const script_callable* payload = payload_from_function_value(global.value())) {
 					if (payload->kind != script_callable::kind_type::function || !payload->fn) {
-						return fail(callee, "call target '" + callee_name + "' is not a plain function (v0)");
+						return fail(callee, "call target '" + callee_name + "' is not a plain function");
 					}
 					if (!admit_function(payload->fn, callee->symbol_id, root_param::none, callee)) { return false; }
 					note_death(payload->fn->return_type);   // the call's result is a temporary
@@ -1859,7 +1859,7 @@ namespace {
 					callee_ok = true;
 					converts_like_host = true;
 				} else {
-					return fail(callee, "host function '" + callee_name + "' is not callable in a parallel body (v0)");
+					return fail(callee, "host function '" + callee_name + "' is not callable in a parallel body");
 				}
 			}
 			for (const auto& a : call->arguments) {
@@ -4182,7 +4182,7 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 		return raise(make_error_code(runtime_error_code::unsupported_operation), std::move(message));
 	};
 	if (state.region_running) {
-		return usage("parallel_transform: nested parallel regions are not supported (v0)");
+		return usage("parallel_transform: nested parallel regions are not supported");
 	}
 	if (args.size() < 2 || args.size() > 3) {
 		return usage("parallel_transform: expected (array, fn) or (array, fn, weight_fn)");
@@ -4305,11 +4305,11 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 		return raise(make_error_code(runtime_error_code::unsupported_operation), std::move(message));
 	};
 	if (state.region_running) {
-		return usage("parallel_for: nested parallel regions are not supported (v0)");
+		return usage("parallel_for: nested parallel regions are not supported");
 	}
 	const script_value& array_value = containers.front().is_reference() ? containers.front().deref() : containers.front();
 	if (!array_value.is_array()) {
-		return usage("parallel_for: can only iterate an array (v1)");
+		return usage("parallel_for: can only iterate an array");
 	}
 
 	// The shared body function (admission + pool key + per-worker provisioning source). Hot

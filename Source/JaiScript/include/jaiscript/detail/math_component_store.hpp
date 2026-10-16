@@ -79,8 +79,11 @@ namespace jai::detail::math {
 	// A static base (`C::s.x = 1`, `ns::v.x = 1`): the namespace scope's cell or the class's static field, by the ladder
 	// and texts the whole-value stores take
 	inline checked_result<script_value*> static_component_cell(const member_expr* m, engine& eng, const environment& env,
-	                                                           const string_symbolizer& symbols, const class_definition* access_context) {
+	                                                           string_symbolizer& symbols, const class_definition* access_context) {
 		if (auto ns = resolve_namespace_store(eng, m, symbols)) {
+			if (ns->missing) {
+				return checked_result<script_value*>(namespace_member_missing(m, symbols));
+			}
 			if (!ns->cell) {
 				return checked_result<script_value*>(make_error_code(runtime_error_code::type_mismatch), "Cannot assign to '{0}': it is read-only", m->member_id);
 			}

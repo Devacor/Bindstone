@@ -1517,6 +1517,7 @@ namespace jai::vm {
         checked_result<script_value> evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in, int compound = -1);
 
         checked_result<script_value> binary_general(token_type op, const script_value& left, const script_value& right);
+        struct binary_host;   // this backend's hooks for detail/binary_handlers.hpp
         checked_result<script_value> handle_binary_op(token_type op, const script_value& left, const script_value& right);
         checked_result<script_value> handle_add(const script_value& left, const script_value& right);
         checked_result<script_value> handle_subtract(const script_value& left, const script_value& right);

@@ -40,6 +40,11 @@ struct interpreter::binary_host {
     jai::engine* engine() const noexcept { return in.engine_; }
     checked_result<script_value> concat(const script_value& l, const script_value& r) { return in.concat_with_methods(l, r); }
     std::optional<checked_result<script_value>> object_arithmetic(const script_value& l, const script_value& r, uint64_t id) { return in.object_arithmetic_via_method(l, r, id); }
+    bool operator_takes(const script_value& l, const script_value& r, uint64_t id) {
+        if (in.parallel_worker_) [[unlikely]] { return detail::worker_operator_takes(l, r, id); }
+        auto target = in.resolve_member_target(l);
+        return target && binary_operator_accepts(target.class_def, id, r);
+    }
     std::optional<checked_result<bool>> object_comparison(const script_value& l, const script_value& r, uint64_t id) { return in.object_comparison_via_method(l, r, id); }
     std::optional<checked_result<bool>> object_equality(const script_value& l, const script_value& r) { return in.object_equality_via_method(l, r); }
     std::optional<checked_result<bool>> object_inequality(const script_value& l, const script_value& r) { return in.object_inequality_via_method(l, r); }

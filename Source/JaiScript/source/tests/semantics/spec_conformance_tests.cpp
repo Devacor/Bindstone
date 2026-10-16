@@ -123,6 +123,41 @@ public:
 	}
 
 	void forge_tests() override {
+		// docs/site/guide/04-operators.html "Operator overloading": the left operand's operator runs when one of its overloads
+		// takes the right operand, ahead of any builtin meaning (C++ overload resolution: a user operator beats the builtin)
+		test("a_class_operator_that_takes_the_operand_beats_the_builtin", [this]() {
+			expect("string right operands", R"(
+				class S {
+					string operator+(string s) { return "S+" + s; }
+					int operator-(string s) { return 7; }
+					int operator&(string s) { return 9; }
+					int operator<=>(string s) { return -1; }
+				}
+				S s = S();
+				int k = s - "x";
+				s + "x" + "|" + k + "|" + (s & "x") + "|" + (s <=> "x") + "|" + (s < "x");
+			)", "S+x|7|9|-1|true");
+			expect("the checker types the operator's result", R"(
+				class N { int operator+(string s) { return s.size(); } }
+				int k = N() + "abcd";
+				to_string(k);
+			)", "4");
+			expect("no overload takes the operand: the builtin meaning stands", R"(
+				class W { W operator+(W o) { return W(); } string to_string() { return "W"; } }
+				W w = W();
+				(w + "!") + "|" + ("!" + w);
+			)", "W!|!W");
+			expect("an untyped parameter takes a string", R"(
+				class A { int operator+(var o) { return 42; } }
+				var a = A();
+				to_string(A() + "s") + "|" + to_string(a + "s");
+			)", "42|42");
+			expect("compound and binary agree", R"(
+				class S { string operator+(string s) { return "S+" + s; } }
+				var t = S(); t += "y";
+				t + "|" + (S() + "y");
+			)", "S+y|S+y");
+		});
 		test("nested_member_regions_preserve_reads_stores_and_callbacks", [this]() {
 			expect("nested scalar updates", R"(
 				class Position { float x = 1.0; }

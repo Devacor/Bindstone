@@ -34,6 +34,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/method_value.hpp>
 #include <jaiscript/detail/scalar_ops.hpp>
+#include <jaiscript/detail/binary_handlers.hpp>   // the general binary operators (interp parity)
 #include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/string_mutator_receiver.hpp>
 #include <jaiscript/detail/string_element.hpp>
@@ -2196,764 +2197,78 @@ op_status vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_
 // Binary operators (mirror interpreter_dispatch.cpp handle_*)
 // ============================================================
 
-checked_result<script_value> vm_backend::handle_add(const script_value& left, const script_value& right) {
-	const size_t li_raw = left.raw_storage_index();
-	const size_t ri_raw = right.raw_storage_index();
-	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
-	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-		return handle_add(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
-		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
-	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
-	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
-		return detail::utf8_rewrapped(handle_add(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
-	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
-		return handle_add(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
-
-	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
-	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
-		if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-			const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
-			script_int r;
-			if (!ints::try_add(a, b, r)) return vm_int_overflow_sv("Integer overflow in '+'");
-			return script_value(r, engine_);
-		}
-		if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
-		    (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
-			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-			return script_value(lf + rf, engine_);
-		}
-		if (li_raw == script_value::TYPEID_STRING || ri_raw == script_value::TYPEID_STRING) {
-			auto joined = concat_text(left, right);
-			if (!joined) { return joined.error_value(); }
-			// engine::memory_cap chokepoint: deny the concat result before it exists
-			if (!limits_->memory_charge(sizeof(script_value) + joined.value().size())) [[unlikely]] {
-				return detail::raise_memory_cap(*limits_);
-			}
-			return script_value(std::move(joined.value()), engine_);
-		}
-		if (detail::math::owns_arithmetic(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-			return detail::math::binary(detail::math::bop::add, left, right, engine_);
-		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for + operator");
-	}
-
-	script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
-	script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
-
-	const size_t li = unwrapped_left.raw_storage_index();
-	const size_t ri = unwrapped_right.raw_storage_index();
-
-	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-		const script_int a = unwrapped_left.unchecked_as_int(), b = unwrapped_right.unchecked_as_int();
-		script_int r;
-		if (!ints::try_add(a, b, r)) return vm_int_overflow_sv("Integer overflow in '+'");
-		return script_value(r, engine_);
-	}
-
-	if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-	    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-		script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
-		script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-		return script_value(lf + rf, engine_);
-	}
-
-	if (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING) {
-		auto joined = concat_text(unwrapped_left, unwrapped_right);
+struct vm_backend::binary_host {
+	vm_backend& vm;
+	script_value make_int(script_int v) const noexcept { return script_value(v, vm.engine_); }
+	script_value make_float(script_float v) const noexcept { return script_value(v, vm.engine_); }
+	script_value make_bool(bool v) const noexcept { return script_value(v, vm.engine_); }
+	jai::engine* engine() const noexcept { return vm.engine_; }
+	checked_result<script_value> concat(const script_value& l, const script_value& r) {
+		auto joined = vm.concat_text(l, r);
 		if (!joined) { return joined.error_value(); }
 		// engine::memory_cap chokepoint: deny the concat result before it exists
-		if (!limits_->memory_charge(sizeof(script_value) + joined.value().size())) [[unlikely]] {
-			return detail::raise_memory_cap(*limits_);
-		}
-		return script_value(std::move(joined.value()), engine_);
+		if (!vm.limits_->memory_charge(sizeof(script_value) + joined.value().size())) [[unlikely]] { return detail::raise_memory_cap(*vm.limits_); }
+		return script_value(std::move(joined.value()), vm.engine_);
 	}
-
-	auto custom_result = object_arithmetic_via_method(left, right, op_plus_id_);
-	if (custom_result.has_value()) {
-		return custom_result.value();
+	std::optional<checked_result<script_value>> object_arithmetic(const script_value& l, const script_value& r, uint64_t id) { return vm.object_arithmetic_via_method(l, r, id); }
+	bool operator_takes(const script_value& l, const script_value& r, uint64_t id) {
+		if (vm.parallel_worker_) [[unlikely]] { return detail::worker_operator_takes(l, r, id); }
+		auto target = vm.resolve_member_target(l);
+		return target && binary_operator_accepts(target.class_def, id, r);
 	}
+	std::optional<checked_result<bool>> object_comparison(const script_value& l, const script_value& r, uint64_t id) { return vm.object_comparison_via_method(l, r, id); }
+	std::optional<checked_result<bool>> object_equality(const script_value& l, const script_value& r) { return vm.object_equality_via_method(l, r); }
+	std::optional<checked_result<bool>> object_inequality(const script_value& l, const script_value& r) { return vm.object_inequality_via_method(l, r); }
+	std::optional<checked_result<bool>> object_comparison_reversed(const script_value& l, const script_value& r, uint64_t id) { return vm.object_comparison_reversed_via_method(l, r, id); }
+	std::optional<checked_result<script_value>> object_spaceship_reversed(const script_value& l, const script_value& r) { return vm.object_spaceship_reversed_via_method(l, r); }
+	std::optional<checked_result<bool>> object_spaceship_equality(const script_value& l, const script_value& r) { return vm.object_spaceship_equality_via_method(l, r); }
+	bool defines_custom_equality(const script_value& v) const { return vm.object_defines_custom_equality(v); }
+	bool unwinding() const noexcept { return vm.is_unwinding_; }
+	bool parallel_worker() const noexcept { return vm.parallel_worker_; }
+	size_t& equality_depth() noexcept { return vm.structural_equality_depth_; }
+	checked_result<script_value> spaceship(const script_value& a, const script_value& b) { return vm.handle_spaceship(a, b); }
+	checked_result<script_value> equal(const script_value& l, const script_value& r) { return vm.handle_equal(l, r); }
+};
 
-	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for + operator");
+checked_result<script_value> vm_backend::handle_add(const script_value& left, const script_value& right) {
+	binary_host h{*this};
+	return detail::binary_arithmetic<detail::arith_op::add>(h, op_plus_id_, left, right);
 }
-
 checked_result<script_value> vm_backend::handle_subtract(const script_value& left, const script_value& right) {
-	const size_t li_raw = left.raw_storage_index();
-	const size_t ri_raw = right.raw_storage_index();
-	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
-	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-		return handle_subtract(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
-		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
-	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
-	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
-		return detail::utf8_rewrapped(handle_subtract(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
-	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
-		return handle_subtract(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
-
-	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
-	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
-		if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-			const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
-			script_int r;
-			if (!ints::try_sub(a, b, r)) return vm_int_overflow_sv("Integer overflow in '-'");
-			return script_value(r, engine_);
-		}
-		if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
-		    (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
-			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-			return script_value(lf - rf, engine_);
-		}
-		if (detail::math::owns_arithmetic(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-			return detail::math::binary(detail::math::bop::sub, left, right, engine_);
-		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for - operator");
-	}
-
-	script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
-	script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
-
-	const size_t li = unwrapped_left.raw_storage_index();
-	const size_t ri = unwrapped_right.raw_storage_index();
-
-	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-		const script_int a = unwrapped_left.unchecked_as_int(), b = unwrapped_right.unchecked_as_int();
-		script_int r;
-		if (!ints::try_sub(a, b, r)) return vm_int_overflow_sv("Integer overflow in '-'");
-		return script_value(r, engine_);
-	}
-
-	if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-	    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-		script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
-		script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-		return script_value(lf - rf, engine_);
-	}
-
-	auto custom_result = object_arithmetic_via_method(left, right, op_minus_id_);
-	if (custom_result.has_value()) {
-		return custom_result.value();
-	}
-
-	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for - operator");
+	binary_host h{*this};
+	return detail::binary_arithmetic<detail::arith_op::sub>(h, op_minus_id_, left, right);
 }
-
 checked_result<script_value> vm_backend::handle_multiply(const script_value& left, const script_value& right) {
-	const size_t li_raw = left.raw_storage_index();
-	const size_t ri_raw = right.raw_storage_index();
-	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
-	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-		return handle_multiply(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
-		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
-	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
-	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
-		return detail::utf8_rewrapped(handle_multiply(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
-	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
-		return handle_multiply(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
-
-	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
-	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
-		if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-			const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
-			script_int r;
-			if (!ints::try_mul(a, b, r)) return vm_int_overflow_sv("Integer overflow in '*'");
-			return script_value(r, engine_);
-		}
-		if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
-		    (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
-			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-			return script_value(lf * rf, engine_);
-		}
-		if (detail::math::owns_arithmetic(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-			return detail::math::binary(detail::math::bop::mul, left, right, engine_);
-		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for * operator");
-	}
-
-	script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
-	script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
-
-	const size_t li = unwrapped_left.raw_storage_index();
-	const size_t ri = unwrapped_right.raw_storage_index();
-
-	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-		const script_int a = unwrapped_left.unchecked_as_int(), b = unwrapped_right.unchecked_as_int();
-		script_int r;
-		if (!ints::try_mul(a, b, r)) return vm_int_overflow_sv("Integer overflow in '*'");
-		return script_value(r, engine_);
-	}
-
-	if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-	    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-		script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
-		script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-		return script_value(lf * rf, engine_);
-	}
-
-	auto custom_result = object_arithmetic_via_method(left, right, op_star_id_);
-	if (custom_result.has_value()) {
-		return custom_result.value();
-	}
-
-	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for * operator");
+	binary_host h{*this};
+	return detail::binary_arithmetic<detail::arith_op::mul>(h, op_star_id_, left, right);
 }
-
 checked_result<script_value> vm_backend::handle_divide(const script_value& left, const script_value& right) {
-	const size_t li_raw = left.raw_storage_index();
-	const size_t ri_raw = right.raw_storage_index();
-	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
-	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-		return handle_divide(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
-		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
-	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
-	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
-		return detail::utf8_rewrapped(handle_divide(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
-	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
-		return handle_divide(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
-
-	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
-	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
-		if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-			const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
-			if (b == 0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
-			}
-			script_int r;
-			if (!ints::try_div(a, b, r)) return vm_int_overflow_sv("Integer overflow in '/'");
-			return script_value(r, engine_);
-		}
-		if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
-		    (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
-			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-			if (rf == 0.0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
-			}
-			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-			return script_value(lf / rf, engine_);
-		}
-		if (detail::math::owns_arithmetic(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-			return detail::math::binary(detail::math::bop::div, left, right, engine_);
-		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for / operator");
-	}
-
-	script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
-	script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
-
-	const size_t li = unwrapped_left.raw_storage_index();
-	const size_t ri = unwrapped_right.raw_storage_index();
-
-	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-		const script_int a = unwrapped_left.unchecked_as_int(), b = unwrapped_right.unchecked_as_int();
-		if (b == 0) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
-		}
-		script_int r;
-		if (!ints::try_div(a, b, r)) return vm_int_overflow_sv("Integer overflow in '/'");
-		return script_value(r, engine_);
-	}
-
-	if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-	    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-		script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-		if (rf == 0.0) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
-		}
-		script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
-		return script_value(lf / rf, engine_);
-	}
-
-	auto custom_result = object_arithmetic_via_method(left, right, op_slash_id_);
-	if (custom_result.has_value()) {
-		return custom_result.value();
-	}
-
-	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for / operator");
+	binary_host h{*this};
+	return detail::binary_arithmetic<detail::arith_op::div>(h, op_slash_id_, left, right);
 }
-
 checked_result<script_value> vm_backend::handle_modulo(const script_value& left, const script_value& right) {
-	const size_t li_raw = left.raw_storage_index();
-	const size_t ri_raw = right.raw_storage_index();
-	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
-	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-		return handle_modulo(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
-		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
-	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
-	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
-		return detail::utf8_rewrapped(handle_modulo(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
-	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
-		return handle_modulo(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
-
-	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
-	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
-		if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-			const script_int b = right.unchecked_as_int();
-			if (b == 0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
-			}
-			return script_value(ints::mod(left.unchecked_as_int(), b), engine_);
-		}
-		if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
-		    (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
-			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-			if (rf == 0.0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
-			}
-			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-			return script_value(std::fmod(lf, rf), engine_);
-		}
-		if (detail::math::owns_arithmetic(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-			return detail::math::binary(detail::math::bop::mod, left, right, engine_);
-		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for % operator");
-	}
-
-	script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
-	script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
-
-	const size_t li = unwrapped_left.raw_storage_index();
-	const size_t ri = unwrapped_right.raw_storage_index();
-
-	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-		const script_int b = unwrapped_right.unchecked_as_int();
-		if (b == 0) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
-		}
-		return script_value(ints::mod(unwrapped_left.unchecked_as_int(), b), engine_);
-	}
-
-	if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-	    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-		script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-		if (rf == 0.0) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
-		}
-		script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
-		return script_value(std::fmod(lf, rf), engine_);
-	}
-
-	auto custom_result = object_arithmetic_via_method(left, right, op_percent_id_);
-	if (custom_result.has_value()) {
-		return custom_result.value();
-	}
-
-	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for % operator");
+	binary_host h{*this};
+	return detail::binary_arithmetic<detail::arith_op::mod>(h, op_percent_id_, left, right);
 }
-
 checked_result<script_value> vm_backend::handle_less(const script_value& left, const script_value& right) {
-	const size_t li_raw = left.raw_storage_index();
-	const size_t ri_raw = right.raw_storage_index();
-	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
-	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-		return handle_less(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
-		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
-	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
-	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
-		return detail::utf8_rewrapped(handle_less(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
-	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
-		return handle_less(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
-
-	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
-	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
-		if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-			return script_value(left.unchecked_as_int() < right.unchecked_as_int(), engine_);
-		}
-		if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
-		    (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
-			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-			return script_value(lf < rf, engine_);
-		}
-		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
-			return script_value(left.unchecked_as_string() < right.unchecked_as_string(), engine_);
-		}
-	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
-		if (!*builtin) { return builtin->error_value(); }
-		return script_value(builtin->value().unchecked_as_int() < 0, engine_);
-	}
-		if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-			return detail::math::ordering_error(left, right);
-		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
-	}
-
-	script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
-	script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
-
-	const size_t li = unwrapped_left.raw_storage_index();
-	const size_t ri = unwrapped_right.raw_storage_index();
-
-	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-		return script_value(unwrapped_left.unchecked_as_int() < unwrapped_right.unchecked_as_int(), engine_);
-	}
-	if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-	    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-		script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
-		script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-		return script_value(lf < rf, engine_);
-	}
-	if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-		return script_value(unwrapped_left.unchecked_as_string() < unwrapped_right.unchecked_as_string(), engine_);
-	}
-
-	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
-		if (!*builtin) { return builtin->error_value(); }
-		return script_value(builtin->value().unchecked_as_int() < 0, engine_);
-	}
-	auto custom_result = object_comparison_via_method(left, right, op_less_id_);
-	if (custom_result.has_value()) {
-		if (!*custom_result) { return custom_result->error_value(); }
-		return script_value(custom_result->value(), engine_);
-	}
-	// A script throw inside the operator method is in flight: don't replace it with
-	// the invalid-operands error (== parity; the value is discarded while unwinding)
-	if (is_unwinding_) {
-		return script_value(false, engine_);
-	}
-	if (auto reversed = object_comparison_reversed_via_method(left, right, op_less_id_)) {
-		if (!*reversed) { return reversed->error_value(); }
-		return script_value(reversed->value(), engine_);
-	}
-	if (is_unwinding_) { return script_value(false, engine_); }
-
-	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
+	binary_host h{*this};
+	return detail::binary_ordering<detail::order_op::less>(h, op_less_id_, left, right);
 }
-
 checked_result<script_value> vm_backend::handle_less_equal(const script_value& left, const script_value& right) {
-	const size_t li_raw = left.raw_storage_index();
-	const size_t ri_raw = right.raw_storage_index();
-	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
-	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-		return handle_less_equal(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
-		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
-	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
-	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
-		return detail::utf8_rewrapped(handle_less_equal(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
-	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
-		return handle_less_equal(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
-
-	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
-	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
-		if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-			return script_value(left.unchecked_as_int() <= right.unchecked_as_int(), engine_);
-		}
-		if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
-		    (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
-			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-			return script_value(lf <= rf, engine_);
-		}
-		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
-			return script_value(left.unchecked_as_string() <= right.unchecked_as_string(), engine_);
-		}
-	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
-		if (!*builtin) { return builtin->error_value(); }
-		return script_value(builtin->value().unchecked_as_int() <= 0, engine_);
-	}
-		if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-			return detail::math::ordering_error(left, right);
-		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <= operator");
-	}
-
-	script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
-	script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
-
-	const size_t li = unwrapped_left.raw_storage_index();
-	const size_t ri = unwrapped_right.raw_storage_index();
-
-	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-		return script_value(unwrapped_left.unchecked_as_int() <= unwrapped_right.unchecked_as_int(), engine_);
-	}
-	if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-	    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-		script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
-		script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-		return script_value(lf <= rf, engine_);
-	}
-	if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-		return script_value(unwrapped_left.unchecked_as_string() <= unwrapped_right.unchecked_as_string(), engine_);
-	}
-
-	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
-		if (!*builtin) { return builtin->error_value(); }
-		return script_value(builtin->value().unchecked_as_int() <= 0, engine_);
-	}
-	auto custom_result = object_comparison_via_method(left, right, op_less_equal_id_);
-	if (custom_result.has_value()) {
-		if (!*custom_result) { return custom_result->error_value(); }
-		return script_value(custom_result->value(), engine_);
-	}
-	// A script throw inside the operator method is in flight: don't replace it with
-	// the invalid-operands error (== parity; the value is discarded while unwinding)
-	if (is_unwinding_) {
-		return script_value(false, engine_);
-	}
-	if (auto reversed = object_comparison_reversed_via_method(left, right, op_less_equal_id_)) {
-		if (!*reversed) { return reversed->error_value(); }
-		return script_value(reversed->value(), engine_);
-	}
-	if (is_unwinding_) { return script_value(false, engine_); }
-
-	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <= operator");
+	binary_host h{*this};
+	return detail::binary_ordering<detail::order_op::less_equal>(h, op_less_equal_id_, left, right);
 }
-
 checked_result<script_value> vm_backend::handle_greater(const script_value& left, const script_value& right) {
-	const size_t li_raw = left.raw_storage_index();
-	const size_t ri_raw = right.raw_storage_index();
-	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
-	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-		return handle_greater(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
-		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
-	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
-	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
-		return detail::utf8_rewrapped(handle_greater(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
-	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
-		return handle_greater(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
-
-	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
-	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
-		if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-			return script_value(left.unchecked_as_int() > right.unchecked_as_int(), engine_);
-		}
-		if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
-		    (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
-			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-			return script_value(lf > rf, engine_);
-		}
-		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
-			return script_value(left.unchecked_as_string() > right.unchecked_as_string(), engine_);
-		}
-	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
-		if (!*builtin) { return builtin->error_value(); }
-		return script_value(builtin->value().unchecked_as_int() > 0, engine_);
-	}
-		if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-			return detail::math::ordering_error(left, right);
-		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for > operator");
-	}
-
-	script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
-	script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
-
-	const size_t li = unwrapped_left.raw_storage_index();
-	const size_t ri = unwrapped_right.raw_storage_index();
-
-	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-		return script_value(unwrapped_left.unchecked_as_int() > unwrapped_right.unchecked_as_int(), engine_);
-	}
-	if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-	    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-		script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
-		script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-		return script_value(lf > rf, engine_);
-	}
-	if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-		return script_value(unwrapped_left.unchecked_as_string() > unwrapped_right.unchecked_as_string(), engine_);
-	}
-
-	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
-		if (!*builtin) { return builtin->error_value(); }
-		return script_value(builtin->value().unchecked_as_int() > 0, engine_);
-	}
-	auto custom_result = object_comparison_via_method(left, right, op_greater_id_);
-	if (custom_result.has_value()) {
-		if (!*custom_result) { return custom_result->error_value(); }
-		return script_value(custom_result->value(), engine_);
-	}
-	// A script throw inside the operator method is in flight: don't replace it with
-	// the invalid-operands error (== parity; the value is discarded while unwinding)
-	if (is_unwinding_) {
-		return script_value(false, engine_);
-	}
-	if (auto reversed = object_comparison_reversed_via_method(left, right, op_greater_id_)) {
-		if (!*reversed) { return reversed->error_value(); }
-		return script_value(reversed->value(), engine_);
-	}
-	if (is_unwinding_) { return script_value(false, engine_); }
-
-	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for > operator");
+	binary_host h{*this};
+	return detail::binary_ordering<detail::order_op::greater>(h, op_greater_id_, left, right);
 }
-
 checked_result<script_value> vm_backend::handle_greater_equal(const script_value& left, const script_value& right) {
-	const size_t li_raw = left.raw_storage_index();
-	const size_t ri_raw = right.raw_storage_index();
-	// S8: bound operands normalize to detached shadow-equivalent temps (re-entry depth is exactly 1)
-	if (li_raw == script_value::TYPEID_CPP_BOUND || ri_raw == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-		return handle_greater_equal(li_raw == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left,
-		                ri_raw == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
-	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
-	if (detail::utf8_operands(li_raw, ri_raw)) [[unlikely]]
-		return detail::utf8_rewrapped(handle_greater_equal(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
-	if (detail::char_operands_promote(li_raw, ri_raw)) [[unlikely]]
-		return handle_greater_equal(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
-
-	if (li_raw != script_value::TYPEID_OBJECT && li_raw != script_value::TYPEID_SHARED_PTR &&
-	    ri_raw != script_value::TYPEID_OBJECT && ri_raw != script_value::TYPEID_SHARED_PTR) {
-		if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
-			return script_value(left.unchecked_as_int() >= right.unchecked_as_int(), engine_);
-		}
-		if ((li_raw == script_value::TYPEID_INT || li_raw == script_value::TYPEID_FLOAT) &&
-		    (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
-			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-			return script_value(lf >= rf, engine_);
-		}
-		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
-			return script_value(left.unchecked_as_string() >= right.unchecked_as_string(), engine_);
-		}
-	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
-		if (!*builtin) { return builtin->error_value(); }
-		return script_value(builtin->value().unchecked_as_int() >= 0, engine_);
-	}
-		if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-			return detail::math::ordering_error(left, right);
-		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for >= operator");
-	}
-
-	script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
-	script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
-
-	const size_t li = unwrapped_left.raw_storage_index();
-	const size_t ri = unwrapped_right.raw_storage_index();
-
-	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-		return script_value(unwrapped_left.unchecked_as_int() >= unwrapped_right.unchecked_as_int(), engine_);
-	}
-	if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-	    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-		script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
-		script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-		return script_value(lf >= rf, engine_);
-	}
-	if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-		return script_value(unwrapped_left.unchecked_as_string() >= unwrapped_right.unchecked_as_string(), engine_);
-	}
-
-	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
-		if (!*builtin) { return builtin->error_value(); }
-		return script_value(builtin->value().unchecked_as_int() >= 0, engine_);
-	}
-	auto custom_result = object_comparison_via_method(left, right, op_greater_equal_id_);
-	if (custom_result.has_value()) {
-		if (!*custom_result) { return custom_result->error_value(); }
-		return script_value(custom_result->value(), engine_);
-	}
-	// A script throw inside the operator method is in flight: don't replace it with
-	// the invalid-operands error (== parity; the value is discarded while unwinding)
-	if (is_unwinding_) {
-		return script_value(false, engine_);
-	}
-	if (auto reversed = object_comparison_reversed_via_method(left, right, op_greater_equal_id_)) {
-		if (!*reversed) { return reversed->error_value(); }
-		return script_value(reversed->value(), engine_);
-	}
-	if (is_unwinding_) { return script_value(false, engine_); }
-
-	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for >= operator");
+	binary_host h{*this};
+	return detail::binary_ordering<detail::order_op::greater_equal>(h, op_greater_equal_id_, left, right);
 }
-
 checked_result<script_value> vm_backend::handle_equal(const script_value& left, const script_value& right) {
-	if (auto identity = detail::builtin_identity_equal(left, right)) { return script_value(*identity, engine_); }
-	// Integral promotion: char operands compare as int64 0..255, so 'a' == 97 and the
-	// binary idiom s[i] == 0x1A hold (char_promotion.hpp)
-	if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-		return detail::utf8_rewrapped(handle_equal(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
-	if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-		return handle_equal(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
-	if ((left.is_weak_ptr() && right.is_null()) || (left.is_null() && right.is_weak_ptr())) {
-		bool is_expired = false;
-		if (left.is_weak_ptr()) {
-			auto weak_ptr = left.get_weak_ptr();
-			is_expired = weak_ptr.expired();
-		} else {
-			if (right.is_weak_ptr()) {
-				auto weak_ptr = right.get_weak_ptr();
-				is_expired = weak_ptr.expired();
-			} else if (right.get_object_holder() != nullptr) {
-				auto holder = right.get_object_holder();
-				is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
-			} else {
-				is_expired = true;
-			}
-		}
-		return script_value(is_expired, engine_);
-	}
-
-	script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
-	script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
-
-	if ((unwrapped_left.is_int() || unwrapped_left.is_float()) && (unwrapped_right.is_int() || unwrapped_right.is_float())) {
-		// Exact int==int: double conversion loses precision beyond 2^53
-		if (unwrapped_left.is_int() && unwrapped_right.is_int()) {
-			return script_value(unwrapped_left.unchecked_as_int() == unwrapped_right.unchecked_as_int(), engine_);
-		}
-		script_float lf = unwrapped_left.is_int() ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
-		script_float rf = unwrapped_right.is_int() ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
-		return script_value(lf == rf, engine_);
-	}
-
-	// Null-ness is a storage property: typed-but-uninitialized compares like null
-	if (unwrapped_left.is_null() || unwrapped_right.is_null()) {
-		return script_value(unwrapped_left.is_null() && unwrapped_right.is_null(), engine_);
-	}
-
-	if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-		return script_value(detail::math::equal(left, right), engine_);
-	if (unwrapped_left.type() != unwrapped_right.type()) {
-		if (unwrapped_left.is_object() || unwrapped_right.is_object()) {   // KEEP BYTE-PARALLEL with detail::binary_equal
-			if (auto mixed = object_spaceship_equality_via_method(left, right)) {
-				if (!*mixed) { return mixed->error_value(); }
-				return script_value(mixed->value(), engine_);
-			}
-		}
-		return script_value(false, engine_);
-	}
-
-	if (unwrapped_left.is_string() && unwrapped_right.is_string()) return script_value(unwrapped_left.unchecked_as_string() == unwrapped_right.unchecked_as_string(), engine_);
-	if (unwrapped_left.is_bool() && unwrapped_right.is_bool()) return script_value(unwrapped_left.unchecked_as_bool() == unwrapped_right.unchecked_as_bool(), engine_);
-
-	// Opaque host pointers (unregistered make_value(T*)): identity — equal iff both
-	// alias the SAME live pointer (§13). Bound primitives never reach
-	// here (their semantic branches above answered). KEEP BYTE-PARALLEL with the interpreter.
-	if (unwrapped_left.is_cpp_bound_primitive() && unwrapped_right.is_cpp_bound_primitive()) {
-		return script_value(unwrapped_left.get_cpp_bound_ptr() == unwrapped_right.get_cpp_bound_ptr(), engine_);
-	}
-
-	// Arrays and maps: memberwise, like C++ containers (detail/structural_equality.hpp;
-	// same_object(x, y) asks the identity question). KEEP BYTE-PARALLEL with the interpreter twin
-	auto element_equal = [this](const script_value& a, const script_value& b) { return handle_equal(a, b); };
-	if (left.is_array() && right.is_array()) {
-		return detail::arrays_equal(left, right, engine_, structural_equality_depth_, element_equal);
-	}
-	if (left.is_map() && right.is_map()) {
-		return detail::maps_equal(left, right, engine_, structural_equality_depth_, element_equal);
-	}
-
-	// Safe-mode workers: a custom op== would be skipped by the operator wall and the
-	// structural fallback below would silently DIVERGE from serial — verdict instead.
-	// KEEP BYTE-PARALLEL with the interpreter twin.
-	if (parallel_worker_ &&
-	    (object_defines_custom_equality(left) || object_defines_custom_equality(right))) [[unlikely]] {
-		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
-			"custom operator dispatch on class instances is not admitted in a parallel body");
-	}
-	auto custom_result = object_equality_via_method(left, right);
-	if (custom_result.has_value()) {
-		if (!*custom_result) { return custom_result->error_value(); }
-		return script_value(custom_result->value(), engine_);
-	}
-	if (auto from_spaceship = object_spaceship_equality_via_method(left, right)) {
-		if (!*from_spaceship) { return from_spaceship->error_value(); }
-		return script_value(from_spaceship->value(), engine_);
-	}
-
-	// Script class instances: same class, fieldwise (a user operator== was consulted above)
-	if (auto structural = detail::instances_equal(left, right, engine_, structural_equality_depth_, element_equal)) {
-		return std::move(*structural);
-	}
-
-	auto left_holder = const_cast<script_value&>(left).get_object_holder();
-	auto right_holder = const_cast<script_value&>(right).get_object_holder();
-	if (left_holder && right_holder) {
-		return script_value(left_holder == right_holder, engine_);
-	}
-
-	return script_value(false, engine_);
+	binary_host h{*this};
+	return detail::binary_equal(h, left, right);
 }
 
 bool vm_backend::native_less_available() const {
@@ -2997,91 +2312,18 @@ checked_result<bool> vm_backend::language_equal(const script_value& a, const scr
 }
 
 checked_result<script_value> vm_backend::handle_not_equal(const script_value& left, const script_value& right) {
-	if ((left.is_weak_ptr() && right.is_null()) || (left.is_null() && right.is_weak_ptr())) {
-		bool is_expired = false;
-		if (left.is_weak_ptr()) {
-			auto weak_ptr = left.get_weak_ptr();
-			is_expired = weak_ptr.expired();
-		} else {
-			if (right.is_weak_ptr()) {
-				auto weak_ptr = right.get_weak_ptr();
-				is_expired = weak_ptr.expired();
-			} else if (right.get_object_holder() != nullptr) {
-				auto holder = right.get_object_holder();
-				is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
-			} else {
-				is_expired = true;
-			}
-		}
-		return script_value(!is_expired, engine_);
-	}
-	if (auto custom = object_inequality_via_method(left, right)) {
-		if (!*custom) { return custom->error_value(); }
-		return script_value(custom->value(), engine_);
-	}
-
-	auto eq_result = handle_equal(left, right);
-	if (!eq_result) [[unlikely]] {
-		return eq_result.error_value();
-	}
-	return script_value(!eq_result.value().unchecked_as_bool(), engine_);
+	binary_host h{*this};
+	return detail::binary_not_equal(h, left, right);
 }
 
 checked_result<script_value> vm_backend::handle_spaceship(const script_value& left, const script_value& right) {
 	if (left.is_reference() || right.is_reference()) { return handle_spaceship(left.deref(), right.deref()); }
-	if (left.raw_storage_index() == script_value::TYPEID_CPP_BOUND || right.raw_storage_index() == script_value::TYPEID_CPP_BOUND) {
-		return handle_spaceship(left.raw_storage_index() == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, right.raw_storage_index() == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
-	}
-	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
-	if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-		return detail::utf8_rewrapped(handle_spaceship(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
-	if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-		return handle_spaceship(detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
-	if (left.raw_storage_index() == script_value::TYPEID_INT && right.raw_storage_index() == script_value::TYPEID_INT) {
-		auto cmp = left.unchecked_as_int() <=> right.unchecked_as_int();
-		return script_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)), engine_);
-	}
-
-	if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
-		script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
-		script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-		return script_value(detail::float_order(lf,rf), engine_);
-	}
-
-	if (left.is_string() && right.is_string()) {
-		int cmp = left.unchecked_as_string().compare(right.unchecked_as_string());
-		return script_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)), engine_);
-	}
-
-	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) { return std::move(*builtin); }
-	if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
-		return detail::math::ordering_error(left, right);
-	if (auto custom = object_arithmetic_via_method(left, right, op_spaceship_id_)) { return *custom; }
-	if (!is_unwinding_) {
-		if (auto reversed = object_spaceship_reversed_via_method(left, right)) { return *reversed; }
-	}
-	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <=> operator");
+	binary_host h{*this};
+	return detail::binary_spaceship(h, op_spaceship_id_, left, right);
 }
 
 checked_result<script_value> vm_backend::handle_binary_op(token_type op, const script_value& left, const script_value& right) {
-	// Integral promotion for the inline bitwise cases below: char operands enter as
-	// int64 0..255 (char_promotion.hpp). Arithmetic ops promote inside their handle_*.
-	switch (op) {
-	case token_type::ampersand:
-	case token_type::pipe:
-	case token_type::caret:
-	case token_type::left_shift:
-	case token_type::right_shift:
-		if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
-			return detail::utf8_rewrapped(handle_binary_op(op, detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
-		}
-		if (detail::char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
-			return handle_binary_op(op, detail::char_promoted(left, engine_), detail::char_promoted(right, engine_));
-		}
-		break;
-	default:
-		break;
-	}
+	binary_host h{*this};
 	switch (op) {
 		case token_type::plus: return handle_add(left, right);
 		case token_type::minus: return handle_subtract(left, right);
@@ -3095,46 +2337,11 @@ checked_result<script_value> vm_backend::handle_binary_op(token_type op, const s
 		case token_type::equal_equal: return handle_equal(left, right);
 		case token_type::bang_equal: return handle_not_equal(left, right);
 		case token_type::spaceship: return handle_spaceship(left, right);
-		case token_type::ampersand:
-			if (!left.is_int() || !right.is_int()) {
-				if (auto custom = object_arithmetic_via_method(left, right, op_ampersand_id_)) { return *custom; }
-				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Bitwise & requires integer operands");
-			}
-			return script_value(left.unchecked_as_int() & right.unchecked_as_int(), engine_);
-		case token_type::pipe:
-			if (!left.is_int() || !right.is_int()) {
-				if (auto custom = object_arithmetic_via_method(left, right, op_pipe_id_)) { return *custom; }
-				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Bitwise | requires integer operands");
-			}
-			return script_value(left.unchecked_as_int() | right.unchecked_as_int(), engine_);
-		case token_type::caret:
-			if (!left.is_int() || !right.is_int()) {
-				if (auto custom = object_arithmetic_via_method(left, right, op_caret_id_)) { return *custom; }
-				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Bitwise ^ requires integer operands");
-			}
-			return script_value(left.unchecked_as_int() ^ right.unchecked_as_int(), engine_);
-		case token_type::left_shift: {
-			if (!left.is_int() || !right.is_int()) {
-				if (auto custom = object_arithmetic_via_method(left, right, op_left_shift_id_)) { return *custom; }
-				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Left shift requires integer operands");
-			}
-			auto shift_amount = right.unchecked_as_int();
-			if (shift_amount < 0 || shift_amount > 63) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Shift amount must be between 0 and 63");
-			}
-			return script_value(left.unchecked_as_int() << shift_amount, engine_);
-		}
-		case token_type::right_shift: {
-			if (!left.is_int() || !right.is_int()) {
-				if (auto custom = object_arithmetic_via_method(left, right, op_right_shift_id_)) { return *custom; }
-				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Right shift requires integer operands");
-			}
-			auto shift_amount = right.unchecked_as_int();
-			if (shift_amount < 0 || shift_amount > 63) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Shift amount must be between 0 and 63");
-			}
-			return script_value(left.unchecked_as_int() >> shift_amount, engine_);
-		}
+		case token_type::ampersand: return detail::binary_bitwise<detail::bit_op::bit_and>(h, op_ampersand_id_, left, right);
+		case token_type::pipe: return detail::binary_bitwise<detail::bit_op::bit_or>(h, op_pipe_id_, left, right);
+		case token_type::caret: return detail::binary_bitwise<detail::bit_op::bit_xor>(h, op_caret_id_, left, right);
+		case token_type::left_shift: return detail::binary_bitwise<detail::bit_op::shift_left>(h, op_left_shift_id_, left, right);
+		case token_type::right_shift: return detail::binary_bitwise<detail::bit_op::shift_right>(h, op_right_shift_id_, left, right);
 		default:
 			return checked_result<script_value>(make_error_code(runtime_error_code::unknown_operator), "Unknown binary operator");
 	}

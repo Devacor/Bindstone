@@ -1038,6 +1038,71 @@ public:
             auto& reg = jai::serialization::polymorphic_registry::instance();
             check_true(reg.is_assignable(std::type_index(typeid(RelDerived)), std::type_index(typeid(RelBase))));
         });
+
+        // A script handle (new P(), shared_ptr<P>) writes its object once and every later handle to it as its id, in every archive;
+        // the load hands back handles to one object, weak_ptrs to it included
+        test("script_handles_round_trip_through_every_archive", [&]() {
+            auto eng = make_engine();
+            stdlib::register_all(*eng);
+            auto r = eng->execute(R"(
+                class P { int x = 3; string s = "hi"; }
+                class N { int v = 0; shared_ptr<N> next; weak_ptr<N> prev; }
+                class H { weak_ptr<P> w; shared_ptr<P> s; }
+                function trip(var v, string how) -> var {
+                    if (how == "json") { return from_json(to_json(v)); }
+                    if (how == "binary") { return from_binary(to_binary(v)); }
+                    return from_base64(to_base64(v));
+                }
+                string out = "";
+                for (string how : ["json", "binary", "base64"]) {
+                    shared_ptr<P> p = new P();
+                    p.x = 7;
+                    var q = trip(p, how);
+                    out += how + ": " + type_of(q) + " " + to_string(q.x) + " " + q.s;
+                    var alias = q;
+                    alias.x = 9;
+                    out += " handle " + to_string(q.x);
+                    var held = new P();
+                    var held2 = trip(held, how);
+                    out += " var " + to_string(held2.x);
+                    array<shared_ptr<P>> pair = [p, p];
+                    var pair2 = trip(pair, how);
+                    out += " aliased " + to_string(same_object(pair2[0], pair2[1]));
+                    var a = new N();
+                    var b = new N();
+                    a.v = 1;
+                    b.v = 2;
+                    a.next = b;
+                    b.prev = a;
+                    b.next = a;
+                    var a2 = trip(a, how);
+                    out += " cycle " + to_string(a2.next.v) + " " + to_string(same_object(a2.next.next, a2)) + " " + to_string(same_object(a2.next.prev.lock(), a2));
+                    var h = new H();
+                    h.s = p;
+                    h.w = p;
+                    var h2 = trip(h, how);
+                    out += " weak " + to_string(same_object(h2.w.lock(), h2.s)) + " " + to_string(h2.s.x);
+                    shared_ptr<P> none = null;
+                    out += " null " + to_string(trip(none, how) == null) + "\n";
+                }
+                out;
+            )");
+            const std::string line = " P 7 hi handle 9 var 3 aliased true cycle 2 true true weak true 7 null true\n";
+            check_eq("json:" + line + "binary:" + line + "base64:" + line, r.as<std::string>());
+        });
+
+        test("script_handle_id_without_its_object_is_refused", [&]() {
+            auto eng = make_engine();
+            stdlib::register_all(*eng);
+            auto r = eng->execute(R"(
+                string out = "";
+                try { from_json("{\"$shared_ptr_id\": 4}"); out = "loaded"; } catch (e) { out = e; }
+                out += " | " + type_of(from_json("{\"$weak_ptr_id\": 4}"));
+                try { from_json("{\"$shared_ptr_id\": 1, \"$shared_ptr_data\": {\"a\": {\"$shared_ptr_id\": 1}}}"); out += " | loaded"; } catch (e) { out += " | " + e; }
+                out;
+            )");
+            check_eq(std::string("Invalid shared_ptr ID: 4 | weak_ptr | Invalid shared_ptr ID: 1"), r.as<std::string>());
+        });
     }
 };
 
@@ -1860,6 +1925,29 @@ public:
             eng->add_global("spawn", eng->make_object(slot));
             check_eq((script_int)7, eng->execute("spawn.fangs").as_int(), "the re-derived layer took the new class's fields");
             check_eq((script_int)18, eng->execute("spawn.chomp").as_int());
+        });
+
+        test("a_script_layer_state_keeps_chars_and_handles", [&]() {
+            auto eng = hybrid_engine();
+            stdlib::register_all(*eng);
+            eng->execute(R"(
+                class Pal { int n = 1; }
+                class Markkin : SlotCreature {
+                    char mark = 'a';
+                    shared_ptr<Pal> pal;
+                    weak_ptr<Pal> seen;
+                }
+            )");
+            auto slot = std::make_shared<SlotCreature>();
+            eng->add_global("kin", eng->extend(slot, "Markkin"));
+            eng->execute("kin.mark = 'q'; kin.pal = new Pal(); kin.pal.n = 6; kin.seen = kin.pal;");
+            std::string state = slot->script_layer_to_json();
+            auto twin = std::make_shared<SlotCreature>();
+            eng->add_global("twin", eng->extend(twin, "Markkin"));
+            check(twin->script_layer_from_json(state), "the state hydrates: " + state);
+            check_eq(std::string("char q 6 true"), eng->execute(
+                "type_of(twin.mark) + \" \" + twin.mark + \" \" + to_string(twin.pal.n) + \" \" + to_string(same_object(twin.seen.lock(), twin.pal))").as<std::string>(),
+                "a char field stays a char, a handle field its object, a weak_ptr to it the same object: " + state);
         });
 
         test("property_owner_carries_the_slot", [&]() {

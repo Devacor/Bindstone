@@ -3,7 +3,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/float_text.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
-#include <jaiscript/stdlib/json.hpp>   // reconstruct_typed_object (hybrid field hydration)
+#include <jaiscript/stdlib/json.hpp>   // reconstruct_archive_value (hybrid field hydration)
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow (overflow policy)
 #include <jaiscript/detail/math_intrinsics.hpp>
@@ -5434,37 +5434,6 @@ script_value engine::execute_import(const std::string& resolved_path) {
 
 // Note: get_engine_weak_ptr() function removed - no longer needed since script_value uses engine* directly
 
-namespace {
-// Archive-shaped field values back to live ones: {"_type_": Name, ...} maps become class
-// instances through the injection-safe registry path, containers recurse, primitives pass.
-script_value hybrid_field_from_archive(engine* eng, const script_value& val, stdlib::archive_handles& handles) {
-    if (val.is_map()) {
-        const auto& map = val.as_map();
-        if (auto handle = stdlib::reconstruct_archive_handle(eng, map, false, &handles)) { return std::move(*handle); }
-        auto typeIt = map.find(script_value("_type_", eng));
-        if (typeIt != map.end() && typeIt->second.is_string()) {
-            script_value obj = stdlib::reconstruct_typed_object(eng, map, typeIt->second.as_string(),
-                [eng, &handles](const script_value& v) { return hybrid_field_from_archive(eng, v, handles); });
-            if (!obj.is_null()) return obj;
-        }
-        script_value out = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
-        auto& outMap = const_cast<script_map&>(out.as_map());
-        for (const auto& [k, v] : map) { outMap[k] = hybrid_field_from_archive(eng, v, handles); }
-        return out;
-    }
-    if (val.is_array()) {
-        script_value out = script_value::make_array(nullptr, eng);
-        auto& outArr = const_cast<std::vector<script_value>&>(out.as_array());
-        const script_array* node = val.unchecked_array_node();
-        outArr.reserve(node->size());
-        node->for_each(eng, [&](const script_value& elem) { outArr.push_back(hybrid_field_from_archive(eng, elem, handles)); });
-        return out;
-    }
-    return val;
-}
-
-}
-
 void engine::note_script_layer(const void* cpp_object, const std::weak_ptr<class_instance>& owner) {
     if (!cpp_object) { return; }
     auto& layers = impl->script_layers_;
@@ -5590,14 +5559,14 @@ checked_result<std::shared_ptr<class_instance>> engine::build_script_layer(const
     if (!fields_json.empty()) {
         serialization::json_archive_reader reader(fields_json, this);
         script_value fields = reader.read_value();
-        stdlib::archive_handles handles;   // a shared handle's record resolves across every field
-        stdlib::collect_archive_handles(this, fields, handles);
         if (fields.is_map()) {
+            stdlib::archive_handles handles;
+            handles.root = &fields;
             for (const auto& [key, value] : fields.as_map()) {
                 if (!key.is_string()) { continue; }
                 uint64_t field_id = symbolize(key.as_string());
                 if (instance->has_field(field_id)) {
-                    instance->set_field(field_id, hybrid_field_from_archive(this, value, handles));
+                    instance->set_field(field_id, stdlib::reconstruct_archive_value(this, value, true, handles));
                 }
             }
         }
@@ -5732,14 +5701,14 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
     if (!fields_json.empty()) {
         serialization::json_archive_reader reader(fields_json, this);
         script_value fields = reader.read_value();
-        stdlib::archive_handles handles;   // a shared handle's record resolves across every field
-        stdlib::collect_archive_handles(this, fields, handles);
         if (fields.is_map()) {
+            stdlib::archive_handles handles;
+            handles.root = &fields;
             for (const auto& [name, value] : fields.as_map()) {
                 if (!name.is_string()) { continue; }
                 uint64_t field_id = symbolize(name.as_string());
                 if (instance->has_field(field_id)) {
-                    instance->set_field(field_id, hybrid_field_from_archive(this, value, handles));
+                    instance->set_field(field_id, stdlib::reconstruct_archive_value(this, value, true, handles));
                 }
             }
         }
@@ -5816,13 +5785,13 @@ bool detail::script_layer_from_json(const std::shared_ptr<class_instance>& layer
     serialization::json_archive_reader fields_reader(fields_writer.str(), eng);
     script_value fields = fields_reader.read_value();
     if (!fields.is_map()) { return false; }
-    stdlib::archive_handles handles;   // a shared handle's record resolves across every field
-    stdlib::collect_archive_handles(eng, fields, handles);
+    stdlib::archive_handles handles;
+    handles.root = &fields;
     for (const auto& [key, value] : fields.as_map()) {
         if (!key.is_string()) { continue; }
         uint64_t field_id = eng->symbolize(key.as_string());
         if (target->has_field(field_id)) {
-            target->set_field(field_id, hybrid_field_from_archive(eng, value, handles));
+            target->set_field(field_id, stdlib::reconstruct_archive_value(eng, value, true, handles));
         }
     }
     return true;

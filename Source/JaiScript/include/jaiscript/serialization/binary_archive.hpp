@@ -6,6 +6,7 @@
 #include <cstring>
 #include <algorithm>
 #include <unordered_map>
+#include <functional>
 
 namespace jai {
 namespace serialization {
@@ -276,6 +277,21 @@ public:
                 break;
             }
             
+            case script_value_type::jai_shared_ptr_type: {
+                // A shared handle: the object once under its id, every later handle the id alone (identity survives the load)
+                auto holder = value.deref().get_object_holder();
+                if (!holder) {
+                    write_uint32(0);
+                    break;
+                }
+                auto [id, is_new] = track_shared_ptr(holder.get());
+                write_uint32(id);
+                if (is_new) {
+                    write_value(weak_target_value(holder));
+                }
+                break;
+            }
+
             case script_value_type::jai_object_type: {
                 // Self-describing binary format: type name + version + property names array + values in order
                 auto type_info = value.get_type_info();
@@ -400,6 +416,10 @@ private:
 
 class binary_archive_reader : public archive_reader_impl<binary_archive_reader> {
 public:
+    // Turns an object's archive form into the object as soon as a shared or weak handle reads it, so the handles share it
+    // (from_binary passes the archive-value reconstruction)
+    void object_restorer(std::function<script_value(const script_value&)> a_restorer) { object_restorer_ = std::move(a_restorer); }
+
     // Engine is REQUIRED for binary reading since we need to create script_values
     explicit binary_archive_reader(const std::vector<uint8_t>& data, engine* eng)
         : archive_reader_impl<binary_archive_reader>(eng), data_(data), pos_(0) {
@@ -804,6 +824,18 @@ public:
 private:
     std::vector<uint8_t> data_;
     size_t pos_;
+    std::function<script_value(const script_value&)> object_restorer_;
+
+    // The object a shared or weak handle's id names: its first occurrence carries the data, read (and restored) here; a
+    // reference back into an object still being read (a cycle) finds the placeholder and reads null
+    script_value read_tracked_object(uint32_t id) {
+        if (const script_value* known = find_shared_ptr(id)) { return *known; }
+        register_shared_ptr(id, script_value(std::monostate{}, engine_ref_));
+        script_value object = read_value_internal();
+        if (object_restorer_) { object = object_restorer_(object); }
+        register_shared_ptr(id, object);
+        return object;
+    }
 
     void read_raw(void* dest, size_t size) {
         if (pos_ + size > data_.size()) {
@@ -947,29 +979,27 @@ private:
                     return v;
                 }
 
-                script_value existing_obj = get_shared_ptr(id);
-                if (!existing_obj.is_invalid()) {
-                    auto obj_holder = existing_obj.get_object_holder();
-                    if (obj_holder) {
-                        script_value weak_val(std::monostate{}, eng);
-                        weak_val.set_type_info(eng->get_type_info_weak_ptr(existing_obj.get_type_info()));
-                        weak_val.storage_ = jai::weaker_ptr<script_value::object_holder>(obj_holder);
-                        return weak_val;
-                    }
-                }
-
-                script_value obj_val = read_value_internal();
-                register_shared_ptr(id, obj_val);
-
+                script_value obj_val = read_tracked_object(id);
                 auto obj_holder = obj_val.get_object_holder();
-                if (!obj_holder) {
-                    throw std::runtime_error("Deserialized weak_ptr object has no object_holder");
-                }
-
                 script_value weak_val(std::monostate{}, eng);
-                weak_val.set_type_info(eng->get_type_info_weak_ptr(obj_val.get_type_info()));
-                weak_val.storage_ = jai::weaker_ptr<script_value::object_holder>(obj_holder);
+                weak_val.set_type_info(eng->get_type_info_weak_ptr(obj_holder ? obj_val.get_type_info() : nullptr));
+                weak_val.storage_ = obj_holder ? jai::weaker_ptr<script_value::object_holder>(obj_holder) : jai::weaker_ptr<script_value::object_holder>();
                 return weak_val;
+            }
+
+            case script_value_type::jai_shared_ptr_type: {
+                uint32_t id = read_little_endian<uint32_t>();
+                if (id == 0) {
+                    script_value v(std::monostate{}, eng);
+                    v.set_type_info(eng->get_type_info_shared_ptr(nullptr));
+                    return v;
+                }
+                script_value object = read_tracked_object(id);
+                // an object the restorer made comes back as the shared handle; without one the archive's own form stays
+                if (object.get_object_holder() && object.type() != script_value_type::jai_shared_ptr_type) {
+                    object.set_type_info(eng->get_type_info_shared_ptr(object.get_type_info()));
+                }
+                return object;
             }
 
             case script_value_type::jai_object_type: {

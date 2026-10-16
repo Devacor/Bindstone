@@ -10,6 +10,7 @@
 //   script_value make_int(script_int), make_float(script_float), make_bool(bool); engine* engine()
 //   checked_result<script_value> concat(const script_value&, const script_value&)   // string +, memory-charged
 //   std::optional<checked_result<script_value>> object_arithmetic(l, r, uint64_t method_id)
+//   bool operator_takes(l, r, uint64_t method_id)   // l's class chain has an overload of the operator that takes r
 //   std::optional<checked_result<bool>> object_comparison(l, r, uint64_t method_id)
 //   std::optional<checked_result<bool>> object_equality(l, r); bool defines_custom_equality(const script_value&)
 //   std::optional<checked_result<bool>> object_inequality(l, r)   // a declared operator!=, ahead of !(l == r)
@@ -25,6 +26,7 @@
 #include <jaiscript/detail/utf8_operands.hpp>
 #include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/math_values.hpp>
+#include <jaiscript/core/overload_resolution.hpp>
 #include <cmath>
 #include <compare>
 #include <optional>
@@ -115,6 +117,21 @@ namespace jai::detail {
 		return std::nullopt;
 	}
 
+	// a worker reads only the instance's class (no method-value copy); the operator call that follows raises the parallel verdict
+	inline bool worker_operator_takes(const script_value& l, const script_value& r, uint64_t id) {
+		const class_definition* cd = operand_instance_class(l);
+		return cd && binary_operator_accepts(cd, id, r);
+	}
+
+	template <arith_op Op>
+	inline bool arithmetic_has_builtin(size_t li, size_t ri) noexcept {
+		if (numeric_storage(li) && numeric_storage(ri)) { return true; }
+		if constexpr (Op == arith_op::add) {
+			if (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING) { return true; }
+		}
+		return math::owns_arithmetic(li, ri);
+	}
+
 	template <arith_op Op, class Host>
 	checked_result<script_value> binary_arithmetic(Host& h, uint64_t method_id, const script_value& left, const script_value& right) {
 		const size_t li = left.raw_storage_index();
@@ -136,7 +153,13 @@ namespace jai::detail {
 		}
 		const script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
 		const script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
-		if (auto result = arithmetic_on_values<Op>(h, unwrapped_left, unwrapped_right, unwrapped_left.raw_storage_index(), unwrapped_right.raw_storage_index())) {
+		const size_t uli = unwrapped_left.raw_storage_index();
+		const size_t uri = unwrapped_right.raw_storage_index();
+		// overload resolution: the left operand's operator beats the builtin meaning when one of its overloads takes the right operand
+		if (object_storage(li) && arithmetic_has_builtin<Op>(uli, uri) && h.operator_takes(left, right, method_id)) {
+			if (auto custom = h.object_arithmetic(left, right, method_id)) { return std::move(*custom); }
+		}
+		if (auto result = arithmetic_on_values<Op>(h, unwrapped_left, unwrapped_right, uli, uri)) {
 			return std::move(*result);
 		}
 		if (auto custom = h.object_arithmetic(left, right, method_id)) { return std::move(*custom); }

@@ -3490,6 +3490,9 @@ private:
 					return {};
 				}
 				stamp(b->static_operand_class, operand_class_of(l, r), operand_class_unknown);   // annotation only
+				if (l.kind == ctype::object_k) {
+					if (auto user = class_binary_operator(l.cls, b->op.type, r)) { return *user; }
+				}
 				return binary_result(l, b->op.type, r);
 			}
 			case node_type::unary_expr: {
@@ -4442,6 +4445,38 @@ private:
             }
         }
         return ctype{};
+    }
+
+    // A class operand's binary arithmetic, bitwise or <=> operator runs when an overload of the chain's nearest set takes the
+    // right operand (both backends): its declared result, or unknown; nullopt when none takes it (the builtin rule applies)
+    std::optional<ctype> class_binary_operator(std::string_view cls, token_type op, const ctype& r) {
+        std::string_view name;
+        switch (op) {
+            case token_type::plus: name = "+"; break;
+            case token_type::minus: name = "-"; break;
+            case token_type::star: name = "*"; break;
+            case token_type::slash: name = "/"; break;
+            case token_type::percent: name = "%"; break;
+            case token_type::ampersand: name = "&"; break;
+            case token_type::pipe: name = "|"; break;
+            case token_type::caret: name = "^"; break;
+            case token_type::left_shift: name = "<<"; break;
+            case token_type::right_shift: name = ">>"; break;
+            case token_type::spaceship: name = "<=>"; break;
+            default: return std::nullopt;
+        }
+        member_hit hit = lookup_member(cls, name, /*want_static=*/false);
+        if (!hit.found) { return std::nullopt; }
+        if (!hit.methods) { return ctype{}; }
+        const std::vector<ctype> one{r};
+        const function_decl* taken = nullptr;
+        size_t takers = 0;
+        for (const auto* fn : *hit.methods) {
+            if (script_fn_viable(fn, one)) { taken = fn; ++takers; }
+        }
+        if (takers == 0) { return std::nullopt; }
+        if (takers > 1 || !taken->return_type || taken->is_coroutine) { return ctype{}; }
+        return ctype_from_type_info(taken->return_type.get());
     }
 
     // -------------------------------------------------------------- statements

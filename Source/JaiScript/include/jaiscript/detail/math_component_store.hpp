@@ -211,4 +211,32 @@ namespace jai::detail::math {
 
 } // namespace jai::detail::math
 
+namespace jai::detail {
+
+	// `base.f = v` where base is a script class VALUE no storage holds (a by-value call result, a constructor call, an
+	// operator's or a value cast's result): C++ rejects built-in assignment to a member of a class prvalue, so the store
+	// raises the math temporary's text. A handle, a reference or an object something else owns (a host shared_ptr's
+	// layer) names its object; a name, member, element or conditional of lvalues (its arms read as references) names storage.
+	inline bool class_temporary_member_store(const member_expr* m, const script_value& base_raw) {
+		const expression* base = m->object.get();
+		switch (base->get_type()) {
+			case node_type::identifier_expr: case node_type::member_expr: case node_type::this_expr: return false;
+			case node_type::binary_expr:
+				if (static_cast<const binary_expr*>(base)->op.type == token_type::left_bracket) { return false; }
+				break;
+			default: break;
+		}
+		if (base_raw.raw_storage_index() != script_value::TYPEID_OBJECT) { return false; }
+		const type_info* tag = base_raw.type_info_raw();
+		if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return false; }
+		const auto& holder = base_raw.unchecked_object_handle();
+		return holder && holder->is_class_instance_wrapper && holder->data && holder->data.use_count() == 1;
+	}
+
+	JAI_NOINLINE inline checked_result<void> class_temporary_member_error() {
+		return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), math::temporary_member_text);
+	}
+
+} // namespace jai::detail
+
 #endif // __JAISCRIPT_DETAIL_MATH_COMPONENT_STORE_HPP__

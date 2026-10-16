@@ -880,9 +880,9 @@ cell instructions.
   - `Cannot assign to a member of a temporary`;
   - the int32 overflow and float-to-int texts.
   - Strict mode reports these at load time. The runtime raises the same texts.
-- **Assignment to a member of a temporary.** For a math value it raises `Cannot assign to a member of a temporary` on
-  both backends, the C++ rule. **[Dev]** C++'s rule covers class values returned by value too; JaiScript does not
-  reject a store into a member of a class temporary (`f().x = 5`).
+- **Assignment to a member of a temporary.** For a math value, and for a script class value returned by value (a call,
+  a constructor call, an operator's result), it raises `Cannot assign to a member of a temporary` on both backends, the C++
+  rule; a handle result names its object and stores.
 - **Proof flow.** The checker's vector types drive the aggregate rewrite (4.3); component reads type as float or int.
 
 ## 11. Bindstone migration

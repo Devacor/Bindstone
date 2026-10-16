@@ -4003,10 +4003,10 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 
             // Check if the left side is an lvalue (variable, member access, or subscript)
             // These should allow modification, even if use_count == 1
-            bool is_lvalue = expr->left->get_type() == node_type::identifier_expr ||
+            const bool is_lvalue = detail::subscript_base_is_lvalue(expr->left->get_type() == node_type::identifier_expr ||
                             expr->left->get_type() == node_type::member_expr ||
                             (expr->left->get_type() == node_type::binary_expr &&
-                             static_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket);
+                             static_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket), left_raw);
 
             // Transient read (transient_read.hpp): the consumer provably discards
             // identity, so skip the reference mint and push a shallow element copy.
@@ -4037,10 +4037,10 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                 auto& map = const_cast<script_map&>(left.as_map());
 
                 // Check if the left side is an lvalue (variable, member access, or subscript)
-                bool is_lvalue = expr->left->get_type() == node_type::identifier_expr ||
+                const bool is_lvalue = detail::subscript_base_is_lvalue(expr->left->get_type() == node_type::identifier_expr ||
                                 expr->left->get_type() == node_type::member_expr ||
                                 (expr->left->get_type() == node_type::binary_expr &&
-                                 static_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket);
+                                 static_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket), left_raw);
 
                 // Transient map read: copy branch below (never inserts, never mints)
                 const bool transient_read = expr->transient_element_read && !want_lvalue_write && !has_custom_binary_ops_;
@@ -5601,6 +5601,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 push_value(make_value());
                 return {};
             }
+            if (detail::class_temporary_member_store(memberExpr, objectValue)) [[unlikely]] { return detail::class_temporary_member_error(); }
 
             JAISCRIPT_TRY(assign_member_value(target_obj, memberExpr, resultValue));
             if (is_unwinding_) {
@@ -6524,6 +6525,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 push_value(make_value());
                 return {};
             }
+            if (detail::class_temporary_member_store(memberExpr, objectValue)) [[unlikely]] { return detail::class_temporary_member_error(); }
 
             // Proven field store (internal/type_proofs_design.md I-M2): assign_member_value's field
             // branch minus the ladder (KEEP BYTE-PARALLEL with vm_backend exec_set_member's

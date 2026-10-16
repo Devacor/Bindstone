@@ -24,6 +24,71 @@
 
 namespace jai::detail {
 
+	// cast<T>(e) / cast<T&>(e) error texts (cast_kernel.hpp casts; a cast<T&> link of a reference chain checks here too)
+	inline constexpr std::string_view cast_error_text = "Cannot cast '{0}' to '{1}'";
+
+	inline std::string cast_target_spelling(const cast_expr& c) {
+		std::string out;
+		if (c.target->base_type == script_value_type::jai_shared_ptr_type) {
+			const type_info* pointee = c.target->element_type().get();
+			out = "shared_ptr<" + (pointee ? pointee->canonical_name() : std::string("auto")) + ">";
+		} else {
+			out = c.target->canonical_name();
+		}
+		if (c.by_reference) {
+			out += "&";
+		}
+		return out;
+	}
+
+	// The operand's DYNAMIC class (the instance, never the value tag: a T stored in an
+	// S-typed field carries S's tag and is still a T)
+	inline const class_definition* cast_dynamic_class(const script_value& seen) {
+		auto holder = seen.get_object_holder();
+		if (!holder || !holder->is_class_instance_wrapper) {
+			return nullptr;
+		}
+		auto* instance = static_cast<class_instance*>(holder->data.get());
+		return instance ? instance->get_class_definition() : nullptr;
+	}
+
+	inline std::string cast_source_spelling(const script_value& seen) {
+		if (seen.is_null()) {
+			return "null";
+		}
+		if (const class_definition* def = cast_dynamic_class(seen)) {
+			return def->get_name();
+		}
+		const type_info_ptr tag = seen.get_type_info();
+		if (tag && (tag->base_type == script_value_type::jai_object_type ||
+		            tag->base_type == script_value_type::jai_shared_ptr_type) && !tag->type_name.empty()) {
+			return tag->type_name;
+		}
+		return container_base_type_name(seen.type());
+	}
+
+	// a parallel worker cannot intern a spelling it has not seen: the same text without them
+	inline constexpr std::string_view cast_error_text_slotless = "Cannot cast the value to the target type";
+
+	JAI_NOINLINE inline error_propagator cast_error_propagator(const script_value& seen, const cast_expr& c, string_symbolizer* sym) {
+		const std::string source = cast_source_spelling(seen);
+		const std::string target = cast_target_spelling(c);
+		if (sym->frozen()) {
+			const auto source_id = sym->find(source);
+			const auto target_id = sym->find(target);
+			if (!source_id || !target_id) {
+				return error_propagator{make_error_code(runtime_error_code::type_mismatch), cast_error_text_slotless, 0, 0};
+			}
+			return error_propagator{make_error_code(runtime_error_code::type_mismatch), cast_error_text, *source_id, *target_id};
+		}
+		return error_propagator{make_error_code(runtime_error_code::type_mismatch), cast_error_text, sym->intern(source), sym->intern(target)};
+	}
+
+	template <typename T = script_value>
+	inline checked_result<T> cast_error(const script_value& seen, const cast_expr& c, string_symbolizer* sym) {
+		return cast_error_propagator(seen, c, sym);
+	}
+
 	// a string& takes any string temporary, written or not, as a private cell (an lvalue argument binds before this)
 	inline bool is_string_reference_temporary(const parameter& param, const script_value& value) {
 		return param.is_reference && param.type && param.type->base_type == script_value_type::jai_string_type && value.is_string();
@@ -410,6 +475,10 @@ namespace jai::detail {
 				if (step_count < 8) { inline_steps[step_count] = base; } else { heap_steps.push_back(base); }
 				++step_count;
 				base = static_cast<const binary_expr*>(base)->left.get();
+			} else if (t == node_type::cast_expr && static_cast<const cast_expr*>(base)->by_reference && step_count > 0) {
+				if (step_count < 8) { inline_steps[step_count] = base; } else { heap_steps.push_back(base); }
+				++step_count;
+				base = static_cast<const cast_expr*>(base)->operand.get();
 			} else {
 				break;
 			}
@@ -483,6 +552,13 @@ namespace jai::detail {
 		for (size_t i = step_count; i-- > 0;) {
 			const bool is_final = (i == 0);
 			const expression* step = step_at(i);
+			if (step->get_type() == node_type::cast_expr) {
+				const auto* c = static_cast<const cast_expr*>(step);
+				if (cur.is_null() || !reference_binding_admits(c->target.get(), cur, eng)) {
+					return cast_error(cur, *c, symbolizer);
+				}
+				continue;
+			}
 			if (step->get_type() == node_type::member_expr) {
 				const auto* m = static_cast<const member_expr*>(step);
 				const uint64_t member_id = m->member_id != UINT64_MAX ? m->member_id : symbolizer->intern(m->member);

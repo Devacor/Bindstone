@@ -5090,10 +5090,11 @@ public:
                 class T { int v = 1; }
                 T obj = T();
                 var g() { return obj; }
-                g().v = 9;
+                string stored = "stored";
+                try { g().v = 9; } catch (e) { stored = e; }
                 for (auto& x : f()) { x = 0; }
-                to_string(ints.size()) + "/" + to_string(obj.v) + "/" + to_string(ints[0])
-            )", "2/1/1", "f().push / g().x = / for (auto& : f()) touch the temporary");
+                to_string(ints.size()) + "/" + to_string(obj.v) + "/" + to_string(ints[0]) + "/" + stored
+            )", "2/1/1/Cannot assign to a member of a temporary", "f().push / for (auto& : f()) touch the temporary; g().x = raises (C++: a member of a class prvalue)");
         });
         test("this_return_shares_receiver", [expect]() {
             expect(R"(

@@ -128,23 +128,24 @@ struct builtin_names {
 	std::vector<std::string> array, map, string, utf8, weak;
 };
 
+// The names are the same for every engine, so the first caller's engine builds them once (a thread-safe static)
 const builtin_names& builtin_method_names(jai::engine& eng) {
-	static builtin_names names;
-	static bool built = false;
-	if (built) { return names; }
-	built = true;
-	jai::builtin_method_registries reg;
-	auto* sym = eng.get_symbolizer();
-	jai::init_builtin_method_registries(sym, reg);
-	auto fill = [&](const auto& table, std::vector<std::string>& out) {
-		for (const auto& [id, _] : table) { out.emplace_back(sym->get_string(id)); }
-		std::sort(out.begin(), out.end());
-	};
-	fill(reg.array_methods, names.array);
-	fill(reg.map_methods, names.map);
-	fill(reg.string_methods, names.string);
-	fill(reg.utf8_methods, names.utf8);
-	fill(reg.weak_ptr_methods, names.weak);
+	static const builtin_names names = [&eng]() {
+		builtin_names result;
+		jai::builtin_method_registries reg;
+		auto* sym = eng.get_symbolizer();
+		jai::init_builtin_method_registries(sym, reg);
+		auto fill = [&](const auto& table, std::vector<std::string>& out) {
+			for (const auto& [id, _] : table) { out.emplace_back(sym->get_string(id)); }
+			std::sort(out.begin(), out.end());
+		};
+		fill(reg.array_methods, result.array);
+		fill(reg.map_methods, result.map);
+		fill(reg.string_methods, result.string);
+		fill(reg.utf8_methods, result.utf8);
+		fill(reg.weak_ptr_methods, result.weak);
+		return result;
+	}();
 	return names;
 }
 

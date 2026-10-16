@@ -809,6 +809,12 @@ protected:
         }
     }
 
+    // The object an id names, null when the archive has not read it yet (its first occurrence carries its data)
+    const script_value* find_shared_ptr(uint32_t id) const {
+        auto it = id_to_shared_ptr_.find(id);
+        return it != id_to_shared_ptr_.end() ? &it->second : nullptr;
+    }
+
     script_value get_shared_ptr(uint32_t id) const {
         if (id == 0) {
             if (engine_ref_) {

@@ -246,6 +246,25 @@ public:
                 break;
             }
 
+            case script_value_type::jai_shared_ptr_type: {
+                // {"$shared_ptr_id": id, "$shared_ptr_data": object} at the first handle, the id alone after (identity survives)
+                auto holder = value.get_object_holder();
+                if (!holder) {
+                    oss_ << "null";
+                    break;
+                }
+                auto [id, is_new] = track_shared_ptr(holder.get());
+                open_value('{');
+                write_value_key("$shared_ptr_id", false);
+                oss_ << id;
+                if (is_new) {
+                    write_value_key("$shared_ptr_data", true);
+                    write_value(weak_target_value(holder));
+                }
+                close_value('}', false);
+                break;
+            }
+
             case script_value_type::jai_array_type: {
                 const script_array* node = value.unchecked_array_node();
                 if (!node) { throw runtime_error("script_value is not an array"); }
@@ -845,8 +864,8 @@ public:
                     v.storage_ = jai::weaker_ptr<script_value::object_holder>();
                     return v;
                 }
-                script_value existing_obj = get_shared_ptr(id);
-                if (!existing_obj.is_invalid()) {
+                if (const script_value* known = find_shared_ptr(id)) {
+                    const script_value& existing_obj = *known;
                     auto obj_holder = existing_obj.get_object_holder();
                     if (obj_holder) {
                         script_value weak_val(std::monostate{}, eng);

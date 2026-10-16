@@ -8,6 +8,7 @@
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/core/dynamic_binder_serialization.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
@@ -1140,6 +1141,35 @@ public:
             check(loaded_shared != nullptr, "shared loaded (binary)");
             check(locked.get() == loaded_shared.get(), "forward weak and shared same object (binary)");
             check_eq(loaded_shared->value, 88, "value preserved through forward ref (binary)");
+        });
+
+        // A script value holding shared_ptr handles round-trips through to_binary as through to_json (it raised Unsupported type
+        // for binary serialization: 13); handles to one object stay one object after the load
+        test("shared_handles_round_trip_through_to_binary", [this]() {
+            auto eng = make_engine();
+            stdlib::register_all(*eng);
+            eng->execute("class P { int x = 0; string tag = \"p\"; P() {} P(int a) { x = a; } }");
+            check_eq(std::string("P 3 p"), eng->execute("var b = from_binary(to_binary(new P(3))); type_of(b) + \" \" + to_string(b.x) + \" \" + b.tag").as<std::string>());
+            check_eq(std::string("true 5"), eng->execute(
+                "var p = new P(4); var back = from_binary(to_binary([p, p, {\"k\": p}])); back[0].x = 5; "
+                "to_string(same_object(back[0], back[1]) && same_object(back[0], back[2][\"k\"])) + \" \" + to_string(back[2][\"k\"].x)").as<std::string>());
+            check_eq(std::string("true"), eng->execute("shared_ptr<P> none = null; to_string(from_binary(to_binary([none]))[0] == null)").as<std::string>());
+            check_eq(std::string("true 7"), eng->execute(
+                "var q = new P(7); weak_ptr<P> w = weak_ptr<P>(q); var pair = from_binary(to_binary([w, q])); "
+                "to_string(same_object(pair[0].lock(), pair[1])) + \" \" + to_string(pair[1].x)").as<std::string>());
+            // to_json wrote a shared handle as null; it writes the object once under its id, and from_json shares it again
+            check_eq(std::string("P 9 true 6"), eng->execute(
+                "var j = new P(9); var jb = from_json(to_json([j, {\"again\": j}])); var first = jb[0]; jb[1][\"again\"].x = 6; "
+                "type_of(from_json(to_json(j))) + \" \" + to_string(from_json(to_json(j)).x) + \" \" + to_string(same_object(first, jb[1][\"again\"])) + \" \" + to_string(first.x)").as<std::string>());
+            check_eq(std::string("true 7"), eng->execute(
+                "var r = new P(7); weak_ptr<P> v = weak_ptr<P>(r); var jp = from_json(to_json([v, r])); "
+                "to_string(same_object(jp[0].lock(), jp[1])) + \" \" + to_string(jp[1].x)").as<std::string>(),
+                "a weak_ptr and its owner come back as one object (the weak's first occurrence raised Invalid shared_ptr ID)");
+            check_eq(std::string("true"), eng->execute("shared_ptr<P> gone = null; to_string(from_json(to_json([gone]))[0] == null)").as<std::string>());
+            // a handle back into an object still being written (a cycle) reads null
+            check_eq(std::string("true true"), eng->execute(
+                "class Ring { var next; } var ring = new Ring(); ring.next = ring; "
+                "to_string(from_binary(to_binary(ring)).next == null) + \" \" + to_string(from_json(to_json(ring)).next == null)").as<std::string>());
         });
     }
 };

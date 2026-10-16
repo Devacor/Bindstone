@@ -1813,6 +1813,24 @@ public:
             check(json.find("55") != std::string::npos, "the C++ property saves through the C++ object: " + json);
         });
 
+        // A layer field holding a shared handle saved as null; it saves the object once and two fields sharing it share it again
+        test("a_script_layers_shared_handles_round_trip", [&]() {
+            auto eng = hybrid_engine();
+            eng->execute(R"(
+                class Pal { int mood = 1; }
+                class Pairkin : Slotkin { var best; var also; Pairkin() : super() {} }
+            )");
+            auto slot = std::make_shared<SlotCreature>();
+            eng->add_global("kin", eng->extend(slot, "Pairkin"));
+            eng->execute("var pal = new Pal(); pal.mood = 4; kin.best = pal; kin.also = pal;");
+            std::string state = slot->script_layer_to_json();
+            auto twin = std::make_shared<SlotCreature>();
+            eng->add_global("twin", eng->extend(twin, "Pairkin"));
+            check(twin->script_layer_from_json(state), "hydrates: " + state);
+            check_eq((script_int)4, eng->execute("twin.best.mood").as_int(), state);
+            check_true(eng->execute("same_object(twin.best, twin.also)").as<bool>(), "the two fields share one object again");
+        });
+
         test("script_extensible_json_state_round_trip", [&]() {
             auto eng = hybrid_engine();
             eng->execute(R"(

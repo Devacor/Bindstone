@@ -245,8 +245,7 @@ namespace jai {
 			(void)_jai_poly_registered;
 			static const auto _inheritance_registered = []() {
 				if constexpr (sizeof...(Bases) > 0) {
-					auto& schema = type_registry::instance().for_type<Derived>();
-					(schema.add_base(std::type_index(typeid(Bases))), ...);
+					(type_registry::instance().add_base(std::type_index(typeid(Derived)), std::type_index(typeid(Bases))), ...);
 				}
 				return true;
 			}();

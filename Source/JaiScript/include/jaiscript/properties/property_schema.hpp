@@ -122,6 +122,12 @@ public:
 		return schemas_[ti];
 	}
 
+	// Under the lock: a base chain walk (all_properties of a derived type) may read this schema from another thread
+	void add_base(std::type_index ti, std::type_index base_type) {
+		std::scoped_lock guard(mutex_);
+		schemas_[ti].add_base(base_type);
+	}
+
 	// Get schema if it exists
 	const type_property_schema* try_get(std::type_index ti) const {
 		std::scoped_lock guard(mutex_);

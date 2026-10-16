@@ -10,6 +10,8 @@
 #include <cstdio>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <typeindex>
 #include <unordered_map>
@@ -58,6 +60,7 @@ public:
     // Static-init order between the two is unspecified, so both orders must converge:
     // implicit-after-explicit no-ops; explicit-after-implicit replaces.
     void register_entry(std::type_index ti, type_entry entry, bool a_implicit = false) {
+        std::unique_lock guard(mutex_);
         entry.type = ti;
         entry.implicit = a_implicit;
         auto existing = by_rtti_.find(ti);
@@ -86,11 +89,13 @@ public:
     }
 
     const type_entry* find(std::type_index ti) const {
+        std::shared_lock guard(mutex_);
         auto it = by_rtti_.find(ti);
         return it != by_rtti_.end() ? &it->second : nullptr;
     }
 
     const type_entry* find(const std::string& name) const {
+        std::shared_lock guard(mutex_);
         auto it = by_name_.find(name);
         return it != by_name_.end() ? it->second : nullptr;
     }
@@ -117,6 +122,7 @@ public:
     }
 
     void add_base_edge(std::type_index derived, std::type_index base, void* (*adjust)(void*)) {
+        std::unique_lock guard(mutex_);
         auto& edges = base_edges_[derived];
         for (const auto& e : edges) { if (e.base == base) { return; } }
         edges.push_back(base_edge{ base, adjust });
@@ -128,6 +134,7 @@ public:
     // adjusters via a short DFS over the recorded edges.
     void* adjust_to_base(std::type_index from, std::type_index to, void* p) const {
         if (p == nullptr || from == to) { return p; }
+        std::shared_lock guard(mutex_);
         auto it = base_edges_.find(from);
         if (it == base_edges_.end()) { return p; }
         for (const auto& e : it->second) { if (e.base == to) { return e.adjust(p); } }
@@ -160,6 +167,7 @@ public:
     // with no recorded relation is assignable only to itself.
     bool is_assignable(std::type_index from, std::type_index to) const {
         if (from == to || to == std::type_index(typeid(void))) { return true; }
+        std::shared_lock guard(mutex_);
         auto it = base_edges_.find(from);
         if (it == base_edges_.end()) { return false; }
         std::set<std::type_index> visited{ from };
@@ -332,10 +340,11 @@ private:
         void* (*adjust)(void*); // Derived* -> Base* (stateless, so a plain function pointer)
     };
 
+    // dynamic_binder::base_class<>() and runtime registrars write here from whichever thread builds an engine
+    mutable std::shared_mutex mutex_;
     std::unordered_map<std::type_index, type_entry> by_rtti_;
     std::unordered_map<std::string, const type_entry*> by_name_;
-    // Direct Derived->Base adjusters; adjust_to_base() composes them transitively. Populated
-    // only at static-init (single-threaded), read-only thereafter, so loads need no lock.
+    // Direct Derived->Base adjusters; adjust_to_base() composes them transitively
     std::unordered_map<std::type_index, std::vector<base_edge>> base_edges_;
 };
 

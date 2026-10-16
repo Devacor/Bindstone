@@ -217,6 +217,8 @@ void print_usage() {
 		"  --no-param-alias      bind every by-value parameter with a clone (the read-only elision off)\n"
 		"  --no-local-alias      copy every by-value local declaration (the read-only local elision off)\n"
 		"  --no-proofs           run without type proofs, typed ops or cell blocks (the general form)\n"
+		"  --unsafe-parallel     admit parallel bodies the region cannot prove safe (engine::allow_unsafe_parallel);\n"
+		"                        a body that races gets racy results, the engine's own walls still raise\n"
 		"  --debug-port=N        first port the DAP listener tries (default 52477, probing +10)\n"
 		"  --pause / --no-pause  force / suppress the \"press Enter to close\" hold after a file\n"
 		"                        run (auto: pauses only when the console window is exclusively\n"

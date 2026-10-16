@@ -1813,6 +1813,7 @@ script_value script_value::try_unwrap_transparent_wrapper() const {
 }
 
 std::string script_value::float_text(double v) {
+    if (std::isnan(v)) { return std::string(detail::k_nan_text); }
     char buf[64];
     auto res = std::to_chars(buf, buf + sizeof(buf), v);   // shortest round-trip
     std::string s(buf, res.ptr);

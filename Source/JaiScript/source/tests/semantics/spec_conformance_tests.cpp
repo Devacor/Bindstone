@@ -339,6 +339,20 @@ public:
 					std::to_string(call.find("super(...) constructs the base only in a constructor's initializer list (: super(args)); call a base method with super::name(args)") != std::string::npos);
 			});
 		});
+		// docs/site/guide/09-containers-strings.html and 01-hello.html: a dot transform and its string:: twin raise one text; every
+		// NaN prints nan (the language orders all NaNs as one group), whatever produced it and on every platform
+		test("repeat_counts_and_nan_text", [this]() {
+			expect("a negative repeat count", R"(
+				string t(function f) { string r = "ran"; try { f(); } catch (e) { r = e; } return r; }
+				t([]() { string s = "abc"; s.repeat(-1); }) + "|" + t([]() { string::repeat("a", -1); }) + "|" + string::repeat("ab", 0) + "|" + "ab".repeat(0) + "|";
+			)", "string::repeat count cannot be negative|string::repeat count cannot be negative|||");
+			expect("nan text", R"(
+				float inf = 1e308 * 10.0;
+				float q = inf - inf;
+				to_string(q) + "|" + to_string(-q) + "|" + to_string(math::sqrt(-1.0)) + "|" + to_string(0.0 * inf) + "|" + to_string(math::NAN_VALUE) + "|" +
+					format("{:.2f}", q) + "|" + format("{:e}", -q) + "|" + to_string(math::vec2(q, 1.0)) + "|" + to_string(inf) + "|" + to_string(-inf);
+			)", "nan|nan|nan|nan|nan|nan|nan|(nan, 1.0)|inf|-inf");
+		});
 		test("nested_member_regions_preserve_reads_stores_and_callbacks", [this]() {
 			expect("nested scalar updates", R"(
 				class Position { float x = 1.0; }

@@ -9,8 +9,13 @@
 #include <cctype>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace jai::detail {
+
+    // Every NaN prints "nan": the language orders all NaNs as one group (no sign, no payload), while a C++ runtime spells a
+    // NaN its own way (MSVC's "-nan(ind)")
+    inline constexpr std::string_view k_nan_text = "nan";
 
     // strtod with the range verdict every C runtime agrees on: glibc and MinGW's CRT raise ERANGE for any
     // subnormal result (5e-324) while MSVC's does not, so an ERANGE parse is out of range only when it

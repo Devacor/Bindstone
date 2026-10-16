@@ -11,6 +11,17 @@
 namespace jai {
 
 namespace detail {
+	// A script callback a C++ caller ran: every failure throws to the host (the throwing flavor), a script throw the callback
+	// did not catch included; a host function called from script hands it back as that call's runtime error, text included
+	inline void throw_script_callback_failure(engine* eng, const checked_result<script_value>& result) {
+		if (!result) {
+			throw runtime_error(eng->format_error(result));
+		}
+		if (eng->backend_unwinding()) {
+			throw runtime_error(eng->backend_exception_text());
+		}
+	}
+
 	// Sig decomposition for convert_script_function (declared in function_binder.hpp)
 	template<typename Sig> struct script_function_wrapper;
 
@@ -24,18 +35,11 @@ namespace detail {
 			return [fn = std::move(fn)](Args... args) -> R {
 				engine* eng = fn.get_engine();
 				engine::external_call_guard scope(eng);
-				// Every failure throws to the host (the throwing flavor); a host function called from script
-				// hands it back to the script as that call's runtime error, text included
 				std::vector<script_value> values;
 				values.reserve(sizeof...(Args));
 				(values.push_back(eng->make_value(args)), ...);
 				auto result = fn.as_function()(values);
-				if (!result) {
-					throw runtime_error(eng->format_error(result));
-				}
-				if (eng->backend_unwinding()) {   // a script throw the callback did not catch
-					throw runtime_error(eng->backend_exception_text());
-				}
+				throw_script_callback_failure(eng, result);
 				if constexpr (!std::is_void_v<R>) {
 					return result.value().template as<R>();
 				}

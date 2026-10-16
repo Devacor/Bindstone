@@ -1405,6 +1405,31 @@ public:
             check_eq(eng->execute("last_new").as<int>(), 100, "New value is 100");
         });
 
+        test("observable_property_script_receiver_failure_throws_out_of_the_change", [this]() {
+            // Every script receiver throws out of the emit (docs/site/embedding/ signals): a failing on_change callback
+            // raises at the store that changed the value, in both spellings, on both backends
+            auto eng = make_engine();
+            dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
+                .auto_bind()
+                .constructor<>()
+                .build();
+            auto cpp_obj = std::make_shared<ObservableOwnerTest>();
+            eng->add_global("obj", eng->make_object(cpp_obj));
+            eng->execute("obj.score.on_change([](auto old_val, auto new_val) { throw \"receiver failed\"; });");
+            check_eq(std::string("receiver failed"), eng->execute("string r = \"none\"; try { obj.score = 5; } catch (e) { r = e; } r;").as<std::string>(),
+                "the property ref's on_change");
+            auto second = make_engine();
+            dynamic_binder<ObservableOwnerTest>(*second, "ObservableOwnerTest")
+                .auto_bind()
+                .constructor<>()
+                .build();
+            auto other = std::make_shared<ObservableOwnerTest>();
+            second->add_global("obj", second->make_object(other));
+            second->execute("obj.on_score_change([](auto old_val, auto new_val) { int z = 0; int q = 1 / z; });");
+            check_eq(std::string("Division by zero"), second->execute("string r = \"none\"; try { obj.score = 5; } catch (e) { r = e; } r;").as<std::string>(),
+                "the owner's on_<name>_change");
+        });
+
         test("observable_property_transparent_comparison", [this]() {
             // Test that observable properties work in comparisons (transparent wrapper)
             auto eng = make_engine();

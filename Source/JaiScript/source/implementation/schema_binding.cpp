@@ -1,5 +1,6 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/properties/property_manager.hpp>
+#include <jaiscript/core/engine_impl.hpp>
 
 namespace jai::detail {
 
@@ -33,9 +34,10 @@ void ensure_observable_ref_type_registered(engine& a_engine) {
 			const script_function& script_func = callback.as_function();
 
 			auto cpp_callback = [script_func, eng](const ValueT& old_val, const ValueT& new_val) {
+				engine::external_call_guard scope(eng);
 				script_value old_sv = script_value_from_cpp(old_val, eng);
 				script_value new_sv = script_value_from_cpp(new_val, eng);
-				auto result = script_func({old_sv, new_sv});
+				throw_script_callback_failure(eng, script_func({old_sv, new_sv}));
 			};
 
 			auto recv = obs_prop->on_change.connect(std::move(cpp_callback));
@@ -120,9 +122,10 @@ void bind_observable_change_method(engine& a_engine, class_definition& class_def
 
 			const script_function& script_func = callback.as_function();
 			auto cpp_callback = [script_func, eng](const ValueT& old_val, const ValueT& new_val) {
+				engine::external_call_guard scope(eng);
 				script_value old_sv = script_value_from_cpp(old_val, eng);
 				script_value new_sv = script_value_from_cpp(new_val, eng);
-				auto result = script_func({old_sv, new_sv});
+				throw_script_callback_failure(eng, script_func({old_sv, new_sv}));
 			};
 
 			auto recv = obs_prop->on_change.connect(std::move(cpp_callback));

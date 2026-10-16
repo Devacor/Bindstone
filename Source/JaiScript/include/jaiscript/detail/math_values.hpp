@@ -13,6 +13,7 @@
 #include <jaiscript/core/checked_result.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/numeric_conversion.hpp>
+#include <jaiscript/detail/float_text.hpp>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -568,6 +569,7 @@ namespace jai::detail::math {
 	// Components in parentheses: a binary32 component in the shortest text that round-trips it (a whole number keeps
 	// ".0", as float_text does), an int32 component in decimal: (1.0, 2.5, 3.0), (4, -2, 0)
 	inline void append_f32(std::string& out, float v) {
+		if (std::isnan(v)) { out += k_nan_text; return; }
 		char buf[32];
 		auto res = std::to_chars(buf, buf + sizeof(buf), v);
 		std::string_view s(buf, static_cast<size_t>(res.ptr - buf));

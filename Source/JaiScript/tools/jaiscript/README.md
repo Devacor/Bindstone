@@ -102,6 +102,8 @@ world per save); because of that, the DAP listener is off in watch mode.
 --no-param-alias      bind every by-value parameter with a clone (the read-only elision off)
 --no-local-alias      copy every by-value local declaration (the read-only local elision off)
 --no-proofs           run without type proofs, typed ops or cell blocks (the general form)
+--unsafe-parallel     admit parallel bodies the region cannot prove safe (engine::allow_unsafe_parallel(true));
+                      a body that races gets racy results, the engine's own walls still raise
 --no-debug            don't stand up the DAP debug listener
 --debug-port=N        first port the listener tries (default 52477, probing +10)
 --pause / --no-pause  force / suppress the exit hold after a file run

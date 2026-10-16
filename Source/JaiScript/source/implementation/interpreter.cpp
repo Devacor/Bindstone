@@ -2034,7 +2034,10 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
 
             script_int count = args[0].unchecked_as_int();
-            if (count <= 0) {
+            if (count < 0) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "string::repeat count cannot be negative");
+            }
+            if (count == 0) {
                 self.unchecked_text_ref().clear();
                 return self;
             }

@@ -17,6 +17,7 @@
 #include <jaiscript/core/script_map.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
+#include <jaiscript/detail/float_text.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <bit>
 #include <limits>
@@ -70,6 +71,7 @@ namespace jai::binary {
 	inline std::string count_text(size_t n, const char* one, const char* many) { return std::to_string(n) + (n == 1 ? one : many); }
 
 	inline std::string float_text(double v) {
+		if (std::isnan(v)) { return std::string(jai::detail::k_nan_text); }
 		char buf[64];
 		auto r = std::to_chars(buf, buf + sizeof(buf), v);
 		return std::string(buf, r.ptr);

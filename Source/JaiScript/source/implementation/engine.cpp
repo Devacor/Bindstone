@@ -1,6 +1,7 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
+#include <jaiscript/detail/float_text.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/stdlib/json.hpp>   // reconstruct_typed_object (hybrid field hydration)
 #include <jaiscript/core/script_namespace.hpp>
@@ -193,12 +194,14 @@ std::string spec_format_int(script_int v, char type) {
 
 std::string spec_format_fixed(script_float v, int precision) {
     // Worst case: sign + 309 integral digits + '.' + capped precision (1024)
+    if (std::isnan(v)) { return std::string(detail::k_nan_text); }
     char buf[1500];
     auto res = std::to_chars(buf, buf + sizeof(buf), v, std::chars_format::fixed, precision);
     return std::string(buf, res.ptr);
 }
 
 std::string spec_format_float(script_float v, std::chars_format fmt, int precision) {
+    if (std::isnan(v)) { return std::string(detail::k_nan_text); }
     char buf[1500];
     auto res = std::to_chars(buf, buf + sizeof(buf), v, fmt, precision);
     return std::string(buf, res.ptr);

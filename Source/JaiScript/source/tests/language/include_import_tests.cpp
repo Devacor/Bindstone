@@ -1892,6 +1892,47 @@ public:
             for (const char* f : {"gi_a.jai", "gi_b.jai"}) { cleanup_temp_file((dir / f).string()); }
         });
 
+        test("a_reload_whose_class_definition_would_fail_applies_nothing", [=, this]() {
+            // the errors a class or namespace definition raises (a base nothing knows, override with nothing to override, a method
+            // redefining a base method without override, a namespace reopening that redefines a function) are the check's: a group
+            // with one applies none of its changes, instead of running the modules before the bad declaration and the declarations
+            // above it
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 900;
+            auto write_module = [&](const std::string& name, const std::string& body) {
+                const auto path = dir / name;
+                { std::ofstream(path, std::ios::binary | std::ios::trunc) << body; }
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            const std::vector<std::pair<std::string, std::string>> broken = {
+                {"class Base { void m() { } }\nclass Kid : Base { void m() { } }\n", "method 'm' redefines 'Base::m': mark it 'override'"},
+                {"class Kid { void m() override { } }\n", "method 'm' marked as override but no base class method found"},
+                {"class Kid : NoSuchBase { int k = 1; }\n", "Base class 'NoSuchBase' not found"},
+                {"namespace dn { int f() { return 1; } }\nnamespace dn { int f() { return 2; } }\n", "'f' is already defined with parameters () at "},
+            };
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            eng->add_include_path(dir.string());
+            eng->import_recheck_interval(0);
+            write_module("cd_a.jai", "int CA = 1;\n");
+            write_module("cd_b.jai", "int cd_b_fn() { return 1; }\n");
+            check_eq(std::string("1|1"), eng->execute("array<string> CD = [\"cd_a.jai\", \"cd_b.jai\"];\nimport(CD);\nto_string(CA) + \"|\" + to_string(cd_b_fn());").to_string());
+            int version = 1;
+            for (const auto& [body, text] : broken) {
+                ++version;
+                write_module("cd_a.jai", "int CA = " + std::to_string(version) + ";\n");
+                write_module("cd_b.jai", "int cd_b_fn() { return " + std::to_string(version) + "; }\n" + body + "int cd_b_after() { return 0; }\n");
+                const std::string failed = eng->execute("string m = \"\";\ntry { import(CD); } catch (e) { m = e; }\nm;").to_string();
+                check_true(failed.rfind("static check failed:\n", 0) == 0 && failed.find("cd_b.jai") != std::string::npos && failed.find(text) != std::string::npos,
+                           "the check names the definition error: " + failed);
+                check_eq(std::string("1|1"), eng->execute("to_string(CA) + \"|\" + to_string(cd_b_fn());").to_string(), "nothing applied for: " + text);
+            }
+            write_module("cd_b.jai", "int cd_b_fn() { return 9; }\nclass Base { void m() { } }\nclass Kid : Base { void m() override { } }\n");
+            check_eq(std::string("5|9"), eng->execute("import(CD);\nto_string(CA) + \"|\" + to_string(cd_b_fn());").to_string(), "the fixed group applies");
+            for (const char* f : {"cd_a.jai", "cd_b.jai"}) { cleanup_temp_file((dir / f).string()); }
+        });
+
         test("a_root_file_lists_its_check_errors_under_its_path", [=, this]() {
             // the root file's listing names the file like an included or imported one does; source text stays "<script>"
             const std::string path = (jai::foundry::test_temp_directory() / "root_listing.jai").generic_string();

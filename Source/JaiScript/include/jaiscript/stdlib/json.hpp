@@ -7,6 +7,7 @@
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/convenience.hpp>
 #include <optional>
+#include <unordered_set>
 #include <sstream>
 #include <iomanip>
 #include <cmath>
@@ -278,7 +279,8 @@ namespace stdlib {
             engine* eng,
             const script_map& map,
             const std::string& type_name,
-            const std::function<script_value(const script_value&)>& transform) {
+            const std::function<script_value(const script_value&)>& transform,
+            const std::function<void(const script_value&)>& on_constructed = {}) {
         if (!eng->get_class_definition(type_name)) return script_value(std::monostate{}, eng);
 
         // the class's constructor, called as Name() would call it; its error (or throw) is the load's
@@ -294,6 +296,7 @@ namespace stdlib {
         script_value instance = std::move(constructed.value());
         std::shared_ptr<class_instance> inst = instance.is_object() ? instance.get_class_instance() : nullptr;
         if (!inst) return script_value(std::monostate{}, eng);
+        if (on_constructed) { on_constructed(instance); }
         {
             for (const auto& [key, value] : map) {
                 if (!key.is_string()) continue;
@@ -350,93 +353,77 @@ namespace stdlib {
 
 	// Every archive format restores nested script classes through the same walk.
 	// Serialized names remain data; reconstruction uses only registered classes/members.
-	// JSON's tagged values: {"$char": n} is the char n (0..255), {"$map": [[k, v], ...]} a map whose keys keep their kind. Any other
-	// shape stays the map it is
-	inline std::optional<script_value> json_tagged_value(engine* eng, const script_map& map, bool json_string_keys, struct archive_handles* handles);
+	// A handle to a loaded instance (what new T() yields): a load that aliases one object hands out the same handle
+	inline script_value script_handle_of(engine* eng, script_value object) {
+		const auto type = object.get_type_info();
+		if (object.is_object() && type && type->base_type == script_value_type::jai_object_type) {
+			object.set_type_info(eng->get_type_info_shared_ptr(type.get()));
+		}
+		return object;
+	}
 
-	// JSON's handle records: {"$shared_ptr_id": n, "$shared_ptr_data": object} (or "$weak_ptr_id"/"$weak_ptr_data") at a handle's
-	// first occurrence, the id alone after. Ids resolve across the whole document, whatever order the walk meets them in.
+	// The script handles one load resolves: {"$shared_ptr_id": N, "$shared_ptr_data": object} at an object's first appearance in
+	// write order, {"$shared_ptr_id": N} after it, and the $weak_ptr_id twins alias one object per id across the archive. A load
+	// visits keys in map order, not write order, so an id met before its object finds the object's archived form by index
 	struct archive_handles {
-		std::unordered_map<script_int, script_value> data;       // id -> the object's archive form
-		std::unordered_map<script_int, script_value> restored;   // id -> the object (null while it is being restored: a cycle)
+		const script_value* root = nullptr;
+		std::unordered_map<script_int, script_value> loaded;
+		std::unordered_map<script_int, script_value> payloads;
+		std::unordered_set<script_int> loading;
+		bool indexed = false;
 	};
 
-	inline const script_value* archive_handle_member(engine* eng, const script_map& map, const char* key) {
-		auto it = map.find(script_value(std::string(key), eng));
-		return it == map.end() ? nullptr : &it->second;
+	inline bool archive_handle_parts(engine* eng, const script_map& map, script_int& id, const script_value*& data, bool& weak) {
+		weak = false;
+		auto id_it = map.find(script_value(std::string("$shared_ptr_id"), eng));
+		if (id_it == map.end()) {
+			id_it = map.find(script_value(std::string("$weak_ptr_id"), eng));
+			weak = true;
+		}
+		if (id_it == map.end() || !id_it->second.is_int()) { return false; }
+		auto data_it = map.find(script_value(std::string(weak ? "$weak_ptr_data" : "$shared_ptr_data"), eng));
+		if (map.size() == 2 && data_it == map.end()) { return false; }
+		id = id_it->second.as_int();
+		data = data_it == map.end() ? nullptr : &data_it->second;
+		return true;
 	}
 
-	inline void collect_archive_handles(engine* eng, const script_value& value, archive_handles& handles) {
+	inline void index_archive_handles(engine* eng, const script_value& value, archive_handles& handles) {
 		if (value.is_map()) {
 			const auto& map = value.as_map();
-			for (const char* kind : {"$shared_ptr", "$weak_ptr"}) {
-				const script_value* id = archive_handle_member(eng, map, (std::string(kind) + "_id").c_str());
-				const script_value* data = archive_handle_member(eng, map, (std::string(kind) + "_data").c_str());
-				if (id && data && id->is_int()) { handles.data.emplace(id->as_int(), *data); }
+			script_int id = 0;
+			const script_value* data = nullptr;
+			bool weak = false;
+			if (map.size() <= 2 && archive_handle_parts(eng, map, id, data, weak) && data && id != 0) {
+				handles.payloads.try_emplace(id, *data);
 			}
-			for (const auto& [key, child] : map) { collect_archive_handles(eng, child, handles); }
+			for (const auto& [key, child] : map) { index_archive_handles(eng, child, handles); }
 		} else if (value.is_array()) {
-			value.unchecked_array_node()->for_each(eng, [&](const script_value& child) { collect_archive_handles(eng, child, handles); });
+			value.unchecked_array_node()->for_each(eng, [&](const script_value& child) { index_archive_handles(eng, child, handles); });
 		}
 	}
 
-	inline script_value reconstruct_archive_value(engine* eng, const script_value& value, bool json_string_keys, archive_handles* handles);
+	inline std::optional<script_value> json_tagged_value(engine* eng, const script_map& map, bool json_string_keys, archive_handles& handles);
+	inline std::optional<script_value> archive_handle_value(engine* eng, const script_map& map, bool json_string_keys, archive_handles& handles);
 
-	// The handle a record names, or nullopt when the map is not a handle record
-	inline std::optional<script_value> reconstruct_archive_handle(engine* eng, const script_map& map, bool json_string_keys, archive_handles* handles) {
-		if (!handles || map.size() > 2) { return std::nullopt; }
-		const script_value* shared_id = archive_handle_member(eng, map, "$shared_ptr_id");
-		const script_value* weak_id = shared_id ? nullptr : archive_handle_member(eng, map, "$weak_ptr_id");
-		const script_value* id = shared_id ? shared_id : weak_id;
-		if (!id || !id->is_int()) { return std::nullopt; }
-		script_value object(std::monostate{}, eng);
-		if (id->as_int() != 0) {
-			if (auto done = handles->restored.find(id->as_int()); done != handles->restored.end()) {
-				object = done->second;
-			} else if (auto data = handles->data.find(id->as_int()); data != handles->data.end()) {
-				handles->restored[id->as_int()] = script_value(std::monostate{}, eng);
-				object = reconstruct_archive_value(eng, data->second, json_string_keys, handles);
-				handles->restored[id->as_int()] = object;
-			}
-		}
-		auto holder = object.get_object_holder();
-		if (shared_id) {
-			if (!holder) {
-				script_value none(std::monostate{}, eng);
-				none.set_type_info(eng->get_type_info_shared_ptr(nullptr));
-				return none;
-			}
-			if (object.type() != script_value_type::jai_shared_ptr_type) { object.set_type_info(eng->get_type_info_shared_ptr(object.get_type_info())); }
-			return object;
-		}
-		if (holder) {
-			script_value shared = object;
-			if (shared.type() != script_value_type::jai_shared_ptr_type) { shared.set_type_info(eng->get_type_info_shared_ptr(object.get_type_info())); }
-			auto weak = script_value::make_weak_ptr(shared, eng);
-			if (weak) { return std::move(weak.value()); }
-		}
-		script_value empty(std::monostate{}, eng);
-		empty.set_type_info(eng->get_type_info_weak_ptr(nullptr));
-		return empty;
-	}
-
-	inline script_value reconstruct_archive_value(engine* eng, const script_value& value, bool json_string_keys = false) {
-		archive_handles handles;
-		collect_archive_handles(eng, value, handles);
-		return reconstruct_archive_value(eng, value, json_string_keys, &handles);
-	}
-
-	inline script_value reconstruct_archive_value(engine* eng, const script_value& value, bool json_string_keys, archive_handles* handles) {
+	// handle_id: the archive id a handle's object is loading under, registered as soon as it is constructed so a cycle back to it resolves
+	inline script_value reconstruct_archive_value(engine* eng, const script_value& value, bool json_string_keys, archive_handles& handles,
+	                                              script_int handle_id = 0) {
 		if (value.is_map()) {
 			const auto& map = value.as_map();
+			if (map.size() <= 2) {
+				if (auto handle = archive_handle_value(eng, map, json_string_keys, handles)) { return std::move(*handle); }
+			}
 			if (json_string_keys && map.size() == 1) {
 				if (auto tagged = json_tagged_value(eng, map, json_string_keys, handles)) { return std::move(*tagged); }
 			}
-			if (auto handle = reconstruct_archive_handle(eng, map, json_string_keys, handles)) { return std::move(*handle); }
 			auto type_it = map.find(script_value("_type_", eng));
 			if (type_it != map.end() && type_it->second.is_string()) {
 				auto object = reconstruct_typed_object(eng, map, type_it->second.as_string(),
-					[eng, json_string_keys, handles](const script_value& child) { return reconstruct_archive_value(eng, child, json_string_keys, handles); });
+					[eng, json_string_keys, &handles](const script_value& child) { return reconstruct_archive_value(eng, child, json_string_keys, handles); },
+					[eng, &handles, handle_id](const script_value& instance) {
+						if (handle_id != 0) { handles.loaded.try_emplace(handle_id, script_handle_of(eng, instance)); }
+					});
 				if (!object.is_null()) {
 					return object;
 				}
@@ -460,7 +447,57 @@ namespace stdlib {
 		return value;
 	}
 
-	inline std::optional<script_value> json_tagged_value(engine* eng, const script_map& map, bool json_string_keys, archive_handles* handles) {
+	// One archive's script value back to live values: classes by name, handles by id
+	inline script_value load_archive_value(engine* eng, const script_value& value, bool json_string_keys) {
+		archive_handles handles;
+		handles.root = &value;
+		return reconstruct_archive_value(eng, value, json_string_keys, handles);
+	}
+
+	[[noreturn]] JAI_NOINLINE inline void throw_unwritten_handle(script_int id) {
+		throw serialization_error("Invalid shared_ptr ID: " + std::to_string(id));
+	}
+
+	inline std::optional<script_value> archive_handle_value(engine* eng, const script_map& map, bool json_string_keys, archive_handles& handles) {
+		script_int id = 0;
+		const script_value* data = nullptr;
+		bool weak = false;
+		if (!archive_handle_parts(eng, map, id, data, weak)) { return std::nullopt; }
+		script_value target(std::monostate{}, eng);
+		if (id != 0) {
+			if (auto known = handles.loaded.find(id); known != handles.loaded.end()) {
+				target = known->second;
+			} else {
+				if (!data) {
+					if (!handles.indexed && handles.root) {
+						handles.indexed = true;
+						index_archive_handles(eng, *handles.root, handles);
+					}
+					if (auto found = handles.payloads.find(id); found != handles.payloads.end()) { data = &found->second; }
+				}
+				if (data) {
+					if (!handles.loading.insert(id).second) { throw_unwritten_handle(id); }
+					script_value rebuilt = reconstruct_archive_value(eng, *data, json_string_keys, handles, id);
+					handles.loading.erase(id);
+					target = handles.loaded.try_emplace(id, script_handle_of(eng, std::move(rebuilt))).first->second;
+				} else if (!weak) {
+					throw_unwritten_handle(id);
+				}
+			}
+		}
+		if (!weak) {
+			if (target.is_null()) { target.set_type_info(eng->get_type_info_shared_ptr(nullptr)); }
+			return target;
+		}
+		if (target.is_object()) {
+			if (auto observed = script_value::make_weak_ptr(target, eng)) { return std::move(observed.value()); }
+		}
+		return script_value::make_empty_weak_ptr(eng->get_type_info_weak_ptr(nullptr), eng);
+	}
+
+	// JSON's tagged values: {"$char": n} is the char n (0..255), {"$map": [[k, v], ...]} a map whose keys keep their kind. Any other
+	// shape stays the map it is
+	inline std::optional<script_value> json_tagged_value(engine* eng, const script_map& map, bool json_string_keys, archive_handles& handles) {
 		const auto& [tag, payload] = *map.begin();
 		if (!tag.is_string()) { return std::nullopt; }
 		if (tag.as_string() == "$char") {
@@ -508,7 +545,7 @@ namespace stdlib {
         
 		eng_ref.add_function("from_json", [eng](const std::string& json) -> script_value {
 			serialization::json_archive_reader reader(json, eng);
-			return reconstruct_archive_value(eng, reader.read_value(), true);
+			return load_archive_value(eng, reader.read_value(), true);
 		});
         
         eng_ref.add_variadic_function("to_binary", [eng](const std::vector<script_value>& args) -> script_value {
@@ -537,9 +574,8 @@ namespace stdlib {
             std::vector<uint8_t> data(binary_data.begin(), binary_data.end());
 
             serialization::binary_archive_reader reader(data, eng);
-            reader.object_restorer([eng](const script_value& a_object) { return reconstruct_archive_value(eng, a_object); });
 
-			return reconstruct_archive_value(eng, reader.read_value());
+			return load_archive_value(eng, reader.read_value(), false);
         });
 
         eng_ref.add_variadic_function("to_base64", [eng](const std::vector<script_value>& args) -> script_value {
@@ -560,8 +596,7 @@ namespace stdlib {
             std::vector<uint8_t> data(binary_str.begin(), binary_str.end());
 
             serialization::binary_archive_reader reader(data, eng);
-            reader.object_restorer([eng](const script_value& a_object) { return reconstruct_archive_value(eng, a_object); });
-			return reconstruct_archive_value(eng, reader.read_value());
+			return load_archive_value(eng, reader.read_value(), false);
         });
 
         eng_ref.add_function("base64_encode", [eng](const std::string& input) -> script_value {

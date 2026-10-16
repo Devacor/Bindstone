@@ -247,8 +247,7 @@ public:
             }
 
             case script_value_type::jai_shared_ptr_type: {
-                // {"$shared_ptr_id": id, "$shared_ptr_data": object} at the first handle, the id alone after (identity survives)
-                auto holder = value.get_object_holder();
+                const auto holder = value.get_object_holder();
                 if (!holder) {
                     oss_ << "null";
                     break;
@@ -842,59 +841,7 @@ public:
         if (!next_node(n)) n = root_;   // matches the old "fall back to the root value"
         const JNode& node = nodes_[n];
 
-        if (node.tag == JTag::Obj) {
-            // Detect the SCRIPT weak_ptr format {"$weak_ptr_id": id, "$weak_ptr_data"?: ...}
-            // by scanning the flat members directly — no script_value is materialized unless
-            // this genuinely is a weak_ptr (then only its $weak_ptr_data subtree) or unless a
-            // raw composite is requested (the final materialize(n) below, e.g. stdlib from_json).
-            uint32_t widNode = 0, wdataNode = 0;
-            bool hasWid = false, hasWdata = false;
-            const uint32_t first = node.u.agg.first, count = node.u.agg.count;
-            for (uint32_t m = 0; m < count; ++m) {
-                const JNode& k = nodes_[first + 2 * m];
-                std::string_view kv(chars_.data() + k.u.str.off, k.u.str.len);
-                if (kv == "$weak_ptr_id") { widNode = first + 2 * m + 1; hasWid = true; }
-                else if (kv == "$weak_ptr_data") { wdataNode = first + 2 * m + 1; hasWdata = true; }
-            }
-            if (hasWid && nodes_[widNode].tag == JTag::Int) {
-                uint32_t id = static_cast<uint32_t>(nodes_[widNode].u.i);
-                if (id == 0) {
-                    script_value v(std::monostate{}, eng);
-                    v.set_type_info(eng->get_type_info_weak_ptr(nullptr));
-                    v.storage_ = jai::weaker_ptr<script_value::object_holder>();
-                    return v;
-                }
-                if (const script_value* known = find_shared_ptr(id)) {
-                    const script_value& existing_obj = *known;
-                    auto obj_holder = existing_obj.get_object_holder();
-                    if (obj_holder) {
-                        script_value weak_val(std::monostate{}, eng);
-                        weak_val.set_type_info(eng->get_type_info_weak_ptr(existing_obj.get_type_info()));
-                        weak_val.storage_ = jai::weaker_ptr<script_value::object_holder>(obj_holder);
-                        return weak_val;
-                    }
-                }
-                if (hasWdata) {
-                    script_value obj_val = materialize(wdataNode);
-                    register_shared_ptr(id, obj_val);
-                    auto obj_holder = obj_val.get_object_holder();
-                    if (!obj_holder) {
-                        throw std::runtime_error("Deserialized weak_ptr object has no object_holder");
-                    }
-                    script_value weak_val(std::monostate{}, eng);
-                    weak_val.set_type_info(eng->get_type_info_weak_ptr(obj_val.get_type_info()));
-                    weak_val.storage_ = jai::weaker_ptr<script_value::object_holder>(obj_holder);
-                    return weak_val;
-                } else {
-                    script_value v(std::monostate{}, eng);
-                    v.set_type_info(eng->get_type_info_weak_ptr(nullptr));
-                    v.storage_ = jai::weaker_ptr<script_value::object_holder>();
-                    return v;
-                }
-            }
-            return materialize(n);
-        }
-        if (node.tag == JTag::Arr) {
+        if (node.tag == JTag::Obj || node.tag == JTag::Arr) {
             return materialize(n);
         }
         return materialize_primitive(node, eng);
@@ -1005,7 +952,7 @@ private:
     }
 
     // Recursively builds a full script_value subtree from a flat node — only used when a raw
-    // composite is actually requested (stdlib from_json / a weak_ptr's $weak_ptr_data).
+    // composite is actually requested (read_value: stdlib from_json, a script value inside a C++ record).
     // Keys are ENGINE-CARRYING string values: ordering and map.find(script_value("_type_"/...))
     // rank by type-then-content (type_info never participates), and every value in the result
     // must clone/detach — the old ast_literal_tag keys had no engine pointer, so copying any

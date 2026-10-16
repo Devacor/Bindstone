@@ -1166,10 +1166,10 @@ public:
                 "to_string(same_object(jp[0].lock(), jp[1])) + \" \" + to_string(jp[1].x)").as<std::string>(),
                 "a weak_ptr and its owner come back as one object (the weak's first occurrence raised Invalid shared_ptr ID)");
             check_eq(std::string("true"), eng->execute("shared_ptr<P> gone = null; to_string(from_json(to_json([gone]))[0] == null)").as<std::string>());
-            // a handle back into an object still being written (a cycle) reads null
+            // a handle back into an object still being written (a cycle) is that object
             check_eq(std::string("true true"), eng->execute(
-                "class Ring { var next; } var ring = new Ring(); ring.next = ring; "
-                "to_string(from_binary(to_binary(ring)).next == null) + \" \" + to_string(from_json(to_json(ring)).next == null)").as<std::string>());
+                "class Ring { var next; } var ring = new Ring(); ring.next = ring; var rb = from_binary(to_binary(ring)); var rj = from_json(to_json(ring)); "
+                "to_string(same_object(rb.next, rb)) + \" \" + to_string(same_object(rj.next, rj))").as<std::string>());
         });
     }
 };

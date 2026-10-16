@@ -765,8 +765,6 @@ protected:
 
     engine* engine_ref_;
 
-    std::unordered_map<uint32_t, script_value> id_to_shared_ptr_;
-
     // C++ shared_ptr tracking for property serialization (type-erased). The stored pointer
     // is the COMPLETE object (most-derived) and `type` its dynamic type, so a back-reference
     // taken through any base view adjusts to the right subobject under multiple inheritance.
@@ -802,33 +800,6 @@ protected:
         depth_guard(const depth_guard&) = delete;
         depth_guard& operator=(const depth_guard&) = delete;
     };
-
-    void register_shared_ptr(uint32_t id, const script_value& ptr) {
-        if (id != 0) {
-            id_to_shared_ptr_.insert_or_assign(id, ptr);
-        }
-    }
-
-    // The object an id names, null when the archive has not read it yet (its first occurrence carries its data)
-    const script_value* find_shared_ptr(uint32_t id) const {
-        auto it = id_to_shared_ptr_.find(id);
-        return it != id_to_shared_ptr_.end() ? &it->second : nullptr;
-    }
-
-    script_value get_shared_ptr(uint32_t id) const {
-        if (id == 0) {
-            if (engine_ref_) {
-                return script_value(std::monostate{}, engine_ref_);
-            }
-            throw serialization_error("Engine pointer is null during deserialization");
-        }
-
-        auto it = id_to_shared_ptr_.find(id);
-        if (it != id_to_shared_ptr_.end()) {
-            return it->second;
-        }
-        throw serialization_error("Invalid shared_ptr ID: " + std::to_string(id));
-    }
 
     uint32_t version_ = 0;
 

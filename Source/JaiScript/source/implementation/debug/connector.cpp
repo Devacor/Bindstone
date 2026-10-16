@@ -30,6 +30,7 @@
 #include <jaiscript/debug/connector.hpp>
 #include <jaiscript/core/engine.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <climits>
@@ -40,6 +41,7 @@
 #include <functional>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <unordered_map>
@@ -267,16 +269,26 @@ std::string json_escape(const std::string& s) {
     return o;
 }
 
-size_t parse_content_length(const std::string& headers) {
+// A request is a few hundred bytes; a peer past these limits is dropped rather than buffered
+constexpr size_t kMaxHeaderBytes = 64 * 1024;
+constexpr size_t kMaxMessageBytes = 64 * 1024 * 1024;
+constexpr size_t kMaxPendingOutput = 4 * 1024 * 1024;
+
+// SIZE_MAX for a value past size_t, so the limit check rejects it instead of reading a wrapped length
+size_t parse_content_length(std::string_view headers) {
     // Case-sensitive "Content-Length:" per DAP.
     size_t p = headers.find("Content-Length:");
-    if (p == std::string::npos) return 0;
+    if (p == std::string_view::npos) return 0;
     p += 15;
     while (p < headers.size() && (headers[p] == ' ' || headers[p] == '\t')) ++p;
     size_t v = 0;
-    bool any = false;
-    while (p < headers.size() && std::isdigit(static_cast<unsigned char>(headers[p]))) { v = v * 10 + (headers[p] - '0'); ++p; any = true; }
-    return any ? v : 0;
+    while (p < headers.size() && std::isdigit(static_cast<unsigned char>(headers[p]))) {
+        const size_t digit = static_cast<size_t>(headers[p] - '0');
+        if (v > (SIZE_MAX - digit) / 10) return SIZE_MAX;
+        v = v * 10 + digit;
+        ++p;
+    }
+    return v;
 }
 
 } // namespace
@@ -306,6 +318,8 @@ struct debug_connector::impl {
     bool want_close_client_ = false;
     std::string in_buf_;
     std::string send_buf_;
+    size_t send_off_ = 0;   // bytes of send_buf_ already sent
+    std::atomic<std::thread::id> connector_thread_{};
 
     // Breakpoints answered unverified because no loaded unit carries their path yet; a
     // `breakpoint` event verifies them when the engine parses that path (script thread).
@@ -361,8 +375,11 @@ struct debug_connector::impl {
             std::lock_guard<std::mutex> lk(out_mtx_);
             out_q_.push_back(std::move(frame));
         }
-        poke_wake();
+        // the connector thread drains its own replies each pass; a wake byte per reply is a syscall per reply
+        if (std::this_thread::get_id() != connector_thread_.load(std::memory_order_relaxed)) poke_wake();
     }
+
+    size_t pending_output() const { return send_buf_.size() - send_off_; }
 
     std::string make_response(int req_seq, const std::string& cmd, bool success,
                               const std::string& body, const std::string& message = "") {
@@ -476,6 +493,7 @@ struct debug_connector::impl {
 
     // ---- connector thread ----
     void run() {
+        connector_thread_.store(std::this_thread::get_id(), std::memory_order_relaxed);
         while (running_.load(std::memory_order_acquire)) {
             drain_out_into_send_buf();
 
@@ -485,8 +503,9 @@ struct debug_connector::impl {
             if (client_ == kInvalid) {
                 fds[n].fd = listener_; fds[n].events = POLLIN; fds[n].revents = 0; idx_listener = n; ++n;
             } else {
-                short ev = POLLIN;
-                if (!send_buf_.empty()) ev |= POLLOUT;
+                // replies the peer is not reading stop its requests from being read: backpressure, not a growing queue
+                short ev = pending_output() < kMaxPendingOutput ? POLLIN : 0;
+                if (pending_output() > 0) ev |= POLLOUT;
                 fds[n].fd = client_; fds[n].events = ev; fds[n].revents = 0; idx_client = n; ++n;
             }
 
@@ -523,6 +542,7 @@ struct debug_connector::impl {
         client_ = c;
         in_buf_.clear();
         send_buf_.clear();
+        send_off_ = 0;
         std::lock_guard<std::mutex> lk(out_mtx_);
         out_q_.clear();
     }
@@ -534,6 +554,7 @@ struct debug_connector::impl {
         client_ = kInvalid;
         in_buf_.clear();
         send_buf_.clear();
+        send_off_ = 0;
         std::lock_guard<std::mutex> lk(out_mtx_);
         out_q_.clear();
     }
@@ -544,22 +565,34 @@ struct debug_connector::impl {
     }
 
     void try_send() {
-        while (!send_buf_.empty()) {
-            int n = ::send(client_, send_buf_.data(), static_cast<int>(send_buf_.size()), 0);
-            if (n > 0) { send_buf_.erase(0, static_cast<size_t>(n)); continue; }
+        while (pending_output() > 0) {
+            const int chunk = static_cast<int>(std::min<size_t>(pending_output(), size_t(1) << 20));
+            int n = ::send(client_, send_buf_.data() + send_off_, chunk, 0);
+            if (n > 0) { send_off_ += static_cast<size_t>(n); continue; }
             if (would_block(last_err())) break;
             drop_client(true);
             return;
         }
+        if (send_off_ == send_buf_.size()) {
+            send_buf_.clear();
+            send_off_ = 0;
+        } else if (send_off_ >= kMaxPendingOutput) {
+            send_buf_.erase(0, send_off_);
+            send_off_ = 0;
+        }
     }
 
+    // Each chunk is framed as it arrives, so a peer that streams requests never piles up unparsed input
     void read_client() {
         char buf[4096];
         for (;;) {
             int n = ::recv(client_, buf, sizeof(buf), 0);
             if (n > 0) {
                 in_buf_.append(buf, buf + n);
-                if (in_buf_.size() > k_max_header_bytes + 4 + k_max_message_bytes) { drop_client(true); return; }
+                process_in_buf();
+                if (client_ == kInvalid) return;
+                drain_out_into_send_buf();
+                if (pending_output() >= kMaxPendingOutput) return;
                 continue;
             }
             if (n == 0) { drop_client(true); return; }   // EOF
@@ -567,33 +600,23 @@ struct debug_connector::impl {
             drop_client(true);
             return;
         }
-        process_in_buf();
     }
 
-    // A local client is still untrusted input: a header that never ends or a body past any DAP message drops the client
-    // instead of growing the buffer without bound
-    static constexpr size_t k_max_header_bytes = 64 * 1024;
-    static constexpr size_t k_max_message_bytes = 64 * 1024 * 1024;
-
     void process_in_buf() {
+        size_t at = 0;
         for (;;) {
-            size_t hdr_end = in_buf_.find("\r\n\r\n");
-            if (hdr_end == std::string::npos) {
-                if (in_buf_.size() > k_max_header_bytes) { drop_client(true); }
-                break;
-            }
-            size_t cl = parse_content_length(in_buf_.substr(0, hdr_end));
-            if (hdr_end > k_max_header_bytes || cl > k_max_message_bytes) {
-                drop_client(true);
-                break;
-            }
-            size_t body_start = hdr_end + 4;
-            if (in_buf_.size() < body_start + cl) break;   // wait for the rest of the body
-            std::string body = in_buf_.substr(body_start, cl);
-            in_buf_.erase(0, body_start + cl);
+            const size_t hdr_end = in_buf_.find("\r\n\r\n", at);
+            if ((hdr_end == std::string::npos ? in_buf_.size() : hdr_end) - at > kMaxHeaderBytes) { drop_client(true); return; }
+            if (hdr_end == std::string::npos) break;
+            const size_t cl = parse_content_length(std::string_view(in_buf_).substr(at, hdr_end - at));
+            if (cl > kMaxMessageBytes) { drop_client(true); return; }
+            const size_t body_start = hdr_end + 4;
+            if (in_buf_.size() - body_start < cl) break;   // wait for the rest of the body
             jval msg;
-            if (parse_json(body, msg)) dispatch(msg);
+            if (parse_json(in_buf_.substr(body_start, cl), msg)) dispatch(msg);
+            at = body_start + cl;
         }
+        in_buf_.erase(0, at);
     }
 
     // ---- DAP request routing ----

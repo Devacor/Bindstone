@@ -72,6 +72,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 
 jaiscript_lsp --host=runner|stdlib|bare   # the host profile (default runner)
               --include=&lt;dir&gt;             # an include path (repeatable)
+              --max-message=&lt;bytes&gt;       # the largest message body read (default 64 MiB; a larger one is skipped)
               --log                       # each request and its time, on stderr</code></pre></div>
 <h2 id="vs-code">Installing the VS&nbsp;Code extension<a class="hlink" href="#vs-code" aria-label="link">&#8203;</a></h2>
 <p>The extension folder is ready to run as it is in the repository: <code>out/extension.js</code> is a single bundled file, the language client included. Install it in one of three ways:</p>

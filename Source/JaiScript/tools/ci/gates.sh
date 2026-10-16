@@ -94,6 +94,7 @@ lsp_test() {
 gate_lsp() {
 	lsp_test --only fixtures
 	lsp_test --only gatorquest
+	lsp_test --only robustness
 }
 
 gate_lsp_latency() { lsp_test --only latency; }

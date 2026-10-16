@@ -1,10 +1,14 @@
 #include "server.hpp"
 #include "analysis_internal.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 
 #ifdef _WIN32
 #include <fcntl.h>
@@ -20,22 +24,65 @@ constexpr int k_request_failed = -32803;
 constexpr int k_request_cancelled = -32800;
 constexpr int k_server_not_initialized = -32002;
 
-bool read_line(std::string& out) {
+constexpr size_t k_max_header_line = 64 * 1024;
+
+// A line longer than k_max_header_line is consumed but not kept: `too_long` reports it
+bool read_line(std::string& out, bool& too_long) {
 	out.clear();
+	too_long = false;
 	for (;;) {
 		int c = std::fgetc(stdin);
-		if (c == EOF) { return !out.empty(); }
+		if (c == EOF) { return !out.empty() || too_long; }
 		if (c == '\n') { break; }
-		out += static_cast<char>(c);
+		if (out.size() < k_max_header_line) {
+			out += static_cast<char>(c);
+		} else {
+			too_long = true;
+		}
 	}
 	if (!out.empty() && out.back() == '\r') { out.pop_back(); }
 	return true;
 }
 
+// The value of a Content-Length header found anywhere in the line (so a header glued to a skipped body still frames);
+// nullopt for a missing, signed, empty, non-numeric or past-size_t value
+std::optional<size_t> content_length_in(const std::string& line) {
+	std::string lower = line;
+	for (auto& ch : lower) { ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch))); }
+	const std::string key = "content-length:";
+	size_t at = lower.find(key);
+	if (at == std::string::npos) { return std::nullopt; }
+	size_t i = at + key.size();
+	while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) { ++i; }
+	size_t end = i;
+	while (end < line.size() && std::isdigit(static_cast<unsigned char>(line[end]))) { ++end; }
+	size_t trail = end;
+	while (trail < line.size() && (line[trail] == ' ' || line[trail] == '\t')) { ++trail; }
+	if (end == i || trail != line.size()) { return std::nullopt; }
+	size_t value = 0;
+	for (size_t k = i; k < end; ++k) {
+		const size_t digit = static_cast<size_t>(line[k] - '0');
+		if (value > (SIZE_MAX - digit) / 10) { return std::nullopt; }
+		value = value * 10 + digit;
+	}
+	return value;
+}
+
+bool discard_input(size_t count) {
+	char sink[64 * 1024];
+	while (count > 0) {
+		size_t want = std::min(count, sizeof(sink));
+		size_t got = std::fread(sink, 1, want, stdin);
+		if (got == 0) { return false; }
+		count -= got;
+	}
+	return true;
+}
+
 } // namespace
 
-server::server(engine_factory make_engine, std::string host, std::vector<std::string> include_paths, bool log)
-	: make_engine_(std::move(make_engine)), host_(std::move(host)), include_paths_(std::move(include_paths)), log_(log) {}
+server::server(engine_factory make_engine, std::string host, std::vector<std::string> include_paths, bool log, size_t max_message)
+	: make_engine_(std::move(make_engine)), host_(std::move(host)), include_paths_(std::move(include_paths)), log_(log), max_message_(max_message) {}
 
 void server::log(const std::string& text) {
 	if (!log_) { return; }
@@ -43,54 +90,71 @@ void server::log(const std::string& text) {
 	std::fflush(stderr);
 }
 
+// A header block with no usable Content-Length is skipped (what follows is read as headers until one frames again);
+// a body over max_message_ is read and dropped, never held
 bool server::read_message(std::string& body) {
-	// a length that does not parse or passes any real message ends the session: the stream cannot be resynchronized, and
-	// stoull's throw or a huge resize took the server down from its reader thread
-	static constexpr size_t k_max_message_bytes = 256 * 1024 * 1024;
-	size_t length = 0;
-	bool any = false;
-	bool valid = true;
-	std::string line;
 	for (;;) {
-		if (!read_line(line)) { return false; }
-		if (line.empty()) {
-			if (any) { break; }
-			continue;
-		}
-		any = true;
-		const std::string key = "content-length:";
-		std::string lower = line;
-		for (auto& ch : lower) { ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch))); }
-		if (lower.rfind(key, 0) == 0) {
-			size_t at = key.size();
-			while (at < line.size() && (line[at] == ' ' || line[at] == '\t')) { ++at; }
-			length = 0;
-			valid = at < line.size();
-			for (; at < line.size() && valid; ++at) {
-				const char ch = line[at];
-				if (ch == ' ' || ch == '\t' || ch == '\r') { break; }
-				valid = ch >= '0' && ch <= '9' && length <= (k_max_message_bytes - static_cast<size_t>(ch - '0')) / 10;
-				if (valid) { length = length * 10 + static_cast<size_t>(ch - '0'); }
+		std::optional<size_t> length;
+		bool any = false;
+		bool malformed = false;
+		std::string line;
+		for (;;) {
+			bool too_long = false;
+			if (!read_line(line, too_long)) { return false; }
+			if (too_long) {
+				malformed = true;
+				any = true;
+				continue;
+			}
+			if (line.empty()) {
+				if (any) { break; }
+				continue;
+			}
+			any = true;
+			if (auto value = content_length_in(line)) {
+				length = value;
+			} else if (line.find(':') == std::string::npos) {
+				malformed = true;
 			}
 		}
+		if (malformed || !length) {
+			log("skipped a message header without a usable Content-Length");
+			continue;
+		}
+		if (*length > max_message_) {
+			log("dropped a message of " + std::to_string(*length) + " bytes (limit " + std::to_string(max_message_) + ")");
+			if (!discard_input(*length)) { return false; }
+			continue;
+		}
+		body.resize(*length);
+		size_t got = *length ? std::fread(body.data(), 1, *length, stdin) : 0;
+		return got == *length;
 	}
-	if (!valid) {
-		log("bad Content-Length header: the session ends");
-		return false;
-	}
-	body.resize(length);
-	size_t got = length ? std::fread(body.data(), 1, length, stdin) : 0;
-	return got == length;
 }
 
 void server::read_loop() {
 	std::string body;
-	while (read_message(body)) {
+	for (;;) {
+		bool more = false;
+		try {
+			more = read_message(body);
+		} catch (const std::exception& ex) {
+			log(std::string("cannot read a message: ") + ex.what());
+		}
+		if (!more) { break; }
 		try {
 			json message = json::parse(body);
+			const json& view = message;
 			std::lock_guard<std::mutex> lock(mutex_);
-			if (message["method"].str() == "$/cancelRequest") {
-				cancelled_.insert(message["params"]["id"].integer(-1));
+			if (view["method"].str() == "$/cancelRequest") {
+				// only a request still queued can be cancelled: ids of answered requests are not kept
+				const int64_t id = view["params"]["id"].integer(-1);
+				for (const auto& queued : queue_) {
+					if (queued.contains("id") && queued["id"].integer(-2) == id) {
+						cancelled_.insert(id);
+						break;
+					}
+				}
 			} else {
 				queue_.push_back(std::move(message));
 			}
@@ -145,6 +209,7 @@ int server::run() {
 			std::unique_lock<std::mutex> lock(mutex_);
 			if (queue_.empty() && idle_work() && ws_) {
 				lock.unlock();
+				flush_deferred_change();
 				idle_step();
 				continue;
 			}
@@ -164,8 +229,24 @@ int server::run() {
 	return exit_code_;
 }
 
+bool server::next_is_change_of(const std::string& uri) {
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (queue_.empty()) { return false; }
+	const json& next = queue_.front();
+	return next["method"].str() == "textDocument/didChange" && next["params"]["textDocument"]["uri"].str() == uri;
+}
+
+void server::flush_deferred_change() {
+	if (!deferred_change_) { return; }
+	deferred_change change = std::move(*deferred_change_);
+	deferred_change_.reset();
+	ws_->change(change.path, std::move(change.text), change.version);
+	dirty_.insert(change.path);
+}
+
 void server::handle(const json& message) {
 	const std::string& method = message["method"].str();
+	if (method != "textDocument/didChange") { flush_deferred_change(); }
 	const bool is_request = message.contains("id") && !method.empty();
 	if (method.empty()) { return; }   // a response to a server request: nothing is waiting on it
 	const json& id = message["id"];
@@ -220,12 +301,22 @@ json server::dispatch(const std::string& method, const json& params, bool& handl
 		return nullptr;
 	}
 	if (method == "textDocument/didChange") {
-		std::string path = path_of(params["textDocument"]["uri"].str());
+		// a burst of edits to one file parses once, at its last edit
+		const std::string& uri = params["textDocument"]["uri"].str();
+		std::string path = path_of(uri);
+		const bool continues = deferred_change_ && deferred_change_->path == path;
+		if (!continues) { flush_deferred_change(); }
 		unit* u = ws_->find(path);
 		if (!u) { return nullptr; }
-		std::string text = u->text;
+		std::string text = continues ? std::move(deferred_change_->text) : u->text;
+		deferred_change_.reset();
 		for (const auto& change : params["contentChanges"].items()) { apply_change(*u, change, text); }
-		ws_->change(path, std::move(text), static_cast<int>(params["textDocument"]["version"].integer()));
+		const int version = static_cast<int>(params["textDocument"]["version"].integer());
+		if (next_is_change_of(uri)) {
+			deferred_change_ = deferred_change{path, std::move(text), version};
+			return nullptr;
+		}
+		ws_->change(path, std::move(text), version);
 		dirty_.insert(path);
 		return nullptr;
 	}
@@ -260,6 +351,10 @@ json server::dispatch(const std::string& method, const json& params, bool& handl
 	if (method == "jaiscript/status") {
 		json result = json::object();
 		result.set("pending", dirty_.size() + stale_.size());
+		{
+			std::lock_guard<std::mutex> lock(mutex_);
+			result.set("cancelled", cancelled_.size());
+		}
 		json units = json::array();
 		for (const unit* u : ws_->loaded_units()) {
 			if (u->checked_epoch == UINT64_MAX) { continue; }

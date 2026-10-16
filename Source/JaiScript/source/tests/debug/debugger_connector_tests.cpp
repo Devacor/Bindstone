@@ -24,7 +24,9 @@
     #include <unistd.h>
 #endif
 
+#include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <filesystem>
 #include <string>
@@ -103,6 +105,79 @@ bool wait_for(sock_t s, std::string& buf, const std::string& needle, int timeout
         // n <= 0 is a timeout (SO_RCVTIMEO) or EOF; loop until the deadline either way.
     }
     return false;
+}
+
+std::string dap_frame(const std::string& json) {
+    return "Content-Length: " + std::to_string(json.size()) + "\r\n\r\n" + json;
+}
+
+// The bytes sent before an error or a send timeout
+size_t send_raw(sock_t s, const std::string& data) {
+    size_t sent = 0;
+    while (sent < data.size()) {
+        const int chunk = static_cast<int>(std::min<size_t>(data.size() - sent, 1 << 20));
+        int n = ::send(s, data.data() + sent, chunk, 0);
+        if (n <= 0) break;
+        sent += static_cast<size_t>(n);
+    }
+    return sent;
+}
+
+void set_send_timeout(sock_t s, int timeout_ms) {
+#ifdef _WIN32
+    DWORD tv = static_cast<DWORD>(timeout_ms);
+    ::setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
+#else
+    timeval tv{timeout_ms / 1000, (timeout_ms % 1000) * 1000};
+    ::setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
+}
+
+bool recv_timed_out() {
+#ifdef _WIN32
+    return ::WSAGetLastError() == WSAETIMEDOUT;
+#else
+    return errno == EAGAIN || errno == EWOULDBLOCK;
+#endif
+}
+
+// True once the peer closes or resets the connection (pending replies are read and dropped)
+bool closed_by_peer(sock_t s, int timeout_ms) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    char tmp[4096];
+    while (std::chrono::steady_clock::now() < deadline) {
+        int n = ::recv(s, tmp, sizeof(tmp), 0);
+        if (n == 0) return true;
+        if (n < 0 && !recv_timed_out()) return true;
+    }
+    return false;
+}
+
+// Like wait_for, keeping only enough of the stream to match the needle (replies may run to many MB)
+bool wait_for_streaming(sock_t s, const std::string& needle, int timeout_ms) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    std::string window;
+    char tmp[65536];
+    while (std::chrono::steady_clock::now() < deadline) {
+        int n = ::recv(s, tmp, sizeof(tmp), 0);
+        if (n == 0 || (n < 0 && !recv_timed_out())) return false;
+        if (n > 0) {
+            window.append(tmp, tmp + n);
+            if (window.find(needle) != std::string::npos) return true;
+            if (window.size() > needle.size()) window.erase(0, window.size() - needle.size());
+        }
+    }
+    return false;
+}
+
+bool answers_initialize(int port) {
+    sock_t s = connect_client(port);
+    if (s == kBad) return false;
+    std::string buf;
+    send_dap(s, R"({"seq":1,"type":"request","command":"initialize"})");
+    const bool ok = wait_for(s, buf, "\"event\":\"initialized\"");
+    close_client(s);
+    return ok;
 }
 
 // Pull the integer value following "key":  out of a JSON blob (small, well-formed DAP).
@@ -449,6 +524,101 @@ public:
             send_dap(cli, R"({"seq":1e300,"type":"request","command":"initialize"})");
             check_true(wait_for(cli, buf, "\"request_seq\":0"), buf);
             close_client(cli);
+        });
+
+        test("dap_an_oversized_content_length_drops_the_client", [this]() {
+            wsa_up();
+            auto eng = jai::foundry::make_engine();
+            auto conn = std::make_shared<jai::debug::debug_connector>(0);
+            eng->set_debug_connector(conn);
+            sock_t cli = connect_client(conn->port());
+            check_true(cli != kBad);
+            if (cli == kBad) return;
+            send_raw(cli, "Content-Length: 1099511627776\r\n\r\n{");
+            check_true(closed_by_peer(cli, 3000), "a body past the limit drops the client instead of buffering it");
+            close_client(cli);
+            check_true(answers_initialize(conn->port()), "the listener takes the next client");
+        });
+
+        test("dap_a_content_length_past_size_t_drops_the_client", [this]() {
+            wsa_up();
+            auto eng = jai::foundry::make_engine();
+            auto conn = std::make_shared<jai::debug::debug_connector>(0);
+            eng->set_debug_connector(conn);
+            sock_t cli = connect_client(conn->port());
+            check_true(cli != kBad);
+            if (cli == kBad) return;
+            send_raw(cli, "Content-Length: 18446744073709551620\r\n\r\n{}");
+            check_true(closed_by_peer(cli, 3000), "a length that wraps size_t is not read as a small one");
+            close_client(cli);
+        });
+
+        test("dap_an_unterminated_header_block_drops_the_client", [this]() {
+            wsa_up();
+            auto eng = jai::foundry::make_engine();
+            auto conn = std::make_shared<jai::debug::debug_connector>(0);
+            eng->set_debug_connector(conn);
+            sock_t cli = connect_client(conn->port());
+            check_true(cli != kBad);
+            if (cli == kBad) return;
+            send_raw(cli, std::string(256 * 1024, 'H'));
+            check_true(closed_by_peer(cli, 3000), "header bytes with no blank line are not buffered without bound");
+            close_client(cli);
+            check_true(answers_initialize(conn->port()), "the listener takes the next client");
+        });
+
+        test("dap_pipelined_requests_are_answered_in_linear_time", [this]() {
+            // 200k requests in one burst took 90+ s when each message re-copied the rest of the buffer
+            wsa_up();
+            auto eng = jai::foundry::make_engine();
+            auto conn = std::make_shared<jai::debug::debug_connector>(0);
+            eng->set_debug_connector(conn);
+            sock_t cli = connect_client(conn->port());
+            check_true(cli != kBad);
+            if (cli == kBad) return;
+            const int requests = 200000;
+            std::string burst;
+            const std::string one = dap_frame(R"({"seq":1,"type":"request","command":"threads"})");
+            burst.reserve(one.size() * requests + 64);
+            for (int i = 0; i < requests; ++i) burst += one;
+            burst += dap_frame(R"({"seq":424242,"type":"request","command":"threads"})");
+            std::thread sender([&] { send_raw(cli, burst); });
+            const bool last = wait_for_streaming(cli, "\"request_seq\":424242", 30000);
+            close_client(cli);
+            sender.join();
+            check_true(last, "the burst's last request is answered within 30 s");
+        });
+
+        test("dap_a_client_that_stops_reading_stalls_its_requests_not_the_heap", [this]() {
+            wsa_up();
+            auto eng = jai::foundry::make_engine();
+            auto conn = std::make_shared<jai::debug::debug_connector>(0);
+            eng->set_debug_connector(conn);
+            sock_t cli = connect_client(conn->port());
+            check_true(cli != kBad);
+            if (cli == kBad) return;
+            set_send_timeout(cli, 2000);
+            const std::string one = dap_frame(R"({"seq":1,"type":"request","command":"threads"})");
+            std::string batch;
+            for (int i = 0; i < 10000; ++i) batch += one;
+            size_t sent = 0;
+            std::string unsent;
+            const size_t ceiling = size_t(256) << 20;
+            while (sent < ceiling) {
+                const size_t n = send_raw(cli, batch);
+                sent += n;
+                if (n < batch.size()) {
+                    unsent = batch.substr(n);
+                    break;
+                }
+            }
+            check_true(sent < ceiling, "the connector stops reading while its replies are unread");
+            set_send_timeout(cli, 0);
+            std::thread sender([&] { send_raw(cli, unsent + dap_frame(R"({"seq":424242,"type":"request","command":"threads"})")); });
+            const bool resumed = wait_for_streaming(cli, "\"request_seq\":424242", 60000);
+            close_client(cli);
+            sender.join();
+            check_true(resumed, "reading the replies resumes the connector");
         });
     }
 };

@@ -6,6 +6,7 @@
 #include "ast.hpp"
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/checked_result.hpp>
+#include <jaiscript/detail/env_storage.hpp>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -237,12 +238,12 @@ namespace jai {
         // names DEFINED in this env only (local_ids_-gated) - never ancestor cache
         // entries (their provenance spans the whole chain), never kind fallbacks.
         script_value* get_own_value_ptr(uint64_t id) {
-            if (local_ids_.count(id) == 0) return nullptr;
+            if (!local_ids_.contains(id)) return nullptr;
             if (symbolizer_->shadow_count() != 0) [[unlikely]] {
                 if (script_value* cell = shadowed_cell(id)) return cell;
             }
-            auto it = flat_lookup_.find(id);
-            return it != flat_lookup_.end() ? it->second : nullptr;
+            auto* it = flat_lookup_.find(id);
+            return it ? *it : nullptr;
         }
 
         // Generation SERIAL for the vm's env-lookup inline caches (chunk.hpp
@@ -256,7 +257,7 @@ namespace jai {
         // {address, count} can repeat across lifetimes, {address, serial} cannot.
         // Cached pointers target storage in the entry's env or an ANCESTOR (a parent
         // can't be pool-recycled while its child chain is live; the global env is
-        // engine-lifetime with in-place redefinition into stable deque storage).
+        // engine-lifetime with in-place redefinition into stable storage).
         uint64_t local_epoch() const noexcept { return local_epoch_; }
 
         // Access-enforcement context: the class whose method/ctor body this scope env
@@ -291,10 +292,11 @@ namespace jai {
         // Engine teardown: every variable that may own an instance (an object, an array, a map) dies, the last defined first
         // (C++ statics at exit); functions stay callable for the destructors that run
         void release_values_in_reverse() {
-            for (auto cell = local_storage_.rbegin(); cell != local_storage_.rend(); ++cell) {
-                const size_t kind = cell->deref().raw_storage_index();
+            for (size_t i = local_storage_.size(); i-- > 0;) {
+                script_value& cell = local_storage_[i];
+                const size_t kind = cell.deref().raw_storage_index();
                 if (kind == script_value::TYPEID_OBJECT || kind == script_value::TYPEID_ARRAY || kind == script_value::TYPEID_MAP) {
-                    script_value dying = std::move(*cell);
+                    script_value dying = std::move(cell);
                 }
             }
         }
@@ -310,11 +312,11 @@ namespace jai {
 
         // The pure env-storage prefix of get_ref/get_value_ptr (this special-case, flat
         // caches, parent-chain walk) with provenance: cacheable is true only when the
-        // pointer is a found-env LOCAL (stable deque storage), so the vm's per-instruction
+        // pointer is a found-env LOCAL (stable storage), so the vm's per-instruction
         // lookup caches never memoize this/static-field fallbacks. nullptr = the prefix is
         // exhausted; the caller runs its original full lookup for the fallback tails.
         script_value* vm_storage_lookup(uint64_t id, bool& cacheable);
-        const std::deque<script_value>& own_values() const noexcept { return local_storage_; }
+        const detail::env_value_store& own_values() const noexcept { return local_storage_; }
 
     protected:
         // Invalidate the vm's env-lookup inline caches (defined in environment.cpp:
@@ -325,23 +327,28 @@ namespace jai {
         static environment* sole_closure_env(const script_value& a_value) noexcept;
 
         // === Lazy-Cached Flat Lookup ===
-        // Stable storage for THIS scope's values - deque doesn't invalidate pointers on push_back
-        std::deque<script_value> local_storage_;
+        // THIS scope's values, each at a fixed address for the env's life
+        detail::env_value_store local_storage_;
 
         // Lazy lookup cache - starts empty, populated on first access to each variable
         // Key: symbol ID, Value: pointer to script_value in some environment's local_storage_
         // mutable because const lookup methods cache for performance (doesn't change logical state)
-        mutable std::unordered_map<uint64_t, script_value*> flat_lookup_;
+        mutable detail::env_id_map<script_value*> flat_lookup_;
 
         // Track which IDs we defined locally (for O(1) "is local" checks)
-        std::unordered_set<uint64_t> local_ids_;
+        detail::env_id_map<bool> local_ids_;
         // Root only: the earlier cells of a name redeclared across units, each with the unit that
         // declared it, and the unit of the cell in flat_lookup_ (absent = 0: host, function, class)
         struct binding_version { unit_stamp unit; script_value* cell; };
-        std::unordered_map<uint64_t, std::vector<binding_version>> versions_;
-        std::unordered_map<uint64_t, unit_stamp> unit_of_;
-        std::unordered_map<uint64_t, std::vector<uint32_t>> inline_cells_;   // an inline cell's declaring units
-        std::unique_ptr<std::unordered_map<uint64_t, bool>> extern_names_;   // root only: plain externs (true = function)
+        // the program scope's unit bookkeeping, made on its first use (no other environment keeps any)
+        struct root_tables {
+            std::unordered_map<uint64_t, std::vector<binding_version>> versions;
+            std::unordered_map<uint64_t, unit_stamp> unit_of;
+            std::unordered_map<uint64_t, std::vector<uint32_t>> inline_cells;   // an inline cell's declaring units
+            std::unordered_map<uint64_t, bool> extern_names;   // plain externs (true = function)
+        };
+        std::unique_ptr<root_tables> root_;
+        root_tables& root_tables_mut();
         script_value* shadowed_cell(uint64_t id) const;
         script_value* uncached_value_ptr(uint64_t id);
         script_value* kind_fallback_ptr(uint64_t id);

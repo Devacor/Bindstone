@@ -121,11 +121,10 @@ void environment::define(const std::string& name, script_value&& value) {
 void environment::define(uint64_t id, const script_value& value) {
     JAI_CENSUS(env_define_id);
     // Check if we're redefining a local variable (shadowing parent is ok)
-    if (local_ids_.count(id) > 0) {
+    if (local_ids_.contains(id)) {
         // Redefining local variable - update in place via flat_lookup_
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            *(it->second) = value;
+        if (auto* it = flat_lookup_.find(id)) {
+            **it = value;
             return;
         }
     }
@@ -136,20 +135,18 @@ void environment::define(uint64_t id, const script_value& value) {
     if (engine* eng = value.get_engine()) {
         eng->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
     }
-    local_storage_.push_back(value);
-    flat_lookup_[id] = &local_storage_.back();  // Update/shadow in flat lookup
-    local_ids_.insert(id);
+    flat_lookup_[id] = &local_storage_.push_back(value);  // Update/shadow in flat lookup
+    local_ids_[id] = true;
     bump_env_epoch();   // a new name can shadow what the vm's lookup caches resolved
 }
 
 void environment::define(uint64_t id, script_value&& value) {
     JAI_CENSUS(env_define_id);
     // Check if we're redefining a local variable (shadowing parent is ok)
-    if (local_ids_.count(id) > 0) {
+    if (local_ids_.contains(id)) {
         // Redefining local variable - update in place via flat_lookup_
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            *(it->second) = std::move(value);
+        if (auto* it = flat_lookup_.find(id)) {
+            **it = std::move(value);
             return;
         }
     }
@@ -160,9 +157,8 @@ void environment::define(uint64_t id, script_value&& value) {
     if (engine* eng = value.get_engine()) {
         eng->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
     }
-    local_storage_.push_back(std::move(value));
-    flat_lookup_[id] = &local_storage_.back();  // Update/shadow in flat lookup
-    local_ids_.insert(id);
+    flat_lookup_[id] = &local_storage_.push_back(std::move(value));  // Update/shadow in flat lookup
+    local_ids_[id] = true;
     bump_env_epoch();   // a new name can shadow what the vm's lookup caches resolved
 }
 
@@ -186,26 +182,26 @@ script_value* environment::vm_storage_lookup(uint64_t id, bool& cacheable) {
     if (symbolizer_->shadow_count() != 0) [[unlikely]] {
         if (script_value* cell = shadowed_cell(id)) { cacheable = true; return cell; }
     }
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        cacheable = local_ids_.count(id) > 0;
+    auto* it = flat_lookup_.find(id);
+    if (it) {
+        cacheable = local_ids_.contains(id);
         if (!cacheable) {
             // a memo of a parent's cell: cacheable when it is the cell of the nearest environment holding the name locally
             for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
-                if (p->local_ids_.count(id) == 0) { continue; }
-                auto owner = p->flat_lookup_.find(id);
-                cacheable = owner != p->flat_lookup_.end() && owner->second == it->second;
+                if (!p->local_ids_.contains(id)) { continue; }
+                auto* owner = p->flat_lookup_.find(id);
+                cacheable = owner && (*owner) == (*it);
                 break;
             }
         }
-        return it->second;
+        return (*it);
     }
     for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
-        auto parent_it = p->flat_lookup_.find(id);
-        if (parent_it != p->flat_lookup_.end()) {
-            flat_lookup_[id] = parent_it->second;
-            cacheable = p->local_ids_.count(id) > 0;
-            return parent_it->second;
+        auto* parent_it = p->flat_lookup_.find(id);
+        if (parent_it) {
+            flat_lookup_[id] = (*parent_it);
+            cacheable = p->local_ids_.contains(id);
+            return (*parent_it);
         }
     }
     if (parent_) {
@@ -244,18 +240,18 @@ checked_result<script_value> environment::get(uint64_t id) const {
     }
 
     // Check cache first (O(1))
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        return *(it->second);
+    auto* it = flat_lookup_.find(id);
+    if (it) {
+        return **it;
     }
 
     // FAST PATH: Iterate parent caches without function call overhead
     for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
-        auto parent_it = p->flat_lookup_.find(id);
-        if (parent_it != p->flat_lookup_.end()) {
+        auto* parent_it = p->flat_lookup_.find(id);
+        if (parent_it) {
             // Found in ancestor cache - copy to our cache and return
-            flat_lookup_[id] = parent_it->second;
-            return *(parent_it->second);
+            flat_lookup_[id] = (*parent_it);
+            return *((*parent_it));
         }
     }
 
@@ -334,54 +330,62 @@ checked_result<script_value> environment::get(uint64_t id) const {
         undefined_text(id), id);
 }
 
+environment::root_tables& environment::root_tables_mut() {
+    if (!root_) { root_ = std::make_unique<root_tables>(); }
+    return *root_;
+}
+
 void environment::share(uint64_t id) {
-    if (local_ids_.count(id) == 0) { return; }
-    unit_of_.erase(id);   // the cell belongs to unit 0
-    inline_cells_[id] = { symbolizer_->current_unit().id };
+    if (!local_ids_.contains(id)) { return; }
+    root_tables& r = root_tables_mut();
+    r.unit_of.erase(id);   // the cell belongs to unit 0
+    r.inline_cells[id] = { symbolizer_->current_unit().id };
 }
 
 environment::inline_verdict environment::inline_declare(uint64_t id, uint32_t& owner) {
     if (!get_own_value_ptr(id)) { return inline_verdict::create; }
     const uint32_t unit = symbolizer_->current_unit().id;
-    if (auto cell = inline_cells_.find(id); cell != inline_cells_.end()) {
+    root_tables& r = root_tables_mut();
+    if (auto cell = r.inline_cells.find(id); cell != r.inline_cells.end()) {
         if (std::find(cell->second.begin(), cell->second.end(), unit) == cell->second.end()) { cell->second.push_back(unit); }
         return inline_verdict::adopt;
     }
-    auto plain = unit_of_.find(id);
-    if (plain != unit_of_.end()) {
-        auto versions = versions_.find(id);
-        if (plain->second.id != unit || versions != versions_.end()) {
+    auto plain = r.unit_of.find(id);
+    if (plain != r.unit_of.end()) {
+        auto versions = r.versions.find(id);
+        if (plain->second.id != unit || versions != r.versions.end()) {
             owner = plain->second.id != unit ? plain->second.id : versions->second.front().unit.id;
             return inline_verdict::conflict;
         }
-        unit_of_.erase(plain);   // the running unit's own plain cell turns inline
+        r.unit_of.erase(plain);   // the running unit's own plain cell turns inline
     }
-    inline_cells_[id] = { unit };
+    r.inline_cells[id] = { unit };
     return inline_verdict::adopt;
 }
 
 bool environment::plain_declare(uint64_t id) {
     const unit_stamp unit = symbolizer_->current_unit();
-    if (auto cell = inline_cells_.find(id); cell != inline_cells_.end()) {
+    root_tables& r = root_tables_mut();
+    if (auto cell = r.inline_cells.find(id); cell != r.inline_cells.end()) {
         if (cell->second.size() != 1 || cell->second.front() != unit.id) { return false; }
-        inline_cells_.erase(cell);
+        r.inline_cells.erase(cell);
     }
-    unit_of_[id] = unit;
+    r.unit_of[id] = unit;
     return true;
 }
 
 void environment::note_extern(uint64_t id, bool function) {
     environment* root = this;
     while (root->parent_) { root = root->parent_.get(); }
-    if (!root->extern_names_) { root->extern_names_ = std::make_unique<std::unordered_map<uint64_t, bool>>(); }
-    (*root->extern_names_)[id] = function;
+    root->root_tables_mut().extern_names[id] = function;
 }
 
 std::string_view environment::undefined_text(uint64_t id, std::string_view otherwise) const {
     const environment* root = this;
     while (root->parent_) { root = root->parent_.get(); }
-    if (root->extern_names_) {
-        if (auto it = root->extern_names_->find(id); it != root->extern_names_->end()) {
+    if (root->root_) {
+        const auto& externs = root->root_->extern_names;
+        if (auto it = externs.find(id); it != externs.end()) {
             return it->second ? "'{0}' is declared extern but never defined"
                               : "'{0}' is declared extern but never defined (an 'inline' declaration creates it)";
         }
@@ -401,26 +405,27 @@ bool environment::define_variable(uint64_t id, script_value&& value) {
         return true;
     }
     const unit_stamp unit = symbolizer_->current_unit();
-    if (local_ids_.count(id) == 0) {
+    root_tables& r = root_tables_mut();
+    if (!local_ids_.contains(id)) {
         define(id, std::move(value));
-        unit_of_[id] = unit;
+        r.unit_of[id] = unit;
         return true;
     }
-    if (auto cell = inline_cells_.find(id); cell != inline_cells_.end()) {
+    if (auto cell = r.inline_cells.find(id); cell != r.inline_cells.end()) {
         if (cell->second.size() != 1 || cell->second.front() != unit.id) { return false; }
-        inline_cells_.erase(cell);
+        r.inline_cells.erase(cell);
         define(id, std::move(value));   // the running unit's own inline cell turns plain in place
-        unit_of_[id] = unit;
+        r.unit_of[id] = unit;
         return true;
     }
-    auto owner = unit_of_.find(id);
-    const unit_stamp flat_unit = owner == unit_of_.end() ? unit_stamp{} : owner->second;
+    auto owner = r.unit_of.find(id);
+    const unit_stamp flat_unit = owner == r.unit_of.end() ? unit_stamp{} : owner->second;
     if (flat_unit.id == unit.id) {
         define(id, std::move(value));   // the same unit writes in place; the cell keeps the seq of its first declaration
         return true;
     }
-    auto versions = versions_.find(id);
-    if (versions != versions_.end()) {
+    auto versions = r.versions.find(id);
+    if (versions != r.versions.end()) {
         for (auto& v : versions->second) {
             if (v.unit.id == unit.id) {
                 *v.cell = std::move(value);
@@ -428,19 +433,18 @@ bool environment::define_variable(uint64_t id, script_value&& value) {
             }
         }
     }
-    auto flat = flat_lookup_.find(id);
-    if (flat == flat_lookup_.end()) {
+    auto* flat = flat_lookup_.find(id);
+    if (!flat) {
         define(id, std::move(value));
-        unit_of_[id] = unit;
+        r.unit_of[id] = unit;
         return true;
     }
-    versions_[id].push_back({flat_unit, flat->second});
+    r.versions[id].push_back({flat_unit, *flat});
     if (engine* eng = value.get_engine()) {
         eng->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
     }
-    local_storage_.push_back(std::move(value));
-    flat->second = &local_storage_.back();
-    unit_of_[id] = unit;
+    *flat = &local_storage_.push_back(std::move(value));
+    r.unit_of[id] = unit;
     symbolizer_->note_shadow();
     bump_env_epoch();
     return true;
@@ -448,32 +452,33 @@ bool environment::define_variable(uint64_t id, script_value&& value) {
 
 std::vector<std::pair<uint64_t, const script_value*>> environment::unit_variables(uint32_t unit) const {
     std::vector<std::pair<uint64_t, const script_value*>> out;
-    if (parent_) { return out; }
-    for (const auto& [id, owner] : unit_of_) {
-        if (owner.id != unit || inline_cells_.count(id)) { continue; }
-        auto flat = flat_lookup_.find(id);
-        if (flat != flat_lookup_.end() && flat->second) { out.emplace_back(id, flat->second); }
+    if (parent_ || !root_) { return out; }
+    for (const auto& [id, owner] : root_->unit_of) {
+        if (owner.id != unit || root_->inline_cells.count(id)) { continue; }
+        auto* flat = flat_lookup_.find(id);
+        if (flat && *flat) { out.emplace_back(id, *flat); }
     }
-    for (const auto& [id, versions] : versions_) {
+    for (const auto& [id, versions] : root_->versions) {
         for (const auto& v : versions) { if (v.unit.id == unit && v.cell) { out.emplace_back(id, v.cell); } }
     }
     return out;
 }
 
 script_value* environment::same_unit_cell(uint64_t id) {
-    if (parent_ || local_ids_.count(id) == 0) { return nullptr; }
+    if (parent_ || !local_ids_.contains(id)) { return nullptr; }
     const unit_stamp unit = symbolizer_->current_unit();
-    if (auto cell = inline_cells_.find(id); cell != inline_cells_.end()) {
+    root_tables& r = root_tables_mut();
+    if (auto cell = r.inline_cells.find(id); cell != r.inline_cells.end()) {
         if (cell->second.size() != 1 || cell->second.front() != unit.id) { return nullptr; }
-        inline_cells_.erase(cell);   // the running unit's own inline cell turns plain in place
-        unit_of_[id] = unit;
+        r.inline_cells.erase(cell);   // the running unit's own inline cell turns plain in place
+        r.unit_of[id] = unit;
     }
-    auto owner = unit_of_.find(id);
-    if (owner != unit_of_.end() && owner->second.id == unit.id) {
-        auto flat = flat_lookup_.find(id);
-        return flat != flat_lookup_.end() ? flat->second : nullptr;
+    auto owner = r.unit_of.find(id);
+    if (owner != r.unit_of.end() && owner->second.id == unit.id) {
+        auto* flat = flat_lookup_.find(id);
+        return flat ? *flat : nullptr;
     }
-    if (auto versions = versions_.find(id); versions != versions_.end()) {
+    if (auto versions = r.versions.find(id); versions != r.versions.end()) {
         for (auto& v : versions->second) { if (v.unit.id == unit.id) { return v.cell; } }
     }
     return nullptr;
@@ -486,25 +491,26 @@ script_value* environment::same_unit_cell(uint64_t id) {
 script_value* environment::shadowed_cell(uint64_t id) const {
     const environment* root = this;
     while (root->parent_) { root = root->parent_.get(); }
-    if (root->versions_.empty()) { return nullptr; }
-    auto versions = root->versions_.find(id);
-    if (versions == root->versions_.end()) { return nullptr; }
-    auto flat = root->flat_lookup_.find(id);
-    if (flat == root->flat_lookup_.end()) { return nullptr; }
+    if (!root->root_ || root->root_->versions.empty()) { return nullptr; }
+    const root_tables& r = *root->root_;
+    auto versions = r.versions.find(id);
+    if (versions == r.versions.end()) { return nullptr; }
+    auto* flat = root->flat_lookup_.find(id);
+    if (!flat) { return nullptr; }
     const unit_stamp me = symbolizer_->current_unit();
-    if (me.id == 0) { return flat->second; }
-    auto owner = root->unit_of_.find(id);
-    const unit_stamp flat_unit = owner == root->unit_of_.end() ? unit_stamp{} : owner->second;
-    if (flat_unit.id == me.id) { return flat->second; }
+    if (me.id == 0) { return *flat; }
+    auto owner = r.unit_of.find(id);
+    const unit_stamp flat_unit = owner == r.unit_of.end() ? unit_stamp{} : owner->second;
+    if (flat_unit.id == me.id) { return *flat; }
     for (const auto& v : versions->second) {
         if (v.unit.id == me.id) { return v.cell; }
     }
-    script_value* pick = flat_unit.seq <= me.seq ? flat->second : nullptr;
+    script_value* pick = flat_unit.seq <= me.seq ? *flat : nullptr;
     unsigned int pick_seq = flat_unit.seq;
     for (const auto& v : versions->second) {
         if (v.unit.seq <= me.seq && (!pick || v.unit.seq > pick_seq)) { pick = v.cell; pick_seq = v.unit.seq; }
     }
-    return pick ? pick : flat->second;
+    return pick ? pick : *flat;
 }
 
 checked_result<void> environment::assign(const std::string& name, const script_value& value) {
@@ -532,17 +538,17 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
     }
 
     // Check cache first (O(1))
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        return std::cref(*(it->second));
+    auto* it = flat_lookup_.find(id);
+    if (it) {
+        return std::cref(**it);
     }
 
     // FAST PATH: Iterate parent caches without function call overhead
     for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
-        auto parent_it = p->flat_lookup_.find(id);
-        if (parent_it != p->flat_lookup_.end()) {
-            flat_lookup_[id] = parent_it->second;
-            return std::cref(*(parent_it->second));
+        auto* parent_it = p->flat_lookup_.find(id);
+        if (parent_it) {
+            flat_lookup_[id] = (*parent_it);
+            return std::cref(*((*parent_it)));
         }
     }
 
@@ -610,17 +616,17 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
     }
 
     // Check cache first (O(1))
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        return std::ref(*(it->second));
+    auto* it = flat_lookup_.find(id);
+    if (it) {
+        return std::ref(**it);
     }
 
     // FAST PATH: Iterate parent caches without function call overhead
     for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
-        auto parent_it = p->flat_lookup_.find(id);
-        if (parent_it != p->flat_lookup_.end()) {
-            flat_lookup_[id] = parent_it->second;
-            return std::ref(*(parent_it->second));
+        auto* parent_it = p->flat_lookup_.find(id);
+        if (parent_it) {
+            flat_lookup_[id] = (*parent_it);
+            return std::ref(*((*parent_it)));
         }
     }
 
@@ -686,18 +692,18 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
         if (script_value* cell = shadowed_cell(id)) { *cell = value; return {}; }
     }
     // Check cache first (O(1))
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        *(it->second) = value;
+    auto* it = flat_lookup_.find(id);
+    if (it) {
+        **it = value;
         return {};
     }
 
     // FAST PATH: Iterate parent caches without function call overhead
     for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
-        auto parent_it = p->flat_lookup_.find(id);
-        if (parent_it != p->flat_lookup_.end()) {
-            flat_lookup_[id] = parent_it->second;
-            *(parent_it->second) = value;
+        auto* parent_it = p->flat_lookup_.find(id);
+        if (parent_it) {
+            flat_lookup_[id] = (*parent_it);
+            *((*parent_it)) = value;
             return {};
         }
     }
@@ -762,18 +768,18 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
         if (script_value* cell = shadowed_cell(id)) { *cell = std::move(value); return {}; }
     }
     // Check cache first (O(1))
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        *(it->second) = std::move(value);
+    auto* it = flat_lookup_.find(id);
+    if (it) {
+        **it = std::move(value);
         return {};
     }
 
     // FAST PATH: Iterate parent caches without function call overhead
     for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
-        auto parent_it = p->flat_lookup_.find(id);
-        if (parent_it != p->flat_lookup_.end()) {
-            flat_lookup_[id] = parent_it->second;
-            *(parent_it->second) = std::move(value);
+        auto* parent_it = p->flat_lookup_.find(id);
+        if (parent_it) {
+            flat_lookup_[id] = (*parent_it);
+            *((*parent_it)) = std::move(value);
             return {};
         }
     }
@@ -839,13 +845,13 @@ bool environment::contains(const std::string& name) const {
 bool environment::contains(uint64_t id) const {
     JAI_CENSUS(env_contains);
     // Check cache first (O(1))
-    if (flat_lookup_.find(id) != flat_lookup_.end()) {
+    if (flat_lookup_.contains(id)) {
         return true;
     }
 
     // FAST PATH: Iterate parent caches without function call overhead
     for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
-        if (p->flat_lookup_.find(id) != p->flat_lookup_.end()) {
+        if (p->flat_lookup_.contains(id)) {
             // Found in ancestor cache - we know it exists
             // Note: we don't cache here since contains() is just a check
             return true;
@@ -865,13 +871,9 @@ bool environment::contains(uint64_t id) const {
 
 std::unordered_map<std::string_view, script_value> environment::get_local_variables() const {
     std::unordered_map<std::string_view, script_value> result;
-    // Iterate over local_ids_ set and look up values via flat_lookup_
-    for (uint64_t id : local_ids_) {
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            result[symbolizer_->get_string(id)] = *(it->second);
-        }
-    }
+    local_ids_.for_each([&](uint64_t id, bool) {
+        if (auto* it = flat_lookup_.find(id)) { result[symbolizer_->get_string(id)] = **it; }
+    });
     return result;
 }
 
@@ -879,10 +881,7 @@ void environment::clear_values() {
     if (local_ids_.empty() && local_storage_.empty()) {
         return;   // nothing to destroy, nothing for vm lookup caches to go stale on
     }
-    // Remove local IDs from flat_lookup_
-    for (uint64_t id : local_ids_) {
-        flat_lookup_.erase(id);
-    }
+    local_ids_.for_each([&](uint64_t id, bool) { flat_lookup_.erase(id); });
 
     // Destroy locals in REVERSE declaration order (C++ LIFO semantics): script class
     // destructors observably fire here, and deque::clear()'s element destruction
@@ -891,23 +890,14 @@ void environment::clear_values() {
         local_storage_.pop_back();
     }
     local_ids_.clear();
-    versions_.clear();
-    unit_of_.clear();
-    inline_cells_.clear();
-    extern_names_.reset();
+    root_.reset();
     bump_env_epoch();   // local storage died: stale vm lookup-cache pointers must miss
 }
 
 void environment::clear_parent_cache() {
     // Remove non-local entries (parent/field pointers that may be stale)
     // Keep local variable entries (which have stable pointers into local_storage_)
-    for (auto it = flat_lookup_.begin(); it != flat_lookup_.end(); ) {
-        if (local_ids_.find(it->first) == local_ids_.end()) {
-            it = flat_lookup_.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    flat_lookup_.erase_if([&](uint64_t id, script_value*) { return !local_ids_.contains(id); });
     bump_env_epoch();
 }
 
@@ -995,12 +985,9 @@ std::unordered_map<std::string_view, script_value> environment::get_all_variable
     }
 
     // Then add/override with our local variables
-    for (uint64_t id : local_ids_) {
-        auto it = flat_lookup_.find(id);
-        if (it != flat_lookup_.end()) {
-            allVars[symbolizer_->get_string(id)] = *(it->second);
-        }
-    }
+    local_ids_.for_each([&](uint64_t id, bool) {
+        if (auto* it = flat_lookup_.find(id)) { allVars[symbolizer_->get_string(id)] = **it; }
+    });
     return allVars;
 }
 
@@ -1015,9 +1002,9 @@ script_value* environment::get_value_ptr(uint64_t id) {
     }
 
     // Check cache first (O(1))
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        return it->second;
+    auto* it = flat_lookup_.find(id);
+    if (it) {
+        return (*it);
     }
 
     // FAST PATH: Iterate parent caches without function call overhead
@@ -1025,11 +1012,11 @@ script_value* environment::get_value_ptr(uint64_t id) {
     // function name is looked up repeatedly at each call depth.
     // Once any ancestor has it cached, all descendants benefit.
     for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
-        auto parent_it = p->flat_lookup_.find(id);
-        if (parent_it != p->flat_lookup_.end()) {
+        auto* parent_it = p->flat_lookup_.find(id);
+        if (parent_it) {
             // Found in ancestor cache - copy to our cache and return
-            flat_lookup_[id] = parent_it->second;
-            return parent_it->second;
+            flat_lookup_[id] = (*parent_it);
+            return (*parent_it);
         }
     }
 
@@ -1115,15 +1102,15 @@ script_value* environment::get_env_var_ptr(uint64_t id) {
     if (symbolizer_->shadow_count() != 0) [[unlikely]] {
         if (script_value* cell = shadowed_cell(id)) { return cell; }
     }
-    auto it = flat_lookup_.find(id);
-    if (it != flat_lookup_.end()) {
-        return it->second;
+    auto* it = flat_lookup_.find(id);
+    if (it) {
+        return (*it);
     }
     for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
-        auto parent_it = p->flat_lookup_.find(id);
-        if (parent_it != p->flat_lookup_.end()) {
-            flat_lookup_[id] = parent_it->second;
-            return parent_it->second;
+        auto* parent_it = p->flat_lookup_.find(id);
+        if (parent_it) {
+            flat_lookup_[id] = (*parent_it);
+            return (*parent_it);
         }
     }
     if (parent_) {

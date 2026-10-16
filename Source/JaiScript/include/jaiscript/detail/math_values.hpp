@@ -242,11 +242,33 @@ namespace jai::detail::math {
 			default: return "math::ivec3 expects numeric components";
 		}
 	}
+	// a lone argument converts a vector of the same dimensions (a color copies a color); a scalar is no vector
+	inline const char* ctor_single_text(vk k) noexcept {
+		switch (k) {
+			case vk::jai_vec2_type: return "math::vec2 expects one vector of 2 components";
+			case vk::jai_vec3_type: return "math::vec3 expects one vector of 3 components";
+			case vk::jai_vec4_type: return "math::vec4 expects one vector of 4 components";
+			case vk::jai_color_type: return "math::color expects one color";
+			case vk::jai_ivec2_type: return "math::ivec2 expects one vector of 2 components";
+			default: return "math::ivec3 expects one vector of 3 components";
+		}
+	}
+	// a leading vector widens only when the scalars after it complete the components
+	inline const char* ctor_widen_text(vk k) noexcept {
+		switch (k) {
+			case vk::jai_vec2_type: return "math::vec2 expects a narrower vector followed by scalars that complete 2 components";
+			case vk::jai_vec3_type: return "math::vec3 expects a narrower vector followed by scalars that complete 3 components";
+			case vk::jai_vec4_type: return "math::vec4 expects a narrower vector followed by scalars that complete 4 components";
+			case vk::jai_ivec2_type: return "math::ivec2 expects a narrower vector followed by scalars that complete 2 components";
+			default: return "math::ivec3 expects a narrower vector followed by scalars that complete 3 components";
+		}
+	}
 	JAI_MATH_COLD inline checked_result<script_value> construct(vk k, const script_value* const* args, size_t argc, engine* eng) {
 		const size_t n = dims(k);
 		float f[k_max_dims] = {0, 0, 0, 0};
 		int32_t i[k_max_dims] = {0, 0, 0, 0};
 		auto bad_type = [&] { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), ctor_type_text(k)); };
+		auto bad_shape = [&](const char* text) { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), text); };
 		auto put = [&](size_t c, const script_value& a) -> checked_result<void> {
 			const scalar s = read_scalar(a);
 			if (!s.ok) { return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), ctor_type_text(k)); }
@@ -262,7 +284,7 @@ namespace jai::detail::math {
 		if (is_color(k)) {   // () opaque white; (c) a color; (r, g, b) opaque; (r, g, b, a)
 			float rgba[k_max_dims] = {1.0f, 1.0f, 1.0f, 1.0f};
 			if (argc == 1) {
-				if (!is_kind(args[0]->raw_storage_index()) || kind_of(*args[0]) != k) { return bad_type(); }
+				if (!is_kind(args[0]->raw_storage_index()) || kind_of(*args[0]) != k) { return bad_shape(ctor_single_text(k)); }
 				return *args[0];
 			}
 			if (argc != 0 && argc != 3 && argc != 4) {
@@ -277,7 +299,7 @@ namespace jai::detail::math {
 		}
 		if (argc == 0) { return make(k, f, i, eng); }
 		if (argc == 1) {
-			if (!is_kind(args[0]->raw_storage_index()) || dims(kind_of(*args[0])) != n) { return bad_type(); }
+			if (!is_kind(args[0]->raw_storage_index()) || dims(kind_of(*args[0])) != n) { return bad_shape(ctor_single_text(k)); }
 			return convert(*args[0], k, eng);
 		}
 		if (argc > n) {
@@ -286,7 +308,7 @@ namespace jai::detail::math {
 		if (is_kind(args[0]->raw_storage_index())) {
 			const size_t d = dims(kind_of(*args[0]));
 			const vk narrow = family_kind(integral(k), d);
-			if (d >= n || d + (argc - 1) != n || narrow == vk::jai_invalid_type) { return bad_type(); }
+			if (d >= n || d + (argc - 1) != n || narrow == vk::jai_invalid_type) { return bad_shape(ctor_widen_text(k)); }
 			auto head = convert(*args[0], narrow, eng);
 			if (!head) { return head.error_value(); }
 			for (size_t c = 0; c < d; ++c) {

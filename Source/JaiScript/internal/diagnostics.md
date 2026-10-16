@@ -407,12 +407,15 @@ Each is recognized only in that position, so a script using one of these words a
 | `const_cast<T&>(x)` | expression start | `JaiScript has no 'const_cast': a const stays const; copy it (auto x = c) for a writable value` |
 | `constexpr int N = 4;` | statement or member start, before a type or name | `JaiScript has no 'constexpr': a const whose initializer is a constant expression is folded at compile time: const int N = 4;` |
 | `mutable int cache;` | statement or member start, before a type or name | `JaiScript has no 'mutable' fields: every field of a const object is read-only; keep state that must change behind a shared_ptr field` |
+| `[n]() mutable { }` | after a lambda's parameters, where its body starts | `A lambda takes no 'mutable': its copied captures are already its own, writable and kept between calls` |
 | `const` anywhere else (`x = const 5`) | expression start, an initializer | `'const' starts a declaration: const int x = 5;` |
 | `virtual void f()` | statement or member start, before a type or name | `JaiScript has no 'virtual': every method dispatches dynamically; mark the subclass's method 'override'` |
 | `delete x;` | statement start, before a name, `this` or `[` | `JaiScript has no 'delete': an object is freed when its last owner lets go; set the handle to null to release it` |
 | `new int[5]` | after `new T` | `'new' makes one shared object (new T(args)); an array is a value: array<T> a = [];` |
 | `new T;` | after `new T` | `'new T' needs its constructor's parentheses: new T() or new T(args)` |
 | `goto done;` | statement start | `JaiScript has no 'goto': use break, continue, return or a flag` |
+| `super.speak()` | a bare `super` (no `::`) in an expression | `A base class method is called with super::name(args), not super.name` |
+| `super(5);` | a bare `super` followed by `(` in a body | `super(...) constructs the base only in a constructor's initializer list (: super(args)); call a base method with super::name(args)` |
 | `&x` | expression start | `JaiScript has no address-of '&x': bind a reference with auto& r = x, or pass x to a T& parameter` |
 | `catch (Error e)`, `catch (int e)` | catch clause | `catch takes one name and no type: catch (e) { ... }; e.value is what was thrown and type_of(e.value) its type` |
 | `class B extends A` | class head | `JaiScript has no 'extends': derive with class Name : Base` |

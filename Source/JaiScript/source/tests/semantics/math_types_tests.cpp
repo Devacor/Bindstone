@@ -73,12 +73,13 @@ public:
         test("constructor_errors", [expect, raised]() {
             expect(raised("math::vec3(1, 2, 3, 4);"), "math::vec3 expects 0 to 3 arguments", "arity");
             expect(raised("math::vec2(\"a\", 1);"), "math::vec2 expects numeric components", "a string component");
-            expect(raised("math::vec3(5);"), "math::vec3 expects numeric components", "one scalar is not a vector");
-            expect(raised("math::vec3(math::vec2(1, 2));"), "math::vec3 expects numeric components", "another dimension");
+            expect(raised("math::vec3(5);"), "math::vec3 expects one vector of 3 components", "one scalar is not a vector");
+            expect(raised("math::vec3(math::vec2(1, 2));"), "math::vec3 expects one vector of 3 components", "another dimension");
             expect(raised("math::ivec2(3000000000, 0);"), "Integer overflow: the value does not fit an int32 component", "int32 range");
             expect(raised("math::ivec2(1e100, 0);"), "Cannot convert float to integer: non-finite or out of range", "a float out of range");
             expect(raised("math::vec4(1, 2, 3, 4, 5);"), "math::vec4 expects 0 to 4 arguments", "vec4 arity");
-            expect(raised("math::vec4(math::vec2(1, 2), 3);"), "math::vec4 expects numeric components", "the scalars must complete the count");
+            expect(raised("math::vec4(math::vec2(1, 2), 3);"), "math::vec4 expects a narrower vector followed by scalars that complete 4 components", "the scalars must complete the count");
+            expect(raised("math::color(5);"), "math::color expects one color", "a lone color argument is a color");
         });
 
         test("components_and_aliases", [expect, raised]() {

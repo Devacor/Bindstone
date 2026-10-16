@@ -1424,6 +1424,12 @@ checked_result<expression_ptr> parser::primary() {
 		check_instance_capture(previous());
         // super:: must be followed by a method name
         token superToken = previous();
+        if (superToken.lexeme != "super::") {
+            report_error(check(token_type::left_paren)
+                ? "super(...) constructs the base only in a constructor's initializer list (: super(args)); call a base method with super::name(args)"
+                : "A base class method is called with super::name(args), not super.name", superToken);
+            return make_error_code(parse_error_code::unexpected_token);
+        }
         JAISCRIPT_TRY_ASSIGN(token methodName, consume(token_type::identifier, "Expected method name after 'super::'"));
 
         // Create a member access on super
@@ -3414,6 +3420,10 @@ checked_result<expression_ptr> parser::finish_lambda_body(std::shared_ptr<lambda
         lambda->body = std::make_shared<block_stmt>(at, std::move(body));
         lambda->local_count = exit_function_scope();
         return lambda;
+    }
+    if (check(token_type::identifier) && peek().lexeme == "mutable") {
+        report_foreign(detail::foreign_word::mutable_lambda, peek());
+        advance();   // the body still parses, so the one error is this one
     }
     if (!match(token_type::left_brace)) {
         exit_function_scope();  // Clean up on error

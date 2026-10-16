@@ -1,7 +1,7 @@
 // jaiscript_lsp: the JaiScript language server. Speaks the Language Server Protocol over
 // stdin/stdout and answers from the engine's own lexer, parser and strict checker.
 //
-//   jaiscript_lsp [--host=runner|stdlib|bare] [--include=<dir>]... [--log]
+//   jaiscript_lsp [--host=runner|stdlib|bare] [--include=<dir>]... [--max-message=<bytes>] [--log]
 //
 // --host picks the registration surface scripts are checked against: `runner` (default) is the
 // jaiscript runner's (stdlib, file IO, console, networking, ARGS), `stdlib` is
@@ -39,6 +39,7 @@ void usage() {
 	std::cout << "jaiscript_lsp - the JaiScript language server (LSP over stdio)\n"
 	             "  --host=runner|stdlib|bare   registration surface to check against (default runner)\n"
 	             "  --include=<dir>             extra include path for import/include resolution (repeatable)\n"
+	             "  --max-message=<bytes>       largest message body read (default 64 MiB; a larger one is skipped)\n"
 	             "  --log                       log requests and timings to stderr\n";
 }
 
@@ -48,16 +49,18 @@ int main(int argc, char** argv) {
 	std::string host = "runner";
 	std::vector<std::string> includes;
 	bool log = false;
+	size_t max_message = jai_lsp::server::default_max_message;
 	for (int i = 1; i < argc; ++i) {
 		std::string a = argv[i];
 		if (a.rfind("--host=", 0) == 0) { host = a.substr(7); }
 		else if (a.rfind("--include=", 0) == 0) { includes.push_back(a.substr(10)); }
+		else if (a.rfind("--max-message=", 0) == 0) { max_message = static_cast<size_t>(std::strtoull(a.c_str() + 14, nullptr, 10)); }
 		else if (a == "--log") { log = true; }
 		else if (a == "--stdio") {}
 		else if (a == "--help" || a == "-h") { usage(); return 0; }
 		else if (a == "--version") { std::cout << "jaiscript_lsp 0.5.0-beta\n"; return 0; }
 	}
-	jai_lsp::server s(make_engine, host, includes, log);
+	jai_lsp::server s(make_engine, host, includes, log, max_message);
 	int code = s.run();
 	std::fflush(stdout);
 	std::_Exit(code);   // the stdin reader may still be blocked in a read: skip teardown rather than wait on its stream lock

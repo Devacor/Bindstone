@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Protocol tests for jaiscript_lsp: drives the server over stdio like an editor does.
 
-  python lsp_test.py [--exe PATH] [--update] [--only fixtures|gatorquest|latency] [--verbose]
+  python lsp_test.py [--exe PATH] [--update] [--only fixtures|gatorquest|latency|robustness] [--verbose]
 
 fixtures    golden responses for every feature on tests/fixtures (--update rewrites golden/fixtures.json)
 gatorquest  examples/gatorquest: zero diagnostics on the clean program, definition/references/hover/
             completion/rename spot checks
 latency     examples/gatorquest: time from an edit to its published diagnostics
+robustness  malformed framing, oversized and malformed messages, edit floods and cut-off input: the server
+            stays up, answers the next request and holds no memory for what it skips
 """
 
 import argparse
@@ -493,7 +495,7 @@ def run_latency(exe, checks):
 
 
 def run_malformed_headers(exe, checks):
-    # a Content-Length that does not parse or passes any real message ends the session cleanly (it threw from the reader thread)
+    # a Content-Length that does not parse or passes any real message is skipped, and the session ends cleanly at end of input (it threw from the reader thread)
     for header in (b"Content-Length: abc\r\n\r\n{}", b"Content-Length: 99999999999999999999999\r\n\r\n{}", b"Content-Length:\r\n\r\n"):
         proc = subprocess.Popen([str(exe)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
@@ -504,11 +506,227 @@ def run_malformed_headers(exe, checks):
         checks.check(proc.returncode in (0, 1), "a malformed header ends the session cleanly: %r" % header[:40], "exit code %s" % proc.returncode)
 
 
+class RawServer:
+    """The server over raw stdio bytes, for input no well-behaved client sends."""
+
+    def __init__(self, exe, args=()):
+        if os.name == "nt":
+            import ctypes
+            ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002 | 0x8000)   # a crash is an exit code here, never a dialog
+        self.proc = subprocess.Popen([str(exe), "--host=bare", *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=subprocess.DEVNULL)
+        self.out = bytearray()
+        self.cv = threading.Condition()
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self):
+        while True:
+            chunk = self.proc.stdout.read1(65536)
+            if not chunk:
+                return
+            with self.cv:
+                self.out += chunk
+                self.cv.notify_all()
+
+    def write(self, raw):
+        try:
+            self.proc.stdin.write(raw)
+            self.proc.stdin.flush()
+            return True
+        except OSError:
+            return False
+
+    @staticmethod
+    def frame(message):
+        body = message if isinstance(message, bytes) else json.dumps(message).encode("utf-8")
+        return b"Content-Length: %d\r\n\r\n" % len(body) + body
+
+    def send(self, message):
+        return self.write(self.frame(message))
+
+    def answered(self, rid, timeout=30):
+        needle = b'"id":%d,' % rid
+        deadline = time.time() + timeout
+        with self.cv:
+            while needle not in self.out:
+                remaining = deadline - time.time()
+                if remaining <= 0 or self.proc.poll() is not None:
+                    return needle in self.out
+                self.cv.wait(min(remaining, 0.2))
+            return True
+
+    def response(self, rid, timeout=30):
+        if not self.answered(rid, timeout):
+            return None
+        deadline = time.time() + timeout
+        with self.cv:
+            while True:
+                data = bytes(self.out)
+                start = data.rindex(b"Content-Length:", 0, data.index(b'"id":%d,' % rid))
+                length = int(data[start:data.index(b"\r\n", start)].split(b":")[1])
+                body_start = data.index(b"\r\n\r\n", start) + 4
+                if len(data) >= body_start + length:
+                    return json.loads(data[body_start:body_start + length].decode("utf-8"))
+                if time.time() > deadline:
+                    return None
+                self.cv.wait(0.2)
+
+    def initialize(self):
+        self.send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"capabilities": {}}})
+        self.send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
+        return self.answered(1)
+
+    def ping(self, rid, timeout=30):
+        self.send({"jsonrpc": "2.0", "id": rid, "method": "jaiscript/status", "params": {}})
+        return self.answered(rid, timeout)
+
+    def private_mb(self):
+        if os.name == "nt":
+            out = subprocess.run(["powershell", "-NoProfile", "-Command", "(Get-Process -Id %d).PrivateMemorySize64" % self.proc.pid],
+                                 capture_output=True, text=True, timeout=30).stdout.strip()
+            return int(out) / 1e6 if out.isdigit() else None
+        try:
+            import psutil
+            return psutil.Process(self.proc.pid).memory_info().rss / 1e6
+        except ImportError:
+            return None
+
+    def end_input(self, timeout=20):
+        try:
+            self.proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            return self.proc.wait(timeout)
+        except subprocess.TimeoutExpired:
+            return None
+
+    def kill(self):
+        if self.proc.poll() is None:
+            self.proc.kill()
+            self.proc.wait()
+
+
+def run_robustness(exe, checks):
+    print("robustness")
+    clean_exits = (0, 1)
+
+    def framing_case(name, header):
+        server = RawServer(exe)
+        try:
+            server.initialize()
+            server.write(header + b"{}")
+            checks.check(server.ping(2), name + ": the next request is answered", "no answer, exit %s" % server.proc.poll())
+        finally:
+            server.kill()
+
+    framing_case("a non-numeric Content-Length", b"Content-Length: abc\r\n\r\n")
+    framing_case("a negative Content-Length", b"Content-Length: -5\r\n\r\n")
+    framing_case("a Content-Length past size_t", b"Content-Length: 99999999999999999999999999\r\n\r\n")
+    framing_case("a header line with no colon", b"garbage\r\n\r\n")
+
+    server = RawServer(exe)
+    try:
+        server.initialize()
+        server.write(b"Content-Length: 1099511627776\r\n\r\n")
+        time.sleep(0.5)
+        checks.check(server.proc.poll() is None, "a Content-Length of 2^40: the server stays up")
+        ws = server.private_mb()
+        checks.check(ws is None or ws < 200, "a Content-Length of 2^40: no body is allocated", "%s MB" % ws)
+        code = server.end_input()
+        checks.check(code in clean_exits, "a Content-Length of 2^40: end of input exits cleanly", "exit %s" % code)
+    finally:
+        server.kill()
+
+    server = RawServer(exe, ["--max-message=1000"])
+    try:
+        server.initialize()
+        server.send({"jsonrpc": "2.0", "id": 50, "method": "jaiscript/status", "params": {"padding": "x" * 5000}})
+        checks.check(server.ping(51), "a body over --max-message: the next request is answered")
+        checks.check(not server.answered(50, 1), "a body over --max-message is skipped, not answered")
+    finally:
+        server.kill()
+
+    server = RawServer(exe)
+    try:
+        server.initialize()
+        for _ in range(25):
+            server.write(b"A" * 2000000)
+        time.sleep(0.5)
+        ws = server.private_mb()
+        checks.check(ws is None or ws < 40, "a 50 MB header line is not held", "%s MB" % ws)
+        server.write(b"\r\n\r\n")
+        checks.check(server.ping(2), "a 50 MB header line: the next request is answered")
+    finally:
+        server.kill()
+
+    server = RawServer(exe)
+    try:
+        server.initialize()
+        for raw in [b"{not json", b"[1,2]", b"42", b"null", b'"text"', b"[" * 100000, b'{"a":' * 100000]:
+            server.write(server.frame(raw))
+        rid = 100
+        for method in ["textDocument/hover", "textDocument/didOpen", "textDocument/didChange", "textDocument/completion",
+                       "textDocument/rename", "workspace/didChangeWatchedFiles", "x/unknown"]:
+            for params in ["text", 5, None, [], {"textDocument": "x"}, {"textDocument": {"uri": 5}},
+                           {"textDocument": {"uri": "file:///none.jai"}, "position": {"line": -1, "character": 2 ** 62}},
+                           {"changes": [5, None, {"uri": 7}]}, {"contentChanges": [{"range": 5, "text": 1}]}]:
+                for rid_value in (rid, None, "s", {"o": 1}):
+                    server.send({"jsonrpc": "2.0", "id": rid_value, "method": method, "params": params})
+                rid += 1
+        checks.check(server.ping(2), "after malformed and wrong-typed messages the next request is answered")
+    finally:
+        server.kill()
+
+    server = RawServer(exe)
+    try:
+        server.initialize()
+        for rid in range(1000, 3000):
+            server.send({"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": rid}})
+        status = server.response(2) if server.ping(2) else None
+        checks.check(status is not None and status.get("result", {}).get("cancelled") == 0,
+                     "a cancel for a request not queued keeps nothing", str(status)[:200])
+    finally:
+        server.kill()
+
+    server = RawServer(exe)
+    try:
+        server.initialize()
+        uri = uri_of(FIXTURES / "flood_unsaved.jai")
+        server.send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+            "uri": uri, "languageId": "jaiscript", "version": 1, "text": "int x = 1;\n" + "int z = 2;\n" * 2000}}})
+        edits = 10000
+        burst = bytearray()
+        for version in range(2, edits + 2):
+            burst += server.frame({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+                "textDocument": {"uri": uri, "version": version},
+                "contentChanges": [{"range": {"start": {"line": 0, "character": 4}, "end": {"line": 0, "character": 4}}, "text": "y"}]}})
+        server.write(bytes(burst))
+        server.send({"jsonrpc": "2.0", "id": 2, "method": "textDocument/documentSymbol", "params": {"textDocument": {"uri": uri}}})
+        start = time.perf_counter()
+        symbols = server.response(2, timeout=60)
+        elapsed = time.perf_counter() - start
+        checks.check(symbols is not None and elapsed < 30, "a burst of %d edits is answered within 30 s" % edits, "%.1f s" % elapsed)
+        names = [s["name"] for s in (symbols or {}).get("result") or []]
+        checks.check(bool(names) and names[0] == "y" * edits + "x", "a burst of edits applies every edit in order", str(names[:1])[:80])
+    finally:
+        server.kill()
+
+    server = RawServer(exe)
+    try:
+        server.initialize()
+        server.write(b'Content-Length: 100\r\n\r\n{"jsonrpc":"2.0","id":9,')
+        code = server.end_input()
+        checks.check(code in clean_exits, "input cut off mid-body exits cleanly", "exit %s" % code)
+    finally:
+        server.kill()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe")
     parser.add_argument("--update", action="store_true")
-    parser.add_argument("--only", choices=["fixtures", "gatorquest", "latency"])
+    parser.add_argument("--only", choices=["fixtures", "gatorquest", "latency", "robustness"])
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     exe = Path(args.exe) if args.exe else default_exe()
@@ -524,6 +742,8 @@ def main():
         run_gatorquest(exe, checks)
     if args.only in (None, "latency"):
         run_latency(exe, checks)
+    if args.only in (None, "robustness"):
+        run_robustness(exe, checks)
     print("%d passed, %d failed" % (checks.passed, len(checks.failures)))
     return 1 if checks.failures else 0
 

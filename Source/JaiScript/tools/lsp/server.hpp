@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <thread>
 
@@ -17,7 +18,9 @@ using engine_factory = std::function<std::shared_ptr<jai::engine>(const std::str
 
 class server {
 public:
-	server(engine_factory make_engine, std::string host, std::vector<std::string> include_paths, bool log);
+	static constexpr size_t default_max_message = 64 * 1024 * 1024;
+
+	server(engine_factory make_engine, std::string host, std::vector<std::string> include_paths, bool log, size_t max_message = default_max_message);
 	int run();
 
 private:
@@ -25,6 +28,7 @@ private:
 	std::string host_;
 	std::vector<std::string> include_paths_;
 	bool log_ = false;
+	size_t max_message_ = default_max_message;
 
 	std::mutex mutex_;
 	std::condition_variable wake_;
@@ -42,6 +46,8 @@ private:
 	std::unordered_map<std::string, uint64_t> surface_seen_;
 	std::map<std::string, std::string> published_;
 	std::set<int64_t> cancelled_;
+	struct deferred_change { std::string path; std::string text; int version = 0; };
+	std::optional<deferred_change> deferred_change_;
 
 	void read_loop();
 	bool read_message(std::string& body);
@@ -52,6 +58,8 @@ private:
 	void log(const std::string& text);
 
 	void handle(const json& message);
+	bool next_is_change_of(const std::string& uri);
+	void flush_deferred_change();
 	json dispatch(const std::string& method, const json& params, bool& handled);
 	void idle_step();
 	bool idle_work() const { return !dirty_.empty() || !stale_.empty(); }

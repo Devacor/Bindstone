@@ -37,6 +37,9 @@ struct signal_synchronized {
 template<typename T, typename Sync = signal_unsynchronized> class signal_emitter;
 template<typename T, typename Sync = signal_unsynchronized> class signal;
 
+// The engine's lifetime token: expired once the engine is destroyed (defined in engine.cpp)
+std::weak_ptr<const void> engine_lifetime_token(engine* a_engine);
+
 template<typename T>
 class receiver {
 public:
@@ -53,12 +56,23 @@ public:
 		engine* eng,
 		const std::shared_ptr<std::vector<std::string>>& parameter_names = nullptr
 	) {
-		return std::shared_ptr<receiver<T>>(new receiver<T>(script, eng, parameter_names));
+		return make(script, eng, eng ? engine_lifetime_token(eng) : std::weak_ptr<const void>(), parameter_names);
+	}
+
+	static std::shared_ptr<receiver<T>> make(
+		const std::string& script,
+		engine* eng,
+		std::weak_ptr<const void> engine_alive,
+		const std::shared_ptr<std::vector<std::string>>& parameter_names
+	) {
+		auto result = std::shared_ptr<receiver<T>>(new receiver<T>(script, eng, parameter_names));
+		result->bind_engine(eng, std::move(engine_alive));
+		return result;
 	}
 
 	template<typename... Args>
 	void notify(Args&&... args) {
-		if (!blocked() && !invalid()) {
+		if (!blocked() && !invalid() && !engine_gone()) {
 			if (script_callback_.empty()) {
 				callback_(std::forward<Args>(args)...);
 			} else {
@@ -69,7 +83,7 @@ public:
 
 	template<typename... Args>
 	bool predicate(Args&&... args) {
-		if (!blocked() && !invalid()) {
+		if (!blocked() && !invalid() && !engine_gone()) {
 			if (script_callback_.empty()) {
 				return callback_(std::forward<Args>(args)...);
 			} else {
@@ -80,7 +94,7 @@ public:
 	}
 
 	void notify() {
-		if (!blocked() && !invalid()) {
+		if (!blocked() && !invalid() && !engine_gone()) {
 			if (script_callback_.empty()) {
 				callback_();
 			} else {
@@ -90,7 +104,7 @@ public:
 	}
 
 	bool predicate() {
-		if (!blocked() && !invalid()) {
+		if (!blocked() && !invalid() && !engine_gone()) {
 			if (script_callback_.empty()) {
 				return callback_();
 			} else {
@@ -131,7 +145,17 @@ public:
 	const std::string& script() const { return script_callback_; }
 	bool has_script() const { return !script_callback_.empty(); }
 
-	void script_engine(engine* eng) { script_engine_ = eng; }
+	void script_engine(engine* eng) {
+		script_engine_ = eng;
+		if (!script_callback_.empty()) { bind_engine(eng, eng ? engine_lifetime_token(eng) : std::weak_ptr<const void>()); }
+	}
+	// A script receiver (text, or a script function) runs only while its engine lives: after the engine is destroyed the
+	// receiver is skipped, and its payload is released without running script (internal/engine_lifetime.md)
+	void bind_engine(engine* eng, std::weak_ptr<const void> engine_alive) {
+		engine_bound_ = eng != nullptr;
+		engine_alive_ = std::move(engine_alive);
+	}
+	bool engine_gone() const noexcept { return engine_bound_ && engine_alive_.expired(); }
 	engine* script_engine() const { return script_engine_; }
 
 	const std::shared_ptr<std::vector<std::string>>& parameter_names() const {
@@ -164,6 +188,8 @@ private:
 	std::atomic<int> block_count_ {0};
 	bool oneshot_ = false;
 	bool oneshot_fired_ = false;
+	bool engine_bound_ = false;
+	std::weak_ptr<const void> engine_alive_;
 	std::function<T> callback_;
 	std::string script_callback_;
 	std::shared_ptr<std::vector<std::string>> ordered_parameter_names_;
@@ -402,6 +428,7 @@ public:
 	signal_emitter& script_engine(engine* eng) {
 		auto lock = lock_state();
 		script_engine_ = eng;
+		script_engine_alive_ = eng ? engine_lifetime_token(eng) : std::weak_ptr<const void>();
 		for (const auto& entry : observers_) {
 			if (auto target = live_target(entry)) {
 				target->script_engine(eng);
@@ -454,7 +481,7 @@ private:
 
 	// Caller holds the lock.
 	shared_receiver_type make_script_receiver(const std::string& a_script) {
-		return receiver<T>::make(a_script, script_engine_, ordered_parameter_names_);
+		return receiver<T>::make(a_script, script_engine_, script_engine_alive_, ordered_parameter_names_);
 	}
 
 	shared_receiver_type connect_new(shared_receiver_type a_receiver, bool a_joinsRunningEmits) {
@@ -665,6 +692,8 @@ private:
 
 	std::shared_ptr<std::vector<std::string>> ordered_parameter_names_;
 	engine* script_engine_ = nullptr;
+	// a text receiver connected after the engine is gone takes this token, never the dead engine's
+	std::weak_ptr<const void> script_engine_alive_;
 
 	template<typename U, typename S> friend class signal;
 

@@ -23,6 +23,12 @@ public:
     jai::signal<void(int)> onTicked{ onTickedSignal };
 };
 
+class gate_board {
+public:
+    jai::signal_emitter<bool(int)> onAskSignal;
+    jai::signal<bool(int)> onAsk{ onAskSignal };
+};
+
 struct signal_box {
     signal_emitter<void(int)> sig;
     template<typename Archive> void serialize(Archive& ar) { ar("sig", sig); }
@@ -1050,6 +1056,116 @@ public:
             check_true(runs.load() > 0 && runs.load() <= EMITS, "the steady receiver ran on unblocked emits only");
             check_eq((size_t)1, sig.observer_count(), "every receiver the other thread connected has left");
             check_false(steady->blocked());
+        });
+
+        // A host may destroy the engine before the emitters its script connected to: script receivers are skipped from then
+        // on, host receivers keep firing, and releasing the receivers afterwards runs no script
+        test("script_receivers_skip_once_their_engine_is_destroyed", [this]() {
+            int noted = 0;
+            int host = 0;
+            auto board = std::make_shared<emit_board>();
+            auto gate = std::make_shared<gate_board>();
+            auto hostReceiver = board->onTicked.connect([&host](int v) { host += v; });
+            {
+                auto eng = jai::foundry::make_engine();
+                jai::stdlib::register_all(*eng);
+                bind_signal_type<void(int)>(*eng, "SignalInt");
+                bind_signal_type<bool(int)>(*eng, "SignalAsk");
+                dynamic_binder<emit_board>(*eng, "EmitBoard").constructor<>().property("onTicked", &emit_board::onTicked).build();
+                dynamic_binder<gate_board>(*eng, "GateBoard").constructor<>().property("onAsk", &gate_board::onAsk).build();
+                eng->add_function("note", [&noted](int v) { noted += v; });
+                eng->add_global("board", eng->make_object(board));
+                eng->add_global("gate", eng->make_object(gate));
+                board->onTickedSignal.script_engine(eng.get());
+                board->onTickedSignal.parameter_names({ "v" });
+                eng->execute(R"(
+                    class Ear { int gain = 10; ~Ear() { note(100000); } void hear(int v) { note(v * gain); } }
+                    var ear = Ear();
+                    var held = new Ear();
+                    board.onTicked.connect("lambda", [held](var v) { held.hear(v); });
+                    board.onTicked.connect("method", reflect::bind(ear, "hear"));
+                    board.onTicked.connect("text", "note(v * 1000);");
+                    gate.onAsk.connect("ask", [held](var v) { held.hear(v); return false; });
+                )");
+                board->onTickedSignal.emit(1);
+                check_eq(1000 + 10 + 10, noted, "every script receiver runs while the engine lives");
+                check_false(gate->onAskSignal.emit_while(1), "the live script predicate stops the emit");
+                check_eq(1030, noted);
+            }
+            const int atDeath = noted;
+            board->onTickedSignal.emit(2);
+            check_eq(atDeath, noted, "no script receiver runs after its engine is destroyed");
+            check_eq(3, host, "host receivers keep firing");
+            check_true(gate->onAskSignal.emit_while(2), "a skipped predicate lets the emit continue, as a blocked one does");
+            check_eq(atDeath, noted);
+
+            auto late = board->onTickedSignal.connect("late", "note(1);");
+            board->onTickedSignal.emit(3);
+            check_eq(atDeath, noted, "a text receiver connected after the engine is gone is skipped too");
+            check_eq(6, host);
+
+            board.reset();
+            gate.reset();
+            late.reset();
+            check_eq(atDeath, noted, "releasing the receivers and their captures runs no script");
+        });
+
+        // Receivers the host holds past both the engine and the emitter release without reaching the engine
+        test("script_receivers_held_past_their_engine_and_emitter_release_quietly", [this]() {
+            int noted = 0;
+            auto board = std::make_shared<emit_board>();
+            signal_emitter<void(int)>::shared_receiver_type lambda;
+            signal_emitter<void(int)>::shared_receiver_type text;
+            {
+                auto eng = jai::foundry::make_engine();
+                jai::stdlib::register_all(*eng);
+                bind_signal_type<void(int)>(*eng, "SignalInt");
+                eng->add_function("note", [&noted](int v) { noted += v; });
+                dynamic_binder<emit_board>(*eng, "EmitBoard").constructor<>().property("onTicked", &emit_board::onTicked).build();
+                eng->add_global("board", eng->make_object(board));
+                board->onTickedSignal.script_engine(eng.get());
+                board->onTickedSignal.parameter_names({ "v" });
+                eng->execute(R"(
+                    class Ear { ~Ear() { note(100000); } void hear(int v) { note(v); } }
+                    var held = new Ear();
+                    var nested = [held](int v) { return [held, v]() { held.hear(v); }; };
+                    board.onTicked.connect("lambda", [nested](var v) { nested(v)(); });
+                )");
+                lambda = board->onTicked.connection("lambda");
+                text = board->onTickedSignal.connect("note(v * 10);");
+                board->onTickedSignal.emit(1);
+                check_eq(11, noted);
+            }
+            const int atDeath = noted;
+            board->onTickedSignal.emit(1);
+            check_eq(atDeath, noted);
+            board.reset();
+            check_false(lambda->connected(), "the emitter is gone");
+            lambda->notify(5);
+            text->notify(5);
+            check_eq(atDeath, noted, "a held receiver called directly after its engine is gone runs nothing");
+            lambda.reset();
+            text.reset();
+            check_eq(atDeath, noted, "releasing them runs no script");
+        });
+
+        test("a_kept_script_callback_throws_once_its_engine_is_destroyed", [this]() {
+            std::function<int(int)> kept;
+            {
+                auto eng = jai::foundry::make_engine();
+                eng->execute("int base = 40; var add = [](int v) { return base + v; };");
+                kept = convert_script_function<int(int)>(eng->get_variable("add"));
+                check_eq(42, kept(2));
+            }
+            bool threw = false;
+            try {
+                kept(2);
+            } catch (const jai::runtime_error& e) {
+                threw = true;
+                check_eq(std::string("Cannot call a script function after its engine was destroyed"), std::string(e.what()));
+            }
+            check_true(threw, "the call throws to the host instead of reaching the dead engine");
+            kept = nullptr;
         });
     }
 };

@@ -2066,6 +2066,10 @@ checked_result<void> host_reference_store(engine* eng, const host_slot& slot, sc
 
 engine::engine() : impl(std::make_unique<implementation>()) {}
 
+std::weak_ptr<const void> engine_lifetime_token(engine* a_engine) {
+    return a_engine ? a_engine->lifetime_token() : std::weak_ptr<const void>();
+}
+
 // Reset the backend before impl members unwind so callable thunks (destructor deleters,
 // stored function values) firing during teardown see get_execution_backend() == nullptr
 // and fail soft instead of re-entering a half-destroyed backend.

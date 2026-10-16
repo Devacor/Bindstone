@@ -492,6 +492,18 @@ def run_latency(exe, checks):
         client.close()
 
 
+def run_malformed_headers(exe, checks):
+    # a Content-Length that does not parse or passes any real message ends the session cleanly (it threw from the reader thread)
+    for header in (b"Content-Length: abc\r\n\r\n{}", b"Content-Length: 99999999999999999999999\r\n\r\n{}", b"Content-Length:\r\n\r\n"):
+        proc = subprocess.Popen([str(exe)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            proc.communicate(header, timeout=20)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+        checks.check(proc.returncode in (0, 1), "a malformed header ends the session cleanly: %r" % header[:40], "exit code %s" % proc.returncode)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe")
@@ -507,6 +519,7 @@ def main():
     checks = Checks(args.verbose)
     if args.only in (None, "fixtures"):
         run_fixtures(exe, args.update, checks)
+        run_malformed_headers(exe, checks)
     if args.only in (None, "gatorquest"):
         run_gatorquest(exe, checks)
     if args.only in (None, "latency"):

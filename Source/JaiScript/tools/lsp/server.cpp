@@ -44,8 +44,12 @@ void server::log(const std::string& text) {
 }
 
 bool server::read_message(std::string& body) {
+	// a length that does not parse or passes any real message ends the session: the stream cannot be resynchronized, and
+	// stoull's throw or a huge resize took the server down from its reader thread
+	static constexpr size_t k_max_message_bytes = 256 * 1024 * 1024;
 	size_t length = 0;
 	bool any = false;
+	bool valid = true;
 	std::string line;
 	for (;;) {
 		if (!read_line(line)) { return false; }
@@ -57,7 +61,22 @@ bool server::read_message(std::string& body) {
 		const std::string key = "content-length:";
 		std::string lower = line;
 		for (auto& ch : lower) { ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch))); }
-		if (lower.rfind(key, 0) == 0) { length = static_cast<size_t>(std::stoull(line.substr(key.size()))); }
+		if (lower.rfind(key, 0) == 0) {
+			size_t at = key.size();
+			while (at < line.size() && (line[at] == ' ' || line[at] == '\t')) { ++at; }
+			length = 0;
+			valid = at < line.size();
+			for (; at < line.size() && valid; ++at) {
+				const char ch = line[at];
+				if (ch == ' ' || ch == '\t' || ch == '\r') { break; }
+				valid = ch >= '0' && ch <= '9' && length <= (k_max_message_bytes - static_cast<size_t>(ch - '0')) / 10;
+				if (valid) { length = length * 10 + static_cast<size_t>(ch - '0'); }
+			}
+		}
+	}
+	if (!valid) {
+		log("bad Content-Length header: the session ends");
+		return false;
 	}
 	body.resize(length);
 	size_t got = length ? std::fread(body.data(), 1, length, stdin) : 0;

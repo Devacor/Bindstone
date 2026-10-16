@@ -408,6 +408,48 @@ public:
 
             close_client(cli);
         });
+
+        // The listener takes any local client: a header that never ends or a body past any DAP message drops that client
+        // (the buffer grew without bound), the listener accepts the next one, and an out-of-range seq answers as seq 0
+        test("an_oversized_or_endless_message_drops_the_client", [this]() {
+            wsa_up();
+            auto eng = jai::foundry::make_engine();
+            auto conn = std::make_shared<jai::debug::debug_connector>(0);
+            eng->set_debug_connector(conn);
+            auto dropped = [&](const std::string& payload) {
+                sock_t cli = connect_client(conn->port());
+                if (cli == kBad) { return false; }
+                for (size_t sent = 0; sent < payload.size();) {
+                    int n = ::send(cli, payload.data() + sent, static_cast<int>(std::min<size_t>(payload.size() - sent, 65536)), 0);
+                    if (n <= 0) { break; }
+                    sent += static_cast<size_t>(n);
+                }
+                char tmp[256];
+                bool closed = false;
+                for (int attempt = 0; attempt < 50 && !closed; ++attempt) {
+                    const int n = ::recv(cli, tmp, sizeof(tmp), 0);
+                    closed = n == 0 || (n < 0 &&
+#ifdef _WIN32
+                        ::WSAGetLastError() != WSAETIMEDOUT
+#else
+                        errno != EAGAIN && errno != EWOULDBLOCK
+#endif
+                    );
+                }
+                close_client(cli);
+                return closed;
+            };
+            check_true(dropped("Content-Length: 99999999999\r\n\r\n{}"), "a body past any DAP message");
+            check_true(dropped(std::string(70000, 'x')), "a header that never ends");
+
+            sock_t cli = connect_client(conn->port());
+            check_true(cli != kBad, "the listener accepts the next client");
+            if (cli == kBad) return;
+            std::string buf;
+            send_dap(cli, R"({"seq":1e300,"type":"request","command":"initialize"})");
+            check_true(wait_for(cli, buf, "\"request_seq\":0"), buf);
+            close_client(cli);
+        });
     }
 };
 

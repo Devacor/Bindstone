@@ -32,6 +32,7 @@
 
 #include <atomic>
 #include <cctype>
+#include <climits>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -124,7 +125,8 @@ struct jval {
         return nullptr;
     }
     std::string as_str() const { return kind == t::string ? str : std::string(); }
-    int as_int() const { return kind == t::number ? static_cast<int>(num) : 0; }
+    // a number outside int (or NaN) is no valid id or line: converting it would be undefined
+    int as_int() const { return kind == t::number && num >= INT_MIN && num <= INT_MAX ? static_cast<int>(num) : 0; }
     double as_num() const { return kind == t::number ? num : 0; }
     double get_num(const std::string& k) const { auto* v = find(k); return v ? v->as_num() : 0; }
 };
@@ -555,7 +557,11 @@ struct debug_connector::impl {
         char buf[4096];
         for (;;) {
             int n = ::recv(client_, buf, sizeof(buf), 0);
-            if (n > 0) { in_buf_.append(buf, buf + n); continue; }
+            if (n > 0) {
+                in_buf_.append(buf, buf + n);
+                if (in_buf_.size() > k_max_header_bytes + 4 + k_max_message_bytes) { drop_client(true); return; }
+                continue;
+            }
             if (n == 0) { drop_client(true); return; }   // EOF
             if (would_block(last_err())) break;
             drop_client(true);
@@ -564,11 +570,23 @@ struct debug_connector::impl {
         process_in_buf();
     }
 
+    // A local client is still untrusted input: a header that never ends or a body past any DAP message drops the client
+    // instead of growing the buffer without bound
+    static constexpr size_t k_max_header_bytes = 64 * 1024;
+    static constexpr size_t k_max_message_bytes = 64 * 1024 * 1024;
+
     void process_in_buf() {
         for (;;) {
             size_t hdr_end = in_buf_.find("\r\n\r\n");
-            if (hdr_end == std::string::npos) break;
+            if (hdr_end == std::string::npos) {
+                if (in_buf_.size() > k_max_header_bytes) { drop_client(true); }
+                break;
+            }
             size_t cl = parse_content_length(in_buf_.substr(0, hdr_end));
+            if (hdr_end > k_max_header_bytes || cl > k_max_message_bytes) {
+                drop_client(true);
+                break;
+            }
             size_t body_start = hdr_end + 4;
             if (in_buf_.size() < body_start + cl) break;   // wait for the rest of the body
             std::string body = in_buf_.substr(body_start, cl);
@@ -583,7 +601,8 @@ struct debug_connector::impl {
         const jval* cmdv = msg.find("command");
         if (!cmdv) return;
         std::string cmd = cmdv->as_str();
-        int req_seq = static_cast<int>(msg.get_num("seq"));
+        const jval* seqv = msg.find("seq");
+        int req_seq = seqv ? seqv->as_int() : 0;
         const jval* args = msg.find("arguments");
 
         if (cmd == "initialize") {

@@ -679,9 +679,23 @@ private:
         t.tentative = true;
         return t;
     }
+    // A bare name in a method resolves locals, then members, then program-scope (and namespace) variables: a member of the
+    // class being walked hides a program-scope name, as at run time
+    bool member_hides_program_name(std::string_view name, size_t scope_index) {
+        if (!class_ctx_) { return false; }
+        const bool program_scope = scope_index == 0 ||
+            std::find(namespace_scopes_.begin(), namespace_scopes_.end(), scope_index) != namespace_scopes_.end();
+        return program_scope && lookup_member(class_ctx_name_, name, /*want_static=*/false).found;
+    }
     // ::name reaches the unit's program scope only: locals and fields never shadow it
     var_entry* find_named(const identifier_expr* id, size_t* scope_index = nullptr) {
-        if (!id->global_qualified) { return find_local(id->name, scope_index); }
+        if (!id->global_qualified) {
+            size_t at = 0;
+            var_entry* local = find_local(id->name, &at);
+            if (local && member_hides_program_name(id->name, at)) { return nullptr; }
+            if (scope_index) { *scope_index = at; }
+            return local;
+        }
         if (scope_index) { *scope_index = 0; }
         if (scopes_.empty()) { return nullptr; }
         auto found = scopes_[0].find(id->name);
@@ -985,10 +999,8 @@ private:
         return nullptr;
     }
 
-    // The name resolves through the global tier at runtime (scope chain reaches the
-    // globals BEFORE the this-field/static fallbacks - see the audited resolution
-    // order in docs/site/guide/07-classes.html). Used both to degrade ambiguous
-    // member hits to unknown and for the shadowing warnings.
+    // A program-scope name (a global or a function), for the shadowing warnings; a bare name in a method resolves locals,
+    // then members, then globals (docs/site/guide/07-classes.html), so a member hit is never degraded by one
     bool global_tier_name(std::string_view name) {
         if (global_var_names_.count(name) || functions_.count(name)) { return true; }
         std::string n(name);
@@ -1552,7 +1564,7 @@ private:
                 if (v->map_pair) { known = true; handle = false; }   // a range-for pair is a value: its halves are the pair's
             } else if (class_ctx_ && !id->global_qualified && lookup_member(class_ctx_name_, id->name, false).found) {
                 member_hit h = lookup_member(class_ctx_name_, id->name, false);
-                if (global_tier_name(id->name) || !h.field) { return none; }
+                if (!h.field) { return none; }
                 is_const = h.field->is_const;
                 if (!h.foreign) { hit.line = h.field->location.line; hit.column = h.field->location.column; }
                 from_type(h.field->type.get());
@@ -1835,10 +1847,10 @@ private:
         check_const_store(u->const_check, u->operand.get(), u->location);
         if (!class_ctx_ || u->operand->get_type() != node_type::identifier_expr) { return; }
         auto* id = static_cast<identifier_expr*>(u->operand.get());
-        if (find_local(id->name)) { return; }
+        if (id->global_qualified || find_named(id)) { return; }
         member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
-        if (hit.found && !global_tier_name(id->name) && access_denied(hit, id->name, id->location)) { return; }
-        if (hit.found && hit.read_only && !global_tier_name(id->name)) { read_only_store(u->location, id->name); }
+        if (hit.found && access_denied(hit, id->name, id->location)) { return; }
+        if (hit.found && hit.read_only) { read_only_store(u->location, id->name); }
     }
 
     // -------------------------------------------------------------- type proofs
@@ -1960,7 +1972,6 @@ private:
         if (!stamping() || !hit.found || hit.methods) { return std::nullopt; }
         if (hit.field && hit.field->is_static) { return std::nullopt; }                 // statics live in class storage
         for (auto n : k_no_proof_names) { if (member == n) { return std::nullopt; } }   // builtin-shadow names
-        if (global_tier_name(member)) { return std::nullopt; }
         auto def = engine_class(cls);                                                   // null on a same-unit class's FIRST check
         if (!def || def->chain_has_nonpublic() || !script_chain_closed(*def)) { return std::nullopt; }
         const uint64_t id = eng_.symbolize(member);
@@ -3722,10 +3733,6 @@ private:
 		if (class_ctx_ && !id->global_qualified) {
 			member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
 			if (hit.found) {
-				// Runtime resolution reaches GLOBALS before this-fields; a name that is
-				// both is flow-order-ambiguous to a static walk (a global declared later
-				// in the source steals the read at call time) - stay unknown.
-				if (global_tier_name(id->name)) { return {}; }
 				if (!capture_stack_.empty() && !fn_stack_.back().sees_fields &&
 					capture_stack_.back().lambda->default_capture == lambda_expr::capture_default::none) {
 					diag(diag_level::error, id->location, "lambda capture list does not capture 'this' for member '" + std::string(id->name) + "'; use [this], [=] or [&]");
@@ -4034,16 +4041,13 @@ private:
 			auto* id = static_cast<identifier_expr*>(callee);
 			if (id->name == "weak_from_this" || id->name == "shared_from_this") { return {}; }   // call-shape builtins, resolved before any lookup
 			size_t scope_index = 0;
-			if (find_local(id->name, &scope_index)) {
+			if (find_local(id->name, &scope_index) && (id->global_qualified || !member_hides_program_name(id->name, scope_index))) {
 				if (scope_index == 0) { note_global_use(id->name); }
 				return {};   // callable local: signature unknown
 			}
-			if (class_ctx_) {
+			if (class_ctx_ && !id->global_qualified) {
 				member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
 				if (hit.found) {
-					// Bare calls prefer the GLOBAL function when one exists (audited
-					// resolution order); flow order decides which one runs - lenient.
-					if (global_tier_name(id->name)) { return {}; }
 					if (access_denied(hit, id->name, id->location)) { return {}; }
 					if (hit.methods) {
 						if (hit.provable) { ov = hit.methods; ov_class_ = class_ctx_name_; }
@@ -4244,9 +4248,6 @@ private:
 			if (class_ctx_ && !id->global_qualified) {
 				member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
 				if (hit.found) {
-					// Writes resolve through the global tier before fields too (audited
-					// order) - a name that is both is flow-order-ambiguous: stay lenient.
-					if (global_tier_name(id->name)) { return done(rhs); }
 					if (access_denied(hit, id->name, id->location)) { return done({}); }
 					if (hit.read_only) { read_only_store(a->location, id->name); return done({}); }
 					if (bare_field_context()) { fp = resolve_field_proof(class_ctx_name_, id->name, hit); }

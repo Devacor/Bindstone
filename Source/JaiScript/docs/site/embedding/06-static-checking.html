@@ -299,7 +299,8 @@ by-value <code>void _set_hp(int)</code> makes <code>obj.hp = "s"</code> the erro
 to property 'hp' declared 'int'</code>. Two overloads, a <code>var</code>/<code>auto</code> getter, a getter
 with parameters, a reference or untyped setter parameter, or an accessor that lives only on a registered
 ancestor all leave the member unknown: lenient. Inside the class a bare <code>x</code> keeps the backing
-field's declared type.</li>
+field's declared type, a global of the same name included: a bare name in a method resolves locals, then members,
+then globals, the order the run time takes, so the member is checked and <code>::x</code> names the global.</li>
 <li><strong>Statics</strong> are typed like instance fields on every spelling (<code>C::s</code>, a bare
 <code>s</code> inside the class, the compound forms).</li>
 <li><strong>Enum values</strong> are checked for existence: <code>Direction.zzz</code> is <code>no value 'zzz'

@@ -672,6 +672,5 @@ Warning severity ALWAYS (never gates strict — shadowing is legal). Shapes:
 
 At run time a bare name in a method resolves locals, then enclosing scopes and captures,
 then members, then globals (see the classes guide chapter, "Name resolution in methods").
-A name that is both a global and a field still degrades to unknown in the static walk
-instead of taking the field's declared type (the checker keeps the field/global ambiguity
-lenient: `field_global_ambiguity_is_lenient`).
+The checker follows the same order: a name that is both a global and a field takes the field's
+declared type inside methods, and `::name` reaches the global (`field_global_collision_follows_the_runtime_order`).

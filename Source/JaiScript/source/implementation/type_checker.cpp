@@ -593,6 +593,15 @@ private:
     void collect_names(const statement* node);        // safety-net name sweep (recursive)
     void collect_names_expr(const expression* e);     // lambdas declare names inside expressions
 
+    // One entry per signature: a same-signature redefinition (the error the redefinition pass reports, or an `override` that
+    // replaces on purpose) takes the earlier one's place, so calls see one candidate
+    static void add_overload(std::vector<const function_decl*>& set, const function_decl* fn) {
+        for (auto& held : set) {
+            if (detail::same_signature(held->parameters, fn->parameters)) { held = fn; return; }
+        }
+        set.push_back(fn);
+    }
+
     // THE class model - same-unit classes and program-table classes are built by this one walk.
     static void model_class(const class_decl* cd, sclass& c) {
         c = sclass{};   // redefinition: last one wins, don't merge members
@@ -608,11 +617,11 @@ private:
                 auto* fn = static_cast<const function_decl*>(m.declaration.get());
                 if (access && fn->name != cd->name) { c.nonpublic[fn->name] = access; }
                 if (fn->name == cd->name) {
-                    c.ctors.push_back(fn);
+                    add_overload(c.ctors, fn);
                 } else if (fn->is_static) {
-                    c.static_methods[fn->name].push_back(fn);
+                    add_overload(c.static_methods[fn->name], fn);
                 } else {
-                    c.methods[fn->name].push_back(fn);
+                    add_overload(c.methods[fn->name], fn);
                 }
             }
         }
@@ -689,8 +698,7 @@ private:
             if (!d) { continue; }
             switch (d->get_type()) {
                 case node_type::function_decl:
-                    functions_[static_cast<const function_decl*>(d.get())->name]
-                        .push_back(static_cast<const function_decl*>(d.get()));
+                    add_overload(functions_[static_cast<const function_decl*>(d.get())->name], static_cast<const function_decl*>(d.get()));
                     break;
                 case node_type::variable_decl:
                     global_var_names_.insert(static_cast<const variable_decl*>(d.get())->name);
@@ -889,6 +897,51 @@ private:
             if (m.declaration && m.declaration->get_type() == node_type::function_decl) { fns.push_back(static_cast<const function_decl*>(m.declaration.get())); }
         }
         report_redefinitions(fns, /*by_name=*/false);
+        report_override_markers(cd, fns);
+    }
+
+    // The base class whose chain declares the instance method `name` (script_class_definition::find_method's walk); a base
+    // field's synthesized _get_/_set_ accessor counts only when `accessors` (an override may take it, a plain method is not
+    // redefining it); found = false with certain = false when a base is out of the checker's sight
+    struct base_method { bool found = false; bool certain = true; std::string owner; };
+    base_method find_base_method(const class_decl* cd, std::string_view name, bool accessors, int depth = 0) {
+        base_method result;
+        if (depth > 32) { result.certain = false; return result; }
+        for (auto base : cd->base_classes) {
+            if (const sclass* b = find_sclass(base)) {
+                if (b->methods.count(name)) { return {true, true, std::string(b->decl->name)}; }
+                if (accessors && name.size() > 5 && (name.substr(0, 5) == "_get_" || name.substr(0, 5) == "_set_") && b->fields.count(name.substr(5))) {
+                    return {true, true, std::string(b->decl->name)};
+                }
+                base_method deeper = find_base_method(b->decl, name, accessors, depth + 1);
+                if (deeper.found) { return deeper; }
+                result.certain = result.certain && deeper.certain;
+                continue;
+            }
+            auto def = engine_class(base);
+            if (!def) { result.certain = false; continue; }
+            auto info = def->find_method(name);
+            if (info.owner_class && (accessors || !info.owner_class->owns_auto_accessor(eng_.symbolize(name)))) {
+                return {true, true, std::string(info.owner_class->get_name())};
+            }
+        }
+        return result;
+    }
+
+    // A method redefining a base class method says 'override', and an 'override' redefines one (the run time raises both when
+    // the class declaration runs)
+    void report_override_markers(const class_decl* cd, const std::vector<const function_decl*>& fns) {
+        if (cd->base_classes.empty()) { return; }
+        for (const function_decl* fn : fns) {
+            if (fn->is_static || fn->name == cd->name || (fn->name.size() > 1 && fn->name[0] == '~')) { continue; }
+            const base_method base = find_base_method(cd, fn->name, fn->is_override);
+            std::string text;
+            if (!fn->is_override && base.found) { text = detail::missing_override_text(fn->name, base.owner); }
+            else if (fn->is_override && !base.found && base.certain) { text = detail::override_without_base_text(fn->name); }
+            if (text.empty()) { continue; }
+            text[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(text[0])));
+            diag(diag_level::error, fn->location, text);
+        }
     }
 
     void warn_duplicate_top_level_functions() {

@@ -154,7 +154,7 @@ public:
                 }
                 class Bird : Animal {
                     Bird() : super(2) {}
-                    int describe() { return legs * 10; }
+                    int describe() override { return legs * 10; }
                 }
                 auto a = Animal();
                 auto b = Bird();

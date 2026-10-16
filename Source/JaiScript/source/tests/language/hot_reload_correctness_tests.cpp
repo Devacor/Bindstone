@@ -392,7 +392,7 @@ public:
             )");
             check_eq((int64_t)1, eng->execute("od.f();").as_int());
             check_eq((int64_t)1, eng->execute("od.f();").as_int());   // cache hot on base's f
-            eng->execute("class OvDer : OvBase { int f() { return 5; } }");
+            eng->execute("class OvDer : OvBase { int f() override { return 5; } }");
             check_eq((int64_t)5, eng->execute("od.f();").as_int());   // override wins now
         });
 

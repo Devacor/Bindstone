@@ -38,6 +38,8 @@ OLD_TEXTS = [
     r"Cannot store '[^']*' in '[^']*'",
     r"Cannot assign to static member: field",
     r"resume\(\) takes no arguments",
+    r"shadows base class method",
+    r"overrides virtual method from base class",
     # `Cannot push 'string' to array<int>` and `Cannot assign 'string' to element of type 'int'`
     # are still the live texts (reference/index.html quotes the push one), so they
     # are deliberately not here.

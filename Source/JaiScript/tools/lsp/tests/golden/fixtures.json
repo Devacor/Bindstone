@@ -44,6 +44,7 @@
   "jai",
   "make_party",
   "namespace",
+  "override",
   "party",
   "print",
   "red",
@@ -651,11 +652,11 @@
   {
    "range": {
     "end": {
-     "character": 27,
+     "character": 36,
      "line": 22
     },
     "start": {
-     "character": 25,
+     "character": 34,
      "line": 22
     }
    },
@@ -664,11 +665,11 @@
   {
    "range": {
     "end": {
-     "character": 32,
+     "character": 41,
      "line": 22
     },
     "start": {
-     "character": 30,
+     "character": 39,
      "line": 22
     }
    },
@@ -845,11 +846,11 @@
      "newText": "health",
      "range": {
       "end": {
-       "character": 27,
+       "character": 36,
        "line": 22
       },
       "start": {
-       "character": 25,
+       "character": 34,
        "line": 22
       }
      }
@@ -858,11 +859,11 @@
      "newText": "health",
      "range": {
       "end": {
-       "character": 32,
+       "character": 41,
        "line": 22
       },
       "start": {
-       "character": 30,
+       "character": 39,
        "line": 22
       }
      }
@@ -1391,7 +1392,7 @@
      "name": "heal",
      "range": {
       "end": {
-       "character": 48,
+       "character": 57,
        "line": 22
       },
       "start": {

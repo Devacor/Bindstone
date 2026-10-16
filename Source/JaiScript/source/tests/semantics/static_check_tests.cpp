@@ -987,20 +987,28 @@ public:
         // to the static walk, so member hits on it degrade to unknown. Pinned here
         // because the old field-first inference produced a strict-mode false positive.
 
-        test("field_global_ambiguity_is_lenient", [this]() {
+        test("field_global_collision_follows_the_runtime_order", [this]() {
+            // docs/site/guide/07-classes.html: a bare name in a method resolves locals, then members, then globals, so the
+            // checker types the field (the run time reads and writes it) and ::name reaches the global
             auto e = make_engine();
-            // global declared AFTER the class: runtime reads the (int) global - the old
-            // checker trusted the string field and errored on a program that runs clean
-            check_eq((size_t)0, error_count(e->check(
+            check_eq((size_t)1, error_count(e->check(
                 "class C { string count = \"s\"; function probe() -> void { int x = count; } }\n"
-                "var count = 5;\nC().probe();")));
-            // writes through the same ambiguity: lenient too
+                "var count = 5;\nC().probe();")), "a read takes the field's type");
+            check_eq((size_t)1, error_count(e->check(
+                "int count = 5;\nclass C { int count = 3; function poke() -> void { count = \"s\"; } }\nC().poke();")),
+                "a write takes the field's type, the global declared first");
             check_eq((size_t)0, error_count(e->check(
-                "class C { string count = \"s\"; function poke() -> void { count = 7; } }\n"
-                "var count = 5;\nC().poke();")));
-            // unambiguous field names keep their precise checking
+                "int count = 5;\nclass C { string count = \"s\"; function probe() -> void { int x = ::count; string s = count; } }\nC().probe();")),
+                "::count is the global, count the field");
+            check_eq((size_t)1, error_count(e->check(
+                "int f() { return 1; }\nclass C { string f() { return \"s\"; } function probe() -> void { int x = f(); } }\nC().probe();")),
+                "a bare call reaches the method");
             check_eq((size_t)1, error_count(e->check(
                 "class C { string only_field = \"s\"; function probe() -> void { int x = only_field; } }")));
+            auto warned = e->check("int count = 5;\nclass C { string count = \"s\"; }");
+            bool collision = false;
+            for (const auto& d : warned.diagnostics) { if (d.message.find("shadows the global 'count'") != std::string::npos) { collision = true; } }
+            check_true(collision, "the collision warning stays");
         });
 
         test("shared_ptr_decl_pointee_checking", [this]() {

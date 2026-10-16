@@ -782,15 +782,20 @@ public:
         test("member_shadow_is_by_name_not_signature", [this]() {
             // C++ contract: shadowing is by NAME. A member with no viable overload
             // hides the global rather than falling back to it -- the call errors.
-            auto e = make_stdlib_engine();
-            e->execute(R"(
+            const char* src = R"(
                 string flavor(int n) { return "global"; }
                 class Tea {
                     string flavor() { return "member"; }
                     string sip() { return flavor(42); }
                 }
                 auto cup = Tea();
-            )");
+            )";
+            std::string load;
+            try { make_stdlib_engine()->execute(src); } catch (const std::exception& ex) { load = ex.what(); }
+            check_true(load.find("'flavor' expects 0 argument(s), got 1") != std::string::npos, "the checker sees the member hide the global: " + load);
+            auto e = make_stdlib_engine();
+            e->static_checking(jai::check_mode::off);
+            e->execute(src);
             check_throws([&]() { e->execute("cup.sip();"); });
             check_eq(std::string("member"), e->execute("cup.flavor()").as<std::string>());
             check_eq(std::string("global"), e->execute("flavor(1)").as<std::string>());

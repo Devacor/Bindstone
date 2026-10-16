@@ -1297,7 +1297,13 @@ namespace jai {
         int select_cpp_overload(const std::vector<script_value>& args,
                                 const std::vector<std::vector<param_type_info>>& candidateParamTypes) const;
 
+        // Expires when this engine is destroyed: script callbacks a host keeps (signal receivers, converted std::functions)
+        // check it before they run, so a destroy order that leaves them behind never reaches the dead engine
+        std::weak_ptr<const void> lifetime_token() const noexcept { return lifetime_; }
+
     private:
+        // declared ahead of impl: alive through the whole teardown, expired once the engine is gone
+        std::shared_ptr<const void> lifetime_ = std::make_shared<char>('\0');
         struct implementation;
         std::unique_ptr<implementation> impl;
 

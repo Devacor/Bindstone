@@ -1822,9 +1822,8 @@ public:
         return properties;
     }
 
-    // This class's own instance fields in declaration order (field_order_), then any field the order does not list (a
-    // binder .property()) in the table's order: symbol ids follow each engine's interning, so the table's own order differs
-    // between engines and backends
+    // This class's own instance fields in declaration order (field_order_), then the fields a binder .property() added in
+    // the order it added them, then any other in symbol order: the table's own order differs between standard libraries
     template <class F>
     void for_each_own_field_id(F&& visit) const {
         size_t listed = 0;
@@ -1832,10 +1831,20 @@ public:
             if (field_defaults_.count(id)) { visit(id); ++listed; }
         }
         if (listed == field_defaults_.size()) { return; }
+        auto unlisted = [&](uint64_t id) {
+            return field_defaults_.count(id) && std::find(field_order_.begin(), field_order_.end(), id) == field_order_.end();
+        };
+        for (uint64_t id : bound_field_order_) {
+            if (unlisted(id)) { visit(id); ++listed; }
+        }
+        if (listed == field_defaults_.size()) { return; }
+        std::vector<uint64_t> rest;
         for (const auto& [id, value] : field_defaults_) {
             (void)value;
-            if (std::find(field_order_.begin(), field_order_.end(), id) == field_order_.end()) { visit(id); }
+            if (unlisted(id) && std::find(bound_field_order_.begin(), bound_field_order_.end(), id) == bound_field_order_.end()) { rest.push_back(id); }
         }
+        std::sort(rest.begin(), rest.end());
+        for (uint64_t id : rest) { visit(id); }
     }
 
     bool is_subtype_of(const std::string& base_class_name) const {
@@ -2282,6 +2291,7 @@ private:
     uint64_t native_stamp_ = 0;
     uint64_t reflection_generation_ = 0;
     std::vector<uint64_t> field_order_;
+    std::vector<uint64_t> bound_field_order_;
     const std::type_info* cpp_type_ = nullptr;
 	struct cpp_base_cast {
 		std::type_index base;

@@ -116,7 +116,8 @@ public:
     }
     
 private:
-    std::map<type_id, conversion_entry> conversions_;
+    // Hashed on std::type_index: libstdc++'s type_info::before is not a strict weak order between internal-linkage and other types
+    std::unordered_map<std::type_index, conversion_entry> conversions_;
     
     // Custom object extractor
     extractor_func custom_extractor_;

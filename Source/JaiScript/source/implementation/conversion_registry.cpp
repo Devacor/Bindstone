@@ -116,11 +116,11 @@ namespace conversions {
 }
 
 void conversion_registry::register_entry(type_id type, conversion_entry entry) {
-    conversions_.insert_or_assign(type, std::move(entry));
+    conversions_.insert_or_assign(type.index, std::move(entry));
 }
 
 const conversion_entry* conversion_registry::find_entry(type_id type) const {
-    auto it = conversions_.find(type);
+    auto it = conversions_.find(type.index);
     return it != conversions_.end() ? &it->second : nullptr;
 }
 

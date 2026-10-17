@@ -3,6 +3,7 @@
 #ifndef __JAISCRIPT_SIGNALS_RECEIVER_OWNER_HPP__
 #define __JAISCRIPT_SIGNALS_RECEIVER_OWNER_HPP__
 
+#include <algorithm>
 #include <memory>
 #include <vector>
 

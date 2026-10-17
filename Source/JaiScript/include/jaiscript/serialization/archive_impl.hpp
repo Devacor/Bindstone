@@ -1206,8 +1206,8 @@ public:
                 return;
             }
             self()->begin_object();
-            if constexpr (std::is_default_constructible_v<elem_type>) {
-                value = std::make_unique<elem_type>();
+            if constexpr (::jai::serialization::load_default_constructible<elem_type>) {
+                value = ::jai::serialization::make_unique_default_for_load<elem_type>();
                 self()->serialize("$val", *value);
             } else {
                 throw serialization_error("Cannot deserialize unique_ptr<T>: type is not default constructible");
@@ -1323,13 +1323,17 @@ private:
             if (!poly_type.empty()) {
                 auto* entry = polymorphic_registry::instance().find(poly_type);
                 std::string hybrid_class;
+                std::string hybrid_base;
                 if (!entry && engine_ref_) {
                     // A $type naming a script class deriving a bound C++ base: load through
                     // the base's registry entry, then re-attach the script layer below.
                     std::string base_name = engine_ref_->script_layer_base_name(poly_type);
                     if (!base_name.empty()) {
                         entry = polymorphic_registry::instance().find(base_name);
-                        if (entry) { hybrid_class = poly_type; }
+                        if (entry) {
+                            hybrid_class = poly_type;
+                            hybrid_base = base_name;
+                        }
                     }
                 }
                 if (entry && entry->load_fn) {
@@ -1373,6 +1377,13 @@ private:
                     }
                     self()->register_deserialized_shared(id, result);
                     return result;
+                } else if (entry) {
+                    // registered, but neither load_and_construct nor a default constructor (public, or private to
+                    // jai::access) can build it
+                    throw serialization_error(hybrid_class.empty()
+                        ? "Cannot deserialize '" + poly_type + "': type is not default constructible and has no load_and_construct"
+                        : "Cannot load hybrid script class '" + hybrid_class + "': its C++ base '" + hybrid_base +
+                          "' is not default constructible and has no load_and_construct");
                 } else {
                     throw serialization_error("Unknown polymorphic type: " + poly_type);
                 }
@@ -1391,8 +1402,8 @@ private:
                 c.set_on_construct([&]() { self()->register_deserialized_shared(id, result); });
                 ::jai::access::load_and_construct(*self(), c);
                 self()->end_object();
-            } else if constexpr (std::is_default_constructible_v<elem_type>) {
-                result = std::make_shared<elem_type>();
+            } else if constexpr (::jai::serialization::load_default_constructible<elem_type>) {
+                result = ::jai::serialization::make_default_for_load<elem_type>();
                 self()->register_deserialized_shared(id, result);
                 self()->serialize("$val", *result);
             } else {

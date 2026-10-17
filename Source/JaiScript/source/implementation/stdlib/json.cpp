@@ -262,6 +262,72 @@ namespace stdlib {
         return oss.str();
     }
 
+    // A host class whose binder registered a constructor that takes no arguments
+    inline bool host_has_default_constructor(engine* eng, const std::string& class_name) {
+        std::vector<engine::host_overload_signature> signatures;
+        if (!eng->host_function_signatures(class_name, signatures)) { return false; }
+        for (const auto& signature : signatures) {
+            if (signature.arity == 0 || signature.arity == SIZE_MAX) { return true; }
+        }
+        return false;
+    }
+
+    // The instance fields the script classes of a chain declare: a script layer's own state (engine::script_layer_save)
+    inline void collect_script_fields(const class_definition& def, std::unordered_set<uint64_t>& out) {
+        if (!def.is_script_class()) { return; }
+        for (const auto& parent : def.get_parent_classes()) {
+            if (parent) { collect_script_fields(*parent, out); }
+        }
+        for (uint64_t id : def.field_order()) {
+            if (!def.has_static_field(id)) { out.insert(id); }
+        }
+    }
+
+    // A load of a script class over a C++ base runs no script constructor, as the C++ archive's hybrid load: the C++ base
+    // is built the way the archive layer builds a host type, through its registry entry (load_and_construct, else its
+    // default constructor whatever its access) from the saved object, or else through a default constructor its binder
+    // registered. The result is owned as a hybrid the script constructed (the layer owns its C++ object, whose slot points
+    // back) and its field initializers run; host_loaded says the C++ base read its own properties from the saved object.
+    inline script_value load_hybrid(engine* eng, const script_map& map, const std::shared_ptr<class_definition>& class_def,
+                                    const class_definition& base, bool& host_loaded) {
+        const std::string& base_name = base.get_name();
+        std::shared_ptr<void> object;
+        const auto* entry = serialization::polymorphic_registry::instance().find(base_name);
+        if (entry && entry->load_fn) {
+            script_value host_part = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+            auto& host_map = const_cast<script_map&>(host_part.as_map());
+            for (const auto& [key, value] : map) {
+                if (key.is_string() && (key.as_string() == "_type_" || key.as_string() == "_version_")) { continue; }
+                host_map.emplace(key, value);
+            }
+            serialization::json_archive_writer writer(-1, eng);
+            writer.write_value(host_part);
+            serialization::json_archive_reader reader(writer.str(), eng);
+            reader.begin_object();
+            serialization::any_archive_reader wrapper(reader);
+            object = entry->load_fn(wrapper, 1);
+            reader.end_object();
+            host_loaded = true;
+        } else if (host_has_default_constructor(eng, base_name)) {
+            auto made = eng->get_variable(base_name).as_function()({});
+            if (!made) {
+                throw runtime_error(eng->format_error(made));
+            }
+            auto holder = made.value().get_object_holder();
+            object = holder ? holder->data : nullptr;
+        } else {
+            throw runtime_error("Cannot load hybrid script class '" + class_def->get_name() + "': its C++ base '" + base_name +
+                                "' is not default constructible and has no load_and_construct");
+        }
+        auto layer = object ? class_def->create_instance() : nullptr;
+        if (!layer) {
+            throw runtime_error("Failed to reconstruct hybrid script class '" + class_def->get_name() + "'");
+        }
+        layer->set_native(script_value::make_cpp_object(base_name, base.get_type_id(), object, eng));
+        eng->get_execution_backend()->apply_field_initializers(layer, class_def);
+        return script_value::make_class_object(*class_def, layer, eng);
+    }
+
     // Reconstruct a class instance from a {"_type_": Name, ...} map WITHOUT eval'ing
     // attacker-controlled keys (the from_json/from_binary/from_base64 key-injection fix, B5).
     // Both the type name and every property name are treated as DATA, not code:
@@ -289,7 +355,11 @@ namespace stdlib {
         script_value ctor = eng->get_variable(type_name);
         if (!ctor.is_function()) return script_value(std::monostate{}, eng);
         script_value instance(std::monostate{}, eng);
-        if (default_constructible(*class_def)) {
+        bool host_loaded = false;
+        const std::shared_ptr<class_definition> cpp_base = class_def->is_script_class() ? class_def->find_cpp_base_class() : nullptr;
+        if (cpp_base) {
+            instance = load_hybrid(eng, map, class_def, *cpp_base, host_loaded);
+        } else if (default_constructible(*class_def)) {
             checked_result<script_value> constructed = [&]() {
                 engine::construction_access_waiver waiver(eng);
                 return ctor.as_function()({});
@@ -310,11 +380,15 @@ namespace stdlib {
         std::shared_ptr<class_instance> inst = instance.is_object() ? instance.get_class_instance() : nullptr;
         if (!inst) return script_value(std::monostate{}, eng);
         if (on_constructed) { on_constructed(instance); }
+        std::unordered_set<uint64_t> script_fields;
+        if (host_loaded) { collect_script_fields(*class_def, script_fields); }
         {
             for (const auto& [key, value] : map) {
                 if (!key.is_string()) continue;
                 const std::string prop_name = key.as_string();
                 if (prop_name == "_type_" || prop_name == "_version_") continue;
+                // the C++ base read its own properties; the layer takes the script fields
+                if (host_loaded && !script_fields.count(eng->symbolize(prop_name))) continue;
 
                 // A property NAME is data, never code: resolve it to a member symbol and assign
                 // only if it names a declared member. A malicious key ("x=1; touch(); y") has no

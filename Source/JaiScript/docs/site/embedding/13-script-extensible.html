@@ -201,10 +201,10 @@ By-value capture (<code>[=]</code>, <code>[this]</code>) shares a hybrid: the la
 <p>A hybrid serializes as <em>itself</em>. Through any C++ archive path (a <code>shared_ptr&lt;Base&gt;</code>
 field, a container, a save file) the writer emits <code>$type</code> = the script class name,
 <code>$script</code> = the script-level fields, and <code>$val</code> = the C++ base's ordinary payload; the
-reader rebuilds the C++ object through the base's registered load, extends it with the script class, hydrates
+reader rebuilds the C++ object the way the archive builds any host type (the base's <code>load_and_construct</code> when it declares one, else its default constructor whatever its access, a private one through <code>friend jai::access;</code>), extends it with the script class without running a script constructor, hydrates
 the fields, and calls <code>post_load</code> if the class defines one (<code>void post_load(int version)</code>: define it on the script class to fix up fields after a load; <code>version</code> is the archive&#x27;s version stamp). JSON and binary, back-references
 included, and the script-level <code>to_json(v)</code> / <code>from_json(s)</code> do the same for a script
-value. Because extension runs field initializers before hydration, a field that was never written during play
+value. The script-level load builds the C++ base the same way, from the saved object, and the value it returns owns its C++ object as a hybrid the script constructed does; a base its registry entry cannot build but whose binder registered a default constructor is built through that. A base with neither a <code>load_and_construct</code> nor a default constructor is refused on every path: <code>Cannot load hybrid script class 'Goblin': its C++ base 'Creature' is not default constructible and has no load_and_construct</code>. Because extension runs field initializers before hydration, a field that was never written during play
 still loads with its declared default. The archive framework itself (dispatch order, the binder chain as the
 polymorphism declaration, the security posture) is the <a href="08-serialization.html">Serialization</a>
 chapter.</p>

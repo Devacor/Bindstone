@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
+#include <jaiscript/serialization/construct.hpp>
 #include <jaiscript/serialization/convenience.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/core/dynamic_binder_serialization.hpp>
@@ -1142,6 +1143,52 @@ struct ArgOnlyCreature : jai::script_extensible {
     int health;
 };
 
+// A base built only through load_and_construct: its one constructor is private and takes the saved health
+struct LacCreature : jai::script_extensible {
+    virtual ~LacCreature() = default;
+    int health = 0;
+    std::string label = "lac";
+    static std::shared_ptr<LacCreature> make(int a_health) { return std::shared_ptr<LacCreature>(new LacCreature(a_health)); }
+    template<class Ar> void serialize(Ar& ar) {
+        ar(jai::serialization::make_nvp("health", health), jai::serialization::make_nvp("label", label));
+    }
+private:
+    friend jai::access;
+    explicit LacCreature(int a_health) : health(a_health) {}
+    template<class Ar> static void load_and_construct(Ar& ar, jai::serialization::construct<LacCreature>& a_construct) {
+        int savedHealth = 0;
+        std::string savedLabel;
+        ar(jai::serialization::make_nvp("health", savedHealth), jai::serialization::make_nvp("label", savedLabel));
+        a_construct(savedHealth);
+        a_construct->label = savedLabel;
+    }
+};
+static jai::registrar<LacCreature, void> _lacCreatureReg("LacCreature");
+
+// A base whose default constructor is private: a load reaches it through friend jai::access
+struct SealedCreature : jai::script_extensible {
+    virtual ~SealedCreature() = default;
+    int health = 100;
+    std::string label = "sealed";
+    static std::shared_ptr<SealedCreature> make() { return std::shared_ptr<SealedCreature>(new SealedCreature()); }
+    template<class Ar> void serialize(Ar& ar) {
+        ar(jai::serialization::make_nvp("health", health), jai::serialization::make_nvp("label", label));
+    }
+private:
+    friend jai::access;
+    SealedCreature() = default;
+};
+static jai::registrar<SealedCreature, void> _sealedCreatureReg("SealedCreature");
+
+// A base with neither: a load says what is missing
+struct StubbornCreature : jai::script_extensible {
+    explicit StubbornCreature(int a_health) : health(a_health) {}
+    virtual ~StubbornCreature() = default;
+    int health;
+    template<class Ar> void serialize(Ar& ar) { ar(jai::serialization::make_nvp("health", health)); }
+};
+static jai::registrar<StubbornCreature, void> _stubbornCreatureReg("StubbornCreature");
+
 // A base whose copy constructor is deleted: copying its hybrid must refuse (S4).
 struct NoCopyCreature : jai::script_extensible {
     NoCopyCreature() = default;
@@ -1860,6 +1907,103 @@ public:
             check_eq(text, v[3].as<std::string>(), "a host base without a default constructor");
             check_eq(text, v[4].as<std::string>(), "the same for a constructor-less class");
             check_eq((script_int)9, v[5].as_int(), "an explicit super(...) still passes its arguments");
+        });
+
+        // A load of a script class over a C++ base builds the base the way the archive layer builds a host type
+        // (load_and_construct, else its default constructor whatever its access) and runs no script constructor; a base
+        // with neither is refused by name. Every load leaves a whole object: the C++ base and the layer's fields.
+        test("a_hybrid_load_builds_its_cpp_base_through_load_and_construct_or_its_default_constructor", [&]() {
+            auto eng = hybrid_engine();
+            dynamic_binder<LacCreature>(*eng, "LacCreature")
+                .property("health", &LacCreature::health)
+                .property("label", &LacCreature::label)
+                .build();
+            dynamic_binder<SealedCreature>(*eng, "SealedCreature")
+                .property("health", &SealedCreature::health)
+                .property("label", &SealedCreature::label)
+                .build();
+            eng->execute(R"(
+                class Lackin : LacCreature { int chomp = 3; }
+                class Sealedkin : SealedCreature { int chomp = 3; }
+                class Argful : SlotCreature { int chomp = 3; Argful(int c) : super() { chomp = c; } }
+                var a = Argful(7);
+                a.health = 42;
+                a.label = "gnasher";
+            )");
+            auto lac = LacCreature::make(42);
+            lac->label = "gnasher";
+            eng->add_global("l", eng->extend(eng->make_object(lac), script_value(std::string("Lackin"), eng.get())));
+            auto sealed = SealedCreature::make();
+            sealed->health = 42;
+            sealed->label = "gnasher";
+            eng->add_global("s2", eng->extend(eng->make_object(sealed), script_value(std::string("Sealedkin"), eng.get())));
+            eng->execute("l.chomp = 7; s2.chomp = 7;");
+
+            auto script_round_trips = [&](const char* var, const char* label) {
+                for (const char* format : { "from_json(to_json(", "from_binary(to_binary(" }) {
+                    const std::string spelled = std::string(format) + var + "))";
+                    const std::string where = std::string(label) + " through " + format;
+                    auto loaded = eng->execute(spelled);
+                    eng->add_global("loaded", loaded);
+                    check_eq((script_int)42, eng->execute("loaded.health").as_int(), where + ": the C++ base's property");
+                    check_eq(std::string("gnasher"), eng->execute("loaded.label").as<std::string>(), where);
+                    check_eq((script_int)7, eng->execute("loaded.chomp").as_int(), where + ": the layer's field");
+                }
+            };
+            script_round_trips("l", "load_and_construct");
+            script_round_trips("s2", "a private default constructor");
+            script_round_trips("a", "a script class whose constructors take arguments");
+            auto lacLoaded = eng->execute("from_json(to_json(l))").as<std::shared_ptr<LacCreature>>();
+            check(lacLoaded != nullptr && lacLoaded.get() != lac.get(), "a fresh C++ object, never a null one");
+            auto sealedLoaded = eng->execute("from_binary(to_binary(s2))").as<std::shared_ptr<SealedCreature>>();
+            check(sealedLoaded != nullptr && sealedLoaded.get() != sealed.get());
+
+            auto archive_round_trips_of = [&](auto original, const char* label) {
+                using Base = typename decltype(original)::element_type;
+                jai::serialization::json_archive_writer w(0, eng.get());
+                w(original);
+                jai::serialization::json_archive_reader r(w.str(), eng.get());
+                std::shared_ptr<Base> fromJson;
+                r(fromJson);
+                auto fromBinary = roundtrip_binary(*eng, original);
+                for (const auto& loaded : { fromJson, fromBinary }) {
+                    check(loaded != nullptr && loaded.get() != original.get(), std::string(label) + ": a fresh C++ object");
+                    check_eq(42, loaded->health, label);
+                    check_eq(std::string("gnasher"), loaded->label, label);
+                    check(eng->script_layer(*loaded) != nullptr, std::string(label) + ": the layer is attached");
+                    eng->add_global("held", eng->make_object(loaded));
+                    check_eq((script_int)7, eng->execute("held.chomp").as_int(), label);
+                }
+            };
+            archive_round_trips_of(lac, "load_and_construct, C++ archive");
+            archive_round_trips_of(sealed, "private default constructor, C++ archive");
+        });
+
+        test("a_hybrid_load_over_a_base_with_neither_constructor_names_what_is_missing", [&]() {
+            auto eng = hybrid_engine();
+            dynamic_binder<StubbornCreature>(*eng, "StubbornCreature")
+                .constructor<int>()
+                .property("health", &StubbornCreature::health)
+                .build();
+            eng->execute("class Stubbornkin : StubbornCreature { int chomp = 3; Stubbornkin(int h) : super(h) {} } var k = Stubbornkin(42);");
+            const std::string text = "Cannot load hybrid script class 'Stubbornkin': its C++ base 'StubbornCreature' is not default constructible and has no load_and_construct";
+            for (const char* spelled : { "from_json(to_json(k))", "from_binary(to_binary(k))" }) {
+                std::string caught;
+                try { eng->execute(spelled); } catch (const std::exception& e) { caught = e.what(); }
+                check(caught.find(text) != std::string::npos, std::string(spelled) + " is refused by name: " + caught);
+            }
+            auto original = eng->execute("k").as<std::shared_ptr<StubbornCreature>>();
+            jai::serialization::json_archive_writer w(0, eng.get());
+            w(original);
+            std::string caught;
+            try {
+                jai::serialization::json_archive_reader r(w.str(), eng.get());
+                std::shared_ptr<StubbornCreature> loaded;
+                r(loaded);
+            } catch (const std::exception& e) {
+                caught = e.what();
+            }
+            check_eq(text, caught, "the C++ archive gives the same text");
         });
 
         test("a_script_layer_saves_only_its_script_fields", [&]() {

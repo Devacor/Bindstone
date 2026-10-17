@@ -52,6 +52,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/type_proofs.hpp>   // parse-time type proof guards (interp parity)
 #include <jaiscript/detail/typed_slot.hpp>   // the one typed-slot conversion table (interp parity)
 #include <jaiscript/detail/range_for_diagnostic.hpp>   // range-for texts (interp parity)
+#include <jaiscript/detail/map_entry_binding.hpp>
 #include <jaiscript/detail/arg_capture.hpp>   // call arguments take their value when evaluated (interp parity)
 #include <jaiscript/detail/construction.hpp>
 #include <jaiscript/detail/function_overloads.hpp>
@@ -344,7 +345,6 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		done_id_ = symbolizer_->intern("done");
 		class_definition_type_id_ = symbolizer_->intern("class_definition");
 		hot_reload_migrate_id_ = symbolizer_->intern("hot_reload_migrate");
-		pair_id_ = symbolizer_->intern("pair");
 		base_type_ids_.intern(*symbolizer_);
 		arity_count_ids_.intern(*symbolizer_);
 
@@ -17681,7 +17681,7 @@ op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 	state.env_pushed = proto.slot == SIZE_MAX || !f.locals || f.top_level;
 	if (state.env_pushed) {
 		JAI_ENV_CENSUS(0); environment_ = acquire_block_env(environment_);
-	} else if (proto.is_reference) {
+	} else if (proto.is_reference || proto.binds_map_entry) {
 		state.slot = proto.slot;
 		state.owner = &f;
 	}
@@ -17703,23 +17703,18 @@ op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 		state.is_string = true;
 		state.is_utf8 = utf8;
 	} else if (container.is_map()) {
+		// KEEP BYTE-PARALLEL with the interpreter's visit_range_for_stmt map arm (detail/map_entry_binding.hpp)
+		if (const type_info* tag = container.get_type_info()) { state.map_value_type = tag->value_type(); }
 		state.container.emplace(std::move(container));
 		state.is_map = true;
 		auto& map_storage = state.container->get_map_storage();
 		state.map_it = map_storage->begin();
-		if (!map_storage->empty()) {
-			auto pair_result = environment_->get_ref(pair_id_);
-			if (!pair_result) {
+		if (!map_storage->empty() && !proto.binds_map_entry) {
+			state.pair_class = detail::map_entry_pair_class(*engine_);
+			if (!state.pair_class) {
 				if (state.env_pushed) pop_scope();
-				return raise_from(pair_result);
+				return raise_from(detail::map_entry_pair_missing());
 			}
-			const script_value& pair_ctor = pair_result.value().get();
-			if (!pair_ctor.is_function()) {
-				if (state.env_pushed) pop_scope();
-				return raise_(make_error_code(runtime_error_code::stdlib_not_loaded),
-					"'pair' type not registered - make sure stdlib is loaded");
-			}
-			state.pair_ctor.emplace(pair_ctor);
 		}
 	} else if (container.is_object()) {
 		auto holder = container.get_object_holder();
@@ -17744,6 +17739,9 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 		return raise_(make_error_code(runtime_error_code::internal_error), "iteration state stack underflow");
 	}
 	iter_state& state = iter_states_.back();
+	if (state.is_map) {
+		return iter_next_map_entry(f, proto, state);
+	}
 
 	if (state.coroutine) {
 		// Drive the fiber: resume, stop (discard value) once it completes, else the
@@ -17792,7 +17790,7 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 		element = state.is_utf8 ? detail::utf8::char_value(state.container->unchecked_as_utf8(), state.index, engine_, cache)
 		                        : script_value(static_cast<script_char>(state.container->unchecked_as_string()[state.index]), engine_);
 		++state.index;
-	} else if (!state.is_map) {
+	} else {
 		// Live size each iteration: the body can alias and shrink the shared array
 		auto& array_storage = state.container->get_array_storage();
 		if (state.index >= array_storage->size()) {
@@ -17844,41 +17842,77 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 			element = clone_for_assignment(array_storage->values()[state.index]);
 		}
 		++state.index;
-	} else {
-		auto& map_storage = state.container->get_map_storage();
-		if (state.map_it == map_storage->end()) {
-			stack_.push_back(script_value(false, engine_));
-			return {};
-		}
-		if (execution_limit_exhausted()) [[unlikely]] {
-			return raise_from(execution_limit_failure());
-		}
-		std::vector<script_value> args;
-		if (proto.is_reference) {
-			args.push_back(state.map_it->first);
-			args.push_back(script_value::make_map_entry_reference(state.container->get_map_storage(),
-			                                                      state.map_it->first, &state.map_it->second, engine_, nullptr));
-		} else {
-			// String keys share their node (the copy-on-write gate detaches any write -
-			// internal/invariants.md 11), other key kinds snapshot; values deep-copy, shared_ptr share
-			args.push_back(state.map_it->first.is_string() ? state.map_it->first : state.map_it->first.clone());
-			args.push_back(clone_for_assignment(state.map_it->second));
-		}
-		const script_function& pair_func = state.pair_ctor->as_function();
-		auto pair_result = pair_func(args);
-		if (!pair_result) {
-			return raise_from(pair_result);
-		}
-		element = std::move(pair_result.value());
-		++state.map_it;
 	}
 
-	if (proto.element_type && !state.is_map) {   // a typed loop variable (KEEP BYTE-PARALLEL with the interpreter)
+	if (proto.element_type) {   // a typed loop variable (KEEP BYTE-PARALLEL with the interpreter)
 		auto bound = detail::range_for_bind(std::move(element), proto.element_type, proto.is_reference, proto.var_name, engine_);
 		if (!bound) { return raise_from(bound); }
 		element = std::move(bound.value());
 	}
 	if (proto.slot != SIZE_MAX && f.locals && !f.top_level) {
+		frame_slot_set(f, proto.slot, std::move(element));
+	} else {
+		environment_->define(proto.var_symbol, std::move(element));
+	}
+	stack_.push_back(script_value(true, engine_));
+	return {};
+}
+
+// A structured binding's half for its declaration: the key or the value from the entry cursor the loop variable holds; a loop
+// variable without one (the container was not a map) reads the half as the member it is spelled as (KEEP BYTE-PARALLEL with the
+// interpreter's visit_member_expr entry_half arm)
+JAI_NOINLINE op_status vm_backend::exec_iter_entry(frame& f, const vm_instruction& ins) {
+	const iter_proto& proto = f.code->iter_protos[ins.a];
+	const bool slotted = proto.slot != SIZE_MAX && f.locals && !f.top_level;
+	const script_value* cell = slotted ? frame_slot(f, proto.slot) : environment_->get_value_ptr(proto.var_symbol);
+	if (cell) {
+		if (auto half = detail::map_entry_half(*cell, static_cast<uint8_t>(ins.c), engine_)) {
+			stack_.push_back(std::move(*half));
+			return {};
+		}
+	}
+	script_value object = cell ? *cell : make_null();
+	script_value out = make_null();
+	VM_TRY(member_access_value(f, object, static_cast<member_expr*>(f.code->nodes[ins.b].get()), out));
+	stack_.push_back(std::move(out));
+	return {};
+}
+
+// A map step: the iterator moves past the entry the last step bound only now, after the body ran, so it continues with the next
+// greater key whatever the body inserted or erased (the guide's Maps section). A structured binding's variable holds the entry's
+// cursor, a plain one the entry's pair (KEEP BYTE-PARALLEL with the interpreter's visit_range_for_stmt map arm)
+JAI_NOINLINE op_status vm_backend::iter_next_map_entry(frame& f, const iter_proto& proto, iter_state& state) {
+	auto& map_storage = state.container->get_map_storage();
+	if (state.map_started) { ++state.map_it; }
+	state.map_started = true;
+	if (state.map_it == map_storage->end()) {
+		stack_.push_back(script_value(false, engine_));
+		return {};
+	}
+	if (execution_limit_exhausted()) [[unlikely]] {
+		return raise_from(execution_limit_failure());
+	}
+	const bool slotted = proto.slot != SIZE_MAX && f.locals && !f.top_level;
+	script_value* cell = slotted ? frame_slot(f, proto.slot) : environment_->get_own_value_ptr(proto.var_symbol);
+	const auto& entry = *state.map_it;
+	script_value element = make_null();
+	if (proto.binds_map_entry) {
+		if (detail::reaim_map_entry_cursor(cell, map_storage, entry.first, state.map_value_type)) {
+			stack_.push_back(script_value(true, engine_));
+			return {};
+		}
+		element = script_value::make_map_entry_reference(map_storage, entry.first, &entry.second, engine_, state.map_value_type);
+	} else {
+		script_value first = make_null();
+		script_value second = make_null();
+		detail::map_entry_pair_halves(map_storage, entry, proto.is_reference, state.map_value_type, engine_, first, second);
+		if (detail::reuse_map_entry_pair(cell, state.pair_class.get(), first, second)) {
+			stack_.push_back(script_value(true, engine_));
+			return {};
+		}
+		element = detail::mint_map_entry_pair(state.pair_class, std::move(first), std::move(second), engine_);
+	}
+	if (slotted) {
 		frame_slot_set(f, proto.slot, std::move(element));
 	} else {
 		environment_->define(proto.var_symbol, std::move(element));
@@ -18361,6 +18395,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_iter_init: return exec_iter_init(f, ins);
 		case opcode::op_iter_next: return exec_iter_next(f, ins);
 		case opcode::op_iter_pop: return exec_iter_pop(f, ins);
+		case opcode::op_iter_entry: return exec_iter_entry(f, ins);
 		case opcode::op_include: return exec_include(f, ins);
 		case opcode::op_import: return exec_import(f, ins);
 		case opcode::op_ref_return_bind: return exec_ref_return_bind(f, ins);
@@ -18686,6 +18721,9 @@ namespace {
 					if (slot < n && r.decl_kind[slot] == census_decl_none) { r.decl_kind[slot] = census_decl_other; r.decl_type[slot] = it.is_reference ? "range-for binding (auto&)" : "range-for binding"; }
 					if (op == opcode::op_iter_next) { mark(slot, static_cast<uint8_t>(census_use_write | (it.is_reference ? census_use_ref : 0)), ip); }
 				}
+				break;
+			case opcode::op_iter_entry:
+				if (ins.a < c.iter_protos.size() && c.iter_protos[ins.a].slot != SIZE_MAX) { mark(static_cast<uint32_t>(c.iter_protos[ins.a].slot), census_use_read, ip); }
 				break;
 			case opcode::op_try_push:
 				if (ins.c != k_invalid_u32 && ins.c < n) {
@@ -19774,6 +19812,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_iter_init:
 			case opcode::op_iter_next:
 			case opcode::op_iter_pop:
+			case opcode::op_iter_entry:
 			case opcode::op_include:
 			case opcode::op_import:
 			case opcode::op_ref_return_bind:

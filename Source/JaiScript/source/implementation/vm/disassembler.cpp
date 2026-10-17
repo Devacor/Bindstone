@@ -164,6 +164,9 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 					out << " \"" << ch.messages[ins.a] << "\"";
 				}
 				break;
+			case opcode::op_iter_entry:
+				out << " proto=" << ins.a << (ins.c == 1 ? " key" : ins.c == 2 ? " value" : " value byref");
+				break;
 			case opcode::op_iter_init:
 			case opcode::op_iter_next:
 				out << " proto=" << ins.a;

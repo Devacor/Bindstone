@@ -387,6 +387,8 @@ namespace jai {
         // capture ahead of it is never needed (transient_read_marker::callout_free)
         mutable bool enum_constant = false;
         mutable uint64_t setter_id = UINT64_MAX;  // "_set_" + member, cached like getter_id
+        // A structured range-for binding's read of its entry (detail::stamp_map_entry_bindings): 1 the key, 2 the value
+        uint8_t entry_half = 0;
         // a reference bind's verdict for one script class (detail::ref_plain_script_field): the member is a plain script field of it
         // (no C++ property, no user accessor, public chain) while both epochs hold; ref_field_declared is its declared type, ref_field_slot
         // the slot the class assigned it
@@ -672,6 +674,8 @@ namespace jai {
         // The checker saw the container's elements already hold the declared type: the binding converts nothing (a cell head
         // may land the element as it is)
         bool element_conversion_free = false;
+        // for (auto [k, v] : m): the body's first two declarations bind the entry's halves (detail::stamp_map_entry_bindings)
+        bool binds_map_entry = false;
         mutable const_site const_check;   // T& / var& over the elements of a const
         expression_ptr container;      // The container to iterate over
         statement_ptr body;            // Loop body

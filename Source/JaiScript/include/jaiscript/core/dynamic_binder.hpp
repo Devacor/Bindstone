@@ -56,6 +56,12 @@ namespace jai {
     using expression_ptr = std::shared_ptr<expression>;
 
     struct script_defined_function;
+
+    namespace detail {
+        // A store into a host script_value member that holds a reference: through the reference, as a store into a reference
+        // variable does (its container's element type converts or raises) (engine.cpp)
+        checked_result<void> store_through_held_reference(script_value& held, const script_value& value, engine* eng);
+    }
 }
 
 namespace jai {
@@ -1095,17 +1101,21 @@ private:
 
         // Only create setter for copy-assignable types
         if constexpr (std::is_copy_assignable_v<P>) {
-            class_def_->add_method("_set_" + name, [member, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
+            class_def_->add_method("_set_" + name, [member, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> checked_result<script_value> {
                 if (args.size() < 2) {
                     throw runtime_error("Property setter requires 'this' and value");
                 }
 
                 T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
 
-                // Special case: if P is script_value, don't convert
                 if constexpr (std::is_same_v<P, script_value>) {
-                    // deref() returns *this if not a reference, so this handles both cases
-                    (cpp_obj->*member).deref() = args[1].clone();
+                    script_value& held = cpp_obj->*member;
+                    if (held.is_reference()) {
+                        auto stored = detail::store_through_held_reference(held, args[1], engine_ptr);
+                        if (!stored) { return stored.error_value(); }
+                    } else {
+                        held = args[1].clone();
+                    }
                 } else if constexpr (dynamic_binder_validation::is_std_function<P>::value) {
                     // Script lambdas assign into C++ callback hooks (spawn/update pattern)
                     cpp_obj->*member = detail::value_converter<P>::from(args[1], engine_ptr);

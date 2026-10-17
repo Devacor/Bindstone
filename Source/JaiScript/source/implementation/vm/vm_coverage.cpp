@@ -77,7 +77,7 @@ namespace {
 			return fam::member;
 		case opcode::op_index: case opcode::op_index_assign: case opcode::op_index_compound: case opcode::op_index_store: case opcode::op_index_compound_fused:
 		case opcode::op_index_fused: case opcode::op_index_store_fused: case opcode::op_index_compound_operand: case opcode::op_index_fused_decl: case opcode::op_iter_init: case opcode::op_iter_next:
-		case opcode::op_iter_pop: case opcode::op_destructure: case opcode::op_parallel_element: case opcode::op_deref_top:
+		case opcode::op_iter_pop: case opcode::op_iter_entry: case opcode::op_destructure: case opcode::op_parallel_element: case opcode::op_deref_top:
 			return fam::element;
 		case opcode::op_concat_append: return fam::string;
 		case opcode::op_new: case opcode::op_array: case opcode::op_map: case opcode::op_closure: return fam::alloc;

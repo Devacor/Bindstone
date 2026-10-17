@@ -1006,10 +1006,12 @@ namespace jai::vm {
 
         struct iter_state {
             std::optional<script_value> container;
-            std::optional<script_value> pair_ctor;
+            std::shared_ptr<class_definition> pair_class;   // a plain loop variable's pair over a map
+            type_info_ptr map_value_type;                    // a by-reference entry's store converts to it
             size_t index = 0;
             script_map::iterator map_it{};
             bool is_map = false;
+            bool map_started = false;  // map_it names the entry the last step bound: the next step advances past it
             bool is_string = false;    // chars by value, like s[i]
             bool is_utf8 = false;      // a utf8_string: characters by value, like u[i]
             bool env_pushed = false;   // slotted loop vars skip the iteration scope env
@@ -1099,7 +1101,6 @@ namespace jai::vm {
         uint64_t done_id_ = 0;
         uint64_t class_definition_type_id_ = 0;
         uint64_t hot_reload_migrate_id_ = 0;
-        uint64_t pair_id_ = 0;
         base_type_symbols base_type_ids_;   // scalar_member_message spellings, interned at init
         detail::arity_count_symbols arity_count_ids_;   // arity text count spellings, interned at init
 
@@ -2427,6 +2428,8 @@ namespace jai::vm {
         op_status exec_case_eq(frame& f, const vm_instruction& ins);
         op_status exec_iter_init(frame& f, const vm_instruction& ins);
         op_status exec_iter_next(frame& f, const vm_instruction& ins);
+        op_status iter_next_map_entry(frame& f, const iter_proto& proto, iter_state& state);
+        op_status exec_iter_entry(frame& f, const vm_instruction& ins);
         op_status exec_iter_pop(frame& f, const vm_instruction& ins);
         void release_iter_slots(frame& f, size_t from);
         void exec_yield(frame& f, const vm_instruction& ins);

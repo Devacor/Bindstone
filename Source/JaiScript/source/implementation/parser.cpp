@@ -5,6 +5,7 @@
 #include "../../include/jaiscript/detail/transient_read.hpp"
 #include "../../include/jaiscript/detail/math_intrinsics.hpp"
 #include "../../include/jaiscript/detail/lexer.hpp"  // a spliced include is lexed here
+#include "../../include/jaiscript/detail/map_entry_binding.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iterator>
@@ -3837,9 +3838,9 @@ checked_result<statement_ptr> parser::for_statement() {
             is_reference = true;
         }
 
-        // for (auto [k, v] : m): the entry's key and value by name, C++17's structured binding. The loop walks a hidden pair
-        // variable and each name is a reference to its half, so by value they name the iteration's copy and with auto& the
-        // value aliases the map's entry
+        // for (auto [k, v] : m): the entry's key and value by name, C++17's structured binding. The loop walks a hidden entry
+        // variable and the names are declarations reading its halves: by value both are the iteration's copies, with auto& the
+        // value is a reference to the map's entry (detail::stamp_map_entry_bindings marks the shape for both backends)
         const token_type spelled = (*stream_)[savedPosition + (is_const ? 1 : 0)].type;
         if (check(token_type::left_bracket) && (spelled == token_type::auto_keyword || spelled == token_type::var_keyword)) {
             const token bracket = advance();
@@ -3864,9 +3865,9 @@ checked_result<statement_ptr> parser::for_statement() {
             std::vector<declaration_ptr> bindings;
             const char* halves[2] = {"first", "second"};
             for (size_t i = 0; i < 2; ++i) {
-                // the key is a copy (a map key is read-only, as std::map's const Key is); the value names the pair's half
+                // the key is a copy (a map key is read-only, as std::map's const Key is); by reference the value is the entry's
                 type_info_ptr binding_type = element_type;
-                if (i == 1) {
+                if (i == 1 && is_reference) {
                     type_info ref_type(script_value_type::jai_reference_type);
                     ref_type.type_name = auto_spelled ? "auto&" : element_type->type_name + "&";
                     ref_type.type_params.push_back(element_type);
@@ -3886,6 +3887,7 @@ checked_result<statement_ptr> parser::for_statement() {
             auto block = std::make_shared<block_stmt>(body->location, std::move(bindings));
             auto result = std::make_shared<range_for_stmt>(forToken.location, element_type, pair_name, pair_id, is_reference, is_const, container, block);
             result->variable_slot_index = pair_slot;
+            detail::stamp_map_entry_bindings(*result);
             return result;
         }
 

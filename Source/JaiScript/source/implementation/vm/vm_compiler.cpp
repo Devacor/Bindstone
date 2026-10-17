@@ -297,11 +297,12 @@ namespace {
 				break;
 			case opcode::op_iter_init:
 			case opcode::op_iter_next:
-			case opcode::op_iter_pop: {
+			case opcode::op_iter_pop:
+			case opcode::op_iter_entry: {
 				// range-for is frame-env-free when the loop var is slot-resident (the
-				// iter's own scope env covers block scoping); iter_next carries the
-				// proto index in a
-				if (ins.op == opcode::op_iter_next && body.iter_protos[ins.a].slot == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
+				// iter's own scope env covers block scoping); iter_next and iter_entry carry
+				// the proto index in a
+				if ((ins.op == opcode::op_iter_next || ins.op == opcode::op_iter_entry) && body.iter_protos[ins.a].slot == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
 				break;
 			}
 			case opcode::op_destructure: {
@@ -506,7 +507,8 @@ namespace {
 			case opcode::op_iter_init:
 			case opcode::op_iter_next:
 			case opcode::op_iter_pop:
-				if (ins.op == opcode::op_iter_next && body.iter_protos[ins.a].slot == SIZE_MAX) return false;
+			case opcode::op_iter_entry:
+				if ((ins.op == opcode::op_iter_next || ins.op == opcode::op_iter_entry) && body.iter_protos[ins.a].slot == SIZE_MAX) return false;
 				break;
 			case opcode::op_destructure: {
 				for (const auto& name : body.destructure_protos[ins.a].names) {
@@ -1820,6 +1822,7 @@ void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 		proto.slot = stmt->variable_slot_index;
 	}
 	proto.is_reference = stmt->is_reference;
+	proto.binds_map_entry = stmt->binds_map_entry;
 	if (stmt->element_type) {
 		proto.element_type = stmt->element_type;
 		proto.var_name = stmt->variable_name;
@@ -1845,7 +1848,9 @@ void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 	if (!stmt->is_reference && proto.slot != SIZE_MAX && slot_kill_wanted(stmt->element_type, proto.slot, proto.var_symbol)) {
 		note_kill_slot(static_cast<uint32_t>(proto.slot));
 	}
+	const uint32_t outer_entry_proto = std::exchange(entry_proto_, stmt->binds_map_entry ? proto_idx : k_invalid_u32);
 	compile_statement(stmt->body);
+	entry_proto_ = outer_entry_proto;
 	close_kill_scope();
 	emit(opcode::op_jump, static_cast<uint32_t>(loop_top));
 
@@ -1858,6 +1863,15 @@ void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 
 	emit(opcode::op_iter_pop);
 	--scope_depth_;
+}
+
+// A structured binding's declaration reads its half from the loop's entry cursor (op_iter_entry), not as a member of the loop variable
+bool vm_compiler::compile_entry_half(const expression_ptr& init) {
+	if (entry_proto_ == k_invalid_u32 || !init || init->get_type() != node_type::member_expr) { return false; }
+	const auto* half = static_cast<const member_expr*>(init.get());
+	if (!half->entry_half) { return false; }
+	emit(opcode::op_iter_entry, entry_proto_, add_node(init), half->entry_half);
+	return true;
 }
 
 void vm_compiler::compile_try(try_stmt* stmt) {
@@ -7776,6 +7790,10 @@ void vm_compiler::compile_variable_decl_value(const std::shared_ptr<variable_dec
 	if (!is_reference && decl->slot_index != SIZE_MAX && primitive_declared_type(decl->type.get())) { callable_.primitive_slots.insert(static_cast<uint32_t>(decl->slot_index)); }   // a typed scalar slot holds that kind at every point
 	if (!is_reference && decl->slot_index != SIZE_MAX) { callable_.slot_types[static_cast<uint32_t>(decl->slot_index)] = decl->type.get(); }
 	if (decl->slot_index != SIZE_MAX) { note_slot_scalar_kind(static_cast<uint32_t>(decl->slot_index), is_reference ? nullptr : decl->type.get()); }
+	if (!is_reference && compile_entry_half(decl->initializer)) {
+		emit(opcode::op_decl_var, add_node(decl), 1, is_lvalue_shaped(decl->initializer.get()) ? 1u : 0u);
+		return;
+	}
 	if (!is_reference && try_inline_variable_decl(decl)) return;
 
 	// Locals declared through env fallback in lambda contexts keep working because the
@@ -7800,7 +7818,7 @@ void vm_compiler::compile_variable_decl_value(const std::shared_ptr<variable_dec
 			}
 			emit(opcode::op_decl_ref_ident, add_node(decl), add_symbol(ident->symbol_id), declared_ref_at_bind(decl.get()));
 		} else {
-			compile_expression(decl->initializer);
+			if (!compile_entry_half(decl->initializer)) { compile_expression(decl->initializer); }
 			emit(opcode::op_decl_ref_value, add_node(decl), 0, declared_ref_at_bind(decl.get()));
 		}
 		if (callable_.active && decl->slot_index != SIZE_MAX && !decl->declared_ref_storage_enforced) {

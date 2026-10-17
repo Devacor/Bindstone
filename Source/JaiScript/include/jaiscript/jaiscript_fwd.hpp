@@ -79,7 +79,7 @@ namespace jai {
     // The vm's cell block counters (engine::cells_counters): block entries, boundary operations run, parked blocks resumed, misses.
     // Counted only on those paths, never per instruction; the interpreter reports zeros
     struct cell_counters {
-        unsigned long long entries = 0, boundaries = 0, resumes = 0, misses = 0;
+        unsigned long long entries = 0, boundaries = 0, resumes = 0, misses = 0, row_entries = 0;   // row_entries: entries whose sites and bindings a loop's block-entry row answered
     };
 
 } // namespace jai

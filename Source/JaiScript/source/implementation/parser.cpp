@@ -3909,7 +3909,7 @@ checked_result<statement_ptr> parser::for_statement() {
             auto block = std::make_shared<block_stmt>(body->location, std::move(bindings));
             auto result = std::make_shared<range_for_stmt>(forToken.location, element_type, pair_name, pair_id, is_reference, is_const, container, block);
             result->variable_slot_index = pair_slot;
-            detail::stamp_map_entry_bindings(*result);
+            detail::stamp_map_entry_bindings(*result, symbolizer_);
             return result;
         }
 

@@ -11580,6 +11580,11 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                     }
                     *loop_var_ptr = std::move(element);
                 }
+                if (stmt->binds_map_entry && !resume_body && !detail::map_entry_binding_decomposes(*loop_var_ptr)) [[unlikely]] {
+                    checked_result<void> rejected = detail::map_entry_binding_rejection(*loop_var_ptr, detail::map_entry_binding_text(*stmt, *string_symbolizer_), engine_);
+                    pop_scope();
+                    return rejected;
+                }
 
                 // Execute loop body
                 auto body_result = resume_body ? dispatch_stmt_resuming(stmt->body.get()) : dispatch_stmt(stmt->body.get());
@@ -11674,6 +11679,11 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                         element = std::move(bound.value());
                     }
                     *loop_var_ptr = std::move(element);
+                }
+                if (stmt->binds_map_entry && !resume_body && !detail::map_entry_binding_decomposes(*loop_var_ptr)) [[unlikely]] {
+                    checked_result<void> rejected = detail::map_entry_binding_rejection(*loop_var_ptr, detail::map_entry_binding_text(*stmt, *string_symbolizer_), engine_);
+                    pop_scope();
+                    return rejected;
                 }
 
                 auto body_result = resume_body ? dispatch_stmt_resuming(stmt->body.get()) : dispatch_stmt(stmt->body.get());
@@ -11866,6 +11876,11 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                         element = std::move(bound.value());
                     }
                     *loop_var_ptr = std::move(element);
+                }
+                if (stmt->binds_map_entry && !resume_body && !detail::map_entry_binding_decomposes(*loop_var_ptr)) [[unlikely]] {
+                    checked_result<void> rejected = detail::map_entry_binding_rejection(*loop_var_ptr, detail::map_entry_binding_text(*stmt, *string_symbolizer_), engine_);
+                    pop_scope();
+                    return rejected;
                 }
 
                 auto body_result = resume_body ? dispatch_stmt_resuming(stmt->body.get()) : dispatch_stmt(stmt->body.get());

@@ -679,6 +679,7 @@ namespace jai {
         bool element_conversion_free = false;
         // for (auto [k, v] : m): the body's first two declarations bind the entry's halves (detail::stamp_map_entry_bindings)
         bool binds_map_entry = false;
+        uint64_t binding_text_id = UINT64_MAX;   // the binding as written, "[k, v]", interned for its run-time text
         mutable const_site const_check;   // T& / var& over the elements of a const
         expression_ptr container;      // The container to iterate over
         statement_ptr body;            // Loop body

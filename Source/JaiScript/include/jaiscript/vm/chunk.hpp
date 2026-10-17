@@ -233,6 +233,7 @@ namespace jai::vm {
         std::string_view var_name;                         // the variable, for the binding's rejection text
         bool conversion_free = true;                       // the checker saw the elements hold the declared type
         bool binds_map_entry = false;                      // for (auto [k, v] : m): over a map the variable holds the entry's cursor
+        uint64_t binding_text = UINT64_MAX;                // its "[k, v]" spelling, interned (a non-decomposing element's text)
     };
 
     // op_binary_fused: evaluates `left op right` without materializing operand loads

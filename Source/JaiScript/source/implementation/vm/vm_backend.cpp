@@ -18006,6 +18006,9 @@ JAI_NOINLINE op_status vm_backend::exec_iter_entry(frame& f, const vm_instructio
 		}
 	}
 	script_value object = cell ? *cell : make_null();
+	if (!detail::map_entry_binding_decomposes(object)) {
+		return raise_from(detail::map_entry_binding_rejection(object, proto.binding_text, engine_));
+	}
 	script_value out = make_null();
 	VM_TRY(member_access_value(f, object, static_cast<member_expr*>(f.code->nodes[ins.b].get()), out));
 	stack_.push_back(std::move(out));

@@ -481,6 +481,9 @@ namespace {
 
 	// ============================== ADMISSION ==============================
 
+	// At namespace scope: a nested class's default member initializers are unusable in its enclosing class's default arguments
+	struct admission_local_info { type_info_ptr type; bool primitive = false; bool reference = false; bool param = false; type_info_ptr referent; };   // referent: a reference's declared target type
+
 	struct admission_builder {
 		engine& eng;
 		string_symbolizer& sym;
@@ -492,7 +495,7 @@ namespace {
 		std::unordered_map<uint64_t, size_t> capture_index;   // name id -> adm.captures slot
 		// A local's declared type; primitive: it can never hold a class instance (a primitive or string type, or an auto
 		// slot the runtime locks to a primitive initializer), so dispatching on it runs no user code
-		struct local_info { type_info_ptr type; bool primitive = false; bool reference = false; bool param = false; type_info_ptr referent; };   // referent: a reference's declared target type
+		using local_info = admission_local_info;
 		std::vector<std::unordered_map<uint64_t, local_info>> scopes;   // current function's scopes
 		bool failed = false;
 		// parallel_for bodies (in-place root mode): the element may bind by reference and

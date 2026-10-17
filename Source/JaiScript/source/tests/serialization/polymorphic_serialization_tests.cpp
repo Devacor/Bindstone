@@ -1297,7 +1297,7 @@ public:
         is_kin("crowd()[0]", "a container element");
         eng->add_function("visit", [object, e = eng.get()](const script_value& f) -> std::string {
             auto ran = f.as_function()({e->make_value(object)});
-            return ran ? ran.value().as<std::string>() : std::string("call failed");
+            return ran ? ran.value().template as<std::string>() : std::string("call failed");
         });
         check_eq(kin, eng->execute("visit(function(var x) -> string { return type_of(x); })").as<std::string>(), order + ": a callback argument");
         check_eq((script_int)3, eng->execute("hero.health - 97").as_int(), order + ": the C++ property reads through the layer");
@@ -1319,7 +1319,7 @@ public:
             eng->add_global("hero", eng->make_object(object));
             eng->add_global("again", object);
             (void)eng->extend(object, kin);
-            check_eq(kin, eng->execute("type_of(again)").as<std::string>(), kin + " two globals then extend: the second global follows");
+            check_eq(kin, eng->execute("type_of(again)").template as<std::string>(), kin + " two globals then extend: the second global follows");
         });
     }
     // The observable identity of a layer reached from C++: the boundary return IS the layer

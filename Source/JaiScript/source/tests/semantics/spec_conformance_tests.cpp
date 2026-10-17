@@ -1906,28 +1906,23 @@ private:
 				{"operator= on a local", A2, "function f() { A2 a = A2(); a = 5; } f();", "Division by zero", check_mode::strict},
 			});
 		});
+		// A save reads a field's storage and a load writes it, so no accessor the script declares runs during either (an
+		// accessor with no field holds no state and is not saved); a post_load's error leaves the load
 		test("archive_hooks_the_script_declares_propagate_their_errors", [this]() {
 			const char* H = R"(
-				class P { int v = 1; int _get_v() { int z = 0; return v / z; } }
-				class PT { int v = 1; int _get_v() { if (v > 0) { throw "getthrow"; } return v; } }
 				class L { int v = 1; void post_load(int version) { int z = 0; v = v / z; } }
-				class S { int v = 1; void _set_v(int x) { int z = 0; v = x / z; } }
 			)";
-			const char* div = "Division by zero";
 			expect_texts({
-				{"to_json getter", H, "string s = to_json(P());", div, check_mode::strict},
-				{"to_json getter throw", H, "string s = to_json(PT());", "getthrow", check_mode::strict},
-				{"to_binary getter", H, "string s = to_binary(P());", div, check_mode::strict},
-				{"from_json post_load", H, "var o = from_json(\"{\\\"_type_\\\":\\\"L\\\",\\\"v\\\":3}\");", div, check_mode::strict},
-				{"from_json setter", H, "var o = from_json(\"{\\\"_type_\\\":\\\"S\\\",\\\"v\\\":3}\");", div, check_mode::strict},
+				{"from_json post_load", H, "var o = from_json(\"{\\\"_type_\\\":\\\"L\\\",\\\"v\\\":3}\");", "Division by zero", check_mode::strict},
 			});
 			expect("hooks that succeed", R"(
 				class L2 { int v = 1; void post_load(int version) { v = v + 10 * version; } }
-				class S2 { int v = 1; void _set_v(int x) { v = x * 2; } }
+				class S2 { int v = 1; void _set_v(int x) { int z = 0; v = x / z; } int _get_v() { return v * 100; } }
+				class P { int raw = 1; int _get_v() { int z = 0; return raw / z; } }
 				var a = from_json("{\"_type_\":\"L2\",\"v\":3}");
 				var b = from_json("{\"_type_\":\"S2\",\"v\":3}");
-				"" + a.v + "|" + b.v;
-			)", "13|6");
+				"" + a.v + "|" + b.v + "|" + to_json(b) + "|" + to_json(P());
+			)", "13|300|{\"_type_\":\"S2\",\"v\":3}|{\"_type_\":\"P\",\"raw\":1}");
 		});
 		test("array_slice_defaults_and_removal_presence", [this]() {
 			expect("slice defaults", R"(

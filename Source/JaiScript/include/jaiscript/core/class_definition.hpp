@@ -204,6 +204,8 @@ public:
     // a reload-removed field must error, not silently resurrect as a default)
     script_value* find_field_value(uint64_t id);
     const script_value* find_field_value(uint64_t id) const;
+    // A script field's own storage (what a save writes and a load restores); null for a C++ property's slot
+    const script_value* find_script_field_value(uint64_t id) const;
 
     // Slot fast path (vm site ICs, tier-1 stage B): present-cell lookup by a
     // pre-resolved slot — no hash; absent (null cell / raw-invalid) returns null so
@@ -2523,6 +2525,14 @@ inline script_value* class_instance::find_field_value(uint64_t id) {
 
 inline const script_value* class_instance::find_field_value(uint64_t id) const {
     return const_cast<class_instance*>(this)->find_field_value(id);
+}
+
+inline const script_value* class_instance::find_script_field_value(uint64_t id) const {
+    if (class_def_) {
+        const uint32_t slot = class_def_->field_slot(id);
+        if (slot != class_definition::k_no_field_slot && class_def_->slot_is_cpp_property(slot)) { return nullptr; }
+    }
+    return find_field_value(id);
 }
 
 inline script_value& class_instance::materialize_field(uint64_t id, script_value&& v) {

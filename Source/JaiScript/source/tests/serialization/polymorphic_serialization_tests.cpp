@@ -1189,6 +1189,14 @@ struct StubbornCreature : jai::script_extensible {
 };
 static jai::registrar<StubbornCreature, void> _stubbornCreatureReg("StubbornCreature");
 
+// A base with an observable property: a load writes it without notifying
+struct WatchCreature : jai::property_owner<WatchCreature> {
+    JAI_OBSERVABLE_PROPERTY((int), health, 100);
+    JAI_PROPERTY((int), armor, 1);
+    virtual ~WatchCreature() = default;
+};
+static jai::registrar<WatchCreature, void> _watchCreatureReg("WatchCreature");
+
 // A base whose copy constructor is deleted: copying its hybrid must refuse (S4).
 struct NoCopyCreature : jai::script_extensible {
     NoCopyCreature() = default;
@@ -1977,6 +1985,293 @@ public:
             };
             archive_round_trips_of(lac, "load_and_construct, C++ archive");
             archive_round_trips_of(sealed, "private default constructor, C++ archive");
+        });
+
+        // A load constructs, then loads the saved values over the result, then runs post_load (C++ semantics, as Cereal):
+        // a class with a zero-argument constructor runs it (for a hybrid, its initializer list builds the C++ base), and
+        // every saved value wins over what the constructor set, the C++ base's properties included; a class with only
+        // argument-taking constructors loads without running one
+        test("a_load_runs_the_zero_argument_constructor_then_loads_every_saved_value_over_it", [&]() {
+            auto eng = hybrid_engine();
+            eng->execute(R"(
+                int built = 0;
+                int loaded_hooks = 0;
+                class Ctorkin : SlotCreature {
+                    int chomp = 3;
+                    Ctorkin() : super() { built += 1; chomp = 50; health = 77; label = "fresh"; }
+                    void post_load(int version) { loaded_hooks += 1; }
+                }
+                class Plain {
+                    int a = 1;
+                    string s = "x";
+                    Plain() { built += 10; a = 99; s = "ctor"; }
+                    void post_load(int version) { loaded_hooks += 1; }
+                }
+                class Argkin : SlotCreature {
+                    int chomp = 3;
+                    Argkin(int c) : super() { built += 100; chomp = c; }
+                }
+                var c = Ctorkin();
+                c.chomp = 7;
+                c.health = 42;
+                c.label = "gnasher";
+                var p = Plain();
+                p.a = 5;
+                p.s = "saved";
+                var g = Argkin(1);
+                g.chomp = 8;
+                g.health = 43;
+                built = 0;
+            )");
+            for (const char* format : { "from_json(to_json(", "from_binary(to_binary(" }) {
+                const std::string f(format);
+                eng->execute("built = 0; loaded_hooks = 0;");
+                eng->add_global("lc", eng->execute(f + "c))"));
+                check_eq((script_int)1, eng->execute("built").as_int(), f + ": the hybrid's zero-argument constructor ran");
+                check_eq((script_int)7, eng->execute("lc.chomp").as_int(), f + ": the saved script field wins");
+                check_eq((script_int)42, eng->execute("lc.health").as_int(), f + ": the saved base property wins");
+                check_eq(std::string("gnasher"), eng->execute("lc.label").as<std::string>(), f);
+                check(eng->execute("lc").as<std::shared_ptr<SlotCreature>>() != nullptr, f + ": the C++ base its constructor built");
+                eng->add_global("lp", eng->execute(f + "p))"));
+                check_eq((script_int)11, eng->execute("built").as_int(), f + ": the pure class's constructor ran");
+                check_eq((script_int)5, eng->execute("lp.a").as_int(), f);
+                check_eq(std::string("saved"), eng->execute("lp.s").as<std::string>(), f);
+                check_eq((script_int)2, eng->execute("loaded_hooks").as_int(), f + ": post_load once per object");
+                eng->add_global("lg", eng->execute(f + "g))"));
+                check_eq((script_int)11, eng->execute("built").as_int(), f + ": an argument-only class loads without a constructor");
+                check_eq((script_int)8, eng->execute("lg.chomp").as_int(), f);
+                check_eq((script_int)43, eng->execute("lg.health").as_int(), f);
+            }
+
+            auto original = eng->execute("c").as<std::shared_ptr<SlotCreature>>();
+            jai::serialization::json_archive_writer w(0, eng.get());
+            w(original);
+            const std::string json = w.str();
+            for (int round = 0; round < 2; ++round) {
+                eng->execute("built = 0; loaded_hooks = 0;");
+                std::shared_ptr<SlotCreature> loaded;
+                if (round == 0) {
+                    jai::serialization::json_archive_reader r(json, eng.get());
+                    r(loaded);
+                } else {
+                    loaded = roundtrip_binary(*eng, original);
+                }
+                const std::string where = round == 0 ? "C++ JSON archive" : "C++ binary archive";
+                check(loaded != nullptr && loaded.get() != original.get(), where + ": a fresh object");
+                check_eq((script_int)1, eng->execute("built").as_int(), where + ": the zero-argument constructor ran");
+                check_eq((script_int)1, eng->execute("loaded_hooks").as_int(), where + ": post_load once");
+                check_eq(42, loaded->health, where + ": the saved base property wins over the constructor's");
+                check_eq(std::string("gnasher"), loaded->label, where);
+                eng->add_global("held", eng->make_object(loaded));
+                check_eq((script_int)7, eng->execute("held.chomp").as_int(), where + ": the saved script field wins");
+            }
+        });
+
+        // A load writes state and notifies nothing: an observer the zero-argument constructor connected stays quiet
+        // through the load on every path (it fires afterwards), so a field it would clobber keeps its saved value; a
+        // saved value that no longer fits keeps the constructed value and is recorded as a retype
+        test("a_load_notifies_no_observer_and_records_a_value_that_no_longer_fits", [&]() {
+            auto eng = hybrid_engine();
+            dynamic_binder<WatchCreature>(*eng, "WatchCreature").auto_bind().constructor<>().build();
+            eng->execute(R"(
+                int fired = 0;
+                class Watchkin : WatchCreature {
+                    int mood = 5;
+                    Watchkin() : super() { on_health_change([this](auto o, auto n) { fired += 1; mood = -1; }); }
+                }
+                var w = Watchkin();
+                w.health = 42;
+                w.armor = 9;
+                w.mood = 7;
+                fired = 0;
+            )");
+            for (const char* format : { "from_json(to_json(", "from_binary(to_binary(" }) {
+                const std::string f(format);
+                eng->execute("fired = 0;");
+                eng->add_global("lw", eng->execute(f + "w))"));
+                check_eq((script_int)0, eng->execute("fired").as_int(), f + ": no observer fires during the load");
+                check_eq((script_int)42, eng->execute("lw.health").as<script_int>(), f);
+                check_eq((script_int)9, eng->execute("lw.armor").as_int(), f);
+                check_eq((script_int)7, eng->execute("lw.mood").as_int(), f + ": the field an observer would clobber keeps its saved value");
+                eng->execute("lw.health = 1;");
+                check_eq((script_int)1, eng->execute("fired").as_int(), f + ": the observer works once the load is done");
+            }
+
+            auto original = eng->execute("w").as<std::shared_ptr<WatchCreature>>();
+            jai::serialization::json_archive_writer writer(0, eng.get());
+            writer(original);
+            const std::string json = writer.str();
+            for (int round = 0; round < 2; ++round) {
+                eng->execute("fired = 0;");
+                std::shared_ptr<WatchCreature> loaded;
+                if (round == 0) {
+                    jai::serialization::json_archive_reader reader(json, eng.get());
+                    reader(loaded);
+                } else {
+                    loaded = roundtrip_binary(*eng, original);
+                }
+                const std::string where = round == 0 ? "C++ JSON archive" : "C++ binary archive";
+                check(loaded != nullptr, where);
+                check_eq((script_int)0, eng->execute("fired").as_int(), where + ": no observer fires during the load");
+                check_eq(42, loaded->health.get(), where);
+                eng->add_global("held", eng->make_object(loaded));
+                check_eq((script_int)7, eng->execute("held.mood").as_int(), where);
+            }
+
+            eng->hot_reload_reporting(true);
+            eng->clear_hot_reload_reports();
+            eng->add_global("bad", eng->execute(R"(from_json("{\"_type_\":\"Watchkin\",\"health\":\"oops\",\"armor\":4,\"mood\":\"sad\"}"))"));
+            check_eq((script_int)100, eng->execute("bad.health").as<script_int>(), "a C++ property keeps its constructed value");
+            check_eq((script_int)4, eng->execute("bad.armor").as_int(), "the values that fit load");
+            check_eq((script_int)5, eng->execute("bad.mood").as_int(), "a script field keeps its constructed value");
+            std::string rows;
+            for (const auto& report : eng->hot_reload_reports()) {
+                rows += report.class_name + "." + report.field_name + ":" + report.old_type + "->" +
+                        (report.outcome == field_migration_outcome::reset ? "kept" : "other") + " ";
+            }
+            check(rows.find("Watchkin.health:string->kept") != std::string::npos, "the C++ property's retype is recorded: " + rows);
+            check(rows.find("Watchkin.mood:string->kept") != std::string::npos, "the script field's retype is recorded: " + rows);
+        });
+
+        // The load contract's oracle: whatever the constructors, accessors, setters and observers do, a load restores
+        // every saved value, so saving what was loaded writes the same bytes (each class shape, alone and in one archive,
+        // JSON and binary, script values and the C++ archive)
+        test("saving_what_a_load_restored_writes_the_same_bytes_for_every_class_shape", [&]() {
+            auto eng = hybrid_engine();
+            dynamic_binder<WatchCreature>(*eng, "WatchCreature").auto_bind().constructor<>().build();
+            eng->execute(R"(
+                int hooks = 0;
+                class Pt { int x = 0; int y = 0; }
+                class Every {
+                    int i = 1; float f = 2.5; string s = "s"; bool b = true; char c = 'q';
+                    array<int> nums = [1, 2]; map<int, string> names = {}; var anything = null; Pt at = Pt();
+                }
+                class ZetaFirst { int zeta = 1; int alpha = 2; }
+                class Base0 { int base_a = 1; }
+                class Mid : Base0 { int mid_b = 2; }
+                class Leaf : Mid { int leaf_c = 3; }
+                class Secret { private: int hidden = 4; public: int shown = 5; void reveal(int v) { hidden = v; } }
+                class Accessed {
+                    int raw = 2;
+                    int _get_raw() { return raw * 10; }
+                    void _set_raw(int v) { raw = v + 1; }
+                    int _get_computed() { return raw + 1000; }
+                }
+                class Clobbers { int a = 0; int b = 0; void _set_b(int v) { b = v; a = -1; } }
+                class Filled { array<int> items = []; Pt spot = Pt(); Filled() { items = [9, 9, 9]; spot.x = 77; } }
+                class OnlyArgs { int v = 0; OnlyArgs(int a) { v = a; } }
+                class Sealed2 { private: Sealed2() {} public: int n = 1; static Sealed2 make() { Sealed2 s = Sealed2(); s.n = 2; return s; } }
+                class Graph { string name = ""; var next = null; var peer = null; }
+                class Hooked { int n = 0; void post_load(int version) { hooks += 1; } }
+                class Hyb : SlotCreature { int chomp = 3; Hyb() : super() { chomp = 50; health = 77; } }
+                class HybArgs : SlotCreature { int chomp = 3; HybArgs(int c) : super() { chomp = c; } }
+                class Watchy : WatchCreature { int mood = 5; Watchy() : super() { on_health_change([this](auto o, auto n) { mood = -1; }); } }
+
+                var e = Every();
+                e.i = 7; e.f = 0.125; e.s = "seven"; e.b = false; e.c = 'z'; e.nums = [3, 4, 5]; e.names[2] = "two";
+                e.anything = [1, "x", {"k": 2}]; e.at.x = 5;
+                var z = ZetaFirst(); z.zeta = 10; z.alpha = 20;
+                var l = Leaf(); l.base_a = 11; l.mid_b = 22; l.leaf_c = 33;
+                var sc = Secret(); sc.reveal(44); sc.shown = 55;
+                var ac = Accessed(); ac.raw = 4;
+                var cl = Clobbers(); cl.b = 8; cl.a = 6;
+                var fi = Filled(); fi.items = [1]; fi.spot = Pt(); fi.spot.y = 3;
+                var oa = OnlyArgs(12);
+                var s2 = Sealed2::make();
+                var g1 = new Graph(); g1.name = "a";
+                var g2 = new Graph(); g2.name = "b";
+                g1.next = g2; g2.next = g1; g1.peer = g2;
+                var hk = Hooked(); hk.n = 3;
+                var hy = Hyb(); hy.chomp = 7; hy.health = 42; hy.label = "gnasher";
+                var ha = HybArgs(1); ha.chomp = 8; ha.health = 43;
+                var wa = new Watchy(); wa.health = 41; wa.armor = 2; wa.mood = 6;
+            )");
+            eng->execute(R"(
+                function same(var v) -> string {
+                    string s = to_json(v);
+                    string again = to_json(from_json(s));
+                    string b = to_binary(v);
+                    string bagain = to_binary(from_binary(b));
+                    return (s == again ? "J" : "[" + s + " became " + again + "]") + (b == bagain ? "B" : "b");
+                }
+            )");
+            for (const char* var : { "e", "z", "l", "sc", "ac", "cl", "fi", "oa", "s2", "g1", "hk", "hy", "ha", "wa" }) {
+                std::string got;
+                try { got = eng->execute(std::string("same(") + var + ")").as<std::string>(); } catch (const std::exception& ex) { got = ex.what(); }
+                check_eq(std::string("JB"), got, std::string(var) + " saves back byte for byte");
+            }
+            std::string together;
+            try { together = eng->execute("same([e, z, l, sc, ac, cl, fi, oa, s2, g1, hk, hy, ha, wa])").as<std::string>(); } catch (const std::exception& ex) { together = ex.what(); }
+            check_eq(std::string("JB"), together, "every shape in one archive saves back byte for byte");
+
+            for (const char* var : { "hy", "ha" }) {
+                auto original = eng->execute(var).as<std::shared_ptr<SlotCreature>>();
+                jai::serialization::json_archive_writer first(0, eng.get());
+                first(original);
+                jai::serialization::json_archive_reader reader(first.str(), eng.get());
+                std::shared_ptr<SlotCreature> loaded;
+                reader(loaded);
+                jai::serialization::json_archive_writer second(0, eng.get());
+                second(loaded);
+                check_eq(first.str(), second.str(), std::string(var) + ": the C++ JSON archive saves back what it loaded");
+                check(jai::to_binary(*eng, original) == jai::to_binary(*eng, roundtrip_binary(*eng, original)),
+                      std::string(var) + ": and the C++ binary archive");
+            }
+        });
+
+        // post_load runs once the whole archive is loaded, once per object, children before parents: inside a cycle each
+        // object's hook sees the other whole, and a C++ archive's script layers wait for the outermost read to finish
+        test("post_load_runs_once_the_whole_archive_is_loaded", [&]() {
+            auto eng = hybrid_engine();
+            auto r = eng->execute(R"(
+                string pl = "";
+                class Node {
+                    string name = "";
+                    var other = null;
+                    int tail = 0;
+                    void post_load(int version) { pl += name + ":" + other.name + "/" + other.tail + " "; }
+                }
+                var p = new Node();
+                p.name = "parent";
+                p.tail = 5;
+                var k = new Node();
+                k.name = "child";
+                k.tail = 6;
+                p.other = k;
+                k.other = p;
+                string out = "";
+                pl = "";
+                var lj = from_json(to_json(p));
+                out += pl + "| ";
+                pl = "";
+                var lb = from_binary(to_binary(p));
+                out += pl;
+                return out;
+            )");
+            check_eq(std::string("child:parent/5 parent:child/6 | child:parent/5 parent:child/6 "), r.as<std::string>(),
+                     "each hook sees the other object whole, children first");
+
+            eng->execute(R"(
+                int built = 0;
+                string seen = "";
+                class Countkin : SlotCreature {
+                    int chomp = 3;
+                    Countkin() : super() { built += 1; }
+                    void post_load(int version) { seen += "" + built + " "; }
+                }
+                var c1 = Countkin();
+                var c2 = Countkin();
+            )");
+            std::vector<std::shared_ptr<SlotCreature>> pair = { eng->execute("c1").as<std::shared_ptr<SlotCreature>>(),
+                                                                eng->execute("c2").as<std::shared_ptr<SlotCreature>>() };
+            const std::string json = jai::to_json(*eng, pair);
+            eng->execute("built = 0; seen = \"\";");
+            auto loaded = jai::from_json<std::vector<std::shared_ptr<SlotCreature>>>(*eng, json);
+            check_eq((size_t)2, loaded.size());
+            check_eq(std::string("2 2 "), eng->execute("seen").as<std::string>(), "both objects exist before either hook runs");
+            eng->execute("built = 0; seen = \"\";");
+            auto fromBinary = jai::from_binary<std::vector<std::shared_ptr<SlotCreature>>>(*eng, jai::to_binary(*eng, pair));
+            check_eq(std::string("2 2 "), eng->execute("seen").as<std::string>(), "the binary archive too");
         });
 
         test("a_hybrid_load_over_a_base_with_neither_constructor_names_what_is_missing", [&]() {

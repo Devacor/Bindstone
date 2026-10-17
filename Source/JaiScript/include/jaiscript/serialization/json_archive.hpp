@@ -234,6 +234,7 @@ private:
         bool compact_weak = false;      // a compact weak_ptr record closes with a bare '}'
         script_map::const_iterator next{};
         class_definition* class_def = nullptr;
+        std::shared_ptr<class_instance> instance;   // an instance frame's object: its script fields save as stored
         std::vector<std::string> names;
         std::vector<std::pair<std::string, script_value>> fields;
     };
@@ -350,6 +351,7 @@ private:
                         write_frame& f = frames.emplace_back(write_shape::instance, value);
                         f.names = class_def->get_property_names();
                         f.class_def = class_def;
+                        f.instance = instance;
                     } else {
                         // No class definition - serialize fields directly (slot order: deterministic, ≈ declaration order)
                         write_frame& f = frames.emplace_back(write_shape::fields, value);
@@ -422,7 +424,7 @@ private:
                     return &f.next->second;
                 }
             case write_shape::instance: {
-                if (!next_serialized_property(f.source, f.class_def, engine_ref_, f.names, f.index, scratch, aborted_)) { return nullptr; }
+                if (!next_serialized_property(f.source, f.instance.get(), f.class_def, engine_ref_, f.names, f.index, scratch, aborted_)) { return nullptr; }
                 write_value_key(f.names[f.index - 1], true);
                 return &scratch;
             }

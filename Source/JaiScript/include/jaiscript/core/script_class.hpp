@@ -497,23 +497,6 @@ inline void apply_member_access_labels(class_definition& def, const class_decl& 
     }
 }
 
-// Whether Name() constructs cls: a script class with constructors needs one that takes no arguments, one without
-// constructors default-constructs its base the same way, and a host class decides for itself
-inline bool default_constructible(const class_definition& cls) {
-    if (!cls.is_script_class()) {
-        return true;
-    }
-    const auto& script = static_cast<const script_class_definition&>(cls);
-    if (!script.get_constructor_asts().empty()) {
-        for (const auto& ctor : script.get_constructor_asts()) {
-            if (arity_accepts(ctor->parameters, 0)) { return true; }
-        }
-        return false;
-    }
-    const class_definition* parent = script.parent_ptr();
-    return !parent || default_constructible(*parent);
-}
-
 // Constructor access, enforce_member_access's rule applied to the overload resolution picked (both backends call it
 // verbatim before an instance exists): a private constructor is callable from its class and every class derived from it.
 // caller_context() answers the calling code's class, asked only when the overload is private

@@ -39,6 +39,8 @@ template<typename T, typename Sync = signal_unsynchronized> class signal;
 
 // The engine's lifetime token: expired once the engine is destroyed (defined in engine.cpp)
 std::weak_ptr<const void> engine_lifetime_token(engine* a_engine);
+// A load in progress on the engine: its script receivers stay quiet (defined in engine.cpp)
+bool engine_loading(const engine* a_engine);
 
 template<typename T>
 class receiver {
@@ -72,7 +74,7 @@ public:
 
 	template<typename... Args>
 	void notify(Args&&... args) {
-		if (!blocked() && !invalid() && !engine_gone()) {
+		if (!blocked() && !invalid() && !engine_quiet()) {
 			if (script_callback_.empty()) {
 				callback_(std::forward<Args>(args)...);
 			} else {
@@ -83,7 +85,7 @@ public:
 
 	template<typename... Args>
 	bool predicate(Args&&... args) {
-		if (!blocked() && !invalid() && !engine_gone()) {
+		if (!blocked() && !invalid() && !engine_quiet()) {
 			if (script_callback_.empty()) {
 				return callback_(std::forward<Args>(args)...);
 			} else {
@@ -94,7 +96,7 @@ public:
 	}
 
 	void notify() {
-		if (!blocked() && !invalid() && !engine_gone()) {
+		if (!blocked() && !invalid() && !engine_quiet()) {
 			if (script_callback_.empty()) {
 				callback_();
 			} else {
@@ -104,7 +106,7 @@ public:
 	}
 
 	bool predicate() {
-		if (!blocked() && !invalid() && !engine_gone()) {
+		if (!blocked() && !invalid() && !engine_quiet()) {
 			if (script_callback_.empty()) {
 				return callback_();
 			} else {
@@ -154,8 +156,11 @@ public:
 	void bind_engine(engine* eng, std::weak_ptr<const void> engine_alive) {
 		engine_bound_ = eng != nullptr;
 		engine_alive_ = std::move(engine_alive);
+		if (eng) { script_engine_ = eng; }
 	}
 	bool engine_gone() const noexcept { return engine_bound_ && engine_alive_.expired(); }
+	// a script receiver skips while its engine is gone or loading (a load does not notify)
+	bool engine_quiet() const { return engine_bound_ && (engine_alive_.expired() || engine_loading(script_engine_)); }
 	engine* script_engine() const { return script_engine_; }
 
 	const std::shared_ptr<std::vector<std::string>>& parameter_names() const {

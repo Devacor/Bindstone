@@ -1011,6 +1011,14 @@ namespace jai {
         std::shared_ptr<class_instance> extend_loaded(const std::string& script_class_name,
             const std::shared_ptr<void>& cpp_object, const std::string& fields_json);
         bool script_layer_object_owned(const std::shared_ptr<class_instance>& layer) const;
+        // A load constructs a class that has a zero-argument constructor (any access, its initializer list included, so
+        // a script class over a C++ base builds that base), then loads the saved values over it, then runs post_load
+        bool script_class_default_constructible(const class_definition& cls) const;
+        // The archive's hybrid load when the script class has a zero-argument constructor: the constructed instance and
+        // the C++ object its constructor built (null when the class has none); then the saved $script fields hydrate over
+        // it and post_load runs
+        std::shared_ptr<class_instance> construct_script_layer_for_load(const std::string& script_class_name, std::shared_ptr<void>& cpp_object);
+        checked_result<void> hydrate_script_layer(const std::shared_ptr<class_instance>& layer, const std::string& fields_json);
         std::string detach_object(const std::shared_ptr<class_instance>& layer);
         // Cores (error codes; the public extend throws at the host boundary): extend itself,
         // the script class behind a constructor value / name, and a layer of script_def over an
@@ -1324,6 +1332,34 @@ namespace jai {
         };
         bool take_construction_access_waiver() noexcept { return std::exchange(construction_access_waived_, false); }
 
+        // A load in progress (from_json, from_binary, a C++ archive read, extend with saved fields): its writes do not
+        // notify (observable properties write silently, script receivers skip), and each loaded object's post_load waits
+        // until the outermost load completes, then runs once per object in completion order (children before parents).
+        // complete() runs them and may throw (a post_load's error fails the load); a session left without complete()
+        // (the load threw) drops what it queued.
+        class load_session {
+        public:
+            explicit load_session(engine* a_engine);
+            ~load_session();
+            void complete();
+            load_session(const load_session&) = delete;
+            load_session& operator=(const load_session&) = delete;
+        private:
+            engine* eng;
+            bool completed = false;
+        };
+        bool loading() const noexcept { return load_depth_ > 0; }
+        // A class's properties in the order a load restores them (its declaration order, base first), kept for the
+        // load in progress
+        struct load_field {
+            uint64_t id;
+            uint64_t setter_id;
+            script_value key;
+        };
+        const std::vector<load_field>& load_field_order(const class_definition& cls);
+        // Queues self.post_load(version) for the outermost load, or runs it now when no load is in progress
+        void defer_post_load(const script_value& self, script_int version);
+
     private:
         // declared ahead of impl: alive through the whole teardown, expired once the engine is gone
         std::shared_ptr<const void> lifetime_ = std::make_shared<char>('\0');
@@ -1349,6 +1385,9 @@ namespace jai {
         resolved_privileges resolve_privileges(std::span<const std::string_view> names) const;
         checked_result<void> require_privileges(privilege flags, std::span<const uint64_t> slots) const noexcept;
         std::unique_ptr<std::mutex> parallel_compile_mutex_ = std::make_unique<std::mutex>();
+        int load_depth_ = 0;
+        std::vector<std::pair<script_value, script_int>> deferred_post_loads_;
+        std::unordered_map<const class_definition*, std::vector<load_field>> load_field_orders_;
 
         // Single post-parse execution pipeline shared by execute(string) and
         // execute(jaibite&): every string execute exercises the same machinery a

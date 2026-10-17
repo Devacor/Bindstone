@@ -45,6 +45,12 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
 - **MV Utility** — `angle2D`/`angle2DRad` overloads, `wrappingDistance` and `wrappingMix` (the
   short-way angle interpolation `Collider::interpolateDrawAngle` draws with), `startsWith`,
   `BoxAABB::centerPoint` and `BoxAABB::collides` with and without depth.
+- **MV ThreadPool** — `ThreadPool`/`AsioThreadPool`: a group job's finish callback and group
+  completion run once each after the job that queued them is gone; a group completes exactly once
+  (an empty group too); `run()` drains callbacks other threads schedule meanwhile, each once and in
+  order, survives a callback that pumps `run()` again and runs work scheduled during the pass in
+  the same pass; the destructor finishes an in-flight job, even one running past 5 s, before any
+  member dies (so the suite takes ~5 s).
 
 ## Benchmarks (measurement, not assertions)
 

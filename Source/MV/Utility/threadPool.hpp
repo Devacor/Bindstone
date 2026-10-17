@@ -6,16 +6,54 @@
 #include <deque>
 #include <vector>
 #include <atomic>
-#include <chrono>
+#include <functional>
 #include <list>
+#include <mutex>
 #include "log.h"
 
 namespace MV {
+	//Callbacks any thread queues for the thread that calls run(), FIFO. Work queued while run() drains runs in the same run().
+	class ScheduledCallbacks {
+	public:
+		void push(const std::function<void()> &a_method) {
+			std::lock_guard<std::mutex> guard(lock);
+			scheduled.push_back(a_method);
+		}
+
+		template<typename OnException>
+		void run(OnException &&a_onException) {
+			std::list<std::function<void()>> pending;
+			for (;;) {
+				{
+					std::lock_guard<std::mutex> guard(lock);
+					if (scheduled.empty()) { return; }
+					pending.swap(scheduled);
+				}
+				while (!pending.empty()) {
+					auto method = std::move(pending.front());
+					pending.pop_front();
+					try {
+						method();
+					} catch (std::exception &e) {
+						a_onException(e);
+					} catch (...) {
+						std::lock_guard<std::mutex> guard(lock);
+						scheduled.splice(scheduled.begin(), pending);
+						throw;
+					}
+				}
+			}
+		}
+
+	private:
+		std::mutex lock;
+		std::list<std::function<void()>> scheduled;
+	};
+
 	class ThreadPool {
-		class Worker;
 	public:
 		class Job {
-			friend Worker;
+			friend ThreadPool;
 		public:
 			enum class Continue {
 				MAIN_THREAD,
@@ -44,26 +82,27 @@ namespace MV {
 				try { action(); } catch (std::exception &e) { parent->exception(e); }
 				bool groupFinished = groupCounter && --(*groupCounter) == 0 && onGroupFinish && *onGroupFinish;
 				if (onFinish && groupFinished && onFinishContinue == onGroupFinishContinue) {
-					continueMethod([=](){
+					//by value: the continuation outlives this job, which the worker destroys once it returns
+					continueMethod(parent, [parent = parent, onFinish = onFinish, onGroupFinish = onGroupFinish](){
 						try { onFinish(); } catch (std::exception &e) { parent->exception(e); }
 						try { (*onGroupFinish)(); } catch (std::exception &e) { parent->exception(e); }
 					}, onFinishContinue);
 				}else{
-					if (onFinish) { continueMethod(onFinish, onFinishContinue); }
-					if (groupFinished) { continueMethod(*onGroupFinish, onGroupFinishContinue); }
+					if (onFinish) { continueMethod(parent, onFinish, onFinishContinue); }
+					if (groupFinished) { continueMethod(parent, *onGroupFinish, onGroupFinishContinue); }
 				}
 			}
 		private:
-			const void continueMethod(const std::function<void()> &a_method, Continue a_plan){
+			static void continueMethod(ThreadPool* a_pool, const std::function<void()> &a_method, Continue a_plan){
 				switch(a_plan){
 					case Continue::IMMEDIATE:
-						try { a_method(); } catch (std::exception &e) { parent->exception(e); }
+						try { a_method(); } catch (std::exception &e) { a_pool->exception(e); }
 					break;
 					case Continue::MAIN_THREAD:
-						parent->schedule(a_method);
+						a_pool->schedule(a_method);
 					break;
 					case Continue::POOL:
-						parent->task(a_method);
+						a_pool->task(a_method);
 					break;
 				}
 			}
@@ -78,70 +117,29 @@ namespace MV {
 			std::shared_ptr<std::function<void()>> onGroupFinish;
 		};
 		friend Job;
-	private:
-		class Worker {
-		public:
-			Worker(ThreadPool* a_parent) :
-				parent(a_parent) {
-				thread = std::make_unique<std::thread>([=]() { work(); });
-			}
-			~Worker() { if (thread && thread->joinable()) { thread->join(); } }
 
-			void cleanup() {
-				const double cleanupTimeout = 5.0;
-				auto start = std::chrono::high_resolution_clock::now();
-				while (!finished && std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count() < cleanupTimeout) {
-					std::this_thread::yield();
-				}
-				if(!finished){
-					MV::error("Cleanup Timeout Exceeded in MV::ThreadPool::Worker!");
-				}
-			}
-		private:
-			void work() {
-				finished = false;
-				while (!parent->stopped) {
-					std::unique_lock<std::mutex> guard(parent->lock);
-					parent->notify.wait(guard, [=] {return parent->jobs.size() > 0 || parent->stopped; });
-					if (parent->stopped) { break; }
-
-					auto job = std::move(parent->jobs.front());
-					parent->jobs.pop_front();
-					guard.unlock();
-
-					job.parent = parent;
-					job();
-					--parent->active;
-				}
-				finished = true;
-			}
-			ThreadPool* parent;
-			bool finished = true;
-			std::unique_ptr<std::thread> thread;
-		};
-		friend Worker;
-
-	public:
 		ThreadPool() :
 			ThreadPool(std::thread::hardware_concurrency() > 1 ? std::thread::hardware_concurrency() - 1 : 1) {
 		}
 
 		ThreadPool(size_t a_threads) {
-			for (size_t i = 0; i < a_threads; ++i) {
-				workers.push_back(std::make_unique<Worker>(this));
+			try {
+				workers.reserve(a_threads);
+				for (size_t i = 0; i < a_threads; ++i) {
+					workers.emplace_back([this]() { work(); });
+				}
+			} catch (...) {
+				stopAndJoin();
+				throw;
 			}
 		}
 
+		ThreadPool(const ThreadPool&) = delete;
+		ThreadPool& operator=(const ThreadPool&) = delete;
+
+		//Drops queued jobs; in-flight jobs finish against a fully alive pool before any member dies.
 		~ThreadPool() {
-			{
-				std::lock_guard<std::mutex> guard(lock);
-				jobs.clear();
-				stopped = true;
-			}
-			notify.notify_all();
-			for (auto&& worker : workers) {
-				worker->cleanup();
-			}
+			stopAndJoin();
 		}
 
 		void task(Job&& a_newWork) {
@@ -178,6 +176,10 @@ namespace MV {
 		}
 
 		void tasks(std::vector<Job> &&a_tasks, const std::function<void()> &a_onGroupComplete, Job::Continue a_continueCompletionCallback = Job::Continue::POOL) {
+			if (a_tasks.empty()) {
+				completeEmptyGroup(a_onGroupComplete, a_continueCompletionCallback);
+				return;
+			}
 			active+=static_cast<int>(a_tasks.size());
 			std::shared_ptr<std::atomic<size_t>> counter = std::make_shared<std::atomic<size_t>>(a_tasks.size());
 			std::shared_ptr<std::function<void()>> sharedGroupComplete = std::make_shared<std::function<void()>>(a_onGroupComplete);
@@ -188,12 +190,14 @@ namespace MV {
 					jobs.push_back(std::move(job));
 				}
 			}
-			for (size_t i = 0; i < a_tasks.size(); ++i) {
-				notify.notify_one();
-			}
+			notify.notify_all();
 		}
 
 		void tasks(const std::vector<Job> &a_tasks, const std::function<void()> &a_onGroupComplete, Job::Continue a_continueCompletionCallback = Job::Continue::POOL) {
+			if (a_tasks.empty()) {
+				completeEmptyGroup(a_onGroupComplete, a_continueCompletionCallback);
+				return;
+			}
 			active+=static_cast<int>(a_tasks.size());
 			std::shared_ptr<std::atomic<size_t>> counter = std::make_shared<std::atomic<size_t>>(a_tasks.size());
 			std::shared_ptr<std::function<void()>> sharedGroupComplete = std::make_shared<std::function<void()>>(a_onGroupComplete);
@@ -204,29 +208,16 @@ namespace MV {
 					jobs.back().group(counter, sharedGroupComplete, a_continueCompletionCallback);
 				}
 			}
-			for (size_t i = 0; i < a_tasks.size(); ++i) {
-				notify.notify_one();
-			}
+			notify.notify_all();
 		}
 
 		void schedule(const std::function<void()> &a_method) {
-			std::lock_guard<std::mutex> guard(scheduleLock);
-			scheduled.push_back(a_method);
+			scheduled.push(a_method);
 		}
 
 		bool run() {
 			auto wasActive = active > 0;
-			auto endNode = scheduled.end();
-			for (auto i = scheduled.begin(); i != endNode;) {
-				try {
-					(*i)();
-				} catch (std::exception &e) {
-					exception(e);
-				}
-
-				std::lock_guard<std::mutex> guard(scheduleLock);
-				scheduled.erase(i++);
-			}
+			scheduled.run([this](std::exception &e) { exception(e); });
 			return wasActive;
 		}
 
@@ -239,6 +230,41 @@ namespace MV {
 			return workers.size();
 		}
 	private:
+		void work() {
+			for (;;) {
+				std::unique_lock<std::mutex> guard(lock);
+				notify.wait(guard, [this] { return !jobs.empty() || stopped; });
+				if (stopped) { return; }
+
+				auto job = std::move(jobs.front());
+				jobs.pop_front();
+				guard.unlock();
+
+				job.parent = this;
+				job();
+				--active;
+			}
+		}
+
+		void stopAndJoin() noexcept {
+			std::deque<Job> abandoned;
+			{
+				std::lock_guard<std::mutex> guard(lock);
+				stopped = true;
+				abandoned.swap(jobs);
+			}
+			notify.notify_all();
+			for (auto&& worker : workers) {
+				if (worker.joinable()) { worker.join(); }
+			}
+		}
+
+		void completeEmptyGroup(const std::function<void()> &a_onGroupComplete, Job::Continue a_continueCompletionCallback) {
+			if (a_onGroupComplete) {
+				Job::continueMethod(this, a_onGroupComplete, a_continueCompletionCallback);
+			}
+		}
+
 		void exception(std::exception &e) {
 			std::lock_guard<std::mutex> guard(exceptionLock);
 			if (onException) {
@@ -251,14 +277,12 @@ namespace MV {
 		std::condition_variable notify;
 		bool stopped = false;
 		std::mutex lock;
-		std::mutex scheduleLock;
 		std::mutex exceptionLock;
-		std::vector<std::unique_ptr<Worker>> workers;
 		std::deque<Job> jobs;
-		std::list<std::function<void()>> scheduled;
-		std::deque<std::string> exceptionMessages;
+		ScheduledCallbacks scheduled;
 		std::function<void(std::exception &e)> onException;
-		std::atomic<int> active;
+		std::atomic<int> active {0};
+		std::vector<std::thread> workers;
 	};
 }
 

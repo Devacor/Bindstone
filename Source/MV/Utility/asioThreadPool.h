@@ -2,12 +2,11 @@
 #define _MV_ASIOTHREADPOOL_H_
 
 #include <thread>
-#include <condition_variable>
-#include <deque>
 #include <vector>
 #include <atomic>
-#include <list>
+#include <memory>
 #include "log.h"
+#include "threadPool.hpp"
 #include <asio.hpp>
 
 namespace MV {
@@ -50,7 +49,8 @@ namespace MV {
 				if (onFinish && !groupFinished) {
 					parent->task(onFinish);
 				} else if (onFinish && groupFinished) {
-					parent->task([=]{
+					//by value: the continuation outlives this job, which dies with the handler that ran it
+					parent->task([parent = parent, onFinish = onFinish, onGroupFinish = onGroupFinish]{
 						try { onFinish(); } catch (std::exception &e) { parent->exception(e); }
 						try { (*onGroupFinish)(); } catch (std::exception &e) { parent->exception(e); }
 					});
@@ -74,6 +74,9 @@ namespace MV {
 
 		AsioThreadPool(size_t a_threads);
 
+		AsioThreadPool(const AsioThreadPool&) = delete;
+		AsioThreadPool& operator=(const AsioThreadPool&) = delete;
+
 		~AsioThreadPool();
 
 		void task(Job a_newWork);
@@ -93,21 +96,11 @@ namespace MV {
 		}
 
 		void schedule(const std::function<void()> &a_method) {
-			std::lock_guard<std::mutex> guard(scheduleLock);
-			scheduled.push_back(a_method);
+			scheduled.push(a_method);
 		}
 
 		void run() {
-			for (auto i = scheduled.begin(); i != scheduled.end();) {
-				try {
-					(*i)();
-				} catch (std::exception &e) {
-					exception(e);
-				}
-
-				std::lock_guard<std::mutex> guard(scheduleLock);
-				scheduled.erase(i++);
-			}
+			scheduled.run([this](std::exception &e) { exception(e); });
 		}
 
 		void exceptionHandler(std::function<void(std::exception &e)> a_onException) {
@@ -121,6 +114,8 @@ namespace MV {
 
 		std::shared_ptr<asio::io_context> io_context() const;
 	private:
+		void stopAndJoin() noexcept;
+
 		void exception(std::exception &e) {
 			std::lock_guard<std::mutex> guard(exceptionLock);
 			if (onException) {
@@ -131,14 +126,10 @@ namespace MV {
 		}
 
 		std::unique_ptr<ThreadPoolDetails> details;
-		std::vector<std::unique_ptr<std::thread>> workers;
-		std::mutex lock;
-		std::mutex scheduleLock;
 		std::mutex exceptionLock;
-		std::deque<Job> jobs;
-		std::list<std::function<void()>> scheduled;
-		std::deque<std::string> exceptionMessages;
+		ScheduledCallbacks scheduled;
 		std::function<void(std::exception &e)> onException;
+		std::vector<std::thread> workers;
 	};
 }
 

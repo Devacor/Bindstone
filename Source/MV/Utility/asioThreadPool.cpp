@@ -16,18 +16,28 @@ namespace MV{
 	AsioThreadPool::AsioThreadPool(size_t a_threads) :
 		details(std::make_unique<ThreadPoolDetails>()) {
 
-		for (size_t i = 0; i < a_threads; ++i) {
-			workers.emplace_back(std::make_unique<std::thread>([this] {
-				details->service->run();
-			}));
+		try {
+			workers.reserve(a_threads);
+			for (size_t i = 0; i < a_threads; ++i) {
+				workers.emplace_back([this] {
+					details->service->run();
+				});
+			}
+		} catch (...) {
+			stopAndJoin();
+			throw;
 		}
 	}
 
 	AsioThreadPool::~AsioThreadPool() {
+		stopAndJoin();
+	}
+
+	void AsioThreadPool::stopAndJoin() noexcept {
 		details->service->stop();
 		for (auto&& worker : workers) {
-			if (worker->joinable()) {
-				worker->join();
+			if (worker.joinable()) {
+				worker.join();
 			}
 		}
 	}

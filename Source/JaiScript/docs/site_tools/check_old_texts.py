@@ -43,6 +43,10 @@ OLD_TEXTS = [
     # `Cannot push 'string' to array<int>` and `Cannot assign 'string' to element of type 'int'`
     # are still the live texts (reference/index.html quotes the push one), so they
     # are deliberately not here.
+    r"Cannot copy: the value nests too deep",
+    r"Maximum JSON nesting depth",
+    r"Maximum serialization depth",
+    r"Maximum deserialization depth",
 ]
 
 

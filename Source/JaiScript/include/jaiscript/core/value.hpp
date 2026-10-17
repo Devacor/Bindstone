@@ -99,6 +99,17 @@ namespace detail {
     std::shared_ptr<class_instance> make_native_instance(class_definition& def, std::string_view name, std::shared_ptr<void> object, engine* eng);
 }
 
+    namespace detail {
+        // A deep copy's deferred child: its source and the placeholder slot its copy fills (script_value::clone_level)
+        struct deep_copy_item;
+        using deep_copy_work = std::vector<deep_copy_item>;
+        // Completes every deferred child of a deep copy, and the children they defer in turn
+        void finish_deep_copy(deep_copy_work& work);
+        // Containers and instances a deep copy nests natively before it defers to its work list: the common shallow value
+        // copies as the recursive walk always did, a deep one spends memory, never native depth
+        inline constexpr unsigned k_inline_copy_depth = 32;
+    }
+
     class script_value {
     public:
         script_value(std::nullptr_t) = delete;
@@ -217,6 +228,9 @@ namespace detail {
         // deep-copy, an explicit shared_ptr<T>/weak_ptr<T> handle copies as a handle and keeps
         // sharing its object. clone() on a bare handle stays the explicit pointee clone.
         script_value clone_element() const {
+            return element_copies_shallow() ? *this : clone();
+        }
+        bool element_copies_shallow() const noexcept {
             switch (raw_storage_index()) {
                 case TYPEID_NULL:
                 case TYPEID_INT:
@@ -231,14 +245,16 @@ namespace detail {
                 case TYPEID_IVEC3:
                 case TYPEID_VEC4:
                 case TYPEID_COLOR:
-                    return *this;
+                    return true;
                 default:
-                    if (type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type) {
-                        return *this;
-                    }
-                    return clone();
+                    return type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type;
             }
         }
+        // One level of a deep copy: nested containers and instances copy inline while depth stays under
+        // detail::k_inline_copy_depth and past it fill placeholders the work list completes (clone() drives it)
+        script_value clone_level(detail::deep_copy_work& work, unsigned depth) const;
+        // clone_element's rule into dest, which must not move until the work list is done: the copy now, or a placeholder
+        void clone_element_into(script_value& dest, detail::deep_copy_work& work, unsigned depth) const;
 
         // Parallel-region detach (parallel_transform v0): deep copy where EVERY heavy
         // node gets a fresh strong_ptr - including strings, which clone() and plain
@@ -257,6 +273,10 @@ namespace detail {
         // recognize results that alias a worker-provisioned value.
         script_value parallel_detached_copy(std::vector<type_info*>* collected_types = nullptr,
                                             std::vector<const void*>* collected_nodes = nullptr) const;
+        // One level of the detach, its nested containers inline while shallow and through the work list past
+        // detail::k_inline_copy_depth, as clone_level
+        script_value parallel_detached_level(std::vector<type_info*>* collected_types, std::vector<const void*>* collected_nodes,
+                                             detail::deep_copy_work& work, unsigned depth) const;
 
         // === Parallel captured-read borrow (internal/parallel_design.md, captured reads) ===
         // A borrow VIEW of an enclosing container: one raw tagged pointer, so copying the
@@ -2733,6 +2753,13 @@ namespace detail {
 
     inline script_array::script_array() = default;
     inline script_array::script_array(kind_t k) : kind_(k) {}
+    namespace detail {
+        struct deep_copy_item {
+            script_value source;
+            script_value* dest;
+        };
+    }
+
     inline script_array::script_array(const script_array&) = default;
     inline script_array::script_array(script_array&&) noexcept = default;
     inline script_array& script_array::operator=(const script_array&) = default;

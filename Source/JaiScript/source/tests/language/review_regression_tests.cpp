@@ -706,14 +706,15 @@ public:
             jai::stdlib::register_all(*e);
             check(e->execute("var x = 0.1 + 0.2; from_json(to_json(x)) == x").as_bool());
         });
-        // ---- #34 deeply nested JSON raises a catchable error (no stack overflow) ----
-        test("json_deep_nesting_throws", [this]() {
+        // ---- #34 deeply nested JSON parses on a work list (no stack overflow, no depth cap) ----
+        test("json_deep_nesting_parses", [this]() {
             auto e = make_engine();
             jai::stdlib::register_all(*e);
-            std::string s(300, '[');   // 300 > JAI_MAX_JSON_PARSE_DEPTH (128)
+            std::string s(300, '[');
             s.append(300, ']');
             e->add_global("s", s);
-            check_throws([&]() { e->execute("from_json(s)"); });
+            check_true(e->execute("to_json(from_json(s)) == s").as_bool());
+            check_throws([&]() { e->execute("from_json(\"[[[\")"); });
         });
 
         // ---- #23 field initializers run in DECLARATION order (not intern order) ----

@@ -173,13 +173,69 @@ public:
         write_string(key);
     }
 
-    void write_value(const script_value& value) {
-        if (value.is_reference()) [[unlikely]] {
-            write_value(value.deref());
-            return;
+    // One value, its containers, instances and handle payloads walked on an explicit frame stack: nesting costs memory, never
+    // native depth
+    void write_value(const script_value& root) {
+        std::vector<value_frame> frames;
+        if (!begin_value(root, frames)) { return; }
+        script_value scratch(std::monostate{}, engine_ref_);
+        while (!frames.empty()) {
+            const script_value* child = next_child(frames.back(), scratch);
+            if (!child) {
+                frames.pop_back();
+                continue;
+            }
+            if (!begin_value(*child, frames)) { return; }   // a getter threw into the backend: the in-flight exception leaves the archive
         }
-        // Track depth - throws on overflow (hard failure, no partial data)
-        depth_guard guard(current_depth_);
+    }
+
+private:
+    enum class frame_shape : uint8_t { values, array, map };
+    struct value_frame {
+        value_frame(frame_shape a_shape, script_value a_source) : shape(a_shape), source(std::move(a_source)) {}
+        frame_shape shape;
+        script_value source;              // the array or map, unused for values
+        size_t index = 0;
+        size_t count = 0;
+        bool value_next = false;          // a map entry's key went out: its value is next
+        script_map::const_iterator next{};
+        std::vector<script_value> values; // a handle's payload, or an instance's property values in order
+    };
+
+    // The frame's next child, in its container (whose storage stays put while frames move) or in scratch when it had to be
+    // made; null when the frame has none left
+    const script_value* next_child(value_frame& f, script_value& scratch) {
+        switch (f.shape) {
+            case frame_shape::values:
+                if (f.index >= f.values.size()) { return nullptr; }
+                return &f.values[f.index++];
+            case frame_shape::array: {
+                if (f.index >= f.count) { return nullptr; }
+                const script_array* node = f.source.unchecked_array_node();
+                const size_t i = f.index++;
+                if (node->kind() == script_array::kind_t::hetero) { return &node->values()[i]; }
+                scratch = node->get(i, f.source.get_engine());
+                return &scratch;
+            }
+            case frame_shape::map: {
+                if (f.next == f.source.as_map().end()) { return nullptr; }
+                if (!f.value_next) {
+                    f.value_next = true;
+                    return &f.next->first;
+                }
+                const script_value* child = &f.next->second;
+                f.value_next = false;
+                ++f.next;
+                return child;
+            }
+        }
+        return nullptr;
+    }
+
+    // Writes a leaf whole, or a container's header and the frame that writes its children; false when a getter threw into
+    // the backend
+    bool begin_value(const script_value& given, std::vector<value_frame>& frames) {
+        const script_value& value = given.is_reference() ? given.deref() : given;
 
         // Write type tag first
         write_uint8(static_cast<uint8_t>(value.type()));
@@ -188,19 +244,19 @@ public:
             case script_value_type::jai_null_type:
                 // Nothing to write
                 break;
-                
+
             case script_value_type::jai_bool_type:
                 write_bool(value.as<script_bool>());
                 break;
-                
+
             case script_value_type::jai_int_type:
                 write_int64(value.as<script_int>());
                 break;
-                
+
             case script_value_type::jai_float_type:
                 write_float64(value.as<script_float>());
                 break;
-                
+
             case script_value_type::jai_string_type:
                 write_string(value.as<script_string>());
                 break;
@@ -234,27 +290,28 @@ public:
             case script_value_type::jai_char_type:
                 write_uint8(static_cast<uint8_t>(value.as<script_char>()));
                 break;
-                
+
             case script_value_type::jai_array_type: {
                 const script_array* node = value.unchecked_array_node();
                 if (!node) { throw runtime_error("script_value is not an array"); }
                 write_uint32(static_cast<uint32_t>(node->size()));
-                node->for_each(value.get_engine(), [&](const script_value& elem) {
-                    write_value(elem);  // Recursive serialization
-                });
-                break;
-            }
-            
-            case script_value_type::jai_map_type: {
-                const auto& map = value.as_map();
-                write_uint32(static_cast<uint32_t>(map.size()));
-                for (const auto& [k, v] : map) {
-                    write_value(k);   // Serialize key
-                    write_value(v);   // Serialize value
+                if (node->size() > 0) {
+                    value_frame& f = frames.emplace_back(frame_shape::array, value);
+                    f.count = node->size();
                 }
                 break;
             }
-            
+
+            case script_value_type::jai_map_type: {
+                const auto& map = value.as_map();
+                write_uint32(static_cast<uint32_t>(map.size()));
+                if (map.size() > 0) {
+                    value_frame& f = frames.emplace_back(frame_shape::map, value);
+                    f.next = map.begin();
+                }
+                break;
+            }
+
             case script_value_type::jai_weak_ptr_type: {
                 // Serialize weak_ptr by tracking the shared_ptr it references
                 auto weak = value.get_weak_ptr();
@@ -271,15 +328,15 @@ public:
                     // If this is the first time seeing this shared object, serialize the data
                     // This makes serialization order-independent: weak_ptr can come before or after shared_ptr
                     if (is_new) {
-                        write_value(weak_target_value(shared));
+                        frames.emplace_back(frame_shape::values, script_value(std::monostate{}, engine_ref_)).values.push_back(weak_target_value(shared));
                     }
                 }
                 break;
             }
-            
+
             case script_value_type::jai_shared_ptr_type: {
                 // A shared handle: the object once under its id, every later handle the id alone (identity survives the load)
-                auto holder = value.deref().get_object_holder();
+                auto holder = value.get_object_holder();
                 if (!holder) {
                     write_uint32(0);
                     break;
@@ -287,7 +344,7 @@ public:
                 auto [id, is_new] = track_shared_ptr(holder.get());
                 write_uint32(id);
                 if (is_new) {
-                    write_value(weak_target_value(holder));
+                    frames.emplace_back(frame_shape::values, script_value(std::monostate{}, engine_ref_)).values.push_back(weak_target_value(holder));
                 }
                 break;
             }
@@ -298,16 +355,16 @@ public:
                 std::string type_name = type_info ? type_info->type_name : "unknown";
 
                 // For script classes, type_info->type_name may be "any" - use the actual class name
+                std::shared_ptr<class_instance> instance;
                 try {
-                    auto instance = value.as<std::shared_ptr<class_instance>>();
-                    if (instance) {
-                        auto class_def = instance->get_class_definition();
-                        if (class_def) {
-                            type_name = class_def->get_name();
-                        }
-                    }
+                    instance = value.as<std::shared_ptr<class_instance>>();
                 } catch (...) {
-                    // Not a class_instance, keep original type_name
+                    // not a class_instance: an empty object under its type's name
+                }
+                if (instance) {
+                    if (auto class_def = instance->get_class_definition()) {
+                        type_name = class_def->get_name();
+                    }
                 }
 
                 // Write type name first
@@ -333,13 +390,6 @@ public:
                 // Collect properties and values
                 std::vector<std::string> property_names;
                 std::vector<script_value> property_values;
-                
-                std::shared_ptr<class_instance> instance;
-                try {
-                    instance = value.as<std::shared_ptr<class_instance>>();
-                } catch (...) {
-                    // not a class_instance: an empty object
-                }
                 if (instance) {
                     auto class_def = instance->get_class_definition();
                     if (class_def) {
@@ -348,32 +398,32 @@ public:
                                 property_names.push_back(std::string(prop_name));
                                 property_values.push_back(std::move(prop_value));
                             })) {
-                            return;
+                            return false;
                         }
                     }
                 }
-                
+
                 // Write property count
                 write_uint32(static_cast<uint32_t>(property_names.size()));
-                
+
                 // Write property names array
                 for (const auto& prop_name : property_names) {
                     write_string(prop_name);
                 }
-                
-                // Write property values in same order
-                for (const auto& prop_value : property_values) {
-                    write_value(prop_value);
+
+                // The values follow in the same order
+                if (!property_values.empty()) {
+                    frames.emplace_back(frame_shape::values, script_value(std::monostate{}, engine_ref_)).values = std::move(property_values);
                 }
                 break;
             }
-            
+
             default:
                 throw serialization_error("Unsupported type for binary serialization: " + std::to_string(static_cast<int>(value.type())));
         }
+        return true;
     }
 
-private:
     std::vector<uint8_t>* buffer_ = nullptr;
     std::vector<uint8_t> owned_buffer_;
 
@@ -623,6 +673,7 @@ public:
             throw serialization_error("Binary archive object property count exceeds remaining data");
         }
 
+        enter_host_record(object_stack_.size());
         // Pre-read all properties for out-of-order access
         object_stack_.emplace_back();
         auto& state = object_stack_.back();
@@ -822,19 +873,6 @@ private:
     size_t pos_;
     std::unordered_set<uint32_t> handle_ids_read_;
 
-    // A script handle reads back in from_json's tagged shape; its object follows the id's first appearance, since the
-    // writer and the reader walk one order
-    script_value read_handle(engine* eng, const char* id_key, const char* data_key) {
-        const uint32_t id = read_little_endian<uint32_t>();
-        script_value result = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
-        auto& map = const_cast<script_map&>(result.as_map());
-        map.insert_or_assign(script_value(std::string(id_key), eng), script_value(static_cast<script_int>(id), eng));
-        if (id != 0 && handle_ids_read_.insert(id).second) {
-            map.insert_or_assign(script_value(std::string(data_key), eng), read_value_internal());
-        }
-        return result;
-    }
-
     void read_raw(void* dest, size_t size) {
         if (pos_ + size > data_.size()) {
             throw runtime_error("Binary archive read past end of data");
@@ -880,42 +918,77 @@ private:
         return result;
     }
 
+    // One value; its arrays, maps, objects and handle payloads open frames on an explicit stack, so nesting costs memory,
+    // never native depth
     script_value read_value_internal() {
-        // Track depth - throws on overflow (hard failure, no partial data)
-        depth_guard guard(current_depth_);
-
-        // Get engine reference once at the start
         auto eng = engine_ref_;
         if (!eng) {
             throw serialization_error("Engine reference expired during deserialization");
         }
+        std::vector<value_frame> frames;
+        for (;;) {
+            script_value value(std::monostate{}, eng);
+            if (!read_or_open(eng, frames, value)) { continue; }
+            for (;;) {
+                if (frames.empty()) { return value; }
+                value_frame& f = frames.back();
+                take_child(eng, f, std::move(value));
+                if (f.remaining > 0) { break; }
+                value = finish_frame(eng, f);
+                frames.pop_back();
+            }
+        }
+    }
 
-        // Read type tag first
+    enum class frame_shape : uint8_t { array, map, handle, object };
+    struct value_frame {
+        value_frame(frame_shape a_shape, uint64_t a_remaining, script_value a_built, engine* a_eng) :
+            shape(a_shape), remaining(a_remaining), built(std::move(a_built)), key(std::monostate{}, a_eng) {}
+        frame_shape shape;
+        uint64_t remaining;
+        script_value built;
+        script_value key;
+        bool have_key = false;
+        const char* data_key = nullptr;
+        std::string type_name;
+        uint32_t version = 0;
+        std::vector<std::string> names;
+        std::vector<script_value> values;
+    };
+
+    // A leaf value read whole (true), or a container that opened a frame for its children (false)
+    bool read_or_open(engine* eng, std::vector<value_frame>& frames, script_value& out) {
         uint8_t type_tag = read_uint8_raw();
         script_value_type vtype = static_cast<script_value_type>(type_tag);
 
         switch (vtype) {
             case script_value_type::jai_null_type:
-                return script_value(std::monostate{}, eng);
+                out = script_value(std::monostate{}, eng);
+                return true;
 
             case script_value_type::jai_bool_type:
-                return script_value(read_uint8_raw() != 0, eng);
+                out = script_value(read_uint8_raw() != 0, eng);
+                return true;
 
             case script_value_type::jai_int_type:
-                return script_value(read_little_endian<int64_t>(), eng);
+                out = script_value(read_little_endian<int64_t>(), eng);
+                return true;
 
             case script_value_type::jai_float_type: {
                 uint64_t bits = read_little_endian<uint64_t>();
                 double value;
                 std::memcpy(&value, &bits, sizeof(value));
-                return script_value(value, eng);
+                out = script_value(value, eng);
+                return true;
             }
 
             case script_value_type::jai_string_type:
-                return script_value(read_string_raw(), eng);
+                out = script_value(read_string_raw(), eng);
+                return true;
 
             case script_value_type::jai_utf8_string_type:
-                return script_value::make_utf8(read_string_raw(), eng);
+                out = script_value::make_utf8(read_string_raw(), eng);
+                return true;
 
             case script_value_type::jai_vec2_type:
             case script_value_type::jai_vec3_type:
@@ -931,11 +1004,13 @@ private:
                     if (detail::math::integral(kind)) { i[k] = static_cast<int32_t>(bits); }
                     else { std::memcpy(&f[k], &bits, sizeof(bits)); }
                 }
-                return detail::math::make(kind, f, i, eng);
+                out = detail::math::make(kind, f, i, eng);
+                return true;
             }
 
             case script_value_type::jai_char_type:
-                return script_value(static_cast<script_char>(read_uint8_raw()), eng);
+                out = script_value(static_cast<script_char>(read_uint8_raw()), eng);
+                return true;
 
             case script_value_type::jai_array_type: {
                 uint32_t size = read_little_endian<uint32_t>();
@@ -943,12 +1018,13 @@ private:
                     throw runtime_error("Binary archive array size exceeds remaining data");
                 }
                 script_value array_val = script_value::make_array(nullptr, eng);
-                auto& arr = const_cast<std::vector<script_value>&>(array_val.as_array());
-
-                for (uint32_t i = 0; i < size; ++i) {
-                    arr.push_back(read_value_internal());
+                if (size == 0) {
+                    out = std::move(array_val);
+                    return true;
                 }
-                return array_val;
+                const_cast<std::vector<script_value>&>(array_val.as_array()).reserve(size);
+                frames.emplace_back(frame_shape::array, size, std::move(array_val), eng);
+                return false;
             }
 
             case script_value_type::jai_map_type: {
@@ -957,21 +1033,31 @@ private:
                     throw runtime_error("Binary archive map size exceeds remaining data");
                 }
                 script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
-                auto& map = const_cast<script_map&>(map_val.as_map());
-
-                for (uint32_t i = 0; i < size; ++i) {
-                    script_value key = read_value_internal();
-                    script_value value = read_value_internal();
-                    map.insert_or_assign(key, value);
+                if (size == 0) {
+                    out = std::move(map_val);
+                    return true;
                 }
-                return map_val;
+                frames.emplace_back(frame_shape::map, uint64_t(size) * 2, std::move(map_val), eng);
+                return false;
             }
 
             case script_value_type::jai_weak_ptr_type:
-                return read_handle(eng, "$weak_ptr_id", "$weak_ptr_data");
-
-            case script_value_type::jai_shared_ptr_type:
-                return read_handle(eng, "$shared_ptr_id", "$shared_ptr_data");
+            case script_value_type::jai_shared_ptr_type: {
+                // A script handle reads back in from_json's tagged shape; its object follows the id's first appearance, since
+                // the writer and the reader walk one order
+                const bool weak = vtype == script_value_type::jai_weak_ptr_type;
+                const uint32_t id = read_little_endian<uint32_t>();
+                script_value record = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+                const_cast<script_map&>(record.as_map()).insert_or_assign(script_value(std::string(weak ? "$weak_ptr_id" : "$shared_ptr_id"), eng),
+                                                                          script_value(static_cast<script_int>(id), eng));
+                if (id == 0 || !handle_ids_read_.insert(id).second) {
+                    out = std::move(record);
+                    return true;
+                }
+                value_frame& f = frames.emplace_back(frame_shape::handle, 1, std::move(record), eng);
+                f.data_key = weak ? "$weak_ptr_data" : "$shared_ptr_data";
+                return false;
+            }
 
             case script_value_type::jai_object_type: {
                 std::string type_name = read_string_raw();
@@ -983,84 +1069,115 @@ private:
                 if (property_count > remaining_bytes() / 5) {
                     throw serialization_error("Binary archive object property count exceeds remaining data");
                 }
-
-                std::vector<std::string> property_names;
-                property_names.reserve(property_count);
+                value_frame f(frame_shape::object, property_count, script_value(std::monostate{}, eng), eng);
+                f.type_name = std::move(type_name);
+                f.version = version;
+                f.names.reserve(property_count);
                 for (uint32_t i = 0; i < property_count; ++i) {
-                    property_names.push_back(read_string_raw());
+                    f.names.push_back(read_string_raw());
                 }
-
-                std::vector<script_value> property_values;
-                property_values.reserve(property_count);
-                for (uint32_t i = 0; i < property_count; ++i) {
-                    property_values.push_back(read_value_internal());
+                f.values.reserve(property_count);
+                if (property_count == 0) {
+                    out = finish_frame(eng, f);
+                    return true;
                 }
-
-                const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
-                if (metadata && metadata->custom_construct) {
-                    any_archive_reader any_ar(*this);
-                    script_value constructed_obj = metadata->custom_construct(any_ar, version);
-
-                    auto instance = constructed_obj.as<std::shared_ptr<class_instance>>();
-                    if (instance) {
-                        auto class_def = instance->get_class_definition();
-                        if (class_def) {
-                            auto class_eng = class_def->get_engine();
-                            if (class_eng) {
-                                for (uint32_t i = 0; i < property_count; ++i) {
-                                    const auto& prop_name = property_names[i];
-                                    const auto& prop_value = property_values[i];
-
-                                    uint64_t setter_id = class_eng->symbolize("_set_" + prop_name);
-                                    auto setter = class_def->get_method(setter_id);
-                                    if (setter.type() == script_value_type::jai_function_type) {
-                                        std::vector<script_value> args = {constructed_obj, prop_value};
-                                        auto stored = setter.as_function()(args);
-                                        if (!stored && (class_def->script_declares_user_accessor(setter_id) ||
-                                                        stored.error() == make_error_code(runtime_error_code::cpp_exception))) {
-                                            throw runtime_error(class_eng->format_error(stored));
-                                        }
-                                        if (class_eng->backend_unwinding()) {
-                                            return constructed_obj;   // the setter threw: the in-flight exception leaves the load
-                                        }
-                                    }
-                                }
-
-                                uint64_t post_load_id = class_eng->symbolize("post_load");
-                                auto post_load = class_def->get_method(post_load_id, false);
-                                if (post_load.type() == script_value_type::jai_function_type) {
-                                    std::vector<script_value> args = {
-                                        constructed_obj,
-                                        script_value(static_cast<script_int>(version), class_eng)
-                                    };
-                                    auto loaded = post_load.as_function()(args);
-                                    if (!loaded) {
-                                        throw runtime_error(class_eng->format_error(loaded));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    return constructed_obj;
-                }
-
-                script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
-                auto& map = const_cast<script_map&>(map_val.as_map());
-
-                map.insert_or_assign(script_value("_type_", eng), script_value(type_name, eng));
-
-                for (uint32_t i = 0; i < property_count; ++i) {
-                    map.insert_or_assign(script_value(property_names[i], eng), property_values[i]);
-                }
-
-                return map_val;
+                frames.push_back(std::move(f));
+                return false;
             }
 
             default:
                 throw serialization_error("Unsupported type tag in binary deserialization: " +
                                         std::to_string(type_tag));
         }
+    }
+
+    void take_child(engine* eng, value_frame& f, script_value&& child) {
+        --f.remaining;
+        switch (f.shape) {
+            case frame_shape::array:
+                const_cast<std::vector<script_value>&>(f.built.as_array()).push_back(std::move(child));
+                break;
+            case frame_shape::map:
+                if (!f.have_key) {
+                    f.key = std::move(child);
+                    f.have_key = true;
+                } else {
+                    const_cast<script_map&>(f.built.as_map()).insert_or_assign(std::move(f.key), std::move(child));
+                    f.key = script_value(std::monostate{}, eng);
+                    f.have_key = false;
+                }
+                break;
+            case frame_shape::handle:
+                const_cast<script_map&>(f.built.as_map()).insert_or_assign(script_value(std::string(f.data_key), eng), std::move(child));
+                break;
+            case frame_shape::object:
+                f.values.push_back(std::move(child));
+                break;
+        }
+    }
+
+    script_value finish_frame(engine* eng, value_frame& f) {
+        if (f.shape != frame_shape::object) { return std::move(f.built); }
+        const uint32_t property_count = static_cast<uint32_t>(f.names.size());
+        const auto* metadata = eng->get_serialization_registry().get_class_metadata(f.type_name);
+        if (metadata && metadata->custom_construct) {
+            any_archive_reader any_ar(*this);
+            script_value constructed_obj = metadata->custom_construct(any_ar, f.version);
+
+            auto instance = constructed_obj.as<std::shared_ptr<class_instance>>();
+            if (instance) {
+                auto class_def = instance->get_class_definition();
+                if (class_def) {
+                    auto class_eng = class_def->get_engine();
+                    if (class_eng) {
+                        for (uint32_t i = 0; i < property_count; ++i) {
+                            const auto& prop_name = f.names[i];
+                            const auto& prop_value = f.values[i];
+
+                            uint64_t setter_id = class_eng->symbolize("_set_" + prop_name);
+                            auto setter = class_def->get_method(setter_id);
+                            if (setter.type() == script_value_type::jai_function_type) {
+                                std::vector<script_value> args = {constructed_obj, prop_value};
+                                auto stored = setter.as_function()(args);
+                                if (!stored && (class_def->script_declares_user_accessor(setter_id) ||
+                                                stored.error() == make_error_code(runtime_error_code::cpp_exception))) {
+                                    throw runtime_error(class_eng->format_error(stored));
+                                }
+                                if (class_eng->backend_unwinding()) {
+                                    return constructed_obj;   // the setter threw: the in-flight exception leaves the load
+                                }
+                            }
+                        }
+
+                        uint64_t post_load_id = class_eng->symbolize("post_load");
+                        auto post_load = class_def->get_method(post_load_id, false);
+                        if (post_load.type() == script_value_type::jai_function_type) {
+                            std::vector<script_value> args = {
+                                constructed_obj,
+                                script_value(static_cast<script_int>(f.version), class_eng)
+                            };
+                            auto loaded = post_load.as_function()(args);
+                            if (!loaded) {
+                                throw runtime_error(class_eng->format_error(loaded));
+                            }
+                        }
+                    }
+                }
+            }
+
+            return constructed_obj;
+        }
+
+        script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+        auto& map = const_cast<script_map&>(map_val.as_map());
+
+        map.insert_or_assign(script_value("_type_", eng), script_value(f.type_name, eng));
+
+        for (uint32_t i = 0; i < property_count; ++i) {
+            map.insert_or_assign(script_value(f.names[i], eng), std::move(f.values[i]));
+        }
+
+        return map_val;
     }
 };
 

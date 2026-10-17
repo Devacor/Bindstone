@@ -8,8 +8,6 @@
 namespace jai {
 namespace stdlib {
 
-    std::string to_json_impl(const script_value& val, int indent, int current_depth);
-
 	// The script handles one load resolves: {"$shared_ptr_id": N, "$shared_ptr_data": object} at an object's first appearance in
 	// write order, {"$shared_ptr_id": N} after it, and the $weak_ptr_id twins alias one object per id across the archive. A load
 	// visits keys in map order, not write order, so an id met before its object finds the object's archived form by index

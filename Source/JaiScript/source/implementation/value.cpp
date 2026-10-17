@@ -1252,12 +1252,6 @@ script_value script_value::make_function(script_function&& func, engine* eng) {
     return v;
 }
 
-namespace {
-    [[noreturn]] JAI_NOINLINE void throw_copy_too_deep() {
-        throw runtime_error("Cannot copy: the value nests too deep for the host thread's stack");
-    }
-}
-
 #ifdef JAISCRIPT_VM_COVERAGE
 namespace {
     // the raw indexes whose copy touches a refcount
@@ -1337,6 +1331,31 @@ script_value script_value::clone_uncounted() const {
 #else
 script_value script_value::clone() const {
 #endif
+    detail::deep_copy_work work;
+    script_value result = clone_level(work, 0);
+    detail::finish_deep_copy(work);
+    return result;
+}
+
+void detail::finish_deep_copy(deep_copy_work& work) {
+    while (!work.empty()) {
+        deep_copy_item item = std::move(work.back());
+        work.pop_back();
+        *item.dest = item.source.clone_level(work, 0);
+    }
+}
+
+void script_value::clone_element_into(script_value& dest, detail::deep_copy_work& work, unsigned depth) const {
+    if (element_copies_shallow()) {
+        dest = *this;
+    } else if (depth < detail::k_inline_copy_depth) {
+        dest = clone_level(work, depth + 1);
+    } else {
+        work.push_back({*this, &dest});
+    }
+}
+
+script_value script_value::clone_level(detail::deep_copy_work& work, unsigned depth) const {
     if (!engine_) {
         throw runtime_error("Cannot clone script_value: missing engine pointer");
     }
@@ -1357,7 +1376,7 @@ script_value script_value::clone() const {
         }
 
         if (obj_holder->is_class_instance_wrapper) {
-            auto new_instance = static_cast<const class_instance*>(obj_holder->data.get())->deep_copy();
+            auto new_instance = static_cast<const class_instance*>(obj_holder->data.get())->deep_copy_level(work, depth);
 
             auto new_holder = acquire_object_holder(engine_);
             new_holder->type_name = obj_holder->type_name;
@@ -1397,12 +1416,6 @@ script_value script_value::clone() const {
     script_value result(std::monostate{}, engine_);  // Preserve engine pointer!
     result.type_info_ = type_info_;
 
-    // A container's deep copy recurses natively per nesting level: a deep enough value raises before the stack runs out
-    const size_t kind = raw_storage_index();
-    if ((kind == TYPEID_ARRAY || kind == TYPEID_MAP || kind == TYPEID_OBJECT) && detail::native_stack_low()) [[unlikely]] {
-        throw_copy_too_deep();
-    }
-
     // Use current_type() to check what's actually stored, not the declared type
     switch (current_type()) {
         case script_value_type::jai_array_type: {
@@ -1415,7 +1428,9 @@ script_value script_value::clone() const {
                 auto new_node = make_strong<script_array>(script_array::kind_t::obj);
                 new_node->reserve(n);
                 for (size_t i = 0; i < n; ++i) {
-                    new_node->push(other_node.get(i, engine_).clone_element());
+                    // a slot holds the object itself, never a placeholder: the element copies its own level now and defers below it
+                    script_value element = other_node.get(i, engine_);
+                    new_node->push(element.element_copies_shallow() ? std::move(element) : element.clone_level(work, depth + 1));
                 }
                 result.storage_ = new_node;
                 break;
@@ -1433,9 +1448,15 @@ script_value script_value::clone() const {
             // loop back-edge); element clones charge themselves recursively
             engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (other_array.size() + 1));
             auto new_node = make_strong<script_array>();
-            new_node->values().reserve(other_array.size());
+            auto& copied = new_node->values();
+            copied.reserve(other_array.size());   // no reallocation: a deferred element's placeholder stays where it is
             for (const auto& elem : other_array) {
-                new_node->values().push_back(elem.clone_element());
+                if (elem.element_copies_shallow()) {
+                    copied.push_back(elem);
+                } else {
+                    copied.push_back(script_value(std::monostate{}, engine_));
+                    elem.clone_element_into(copied.back(), work, depth);
+                }
             }
             result.storage_ = new_node;
             break;
@@ -1447,7 +1468,12 @@ script_value script_value::clone() const {
             engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (other_map.size() + 1));
             auto new_map = make_strong<script_map>();
             for (const auto& [key, value] : other_map) {
-                new_map->emplace(key.clone_element(), value.clone_element());
+                if (value.element_copies_shallow()) {
+                    new_map->emplace(key.clone_element(), value);
+                } else {
+                    auto placed = new_map->emplace(key.clone_element(), script_value(std::monostate{}, engine_));
+                    value.clone_element_into(placed.first->second, work, depth);   // map entries never move
+                }
             }
             result.storage_ = new_map;
             break;
@@ -1466,7 +1492,7 @@ script_value script_value::clone() const {
             }
 
             if (obj_holder->is_class_instance_wrapper) {
-                auto new_instance = static_cast<const class_instance*>(obj_holder->data.get())->deep_copy();
+                auto new_instance = static_cast<const class_instance*>(obj_holder->data.get())->deep_copy_level(work, depth);
 
                 auto new_holder = acquire_object_holder(engine_);
                 new_holder->type_name = obj_holder->type_name;
@@ -1508,7 +1534,7 @@ script_value script_value::clone() const {
         case script_value_type::jai_reference_type: {
             // When cloning a reference, we want to clone the referenced value,
             // not create another reference to the same value
-            return deref().clone();
+            return deref().clone_level(work, depth);
         }
         case script_value_type::jai_weak_ptr_type: {
             // For weak_ptr, shallow copy the weak_ptr itself (copy the weak reference)
@@ -1596,12 +1622,33 @@ namespace {
 
 script_value script_value::parallel_detached_copy(std::vector<type_info*>* collected_types,
                                                   std::vector<const void*>* collected_nodes) const {
+    detail::deep_copy_work work;
+    script_value result = parallel_detached_level(collected_types, collected_nodes, work, 0);
+    while (!work.empty()) {
+        detail::deep_copy_item item = std::move(work.back());
+        work.pop_back();
+        *item.dest = item.source.parallel_detached_level(collected_types, collected_nodes, work, 0);
+    }
+    return result;
+}
+
+script_value script_value::parallel_detached_level(std::vector<type_info*>* collected_types, std::vector<const void*>* collected_nodes,
+                                                   detail::deep_copy_work& work, unsigned depth) const {
+    // a container element detaches inline while shallow, past that into a placeholder the work list fills
+    auto detach_into = [&](const script_value& element, script_value& dest) {
+        const size_t kind = element.raw_storage_index();
+        if (depth < detail::k_inline_copy_depth || (kind != TYPEID_ARRAY && kind != TYPEID_MAP && kind != TYPEID_REFERENCE)) {
+            dest = element.parallel_detached_level(collected_types, collected_nodes, work, depth + 1);
+        } else {
+            work.push_back({element, &dest});
+        }
+    };
     if (!engine_) {
         throw runtime_error("Cannot detach script_value: missing engine pointer");
     }
     const size_t idx = raw_storage_index();
     if (idx == TYPEID_REFERENCE) {
-        return deref().parallel_detached_copy(collected_types, collected_nodes);
+        return deref().parallel_detached_level(collected_types, collected_nodes, work, depth);
     }
     if (collected_types && type_info_.get()) {
         collected_types->push_back(type_info_.get());
@@ -1654,7 +1701,7 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
                 auto fresh = make_strong<script_array>(script_array::kind_t::obj);
                 fresh->reserve(n);
                 for (size_t i = 0; i < n; ++i) {
-                    fresh->push(handle->get(i, engine_).parallel_detached_copy(collected_types, collected_nodes));
+                    fresh->push(handle->get(i, engine_).parallel_detached_level(collected_types, collected_nodes, work, depth + 1));
                 }
                 if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
                 result.storage_ = fresh;
@@ -1668,9 +1715,10 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
             }
             engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (handle->size() + 1));
             auto fresh = make_strong<script_array>();
-            fresh->values().reserve(handle->size());
+            fresh->values().reserve(handle->size());   // no reallocation: a deferred element's placeholder stays where it is
             for (const auto& elem : handle->values()) {
-                fresh->values().push_back(elem.parallel_detached_copy(collected_types, collected_nodes));
+                fresh->values().push_back(script_value(std::monostate{}, engine_));
+                detach_into(elem, fresh->values().back());
             }
             if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
             result.storage_ = fresh;
@@ -1682,8 +1730,8 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
             engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (handle->size() + 1));
             auto fresh = make_strong<script_map>();
             for (const auto& [key, val] : *handle) {
-                fresh->emplace(key.parallel_detached_copy(collected_types, collected_nodes),
-                               val.parallel_detached_copy(collected_types, collected_nodes));
+                auto placed = fresh->emplace(key.parallel_detached_copy(collected_types, collected_nodes), script_value(std::monostate{}, engine_));
+                detach_into(val, placed.first->second);
             }
             if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
             result.storage_ = fresh;
@@ -1692,7 +1740,7 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
         case TYPEID_CPP_BOUND: {
             if (bound_semantic_index() != TYPEID_NULL) {
                 // Decode, then re-detach so bound strings get fresh storage too
-                return bound_decoded_temp().parallel_detached_copy(collected_types, collected_nodes);
+                return bound_decoded_temp().parallel_detached_level(collected_types, collected_nodes, work, depth);
             }
             throw runtime_error("value is not value-semantic (bound host object)");
         }
@@ -1712,7 +1760,8 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
                 auto fresh = make_strong<script_array>();
                 fresh->values().reserve(arr->size());
                 for (const auto& elem : arr->values()) {
-                    fresh->values().push_back(elem.parallel_detached_copy(collected_types, collected_nodes));
+                    fresh->values().push_back(script_value(std::monostate{}, engine_));
+                    detach_into(elem, fresh->values().back());
                 }
                 if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
                 result.storage_ = fresh;
@@ -1720,8 +1769,8 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
                 engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (map->size() + 1));
                 auto fresh = make_strong<script_map>();
                 for (const auto& [key, val] : *map) {
-                    fresh->emplace(key.parallel_detached_copy(collected_types, collected_nodes),
-                                   val.parallel_detached_copy(collected_types, collected_nodes));
+                    auto placed = fresh->emplace(key.parallel_detached_copy(collected_types, collected_nodes), script_value(std::monostate{}, engine_));
+                    detach_into(val, placed.first->second);
                 }
                 if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
                 result.storage_ = fresh;

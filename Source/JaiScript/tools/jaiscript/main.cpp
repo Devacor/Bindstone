@@ -1579,7 +1579,9 @@ struct repl_session {
 		else if (result.is_char()) { out << '\'' << result.to_string() << '\'' << "\n"; }
 		else if (result.is_array() || result.is_map()) {
 			// to_string says only "[array]"/"[map]" — show the contents like a REPL should
-			out << jai::stdlib::to_json_impl(result, -1, 0) << "\n";   // -1 = compact one-liner
+			jai::serialization::json_archive_writer writer(-1, eng.get());
+			writer.write_value(result);
+			out << writer.str() << "\n";
 		}
 		else { out << result.to_string() << "\n"; }
 	}

@@ -152,7 +152,7 @@ print(text, " -&gt; ", copy.name, " ", copy.hp);
 try { from_json("{bad"); } catch (e) { print("caught: ", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{"_type_":"Hero","name":"Vex","hp":12} -&gt; Vex 12
 caught: Expected '"' in JSON</code></pre></div>
-<p>Nesting deeper than 128 levels stops a parse with <code>Maximum JSON nesting depth (128) exceeded</code>; a host that needs more defines <code>JAI_MAX_JSON_PARSE_DEPTH</code> before including the headers.</p>
+<p>Nesting is bounded by memory, not by a depth limit: the parser and the walks that rebuild script values run on work lists. A host record type whose own <code>serialize</code>/<code>load</code> recurses natively stops at the host thread's stack, or at <code>JAI_MAX_HOST_RECORD_DEPTH</code> (1024) nested records where the stack cannot be asked, raising <code>Record nesting depth exceeds the host thread's stack</code> or <code>Maximum record nesting depth (1024) exceeded</code>.</p>
 
 <h2 id="json-on-the-host-side">JSON on the host side<a class="hlink" href="#json-on-the-host-side" aria-label="link">&#8203;</a></h2>
 <p>The script builtins are functions like any other, so a host that wants a document in C++ calls them through <code>convert_script_function</code> and works with the <code>jai::script_value</code> it gets back:</p>

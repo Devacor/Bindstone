@@ -5,12 +5,15 @@
 
 #include <jaiscript/serialization/archive.hpp>
 
-// Maximum serialization depth (default: 1000)
-// This is high enough for complex nested structures but prevents stack overflow
-// from maliciously crafted data or circular references
-#ifndef JAI_MAX_SERIALIZATION_DEPTH
-#define JAI_MAX_SERIALIZATION_DEPTH 1000
+// Records a load of host types nests at most where the host thread's stack cannot be asked: a host type's own load
+// (serialize, load, load_and_construct) recurses natively once per record it opens, so the reader raises at the stack's
+// margin (detail::native_stack_low) or at this many levels, whichever comes first. Script values never count: their walks
+// run on work lists
+#ifndef JAI_MAX_HOST_RECORD_DEPTH
+#define JAI_MAX_HOST_RECORD_DEPTH 1024
 #endif
+
+namespace jai::detail { bool native_stack_low() noexcept; }
 
 #include <jaiscript/serialization/serialization_metadata.hpp>
 #include <jaiscript/serialization/traits.hpp>
@@ -112,33 +115,7 @@ protected:
     std::unordered_map<const void*, uint32_t> shared_ptr_ids_;
     uint32_t next_shared_id_ = 1;  // 0 reserved for null
 
-    int current_depth_ = 0;
-
     std::stack<SerializationContext> context_stack_;
-
-    // RAII guard for depth tracking - throws on depth exceeded
-    struct depth_guard {
-        int& depth;
-        bool acquired = false;
-
-        depth_guard(int& d) : depth(d) {
-            if (depth >= JAI_MAX_SERIALIZATION_DEPTH) {
-                throw serialization_error(
-                    "Maximum serialization depth (" + std::to_string(JAI_MAX_SERIALIZATION_DEPTH) +
-                    ") exceeded - possible circular reference or deeply nested structure"
-                );
-            }
-            ++depth;
-            acquired = true;
-        }
-
-        ~depth_guard() {
-            if (acquired) --depth;
-        }
-
-        depth_guard(const depth_guard&) = delete;
-        depth_guard& operator=(const depth_guard&) = delete;
-    };
 
     std::pair<uint32_t, bool> track_shared_ptr(const void* raw_ptr) {
         if (raw_ptr == nullptr) {
@@ -168,7 +145,24 @@ protected:
     // stays out. False when a getter threw into the backend: the in-flight exception leaves the archive.
     template <class ClassDef, class Emit>
     bool for_each_serialized_property(const script_value& value, const ClassDef& class_def, engine* eng, Emit&& emit) {
-        for (const auto& prop_name : class_def->get_property_names()) {
+        const std::vector<std::string> names = class_def->get_property_names();
+        size_t index = 0;
+        bool aborted = false;
+        script_value property(std::monostate{}, eng);
+        while (next_serialized_property(value, class_def, eng, names, index, property, aborted)) {
+            emit(names[index - 1], std::move(property));
+            property = script_value(std::monostate{}, eng);
+        }
+        return !aborted;
+    }
+
+    // The next of names (from index on) with a getter, read into out; false when none is left, or when a getter threw into
+    // the backend (aborted)
+    template <class ClassDef>
+    bool next_serialized_property(const script_value& value, const ClassDef& class_def, engine* eng, const std::vector<std::string>& names,
+                                  size_t& index, script_value& out, bool& aborted) {
+        while (index < names.size()) {
+            const std::string& prop_name = names[index++];
             uint64_t getter_id = eng->symbolize("_get_" + prop_name);
             auto getter = class_def->get_method(getter_id);
             if (getter.type() != script_value_type::jai_function_type) { continue; }
@@ -181,10 +175,14 @@ protected:
                 }
                 continue;
             }
-            if (eng->backend_unwinding()) { return false; }
-            emit(prop_name, std::move(result.value()));
+            if (eng->backend_unwinding()) {
+                aborted = true;
+                return false;
+            }
+            out = std::move(result.value());
+            return true;
         }
-        return true;
+        return false;
     }
 
     std::map<std::string, bool> property_enabled_;
@@ -778,32 +776,19 @@ protected:
     // Hashed on std::type_index: libstdc++'s type_info::before is not a strict weak order between internal-linkage and other types
     std::unordered_map<std::type_index, void*> user_contexts_;
 
-    int current_depth_ = 0;
-
-    struct depth_guard {
-        int& depth;
-        bool acquired = false;
-
-        depth_guard(int& d) : depth(d) {
-            if (depth >= JAI_MAX_SERIALIZATION_DEPTH) {
-                throw serialization_error(
-                    "Maximum deserialization depth (" + std::to_string(JAI_MAX_SERIALIZATION_DEPTH) +
-                    ") exceeded - possible malicious data or deeply nested structure"
-                );
-            }
-            ++depth;
-            acquired = true;
-        }
-
-        ~depth_guard() {
-            if (acquired) --depth;
-        }
-
-        depth_guard(const depth_guard&) = delete;
-        depth_guard& operator=(const depth_guard&) = delete;
-    };
-
     uint32_t version_ = 0;
+
+    [[noreturn]] JAI_NOINLINE static void throw_record_depth() {
+        throw serialization_error("Maximum record nesting depth (" + std::to_string(JAI_MAX_HOST_RECORD_DEPTH) + ") exceeded");
+    }
+    [[noreturn]] JAI_NOINLINE static void throw_record_stack() {
+        throw serialization_error("Record nesting depth exceeds the host thread's stack");
+    }
+    // Before a reader opens a record: open_records are the ones already open
+    static void enter_host_record(size_t open_records) {
+        if (open_records >= JAI_MAX_HOST_RECORD_DEPTH) [[unlikely]] { throw_record_depth(); }
+        if (detail::native_stack_low()) [[unlikely]] { throw_record_stack(); }
+    }
 
 public:
     explicit archive_reader_impl(engine* eng) : engine_ref_(eng) {}

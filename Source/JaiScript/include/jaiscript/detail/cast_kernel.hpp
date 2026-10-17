@@ -91,7 +91,10 @@ namespace jai::detail {
 	inline checked_result<script_value> range_for_bind(script_value element, const type_info_ptr& declared, bool by_ref, std::string_view name, engine* eng) {
 		if (!declared) { return element; }
 		if (declared->base_type == script_value_type::jai_any_type) {   // var: takes the element as var x = element; would
-			if (!by_ref) { element.set_type_info(declared); }
+			// a handle keeps its own type, so a copy of the loop variable shares the object as a copy of the handle does
+			const type_info_ptr& tag = element.get_type_info();
+			const bool handle = tag && (tag->base_type == script_value_type::jai_shared_ptr_type || tag->base_type == script_value_type::jai_weak_ptr_type);
+			if (!by_ref && !handle) { element.set_type_info(declared); }
 			return element;
 		}
 		if (!range_for_declared(declared.get())) { return element; }

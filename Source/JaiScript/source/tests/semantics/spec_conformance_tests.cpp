@@ -940,6 +940,21 @@ private:
 				TRACE;
 			)", "|d1|d2");
 		});
+		// A var or auto loop variable takes a handle element as var x = element; would: it stays a handle, so a copy of it shares
+		// the object as a copy of the handle does (the loop stamped it var, and the copy copied the object)
+		test("a_range_for_variable_keeps_a_handle_elements_type", [this]() {
+			expect("loop handles", R"(
+				class C { int x = 0; }
+				var h = new C();
+				for (var v : [h]) { var u = v; u.x = 5; }
+				for (auto v : [h]) { var u = v; u.x += 1; }
+				var arr = [h];
+				for (var v : arr) { var u = v; u.x += 1; }
+				function bump(var c) { c.x += 10; }
+				for (var v : [h]) { bump(v); }
+				"" + h.x;
+			)", "17", check_mode::off);
+		});
 		test("aggregate_copies_copy_values_and_share_handles", [this]() {
 			expect("aggregate copy", R"(
 				class In { int x = 1; }

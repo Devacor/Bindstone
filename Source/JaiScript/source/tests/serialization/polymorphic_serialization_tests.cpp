@@ -2274,6 +2274,26 @@ public:
             check_eq(std::string("2 2 "), eng->execute("seen").as<std::string>(), "the binary archive too");
         });
 
+        // A handle to a nocopy hybrid in an array literal stays a handle through a range-for: passing or copying the loop
+        // variable shares the object (the loop stamped it var, and the copy refused the nocopy class)
+        test("a_range_for_over_a_handle_to_a_nocopy_hybrid_never_copies_it", [&]() {
+            auto eng = hybrid_engine();
+            auto r = eng->execute(R"(
+                class V { int a = 1; }
+                class Lk : NoCopyCreature { int chomp = 3; Lk() : super() {} }
+                class Hy : SlotCreature { int chomp = 3; Hy() : super() {} }
+                var e = V();
+                var hy = Hy();
+                var wa = new Lk();
+                function take(var v) -> int { return 1; }
+                int k = 0;
+                for (var v : [e, hy, wa]) { k += take(v); }
+                for (var v : [wa]) { var u = v; u.chomp = 9; }
+                return "" + k + " " + wa.chomp;
+            )");
+            check_eq(std::string("3 9"), r.as<std::string>(), "the loop variable shares the nocopy object");
+        });
+
         test("a_hybrid_load_over_a_base_with_neither_constructor_names_what_is_missing", [&]() {
             auto eng = hybrid_engine();
             dynamic_binder<StubbornCreature>(*eng, "StubbornCreature")

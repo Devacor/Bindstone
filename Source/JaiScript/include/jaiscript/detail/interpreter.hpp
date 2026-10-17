@@ -19,11 +19,13 @@
 #include "builtin_methods.hpp"
 #include "execution_limits.hpp"
 #include "operator_table.hpp"
+#include "host_member.hpp"
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/core/types.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
+#include <array>
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
@@ -1377,6 +1379,11 @@ namespace jai {
         // arbitrary env reach are unsafe off-thread) checks this, gated by
         // engine::allow_unsafe_parallel. Never set on the engine's own backend.
         bool parallel_worker_ = false;
+        // The bound C++ members this interpreter reached in place, by member node: its own rows, so workers share nothing
+        struct host_member_row { const member_expr* node = nullptr; const class_definition* cd = nullptr; uint64_t epoch = 0; detail::host_member_hit hit; };
+        std::array<host_member_row, 128> host_member_rows_{};
+        void* host_member_cached(const member_expr* node, class_definition* cd, class_instance* inst, const script_value& receiver,
+                                 const detail::host_member_lane*& lane);
         // Shadowing unit of the running code (string_symbolizer::current_unit): set around a call from the
         // callee's function or class, restored after; a worker interpreter never writes it (the symbolizer
         // is shared, and a worker's environments consult their private sink, never the versions)

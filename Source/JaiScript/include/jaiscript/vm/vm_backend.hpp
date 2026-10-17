@@ -2335,6 +2335,9 @@ namespace jai::vm {
         // fill (slot UINT32_MAX = negative: same_as / nonpublic chain / sp-builtin name /
         // custom-getter shadow / no field slot)
         uint32_t member_read_slot_probe(class_definition* cd, member_expr* expr);
+        // a negative member_ic row on a bound C++ class: the member's in-place lane when the ladder would reach its accessors
+        void fill_host_member_hit(class_definition* cd, const class_instance* inst, uint64_t member_id, const script_value& receiver,
+                                  chunk::member_ic_entry& entry);
         // Fused-INDEX member container `base.member[...]`: the GET_MEMBER site IC at the
         // fused op's own member_ic row, member_access_value ladder for everything else
         op_status fused_member_container(frame& f, size_t site, const script_value& base,

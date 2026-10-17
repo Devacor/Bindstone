@@ -12,6 +12,7 @@
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/slot_site.hpp>
 #include <jaiscript/detail/arity_diagnostic.hpp>
+#include <jaiscript/detail/host_member.hpp>
 #include <set>
 #include <unordered_set>
 #include <algorithm>
@@ -1622,6 +1623,25 @@ public:
         return nullptr;
     }
 
+    // A bound data member's in-place lane (detail/host_member.hpp); chain-aware like the accessors. Registering bumps the
+    // method epoch, so every cached hit refills.
+    void register_host_member_lane(uint64_t field_id, std::shared_ptr<const detail::host_member_lane> lane);
+    const detail::host_member_lane* host_member_lane_for(uint64_t field_id) const {
+        auto it = host_member_lanes_.find(field_id);
+        if (it != host_member_lanes_.end()) {
+            return it->second.get();
+        }
+        for (const auto& parent : parent_classes_) {
+            if (parent) {
+                if (const auto* inherited = parent->host_member_lane_for(field_id)) { return inherited; }
+            }
+        }
+        return nullptr;
+    }
+    // The bound C++ type has a vtable: its objects carry their dynamic type in their first word
+    void set_cpp_polymorphic(bool polymorphic) { cpp_polymorphic_ = polymorphic; }
+    bool cpp_polymorphic() const { return cpp_polymorphic_; }
+
     bool is_transparent_wrapper() const { return is_transparent_wrapper_; }
 
     script_value unwrap(script_value& wrapper_value) const {
@@ -2378,6 +2398,8 @@ private:
     std::unordered_map<uint64_t, uint64_t> property_getter_ids_;
     std::unordered_set<uint64_t> read_only_property_ids_;
     std::unordered_map<uint64_t, cpp_member_accessor> property_member_accessors_;
+    std::unordered_map<uint64_t, std::shared_ptr<const detail::host_member_lane>> host_member_lanes_;
+    bool cpp_polymorphic_ = false;
 
     bool has_property_getters_ = false;
 

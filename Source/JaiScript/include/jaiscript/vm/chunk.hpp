@@ -7,6 +7,7 @@
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/host_member.hpp>
 #include <deque>
 #include <memory>
 #include <string>
@@ -707,6 +708,7 @@ namespace jai::vm {
             uint32_t slot = UINT32_MAX;
             type_info* scalar_type = nullptr;   // a store site's int, float or bool field: its declared type and storage kind
             uint8_t scalar_kind = 0;
+            detail::host_member_hit host;       // slot UINT32_MAX on a bound C++ class: the member's in-place lane, when it has one
         };
         mutable std::vector<member_ic_entry> member_ic;
         // Compile-time sticky-method-scope gate: true = no op parks per-call state in the

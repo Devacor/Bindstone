@@ -1,4 +1,5 @@
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/detail/host_member_access.hpp>
 #include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <jaiscript/detail/uniquely_held.hpp>
 #include <jaiscript/detail/release_machine.hpp>
@@ -4558,6 +4559,25 @@ checked_result<script_value> interpreter::assign_math_component(script_value& ba
         detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()}, environment_.get(), engine_, string_symbolizer_);
 }
 
+// a bound C++ member reached in place (detail/host_member_access.hpp): the row fills once per node, class and method epoch
+void* interpreter::host_member_cached(const member_expr* node, class_definition* cd, class_instance* inst, const script_value& receiver,
+                                      const detail::host_member_lane*& lane) {
+    host_member_row& row = host_member_rows_[(reinterpret_cast<uintptr_t>(node) >> 4) & 127];
+    if (row.node != node || row.cd != cd || row.epoch != cd->method_epoch()) {
+        row.node = node;
+        row.cd = cd;
+        row.epoch = cd->method_epoch();
+        if (node->member_id == UINT64_MAX || !detail::host_member_fill(cd, inst, node->member_id, receiver, engine_, row.hit)) {
+            row.hit = detail::host_member_hit{};
+        }
+    }
+    if (!row.hit.lane) {
+        return nullptr;
+    }
+    lane = row.hit.lane;
+    return detail::host_member_address(inst, row.hit);
+}
+
 checked_result<void> interpreter::assign_member_value(const script_value& objectValue, member_expr* memberExpr, const script_value& value) {
     // Worker direct-field store (parallel_for v1): the setter probe below COPIES a
     // shared method value (cross-worker count race); a backing field's enforce+set is
@@ -4597,6 +4617,13 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     auto [setter_id, _] = string_symbolizer_->get_setter_id_with_view(member_id);
     script_value setter = target.user_accessor(setter_id);   // a synthesized setter takes the field rung
     if (!setter.is_null() && !setter.is_invalid() && setter.is_function()) {
+        if (target.instance) {
+            const detail::host_member_lane* lane = nullptr;
+            if (void* address = host_member_cached(memberExpr, target.class_def, target.instance.get(), objectValue, lane);
+                address && lane->write && lane->write(address, value)) {
+                return {};
+            }
+        }
         const script_function& func = setter.as_function();
         std::vector<script_value> args = {objectValue, clone_for_assignment(value)};
         auto result = func(args);
@@ -9126,6 +9153,13 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             }
             script_value getter = target.user_accessor(getter_id);
             if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
+                if (target.instance) {
+                    const detail::host_member_lane* lane = nullptr;
+                    if (void* address = host_member_cached(expr, target.class_def, target.instance.get(), objectValue, lane)) {
+                        push_value(lane->read(address, engine_));
+                        return {};
+                    }
+                }
                 // The shared read (retired-layer report, receiver pin): the bare-name
                 // rung of detail/member_scope.hpp runs the identical kernel
                 auto result = detail::read_cpp_property(objectValue, target.class_def, target.instance.get(),

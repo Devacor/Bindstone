@@ -17,6 +17,7 @@
 #include "script_extensible.hpp"
 #include <jaiscript/serialization/archive_impl.hpp>
 #include <jaiscript/detail/static_type_name.hpp>
+#include <jaiscript/detail/host_member.hpp>
 #include <jaiscript/properties/property_schema.hpp>
 #include <jaiscript/properties/observable_property.hpp>
 #include <jaiscript/signals/signal_impl.hpp>
@@ -26,6 +27,7 @@
 #include <optional>
 #include <array>
 #include <bit>
+#include <utility>
 #include <cstddef>
 #include <functional>
 #include <vector>
@@ -300,6 +302,69 @@ namespace detail {
 		uint64_t native_type_id;
 	};
 
+	// A member type the in-place lane reads with the getter's own conversion: integers (not characters), floating
+	// point, bool, std::string
+	template<typename P>
+	inline constexpr bool host_member_value = (std::is_integral_v<P> && !std::is_same_v<P, char> && !std::is_same_v<P, signed char> &&
+	                                           !std::is_same_v<P, unsigned char> && !std::is_same_v<P, wchar_t> && !std::is_same_v<P, char8_t> &&
+	                                           !std::is_same_v<P, char16_t> && !std::is_same_v<P, char32_t>) ||
+	                                          std::is_floating_point_v<P> || std::is_same_v<P, std::string>;
+
+	template<typename P>
+	script_value host_member_read(const void* address, engine* eng) {
+		return value_converter<P>::to(*static_cast<const P*>(address), eng);
+	}
+
+	// The values the setter's as<P>() stores unchanged: an int in range for an integer, a float for a double, a bool, a string
+	template<typename P>
+	bool host_member_write(void* address, const script_value& value) {
+		const size_t kind = value.raw_storage_index();
+		if constexpr (std::is_same_v<P, bool>) {
+			if (kind != script_value::TYPEID_BOOL) { return false; }
+			*static_cast<P*>(address) = value.unchecked_as_bool();
+		} else if constexpr (std::is_integral_v<P>) {
+			if (kind != script_value::TYPEID_INT || !std::in_range<P>(value.unchecked_as_int())) { return false; }
+			*static_cast<P*>(address) = static_cast<P>(value.unchecked_as_int());
+		} else if constexpr (std::is_same_v<P, double>) {
+			if (kind != script_value::TYPEID_FLOAT) { return false; }
+			*static_cast<P*>(address) = value.unchecked_as_float();
+		} else if constexpr (std::is_same_v<P, std::string>) {
+			if (kind != script_value::TYPEID_STRING) { return false; }
+			*static_cast<P*>(address) = std::string(std::string_view(value.unchecked_as_string()));
+		} else {
+			return false;
+		}
+		return true;
+	}
+
+	template<typename T, typename P>
+	struct host_member_lane_of : host_member_lane {
+		P T::*member = nullptr;
+		uint64_t native_type_id = UINT64_MAX;
+	};
+
+	template<typename T, typename P>
+	void* host_member_locate(const host_member_lane& lane, const script_value& receiver) {
+		const auto& self = static_cast<const host_member_lane_of<T, P>&>(lane);
+		try {
+			T* object = extract_cpp_object_ptr<T>(receiver, self.native_type_id);
+			return object ? const_cast<void*>(static_cast<const void*>(&(object->*self.member))) : nullptr;
+		} catch (...) {
+			return nullptr;
+		}
+	}
+
+	template<typename T, typename P>
+	std::shared_ptr<const host_member_lane> make_host_member_lane(P T::*member, uint64_t native_type_id) {
+		auto lane = std::make_shared<host_member_lane_of<T, P>>();
+		lane->member = member;
+		lane->native_type_id = native_type_id;
+		lane->read = &host_member_read<std::remove_cv_t<P>>;
+		if constexpr (std::is_copy_assignable_v<P>) { lane->write = &host_member_write<P>; }
+		lane->locate = &host_member_locate<T, P>;
+		return lane;
+	}
+
 	template<typename ValueT>
 	script_value script_value_from_cpp(const ValueT& value, engine* eng) {
 		if constexpr (std::is_same_v<ValueT, int> || std::is_same_v<ValueT, int32_t>) {
@@ -328,6 +393,7 @@ namespace detail {
 		void* (*extract)(const script_value&, uint64_t);
 		property_base* (*find)(void*, const std::string&);
 		property_manager* (*manager)(void*);
+		size_t owner_size = 0;   // sizeof the bound type: a property object inside it is a member at a fixed offset
 	};
 
 	template<typename T>
@@ -454,6 +520,7 @@ public:
         } else {
             class_def_ = detail::make_class_definition(class_name, type_id, &engine_);
         }
+        class_def_->set_cpp_polymorphic(std::is_polymorphic_v<T>);
 
         // Initialize serialization metadata
         serialization_metadata_.class_name = class_name;
@@ -1056,6 +1123,12 @@ private:
             register_read_only_setter(name);
         }
 
+        if constexpr (detail::host_member_value<P> && !std::is_const_v<P>) {
+            class_def_->register_host_member_lane(engine_.symbolize(name), detail::make_host_member_lane<T, P>(member, class_def_->get_type_id()));
+        } else {
+            class_def_->register_host_member_lane(engine_.symbolize(name), nullptr);
+        }
+
         // A box-decodable member binds BY REFERENCE as the member itself (internal/reference_model.md
         // CPP-MEMBER): record its address accessor beside the getter/setter
         if constexpr (script_value::cpp_bound_encoding<P>::capable) {
@@ -1141,6 +1214,7 @@ public:
             }
         });
         class_def_->register_property_getter(engine_.symbolize(name), engine_.symbolize("_get_" + name));
+        class_def_->register_host_member_lane(engine_.symbolize(name), nullptr);
 
         // Add setter method - use different implementations based on setter type
         if constexpr (is_read_only) {
@@ -1478,7 +1552,7 @@ private:
     void bind_properties_from_schema() {
         // Get the schema for this type (includes inherited properties)
         auto all_props = type_registry::instance().all_properties<T>();
-        const detail::schema_property_access access{ &detail::schema_extract<T>, &detail::schema_find<T>, &detail::schema_manager<T> };
+        const detail::schema_property_access access{ &detail::schema_extract<T>, &detail::schema_find<T>, &detail::schema_manager<T>, sizeof(T) };
 
         for (const auto* prop_meta : all_props) {
             if (!prop_meta) continue;

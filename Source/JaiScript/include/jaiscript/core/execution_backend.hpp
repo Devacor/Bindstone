@@ -234,6 +234,8 @@ public:
     
     // Configuration
     virtual void set_execution_budget(std::chrono::nanoseconds) = 0;
+    // Moves the running deadline later by work the engine did for the script that is not the script's (building a thread pool)
+    virtual void extend_execution_deadline(std::chrono::nanoseconds) = 0;
     virtual void set_has_custom_numeric_ops(bool value) = 0;
     // ANY user binary-operator / "[]" override registered: transient subscript reads fall
     // back to the reference mint (see detail/transient_read.hpp).

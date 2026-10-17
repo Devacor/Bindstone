@@ -1016,6 +1016,27 @@ public:
             std::filesystem::remove(std::filesystem::path(path).replace_extension(".jaibite"));
         });
 
+        test("a_sibling_that_cannot_be_replaced_is_kept", [=, this]() {
+            // a sibling the rename cannot replace (read-only here; another engine holding it open in a race) stays: the write gives
+            // up and leaves it, and its identity keeps it from standing in for the new text
+            const auto path = jai::foundry::test_temp_directory() / "hr_keep.jai";
+            const auto sibling = std::filesystem::path(path).replace_extension(".jaibite");
+            std::filesystem::remove(sibling);
+            put_file(path, "int keep_v() { return 5; }\nkeep_v();\n");
+            check_eq(script_int(5), make_engine()->execute_file(path.string()).as_int());
+            check_true(std::filesystem::exists(sibling), "the first run writes the sibling");
+            { std::ofstream(path, std::ios::binary | std::ios::trunc) << "int keep_v() { return 6; }\nkeep_v();\n"; }
+            const auto read_only = std::filesystem::perms::owner_write | std::filesystem::perms::group_write | std::filesystem::perms::others_write;
+            std::filesystem::permissions(sibling, read_only, std::filesystem::perm_options::remove);
+            check_eq(script_int(6), make_engine()->execute_file(path.string()).as_int(), "the new text runs whatever the sibling holds");
+            check_true(std::filesystem::exists(sibling), "a sibling the write could not replace is kept");
+            check_eq(0, temporaries_beside(sibling), "no temporary file after the attempt");
+            std::filesystem::permissions(sibling, std::filesystem::perms::owner_write, std::filesystem::perm_options::add);
+            check_eq(script_int(6), make_engine()->execute_file(path.string()).as_int(), "the next run parses the new text and rewrites the sibling");
+            std::filesystem::remove(sibling);
+            std::filesystem::remove(path);
+        });
+
         test("a_jaibite_sibling_is_replaced_whole_or_not_at_all", [=, this]() {
             // the writer renames a finished temporary file over the sibling: a truncated sibling (a crash leftover) parses
             // and is replaced whole, a sibling that cannot be replaced never stands in for the new text, and no temporary

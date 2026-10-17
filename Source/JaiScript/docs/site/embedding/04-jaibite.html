@@ -168,7 +168,7 @@ same gate <code>execute()</code> passes through. Under <strong>warn</strong> the
 instead (see <a href="06-static-checking.html">Static Checking</a>):</p>
 <ul><li><code>bite.checked_clean()</code>: checked, no error-severity diagnostics.</li><li><code>bite.check_diagnostics()</code>: the <code>check_report</code>.</li><li><code>save()</code> stamps a checked-clean bit beside the fingerprint, so a bake step&#x27;s strict
 check travels with the file.</li><li>On load the stamp is <strong>trusted only when the registration fingerprint matches</strong> the
-saving engine; otherwise the bite loads unchecked and is re-checked against the loading engine&#x27;s
+saving engine and the stamp names this library's checker revision (a newer checker has rules an older stamp never ran); otherwise the bite loads unchecked and is re-checked against the loading engine&#x27;s
 surface on the strict/warn path (strict throws at load on errors).</li><li>A bite is checked <strong>once</strong>. Registrations arriving later don&#x27;t re-trigger;
 re-create the bite to re-check. Parse-time type proofs (fast-path annotations the checker stamps on the
 AST, nothing you configure; see <a href="06-static-checking.html#proofs">Static Checking, Proofs</a>) are

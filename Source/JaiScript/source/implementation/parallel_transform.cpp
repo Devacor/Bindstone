@@ -4046,6 +4046,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	if (worker_count > 1) {
 		const size_t pool_workers_needed = worker_count - 1;
 		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
+			const auto build_start = std::chrono::steady_clock::now();
 			state.faults.checkpoint("region.pool_create");
 			state.pool = std::make_unique<jai::thread_pool>(
 				std::max(pool_workers_needed, eng.parallel_thread_count() > 1 ? eng.parallel_thread_count() - 1 : size_t(1)), &state.faults);
@@ -4053,6 +4054,11 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			region_guard.pending_pool = state.pool.get();
 			calibrate_pool_overhead(state);
 			region_guard.pending_pool = nullptr;   // calibration joined each completed batch
+			// Starting threads is the engine's cost, not the script's: an oversubscribed host can take seconds, so the
+			// execution budget (the caller's deadline and the workers' armed ones) does not count it
+			const auto built_in = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - build_start);
+			eng.extend_execution_deadline(built_in);
+			for (size_t k = 0; k < worker_count; ++k) { contexts[k]->backend->extend_execution_deadline(built_in); }
 		}
 		for (size_t k = 1; k < worker_count; ++k) {
 			state.faults.checkpoint("region.table_entry", k);

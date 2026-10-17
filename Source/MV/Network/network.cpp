@@ -57,68 +57,132 @@ static jai::registrar<MV::Client, MV::Services> _hookClient("Client",
 
 namespace MV {
 
+	Client::~Client() {
+		ourConnectionState = DISCONNECTED;
+		ioService.stop();
+		if (worker && worker->joinable()) {
+			worker->join();
+		}
+		closeNow();
+	}
+
+	void Client::disconnect() {
+		disconnectRequested = true;
+		info("client.disconnect();");
+		closeConnection("Disconnect Requested");
+	}
+
+	void Client::handleError(const asio::error_code &a_err, const std::string &a_section) {
+		auto message = a_err.message();
+		closeConnection(message);
+		error("[", a_section, "] => ", message);
+	}
+
+	void Client::closeConnection(const std::string &a_reason) {
+		ourConnectionState = DISCONNECTED;
+		{
+			std::lock_guard<std::mutex> guard(errorLock);
+			failMessage = a_reason;
+		}
+		closeOnNetworkThread();
+	}
+
+	void Client::closeOnNetworkThread() {
+		if (ioService.get_executor().running_in_this_thread()) {
+			closeNow();
+		} else {
+			asio::post(ioService, [this] { closeNow(); });
+		}
+	}
+
+	void Client::closeNow() {
+		closeSocket(socket);
+		outbox.clear();
+	}
+
 	void Client::initiateConnection() {
-		if (ourConnectionState == DISCONNECTED) {
-			ourConnectionState = CONNECTING;
-			socket = std::make_shared<asio::ip::tcp::socket>(ioService);
-			asio::ip::tcp::resolver::query query(url.host(), std::to_string(url.port()), asio::ip::tcp::resolver::query::canonical_name);
-			auto self = shared_from_this();
-			resolver.async_resolve(query, [=](const asio::error_code& a_err, asio::ip::tcp::resolver::iterator endpoint_iterator) {
-				if (!a_err && socket) {
-					asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-					socket->async_connect(endpoint, std::bind(&Client::handleConnect, self, std::placeholders::_1, ++endpoint_iterator));
-				} else {
-					handleError(a_err, "resolve");
+		auto expected = DISCONNECTED;
+		if (ourConnectionState.compare_exchange_strong(expected, CONNECTING)) {
+			disconnectRequested = false;
+			connectionAnnounced = false;
+			{
+				std::lock_guard<std::mutex> guard(errorLock);
+				failMessage.clear();
+			}
+			asio::post(ioService, [this] {
+				if (ourConnectionState != CONNECTING) {
+					return;
 				}
+				auto attempt = std::make_shared<asio::ip::tcp::socket>(ioService);
+				socket = attempt;
+				asio::ip::tcp::resolver::query query(url.host(), std::to_string(url.port()), asio::ip::tcp::resolver::query::canonical_name);
+				resolver.async_resolve(query, [this, attempt](const asio::error_code& a_err, asio::ip::tcp::resolver::iterator a_endpoints) {
+					if (attempt != socket) {
+						return;
+					}
+					if (a_err) {
+						handleError(a_err, "resolve");
+					} else {
+						connectTo(attempt, a_endpoints);
+					}
+				});
 			});
 		}
 	}
 
-	void Client::handleConnect(const asio::error_code& a_err, asio::ip::tcp::resolver::iterator endpoint_iterator) {
-		if (ourConnectionState == CONNECTING) {
-			if (!a_err) {
-				//socket->set_option(asio::ip::tcp::no_delay(true));
-				ourConnectionState = CONNECTING_SUCCESS;
+	void Client::connectTo(const std::shared_ptr<asio::ip::tcp::socket>& a_attempt, asio::ip::tcp::resolver::iterator a_endpoints) {
+		asio::ip::tcp::endpoint endpoint = *a_endpoints;
+		a_attempt->async_connect(endpoint, [this, a_attempt, next = ++a_endpoints](const asio::error_code& a_err) {
+			handleConnect(a_attempt, a_err, next);
+		});
+	}
+
+	void Client::handleConnect(const std::shared_ptr<asio::ip::tcp::socket>& a_attempt, const asio::error_code& a_err, asio::ip::tcp::resolver::iterator a_nextEndpoint) {
+		if (a_attempt != socket) {
+			return;
+		}
+		if (!a_err) {
+			auto expected = CONNECTING;
+			if (ourConnectionState.compare_exchange_strong(expected, CONNECTING_SUCCESS)) {
 				initiateRead();
 			}
-			else if (endpoint_iterator != asio::ip::tcp::resolver::iterator()) {
-				// Try the next endpoint in the list.
-				info("Trying next endpoint: ", a_err.message());
-				socket = std::make_shared<asio::ip::tcp::socket>(ioService);
-				auto endpoint = *endpoint_iterator;
-				auto self = shared_from_this();
-				socket->async_connect(endpoint, std::bind(&Client::handleConnect, self, std::placeholders::_1, ++endpoint_iterator));
-			}
-			else {
-				handleError(a_err, "connect");
-			}
+		} else if (a_nextEndpoint != asio::ip::tcp::resolver::iterator()) {
+			info("Trying next endpoint: ", a_err.message());
+			auto retry = std::make_shared<asio::ip::tcp::socket>(ioService);
+			socket = retry;
+			connectTo(retry, a_nextEndpoint);
+		} else {
+			handleError(a_err, "connect");
 		}
 	}
 
 	void Client::initiateRead() {
 		auto message = std::make_shared<NetworkMessage>();
-		auto self = shared_from_this();
-		auto copiedSocket = socket;
-		asio::async_read(*copiedSocket, asio::buffer(message->headerBuffer, 4), asio::transfer_exactly(4), [this, message, self, copiedSocket](const asio::error_code& a_err, size_t a_amount) {
-			if (!a_err && socket) {
-				message->readHeaderFromBuffer();
-				asio::async_read(*copiedSocket, message->buffer, asio::transfer_exactly(message->content.size()), [this, message, self, copiedSocket](const asio::error_code& a_err, size_t a_amount) {
-					if (!a_err && socket) {
-						if (ourConnectionState != DISCONNECTED) {
-							message->readContentFromBuffer();
-							{
-								std::lock_guard<std::recursive_mutex> guard(lock);
-								inbox.push_back(message);
-							}
-							initiateRead();
-						}
-					} else if (socket) {
-						handleError(a_err, "content");
-					}
-				});
-			} else if (socket) {
-				handleError(a_err, "header");
+		auto reading = socket;
+		asio::async_read(*reading, asio::buffer(message->headerBuffer, 4), asio::transfer_exactly(4), [this, message, reading](const asio::error_code& a_err, size_t) {
+			if (reading != socket) {
+				return;
 			}
+			if (a_err) {
+				handleError(a_err, "header");
+				return;
+			}
+			message->readHeaderFromBuffer();
+			asio::async_read(*reading, message->buffer, asio::transfer_exactly(message->content.size()), [this, message, reading](const asio::error_code& a_err, size_t) {
+				if (reading != socket) {
+					return;
+				}
+				if (a_err) {
+					handleError(a_err, "content");
+				} else if (ourConnectionState != DISCONNECTED) {
+					message->readContentFromBuffer();
+					{
+						std::lock_guard<std::mutex> guard(inboxLock);
+						inbox.push_back(message);
+					}
+					initiateRead();
+				}
+			});
 		});
 	}
 
@@ -134,73 +198,71 @@ namespace MV {
 		}
 	}
 
-
-	void Client::disconnectIfFailed() {
-		std::unique_lock<std::mutex> guard(errorLock);
-		if (!failMessage.empty()) {
-			auto failMessageCached = failMessage;
-			failMessage.clear();
-			guard.unlock();
-
-			if (onConnectionFail) {
-				onConnectionFail(failMessageCached);
-			}
-			ourConnectionState = DISCONNECTED;
-		}
+	std::string Client::takeFailure() {
+		std::string result;
+		std::lock_guard<std::mutex> guard(errorLock);
+		result.swap(failMessage);
+		return result;
 	}
 
 	void Client::update() {
 		auto keepAlive = shared_from_this();
-		disconnectIfFailed();
-
-		if (ourConnectionState == DISCONNECTED) {
-			closeSocket(socket);
-			inbox.clear();
-		} else {
-			tryInitializeCallback();
-			if (!inbox.empty()) {
-				std::lock_guard<std::recursive_mutex> guard(lock);
-
-				for (auto&& message : inbox) {
-					try {
-						onMessageGet(message->content);
-					} catch (std::exception &e) {
-						error("Exception caught in network message handler: ", e.what());
-					}
+		auto failure = takeFailure(); //read before the inbox: every message the peer sent before failing is in it
+		std::vector<std::shared_ptr<NetworkMessage>> received;
+		{
+			std::lock_guard<std::mutex> guard(inboxLock);
+			received.swap(inbox);
+		}
+		tryInitializeCallback();
+		if (connectionAnnounced && !disconnectRequested) {
+			for (auto&& message : received) {
+				try {
+					onMessageGet(message->content);
+				} catch (std::exception &e) {
+					error("Exception caught in network message handler: ", e.what());
 				}
-				inbox.clear();
+			}
+		}
+		if (!failure.empty()) {
+			connectionAnnounced = false;
+			if (onConnectionFail) {
+				onConnectionFail(failure);
 			}
 		}
 	}
 
 	void Client::send(const std::string &a_content) {
 		require<DeviceException>(connected(), "Failed to send message due to lack of connection.");
-		auto self = shared_from_this();
 		auto message = std::make_shared<NetworkMessage>(a_content);
-		ioService.post([self, message] {
-			self->outbox.push_back(message);
-			if (self->outbox.size() == 1) { self->writeNext(); }
+		asio::post(ioService, [this, message] {
+			if (socket) {
+				outbox.push_back(message);
+				if (outbox.size() == 1) { writeNext(); }
+			}
 		});
 	}
 
 	// One async_write in flight per socket: overlapping writes interleave their bytes on the wire.
 	void Client::writeNext() {
-		auto self = shared_from_this();
 		auto message = outbox.front();
-		asio::async_write(*socket, asio::buffer(message->wire()), [self, message](asio::error_code a_err, size_t a_amount) {
-			self->outbox.pop_front();
+		auto writing = socket;
+		asio::async_write(*writing, asio::buffer(message->wire()), [this, message, writing](asio::error_code a_err, size_t) {
+			if (writing != socket) {
+				return;
+			}
+			outbox.pop_front();
 			if (a_err) {
-				self->handleError(a_err, "write");
-				self->outbox.clear();
-			} else if (!self->outbox.empty()) {
-				self->writeNext();
+				handleError(a_err, "write");
+			} else if (!outbox.empty()) {
+				writeNext();
 			}
 		});
 	}
 
 	void Client::tryInitializeCallback() {
-		if (ourConnectionState == CONNECTING_SUCCESS) {
-			ourConnectionState = CONNECTED;
+		auto expected = CONNECTING_SUCCESS;
+		if (ourConnectionState.compare_exchange_strong(expected, CONNECTED)) {
+			connectionAnnounced = true;
 			if (onInitialized) {
 				try {
 					onInitialized();
@@ -225,12 +287,13 @@ namespace MV {
 #endif
 		acceptor.bind(a_endpoint);
 		acceptor.listen();
+		ourPort = acceptor.local_endpoint().port();
 		info("Server Startup");
 		acceptClients();
 		info("Accept Clients");
 		worker = std::make_unique<std::thread>([this] { ioService.run(); });
 	}
-	
+
 	Server::~Server() {
 		info("Server::~Server");
 		ioService.stop();
@@ -238,7 +301,6 @@ namespace MV {
 	}
 
 	void Server::sendAll(const std::string &a_message) {
-		std::lock_guard<std::recursive_mutex> guard(lock);
 		sent.add(accumulatedTime, (a_message.size() + 4) * ourConnections.size());
 		for (auto&& connection : ourConnections) {
 			connection->send(a_message);
@@ -246,7 +308,6 @@ namespace MV {
 	}
 
 	void Server::sendExcept(const std::string &a_message, Connection* a_exceptConnection) {
-		std::lock_guard<std::recursive_mutex> guard(lock);
 		if (!ourConnections.empty()) {
 			sent.add(accumulatedTime, (a_message.size() + 4) * (ourConnections.size() - 1));
 		}
@@ -262,98 +323,64 @@ namespace MV {
 		acceptor.async_accept(*socket, [this, socket](asio::error_code ec) {
 			if (!ec) {
 				//socket->set_option(asio::ip::tcp::no_delay(true));
-				auto connection = std::make_shared<Connection>(*this, socket, ioService);
-				connection->initialize(connectionStateFactory);
-				{
-					std::lock_guard<std::recursive_mutex> guard(lock);
-					ourConnections.push_back(connection);
-				}
-				connection->initiateRead();
+				auto connectionSocket = std::make_shared<ConnectionSocket>(socket, ioService);
+				connectionSocket->start();
+				std::lock_guard<std::mutex> guard(acceptedLock);
+				accepted.push_back(connectionSocket);
 			}
 
 			acceptClients();
 		});
 	}
 
+	void Server::adoptAcceptedConnections() {
+		std::vector<std::shared_ptr<ConnectionSocket>> adopting;
+		{
+			std::lock_guard<std::mutex> guard(acceptedLock);
+			adopting.swap(accepted);
+		}
+		for (auto&& connectionSocket : adopting) {
+			auto connection = std::make_shared<Connection>(connectionSocket);
+			connection->initialize(connectionStateFactory);
+			ourConnections.push_back(connection);
+		}
+	}
+
 	void Server::update(double a_dt) {
-		std::lock_guard<std::recursive_mutex> guard(lock);
+		adoptAcceptedConnections();
 		accumulatedTime += a_dt;
-		auto startSize = ourConnections.size();
-		ourConnections.erase(std::remove_if(ourConnections.begin(), ourConnections.end(), [this, a_dt](auto c) {
-			if (!c) { return true; }
+		auto updating = ourConnections; //an update may disconnect any connection, so none is erased mid-pass
+		for (auto&& connection : updating) {
 			try {
-				received.add(accumulatedTime, c->update(a_dt));
+				received.add(accumulatedTime, connection->update(a_dt));
 			} catch (std::exception &e) {
 				error("Exception for connection update: ", e.what());
 			} catch (...) {
 				error("Unknown Exception for connection update!");
 			}
-			return c->disconnected();
+		}
+		auto startSize = ourConnections.size();
+		ourConnections.erase(std::remove_if(ourConnections.begin(), ourConnections.end(), [](const std::shared_ptr<Connection>& a_connection) {
+			if (a_connection->disconnected()) {
+				a_connection->disconnect();
+				return true;
+			}
+			return false;
 		}), ourConnections.end());
 		if (startSize != ourConnections.size()) {
 			info("Connections lost: ", startSize - ourConnections.size());
 		}
 	}
 
-	void Connection::send(const std::string &a_content) {
-		auto self = shared_from_this();
-		auto message = std::make_shared<NetworkMessage>(a_content);
-		ioService.post([self, message] {
-			self->outbox.push_back(message);
-			if (self->outbox.size() == 1) { self->writeNext(); }
-		});
-	}
-
-	void Connection::writeNext() {
-		auto self = shared_from_this();
-		auto message = outbox.front();
-		asio::async_write(*socket, asio::buffer(message->wire()), [self, message](asio::error_code a_err, size_t a_amount) {
-			self->outbox.pop_front();
-			if (a_err) {
-				self->handleError(a_err, "write");
-				self->outbox.clear();
-			} else if (!self->outbox.empty()) {
-				self->writeNext();
-			}
-		});
-	}
-
-	void Connection::initiateRead() {
-		auto message = std::make_shared<NetworkMessage>();
-		auto self = shared_from_this();
-		auto copiedSocket = socket;
-		asio::async_read(*copiedSocket, asio::buffer(message->headerBuffer), asio::transfer_exactly(4), [this, message, self, copiedSocket](const asio::error_code& a_err, size_t a_amount) {
-			if (!a_err && socket) {
-				message->readHeaderFromBuffer();
-				asio::async_read(*copiedSocket, message->buffer, asio::transfer_exactly(message->content.size()), [this, message, self, copiedSocket](const asio::error_code& a_err, size_t a_amount) {
-					if (!a_err && socket) {
-						message->readContentFromBuffer();
-						{
-							std::lock_guard<std::recursive_mutex> guard(lock);
-							inbox.push_back(message);
-						}
-						initiateRead();
-					} else if(socket) {
-						handleError(a_err, "content");
-					}
-				});
-			} else if(socket) {
-				handleError(a_err, "header");
-			}
-		});
-	}
-
 	size_t Connection::update(double a_dt) {
 		size_t receivedAmount = 0;
 		if (ourState->disconnected()) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
-			closeSocket(socket);
-			inbox.clear();
+			socket->close();
 			return receivedAmount;
 		}
-		std::lock_guard<std::recursive_mutex> guard(lock);
 		auto self = shared_from_this();
-		for (auto&& message : inbox) {
+		bool failed = socket->failed(); //read before the inbox: every message the peer sent before failing is in it
+		for (auto&& message : socket->takeInbox()) {
 			try {
 				receivedAmount += message->headerAndContentSize();
 				ourState->message(message->content);
@@ -363,14 +390,126 @@ namespace MV {
 				return receivedAmount;
 			}
 		}
-		inbox.clear();
+		if (failed) {
+			disconnect();
+			return receivedAmount;
+		}
 		ourState->update(a_dt);
 		return receivedAmount;
 	}
 
-	void Connection::handleError(const asio::error_code &a_err, const std::string &a_section) {
+	namespace {
+		bool remoteIsLoopback(const asio::ip::tcp::socket& a_socket) {
+			asio::error_code error;
+			auto endpoint = a_socket.remote_endpoint(error);
+			return !error && endpoint.address().is_loopback();
+		}
+	}
+
+	ConnectionSocket::ConnectionSocket(const std::shared_ptr<asio::ip::tcp::socket> &a_socket, asio::io_context& a_ioService) :
+		ioService(a_ioService),
+		socket(a_socket),
+		closeDeadline(a_ioService),
+		ourLoopback(remoteIsLoopback(*a_socket)) {
+	}
+
+	void ConnectionSocket::start() {
+		initiateRead();
+	}
+
+	void ConnectionSocket::send(const std::string &a_content) {
+		auto message = std::make_shared<NetworkMessage>(a_content);
+		asio::post(ioService, [self = shared_from_this(), message] {
+			if (self->socket && !self->closing) {
+				self->outbox.push_back(message);
+				if (self->outbox.size() == 1) { self->writeNext(); }
+			}
+		});
+	}
+
+	// Messages sent before the close still go out (a kick says why): the socket closes once the outbox
+	// drains, or at the deadline when the peer stops reading.
+	void ConnectionSocket::close() {
+		asio::post(ioService, [self = shared_from_this()] {
+			if (self->closing || !self->socket) {
+				return;
+			}
+			self->closing = true;
+			if (self->outbox.empty()) {
+				self->closeNow();
+			} else {
+				self->closeDeadline.expires_after(std::chrono::seconds(2));
+				self->closeDeadline.async_wait([self](const asio::error_code&) { self->closeNow(); });
+			}
+		});
+	}
+
+	void ConnectionSocket::closeNow() {
+		closeSocket(socket);
+		outbox.clear();
+		closeDeadline.cancel();
+	}
+
+	std::vector<std::shared_ptr<NetworkMessage>> ConnectionSocket::takeInbox() {
+		std::vector<std::shared_ptr<NetworkMessage>> result;
+		std::lock_guard<std::mutex> guard(inboxLock);
+		result.swap(inbox);
+		return result;
+	}
+
+	void ConnectionSocket::writeNext() {
+		auto message = outbox.front();
+		auto writing = socket;
+		asio::async_write(*writing, asio::buffer(message->wire()), [self = shared_from_this(), message, writing](asio::error_code a_err, size_t) {
+			if (writing != self->socket) {
+				return;
+			}
+			self->outbox.pop_front();
+			if (a_err) {
+				self->handleError(a_err, "write");
+				self->outbox.clear();
+			}
+			if (!self->outbox.empty()) {
+				self->writeNext();
+			} else if (self->closing) {
+				self->closeNow();
+			}
+		});
+	}
+
+	void ConnectionSocket::initiateRead() {
+		auto message = std::make_shared<NetworkMessage>();
+		auto reading = socket;
+		asio::async_read(*reading, asio::buffer(message->headerBuffer), asio::transfer_exactly(4), [self = shared_from_this(), message, reading](const asio::error_code& a_err, size_t) {
+			if (reading != self->socket) {
+				return;
+			}
+			if (a_err) {
+				self->handleError(a_err, "header");
+				return;
+			}
+			message->readHeaderFromBuffer();
+			asio::async_read(*reading, message->buffer, asio::transfer_exactly(message->content.size()), [self, message, reading](const asio::error_code& a_err, size_t) {
+				if (reading != self->socket) {
+					return;
+				}
+				if (a_err) {
+					self->handleError(a_err, "content");
+					return;
+				}
+				message->readContentFromBuffer();
+				{
+					std::lock_guard<std::mutex> guard(self->inboxLock);
+					self->inbox.push_back(message);
+				}
+				self->initiateRead();
+			});
+		});
+	}
+
+	void ConnectionSocket::handleError(const asio::error_code &a_err, const std::string &a_section) {
 		error("[", a_section, "] -> ", a_err.message());
-		disconnect();
+		ourFailed = true;
 	}
 
 	uint32_t NetworkMessage::sizeFromHeaderBuffer() {

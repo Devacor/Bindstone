@@ -398,7 +398,8 @@ public:
 every record (the binary one through a table of names and sizes ahead of the values), so a reader finds a property
 by name and skips the ones it does not ask for. Most of what a version number did goes away:</p>
 <ul>
-<li>Reordering fields changes nothing.</li>
+<li>Reordering fields changes nothing, except among fields that hold the same object: the one the file writes the
+object in is read first (<a href="#pitfalls">Pitfalls</a>).</li>
 <li>A removed field is skipped, because nothing asks for it.</li>
 <li>An added field is read under <code>ar.has_property</code>, and keeps its initializer for a record written
 before it existed (a <code>property_owner</code> does this for every property):</li>
@@ -688,6 +689,15 @@ same key twice. (In a <code>property_owner</code> chain the derived level wins, 
 <li><strong>A property saved twice.</strong> A hand-written <code>save</code> that calls
 <code>save_owned_properties(ar)</code> and also writes a <code>JAI_PROPERTY</code> field by name writes that key
 twice.</li>
+<li><strong>Shared objects read out of order.</strong> A <code>shared_ptr</code> writes its object at the first
+reference the save reaches (<code>{"$id": N, "$val": {...}}</code>; a <code>weak_ptr</code> that comes first writes
+it as <code>{"$ref": N, "$val": {...}}</code>) and <code>{"$id": N}</code> at every later one, and the load resolves
+ids in the order <code>load</code> reads its fields. When the save writes <code>inventory</code> and then
+<code>equipped</code>, both holding one object, a <code>load</code> that reads <code>equipped</code> first throws
+<code>jai::serialization_error</code> (<code>Dangling shared_ptr reference: {"$id": N} names an object this archive
+never defined (...)</code>); a <code>weak_ptr</code> read before the field that carries its object loads empty. Read
+such fields in the order the save writes them. A <code>property_owner</code>'s automatic save and load walk its
+properties in one order (each level by name, base levels first), so this concerns a hand-written pair.</li>
 <li><strong>One graph per call.</strong> Object identity lasts one archive, as in Cereal: a <code>shared_ptr</code>
 saved by two separate <code>to_json</code> calls loads as two objects.</li>
 <li><strong>Exception types.</strong> A <code>catch (const cereal::Exception&amp;)</code> becomes

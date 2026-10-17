@@ -315,7 +315,8 @@ saved sliced as its nearest registered base.
 later `shared_ptr` to it, `{"$ref": N}` for a `weak_ptr` (`componentOwner`). Properties are written in
 `property_mgr` order (a `std::map`, so `childComponents` precedes `childNodes`): a Button's views carry
 their payload under `activeView`/`idleView`/`disabledView` and the owner's `childNodes` entries are
-id-only. Reading in an order other than the written one yields nulls, so never reorder
+id-only. The reader resolves ids in read order: a `{"$id": N}` read before the entry that defines N
+throws `Dangling shared_ptr reference` (a `{"$ref": N}` read before it loads an empty `weak_ptr`), so never reorder
 `childNodes`/`childComponents`, and never rename a property key without re-saving the corpus.
 
 ### The gate

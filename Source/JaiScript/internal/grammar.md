@@ -951,8 +951,10 @@ string healthLevel = health > 75 ? "healthy" :
     raise a catchable error ("Cannot access private member 'x' of class 'C'") on every
     spelling (read, write, call, compound, `++`/`--`, reference, capture), and the strict
     checker reports a violation whose receiver class it knows at load, with the same text.
-    Scope notes: constructors are exempt (labels govern member access, not construction);
-    operator methods dispatch through operators regardless of labels; the host C++ API
+    A labeled constructor follows the same rule, checked on the overload resolution picks
+    ("Cannot access private constructor of class 'C'"; `enforce_constructor_access`), and an
+    archive load constructs regardless (`engine::construction_access_waiver`).
+    Scope notes: operator methods dispatch through operators regardless of labels; the host C++ API
     (`get_field`/`set_field`, serialization, reflection) is deliberately unrestricted. Hot reload is permissive:
     enforcement consults the class's CURRENT definition at access time. Enforcement
     costs one flag test on classes with no nonpublic members (measured: within

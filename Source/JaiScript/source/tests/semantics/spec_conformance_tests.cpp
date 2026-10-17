@@ -720,6 +720,7 @@ public:
 		parallel_contracts();
 		native_exceptions();
 		access_control();
+		private_constructors();
 		lambda_globals_and_init_captures();
 		compound_member_order();
 		compound_subscript_order();
@@ -2480,6 +2481,105 @@ private:
 				e.static_checking(check_mode::warn);
 				out += "|" + e.execute(src + "string r = \"\"; try { peek(Wallet()); } catch (x) { r = x == \"Cannot access private member 'secret' of class 'Wallet'\" ? \"S\" : x; } r;").as_string();
 				return out;
+			});
+		});
+	}
+
+	// Access control reaches constructors: an overload declared under private: (or protected:) is callable from its class and
+	// every class derived from it (a static factory, a method, super(...), a derived class's implicit base construction), and
+	// from nowhere else, by any spelling: Name(...), new, a declaration, an implicit conversion, reflect::construct. Outside
+	// the family it raises "Cannot access private constructor of class 'C'", checked after overload resolution, so a public
+	// overload of the same class stays reachable. An archive load constructs regardless, as reads see private state
+	void private_constructors() {
+		const char* K = R"(
+			class Token {
+			private:
+				Token(int v) { value = v; }
+				Token() { value = -1; }
+			public:
+				int value = 0;
+				static Token make(int v) { return Token(v); }
+				Token twin() { return Token(value + 1); }
+			}
+			class Special : Token {
+				Special() : super(7) {}
+				Token peer() { return Token(3); }
+			}
+			class Kid : Token { }
+			class Stranger { Token grab() { return Token(1); } }
+			class Mixed {
+			public:
+				Mixed(int a) { n = a; }
+			protected:
+				Mixed(string s) { n = 99; }
+			public:
+				int n = 0;
+			}
+			class Money {
+			private:
+				Money(int c) { cents = c; }
+			public:
+				int cents = 0;
+				static Money of(int c) { Money m = c; return m; }
+			}
+			class Saved {
+			private:
+				Saved() {}
+			public:
+				int n = 1;
+				static Saved make() { Saved s = Saved(); s.n = 5; return s; }
+			}
+			function t(function f) -> string {
+				string r = "";
+				try { r = "" + f(); }
+				catch (e) {
+					r = e == "Cannot access private constructor of class 'Token'" ? "X"
+					  : e == "Cannot access private constructor of class 'Mixed'" ? "M"
+					  : e == "Cannot access private constructor of class 'Money'" ? "Y" : e;
+				}
+				return r + ",";
+			}
+		)";
+		test("the_class_family_reaches_a_private_constructor", [this, K]() {
+			expect("family", std::string(K) + R"(
+				t([]() { return Token::make(5).value; }) + t([]() { return Token::make(1).twin().value; }) +
+				t([]() { return Special().value; }) + t([]() { return Special().peer().value; }) + t([]() { return Kid().value; }) +
+				t([]() { return Mixed(4).n; }) + t([]() { return Money::of(250).cents; });
+			)", "5,2,7,3,-1,4,250,", check_mode::off);
+		});
+		test("outside_the_family_every_construction_spelling_raises_the_private_constructor_text", [this, K]() {
+			expect("outside", std::string(K) + R"(
+				t([]() { return Token(1).value; }) + t([]() { auto p = new Token(1); return p.value; }) +
+				t([]() { Token k(2); return k.value; }) + t([]() { Token k; return k.value; }) +
+				t([]() { return Stranger().grab().value; }) + t([]() { return reflect::construct("Token", 1).value; }) +
+				t([]() { return reflect::construct_shared("Token", 1).value; }) + t([]() { return Mixed("x").n; }) +
+				t([]() { Money m = 5; return m.cents; });
+			)", "X,X,X,X,X,X,X,M,Y,", check_mode::off);
+		});
+		test("an_archive_load_constructs_a_class_whose_default_constructor_is_private", [this, K]() {
+			expect("loads", std::string(K) + R"(
+				Saved s = Saved::make();
+				"" + from_json(to_json(s)).n + "," + from_binary(to_binary(s)).n + "," + t([]() { return Saved().n; });
+			)", "5,5,Cannot access private constructor of class 'Saved',", check_mode::off);
+		});
+		test("the_strict_checker_reports_an_outside_private_construction_at_load_with_the_runtime_text", [this]() {
+			every_config("checker", "1:Cannot access private constructor of class 'Token'|0|0|1:Cannot access private constructor of class 'Token'|"
+			             "0|1:Cannot access private constructor of class 'Mixed'|0", [](engine& e) {
+				const std::string base = "class Token { private: Token(int v) { value = v; } public: int value = 0; static Token make(int v) { return Token(v); } } "
+				                         "class Mixed { public: Mixed(int a) { n = a; } private: Mixed(string s) { n = 2; } public: int n = 0; } ";
+				auto one = [&](const std::string& src) {
+					const auto rep = e.check(base + src);
+					std::string first;
+					for (const auto& d : rep.diagnostics) { if (d.severity == check_diagnostic::level::error) { first = d.message; break; } }
+					return std::to_string(rep.error_count()) + (first.empty() ? "" : ":" + first);
+				};
+				return one("int f() { return Token(1).value; }") + "|" +
+				       one("class Sub : Token { Sub() : super(1) {} int g() { return Token(2).value; } }") + "|" +
+				       one("int f() { return Token::make(1).value; }") + "|" +
+				       one("class Thief { int steal() { return Token(3).value; } }") + "|" +
+				       one("int f() { return Mixed(4).n; }") + "|" +
+				       one("int f() { return Mixed(\"s\").n; }") + "|" +
+				       one("int f() { return 1; }");
 			});
 		});
 	}

@@ -84,7 +84,7 @@ reflect::set(s, "hp", 42);                     // writes like s.hp = 42
 print("wound(5) -&gt; {}", reflect::invoke(s, "wound", 5));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hp = 10
 wound(5) -&gt; 37</code></pre></div>
-<p>The one rule that governs all of these: <strong>reflection is a spelling, not a bypass.</strong> A write or call through <code>reflect::</code> enforces exactly what direct syntax enforces: private stays private from outside, typed fields still convert-or-error, and the error text is byte-identical to the direct spelling. Reads are the deliberate exception: <code>reflect::get</code> and <code>reflect::fields</code> see everything, with <code>access</code> reported so tools can choose to respect it, the same rule <code>to_json</code> and the debugger already follow (serialization could not work otherwise).</p>
+<p>The one rule that governs all of these: <strong>reflection is a spelling, not a bypass.</strong> A write or call through <code>reflect::</code> enforces exactly what direct syntax enforces: private stays private from outside (<code>reflect::construct</code> of a private constructor included), typed fields still convert-or-error, and the error text is byte-identical to the direct spelling. Reads are the deliberate exception: <code>reflect::get</code> and <code>reflect::fields</code> see everything, with <code>access</code> reported so tools can choose to respect it, the same rule <code>to_json</code> and the debugger already follow (serialization could not work otherwise).</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vault { private: int gold = 100; }
 var v = Vault();
 

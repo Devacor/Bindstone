@@ -333,6 +333,7 @@ private:
         std::unordered_map<std::string_view, std::vector<const function_decl*>> methods;
         std::unordered_map<std::string_view, std::vector<const function_decl*>> static_methods;
         std::vector<const function_decl*> ctors;
+        std::vector<const function_decl*> private_ctors;   // the ctors declared under private: / protected:
         std::unordered_map<std::string_view, uint8_t> nonpublic;   // private: / protected: members (member_hit::access)
         // Declared by another closure unit (program table): its locations belong to that unit's
         // source, and its member types seed proofs only once the engine has registered it.
@@ -618,6 +619,7 @@ private:
                 if (access && fn->name != cd->name) { c.nonpublic[fn->name] = access; }
                 if (fn->name == cd->name) {
                     add_overload(c.ctors, fn);
+                    if (access) { c.private_ctors.push_back(fn); }
                 } else if (fn->is_static) {
                     add_overload(c.static_methods[fn->name], fn);
                 } else {
@@ -3481,11 +3483,22 @@ private:
             return;
         }
         size_t viable = 0;
+        size_t viable_private = 0;
         for (const auto* ctor : c.ctors) {
-            if (script_fn_viable(ctor, args, arity_rivals(c.ctors, args.size()))) { ++viable; }
+            if (script_fn_viable(ctor, args, arity_rivals(c.ctors, args.size()))) {
+                ++viable;
+                if (std::find(c.private_ctors.begin(), c.private_ctors.end(), ctor) != c.private_ctors.end()) { ++viable_private; }
+            }
         }
         if (viable > 1) { report_ambiguous_call(cls_name, c.ctors, args, loc); }
-        if (viable) { return; }
+        if (viable) {
+            // whichever overload the runtime picks is private: the raise detail::enforce_constructor_access gives
+            const std::string_view ctx = class_ctx_ ? class_ctx_name_ : std::string_view{};
+            if (viable_private == viable && (ctx.empty() || !class_is_or_derives(ctx, cls_name))) {
+                diag(diag_level::error, loc, "Cannot access private constructor of class '" + std::string(cls_name) + "'");
+            }
+            return;
+        }
         report_no_overload(cls_name, c.ctors, args, loc, c.foreign);
     }
 

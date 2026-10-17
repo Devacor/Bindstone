@@ -1301,6 +1301,19 @@ namespace jai {
         // check it before they run, so a destroy order that leaves them behind never reaches the dead engine
         std::weak_ptr<const void> lifetime_token() const noexcept { return lifetime_; }
 
+        // An archive load constructs a class through its constructor whatever the constructor's access (as reads see
+        // private state): held around the load's constructor call, taken by the first constructor dispatch inside it
+        class construction_access_waiver {
+        public:
+            explicit construction_access_waiver(engine* a_engine) : eng(a_engine) { eng->construction_access_waived_ = true; }
+            ~construction_access_waiver() { eng->construction_access_waived_ = false; }
+            construction_access_waiver(const construction_access_waiver&) = delete;
+            construction_access_waiver& operator=(const construction_access_waiver&) = delete;
+        private:
+            engine* eng;
+        };
+        bool take_construction_access_waiver() noexcept { return std::exchange(construction_access_waived_, false); }
+
     private:
         // declared ahead of impl: alive through the whole teardown, expired once the engine is gone
         std::shared_ptr<const void> lifetime_ = std::make_shared<char>('\0');
@@ -1311,6 +1324,7 @@ namespace jai {
         bool hot_reload_reporting_ = false;
         bool destructors_armed_ = false;
         bool parallel_region_active_ = false;
+        bool construction_access_waived_ = false;
         std::vector<field_migration_report> hot_reload_reports_;
         void register_location_builtins();   // engine-core script builtins: root/current_script_dir, resolve_path, app dirs
         void register_privilege_builtins();

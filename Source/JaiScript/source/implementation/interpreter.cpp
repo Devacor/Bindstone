@@ -13091,10 +13091,11 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
             if (!script_cls) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Constructor payload without script class definition");
             }
+            const bool waived = engine_->take_construction_access_waiver();
             if (script_cls->get_constructor_asts().empty()) {
                 return construct_default_instance(script_cls, args);
             }
-            return construct_instance(script_cls, payload.definition_env, args);
+            return construct_instance(script_cls, payload.definition_env, args, !waived);
         }
     }
     return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Unknown callable kind");
@@ -13495,7 +13496,7 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
 
 checked_result<script_value> interpreter::construct_instance(std::shared_ptr<script_class_definition> class_def,
                                                               std::shared_ptr<environment> definition_env,
-                                                              const std::vector<script_value>& args) {
+                                                              const std::vector<script_value>& args, bool check_access) {
     // Initializers execute before call_function owns the constructor's activation.
     // Hand the same depth back before each body call rather than counting it twice.
     if (current_call_depth_ >= limits_->interpreter_call_depth_limit) {
@@ -13525,6 +13526,9 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     if (!matching_ctor) {
         return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
             class_def->get_type_id(), args.data(), args.size(), engine_, true);
+    }
+    if (check_access) {   // KEEP BYTE-PARALLEL with vm_backend::construct_instance_pre_body
+        JAISCRIPT_TRY(enforce_constructor_access(*class_def, matching_ctor.get(), [&]() { return environment_->find_access_context(); }));
     }
 
     // Create instance

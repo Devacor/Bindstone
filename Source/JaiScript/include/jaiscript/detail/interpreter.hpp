@@ -576,7 +576,7 @@ namespace jai {
         // super()/this() chains). Bodies were the visit_class_decl ctor thunks.
         checked_result<script_value> construct_instance(std::shared_ptr<script_class_definition> class_def,
                                                         std::shared_ptr<environment> definition_env,
-                                                        const std::vector<script_value>& args);
+                                                        const std::vector<script_value>& args, bool check_access = true);
         // `ctor`'s member initialization on an instance under construction: its initializer list (a base constructor, or the
         // whole delegated-to constructor) and then the field initializers; the body is the caller's
         checked_result<script_value> initialize_members(const std::shared_ptr<script_class_definition>& class_def,

@@ -136,6 +136,15 @@ public:
     const std::vector<std::shared_ptr<function_decl>>& get_constructor_asts() const {
         return constructor_asts_;
     }
+
+    // The constructor overloads declared under private: (or protected:), set with the class's access labels
+    void set_private_constructors(std::vector<const function_decl*> ctors) { private_ctors_ = std::move(ctors); }
+    bool constructor_is_private(const function_decl* ctor) const noexcept {
+        for (const function_decl* p : private_ctors_) {
+            if (p == ctor) { return true; }
+        }
+        return false;
+    }
     
     std::shared_ptr<function_decl> get_destructor_ast() const {
         return destructor_ast_;
@@ -252,6 +261,7 @@ private:
     // Store ASTs for potential VM compilation (keyed by name_id for efficiency)
     std::map<uint64_t, std::shared_ptr<function_decl>> method_asts_;
     std::vector<std::shared_ptr<function_decl>> constructor_asts_;
+    std::vector<const function_decl*> private_ctors_;
     std::shared_ptr<function_decl> destructor_ast_;
     std::shared_ptr<function_decl> implicit_default_ctor_;
     // Vector (not map) to preserve source declaration order for field initializers.
@@ -456,10 +466,11 @@ inline bool has_true_single_param_conversion_ctor(const std::shared_ptr<class_de
 
 // Collect a class declaration's private:/protected: labels into the runtime access map
 // (both backends call this from their class-decl execution — parity by construction).
-// Constructors are exempt: visibility labels govern member access, not construction.
+// A labeled constructor is recorded by overload: enforce_constructor_access checks the one overload resolution picks.
 template<typename Symbolizer>
 inline void apply_member_access_labels(class_definition& def, const class_decl& decl, Symbolizer& symbols) {
     std::unordered_map<uint64_t, access_level> nonpublic;
+    std::vector<const function_decl*> private_ctors;
     for (const auto& member : decl.members) {
         if (member.visibility == class_decl::Public || !member.declaration) continue;
         uint64_t id = UINT64_MAX;
@@ -468,7 +479,10 @@ inline void apply_member_access_labels(class_definition& def, const class_decl& 
             id = vd->name_id != UINT64_MAX ? vd->name_id : symbols.intern(std::string(vd->name));
         } else if (member.declaration->get_type() == node_type::function_decl) {
             auto* fd = static_cast<function_decl*>(member.declaration.get());
-            if (fd->name == decl.name) continue;   // constructor
+            if (fd->name == decl.name) {
+                private_ctors.push_back(fd);
+                continue;
+            }
             id = fd->name_id != UINT64_MAX ? fd->name_id : symbols.intern(std::string(fd->name));
         }
         if (id != UINT64_MAX) {
@@ -478,6 +492,26 @@ inline void apply_member_access_labels(class_definition& def, const class_decl& 
         }
     }
     def.set_nonpublic_members(std::move(nonpublic));
+    if (def.is_script_class()) {
+        static_cast<script_class_definition&>(def).set_private_constructors(std::move(private_ctors));
+    }
+}
+
+// Constructor access, enforce_member_access's rule applied to the overload resolution picked (both backends call it
+// verbatim before an instance exists): a private constructor is callable from its class and every class derived from it.
+// caller_context() answers the calling code's class, asked only when the overload is private
+template<typename CallerContext>
+inline checked_result<void> enforce_constructor_access(const script_class_definition& cls, const function_decl* ctor,
+                                                       CallerContext&& caller_context) {
+    if (!cls.constructor_is_private(ctor)) {
+        return {};
+    }
+    const class_definition* ctx = caller_context();
+    if (ctx == &cls || (ctx && ctx->derives_from(&cls))) {
+        return {};
+    }
+    return checked_result<void>(make_error_code(runtime_error_code::access_violation),
+        "Cannot access private constructor of class '{0}'", cls.get_type_id());
 }
 
 inline bool converting_constructor_takes(const script_value& arg, const type_info& target) {

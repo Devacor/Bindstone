@@ -398,6 +398,33 @@ public:
             check_eq((int64_t)3, all[2].as_int(), "the live handle read the stored value");
         });
 
+        // A handle that reached the object before another handle extended it re-points to the script layer on its next
+        // touch, and the layer's accessor wins: a site warm on the plain class must not keep reading the member in place
+        test("host_member_lane_yields_to_a_layer_added_through_another_handle", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            dynamic_binder<LaneSchemaOwner>(*eng, "LaneSchemaOwner")
+                .constructor<>()
+                .auto_bind()
+                .build();
+            auto shared = std::make_shared<LaneSchemaOwner>();
+            jai::engine* raw_eng = eng.get();
+            eng->add_function("same", [raw_eng, shared]() -> script_value { return raw_eng->make_object(shared); });
+            auto out = eng->execute(R"(
+                class Over : LaneSchemaOwner { int _get_depth() override { return 1000; } }
+                shared_ptr<LaneSchemaOwner> a = same();
+                shared_ptr<LaneSchemaOwner> b = same();
+                function read_depth(var& x) -> int { return x.depth; }
+                int r1 = read_depth(a);
+                int r2 = read_depth(a);
+                extend(b, Over);
+                int r3 = read_depth(a);
+                int r4 = read_depth(a);
+                to_string(r1) + "," + to_string(r2) + "," + to_string(r3) + "," + to_string(r4);
+            )").as_string();
+            check_eq(std::string("3,3,1000,1000"), out);
+        });
+
         test("host_member_lane_follows_a_rebinding", [this]() {
             auto eng = make_engine();
             jai::stdlib::register_all(*eng);

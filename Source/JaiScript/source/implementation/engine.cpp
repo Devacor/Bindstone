@@ -77,13 +77,13 @@ namespace {
 script_exception without_category_suffix(const script_exception& e) {
     if (e.thrown) { return e; }
     const std::string_view text = e.what();
-    const size_t cut = text.rfind(": ");
-    if (cut == std::string_view::npos || cut == 0) { return e; }
-    const std::string_view category = text.substr(cut + 2);
     const auto& errors = runtime_error_category();
+    // matched as a whole suffix: a category text may itself hold ": "
     for (int ev = 1; ev <= static_cast<int>(runtime_error_code::coroutine_suspended); ++ev) {
-        if (errors.message(ev) == category) {
-            return script_exception(std::string(text.substr(0, cut)), e.location());
+        const std::string category = errors.message(ev);
+        if (text.size() > category.size() + 2 && text.ends_with(category) &&
+            text.substr(text.size() - category.size() - 2, 2) == ": ") {
+            return script_exception(std::string(text.substr(0, text.size() - category.size() - 2)), e.location());
         }
     }
     return e;
@@ -5811,8 +5811,12 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
         const bool was_wrapper = !instance_def->is_script_class();
         reclass_in_place(*this, instance, script_def);
         if (was_wrapper) {
-            // the wrapper owned the object outright; as a layer it must not (S2)
-            if (auto hooks = base->slot_hooks()) {
+            // an object only the script owns at this moment stays the script's: the layer keeps owning it, as a constructed hybrid's does
+            const bool script_owns_alone = cpp_holder->data && cpp_object.use_count() <= 2;   // the wrapper's holder and cpp_object
+            if (auto hooks = base->slot_hooks(); hooks && script_owns_alone) {
+                hooks->attach(key, instance);
+            } else if (hooks) {
+                // the host owns the object too: the object owns its layer, which must not own it back (S2)
                 instance->set_native(script_value::make_cpp_reference(base->get_name(), base->get_type_id(), key, cpp_object, this));
                 hooks->own(key, instance);
                 base->note_extended();

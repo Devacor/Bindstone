@@ -190,6 +190,7 @@ namespace jai {
             if (budget.count() <= 0) { budget_active_ = false; }
         }
         std::chrono::nanoseconds execution_budget() const { return execution_budget_; }
+        void extend_execution_deadline(std::chrono::nanoseconds by) override { if (budget_active_) { execution_deadline_ += by; } }
 
         void arm_execution_deadline() {
             budget_tick_ = 0;

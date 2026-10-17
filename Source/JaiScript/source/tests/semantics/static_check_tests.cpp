@@ -9,6 +9,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/type_proofs.hpp>
 #include <jaiscript/detail/parser.hpp>
+#include <jaiscript/detail/ast_serializer.hpp>
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
@@ -732,6 +733,24 @@ public:
             auto bad_bytes = bad_bite.save_bytes();
             e3->static_checking(check_mode::strict);
             check_throws([&]() { e3->jaibite_load_bytes(bad_bytes); });
+        });
+
+        test("jaibite_stamp_from_another_checker_revision_rechecks", [this]() {
+            // a checked-clean stamp vouches for the checker that gave it: one from an older revision (rules that have since
+            // grown) is checked again on load, one from this revision is trusted
+            auto e = make_engine();
+            e->static_checking(check_mode::off);
+            auto bytes = e->jaibite("int bad = \"s\";").save_bytes();
+            auto stamp = [&bytes](uint32_t flags) {
+                std::vector<uint8_t> stamped = bytes;
+                for (int i = 0; i < 4; ++i) { stamped[8 + i] = static_cast<uint8_t>(flags >> (8 * i)); }
+                return stamped;
+            };
+            e->static_checking(check_mode::strict);
+            const auto older = stamp(jai::detail::k_jaibite_flag_checked_clean | ((jai::detail::k_jaibite_checker_revision - 1) << 8));
+            check_throws<static_check_error>([&]() { e->jaibite_load_bytes(older); }, "an older revision's stamp re-checks and finds the error");
+            auto current = e->jaibite_load_bytes(stamp(jai::detail::jaibite_checked_clean_flags()));
+            check_true(current.checked_clean(), "this revision's stamp is trusted");
         });
 
         test("jaibite_execute_checks_lazily", [this]() {

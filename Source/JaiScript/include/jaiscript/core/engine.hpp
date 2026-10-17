@@ -395,6 +395,9 @@ namespace jai {
         // call entry, so straight-line C++ bindings are never interrupted mid-call.
         void execution_budget(double seconds);
         double execution_budget() const;
+        // Moves the running execute's deadline later by work done for the script that is not the script's own (the engine
+        // starting its worker pool; a host's slow service call); nothing when no budget is armed
+        void extend_execution_deadline(std::chrono::nanoseconds by);
         // A clock-free bound beside it for harnesses that must not depend on load: at most `checks` budget checks (each one
         // per 1024 loop back-edges and call entries) per host entry, then the same terminal budget error. Deterministic per
         // backend and program; zero (the default) disables it.

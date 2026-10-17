@@ -43,6 +43,16 @@ namespace jai::detail {
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
     inline constexpr uint32_t k_jaibite_flag_checked_clean = 0x1;
+    // BUMP THIS whenever the static checker's rules change (a new diagnostic, a rule that rejects more): a checked-clean
+    // stamp records the revision that checked it (flag bits 8..31), and a bite stamped under another revision is checked
+    // again on load instead of trusted. A parse change bumps k_jaibite_version instead, which re-parses as well.
+    //   1: Base class 'X' not found, an override in a class with no base, a namespace reopening's redefinition
+    inline constexpr uint32_t k_jaibite_checker_revision = 1;
+    inline constexpr uint32_t jaibite_checked_clean_flags() { return k_jaibite_flag_checked_clean | (k_jaibite_checker_revision << 8); }
+    // The stamp is trusted only from this checker revision
+    inline constexpr bool jaibite_stamped_clean(uint32_t flags) {
+        return (flags & k_jaibite_flag_checked_clean) && (flags >> 8) == k_jaibite_checker_revision;
+    }
     // The source a bite was parsed from: its byte count and a 64-bit hash of its bytes. A disk sibling is valid only for
     // the source whose identity equals the one it records (never by an mtime ordering); a bite saved without a source
     // records the empty identity, which no source text has.

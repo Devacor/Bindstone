@@ -1699,7 +1699,7 @@ struct engine::implementation {
             entry->sibling_mtime = siblingMtime;
             entry->sibling_size = siblingSize;
             entry->sibling_stamped = true;
-            if (flags & detail::k_jaibite_flag_checked_clean) {
+            if (detail::jaibite_stamped_clean(flags)) {
                 // Trusted stamp (fingerprint matched): skip the re-check exactly like a
                 // loaded bite does — check_result stays default (no diagnostics).
                 entry->checked = true;
@@ -1715,7 +1715,9 @@ struct engine::implementation {
     // error — read-only asset dirs, shipped games) and counted for diagnostics. The bytes go
     // to a temporary file in the sibling's folder that is renamed over the sibling, so a
     // reader (another engine, another process, a crash mid-write) sees the old file or the
-    // new one, never part of one; a failed write leaves no sibling rather than a stale one.
+    // new one, never part of one. A failed write keeps the sibling it could not replace: its
+    // recorded source identity stops it standing in for other text, and deleting it threw away
+    // another engine's fresh write whenever two engines raced on one file.
     void write_jaibite_sibling(engine& self, const std::filesystem::path& sibling, script_cache_entry& entry,
                                const std::string& sourcePath, const std::string& source) noexcept {
         if (!self.is_enabled(privilege::filesystem)) { return; }
@@ -1724,7 +1726,7 @@ struct engine::implementation {
             uint32_t flags = 0;
             if (static_check_mode_ != check_mode::off && entry.checked &&
                 entry.checked_epoch == check_surface_epoch_ && !entry.check_result.has_errors()) {
-                flags |= detail::k_jaibite_flag_checked_clean;
+                flags |= detail::jaibite_checked_clean_flags();
             }
             std::vector<uint8_t> bytes;
             {
@@ -1763,7 +1765,6 @@ struct engine::implementation {
         entry.sibling_stamped = false;
         std::error_code ec;
         if (!temporary.empty()) { std::filesystem::remove(temporary, ec); }
-        if (std::filesystem::is_regular_file(sibling, ec)) { std::filesystem::remove(sibling, ec); }
     }
 
     implementation();
@@ -2683,7 +2684,7 @@ std::vector<uint8_t> jaibite::save_bytes() const {
     if (!owner) {
         throw script_exception("jaibite: owning engine no longer exists");
     }
-    uint32_t flags = (check_state_ == check_state::clean) ? detail::k_jaibite_flag_checked_clean : 0;
+    uint32_t flags = (check_state_ == check_state::clean) ? detail::jaibite_checked_clean_flags() : 0;
     detail::aggregate_source_view source(lowering_ ? std::static_pointer_cast<detail::aggregate_lowering_state>(lowering_).get() : nullptr);
     if (!reload_hook_) { return detail::serialize_jaibite(declarations_, *owner->get_symbolizer(), owner->registration_fingerprint(), flags); }
     std::vector<declaration_ptr> with_hook = declarations_;
@@ -2732,7 +2733,7 @@ jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size, const 
     // Trust the checked-clean stamp only when the registration surface matches the
     // saving engine's; otherwise the bite loads unchecked and is re-checked here
     // (relocated AST, this engine's surface) when a checking mode is active.
-    if ((flags & detail::k_jaibite_flag_checked_clean) && !bite.registration_mismatch_) {
+    if (detail::jaibite_stamped_clean(flags) && !bite.registration_mismatch_) {
         bite.check_state_ = jaibite::check_state::clean;
     }
     check_bite(bite, nullptr);
@@ -4015,6 +4016,10 @@ void engine::execution_budget(double seconds) {
         impl->backend->set_execution_budget(budget);
     }
     // Not yet constructed: wire_backend applies the stored value at first use
+}
+
+void engine::extend_execution_deadline(std::chrono::nanoseconds by) {
+    if (impl->backend) { impl->backend->extend_execution_deadline(by); }
 }
 
 void engine::execution_step_budget(uint64_t checks) {

@@ -152,7 +152,8 @@ namespace {
 				break;
 			}
 		}
-		for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+		for (size_t below = chain.size(); below > 0; --below) {
+			auto* it = &chain[below - 1];
 			auto level_env = construction_level_environment(host, definition_env, this_value, it->script_class.get(), *it->ctor, it->args);
 			for (const auto& [field_id, initializer_ast] : it->script_class->get_field_initializer_asts()) {
 				if (!initializer_ast) { continue; }
@@ -168,6 +169,7 @@ namespace {
 			auto body = host.run_constructor_body(it->ctor, definition_env, this_value, it->script_class.get(), it->args);
 			if (!body) { return body.error_value(); }
 			if (host.unwinding) { return {}; }
+			instance.constructed_below(static_cast<uint16_t>(below));
 			initializer_depth.emplace(host.call_depth);
 		}
 		return {};
@@ -288,11 +290,13 @@ checked_result<script_value> initialize_members(construction_host& host, const s
 			auto target_body = host.run_constructor_body(target, definition_env, this_value, cls.get(), init_args);
 			if (!target_body) { return target_body.error_value(); }
 			if (host.unwinding) { return this_value; }
+			instance->constructed_below(0);   // C++: the object is constructed once its target constructor finishes
 			initializer_depth.emplace(host.call_depth);
 		}
 	}
 
 	if (!delegated_to_this) {
+		if (cls->parent_ptr()) { instance->constructed_below(1); }
 		if (!all_literal) {
 			auto initialized = host.evaluate_field_initializers(instance, cls, init_env, handled_parent_init, nullptr);
 			if (!initialized) { return initialized.error_value(); }

@@ -1,5 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
 #include <string>
@@ -110,6 +111,83 @@ public:
                 function f() -> void { try { G g; } catch (x) { LOG = LOG + "|" + x; } try { E e; } catch (x) { LOG = LOG + "|" + x; } }
                 f(); LOG;
             )", "|t|b");
+        });
+
+        // C++ [except.ctor]: a throw out of a constructor destroys every fully constructed subobject in reverse order; the
+        // throwing level's own destructor body never runs, its members (all constructed before its body) do die
+        test("a_throwing_derived_body_destroys_the_constructed_base", [this]() {
+            expect_log(R"(
+                class B { B() { LOG = LOG + "B"; } ~B() { LOG = LOG + "~B"; } }
+                class D : B { D() { LOG = LOG + "D"; throw "x"; } ~D() { LOG = LOG + "~D"; } }
+                function f() -> void { try { D d; } catch (e) { LOG = LOG + "!"; } }
+                f(); LOG;
+            )", "BD~B!");
+            expect_log(R"(
+                class B { B() {} ~B() { LOG = LOG + "~B"; } }
+                class D : B { Token t = Token("t"); Token u = Token("u"); D() { throw "x"; } ~D() { LOG = LOG + "~D"; } }
+                function f() -> void { try { D d; } catch (e) { LOG = LOG + "!"; } }
+                f(); LOG;
+            )", "ut~B!");
+            expect_log(R"(
+                class B { ~B() { LOG = LOG + "~B"; } }
+                class D : B { D() { throw "x"; } ~D() { LOG = LOG + "~D"; } }
+                function f() -> void { try { D d; } catch (e) { LOG = LOG + "!"; } }
+                f(); LOG;
+            )", "~B!");
+        });
+
+        test("a_throw_in_a_middle_level_destroys_only_the_levels_below_it", [this]() {
+            expect_log(R"(
+                class A { A() { LOG = LOG + "A"; } ~A() { LOG = LOG + "~A"; } }
+                class B : A { B() { LOG = LOG + "B"; throw "x"; } ~B() { LOG = LOG + "~B"; } }
+                class C : B { C() { LOG = LOG + "C"; } ~C() { LOG = LOG + "~C"; } }
+                function f() -> void { try { C c; } catch (e) { LOG = LOG + "!"; } }
+                f(); LOG;
+            )", "AB~A!");
+        });
+
+        test("a_field_initializer_throwing_after_the_base_destroys_the_base", [this]() {
+            expect_log(R"(
+                int boom() { throw "f"; return 0; }
+                class B { B() { LOG = LOG + "B"; } ~B() { LOG = LOG + "~B"; } }
+                class D : B { Token t = Token("t"); int k = boom(); D() { LOG = LOG + "D"; } ~D() { LOG = LOG + "~D"; } }
+                class E : B { Token t = Token("e"); int k = boom(); ~E() { LOG = LOG + "~E"; } }
+                function f() -> void { try { D d; } catch (e) { LOG = LOG + "!"; } try { E e; } catch (e) { LOG = LOG + "?"; } }
+                f(); LOG;
+            )", "Bt~B!Be~B?");
+        });
+
+        test("a_throwing_delegating_body_destroys_the_object_its_target_constructed", [this]() {
+            expect_log(R"(
+                class B { B() { LOG = LOG + "B"; } ~B() { LOG = LOG + "~B"; } }
+                class C : B { C(int v) { LOG = LOG + "T"; } C() : this(1) { LOG = LOG + "D"; throw "x"; } ~C() { LOG = LOG + "~C"; } }
+                function f() -> void { try { C c; } catch (e) { LOG = LOG + "!"; } }
+                f(); LOG;
+            )", "BTD~C~B!");
+        });
+
+        test("a_throwing_hybrid_body_destroys_its_cpp_base_once", [this]() {
+            struct counted_base { std::shared_ptr<int> deaths; ~counted_base() { if (deaths) { ++*deaths; } } };
+            auto deaths = std::make_shared<int>(0);
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            dynamic_binder<counted_base>(*eng, "CountedBase")
+                .constructor<>()
+                .method("arm", [deaths](counted_base& self) { self.deaths = deaths; })
+                .build();
+            std::string got;
+            try {
+                got = eng->execute(R"(
+                    string LOG = "";
+                    class D : CountedBase { D() : super() { arm(); LOG = LOG + "D"; throw "x"; } ~D() { LOG = LOG + "~D"; } }
+                    function f() -> void { try { D d; } catch (e) { LOG = LOG + "!"; } }
+                    f(); LOG;
+                )").as_string();
+            } catch (const std::exception& e) {
+                got = std::string("threw: ") + e.what();
+            }
+            check_eq(std::string("D!"), got, "the script level's destructor body never runs");
+            check_eq(1, *deaths, "the C++ base dies once");
         });
 
         test("prvalue_arguments_are_the_parameters", [this]() {

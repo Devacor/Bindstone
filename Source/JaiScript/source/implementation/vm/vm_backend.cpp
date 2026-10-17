@@ -1218,6 +1218,28 @@ void vm_backend::note_compiled(const chunk& compiled) {
 	if (const auto& sink = engine_->disassembly_sink()) { sink(disassemble(compiled, symbolizer_), chunk_manifest(compiled, symbolizer_)); }
 }
 
+// the grafts whose bodies hold ip, innermost first: each one's frame named by its callee at the line node points to, then node moves to
+// its caller's statement (out null: counted only)
+size_t vm_backend::graft_frames_at(const chunk& code, size_t ip, const ast_node** node) {
+	const chunk::inline_site* held[16];
+	size_t count = 0;
+	for (const chunk::cell_loop& loop : code.cell_loops) {   // a block's door call stands at its copy: the general instruction it copies
+		if (ip >= loop.copy_head && ip - loop.copy_head < loop.origin.size()) { ip = loop.origin[ip - loop.copy_head]; break; }
+	}
+	for (const chunk::inline_site& s : code.inline_sites) {
+		if (ip >= s.begin_ip && ip < s.fallback_ip && s.decl && count < 16) { held[count++] = &s; }
+	}
+	std::sort(held, held + count, [](const chunk::inline_site* a, const chunk::inline_site* b) { return a->begin_ip > b->begin_ip; });
+	if (node) {
+		for (size_t i = 0; i < count; ++i) {
+			const ast_node* at = *node;
+			captured_trace_.push_back({ std::string(held[i]->decl->name), at ? at->location.filename : std::string(), at ? at->location.line : 0, at ? at->location.column : 0 });
+			*node = held[i]->call_stmt;
+		}
+	}
+	return count;
+}
+
 void vm_backend::capture_stack_trace() {
 	captured_trace_.clear();
 	const ast_node* top_node = nullptr;
@@ -1231,17 +1253,13 @@ void vm_backend::capture_stack_trace() {
 		}
 		if (captured_trace_.size() >= k_stack_trace_frames) {   // the frames above the innermost top-level one, counted, not walked
 			const size_t first = top_frame_mark_ == SIZE_MAX ? 0 : top_frame_mark_ + 1;
-			cap_stack_trace(captured_trace_, frames_.size() - first - walked + 1);
+			size_t grafted = 0;   // a frame stopped at a call a graft makes counts the grafts around it, as their frames would
+			for (auto rest = it; rest != frames_.rend() && !(*rest)->top_level; ++rest) { if ((*rest)->code->graft_calls) { grafted += graft_frames_at(*(*rest)->code, (*rest)->ip, nullptr); } }
+			cap_stack_trace(captured_trace_, frames_.size() - first - walked + 1 + grafted);
 			trace_captured_ = true;
 			return;
 		}
-		for (const chunk::inline_site& s : fr->code->inline_sites) {   // an inlined leaf: the callee's frame as the interpreter has it, the caller's line the call's
-			if (fr->ip >= s.begin_ip && fr->ip < s.fallback_ip && s.decl) {
-				captured_trace_.push_back({ std::string(s.decl->name), node ? node->location.filename : std::string(), node ? node->location.line : 0, node ? node->location.column : 0 });
-				node = s.call_stmt;
-				break;
-			}
-		}
+		graft_frames_at(*fr->code, fr->ip, &node);   // inlined callees: their frames as the interpreter has them, innermost first, each caller's line its call's
 		captured_trace_.push_back({
 			fr->code->function_name.empty() ? std::string("<anonymous>") : fr->code->function_name,
 			node ? node->location.filename : std::string(),
@@ -8342,6 +8360,7 @@ next_frame:
 		}
 		case opcode::op_c_mov_p: hot.payload[ci.a] = hot.payload[ci.b]; hot.kinds[ci.a] = hot.kinds[ci.b]; hot.dirty->set(ci.a); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_sin_f: cell_put_float(hot, ci.a, std::sin(cell_float_of_bits(hot.payload[ci.b]))); ++ip; JAI_CELL_NEXT;
+		case opcode::op_c_gdepth: current_call_depth_ += ci.a ? 1 : -1; ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_jtruth: {
 			const uint8_t tk = hot.kinds[ci.a];
 			if (tk != static_cast<uint8_t>(script_value::TYPEID_INT) && tk != static_cast<uint8_t>(script_value::TYPEID_BOOL) && tk != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) [[unlikely]] { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 3); break; }   // an adopted cell holding a string
@@ -17782,6 +17801,7 @@ op_status vm_backend::exec_try_push(frame& f, const vm_instruction& ins) {
 	rec.iter_size = iter_states_.size();
 	rec.cfor_size = cfor_states_.size();
 	rec.pending_size = pending_callees_.size();
+	rec.call_depth = current_call_depth_;
 	rec.entry_env = environment_;
 
 	// Inside a catch block the exception state survives so a bare rethrow works; a try block inside a handler is still inside
@@ -17925,6 +17945,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 		}
 		if (f.cells && f.cells->loop != k_invalid_u32) [[unlikely]] { cells_flush(f, f.code->cell_loops[f.cells->loop]); }   // a callee raised into an active block: the handler sees materialized slots
 		if (f.cells) { f.cells->park_at = k_invalid_u32; }   // a block parked for a statement that raised stays closed
+		current_call_depth_ = handler.call_depth;   // a raise out of a graft whose body makes calls left its level counted
 		f.ip = handler.handler_ip;
 		try_records_[handler_index].in_catch = true;
 		return true;
@@ -20020,6 +20041,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_cfor_pop:
 				if (!cfor_states_.empty()) { cfor_states_.pop_back(); }
 				break;
+			case opcode::op_graft_depth: current_call_depth_ += ins.a ? 1 : -1; break;   // a raise unwinding out of the graft restores the depth at its handler or at the run's end
 			case opcode::op_index: VM_TRY_OP(exec_index(f, ins)); break;
 			case opcode::op_index_assign: VM_TRY_OP(exec_index_assign(f, ins)); break;
 			case opcode::op_index_compound: VM_TRY_OP(exec_index_compound(f, ins)); break;
@@ -20536,7 +20558,6 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textua
 	run_error_.reset();
 
 	const int entry_call_depth = current_call_depth_;
-	(void)entry_call_depth;
 	const size_t entry_pending = pending_callees_.size();
 
 	call_frame top_locals;
@@ -20594,8 +20615,10 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textua
 	environment_ = f.entry_env;
 	if (!isolation.reentrant) { release_deep_call_storage(); }
 
-	// Every in-loop pop path must decrement exactly once (no RAII on that path)
-	assert(current_call_depth_ == entry_call_depth);
+	// Every in-loop pop path must decrement exactly once (no RAII on that path); a raise out of a graft whose body makes calls
+	// leaves its level counted
+	assert(current_call_depth_ >= entry_call_depth);
+	current_call_depth_ = entry_call_depth;
 
 	if (has_return_value_) {
 		script_value out = std::move(return_value_.value());

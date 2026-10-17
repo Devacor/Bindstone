@@ -195,6 +195,7 @@ namespace {
 			case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
 			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f: case opcode::op_c_jtruth:
+			case opcode::op_graft_depth: case opcode::op_c_gdepth:
 			case opcode::op_c_load_f: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
@@ -413,6 +414,7 @@ namespace {
 			case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
 			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f: case opcode::op_c_jtruth:
+			case opcode::op_graft_depth: case opcode::op_c_gdepth:
 			case opcode::op_c_load_f: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
@@ -3686,6 +3688,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				ops.push_back(op);
 				continue;
 			}
+			if (st.op == opcode::op_graft_depth) { op.kind = ir::depth; op.a = st.a; ops.push_back(op); continue; }   // a graft whose body makes calls: its level in the call depth
 			if (st.op == opcode::op_math_guard) {   // a stdlib alias's guard: its name holds at the entry and after every effect point, no copy instruction
 				loop_alias_sites.push_back(chunk::cell_loop::math_alias_site{ st.a, static_cast<uint8_t>(st.c), static_cast<uint32_t>(ip * 3) });
 				op.kind = ir::skip; ops.push_back(op); continue;
@@ -4996,6 +4999,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			}
 			case ir::probe: { const chunk::cell_loop::cell_call& cc = loop.calls[op.a]; append(vm_instruction{opcode::op_c_probe, op.a, loop_index, cc.probe_ip}, cc.probe_ip); break; }   // the callee resolved at its own place
 			case ir::skip: break;
+			case ir::depth: append(vm_instruction{opcode::op_c_gdepth, op.a, 0, 0}, ip); break;
 			case ir::exit: append(vm_instruction{opcode::op_c_exit, op.target, 0, 0}, ip); break;
 			case ir::rebind: {
 				// the alias's declaration: its source read's site row for the copy (the container the general operand, resolved and pinned at entry;

@@ -644,7 +644,13 @@ body, not a coroutine, not a method) compiles at its call site as the callee's b
 budget, 512 nodes for the body and the statement together) and made of the forms the graft takes: declarations, expression
 statements, blocks, ifs, returns, C-style `for` and `while` loops with `break` and `continue` inside them; literals, identifiers,
 arithmetic, assignments, members, elements, ternaries, casts and math intrinsics. A `return` inside the callee's own loop, a switch,
-a try, a lambda, `this`, a reference declaration, a nested script or host call or a method call in the body leaves the call a call.
+a try, a lambda, `this` or a reference declaration in the body leaves the call a call. A call the body makes stays a call made from
+the grafted body (a door call inside a block, which lands a plain-name call wherever it lands a value): the criterion is the node budget,
+not the absence of calls. `op_graft_depth` brackets such a body (`op_c_gdepth` in a block), so its calls run one level below the grafted
+frame as the callee's own frame would put them (the call-depth cap, a host callback's depth); a raise out of the bracket leaves the level
+counted until a handler restores the depth its try recorded or the run restores the depth it entered at. The trace names every graft
+around a frame's instruction, innermost first (a block's door call is mapped to the general instruction it copies), and counts them in
+the elided frames.
 A cloned loop compiles as any nested loop of the caller, so inside a caller's loop it closes into the caller's block. The by-value parameters must be scalars the checker proved (the same assignment table `bind_parameters` runs, so nothing
 converts; an unproven argument would bind out of the call's order, which evaluates every argument before it binds the first) or
 `var` taking a scalar local or a literal; a reference parameter bound to a plain identifier becomes the caller's variable, a typed

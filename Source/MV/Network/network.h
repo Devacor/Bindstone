@@ -72,16 +72,9 @@ namespace MV {
 			return self;
 		}
 
-		~Client() {
-			disconnect();
-			ioService.stop();
-			if (worker && worker->joinable()) {
-				worker->detach(); //getting errors if we join for some reason? :<
-			}
-		}
+		~Client();
 
 		void send(const std::string &a_content);
-		void writeNext();
 
 		void update();
 
@@ -107,12 +100,7 @@ namespace MV {
 			return ourConnectionState == DISCONNECTED;
 		}
 
-		void disconnect() {
-			ourConnectionState = DISCONNECTED;
-			info("client.disconnect();");
-			std::unique_lock<std::mutex> guard(errorLock);
-			failMessage = "Disconnect Requested";
-		}
+		void disconnect();
 
 	private:
 		Client(const MV::Url& a_url, const std::function<void(const std::string &)> &a_onMessageGet, const std::function<void(const std::string &)> &a_onConnectionFail, const std::function<void()> &a_onInitialized) :
@@ -129,27 +117,27 @@ namespace MV {
 
 		void initiateConnection();
 
-		void handleConnect(const asio::error_code& a_err, asio::ip::tcp::resolver::iterator endpoint_iterator);
+		void connectTo(const std::shared_ptr<asio::ip::tcp::socket>& a_attempt, asio::ip::tcp::resolver::iterator a_endpoints);
+		void handleConnect(const std::shared_ptr<asio::ip::tcp::socket>& a_attempt, const asio::error_code& a_err, asio::ip::tcp::resolver::iterator a_nextEndpoint);
 
 		void initiateRead();
+		void writeNext();
 
-		void handleError(const asio::error_code &a_err, const std::string &a_section) {
-			disconnect();
-			{
-				std::lock_guard<std::mutex> guard(errorLock);
-				failMessage = a_err.message();
-			}
-			error("[", a_section, "] => ", failMessage);
-		}
+		void handleError(const asio::error_code &a_err, const std::string &a_section);
 
-		void disconnectIfFailed();
+		void closeConnection(const std::string &a_reason);
+		void closeOnNetworkThread();
+		void closeNow();
+
+		std::string takeFailure();
 
 		MV::Url url;
 
-		std::recursive_mutex lock;
+		std::mutex inboxLock;
 		std::mutex errorLock;
 
 		asio::io_context ioService;
+		// The resolver, socket and outbox belong to the network thread; handlers capture this, never own it.
 		asio::ip::tcp::resolver resolver;
 		std::shared_ptr<asio::ip::tcp::socket> socket;
 		std::deque<std::shared_ptr<NetworkMessage>> outbox;
@@ -168,6 +156,9 @@ namespace MV {
 
 		std::vector<double> serverTimeDeltas;
 		std::atomic<ConnectionState> ourConnectionState = DISCONNECTED;
+		// Touched only by the thread that calls update() and the public methods.
+		bool connectionAnnounced = false;
+		bool disconnectRequested = false;
 	};
 
 	class Server;
@@ -182,7 +173,14 @@ namespace MV {
 			connectImplementation();
 		}
 
-		void disconnect() { disconnectRecieved = true; disconnectImplementation(); }
+		virtual ~ConnectionStateBase() = default;
+
+		void disconnect() {
+			if (!disconnectRecieved) {
+				disconnectRecieved = true;
+				disconnectImplementation();
+			}
+		}
 
 		bool disconnected() const { return disconnectRecieved; }
 
@@ -200,12 +198,49 @@ namespace MV {
 		bool disconnectRecieved = false;
 	};
 
+	// The network-thread half of a Connection: its handlers own this, never the Connection, so the
+	// Connection and its game state die on the thread that updates the Server.
+	class ConnectionSocket : public std::enable_shared_from_this<ConnectionSocket> {
+	public:
+		ConnectionSocket(const std::shared_ptr<asio::ip::tcp::socket> &a_socket, asio::io_context& a_ioService);
+
+		void start();
+		void send(const std::string &a_content);
+		void close();
+
+		std::vector<std::shared_ptr<NetworkMessage>> takeInbox();
+
+		bool failed() const {
+			return ourFailed;
+		}
+
+		bool loopback() const {
+			return ourLoopback;
+		}
+
+	private:
+		void initiateRead();
+		void writeNext();
+		void closeNow();
+		void handleError(const asio::error_code &a_err, const std::string &a_section);
+
+		asio::io_context& ioService;
+		std::shared_ptr<asio::ip::tcp::socket> socket;
+		std::deque<std::shared_ptr<NetworkMessage>> outbox;
+		bool closing = false;
+		asio::steady_timer closeDeadline;
+
+		std::mutex inboxLock;
+		std::vector<std::shared_ptr<NetworkMessage>> inbox;
+
+		std::atomic<bool> ourFailed {false};
+		const bool ourLoopback;
+	};
+
 	class Connection : public std::enable_shared_from_this<Connection> {
 	public:
-		Connection(Server& a_server, const std::shared_ptr<asio::ip::tcp::socket> &a_socket, asio::io_context& a_ioService) :
-			server(a_server),
-			socket(a_socket),
-			ioService(a_ioService){
+		Connection(const std::shared_ptr<ConnectionSocket> &a_socket) :
+			socket(a_socket) {
 		}
 
 		//can't happen in the constructor due to shared_from_this
@@ -215,13 +250,16 @@ namespace MV {
 
 		~Connection() {
 			info("Connection::~Connection()");
-			disconnect();
+			if (ourState) {
+				ourState->disconnect();
+			}
+			socket->close();
 		}
 
-		void send(const std::string &a_content);
-		void writeNext();
+		void send(const std::string &a_content) {
+			socket->send(a_content);
+		}
 
-		void initiateRead();
 		size_t update(double a_dt);
 
 		ConnectionStateBase* state() const {
@@ -230,6 +268,7 @@ namespace MV {
 
 		void disconnect() {
 			ourState->disconnect();
+			socket->close();
 		}
 
 		bool disconnected() const {
@@ -237,23 +276,11 @@ namespace MV {
 		}
 		// The peer is this machine (a locally hosted stack), as seen by the socket itself
 		bool loopback() const {
-			asio::error_code error;
-			auto endpoint = socket->remote_endpoint(error);
-			return !error && endpoint.address().is_loopback();
+			return socket->loopback();
 		}
 
 	private:
-		std::recursive_mutex lock;
-
-		void handleError(const asio::error_code &a_err, const std::string &a_section);
-
-		Server& server;
-		asio::io_context& ioService;
-
-		std::shared_ptr<asio::ip::tcp::socket> socket;
-		std::deque<std::shared_ptr<NetworkMessage>> outbox;
-		std::vector<std::shared_ptr<NetworkMessage>> inbox;
-
+		std::shared_ptr<ConnectionSocket> socket;
 		std::unique_ptr<ConnectionStateBase> ourState = nullptr;
 	};
 
@@ -284,8 +311,9 @@ namespace MV {
 		std::deque<std::pair<double, size_t>> packets;
 	};
 
+	// Connections are accepted on the network thread and adopted, updated and dropped by update(); every
+	// other member is used only from the thread that calls update().
 	class Server {
-		friend Connection;
 	public:
 		Server(const asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase> (const std::shared_ptr<Connection> &)> a_connectionStateFactory);
 
@@ -299,8 +327,8 @@ namespace MV {
 			return ourConnections;
 		}
 
-		uint16_t port() {
-			return acceptor.local_endpoint().port();
+		uint16_t port() const {
+			return ourPort;
 		}
 
 		size_t bytesPerSecondSent() {
@@ -312,11 +340,14 @@ namespace MV {
 		}
 	private:
 		void acceptClients();
-
-		std::recursive_mutex lock;
+		void adoptAcceptedConnections();
 
 		asio::io_context ioService;
  		asio::ip::tcp::acceptor acceptor;
+		uint16_t ourPort = 0;
+
+		std::mutex acceptedLock;
+		std::vector<std::shared_ptr<ConnectionSocket>> accepted;
 
 		std::vector<std::shared_ptr<Connection>> ourConnections;
 

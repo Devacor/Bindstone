@@ -309,12 +309,12 @@ namespace detail {
 	};
 
 	// A member type the in-place lane reads with the getter's own conversion: integers (not characters), floating
-	// point, bool, std::string
+	// point, bool, std::string, script_value
 	template<typename P>
 	inline constexpr bool host_member_value = (std::is_integral_v<P> && !std::is_same_v<P, char> && !std::is_same_v<P, signed char> &&
 	                                           !std::is_same_v<P, unsigned char> && !std::is_same_v<P, wchar_t> && !std::is_same_v<P, char8_t> &&
 	                                           !std::is_same_v<P, char16_t> && !std::is_same_v<P, char32_t>) ||
-	                                          std::is_floating_point_v<P> || std::is_same_v<P, std::string>;
+	                                          std::is_floating_point_v<P> || std::is_same_v<P, std::string> || std::is_same_v<P, script_value>;
 
 	template<typename P>
 	script_value host_member_read(const void* address, engine* eng) {
@@ -337,6 +337,15 @@ namespace detail {
 		} else if constexpr (std::is_same_v<P, std::string>) {
 			if (kind != script_value::TYPEID_STRING) { return false; }
 			*static_cast<P*>(address) = std::string(std::string_view(value.unchecked_as_string()));
+		} else if constexpr (std::is_same_v<P, script_value>) {
+			// a held reference stores through itself with its container's element type (the setter's business); a scalar or
+			// a string clones as itself
+			script_value& held = *static_cast<script_value*>(address);
+			if (held.is_reference() || (kind != script_value::TYPEID_NULL && kind != script_value::TYPEID_INT && kind != script_value::TYPEID_FLOAT &&
+			                            kind != script_value::TYPEID_BOOL && kind != script_value::TYPEID_CHAR && kind != script_value::TYPEID_STRING)) {
+				return false;
+			}
+			held = value;
 		} else {
 			return false;
 		}
@@ -368,6 +377,10 @@ namespace detail {
 		lane->read = &host_member_read<std::remove_cv_t<P>>;
 		if constexpr (std::is_copy_assignable_v<P>) { lane->write = &host_member_write<P>; }
 		lane->locate = &host_member_locate<T, P>;
+		if constexpr (std::is_same_v<std::remove_cv_t<P>, script_value>) {
+			// a non-owning object takes the getter's read, which pins the receiver's object under it
+			lane->serves = [](const void* address) { return !static_cast<const script_value*>(address)->is_non_owning_object(); };
+		}
 		return lane;
 	}
 

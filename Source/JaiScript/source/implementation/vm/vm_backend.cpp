@@ -14586,7 +14586,7 @@ bool vm_backend::bare_host_read(frame& f, size_t cache_slot, script_value& out) 
 	class_instance* inst = detail::host_this_instance(*f.locals->scope_this);
 	if (!inst || inst->get_class_definition() != entry.cd || entry.cd->method_epoch() != entry.epoch) { return false; }
 	void* address = detail::host_member_address(inst, entry.hit);
-	if (!address) { return false; }
+	if (!address || !detail::host_member_serves(*entry.hit.lane, address)) { return false; }
 	out = entry.hit.lane->read(address, engine_);
 	return true;
 }
@@ -14602,7 +14602,7 @@ JAI_NOINLINE bool vm_backend::bare_host_fill_read(frame& f, size_t cache_slot, u
 	entry.epoch = cd->method_epoch();
 	if (!detail::host_member_fill(cd, inst, sym, *f.locals->scope_this, engine_, entry.hit)) { return false; }
 	void* address = detail::host_member_address(inst, entry.hit);
-	if (!address) { return false; }
+	if (!address || !detail::host_member_serves(*entry.hit.lane, address)) { return false; }
 	out = entry.hit.lane->read(address, engine_);
 	return true;
 }
@@ -14783,7 +14783,7 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 								return {};
 							}
 						} else if (entry.host.lane) {
-							if (void* address = detail::host_member_address(inst, entry.host)) {
+							if (void* address = detail::host_member_address(inst, entry.host); address && detail::host_member_serves(*entry.host.lane, address)) {
 								stack_.push_back(entry.host.lane->read(address, engine_));
 								return {};
 							}
@@ -14883,7 +14883,7 @@ op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
 							return {};
 						}
 					} else if (entry.host.lane) {
-						if (void* address = detail::host_member_address(inst, entry.host)) {
+						if (void* address = detail::host_member_address(inst, entry.host); address && detail::host_member_serves(*entry.host.lane, address)) {
 							frame_slot_set(f, ins.b, entry.host.lane->read(address, engine_));
 							return {};
 						}

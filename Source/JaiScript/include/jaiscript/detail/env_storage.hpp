@@ -141,22 +141,28 @@ namespace jai::detail {
             --size_;   // the slot leaves the store before its value dies (a destructor reentering the env sees it gone)
             last->~script_value();
         }
+        void clear() noexcept { while (size_ != 0) { pop_back(); } }
         script_value& back() noexcept { return *cell(size_ - 1); }
         bool empty() const noexcept { return size_ == 0; }
         size_t size() const noexcept { return size_; }
         script_value& operator[](size_t i) noexcept { return *cell(i); }
         const script_value& operator[](size_t i) const noexcept { return *const_cast<env_value_store*>(this)->cell(i); }
 
-        class const_iterator {
-            const env_value_store* store_;
+        template <class Store, class Value>
+        class basic_iterator {
+            Store* store_;
             size_t i_;
         public:
-            const_iterator(const env_value_store* store, size_t i) : store_(store), i_(i) {}
-            const script_value& operator*() const noexcept { return (*store_)[i_]; }
-            const_iterator& operator++() noexcept { ++i_; return *this; }
-            bool operator!=(const const_iterator& other) const noexcept { return i_ != other.i_; }
-            bool operator==(const const_iterator& other) const noexcept { return i_ == other.i_; }
+            basic_iterator(Store* store, size_t i) : store_(store), i_(i) {}
+            Value& operator*() const noexcept { return (*store_)[i_]; }
+            basic_iterator& operator++() noexcept { ++i_; return *this; }
+            bool operator!=(const basic_iterator& other) const noexcept { return i_ != other.i_; }
+            bool operator==(const basic_iterator& other) const noexcept { return i_ == other.i_; }
         };
+        using iterator = basic_iterator<env_value_store, script_value>;
+        using const_iterator = basic_iterator<const env_value_store, const script_value>;
+        iterator begin() noexcept { return {this, 0}; }
+        iterator end() noexcept { return {this, size_}; }
         const_iterator begin() const noexcept { return {this, 0}; }
         const_iterator end() const noexcept { return {this, size_}; }
     };

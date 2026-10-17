@@ -111,7 +111,10 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
 - `checked_result.hpp` does not include `<format>`; error messages use plain `{0}`/`{1}` substitution.
 - `detail/integer_ops.hpp` (and its `<intrin.h>`) stays out of `interpreter.hpp`. Keep `<intrin.h>`, heavy standard
   headers and implementation headers out of widely included core headers.
-- Parse recursion (`MAX_PARSE_DEPTH`) and JSON nesting (`JAI_MAX_JSON_PARSE_DEPTH`) stay low enough to throw before the
+- Walks over script data (JSON parsing, `from_json`/`from_binary`, `to_json`/`to_binary`, deep copy, the parallel detach) run on
+  explicit work stacks, so data nests as deep as memory allows; no depth cap stops a legitimate payload. A walk that recurses
+  through host code (a host type's `serialize`/`load`) keeps a guard: `detail::native_stack_low()` plus the
+  `JAI_MAX_HOST_RECORD_DEPTH` backstop (1024). Parse recursion (`MAX_PARSE_DEPTH`) stays low enough to throw before the
   native stack overflows in a Debug build.
 
 ## Design principles

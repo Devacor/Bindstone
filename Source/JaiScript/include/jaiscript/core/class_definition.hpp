@@ -304,6 +304,8 @@ public:
     }
 
     std::shared_ptr<class_instance> deep_copy() const;
+    // One level of a deep copy (script_value::clone_level): a field a deep value holds fills from the work list
+    std::shared_ptr<class_instance> deep_copy_level(detail::deep_copy_work& work, unsigned depth) const;
 
     void copy_fields_from(const class_instance& other);
 
@@ -3907,6 +3909,13 @@ inline const script_value& class_instance::native_or_throw() const {
 }
 
 inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
+    detail::deep_copy_work work;
+    auto result = deep_copy_level(work, 0);
+    detail::finish_deep_copy(work);
+    return result;
+}
+
+inline std::shared_ptr<class_instance> class_instance::deep_copy_level(detail::deep_copy_work& work, unsigned depth) const {
     if (class_def_ && class_def_->nocopy()) {
         throw runtime_error("Cannot copy an instance of nocopy class '" + std::string(get_class_name()) + "': hold it by reference (auto&/var&) or share it (shared_ptr)");
     }
@@ -3952,7 +3961,12 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
                 new_instance->flat_fields_[slot] = new_instance->make_trivial_cell(*cell);
                 continue;
             }
-            new_instance->flat_fields_[slot] = new_instance->make_cell(cell->clone_element());
+            if (cell->element_copies_shallow()) {
+                new_instance->flat_fields_[slot] = new_instance->make_cell(script_value(*cell));
+                continue;
+            }
+            new_instance->flat_fields_[slot] = new_instance->make_cell(script_value(std::monostate{}, engine_));
+            cell->clone_element_into(*new_instance->flat_fields_[slot], work, depth);
         }
         copy_native(*new_instance);
         class_def_->register_live_instance(new_instance.get());

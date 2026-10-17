@@ -16,14 +16,6 @@
 #include <cstdlib>
 #endif
 
-// Maximum nesting depth for JSON TEXT parsing (from_json). Each level recurses a
-// couple of native stack frames, so this is intentionally well below
-// JAI_MAX_SERIALIZATION_DEPTH (used for in-memory traversal) to guarantee the
-// guard fires before deeply-nested / adversarial input exhausts the call stack.
-#ifndef JAI_MAX_JSON_PARSE_DEPTH
-#define JAI_MAX_JSON_PARSE_DEPTH 128
-#endif
-
 namespace jai {
 namespace serialization {
 
@@ -201,22 +193,60 @@ public:
         // Context is managed by base class which pushes MapValue after this
     }
 
-    void write_value(const script_value& value) {
-        if (value.is_reference()) [[unlikely]] {
-            write_value(value.deref());
-            return;
+    // One value, its containers, instances and handle payloads walked on an explicit frame stack: nesting costs memory, never
+    // native depth
+    void write_value(const script_value& root) {
+        std::vector<write_frame> frames;
+        const int depth_at_entry = json_depth_;
+        begin_value(root, frames);
+        script_value scratch(std::monostate{}, engine_ref_);
+        while (!frames.empty()) {
+            const script_value* child = next_child(frames.back(), scratch);
+            if (aborted_) [[unlikely]] {
+                json_depth_ = depth_at_entry;   // a getter threw into the backend: the in-flight exception leaves the archive
+                aborted_ = false;
+                return;
+            }
+            if (child) {
+                begin_value(*child, frames);
+            } else {
+                end_frame(frames.back());
+                frames.pop_back();
+            }
         }
-        // Track depth - throws on overflow (hard failure, no partial data)
-        depth_guard guard(current_depth_);
+    }
 
-        // Handle shared_ptr types with proper tracking, delegate others to stdlib
+    // Get the resulting JSON string
+    std::string str() const { return oss_.str(); }
+
+private:
+    enum class ContainerType { Object, Array };
+
+    enum class write_shape : uint8_t { payload, array, map, tagged_map, instance, fields };
+    struct write_frame {
+        write_frame(write_shape a_shape, script_value a_source) : shape(a_shape), source(std::move(a_source)) {}
+        write_shape shape;
+        script_value source;            // the container, the instance, or a handle's payload
+        size_t index = 0;
+        size_t count = 0;
+        bool first = true;
+        uint8_t phase = 0;              // a tagged map's pair: 0 its key next, 1 its value next, 2 its close
+        bool compact_weak = false;      // a compact weak_ptr record closes with a bare '}'
+        script_map::const_iterator next{};
+        class_definition* class_def = nullptr;
+        std::vector<std::string> names;
+        std::vector<std::pair<std::string, script_value>> fields;
+    };
+    bool aborted_ = false;
+
+    // Writes a leaf whole, or a container's opening and the frame that writes the rest
+    void begin_value(const script_value& given, std::vector<write_frame>& frames) {
+        const script_value& value = given.is_reference() ? given.deref() : given;
         switch (value.type()) {
-            
             case script_value_type::jai_weak_ptr_type: {
-                // Serialize weak_ptr by tracking the shared_ptr it references
+                // a weak_ptr writes its id; its object rides along the first time the archive meets it
                 auto weak = value.get_weak_ptr();
-                auto shared = weak.lock();  // Try to lock to get shared_ptr<object_holder>
-
+                auto shared = weak.lock();
                 if (indent_ > 0) {
                     open_value('{');
                     auto [id, is_new] = shared ? track_shared_ptr(shared.get()) : std::pair<uint32_t, bool>{0, false};
@@ -224,33 +254,31 @@ public:
                     oss_ << id;
                     if (is_new) {
                         write_value_key("$weak_ptr_data", true);
-                        write_value(weak_target_value(shared));
+                        frames.emplace_back(write_shape::payload, weak_target_value(shared));
+                        return;
                     }
                     close_value('}', false);
                 } else if (!shared) {
-                    // Expired or null weak_ptr
                     oss_ << "{\"$weak_ptr_id\": 0}";
                 } else {
-                    // Track the shared_ptr and write its ID
                     auto [id, is_new] = track_shared_ptr(shared.get());
                     oss_ << "{\"$weak_ptr_id\": " << id;
-
-                    // If this is the first time seeing this object, serialize it inline
                     if (is_new) {
                         oss_ << ", \"$weak_ptr_data\": ";
-                        write_value(weak_target_value(shared));
+                        write_frame& f = frames.emplace_back(write_shape::payload, weak_target_value(shared));
+                        f.compact_weak = true;
+                        return;
                     }
-
                     oss_ << "}";
                 }
-                break;
+                return;
             }
 
             case script_value_type::jai_shared_ptr_type: {
                 const auto holder = value.get_object_holder();
                 if (!holder) {
                     oss_ << "null";
-                    break;
+                    return;
                 }
                 auto [id, is_new] = track_shared_ptr(holder.get());
                 open_value('{');
@@ -258,23 +286,20 @@ public:
                 oss_ << id;
                 if (is_new) {
                     write_value_key("$shared_ptr_data", true);
-                    write_value(weak_target_value(holder));
+                    frames.emplace_back(write_shape::payload, weak_target_value(holder));
+                    return;
                 }
                 close_value('}', false);
-                break;
+                return;
             }
 
             case script_value_type::jai_array_type: {
                 const script_array* node = value.unchecked_array_node();
                 if (!node) { throw runtime_error("script_value is not an array"); }
                 open_value('[');
-                size_t i = 0;
-                node->for_each(value.get_engine(), [&](const script_value& elem) {
-                    write_value_separator(i++ > 0);
-                    write_value(elem);  // Recursive call handles shared_ptrs
-                });
-                close_value(']', i == 0);
-                break;
+                write_frame& f = frames.emplace_back(write_shape::array, value);
+                f.count = node->size();
+                return;
             }
 
             case script_value_type::jai_map_type: {
@@ -283,36 +308,16 @@ public:
                     open_value('{');
                     write_value_key("$map", false);
                     open_value('[');
-                    bool first_pair = true;
-                    for (const auto& [k, v] : map) {
-                        write_value_separator(!first_pair);
-                        first_pair = false;
-                        open_value('[');
-                        write_value_separator(false);
-                        write_value(k);
-                        write_value_separator(true);
-                        write_value(v);
-                        close_value(']', false);
-                    }
-                    close_value(']', first_pair);
-                    close_value('}', false);
-                    break;
+                    write_frame& f = frames.emplace_back(write_shape::tagged_map, value);
+                    f.next = map.begin();
+                    return;
                 }
                 open_value('{');
-                bool first = true;
-                for (const auto& [k, v] : map) {
-                    if (k.is_string()) {
-                        write_value_key(k.as_string(), !first);
-                    } else {
-                        write_value_key(k.to_string(), !first);
-                    }
-                    first = false;
-                    write_value(v);  // Recursive call handles shared_ptrs
-                }
-                close_value('}', first);
-                break;
+                write_frame& f = frames.emplace_back(write_shape::map, value);
+                f.next = map.begin();
+                return;
             }
-            
+
             case script_value_type::jai_object_type: {
                 auto type_info = value.get_type_info();
                 std::string type_name = type_info ? type_info->type_name : "unknown";
@@ -320,7 +325,7 @@ public:
                 auto eng = engine_ref_;
                 if (!eng) {
                     oss_ << "null";
-                    break;
+                    return;
                 }
 
                 std::shared_ptr<class_instance> instance;
@@ -329,61 +334,128 @@ public:
                 } catch (...) {
                     // not a class_instance: the fallback below
                 }
-                {
-                    if (instance) {
-                        auto class_def = instance->get_class_definition();
+                if (instance) {
+                    auto class_def = instance->get_class_definition();
 
-                        // For script classes, type_info->type_name may be "any" - use the actual class name
-                        if (class_def) {
-                            type_name = class_def->get_name();
-                        }
-
-                        open_value('{');
-                        write_value_key("_type_", false);
-                        oss_ << '"' << escape_json_string_local(type_name) << '"';
-
-                        if (class_def) {
-                            const bool completed = for_each_serialized_property(value, class_def, eng, [&](const auto& prop_name, script_value&& prop_value) {
-                                write_value_key(prop_name, true);
-                                write_value(std::move(prop_value));
-                            });
-                            if (!completed) {
-                                --json_depth_;
-                                return;
-                            }
-                        } else {
-                            // No class definition - serialize fields directly (slot order:
-                            // deterministic, ≈ declaration order)
-                            instance->for_each_field([&](uint64_t field_id, const script_value& field_val) {
-                                std::string field_name = std::string(eng->get_symbolizer()->get_string(field_id));
-                                write_value_key(field_name, true);
-                                write_value(field_val);
-                            });
-                        }
-
-                        close_value('}', false);
-                        break;
+                    // For script classes, type_info->type_name may be "any" - use the actual class name
+                    if (class_def) {
+                        type_name = class_def->get_name();
                     }
+
+                    open_value('{');
+                    write_value_key("_type_", false);
+                    oss_ << '"' << escape_json_string_local(type_name) << '"';
+
+                    if (class_def) {
+                        write_frame& f = frames.emplace_back(write_shape::instance, value);
+                        f.names = class_def->get_property_names();
+                        f.class_def = class_def;
+                    } else {
+                        // No class definition - serialize fields directly (slot order: deterministic, ≈ declaration order)
+                        write_frame& f = frames.emplace_back(write_shape::fields, value);
+                        instance->for_each_field([&](uint64_t field_id, const script_value& field_val) {
+                            f.fields.emplace_back(std::string(eng->get_symbolizer()->get_string(field_id)), field_val);
+                        });
+                    }
+                    return;
                 }
 
                 // Fallback for other object types
                 oss_ << to_json_impl_fallback(value);
-                break;
+                return;
             }
 
-            default: {
+            default:
                 oss_ << to_json_impl_fallback(value);
-                break;
-            }
+                return;
         }
     }
-    
-    // Get the resulting JSON string
-    std::string str() const { return oss_.str(); }
-    
-private:
-    enum class ContainerType { Object, Array };
-    
+
+    // Writes what comes before the frame's next child and hands the child out (in its container, or in scratch when it had
+    // to be made); null when the frame has none left
+    const script_value* next_child(write_frame& f, script_value& scratch) {
+        switch (f.shape) {
+            case write_shape::payload:
+                if (f.index++ > 0) { return nullptr; }
+                scratch = f.source;
+                return &scratch;
+            case write_shape::array: {
+                if (f.index >= f.count) { return nullptr; }
+                write_value_separator(f.index > 0);
+                const script_array* node = f.source.unchecked_array_node();
+                const size_t i = f.index++;
+                if (node->kind() == script_array::kind_t::hetero) { return &node->values()[i]; }
+                scratch = node->get(i, f.source.get_engine());
+                return &scratch;
+            }
+            case write_shape::map: {
+                if (f.next == f.source.as_map().end()) { return nullptr; }
+                const script_value& k = f.next->first;
+                if (k.is_string()) {
+                    write_value_key(k.as_string(), !f.first);
+                } else {
+                    write_value_key(k.to_string(), !f.first);
+                }
+                f.first = false;
+                const script_value* child = &f.next->second;
+                ++f.next;
+                return child;
+            }
+            case write_shape::tagged_map:
+                for (;;) {
+                    if (f.phase == 2) {
+                        close_value(']', false);
+                        ++f.next;
+                        f.phase = 0;
+                    }
+                    if (f.phase == 0) {
+                        if (f.next == f.source.as_map().end()) { return nullptr; }
+                        write_value_separator(!f.first);
+                        f.first = false;
+                        open_value('[');
+                        write_value_separator(false);
+                        f.phase = 1;
+                        return &f.next->first;
+                    }
+                    write_value_separator(true);
+                    f.phase = 2;
+                    return &f.next->second;
+                }
+            case write_shape::instance: {
+                if (!next_serialized_property(f.source, f.class_def, engine_ref_, f.names, f.index, scratch, aborted_)) { return nullptr; }
+                write_value_key(f.names[f.index - 1], true);
+                return &scratch;
+            }
+            case write_shape::fields:
+                if (f.index >= f.fields.size()) { return nullptr; }
+                write_value_key(f.fields[f.index].first, true);
+                return &f.fields[f.index++].second;
+        }
+        return nullptr;
+    }
+
+    void end_frame(write_frame& f) {
+        switch (f.shape) {
+            case write_shape::payload:
+                if (f.compact_weak) { oss_ << "}"; } else { close_value('}', false); }
+                break;
+            case write_shape::array:
+                close_value(']', f.count == 0);
+                break;
+            case write_shape::map:
+                close_value('}', f.first);
+                break;
+            case write_shape::tagged_map:
+                close_value(']', f.first);
+                close_value('}', false);
+                break;
+            case write_shape::instance:
+            case write_shape::fields:
+                close_value('}', false);
+                break;
+        }
+    }
+
     // Local helper functions to avoid circular includes
     // write_value's layout: compact (indent_ <= 0) or one member per line, indent_ spaces per level
     void open_value(char bracket) {
@@ -718,6 +790,7 @@ public:
             }
         }
         version_ = version;
+        enter_host_record(object_stack_.size());
         object_stack_.push(ObjState{ first, count, 0, nullptr });
         return true;
     }
@@ -831,7 +904,6 @@ public:
     }
 
     script_value read_value() {
-        depth_guard guard(current_depth_);
         auto eng = engine_ref_;
         if (!eng) {
             throw serialization_error("Engine reference expired during JSON deserialization");
@@ -951,40 +1023,63 @@ private:
         return true;
     }
 
-    // Recursively builds a full script_value subtree from a flat node — only used when a raw
+    // Builds a full script_value subtree from a flat node, its containers on an explicit frame stack — only used when a raw
     // composite is actually requested (read_value: stdlib from_json, a script value inside a C++ record).
     // Keys are ENGINE-CARRYING string values: ordering and map.find(script_value("_type_"/...))
     // rank by type-then-content (type_info never participates), and every value in the result
     // must clone/detach — the old ast_literal_tag keys had no engine pointer, so copying any
     // deserialized map died with "Cannot clone script_value: missing engine pointer".
     script_value materialize(uint32_t idx) {
-        depth_guard guard(current_depth_);
         engine* eng = engine_ref_;
-        const JNode& node = nodes_[idx];
-        if (node.tag == JTag::Obj) {
-            script_value math_value(std::monostate{}, eng);
-            if (materialize_math(node, eng, math_value)) {
-                return math_value;
+        struct frame { uint32_t node; uint32_t next; script_value container; };
+        std::vector<frame> frames;
+        // a leaf's value, or nothing when n opened a container frame
+        auto open = [&](uint32_t n, script_value& leaf) -> bool {
+            const JNode& node = nodes_[n];
+            if (node.tag == JTag::Obj) {
+                script_value math_value(std::monostate{}, eng);
+                if (materialize_math(node, eng, math_value)) {
+                    leaf = std::move(math_value);
+                    return true;
+                }
+                frames.push_back({n, 0, script_value::make_map(eng->get_type_info_string(), nullptr, eng)});
+                return false;
             }
-            script_value mv = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
-            auto& map = const_cast<script_map&>(mv.as_map());
-            for (uint32_t m = 0; m < node.u.agg.count; ++m) {
-                const JNode& k = nodes_[node.u.agg.first + 2 * m];
-                map.emplace(script_value(script_string(chars_.data() + k.u.str.off, k.u.str.len), eng),
-                            materialize(node.u.agg.first + 2 * m + 1));
+            if (node.tag == JTag::Arr) {
+                script_value av = script_value::make_array(nullptr, eng);
+                const_cast<std::vector<script_value>&>(av.as_array()).reserve(node.u.agg.count);
+                frames.push_back({n, 0, std::move(av)});
+                return false;
             }
-            return mv;
+            leaf = materialize_primitive(node, eng);
+            return true;
+        };
+        // the child just made goes into the container whose member index - 1 it is
+        auto attach = [&](frame& parent, script_value&& child) {
+            const JNode& node = nodes_[parent.node];
+            if (node.tag == JTag::Obj) {
+                const JNode& k = nodes_[node.u.agg.first + 2 * (parent.next - 1)];
+                const_cast<script_map&>(parent.container.as_map()).emplace(script_value(script_string(chars_.data() + k.u.str.off, k.u.str.len), eng), std::move(child));
+            } else {
+                const_cast<std::vector<script_value>&>(parent.container.as_array()).push_back(std::move(child));
+            }
+        };
+        script_value leaf(std::monostate{}, eng);
+        if (open(idx, leaf)) { return leaf; }
+        for (;;) {
+            frame& top = frames.back();
+            const JNode& node = nodes_[top.node];
+            if (top.next < node.u.agg.count) {
+                const uint32_t child = node.tag == JTag::Obj ? node.u.agg.first + 2 * top.next + 1 : node.u.agg.first + top.next;
+                ++top.next;
+                if (open(child, leaf)) { attach(frames.back(), std::move(leaf)); }
+                continue;
+            }
+            script_value done = std::move(top.container);
+            frames.pop_back();
+            if (frames.empty()) { return done; }
+            attach(frames.back(), std::move(done));
         }
-        if (node.tag == JTag::Arr) {
-            script_value av = script_value::make_array(nullptr, eng);
-            auto& arr = const_cast<std::vector<script_value>&>(av.as_array());
-            arr.reserve(node.u.agg.count);
-            for (uint32_t e = 0; e < node.u.agg.count; ++e) {
-                arr.push_back(materialize(node.u.agg.first + e));
-            }
-            return av;
-        }
-        return materialize_primitive(node, eng);
     }
 
     // ---- Flat JSON parser (builds nodes_/chars_; no script_value DOM) ----
@@ -1024,42 +1119,81 @@ private:
         scratch_.push_back(v);
     }
 
+    // One value, its containers walked on an explicit frame stack: nesting costs memory, never native depth
     void parse_value_flat() {
-        // Bound recursion so adversarial deep nesting can't overflow the native stack.
-        depth_guard guard(current_depth_);
-        if (current_depth_ > JAI_MAX_JSON_PARSE_DEPTH) {
-            throw serialization_error(
-                "Maximum JSON nesting depth (" + std::to_string(JAI_MAX_JSON_PARSE_DEPTH) + ") exceeded");
-        }
-        skip_whitespace();
-        if (pos_ >= json_.length()) {
-            throw serialization_error("Unexpected end of JSON");
-        }
-        char c = json_[pos_];
-        if (c == '"') {
-            JNode v; v.tag = JTag::Str;
-            parse_string_into(v.u.str.off, v.u.str.len);
-            scratch_.push_back(v);
-        } else if (c == '{') {
-            parse_object_flat();
-        } else if (c == '[') {
-            parse_array_flat();
-        } else if (c == 't' || c == 'f') {
-            parse_bool_flat();
-        } else if (c == 'n') {
-            parse_null_flat();
-        } else if (c == '-' || (c >= '0' && c <= '9')) {
-            parse_number_flat();
-        } else {
-            size_t start = (pos_ > 20) ? pos_ - 20 : 0;
-            size_t len = std::min(size_t(40), json_.length() - start);
-            std::string context = json_.substr(start, len);
-            throw serialization_error("Unexpected character '" + std::string(1, c) +
-                "' in JSON at position " + std::to_string(pos_) +
-                ", near: ..." + context + "...");
+        struct open_container { JTag tag; size_t mark; };
+        std::vector<open_container> open;
+        for (;;) {
+            skip_whitespace();
+            if (pos_ >= json_.length()) {
+                throw serialization_error("Unexpected end of JSON");
+            }
+            char c = json_[pos_];
+            bool completed = true;
+            if (c == '"') {
+                JNode v; v.tag = JTag::Str;
+                parse_string_into(v.u.str.off, v.u.str.len);
+                scratch_.push_back(v);
+            } else if (c == '{' || c == '[') {
+                const JTag tag = c == '{' ? JTag::Obj : JTag::Arr;
+                pos_++;
+                const size_t mark = scratch_.size();
+                if (peek() == (c == '{' ? '}' : ']')) {
+                    advance();
+                    push_container(tag, mark);
+                } else {
+                    open.push_back({tag, mark});
+                    if (tag == JTag::Obj) { parse_member_key(); }
+                    completed = false;
+                }
+            } else if (c == 't' || c == 'f') {
+                parse_bool_flat();
+            } else if (c == 'n') {
+                parse_null_flat();
+            } else if (c == '-' || (c >= '0' && c <= '9')) {
+                parse_number_flat();
+            } else {
+                size_t start = (pos_ > 20) ? pos_ - 20 : 0;
+                size_t len = std::min(size_t(40), json_.length() - start);
+                std::string context = json_.substr(start, len);
+                throw serialization_error("Unexpected character '" + std::string(1, c) +
+                    "' in JSON at position " + std::to_string(pos_) +
+                    ", near: ..." + context + "...");
+            }
+            if (!completed) { continue; }
+            // a value finished: close every container it finished, until one wants its next member
+            for (;;) {
+                if (open.empty()) { return; }
+                const open_container top = open.back();
+                const char next = peek();
+                if (next == ',') {
+                    advance();
+                    if (top.tag == JTag::Obj) { parse_member_key(); }
+                    break;
+                }
+                if (next == (top.tag == JTag::Obj ? '}' : ']')) {
+                    advance();
+                    open.pop_back();
+                    push_container(top.tag, top.mark);
+                    continue;
+                }
+                size_t start = (pos_ > 20) ? pos_ - 20 : 0;
+                size_t len = std::min(size_t(40), json_.length() - start);
+                std::string context = json_.substr(start, len);
+                throw serialization_error(std::string(top.tag == JTag::Obj ? "Expected ',' or '}' in JSON object at position " : "Expected ',' or ']' in JSON array at position ") +
+                    std::to_string(pos_) + ", got '" + std::string(1, next) + "', near: ..." + context + "...");
+            }
         }
     }
-    
+
+    // An object member's key and its colon (parse_string_into's expect('"') skips any leading whitespace)
+    void parse_member_key() {
+        JNode k; k.tag = JTag::Str;
+        parse_string_into(k.u.str.off, k.u.str.len);
+        scratch_.push_back(k);
+        expect(':');
+    }
+
     void skip_whitespace() {
         // JSON whitespace is exactly these four bytes (RFC 8259). Comparing directly
         // avoids std::isspace, which is a locale-aware function call AND is undefined
@@ -1189,51 +1323,6 @@ private:
         }
 
         expect('"');                              // unterminated string -> throws
-    }
-
-    void parse_object_flat() {
-        expect('{');
-        const size_t mark = scratch_.size();
-        if (peek() == '}') { advance(); push_container(JTag::Obj, mark); return; }
-        while (true) {
-            // key (parse_string_into's expect('"') skips any leading whitespace)
-            JNode k; k.tag = JTag::Str;
-            parse_string_into(k.u.str.off, k.u.str.len);
-            scratch_.push_back(k);
-            expect(':');
-            parse_value_flat();   // pushes the value node
-            char c = peek();
-            if (c == ',') { advance(); }
-            else if (c == '}') { advance(); break; }
-            else {
-                size_t start = (pos_ > 20) ? pos_ - 20 : 0;
-                size_t len = std::min(size_t(40), json_.length() - start);
-                std::string context = json_.substr(start, len);
-                throw serialization_error("Expected ',' or '}' in JSON object at position " +
-                    std::to_string(pos_) + ", got '" + std::string(1, c) + "', near: ..." + context + "...");
-            }
-        }
-        push_container(JTag::Obj, mark);
-    }
-
-    void parse_array_flat() {
-        expect('[');
-        const size_t mark = scratch_.size();
-        if (peek() == ']') { advance(); push_container(JTag::Arr, mark); return; }
-        while (true) {
-            parse_value_flat();   // pushes the element node
-            char c = peek();
-            if (c == ',') { advance(); }
-            else if (c == ']') { advance(); break; }
-            else {
-                size_t start = (pos_ > 20) ? pos_ - 20 : 0;
-                size_t len = std::min(size_t(40), json_.length() - start);
-                std::string context = json_.substr(start, len);
-                throw serialization_error("Expected ',' or ']' in JSON array at position " +
-                    std::to_string(pos_) + ", got '" + std::string(1, c) + "', near: ..." + context + "...");
-            }
-        }
-        push_container(JTag::Arr, mark);
     }
 
     void parse_bool_flat() {

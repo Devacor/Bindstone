@@ -953,7 +953,8 @@ string healthLevel = health > 75 ? "healthy" :
     checker reports a violation whose receiver class it knows at load, with the same text.
     A labeled constructor follows the same rule, checked on the overload resolution picks
     ("Cannot access private constructor of class 'C'"; `enforce_constructor_access`), and an
-    archive load constructs regardless (`engine::construction_access_waiver`).
+    archive load reconstitutes regardless (`engine::construction_access_waiver`; a class that is not
+    `default_constructible` is created without a constructor, field initializers then the saved fields).
     Scope notes: operator methods dispatch through operators regardless of labels; the host C++ API
     (`get_field`/`set_field`, serialization, reflection) is deliberately unrestricted. Hot reload is permissive:
     enforcement consults the class's CURRENT definition at access time. Enforcement

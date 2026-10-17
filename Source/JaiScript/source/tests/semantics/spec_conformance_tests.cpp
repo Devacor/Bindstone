@@ -2529,6 +2529,26 @@ private:
 				int n = 1;
 				static Saved make() { Saved s = Saved(); s.n = 5; return s; }
 			}
+			class SavedChild : Saved {
+				string name = "kid";
+				SavedChild() : super() { n = 4; }
+			}
+			class OnlyArgs {
+			private:
+				OnlyArgs(int v) { value = v; }
+			public:
+				int value = 0;
+				string tag = "x";
+				static OnlyArgs make(int v) { OnlyArgs o = OnlyArgs(v); o.tag = "made"; return o; }
+			}
+			class Hidden {
+			private:
+				Hidden() { hp = 1; }
+			public:
+				int hp = 0;
+			}
+			class Shown : Hidden { int dmg = 3; }
+			function trip(var v) -> string { return to_json(from_json(to_json(v))) + " " + to_json(from_binary(to_binary(v))); }
 			function t(function f) -> string {
 				string r = "";
 				try { r = "" + f(); }
@@ -2556,11 +2576,23 @@ private:
 				t([]() { Money m = 5; return m.cents; });
 			)", "X,X,X,X,X,X,X,M,Y,", check_mode::off);
 		});
-		test("an_archive_load_constructs_a_class_whose_default_constructor_is_private", [this, K]() {
+		// a load reconstitutes the state whatever the constructors' access, and a class no constructor builds without
+		// arguments is created without one (its field initializers, then the archive's fields)
+		test("an_archive_load_reconstitutes_a_class_whatever_its_constructors", [this, K]() {
 			expect("loads", std::string(K) + R"(
 				Saved s = Saved::make();
-				"" + from_json(to_json(s)).n + "," + from_binary(to_binary(s)).n + "," + t([]() { return Saved().n; });
-			)", "5,5,Cannot access private constructor of class 'Saved',", check_mode::off);
+				SavedChild c = SavedChild();
+				c.name = "late";
+				c.n = 6;
+				Shown h = Shown();
+				h.hp = 9;
+				h.dmg = 5;
+				trip(s) + "|" + trip(c) + "|" + trip(OnlyArgs::make(7)) + "|" + trip(h) + "|" + t([]() { return Saved().n; });
+			)", "{\"_type_\":\"Saved\",\"n\":5} {\"_type_\":\"Saved\",\"n\":5}|"
+			    "{\"_type_\":\"SavedChild\",\"n\":6,\"name\":\"late\"} {\"_type_\":\"SavedChild\",\"n\":6,\"name\":\"late\"}|"
+			    "{\"_type_\":\"OnlyArgs\",\"value\":7,\"tag\":\"made\"} {\"_type_\":\"OnlyArgs\",\"value\":7,\"tag\":\"made\"}|"
+			    "{\"_type_\":\"Shown\",\"hp\":9,\"dmg\":5} {\"_type_\":\"Shown\",\"hp\":9,\"dmg\":5}|"
+			    "Cannot access private constructor of class 'Saved',", check_mode::off);
 		});
 		test("the_strict_checker_reports_an_outside_private_construction_at_load_with_the_runtime_text", [this]() {
 			every_config("checker", "1:Cannot access private constructor of class 'Token'|0|0|1:Cannot access private constructor of class 'Token'|"

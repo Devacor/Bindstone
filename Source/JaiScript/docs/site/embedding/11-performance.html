@@ -147,7 +147,7 @@ declaration pays redefinition/hot-reload machinery every time: cheap once, waste
 stdlib cost hundreds of warm executes. Reuse engines; never build one per evaluation.</li>
 </ul>
 <h3 id="whats-slower">What&#x27;s slower, and what to use instead<a class="hlink" href="#whats-slower" aria-label="link">&#8203;</a></h3>
-<ul><li><strong>Call-dense recursion.</strong> Lua runs fib(15) ~4.5&times; faster and Squirrel ~2.4&times;;
+<ul><li><strong>Call-dense recursion.</strong> Lua runs fib(15) ~3&times; faster and Squirrel ~1.5&times;;
 the cost is per-call frame setup, not opcode count. Bare self tail calls are the exception: on the VM,
 <code>return f(args)</code> reuses the live frame (constant stack space, no depth limit, ~40 ns per
 call), so accumulator-style tail recursion runs at loop speed and any depth. The interpreter keeps its
@@ -157,12 +157,12 @@ method-shaped, where the gap is small to none. Keep naive deep <em>non-tail</em>
 per-frame hot paths, or express the algorithm iteratively.</li>
 <li><strong>By-value copies of big structures.</strong> Use <code>&amp;</code> parameters and
 <code>var&amp;</code> declarations for anything heavy. The BST benchmark written with <code>&amp;</code>
-runs 65 µs on the reference machine against 462 µs for the naive by-value spelling (~7&times;; the
+runs 19 µs on the reference machine against 75 µs for the naive by-value spelling (~4&times;; the
 older report machine measured the same pair at ~3.7&times;): by-value deep-copies a subtree at every
 recursion level, and that copy is the whole difference.</li>
 <li><strong>Bulk per-element pixel pushing.</strong> Software rendering (tens of thousands of scripted
 element reads and stores per frame) is where any tagged-value VM pays list price against Lua
-(GLOOM serial takes about 3.5&times; Lua 5.4.8&#x27;s time per tick in the
+(GLOOM serial takes about 1.7&times; Lua 5.4.8&#x27;s time per tick in the
 <a href="#whole-games-measured">GLOOM row</a> below). The
 mitigations, in order: typed arrays for the grids, <code>parallel_transform</code> for the bulk stages
 (it roughly halved GLOOM&#x27;s dominant stage), and binding the one innermost loop to C++ if the budget
@@ -177,13 +177,13 @@ complete games measured end-to-end. Sources are named per table.</p>
 <div class="callout"><p><strong>Two machines appear below; never compare a number from one with a number
 from the other.</strong> The <em>report machine</em> is a 2016-era 4-core/8-thread laptop: the cost sheet, the dispatch regimes, the aliasing table,
 the parallel-scaling figures and the five-way GLOOM report all come from it. The <em>reference machine</em>
-is a current 24-thread laptop CPU (Core Ultra 9 285HX): the head-to-head table, the GLOOM row and the DOOM
-rows were measured there (each game row names its date). It runs everything faster, and the two runs are different builds of the
-VM, so the recursion gap reads ~4.5&times; against Lua here and ~6.7&times; in the report. Read ratios
+is a current 24-thread laptop CPU (Core Ultra 9 285HX): the head-to-head table, the kernel suite and every
+whole-game row were measured there (each game row names its date). It runs everything faster, and the two runs are different builds of the
+VM, so the recursion gap reads ~3&times; against Lua here and ~6.7&times; in the report. Read ratios
 within one table.</p></div>
 <h3 id="embedding-costs">The embedding cost sheet<a class="hlink" href="#embedding-costs" aria-label="link">&#8203;</a></h3>
 <p>Order-of-magnitude operation costs, report machine (interp / VM):</p>
-<div class="tablewrap"><table><thead><tr><th>operation</th><th>cost</th></tr></thead><tbody><tr><td>single arithmetic op</td><td>&lt;1 µs both backends</td></tr><tr><td>function call</td><td>~2 µs interp / ~1 µs VM (in a tight loop: 0.9 / 0.44 µs)</td></tr><tr><td>class creation</td><td>~15 µs interp / ~14 µs VM</td></tr><tr><td>method invocation</td><td>~12 µs interp / ~9 µs VM (per-call in a tight loop: ~1 µs either backend)</td></tr><tr><td>hot loop, per iteration</td><td><strong>~45 ns</strong> (VM, fused compound loop; ~12 ns on the reference machine)</td></tr><tr><td>engine creation</td><td>~73–77 µs (+ lazy backend init on first execute; ~90 µs all-in)</td></tr><tr><td>stdlib registration</td><td>~311 µs</td></tr></tbody></table></div>
+<div class="tablewrap"><table><thead><tr><th>operation</th><th>cost</th></tr></thead><tbody><tr><td>single arithmetic op</td><td>&lt;1 µs both backends</td></tr><tr><td>function call</td><td>~2 µs interp / ~1 µs VM (in a tight loop: 0.9 / 0.44 µs)</td></tr><tr><td>class creation</td><td>~15 µs interp / ~14 µs VM</td></tr><tr><td>method invocation</td><td>~12 µs interp / ~9 µs VM (per-call in a tight loop: ~1 µs either backend)</td></tr><tr><td>hot loop, per iteration</td><td><strong>~45 ns</strong> (VM, fused compound loop; ~9 ns on the reference machine)</td></tr><tr><td>engine creation</td><td>~73–77 µs (+ lazy backend init on first execute; ~90 µs all-in)</td></tr><tr><td>stdlib registration</td><td>~311 µs</td></tr></tbody></table></div>
 <p>Dispatch regimes, report machine (Release builds, medians of
 interleaved samples; scripts: a 1-line predicate, a 6-line function script, a ~30-line class+loop
 script):</p>
@@ -212,58 +212,101 @@ reference-machine run; the report machine&#x27;s run of the same harness agrees 
 verdict while disagreeing on every absolute number.
 Headline rows, µs/iteration (a plain function call rounds to 0 µs on every runtime but ChaiScript, so that row is omitted; the cost sheet above has it in nanoseconds):</p>
 <div class="tablewrap"><table><thead><tr><th>benchmark</th><th>Jai interp</th><th>Jai VM</th><th>Lua 5.4</th><th>Squirrel</th><th>ChaiScript</th></tr></thead><tbody>
-<tr><td>Method invocation</td><td>1</td><td>1</td><td>1</td><td>2</td><td>38</td></tr>
-<tr><td>Class creation</td><td>2</td><td>2</td><td>1</td><td>2</td><td>45</td></tr>
-<tr><td>Array push/pop</td><td>2</td><td>0</td><td>2</td><td>3</td><td>47</td></tr>
-<tr><td>Map/table insert + lookup</td><td>1</td><td>0</td><td>1</td><td>3</td><td>29</td></tr>
-<tr><td>For loop, 100 iters</td><td>5</td><td>1</td><td>1</td><td>4</td><td>28</td></tr>
-<tr><td>Hot loop 1000 (<code>sum += i</code>)</td><td>44</td><td>12</td><td>3</td><td>9</td><td>n/a</td></tr>
-<tr><td>String concat, 20 iters</td><td>5</td><td>2</td><td>1</td><td>3</td><td>51</td></tr>
-<tr><td>Fibonacci(15)</td><td>736</td><td>140</td><td>31</td><td>57</td><td>n/a</td></tr>
-<tr><td>BST 15 nodes, idiomatic <code>&amp;</code></td><td>114</td><td>65</td><td>9</td><td>14</td><td>n/a</td></tr>
-<tr><td>C++-bound BST</td><td>20</td><td>18</td><td>8</td><td>12</td><td>196</td></tr>
+<tr><td>Method invocation</td><td>1</td><td>0</td><td>1</td><td>2</td><td>13</td></tr>
+<tr><td>Class creation</td><td>1</td><td>0</td><td>1</td><td>2</td><td>16</td></tr>
+<tr><td>Array push/pop</td><td>1</td><td>0</td><td>2</td><td>3</td><td>16</td></tr>
+<tr><td>Map/table insert + lookup</td><td>1</td><td>0</td><td>1</td><td>3</td><td>10</td></tr>
+<tr><td>For loop, 100 iters</td><td>5</td><td>1</td><td>1</td><td>3</td><td>11</td></tr>
+<tr><td>Hot loop 1000 (<code>sum += i</code>)</td><td>48</td><td>9</td><td>3</td><td>11</td><td>n/a</td></tr>
+<tr><td>String concat, 20 iters</td><td>4</td><td>1</td><td>1</td><td>4</td><td>19</td></tr>
+<tr><td>Fibonacci(15)</td><td>608</td><td>79</td><td>26</td><td>52</td><td>n/a</td></tr>
+<tr><td>BST 15 nodes, idiomatic <code>&amp;</code></td><td>73</td><td>19</td><td>8</td><td>12</td><td>n/a</td></tr>
+<tr><td>C++-bound BST</td><td>11</td><td>8</td><td>7</td><td>12</td><td>69</td></tr>
 </tbody></table></div>
 <ul><li><strong>vs Squirrel</strong>: the VM wins or ties everything statement-, container-, string- and
-object-shaped: method dispatch, class creation, containers, short loops, string work; Squirrel keeps the
-1,000-iteration hot loop (9 µs against 12), call-dense recursion and the object-graph BSTs, where its
-minimal per-call frames pull ahead.</li>
-<li><strong>vs Lua 5.4</strong> (via sol2): the VM wins or ties statements, containers, range-for and
-null-checks; method dispatch and string work are level; Lua keeps the hot-loop row (~4&times;),
-call-dense recursion (<strong>~4.5&times; on fib(15)</strong>) and the object-graph BSTs.</li>
-<li><strong>vs ChaiScript</strong>: a clean sweep across every live row, mostly 22–38&times;
-(method dispatch 38&times;), 10.9&times; at the narrowest (C++-bound BST); the VM&#x27;s push/pop and map rows
-round to 0&nbsp;µs against ChaiScript&#x27;s 47 and 29.</li></ul>
+object-shaped: method dispatch, class creation, containers, short loops, the 1,000-iteration hot loop
+(9 µs against 11), string work and the C++-bound BST; Squirrel keeps call-dense recursion (~1.5&times; on
+fib(15)) and the script-built BST (~1.6&times;), where its minimal per-call frames pull ahead.</li>
+<li><strong>vs Lua 5.4</strong> (via sol2): the VM wins or ties statements, containers, method dispatch,
+class creation, range-for and null-checks; string work is level; Lua keeps the hot-loop row (~3&times;),
+call-dense recursion (<strong>~3&times; on fib(15)</strong>) and the script-built BST (~2.4&times;); the
+C++-bound BST is within a microsecond.</li>
+<li><strong>vs ChaiScript</strong>: a clean sweep across every live row: method dispatch, class creation,
+push/pop and map round to 0&nbsp;µs on the VM against ChaiScript&#x27;s 13, 16, 16 and 10; the loop and string
+rows run 11–19&times; faster, and the C++-bound BST, the narrowest, 8.6&times;.</li></ul>
+<p><strong>The kernel suite, 2026-10-17.</strong> The sixteen interpreter kernels of daScript&#x27;s
+<a href="https://github.com/borisbat/dasProfile">dasProfile</a> (recursion, loops, n-queens, mandelbrot,
+n-bodies, spectral norm, particles, sha256, a treap, sort, dictionary, exp, string/float conversion, host
+calls) run under dasProfile&#x27;s protocol in the same comparison harness: each sample is one process that
+repeats the kernel for a 0.5&nbsp;s budget, each cell the median of five, implementations interleaved,
+checksums equal across implementations, reference machine. Against Lua 5.5.1, idiomatic typed JaiScript on
+the VM takes a geometric mean of <strong>1.23&times;</strong> Lua&#x27;s time and the same algorithms with
+<code>var</code> everywhere 1.55&times;. The VM&#x27;s widest wins are mandelbrot (0.03&times;: two float locals
+against Lua&#x27;s complex-number tables), sha256 (0.13&times;) and float-to-string (0.34&times;); string-to-float
+is level; its widest losses are the treap (6.1&times;), host calls (3.7&times;), n-queens (3.6&times;),
+particles (3.2&times;) and recursive fibonacci (2.8&times;). LuaJIT&#x27;s JIT runs the suite at 0.01–0.72&times;
+Lua&#x27;s time.</p>
 <h3 id="whole-games-measured">Whole games, measured<a class="hlink" href="#whole-games-measured" aria-label="link">&#8203;</a></h3>
-<p>Microbenchmarks reward fast statements; games reward fast <em>frames</em>. Three complete games are
-measured end-to-end. All three ship in <code>examples/</code> and reproduce on your machine. JaiDoom ships as
+<p>Microbenchmarks reward fast statements; games reward fast <em>frames</em>. Four complete programs are
+measured end-to-end: DOOM, GLOOM, the demoreel&#x27;s OSSUARY scene and Gator Quest&#x27;s simulation. All four
+ship in <code>examples/</code> and reproduce on your machine; the Lua, Squirrel and Luau ports they are timed
+against live in the separate comparison harness. JaiDoom ships as
 source and downloads its game data on first launch: the freely distributable Freedoom IWADs and the DOOM
 shareware episode, from their public releases (<a href="../examples/index.html#jaidoom">Examples</a>).</p>
 <div class="tablewrap"><table><thead><tr><th>workload</th><th>measured</th><th>the takeaway</th></tr></thead><tbody>
-<tr><td><strong>DOOM, 2026-10-04</strong>: E1M1 on the VM, textured software render at
+<tr><td><strong>DOOM, 2026-10-17</strong>: E1M1 on the VM, textured software render at
 120&times;78 plus status bar, six monsters awake and firing, the full weapon/powerup/lighting roster,
-300-frame autopilot play session (<code>p7_bench.jai</code>, three runs); reference machine</td><td><strong>~2.4 ms/frame</strong>
-(sim ~0.75, render ~1.3, blit ~0.4)</td><td>more than 11&times; inside DOOM&#x27;s 28.5 ms (35 fps) frame budget,
+300-frame autopilot play session (<code>p7_bench.jai</code>, three runs, one P core); reference machine</td><td><strong>~1.3 ms/frame</strong>
+(sim ~0.35, render ~0.71, blit ~0.23)</td><td>more than 21&times; inside DOOM&#x27;s 28.5 ms (35 fps) frame budget,
 with the enemy brains written as coroutines and the movers and weapons as classes</td></tr>
-<tr><td><strong>DOOM timedemo, 2026-09-09</strong>: 3,984 recorded tics of E1M1 at 120&times;78,
-one full replay warming the same engine before the measured replay; one P core</td><td><strong>4.707 ms/tic</strong>
-(about 6&times; real time)<br>
-layout control: 4.750, +0.65% to +1.09%</td><td>Six runs per build in three interleaved rounds. The layout control is
+<tr><td><strong>DOOM timedemo, 2026-10-17</strong>: 3,984 recorded tics of E1M1 at 120&times;78,
+one full replay warming the same engine before the measured replay; one P core</td><td><strong>1.439 ms/tic</strong>
+(about 20&times; real time)<br>
+layout control: 1.437, -0.61% to +0.51%</td><td>Six runs per build in three interleaved rounds. The layout control is
 the same program relinked with unused padding code, so a change smaller than its spread is code layout, not
 speed. Both replay hashes match 1746772898. The script timer excludes level/demo setup.</td></tr>
-<tr><td><strong>GLOOM, 2026-09-09 snapshot</strong>: 600 measured ticks after 600 warm-up ticks,
+<tr><td><strong>GLOOM, 2026-10-17 snapshot</strong>: 600 measured ticks after 600 warm-up ticks,
 seed 666, 100&times;40 quad output. One P core for serial configurations; eight for parallel
 JaiScript. MSVC Release with LTCG, Core Ultra 9 285HX.</td><td>
-JaiScript VM serial: <strong>1.401 ms/tick</strong> (layout control -2.01% to -1.10%)<br>
-JaiScript VM 8 workers: <strong>0.973 ms/tick</strong> (layout control -3.09% to +7.84%)<br>
-Lua 5.4.8: <strong>0.395 ms/tick</strong> (layout control -4.09% to -1.62%)<br>
-Lua 5.5.1: <strong>0.395 ms/tick</strong> (layout control -1.41% to +2.05%)<br>
-LuaJIT 2.1 JIT: <strong>0.102 ms/tick</strong> (layout control -20.71% to +12.49%)</td><td>All frame and state hashes match. Six runs per build in three interleaved rounds;
-runs started while the desktop was busy (23 in the Lua window) were discarded.
-Eight workers take JaiScript from 1.401 to 0.973 ms/tick (1.44&times;): only the stages
+JaiScript VM serial: <strong>0.671 ms/tick</strong> (layout control -2.64% to +2.56%)<br>
+JaiScript VM 8 workers: <strong>0.589 ms/tick</strong> (layout control -3.98% to +8.58%)<br>
+Lua 5.4.8: <strong>0.398 ms/tick</strong> (layout control -1.27% to +0.68%)<br>
+Lua 5.5.1: <strong>0.391 ms/tick</strong> (layout control -0.94% to +1.15%)<br>
+LuaJIT 2.1 JIT: <strong>0.097 ms/tick</strong> (layout control -24.92% to +18.63%)<br>
+Squirrel 3.2: <strong>1.178 ms/tick</strong> (layout control -2.41% to +0.84%)</td><td>All frame and state hashes match. Six runs per build in three interleaved rounds;
+runs started while the desktop was busy (27 in the LuaJIT window, 45 in all) were discarded.
+Eight workers take JaiScript from 0.671 to 0.589 ms/tick (1.14&times;): only the stages
 whose loops the engine proves safe run in parallel, and the rest stay serial.
-Lua 5.4.8 and 5.5.1 overlap within noise, and LuaJIT&#x27;s spread is wide. LuaJIT&#x27;s JIT
+Lua 5.5.1 runs within 2% of 5.4.8, and LuaJIT&#x27;s spread is wide. LuaJIT&#x27;s JIT
 generates machine code at run time, which some shipping targets (iOS) forbid, so it is a
-ceiling rather than a target.</td></tr></tbody></table></div>
+ceiling rather than a target.</td></tr>
+<tr><td><strong>OSSUARY, 2026-10-17</strong>: the demoreel&#x27;s raymarched skull-spider scene at
+100&times;40, seed 20260705, from scene time 3.0; five measured frames after five warm-up frames and a
+reboot to the same state in the same runtime. One P core for serial configurations; six for parallel
+JaiScript. MSVC Release with LTCG.</td><td>
+JaiScript VM serial: <strong>138.3 ms/frame</strong> (layout control -1.40% to +0.88%)<br>
+JaiScript VM 6 workers: <strong>28.5 ms/frame</strong> (layout control -8.60% to -0.33%)<br>
+Lua 5.4.8: <strong>168.4 ms/frame</strong> (layout control -1.58% to +1.35%)<br>
+Squirrel 3.2: <strong>388.5 ms/frame</strong> (layout control -4.30% to -0.85%)</td><td>Every frame hash
+matches the interpreter&#x27;s reference. Six runs per layout in three interleaved rounds. The serial VM takes
+0.82&times; Lua 5.4.8&#x27;s time per frame and 0.36&times; Squirrel&#x27;s; six workers trace the rows in parallel
+for 4.9&times;. <code>skull_natural.jai</code>, the same scene written the way a user would write it, runs
+2.6% slower serial (141.9 ms/frame).</td></tr>
+<tr><td><strong>Gator Quest, 2026-10-17</strong>: the smoke session&#x27;s simulation (mobiles, spawners,
+combat, items, quests, bots), seed 1, 6,000 ticks with 4 bots; the in-script tick loop is timed, world
+generation is not. One process per sample on one P core, five interleaved rounds.</td><td>
+JaiScript VM: <strong>1.451 ms/tick</strong><br>
+Lua 5.4.8: <strong>1.145 ms/tick</strong><br>
+Lua 5.5.1: <strong>1.150 ms/tick</strong><br>
+Luau 0.741 interpreter (-O2): <strong>1.128 ms/tick</strong><br>
+Luau 0.741 native (-O2 --codegen): <strong>0.651 ms/tick</strong><br>
+LuaJIT 2.1 interpreter (-joff): <strong>0.776 ms/tick</strong><br>
+LuaJIT 2.1 JIT: <strong>0.192 ms/tick</strong></td><td>Every run&#x27;s STATE_HASH matches. Medians of
+five; every range is within 1% of its median except LuaJIT&#x27;s (the interpreter -0.3% to +2.3%, the JIT
+-8% to +4%). The VM takes 1.27&times;
+Lua 5.4.8&#x27;s time per tick here, and 1.47&times; on the shorter 2,000-tick, 2-bot session (0.82 against
+0.56 ms/tick). The Lua twins port the simulation only; rendering, audio, netplay and save/load are not in
+the measured session.</td></tr></tbody></table></div>
 <p>The five ports say something beyond the numbers: the same enemy brain is ~23 lines of
 coroutine or generator method in JaiScript, Lua, Squirrel, and Python. In ChaiScript, which has no coroutines, it is a 50-line
 hand-lowered state machine. Expressiveness parity is table stakes; the

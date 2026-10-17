@@ -178,9 +178,15 @@ public:
     // A retired layer (engine::script_layer_detach, or a move to another engine) keeps
     // owning its object so old handles never dangle, but every C++ extraction through it
     // throws instead of reaching an object another layer now speaks for.
-    // Set while a script constructor has not completed: the half-built instance runs no destructor
+    // Set while a script constructor has not completed. A throw out of it destroys only the levels whose constructors
+    // completed (C++ [except.ctor]): the levels below the top `constructed_below()` of the class it was created as
     void construction_pending(bool pending) { construction_pending_ = pending; }
     bool construction_pending() const { return construction_pending_; }
+    static constexpr uint16_t k_nothing_constructed = UINT16_MAX;
+    void constructed_below(uint16_t levels) { constructed_below_ = levels; }
+    uint16_t constructed_below() const { return constructed_below_; }
+    // The deepest level a pending instance's destruction runs bodies for; null when no level completed
+    const class_definition* constructed_level() const;
 
     void retire_script_layer() { script_layer_retired_ = true; }
     bool script_layer_retired() const { return script_layer_retired_; }
@@ -428,6 +434,7 @@ private:
     bool destructor_armed_ = false;
     bool late_destructor_ = false;   // armed by a re-class, not by the allocation: ~class_instance runs the chain
     std::atomic<bool> registered_{false};   // in the class's registry list (read unlocked by its own dying owner)
+    uint16_t constructed_below_ = k_nothing_constructed;
     uint32_t live_field_refs_ = 0;
     // What few instances hold, boxed so the rest pay one pointer: the C++ object (released after the fields, as a C++ base
     // dies after the derived members) and the cells a re-class retired
@@ -807,12 +814,14 @@ public:
     // C++ destruction of a dying instance from `level` down: the level's destructor body, its own fields in reverse
     // declaration order, then its bases in reverse order
     void destroy_chain(class_instance* instance, const class_definition* level) const { destroy_levels(instance, level, nullptr); }
-    // destroy_chain for the levels `kept` does not share (a re-class drops them): kept and its bases stay alive
-    void destroy_levels(class_instance* instance, const class_definition* level, const class_definition* kept) const;
+    // destroy_chain for the levels `kept` does not share (a re-class drops them): kept and its bases stay alive.
+    // constructed (non-null): only it and its bases run their destructor bodies; every level's fields still die
+    void destroy_levels(class_instance* instance, const class_definition* level, const class_definition* kept,
+                        const class_definition* constructed = nullptr) const;
     // destroy_levels one level at a time (the release stack's frames run the same actions): `level`'s body, then its own
     // fields and its bases onto `actions` (back = next)
     void expand_destroy_level(class_instance* instance, const class_definition* level, const class_definition* kept,
-                              std::vector<detail::release_action>& actions) const;
+                              std::vector<detail::release_action>& actions, const class_definition* constructed = nullptr) const;
     script_value take_field_for_destroy(class_instance* instance, uint64_t field) const;
     void run_destructor_body(class_instance* instance, const class_definition* level, const script_value& body) const;
     // The same question for a declared type (null, var and unknown kinds can hold anything)
@@ -4092,7 +4101,13 @@ inline class_instance::class_instance(std::string_view class_name, engine* eng)
 }
 
 inline class_instance::~class_instance() {
-    if (late_destructor_ && class_def_ && !construction_pending_) { class_def_->destroy_chain(this, class_def_); }
+    if (late_destructor_ && class_def_) {
+        if (!construction_pending_) {
+            class_def_->destroy_chain(this, class_def_);
+        } else if (const class_definition* constructed = constructed_level()) {
+            class_def_->destroy_levels(this, class_def_, nullptr, constructed);
+        }
+    }
     if (class_def_) {
         class_def_->unregister_instance(this);
         if (fields_cascade()) { release_fields(); }

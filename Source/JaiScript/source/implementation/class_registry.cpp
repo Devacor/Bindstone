@@ -136,9 +136,9 @@ void class_definition::run_destructor_body(class_instance* instance, const class
 }
 
 void class_definition::expand_destroy_level(class_instance* instance, const class_definition* level, const class_definition* kept,
-                                            std::vector<detail::release_action>& actions) const {
+                                            std::vector<detail::release_action>& actions, const class_definition* constructed) const {
     if (!level || (kept && (kept == level || kept->derives_from(level)))) { return; }
-    if (engine_) {
+    if (engine_ && (!constructed || constructed->derives_from(level))) {
         if (const script_value* body = level->destructor_body(*engine_)) { run_destructor_body(instance, level, *body); }
     }
     for (const auto& parent : level->parent_classes_) {
@@ -153,7 +153,15 @@ script_value class_definition::take_field_for_destroy(class_instance* instance, 
     return slot != k_no_field_slot ? instance->take_field_slot(slot) : script_value(std::monostate{}, engine_);
 }
 
-void class_definition::destroy_levels(class_instance* instance, const class_definition* level, const class_definition* kept) const {
+const class_definition* class_instance::constructed_level() const {
+    if (constructed_below_ == k_nothing_constructed) { return nullptr; }
+    const class_definition* level = class_def_;
+    for (uint16_t up = 0; level && up < constructed_below_; ++up) { level = level->parent_ptr(); }
+    return level;
+}
+
+void class_definition::destroy_levels(class_instance* instance, const class_definition* level, const class_definition* kept,
+                                      const class_definition* constructed) const {
     if (!level) { return; }
     detail::release_sync sync(engine_);
     detail::release_machine* m = engine_ ? engine_->release_machine_here() : nullptr;
@@ -167,7 +175,7 @@ void class_definition::destroy_levels(class_instance* instance, const class_defi
         const detail::release_action action = actions.back();
         actions.pop_back();
         if (action.level) {
-            expand_destroy_level(instance, action.level, kept, actions);
+            expand_destroy_level(instance, action.level, kept, actions, constructed);
         } else {
             script_value dying = take_field_for_destroy(instance, action.field);
         }
@@ -245,16 +253,17 @@ void instance_deleter::operator()(class_instance* ptr) const noexcept {
     if (!ptr) { return; }
     engine* eng = def->get_engine();
     release_machine* m = eng ? eng->release_machine_here() : nullptr;
-    const bool run_chain = !ptr->construction_pending();
+    const class_definition* constructed = ptr->construction_pending() ? ptr->constructed_level() : nullptr;
+    const bool run_chain = !ptr->construction_pending() || constructed;
     if (m && (m->deferring || m->depth >= m->depth_limit)) {
-        release_instance_frame(*eng, *m, ptr, def, run_chain);
+        release_instance_frame(*eng, *m, ptr, def, run_chain, constructed);
         return;
     }
     if (m) { ++m->depth; }
     if (run_chain) {
         const class_definition* now = ptr->get_class_definition();   // a re-classed instance dies as its class now
         if (!now) { now = def.get(); }
-        now->destroy_chain(ptr, now);
+        now->destroy_levels(ptr, now, nullptr, constructed);
     }
     class_instance::free_allocation(ptr);
     if (m) { --m->depth; }
@@ -276,7 +285,7 @@ void release_step(release_machine& m, F&& drop) {
 }
 
 void release_instance_frame(engine& eng, release_machine& m, class_instance* instance, std::shared_ptr<class_definition> owner,
-                            bool run_chain) {
+                            bool run_chain, const class_definition* constructed) {
     const bool driver = !m.deferring;
     const size_t mark = m.stack.size();
     uint32_t index;
@@ -294,6 +303,7 @@ void release_instance_frame(engine& eng, release_machine& m, class_instance* ins
     frame.allocation = instance->weak_from_this();
     frame.root = now ? now : frame.owner.get();
     frame.kept = nullptr;
+    frame.constructed = constructed;
     frame.actions.clear();
     if (run_chain) { frame.actions.push_back({frame.root, 0}); }
     frame.delete_at_end = true;
@@ -329,7 +339,7 @@ void release_drive(engine& eng, release_machine& m, size_t mark) {
         if (action.level) {
             const class_definition* kept = frame.kept;
             expanded.clear();
-            root->expand_destroy_level(instance, action.level, kept, expanded);   // the body may grow the frames: re-index after
+            root->expand_destroy_level(instance, action.level, kept, expanded, m.frames[index].constructed);   // the body may grow the frames: re-index after
             auto& actions = m.frames[index].actions;
             actions.insert(actions.end(), expanded.begin(), expanded.end());
         } else {

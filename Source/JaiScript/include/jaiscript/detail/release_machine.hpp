@@ -33,6 +33,7 @@ struct release_frame {
     std::weak_ptr<class_instance> allocation;  // keeps the instance's memory (it goes with its control block) until the frame ends
     const class_definition* root = nullptr;    // the level destroy_levels started from
     const class_definition* kept = nullptr;
+    const class_definition* constructed = nullptr;   // a half-built instance's deepest completed level (null: every level)
     std::vector<release_action> actions;       // back = next
     bool delete_at_end = false;
 };
@@ -59,7 +60,7 @@ struct release_machine {
 void release_drive(engine& eng, release_machine& m, size_t mark);
 // A dying instance's frame (deleter of a destructor class): runs now unless a step is deferring
 void release_instance_frame(engine& eng, release_machine& m, class_instance* instance, std::shared_ptr<class_definition> owner,
-                            bool run_chain);
+                            bool run_chain, const class_definition* constructed);
 // Before script runs inside a deferring step: the step's deferred deaths happen first, and drops inside the script are
 // immediate until the guard ends
 class release_sync {

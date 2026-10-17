@@ -193,6 +193,7 @@ namespace jai {
         }
         std::chrono::nanoseconds execution_budget() const { return execution_budget_; }
         void extend_execution_deadline(std::chrono::nanoseconds by) override { if (budget_active_) { execution_deadline_ += by; } }
+        std::chrono::steady_clock::time_point execution_deadline() const override { return budget_active_ ? execution_deadline_ : std::chrono::steady_clock::time_point{}; }
 
         void arm_execution_deadline() {
             budget_tick_ = 0;

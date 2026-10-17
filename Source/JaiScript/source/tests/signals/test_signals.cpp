@@ -1031,11 +1031,17 @@ public:
             auto steady = facade.connect([&](int) { runs.fetch_add(1); });
             constexpr int EMITS = 2000;
             std::atomic<bool> emitting { true };
+            std::atomic<bool> first_emitted { false };
             std::thread emitter_thread([&]() {
-                for (int i = 0; i < EMITS; ++i) { sig.emit(i); }
+                for (int i = 0; i < EMITS; ++i) {
+                    sig.emit(i);
+                    if (i == 0) { first_emitted = true; }
+                }
                 emitting = false;
             });
             std::thread churn_thread([&]() {
+                // a latch: the churn starts once one emit has run with nothing blocked, so that emit's delivery is certain
+                while (!first_emitted.load()) { std::this_thread::yield(); }
                 int cycles = 0;
                 while (emitting.load() || cycles < 100) {
                     auto passing = facade.connect([&](int) {});

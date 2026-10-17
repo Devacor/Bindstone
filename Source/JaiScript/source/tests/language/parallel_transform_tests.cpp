@@ -3058,36 +3058,36 @@ public:
 		});
 
 		test("building_the_worker_pool_is_not_charged_to_the_budget", [this]() {
-			// an oversubscribed host can take seconds to start threads; the region's first pool build stands in for that here
+			// an oversubscribed host can take seconds to start threads; the region's first pool build stands in for that here.
+			// The caller's deadline moves later by the build's own time: read as the absolute deadline before and after the
+			// region, the move covers the injected 200 ms however loaded the machine is, and a build left uncredited moves it 0
 			auto eng = make_engine();
 			eng->parallel_thread_count(4);
-			eng->execution_budget(0.3);
+			eng->execution_budget(60.0);
 			std::atomic<int> builds{0};
 			auto& faults = eng->parallel_state().faults;
 			faults.context = &builds;
 			faults.callback = [](void* context, const char* point, size_t) {
 				if (std::strcmp(point, "region.pool_create") == 0) {
 					static_cast<std::atomic<int>*>(context)->fetch_add(1);
-					std::this_thread::sleep_for(std::chrono::milliseconds(600));
+					std::this_thread::sleep_for(std::chrono::milliseconds(200));
 				}
 			};
-			std::string outcome = "ran";
-			try {
-				outcome = std::to_string(eng->execute(R"(
-					array<int> xs = [];
-					for (int i = 0; i < 4096; i++) { xs.push(i); }
-					parallel_for (auto& x : xs) { int s = 0; for (int k = 0; k < 64; k++) { s += k; } x = x + s; }
-					int total = 0;
-					for (int i = 0; i < 4096; i++) { total += xs[i] % 7; }
-					total;
-				)").as_int());
-			} catch (const std::exception& e) {
-				outcome = e.what();
-			}
+			std::vector<std::chrono::steady_clock::time_point> deadlines;
+			engine* raw_eng = eng.get();
+			eng->add_function("deadline_mark", [raw_eng, &deadlines]() { deadlines.push_back(raw_eng->get_execution_backend()->execution_deadline()); });
+			eng->execute(R"(
+				array<int> xs = [];
+				for (int i = 0; i < 4096; i++) { xs.push(i); }
+				deadline_mark();
+				parallel_for (auto& x : xs) { x = x + 1; }
+				deadline_mark();
+			)");
 			faults.callback = nullptr;
 			faults.context = nullptr;
 			check_eq(1, builds.load(), "the region built its pool once");
-			check_true(outcome.find("budget") == std::string::npos, "the pool build did not spend the script's budget: " + outcome);
+			check_eq((size_t)2, deadlines.size());
+			check_true(deadlines[1] - deadlines[0] >= std::chrono::milliseconds(200), "the deadline moved later by the pool build's time");
 		});
 
 		test("worker_argument_failure_is_not_silently_swallowed", [this]() {

@@ -830,6 +830,17 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 		return false;
 	};
 	// a loop's verdict: the innermost closed loop or refusal whose span holds where the loop's body began
+	auto closed_loops = [](const chunk& c, const std::vector<std::pair<const ast_node*, uint32_t>>& marks) {
+		std::unordered_set<const ast_node*> out;
+		for (const auto& [stmt, at] : marks) {
+			bool closed = false; uint32_t best = UINT32_MAX;
+			for (const auto& r : c.cell_refusals) { if (r.head <= at && at <= r.back && r.back - r.head < best) { best = r.back - r.head; closed = false; } }
+			for (const auto& l : c.cell_loops) { if (!l.straight && !l.frame_program && l.head <= at && at <= l.back && l.back - l.head < best) { best = l.back - l.head; closed = true; } }
+			if (closed) { out.insert(stmt); }
+		}
+		return out;
+	};
+	const std::unordered_set<const ast_node*> first_closed = closed_loops(*first, loop_marks_);
 	std::unordered_set<const ast_node*> retry;
 	bool any_open = false;
 	for (const auto& [stmt, at] : loop_marks_) {
@@ -840,19 +851,14 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 		else if (loop && !loop->calls.empty() && kept_in(*first, loop->head, loop->back)) { retry.insert(stmt); }
 	}
 	if (retry.empty()) return first;
-	auto census = [](const chunk& c, size_t& closed, size_t& calls) {
-		closed = calls = 0;
-		for (const auto& l : c.cell_loops) { if (!l.straight && !l.frame_program) { ++closed; calls += l.calls.size(); } }
-	};
-	size_t first_closed, first_calls;
-	census(*first, first_closed, first_calls);
+	auto calls_of = [](const chunk& c) { size_t n = 0; for (const auto& l : c.cell_loops) { if (!l.straight && !l.frame_program) { n += l.calls.size(); } } return n; };
 	open_loops_ = std::move(retry);
 	loop_marks_.clear();
 	auto second = compile_callable_once(name, parameters, body, local_count);
 	open_loops_.clear();
-	size_t second_closed, second_calls;
-	census(*second, second_closed, second_calls);
-	return second_closed >= first_closed && (any_open || second_calls < first_calls) ? second : first;
+	const std::unordered_set<const ast_node*> second_closed = closed_loops(*second, loop_marks_);
+	for (const ast_node* stmt : first_closed) { if (!second_closed.count(stmt)) return first; }   // every loop the first closed stays closed
+	return any_open || calls_of(*second) < calls_of(*first) ? second : first;
 }
 
 std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,

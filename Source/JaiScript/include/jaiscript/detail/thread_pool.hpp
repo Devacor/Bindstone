@@ -20,9 +20,10 @@
 // spin_budget before parking on the condition variable, and only when the pool's last two
 // batches arrived within that budget (dense fork-join regions, a frame's worth of them);
 // a pool whose regions come one per frame parks at once and burns nothing between them.
-// The submitter wakes the kernel only for parked targets, and a worker pings the joiner
-// only while it is parked; the flags that decide this are read under the mutex the
-// waiter sets them under, so no wake is lost. Task order and placement never change.
+// The submitter wakes the kernel only for parked targets, and a worker pings the joiners
+// only while one is parked; the flags and the parked-joiner count that decide this are read
+// under the mutex the waiter sets them under, so no wake is lost. Task order and placement
+// never change.
 
 #include <jaiscript/detail/fault_injection.hpp>
 #include <atomic>
@@ -169,9 +170,9 @@ namespace jai {
                 }
             }
             std::unique_lock<std::mutex> guard(mutex_);
-            joiner_parked_ = true;
+            ++joiners_parked_;
             idle_cv_.wait(guard, [this] { return outstanding_.load(std::memory_order_relaxed) == 0; });
-            joiner_parked_ = false;
+            --joiners_parked_;
         }
 
     private:
@@ -271,7 +272,7 @@ namespace jai {
                 {
                     std::lock_guard<std::mutex> guard(mutex_);
                     outstanding_.fetch_sub(1, std::memory_order_release);
-                    ping_joiner = joiner_parked_;
+                    ping_joiner = joiners_parked_ != 0;
                 }
                 if (ping_joiner) { idle_cv_.notify_all(); }
             }
@@ -300,7 +301,7 @@ namespace jai {
         std::atomic<int64_t> spin_budget_ns_{1000000};   // 1 ms
         std::atomic<int64_t> last_gap_ns_{INT64_MAX};
         std::chrono::steady_clock::time_point last_batch_{};
-        bool joiner_parked_ = false;               // under mutex_
+        size_t joiners_parked_ = 0;                // under mutex_; a count: a waiter that returns never hides one still parked
         bool stop_ = false;
     };
 

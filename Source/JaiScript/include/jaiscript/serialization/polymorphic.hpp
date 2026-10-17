@@ -42,11 +42,14 @@ public:
     // a Component's componentOwner pointing at the Node currently being loaded —
     // resolve correctly during load.
     using load_fn_t = std::function<std::shared_ptr<void>(any_archive_reader&, std::uint32_t id)>;
+    // Loads the saved properties into an object that already exists (a hybrid its script constructor built)
+    using load_into_fn_t = void (*)(any_archive_reader&, void* object);
 
     struct type_entry {
         std::string name;
         save_fn_t save_fn;
         load_fn_t load_fn;
+        load_into_fn_t load_into_fn = nullptr;
         std::type_index type = std::type_index(typeid(void));
         bool implicit = false; //registered via property_owner's derived name; any explicit registration wins
     };
@@ -197,6 +200,7 @@ public:
             entry.name = name;
             entry.save_fn = make_save_fn<T>();
             entry.load_fn = make_load_fn<T>();
+            entry.load_into_fn = make_load_into_fn<T>();
             instance().register_entry(std::type_index(typeid(T)), std::move(entry));
         }
     }
@@ -270,6 +274,7 @@ private:
         entry.name = std::move(name);
         entry.save_fn = make_save_fn<T>();
         entry.load_fn = make_load_fn<T>();
+        entry.load_into_fn = make_load_into_fn<T>();
         instance().register_entry(std::type_index(typeid(T)), std::move(entry), true);
     }
 
@@ -300,6 +305,42 @@ private:
     struct has_jai_load_and_construct<T, std::void_t<decltype(
         ::jai::access::load_and_construct(std::declval<detection_archive&>(), std::declval<construct<T>&>())
     )>> : std::true_type {};
+
+    // A type that loads its properties into an existing object: a load or serialize member (through jai::access) or free
+    // function; one that only load_and_construct reads cannot
+    template<typename T, typename = void> struct has_member_load_in_place : std::false_type {};
+    template<typename T> struct has_member_load_in_place<T, std::void_t<decltype(
+        ::jai::access::member_load(std::declval<detection_archive&>(), std::declval<T&>(), std::uint32_t(0)))>> : std::true_type {};
+    template<typename T, typename = void> struct has_simple_member_load_in_place : std::false_type {};
+    template<typename T> struct has_simple_member_load_in_place<T, std::void_t<decltype(
+        ::jai::access::member_load(std::declval<detection_archive&>(), std::declval<T&>()))>> : std::true_type {};
+    template<typename T, typename = void> struct has_member_serialize_in_place : std::false_type {};
+    template<typename T> struct has_member_serialize_in_place<T, std::void_t<decltype(
+        ::jai::access::member_serialize(std::declval<detection_archive&>(), std::declval<T&>(), std::uint32_t(0)))>> : std::true_type {};
+    template<typename T, typename = void> struct has_simple_member_serialize_in_place : std::false_type {};
+    template<typename T> struct has_simple_member_serialize_in_place<T, std::void_t<decltype(
+        ::jai::access::member_serialize(std::declval<detection_archive&>(), std::declval<T&>()))>> : std::true_type {};
+    template<typename T, typename = void> struct has_free_load_in_place : std::false_type {};
+    template<typename T> struct has_free_load_in_place<T, std::void_t<decltype(
+        load(std::declval<detection_archive&>(), std::declval<T&>()))>> : std::true_type {};
+    template<typename T, typename = void> struct has_free_serialize_in_place : std::false_type {};
+    template<typename T> struct has_free_serialize_in_place<T, std::void_t<decltype(
+        serialize(std::declval<detection_archive&>(), std::declval<T&>()))>> : std::true_type {};
+    template<typename T>
+    static constexpr bool loads_in_place = has_member_load_in_place<T>::value || has_simple_member_load_in_place<T>::value ||
+        has_member_serialize_in_place<T>::value || has_simple_member_serialize_in_place<T>::value ||
+        has_free_load_in_place<T>::value || has_free_serialize_in_place<T>::value;
+
+    template<typename T>
+    static load_into_fn_t make_load_into_fn() {
+        if constexpr (loads_in_place<T>) {
+            return [](any_archive_reader& ar, void* object) {
+                ar.dispatch([object](auto& concrete_ar) { concrete_ar(*static_cast<T*>(object)); });
+            };
+        } else {
+            return nullptr;
+        }
+    }
 
     template<typename T>
     static load_fn_t make_load_fn() {

@@ -2077,6 +2077,64 @@ checked_result<void> host_reference_store(engine* eng, const host_slot& slot, sc
 
 engine::engine() : impl(std::make_unique<implementation>()) {}
 
+bool engine_loading(const engine* a_engine) {
+    return a_engine && a_engine->loading();
+}
+
+engine::load_session::load_session(engine* a_engine) : eng(a_engine) {
+    if (eng) { ++eng->load_depth_; }
+}
+
+engine::load_session::~load_session() {
+    if (!eng || completed) { return; }
+    if (--eng->load_depth_ == 0) {
+        eng->deferred_post_loads_.clear();
+        eng->load_field_orders_.clear();
+    }
+}
+
+const std::vector<engine::load_field>& engine::load_field_order(const class_definition& cls) {
+    if (load_depth_ == 0) { load_field_orders_.clear(); }   // kept only while a load is in progress (a reload may follow)
+    auto it = load_field_orders_.find(&cls);
+    if (it != load_field_orders_.end()) { return it->second; }
+    std::vector<load_field> order;
+    for (const std::string& name : cls.get_property_names()) {
+        order.push_back(load_field{symbolize(name), symbolize("_set_" + name), script_value(name, this)});
+    }
+    return load_field_orders_.emplace(&cls, std::move(order)).first->second;
+}
+
+void engine::load_session::complete() {
+    if (!eng || completed) { return; }
+    completed = true;
+    if (--eng->load_depth_ > 0) { return; }
+    eng->load_field_orders_.clear();
+    // the outermost load is done and its objects are whole: their post_load hooks run once each in completion order,
+    // outside the load (a hook's writes notify as usual, and a hook that loads again gets a load of its own)
+    std::vector<std::pair<script_value, script_int>> hooks = std::move(eng->deferred_post_loads_);
+    eng->deferred_post_loads_.clear();
+    const uint64_t post_load_id = eng->symbolize("post_load");
+    for (auto& [self, version] : hooks) {
+        auto instance = self.is_object() ? self.get_class_instance() : nullptr;
+        auto* def = instance ? instance->get_class_definition() : nullptr;
+        script_value post_load = def ? def->get_method(post_load_id, false) : script_value(std::monostate{}, eng);
+        if (post_load.type() != script_value_type::jai_function_type) { continue; }
+        auto ran = post_load.as_function()({ self, script_value(version, eng) });
+        if (!ran) { throw runtime_error(eng->format_error(ran)); }
+        if (eng->backend_unwinding()) { throw runtime_error(eng->backend_exception_text()); }
+    }
+}
+
+void engine::defer_post_load(const script_value& self, script_int version) {
+    if (load_depth_ > 0) {
+        deferred_post_loads_.emplace_back(self, version);
+        return;
+    }
+    load_session session(this);
+    deferred_post_loads_.emplace_back(self, version);
+    session.complete();
+}
+
 std::weak_ptr<const void> engine_lifetime_token(engine* a_engine) {
     return a_engine ? a_engine->lifetime_token() : std::weak_ptr<const void>();
 }
@@ -5521,6 +5579,66 @@ bool engine::script_layer_object_owned(const std::shared_ptr<class_instance>& la
     return base && base->slot_hooks();
 }
 
+bool engine::script_class_default_constructible(const class_definition& cls) const {
+    if (!cls.is_script_class()) { return true; }
+    const auto& script = static_cast<const script_class_definition&>(cls);
+    if (!script.get_constructor_asts().empty()) {
+        for (const auto& ctor : script.get_constructor_asts()) {
+            if (arity_accepts(ctor->parameters, 0)) { return true; }
+        }
+        return false;
+    }
+    // no declared constructor: the implicit one default-constructs the base
+    const class_definition* parent = script.parent_ptr();
+    if (!parent) { return true; }
+    if (parent->is_script_class()) { return script_class_default_constructible(*parent); }
+    std::vector<host_overload_signature> signatures;
+    if (!host_function_signatures(parent->get_name(), signatures)) { return false; }
+    for (const auto& signature : signatures) {
+        if (signature.arity == 0 || signature.arity == SIZE_MAX) { return true; }
+    }
+    return false;
+}
+
+std::shared_ptr<class_instance> engine::construct_script_layer_for_load(const std::string& script_class_name, std::shared_ptr<void>& cpp_object) {
+    auto script_def = get_class_registry().find_script_class(script_class_name);
+    if (!script_def || !script_class_default_constructible(*script_def)) { return nullptr; }
+    script_value ctor = get_variable(script_class_name);
+    if (!ctor.is_function()) { return nullptr; }
+    checked_result<script_value> constructed = [&]() {
+        construction_access_waiver waiver(this);
+        return ctor.as_function()({});
+    }();
+    if (!constructed) { throw runtime_error(format_error(constructed)); }
+    if (backend_unwinding()) { throw runtime_error(backend_exception_text()); }
+    auto instance = constructed.value().is_object() ? constructed.value().get_class_instance() : nullptr;
+    cpp_object = instance ? instance->get_cpp_object() : nullptr;
+    if (!cpp_object) {
+        throw runtime_error("Failed to reconstruct hybrid script class '" + script_class_name + "'");
+    }
+    return instance;
+}
+
+checked_result<void> engine::hydrate_script_layer(const std::shared_ptr<class_instance>& instance, const std::string& fields_json) {
+    if (!instance) { return {}; }
+    auto* script_def = instance->get_class_definition();
+    if (!script_def) { return {}; }
+    script_value self_value = script_value::make_object(script_def->get_name(), instance, this);
+    if (!fields_json.empty()) {
+        serialization::json_archive_reader reader(fields_json, this);
+        script_value fields = reader.read_value();
+        if (fields.is_map()) {
+            stdlib::archive_handles handles;
+            handles.root = &fields;
+            stdlib::load_saved_fields(this, self_value, fields.as_map(), [this, &handles](const script_value& value) {
+                return stdlib::reconstruct_archive_value(this, value, true, handles);
+            });
+        }
+    }
+    defer_post_load(self_value, 1);
+    return {};
+}
+
 std::shared_ptr<class_instance> engine::extend_loaded(const std::string& script_class_name,
         const std::shared_ptr<void>& cpp_object, const std::string& fields_json) {
     auto script_def = get_class_registry().find_script_class(script_class_name);
@@ -5581,26 +5699,8 @@ checked_result<std::shared_ptr<class_instance>> engine::build_script_layer(const
         });
     }
     if (!fields_json.empty()) {
-        serialization::json_archive_reader reader(fields_json, this);
-        script_value fields = reader.read_value();
-        if (fields.is_map()) {
-            stdlib::archive_handles handles;
-            handles.root = &fields;
-            for (const auto& [key, value] : fields.as_map()) {
-                if (!key.is_string()) { continue; }
-                uint64_t field_id = symbolize(key.as_string());
-                if (instance->has_field(field_id)) {
-                    instance->set_field(field_id, stdlib::reconstruct_archive_value(this, value, true, handles));
-                }
-            }
-        }
-        script_value post_load = script_def->get_method(impl->post_load_id_, false);
-        if (post_load.type() == script_value_type::jai_function_type) {
-            script_value self_value = script_value::make_object(script_def->get_name(), instance, this);
-            std::vector<script_value> args = { self_value, script_value(static_cast<script_int>(1), this) };
-            auto ran = post_load.as_function()(args);
-            if (!ran) { return ran.error_value(); }
-        }
+        auto hydrated = hydrate_script_layer(instance, fields_json);
+        if (!hydrated) { return hydrated.error_value(); }
     }
     return result(std::move(instance));
 }

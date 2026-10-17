@@ -26,6 +26,12 @@ namespace stdlib {
 	// One archive's script value back to live values: classes by name, handles by id
 	script_value load_archive_value(engine* eng, const script_value& value, bool json_string_keys);
 
+	// A constructed object's saved values, in the class's property order (base first; unknown keys ignored, a missing
+	// key keeps the constructed value): a script field writes its storage, a C++ property its binding, and a value that
+	// does not fit converts as hot reload's retype does or keeps the constructed value (record_field_migration)
+	void load_saved_fields(engine* eng, const script_value& instance, const script_map& saved,
+	                       const std::function<script_value(const script_value&)>& transform);
+
     // json:: and the archive functions (source/implementation/stdlib/json.cpp)
     void register_json_functions(engine& eng_ref);
 

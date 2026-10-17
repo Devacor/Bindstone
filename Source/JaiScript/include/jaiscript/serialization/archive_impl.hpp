@@ -139,30 +139,46 @@ protected:
                                          shared->is_class_instance_wrapper);
     }
 
-    // Every property with a getter, in the class's order: C++ bound properties, script fields through their
-    // synthesized getters, hybrids (inherited C++ properties chain through the C++ base).
+    // Every property in the class's order: C++ bound properties through their getters, script fields as stored (a
+    // load restores storage, so an accessor the script declared never stands between a save and its load), hybrids
+    // (inherited C++ properties chain through the C++ base); an accessor with no field saves what its getter answers.
     // A script-declared accessor's error and a host exception leave the archive; a host property that cannot read
     // stays out. False when a getter threw into the backend: the in-flight exception leaves the archive.
     template <class ClassDef, class Emit>
     bool for_each_serialized_property(const script_value& value, const ClassDef& class_def, engine* eng, Emit&& emit) {
+        const std::shared_ptr<class_instance> instance = serialized_instance_of(value);
         const std::vector<std::string> names = class_def->get_property_names();
         size_t index = 0;
         bool aborted = false;
         script_value property(std::monostate{}, eng);
-        while (next_serialized_property(value, class_def, eng, names, index, property, aborted)) {
+        while (next_serialized_property(value, instance.get(), class_def, eng, names, index, property, aborted)) {
             emit(names[index - 1], std::move(property));
             property = script_value(std::monostate{}, eng);
         }
         return !aborted;
     }
 
-    // The next of names (from index on) with a getter, read into out; false when none is left, or when a getter threw into
-    // the backend (aborted)
+    static std::shared_ptr<class_instance> serialized_instance_of(const script_value& value) {
+        std::shared_ptr<class_instance> instance;
+        if (value.is_object()) {
+            try { instance = value.as<std::shared_ptr<class_instance>>(); } catch (...) {}
+        }
+        return instance;
+    }
+
+    // The next of names (from index on) that holds state, read into out (a script field as stored, a property through its
+    // getter); false when none is left, or when a getter threw into the backend (aborted)
     template <class ClassDef>
-    bool next_serialized_property(const script_value& value, const ClassDef& class_def, engine* eng, const std::vector<std::string>& names,
-                                  size_t& index, script_value& out, bool& aborted) {
+    bool next_serialized_property(const script_value& value, const class_instance* instance, const ClassDef& class_def, engine* eng,
+                                  const std::vector<std::string>& names, size_t& index, script_value& out, bool& aborted) {
         while (index < names.size()) {
             const std::string& prop_name = names[index++];
+            if (instance) {
+                if (const script_value* stored = instance->find_script_field_value(eng->symbolize(prop_name))) {
+                    out = stored->deref();
+                    return true;
+                }
+            }
             uint64_t getter_id = eng->symbolize("_get_" + prop_name);
             auto getter = class_def->get_method(getter_id);
             if (getter.type() != script_value_type::jai_function_type) { continue; }
@@ -179,7 +195,8 @@ protected:
                 aborted = true;
                 return false;
             }
-            out = std::move(result.value());
+            // a property handed out through a transparent wrapper (an observable property's reference) saves its value
+            out = result.value().try_unwrap_transparent_wrapper();
             return true;
         }
         return false;
@@ -764,6 +781,23 @@ protected:
 
     engine* engine_ref_;
 
+    // The outermost read is one load: a load session opens there and completes when it returns, so the script
+    // post_load hooks of everything it loaded run once the whole archive is loaded (a read that throws drops them)
+    int read_depth_ = 0;
+    struct read_scope {
+        archive_reader_impl* reader;
+        std::optional<engine::load_session> session;
+        explicit read_scope(archive_reader_impl* a_reader) : reader(a_reader) {
+            if (reader->read_depth_++ == 0 && reader->engine_ref_) { session.emplace(reader->engine_ref_); }
+        }
+        ~read_scope() { --reader->read_depth_; }
+        read_scope(const read_scope&) = delete;
+        read_scope& operator=(const read_scope&) = delete;
+        void done() {
+            if (session) { session->complete(); }
+        }
+    };
+
     // C++ shared_ptr tracking for property serialization (type-erased). The stored pointer
     // is the COMPLETE object (most-derived) and `type` its dynamic type, so a back-reference
     // taken through any base view adjusts to the right subobject under multiple inheritance.
@@ -894,20 +928,26 @@ public:
 
     template<typename T>
     void operator()(const char* name, T& value) {
+        read_scope scope(this);
         serialize(name, value);
+        scope.done();
     }
 
     template<typename T>
     void operator()(const nvp<T>& nv) {
+        read_scope scope(this);
         serialize(nv.name, nv.value);
+        scope.done();
     }
 
     template<typename T, typename... Rest>
     void operator()(const nvp<T>& first, const Rest&... rest) {
+        read_scope scope(this);
         serialize(first.name, first.value);
         if constexpr (sizeof...(rest) > 0) {
             operator()(rest...);
         }
+        scope.done();
     }
 
 private:
@@ -985,11 +1025,13 @@ public:
     // Uses access:: to support protected methods that friend jai::access
     template<typename T, std::enable_if_t<has_load_method<T>::value, int> = 0>
     void operator()(T& obj) {
+        read_scope scope(this);
         if constexpr (has_versioned_load_method<T>::value) {
             ::jai::access::member_load(*self(), obj, 0);
         } else {
             ::jai::access::member_load(*self(), obj);
         }
+        scope.done();
     }
 
     // operator() for types with serialize() method (but no load())
@@ -1000,11 +1042,13 @@ public:
         !has_load_method<T>::value &&
         has_serialize_method<T>::value, int> = 0>
     void operator()(T& obj) {
+        read_scope scope(this);
         if constexpr (has_versioned_serialize_method<T>::value) {
             ::jai::access::member_serialize(*self(), obj, 0);
         } else {
             ::jai::access::member_serialize(*self(), obj);
         }
+        scope.done();
     }
 
     // operator() for property_owner types WITHOUT custom load() or serialize()
@@ -1013,7 +1057,9 @@ public:
         !has_serialize_method<T>::value &&
         has_property_mgr<T>::value, int> = 0>
     void operator()(T& obj) {
+        read_scope scope(this);
         obj.load_owned_properties(*self());  // walks the inheritance chain (not just the derived mgr)
+        scope.done();
     }
 
     template<typename T>
@@ -1030,6 +1076,13 @@ public:
         !std::is_enum_v<T> &&
         !std::is_same_v<T, std::string>, int> = 0>
     void operator()(T& value) {
+        read_scope scope(this);
+        read_unscoped(value);
+        scope.done();
+    }
+
+    template<typename T>
+    void read_unscoped(T& value) {
         using namespace serialization_traits;
 
         if constexpr (is_std_vector_v<T>) {
@@ -1321,16 +1374,48 @@ private:
                         }
                     }
                 }
-                if (entry && entry->load_fn) {
-                    // Reject a tampered $type that names a registered type unrelated to the
-                    // requested base BEFORE constructing it — otherwise the void->elem_type cast
-                    // below would reinterpret an unrelated object as elem_type (type confusion
-                    // reachable from untrusted payloads). B5.
+                // Reject a tampered $type that names a registered type unrelated to the
+                // requested base BEFORE constructing it — otherwise the void->elem_type cast
+                // below would reinterpret an unrelated object as elem_type (type confusion
+                // reachable from untrusted payloads). B5.
+                const auto refuse_unrelated = [&]() {
                     if (!polymorphic_registry::instance().is_assignable(entry->type, std::type_index(typeid(elem_type)))) {
                         throw serialization_error("Polymorphic type '" + poly_type + "' is not a registered subtype of requested base '" +
                             std::type_index(typeid(elem_type)).name() + "' (declare it: static jai::serialization::register_relation<" +
                             poly_type + ", Base>, or .base<Base>() on its registrar)");
                     }
+                };
+                if (entry && !hybrid_class.empty() && entry->load_into_fn) {
+                    // A script class with a zero-argument constructor is constructed (its initializer list builds the C++
+                    // base), then the saved values load over it: the base's properties into that object, then the script
+                    // fields, then post_load. The layer owns the object it constructed, so the pointer aliases the layer.
+                    refuse_unrelated();
+                    std::shared_ptr<void> constructed_object;
+                    auto constructed = engine_ref_->construct_script_layer_for_load(hybrid_class, constructed_object);
+                    if (constructed) {
+                        std::string hybrid_fields;
+                        if (self()->has_property("$script")) {
+                            self()->serialize("$script", hybrid_fields);
+                        }
+                        if (!self()->seek_property("$val")) {
+                            throw serialization_error("Expected '$val' for polymorphic shared_ptr");
+                        }
+                        void* adjusted = polymorphic_registry::instance().adjust_to_base(entry->type, std::type_index(typeid(elem_type)), constructed_object.get());
+                        result = std::shared_ptr<elem_type>(constructed, static_cast<elem_type*>(adjusted));
+                        self()->register_deserialized_shared(id, result);
+                        self()->begin_object();
+                        any_archive_reader wrapper(*self());
+                        entry->load_into_fn(wrapper, constructed_object.get());
+                        self()->end_object();
+                        auto hydrated = engine_ref_->hydrate_script_layer(constructed, hybrid_fields);
+                        if (!hydrated) {
+                            throw serialization_error(engine_ref_->format_error(hydrated));
+                        }
+                        return result;
+                    }
+                }
+                if (entry && entry->load_fn) {
+                    refuse_unrelated();
                     std::string hybrid_fields;
                     if (!hybrid_class.empty() && self()->has_property("$script")) {
                         self()->serialize("$script", hybrid_fields);

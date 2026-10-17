@@ -224,13 +224,18 @@ bool bind_schema_typed(engine& a_engine, class_definition& class_def, serializat
 			return eng->make_object(ref);
 		};
 
-		auto setter = [prop_name, access](void* self, const script_value& arg) {
+		auto setter = [prop_name, access, eng](void* self, const script_value& arg) {
 			auto val = arg.as<ValueT>();
 			jai::property_base* base_prop = access.find(self, prop_name);
 			if (!base_prop) return;
 			auto* obs_prop = dynamic_cast<jai::observable_property<ValueT>*>(base_prop);
 			if (obs_prop) {
-				*obs_prop = std::move(val);
+				// a load writes state without notifying
+				if (eng->loading()) {
+					obs_prop->set_silent(std::move(val));
+				} else {
+					*obs_prop = std::move(val);
+				}
 			}
 		};
 

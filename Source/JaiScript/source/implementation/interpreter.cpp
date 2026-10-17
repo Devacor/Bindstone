@@ -40,6 +40,7 @@
 #include <jaiscript/detail/type_proofs.hpp>   // parse-time type proof guards (vm parity)
 #include <jaiscript/detail/typed_slot.hpp>   // the one typed-slot conversion table (vm parity)
 #include <jaiscript/detail/range_for_diagnostic.hpp>   // range-for texts (vm parity)
+#include <jaiscript/detail/map_entry_binding.hpp>
 #include <jaiscript/detail/float_text.hpp>
 #include <jaiscript/debug/controller.hpp>     // step-debugger statement hook
 #include <stdexcept>
@@ -8321,6 +8322,17 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
     // Consumed at entry: a nested receiver's own member reads are accesses
     const bool as_callee = member_callee_lookup_;
     member_callee_lookup_ = false;
+    // A structured binding's half reads the loop variable's entry cursor; without one (the container was not a map) it is the
+    // member read it is spelled as (KEEP BYTE-PARALLEL with vm_backend::exec_iter_entry)
+    if (expr->entry_half) [[unlikely]] {
+        const auto* loop_var = static_cast<const identifier_expr*>(expr->object.get());
+        if (const script_value* cell = resolve_local_or_env(loop_var->slot_index, loop_var->symbol_id)) {
+            if (auto half = detail::map_entry_half(*cell, expr->entry_half, engine_)) {
+                push_value(std::move(*half));
+                return {};
+            }
+        }
+    }
     // Check if this is a static member access (::)
     if (expr->is_static) {
         // For static access, the object should be an identifier (class or namespace name)
@@ -11453,7 +11465,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                 *cell = self->make_value();
             }
         }
-    } release_loop_reference{this, stmt->variable_slot_index, use_slot && stmt->is_reference};
+    } release_loop_reference{this, stmt->variable_slot_index, use_slot && (stmt->is_reference || stmt->binds_map_entry)};
 
     // Create a new scope for the loop variable
     push_scope();
@@ -11677,24 +11689,21 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
         }
 
     } else if (container.is_map()) {
-        // Iterate over map - return key-value pairs with first/second access
+        // A structured binding's variable holds the entry's cursor, a plain one the entry's pair (KEEP BYTE-PARALLEL with
+        // vm_backend::iter_next_map_entry; detail/map_entry_binding.hpp)
         auto& map_storage = container.get_map_storage();
+        const type_info* map_tag = container.get_type_info();
+        const type_info_ptr map_value_type = map_tag ? map_tag->value_type() : nullptr;
 
         if (!map_storage->empty()) {
-            // OPTIMIZATION: Look up pair constructor ONCE before the loop
-            uint64_t pair_symbol_id = string_symbolizer_->intern("pair");
-            auto pair_result = environment_->get_ref(pair_symbol_id);
-            if (!pair_result) {
-                pop_scope();
-                return pair_result.error_value();
+            std::shared_ptr<class_definition> pair_class;
+            if (!stmt->binds_map_entry) {
+                pair_class = detail::map_entry_pair_class(*engine_);
+                if (!pair_class) {
+                    pop_scope();
+                    return detail::map_entry_pair_missing();
+                }
             }
-            const script_value& pairConstructor = pair_result.value().get();
-            if (!pairConstructor.is_function()) {
-                pop_scope();
-                return checked_result<void>(make_error_code(runtime_error_code::stdlib_not_loaded),
-                    "'pair' type not registered - make sure stdlib is loaded");
-            }
-            const script_function& pair_func = pairConstructor.as_function();
 
             script_value* loop_var_ptr = nullptr;
 
@@ -11737,28 +11746,18 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                     // First replayed iteration: the loop variable is already restored;
                     // the body dispatch below fast-forwards to the yield point
                     replaying = false;
+                } else if (stmt->binds_map_entry) {
+                    const auto& entry = *it;
+                    if (!detail::reaim_map_entry_cursor(loop_var_ptr, map_storage, entry.first, map_value_type)) {
+                        *loop_var_ptr = script_value::make_map_entry_reference(map_storage, entry.first, &entry.second, engine_, map_value_type);
+                    }
                 } else {
-                    // Create pair args
-                    std::vector<script_value> args;
-
-                    if (stmt->is_reference) {
-                        // For references, create a pair with a map-entry reference to the value
-                        args.push_back(it->first);  // Don't clone - just pass the key
-                        args.push_back(script_value::make_map_entry_reference(map_storage, it->first, &it->second, engine_, nullptr));
-                    } else {
-                        // Copy binding: string keys share their node (the copy-on-write
-                        // gate detaches any write - internal/invariants.md 11), other key kinds
-                        // snapshot; values deep-copy, shared_ptr values share
-                        args.push_back(it->first.is_string() ? it->first : it->first.clone());
-                        args.push_back(clone_for_assignment(it->second));
+                    script_value first = make_value();
+                    script_value second = make_value();
+                    detail::map_entry_pair_halves(map_storage, *it, stmt->is_reference, map_value_type, engine_, first, second);
+                    if (!detail::reuse_map_entry_pair(loop_var_ptr, pair_class.get(), first, second)) {
+                        *loop_var_ptr = detail::mint_map_entry_pair(pair_class, std::move(first), std::move(second), engine_);
                     }
-
-                    auto result = pair_func(args);
-                    if (!result) {
-                        pop_scope();
-                        return result.error_value();
-                    }
-                    *loop_var_ptr = std::move(result.value());
                 }
 
                 // Execute loop body

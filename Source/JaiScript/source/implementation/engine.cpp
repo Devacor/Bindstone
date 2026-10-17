@@ -5886,6 +5886,11 @@ type_info_ptr object_element_own_tag(const script_value& v, engine* eng) {
     auto view = resolve_slot_class(v, eng);
     return view.def ? view.def->get_type_info() : nullptr;
 }
+
+checked_result<void> store_through_held_reference(script_value& held, const script_value& value, engine* eng) {
+    script_value source = value;
+    return ref_store_through_storage(held, source, eng, eng->get_symbolizer());
+}
 } // namespace detail
 
 } // namespace jai

@@ -315,6 +315,7 @@ namespace jai::vm {
         op_d_and, op_d_or, op_d_xor, op_d_shl, op_d_shr,
         // compare and jump-if-false: a = left, b = right, c = target
         op_d_jlt, op_d_jle, op_d_jgt, op_d_jge, op_d_jeq, op_d_jne,
+        op_iter_entry,      // a=iter proto index, b=node index (the half's member_expr), c=member_expr::entry_half: a structured binding's half from the loop variable's entry cursor, pushed for its declaration (no cursor: the member read)
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -551,6 +552,7 @@ namespace jai::vm {
             case opcode::op_iter_init: return "ITER_INIT";
             case opcode::op_iter_next: return "ITER_NEXT";
             case opcode::op_iter_pop: return "ITER_POP";
+            case opcode::op_iter_entry: return "ITER_ENTRY";
             case opcode::op_cfor_prep: return "CFOR_PREP";
             case opcode::op_cfor_back: return "CFOR_BACK";
             case opcode::op_cfor_pop: return "CFOR_POP";

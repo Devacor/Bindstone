@@ -2632,6 +2632,13 @@ namespace detail {
             return holder && holder.unique() && holder->container && !holder->has_map_key && !holder->has_cell &&
                    !holder->owner_instance && !holder->property ? holder.get() : nullptr;
         }
+        // The MAP-ENTRY holder this handle alone owns: a structured range-for re-aims it at the next entry instead of minting a
+        // holder per iteration. Null when anyone else shares the holder and for every other mode.
+        reference_holder* map_entry_cursor_holder() noexcept {
+            if (raw_storage_index() != TYPEID_REFERENCE) { return nullptr; }
+            auto& holder = *storage_.get_if<TYPEID_REFERENCE>();
+            return holder && holder.unique() && holder->has_map_key ? holder.get() : nullptr;
+        }
 
         // The parallel_for chunk cursor: an ELEMENT-mode reference the worker's chunk loop
         // shares with the body call, re-pointed at the next slot after each element. Unlike

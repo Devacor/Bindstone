@@ -230,6 +230,7 @@ namespace jai::vm {
         type_info_ptr element_type;                        // a declared loop variable type the binding converts to (null: auto, var)
         std::string_view var_name;                         // the variable, for the binding's rejection text
         bool conversion_free = true;                       // the checker saw the elements hold the declared type
+        bool binds_map_entry = false;                      // for (auto [k, v] : m): over a map the variable holds the entry's cursor
     };
 
     // op_binary_fused: evaluates `left op right` without materializing operand loads

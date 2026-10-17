@@ -213,6 +213,7 @@ namespace jai::vm {
         // an if's condition: each leaf between the short-circuit jumps hoists its own leaf calls, so a graft behind && or || runs only on
         // the path that reaches its operand
         bool leaf_grafts_ = false;
+        uint32_t entry_proto_ = k_invalid_u32;   // the structured range-for whose body compiles: its iter proto
         bool leaf_retry_ = false;   // the if's whole condition hoists first: a call behind && or || is retried at its leaf, so the listing names it there   // the graft being planned or compiled lands by the block rules: a leaf its body calls is held to them too
         void mark_loop(const ast_node* stmt) { loops_.back().stmt = stmt; loop_marks_.emplace_back(stmt, static_cast<uint32_t>(chunk_->code.size())); }
         bool in_closable_loop() const;
@@ -324,6 +325,7 @@ namespace jai::vm {
         // interpreter's counting-loop pattern; false = use the generic codegen
         bool compile_counted_for(for_stmt* stmt);
         void compile_range_for(range_for_stmt* stmt);
+        bool compile_entry_half(const expression_ptr& init);
         void compile_try(try_stmt* stmt);
         void compile_switch(switch_stmt* stmt);
         void compile_break();

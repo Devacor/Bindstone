@@ -17536,7 +17536,8 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(const std::
                                                             const std::shared_ptr<environment>& definition_env,
                                                             const std::vector<script_value>& args,
                                                             std::shared_ptr<function_decl>& matching_ctor_out,
-                                                            std::vector<script_value>& captured_out) {
+                                                            std::vector<script_value>& captured_out,
+                                                            const frame* caller, bool check_access) {
 	// This native phase owns the constructor depth only until a body takes over.
 	if (current_call_depth_ >= limits_->vm_depth_gate) {
 		if (auto blocked = pass_depth_gate()) { return *blocked; }
@@ -17566,6 +17567,11 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(const std::
 	if (!matching_ctor) {
 		return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
 			class_def->get_type_id(), args.data(), args.size(), engine_, true);
+	}
+	if (check_access) {   // KEEP BYTE-PARALLEL with interpreter::construct_instance
+		JAISCRIPT_TRY(enforce_constructor_access(*class_def, matching_ctor.get(), [&]() {
+			return caller ? frame_access_context(*caller) : current_access_context();
+		}));
 	}
 
 #ifdef JAISCRIPT_VM_PROFILE
@@ -17598,10 +17604,10 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(const std::
 
 checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<script_class_definition> class_def,
                                                             std::shared_ptr<environment> definition_env,
-                                                            const std::vector<script_value>& args) {
+                                                            const std::vector<script_value>& args, bool check_access) {
 	std::shared_ptr<function_decl> matching_ctor;
 	std::vector<script_value> captured;
-	auto pre = construct_instance_pre_body(class_def, definition_env, args, matching_ctor, captured);
+	auto pre = construct_instance_pre_body(class_def, definition_env, args, matching_ctor, captured, nullptr, check_access);
 	if (!pre) {
 		return pre;
 	}
@@ -17636,7 +17642,7 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
                                                 type_info* result_stamp, const call_site* site) {
 	std::shared_ptr<function_decl> matching_ctor;
 	std::vector<script_value> captured;
-	auto pre = construct_instance_pre_body(class_def, definition_env, call_args, matching_ctor, captured);
+	auto pre = construct_instance_pre_body(class_def, definition_env, call_args, matching_ctor, captured, &f, true);
 	const std::vector<script_value>& args = captured.empty() ? call_args : captured;
 	struct owned_scope {
 		vm_backend* vm; std::vector<script_value>* saved;
@@ -20698,10 +20704,11 @@ checked_result<script_value> vm_backend::execute_callable_from(const script_call
 			if (!script_cls) {
 				return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Constructor payload without script class definition");
 			}
+			const bool waived = engine_->take_construction_access_waiver();
 			if (script_cls->get_constructor_asts().empty()) {
 				return construct_default_instance(script_cls, args);
 			}
-			return construct_instance(script_cls, payload.definition_env, args);
+			return construct_instance(script_cls, payload.definition_env, args, !waived);
 		}
 	}
 	return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Unknown callable kind");

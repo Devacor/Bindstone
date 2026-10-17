@@ -1553,7 +1553,7 @@ namespace jai::vm {
 
         checked_result<script_value> construct_instance(std::shared_ptr<script_class_definition> class_def,
                                                         std::shared_ptr<environment> definition_env,
-                                                        const std::vector<script_value>& args);
+                                                        const std::vector<script_value>& args, bool check_access = true);
         // Everything before the ctor body (overload resolve, instance, init_env + binds,
         // initializer chains, field inits); success value = the new instance ('this');
         // captured_out = the arguments taken ahead of that code, when it runs any (the body binds them)
@@ -1561,7 +1561,8 @@ namespace jai::vm {
                                                         const std::shared_ptr<environment>& definition_env,
                                                         const std::vector<script_value>& args,
                                                         std::shared_ptr<function_decl>& matching_ctor_out,
-                                                        std::vector<script_value>& captured_out);
+                                                        std::vector<script_value>& captured_out,
+                                                        const frame* caller, bool check_access);
         // `ctor`'s member initialization on an instance under construction: its initializer list (a base constructor, or the
         // whole delegated-to constructor) and then the field initializers; the body is the caller's. captured_out (the
         // outermost constructor only): the arguments taken ahead of that code, when it runs any

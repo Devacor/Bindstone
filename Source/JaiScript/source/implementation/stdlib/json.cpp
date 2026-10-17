@@ -285,7 +285,10 @@ namespace stdlib {
         // the class's constructor, called as Name() would call it; its error (or throw) is the load's
         script_value ctor = eng->get_variable(type_name);
         if (!ctor.is_function()) return script_value(std::monostate{}, eng);
-        auto constructed = ctor.as_function()({});
+        checked_result<script_value> constructed = [&]() {
+            engine::construction_access_waiver waiver(eng);
+            return ctor.as_function()({});
+        }();
         if (!constructed) {
             throw runtime_error(eng->format_error(constructed));
         }

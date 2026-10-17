@@ -315,6 +315,26 @@ print(c.gold);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&lt;script&gt;:6:9: error: Cannot access private member &#x27;gold&#x27; of class &#x27;Chest&#x27;
     print(c.gold);
             ^</code></pre></div>
+<p>Constructors follow the same rule. A constructor declared after <code>private:</code> (or <code>protected:</code>) is callable from its own class (a static factory, a method) and from every class derived from it (<code>super(...)</code>, a derived class&#x27;s implicit base construction). Any other construction raises <code>Cannot access private constructor of class 'C'</code>, whatever the spelling: <code>Name(...)</code>, <code>new</code>, a declaration, an implicit conversion, <code>reflect::construct</code>. Access is checked on the overload that overload resolution picks, so a class may keep some constructors public. The strict checker reports a construction it resolves at load, with the same text. An archive load (<code>from_json</code>, <code>from_binary</code>, a binary layout&#x27;s <code>read</code>) constructs the class whatever its constructor&#x27;s access, as reads see private state:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Ticket {
+private:
+    Ticket(int n) { number = n; }
+public:
+    int number = 0;
+    static Ticket issue(int n) { return Ticket(n); }   // the class's own code constructs
+}
+class VipTicket : Ticket {
+    VipTicket() : super(1) {}                           // so does a derived class
+}
+print("issued {}, vip {}", Ticket::issue(7).number, VipTicket().number);
+var name = "Ticket";
+try {
+    reflect::construct(name, 3);
+} catch (e) {
+    print("caught: {}", e);
+}</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">issued 7, vip 1
+caught: Cannot access private constructor of class &#x27;Ticket&#x27;</code></pre></div>
 <h2 id="accessors-get-x-set-x">Accessors: <code>_get_x</code> / <code>_set_x</code><a class="hlink" href="#accessors-get-x-set-x" aria-label="link">&#8203;</a></h2>
 <p>Every field comes with synthesized accessors, which is why <code>obj.x</code> just works. Declare your own <code>_get_x()</code> / <code>_set_x(v)</code> and they win: <code>obj.x</code> reads through the getter, <code>obj.x = v</code> writes through the setter. Inside the class a bare <code>x</code> is still the backing field, so the accessors can use it without recursing:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Thermostat {

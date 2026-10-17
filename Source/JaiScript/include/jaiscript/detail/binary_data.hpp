@@ -562,7 +562,10 @@ namespace jai::binary {
 		engine* eng = r.get_engine();
 		const script_value& ctor = cls.deref();
 		if (!ctor.is_function()) { raise("read expects a class, got " + value_kind_name(ctor)); }
-		auto made = ctor.as_function()(std::vector<script_value>{});
+		checked_result<script_value> made = [&]() {
+			engine::construction_access_waiver waiver(eng);
+			return ctor.as_function()(std::vector<script_value>{});
+		}();
 		if (!made) { raise("read could not construct the class: " + eng->format_error(made)); }
 		script_value obj = std::move(made.value());
 		std::shared_ptr<class_instance> instance;

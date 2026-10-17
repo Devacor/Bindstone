@@ -1,6 +1,9 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/core/engine_impl.hpp>
+#include <jaiscript/properties/property_serialization.hpp>
+#include <jaiscript/serialization/json_archive.hpp>
+#include <jaiscript/serialization/binary_archive.hpp>
 
 namespace jai::detail {
 
@@ -245,4 +248,68 @@ bool bind_schema_primitive_property(engine& a_engine, class_definition& class_de
 		bind_schema_typed<uint8_t>(a_engine, class_def, metadata, prop_name, value_type, is_observable, access);
 }
 
+std::shared_ptr<class_definition> make_class_definition(std::string_view name, uint64_t type_id, engine* eng) {
+	return std::make_shared<class_definition>(name, type_id, eng);
+}
+
+std::shared_ptr<class_instance> make_native_instance(class_definition& def, std::string_view name, std::shared_ptr<void> object, engine* eng) {
+	auto instance = def.create_instance();
+	instance->set_native(script_value::make_cpp_object(name, def.get_type_id(), std::move(object), eng));
+	return instance;
+}
+
+script_value bound_class_conversion::wrap(std::shared_ptr<void> object, engine* eng) const {
+	if (!object) {
+		return script_value(std::monostate{}, eng);
+	}
+	return script_value::make_object(name, make_native_instance(*def, name, std::move(object), eng), eng);
+}
+
+std::shared_ptr<void> bound_class_conversion::unwrap_shared(const script_value& v, const std::type_info& type) const {
+	if (v.is_null()) {
+		return nullptr;
+	}
+	auto holder = v.get_object_holder();
+	if (!holder) {
+		throw_concat("Cannot convert script_value to shared_ptr<", name, ">");
+	}
+	return native_cast_or_throw(checked_native_object(v.get_engine(), *holder, type, def->get_type_id()), v.get_engine());
+}
+
+void bound_class_conversion::require_object(const script_value& v) const {
+	if (!v.get_object_holder()) {
+		throw_concat("Cannot convert non-object to ", def->get_name());
+	}
+}
+
+void ensure_signal_view_type_registered(engine& a_engine) {
+	if (a_engine.is_type_registered("Signal")) { return; }
+	engine* eng = &a_engine;
+	dynamic_binder<signal_script_ops> builder(a_engine, "Signal");
+	builder.method("connect", [eng](signal_script_ops& self, const std::string& id, const script_value& cb) {
+		if (!self.valid()) { throw runtime_error("Signal view is not backed by a live signal"); }
+		self.connect_fn(self.source, id, cb, eng);
+	});
+	builder.method("disconnect", [](signal_script_ops& self, const std::string& id) {
+		if (self.disconnect_fn != nullptr) { self.disconnect_fn(self.source, id); }
+	});
+	builder.method("connected", [](signal_script_ops& self, const std::string& id) {
+		return self.connected_fn != nullptr && self.connected_fn(self.source, id);
+	});
+	builder.build();
+}
+
+script_value make_signal_view(engine* eng, const signal_script_ops& ops) {
+	return eng->make_object(std::make_shared<signal_script_ops>(ops));
+}
+
 } // namespace jai::detail
+
+namespace jai {
+
+template void property_manager::save<serialization::json_archive_writer>(serialization::json_archive_writer&) const;
+template void property_manager::save<serialization::binary_archive_writer>(serialization::binary_archive_writer&) const;
+template void property_manager::load<serialization::json_archive_reader>(serialization::json_archive_reader&);
+template void property_manager::load<serialization::binary_archive_reader>(serialization::binary_archive_reader&);
+
+} // namespace jai

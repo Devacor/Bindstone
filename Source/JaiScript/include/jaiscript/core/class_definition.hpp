@@ -694,83 +694,13 @@ public:
     // argument type at call time; an identical signature re-binds. Empty param_types is a legacy
     // untyped binding (single overload per arity, as before).
     void add_method(const std::string& name, script_function func, size_t arity,
-                    std::vector<param_type_info> param_types, param_type_info result = {}) {
-        auto eng = engine_;
-        if (!eng) return;
+                    std::vector<param_type_info> param_types, param_type_info result = {});
 
-        if (name.size() > 5 && name.substr(0, 5) == "_get_") {
-            has_property_getters_ = true;
-        }
-
-        uint64_t name_id = eng->symbolize(name);
-        // A first user _get_/_set_ (or one replacing the synthesized accessor) changes the field
-        // ladder: armed field proofs and member caches must miss
-        const bool accessor_set_changes = (name.rfind("_get_", 0) == 0 || name.rfind("_set_", 0) == 0) &&
-            (methods_.find(name_id) == methods_.end() || auto_accessor_ids_.find(name_id) != auto_accessor_ids_.end());
-
-        if (arity != SIZE_MAX) {
-            auto& bucket = cpp_method_overloads_[name_id][arity];
-            auto existing = std::find_if(bucket.begin(), bucket.end(),
-                [&](const cpp_overload_entry& e) { return e.param_types == param_types; });
-            if (existing != bucket.end()) {
-                existing->func = func;  // re-bind same signature
-                existing->result = result;
-            } else {
-                bucket.push_back(cpp_overload_entry{ std::move(param_types), func, result });
-            }
-            method_arities_[name_id].push_back(arity);
-
-            methods_.insert_or_assign(name_id, script_value::make_function(cpp_method_dispatch{ this, name_id }, engine_));
-        } else {
-            methods_.insert_or_assign(name_id, script_value::make_function(
-                [func, eng](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
-                    std::vector<script_value> scratch;
-                    try {
-                        return func(detail::deref_builtin_args(raw_args, scratch));
-                    } catch (const std::exception& e) {
-                        return host_exception_result(eng, e);
-                    }
-                },
-                engine_
-            ));
-        }
-        auto_accessor_ids_.erase(name_id);
-        if (accessor_set_changes) { bump_field_shape_epoch(); }
-        bump_method_epoch();
-    }
-
-    void add_static_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
-        auto eng = engine_;
-        if (!eng) return;
-
-        if (name.size() > 5 && name.substr(0, 5) == "_get_") {
-            has_property_getters_ = true;
-        }
-
-        uint64_t name_id = eng->symbolize(name);
-        add_static_method(name_id, std::move(func), arity);
-    }
+    void add_static_method(const std::string& name, script_function func, size_t arity = SIZE_MAX);
 
     // C++-only registration door (dynamic_binder statics; script statics take
     // add_static_script_method) — args normalize like add_method's.
-    void add_static_method(uint64_t name_id, script_function func, size_t arity = SIZE_MAX) {
-        const auto* writeback = func.target<host_writeback_function>();
-        const uint64_t writeback_mask = writeback ? writeback->mask : 0;
-        script_function call = [func, eng = engine_](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
-            std::vector<script_value> scratch;
-            try {
-                return func(detail::deref_builtin_args(raw_args, scratch));
-            } catch (const std::exception& e) {
-                return host_exception_result(eng, e);
-            }
-        };
-        if (writeback_mask != 0) { call = host_writeback_function{ std::move(call), writeback_mask }; }
-        static_methods_.insert_or_assign(name_id, script_value::make_function(std::move(call), engine_));
-
-        if (arity != SIZE_MAX) {
-            static_method_arities_[name_id].push_back(arity);
-        }
-    }
+    void add_static_method(uint64_t name_id, script_function func, size_t arity = SIZE_MAX);
 
     void add_script_method(std::string_view name, std::shared_ptr<function_decl> ast, std::shared_ptr<environment> definition_env);
 
@@ -810,36 +740,9 @@ public:
     const auto& method_values() const { return methods_; }
     const auto& static_method_values() const { return static_methods_; }
 
-    void add_field(std::string_view name, const script_value& default_value) {
-        auto eng = engine_;
-        if (!eng) return;
+    void add_field(std::string_view name, const script_value& default_value);
 
-        uint64_t name_id = eng->symbolize(name);
-
-        if (default_value.get_engine() == nullptr && !!engine_) {
-            script_value value_with_engine(default_value);
-            value_with_engine.set_engine(engine_);
-            field_defaults_.insert_or_assign(name_id, value_with_engine);
-        } else {
-            field_defaults_.insert_or_assign(name_id, default_value);
-        }
-        field_defaults_cache_valid_ = false; ++defaults_version_;
-        field_slots_current_ = false;
-        bump_field_shape_epoch();
-        bump_method_epoch();   // method ICs memoize the field-shadow answer per class
-    }
-
-    void add_field(const std::string& name) {
-        auto eng = engine_;
-        if (!eng) return;
-
-        uint64_t name_id = eng->symbolize(name);
-        field_defaults_.insert_or_assign(name_id, script_value(std::monostate{}, engine_));
-        field_defaults_cache_valid_ = false; ++defaults_version_;
-        field_slots_current_ = false;
-        bump_field_shape_epoch();
-        bump_method_epoch();
-    }
+    void add_field(const std::string& name);
 
     // Declared field types (typed fields enforce like locals). 'auto'
     // fields store no entry (they infer from the initialized value); 'var' stores the
@@ -1643,19 +1546,12 @@ public:
         return nullptr;
     }
 
-    void register_property_setter(uint64_t field_id, uint64_t setter_id) {
-        property_setter_ids_[field_id] = setter_id;
-        read_only_property_ids_.erase(field_id);
-        bump_field_shape_epoch();
-    }
+    void register_property_setter(uint64_t field_id, uint64_t setter_id);
 
     // A getter-only .property() registers a REJECTING setter (dynamic_binder
     // register_read_only_setter), so its setter id is non-zero like any other and every
     // store spelling raises through it; this set is the checker's writability answer.
-    void register_property_read_only(uint64_t field_id) {
-        read_only_property_ids_.insert(field_id);
-        bump_field_shape_epoch();
-    }
+    void register_property_read_only(uint64_t field_id);
 
     bool owns_read_only_property(uint64_t field_id) const {
         return read_only_property_ids_.find(field_id) != read_only_property_ids_.end();
@@ -1688,10 +1584,7 @@ public:
 
     // Binder .property() registry (the getter side): the "this name is a C++ property of
     // this class" test for the bare-name ladder (detail/member_scope.hpp)
-    void register_property_getter(uint64_t field_id, uint64_t getter_id) {
-        property_getter_ids_[field_id] = getter_id;
-        bump_field_shape_epoch();
-    }
+    void register_property_getter(uint64_t field_id, uint64_t getter_id);
 
     uint64_t get_property_getter_id(uint64_t field_id) const {
         auto it = property_getter_ids_.find(field_id);
@@ -1714,10 +1607,7 @@ public:
         uint8_t size_and_sign = 0;
         uint8_t semantic_index = 0;
     };
-    void register_property_member(uint64_t field_id, cpp_member_accessor accessor) {
-        property_member_accessors_[field_id] = std::move(accessor);
-        bump_field_shape_epoch();
-    }
+    void register_property_member(uint64_t field_id, cpp_member_accessor accessor);
     // Chain-aware like the getter/setter ids
     const cpp_member_accessor* get_property_member_accessor(uint64_t field_id) const {
         auto it = property_member_accessors_.find(field_id);

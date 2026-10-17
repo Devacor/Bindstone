@@ -92,7 +92,12 @@ namespace jai {
         return static_cast<script_int>(f);
     }
 
-namespace detail { struct argument_capture_storage; }
+namespace detail {
+    struct argument_capture_storage;
+    // Out of line (schema_binding.cpp) so a binding TU does not instantiate the class and instance machinery
+    std::shared_ptr<class_definition> make_class_definition(std::string_view name, uint64_t type_id, engine* eng);
+    std::shared_ptr<class_instance> make_native_instance(class_definition& def, std::string_view name, std::shared_ptr<void> object, engine* eng);
+}
 
     class script_value {
     public:
@@ -2688,6 +2693,7 @@ namespace detail { struct argument_capture_storage; }
         // Friends only for essential access patterns
         friend class interpreter;  // For coroutine handle creation (object_holder access)
         template<typename T> friend class dynamic_binder;  // For make_cpp_object
+        friend std::shared_ptr<class_instance> detail::make_native_instance(class_definition&, std::string_view, std::shared_ptr<void>, engine*);
         friend class serialization::binary_archive_writer;  // For storage_ access
         friend class serialization::binary_archive_reader;  // For storage_ access
         friend class serialization::json_archive_writer;    // For storage_ access

@@ -114,10 +114,8 @@ script_value engine::make_object(std::shared_ptr<T> data) {
     if constexpr (std::is_polymorphic_v<T>) {
         if (data && std::type_index(typeid(*data)) != std::type_index(typeid(T))) {
             if (std::shared_ptr<detail::first_type_t<class_definition, T>> dynamic_def = get_class_definition_by_type(std::type_index(typeid(*data)))) {
-                auto instance = dynamic_def->create_instance();
                 std::shared_ptr<void> complete_object(data, dynamic_cast<void*>(data.get()));
-                instance->set_native(
-                    script_value::make_cpp_object(dynamic_def->get_name(), dynamic_def->get_type_id(), complete_object, this));
+                auto instance = detail::make_native_instance(*dynamic_def, dynamic_def->get_name(), complete_object, this);
                 if (!key_held_by_another_object) { note_script_layer(key, instance); }
                 return script_value::make_object(dynamic_def->get_name(), instance, this);
             }
@@ -128,10 +126,7 @@ script_value engine::make_object(std::shared_ptr<T> data) {
         std::shared_ptr<detail::first_type_t<class_definition, T>> class_def = get_class_definition_by_type(std::type_index(typeid(T)));
         if (class_def) {
             const std::string& type_name = class_def->get_name();
-            auto instance = class_def->create_instance();
-
-            instance->set_native(
-                script_value::make_cpp_object(type_name, class_def->get_type_id(), std::static_pointer_cast<void>(data), this));
+            auto instance = detail::make_native_instance(*class_def, type_name, std::static_pointer_cast<void>(data), this);
             if (data && !key_held_by_another_object) { note_script_layer(key, instance); }
 
             return script_value::make_object(type_name, instance, this);

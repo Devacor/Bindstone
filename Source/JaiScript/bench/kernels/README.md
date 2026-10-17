@@ -9,6 +9,9 @@ in two forms:
 | `jai/<kernel>_dyn.jai` | the same algorithm with `var` everywhere (untyped parameters, fields, containers) |
 | `host/jai_kernel_host.cpp` | a runner-equivalent engine that also registers the C++ `add_one(int) -> int` the interop kernel calls |
 
+`jai/cell_compares_typed.jai` is outside dasProfile: a breadth-first search's inner compares (an element read and a local
+against typed globals, a bool's truth test) in a counted loop, kept as the VM's regression detector for pinned compares.
+
 Every program prints `"<board name>", <seconds per run>, <runs>` and a `checksum` line. A sample runs the kernel as
 many times as fit a 0.5 s budget and reports the per-run time (dasProfile's protocol, timed with a `time::stopwatch`).
 

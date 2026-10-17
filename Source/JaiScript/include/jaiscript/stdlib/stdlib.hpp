@@ -12,19 +12,8 @@
 namespace jai {
 namespace stdlib {
 
-    // Register all standard library functions with an engine
-    inline void register_all(engine& eng_ref) {
-        // Core functions
-        register_json_functions(eng_ref);
-        register_io_functions(eng_ref);
-        register_container_types(eng_ref);
-        register_string_functions(eng_ref);
-        register_reflection_functions(eng_ref);   // the reflect:: capability — separately
-                                                  // composable for hosts that grant stdlib
-                                                  // without reflection
-        register_time_functions(eng_ref);         // time:: over the engine's time source
-
-    }
+    // Register all standard library functions with an engine (source/implementation/stdlib/stdlib.cpp)
+    void register_all(engine& eng_ref);
     
     // Overloads for shared_ptr / raw-pointer convenience (engine::make() returns a
     // shared_ptr; host callbacks often hold engine*) - no deref spelling needed,

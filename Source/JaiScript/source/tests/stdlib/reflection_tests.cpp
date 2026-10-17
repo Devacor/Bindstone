@@ -7,6 +7,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/properties/macros.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>

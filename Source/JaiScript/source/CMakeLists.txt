@@ -18,6 +18,13 @@ set(JAISCRIPT_SOURCES
     implementation/parser.cpp
     implementation/runtime_errors.cpp
     implementation/schema_binding.cpp
+    implementation/stdlib/containers.cpp
+    implementation/stdlib/io.cpp
+    implementation/stdlib/json.cpp
+    implementation/stdlib/reflection.cpp
+    implementation/stdlib/stdlib.cpp
+    implementation/stdlib/strings.cpp
+    implementation/stdlib/time.cpp
     implementation/type_checker.cpp
     implementation/type_info.cpp
     implementation/value.cpp

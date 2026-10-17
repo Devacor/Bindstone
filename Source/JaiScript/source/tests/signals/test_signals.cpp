@@ -9,6 +9,8 @@
 #include <jaiscript/serialization/convenience.hpp>
 #include <vector>
 #include <stdexcept>
+#include <thread>
+#include <atomic>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -724,6 +726,330 @@ public:
             check_eq(1, fired);
             check_true(sig.emit_while(1));
             check_eq(1, fired);
+        });
+
+        test("a_receiver_disconnected_during_an_emit_does_not_run_later_in_it", [this]() {
+            std::vector<std::string> order;
+            signal_emitter<void(int)> by_handle;
+            std::shared_ptr<receiver<void(int)>> later;
+            auto first = by_handle.connect([&](int) { order.push_back("first"); by_handle.disconnect(later); });
+            later = by_handle.connect([&](int) { order.push_back("later"); });
+            by_handle.emit(1);
+            check_eq((size_t)1, order.size(), "disconnect(handle) stops a receiver the pass has not reached");
+            check_false(later->connected());
+            by_handle.emit(1);
+            check_eq((size_t)2, order.size());
+
+            order.clear();
+            signal_emitter<void(int)> by_name;
+            auto front = by_name.connect([&](int) { order.push_back("front"); by_name.disconnect("named"); });
+            by_name.connect("named", [&](int) { order.push_back("named"); });
+            by_name.emit(1);
+            check_eq((size_t)1, order.size(), "disconnect(id) stops a receiver the pass has not reached");
+            check_false(by_name.connected("named"));
+
+            order.clear();
+            signal_emitter<void(int)> cleared;
+            auto clears = cleared.connect([&](int) { order.push_back("clears"); cleared.clear(); });
+            auto after = cleared.connect([&](int) { order.push_back("after"); });
+            cleared.connect("owned", [&](int) { order.push_back("owned"); });
+            cleared.emit(1);
+            check_eq((size_t)1, order.size(), "clear() stops every receiver the pass has not reached");
+            check_false(after->connected());
+            cleared.emit(1);
+            check_eq((size_t)1, order.size());
+            check_eq((size_t)0, cleared.observer_count());
+
+            order.clear();
+            signal_emitter<void(int)> itself;
+            std::shared_ptr<receiver<void(int)>> self_handle;
+            self_handle = itself.connect([&](int v) {
+                order.push_back("self");
+                itself.disconnect(self_handle);
+                if (v > 0) { itself.emit(v - 1); }
+            });
+            itself.emit(3);
+            check_eq((size_t)1, order.size(), "a receiver that disconnects itself does not run in the nested emit it starts");
+
+            signal_emitter<void(int)> nested;
+            std::shared_ptr<receiver<void(int)>> third;
+            int third_runs = 0;
+            auto opener = nested.connect([&](int v) { if (v == 0) { nested.disconnect(third); nested.emit(1); } });
+            auto middle = nested.connect([](int) {});
+            third = nested.connect([&](int) { ++third_runs; });
+            nested.emit(0);
+            check_eq(0, third_runs, "neither the nested emit nor the outer one runs a receiver disconnected before them");
+        });
+
+        test("a_disconnect_and_reconnect_during_an_emit_keeps_the_reconnection", [this]() {
+            signal_emitter<void(int)> sig;
+            std::shared_ptr<receiver<void(int)>> moved;
+            int moved_runs = 0;
+            bool toggled = false;
+            auto toggler = sig.connect([&](int) {
+                if (!toggled) {
+                    toggled = true;
+                    sig.disconnect(moved);
+                    sig.connect(moved);
+                }
+            });
+            moved = sig.connect([&](int) { ++moved_runs; });
+            sig.emit(1);
+            check_eq(0, moved_runs, "the reconnection is a new connection: it joins from the next emit");
+            check_true(moved->connected());
+            sig.emit(1);
+            check_eq(1, moved_runs, "the cleanup after the first emit did not remove the reconnection");
+            check_eq((size_t)2, sig.observer_count());
+        });
+
+        test("a_oneshot_or_named_receiver_dropped_during_an_emit_does_not_run_later_in_it", [this]() {
+            signal_emitter<void(int)> sig;
+            std::shared_ptr<receiver<void(int)>> once;
+            int once_runs = 0;
+            int replaced_runs = 0;
+            int replacement_runs = 0;
+            bool acted = false;
+            auto first = sig.connect([&](int) {
+                if (acted) { return; }
+                acted = true;
+                sig.disconnect(once);
+                sig.connect("slot", [&](int) { ++replacement_runs; });
+            });
+            once = sig.connect_oneshot([&](int) { ++once_runs; });
+            sig.connect("slot", [&](int) { ++replaced_runs; });
+            sig.emit(1);
+            check_eq(0, once_runs, "a one-shot disconnected before the pass reached it never fires");
+            check_eq(0, replaced_runs, "a named receiver whose name was taken over does not run");
+            check_eq(0, replacement_runs, "the receiver that took the name over joins from the next emit");
+            sig.emit(1);
+            check_eq(0, once_runs);
+            check_eq(0, replaced_runs);
+            check_eq(1, replacement_runs);
+        });
+
+        test("a_script_receiver_disconnected_during_an_emit_does_not_run_later_in_it", [this]() {
+            auto eng = jai::foundry::make_engine();
+            eng->execute("int text_runs = 0; int fn_runs = 0; var counts = [](int v) -> void { fn_runs += 1; };");
+            signal_emitter<void(int)> sig;
+            sig.script_engine(eng.get());
+            sig.parameter_names({"v"});
+            auto first = sig.connect([&](int) { sig.disconnect("text"); sig.disconnect("fn"); });
+            sig.connect("text", std::string("text_runs += 1;"));
+            sig.connect("fn", eng->get_variable("counts"));
+            sig.emit(1);
+            check_eq((int64_t)0, eng->get_variable("text_runs").as_int());
+            check_eq((int64_t)0, eng->get_variable("fn_runs").as_int());
+        });
+
+        test("cull_dead_observers_during_an_emit_skips_no_live_receiver", [this]() {
+            signal_emitter<void(int)> sig;
+            std::vector<int> order;
+            auto dropped = sig.connect([&](int) { order.push_back(0); });
+            auto culls = sig.connect([&](int) { order.push_back(1); sig.cull_dead_observers(); });
+            auto last = sig.connect([&](int) { order.push_back(2); });
+            dropped.reset();
+            sig.emit(1);
+            check_eq((size_t)2, order.size(), "the receiver after the cull still ran");
+            check_eq(2, order.back());
+            check_eq((size_t)2, sig.cull_dead_observers());
+        });
+
+        test("a_receiver_connected_during_an_emit_joins_from_the_next_emit", [this]() {
+            signal_emitter<void(int)> sig;
+            std::vector<std::string> order;
+            std::vector<std::shared_ptr<receiver<void(int)>>> added;
+            auto grows = sig.connect([&](int) {
+                order.push_back("grows");
+                added.push_back(sig.connect([&](int) { order.push_back("added"); }));
+            });
+            sig.emit(1);
+            check_eq((size_t)1, order.size(), "a receiver that connects another on every fire ends its emit");
+            order.clear();
+            sig.emit(1);
+            check_eq((size_t)2, order.size(), "the receiver connected during the first emit runs from the second");
+            check_eq(std::string("added"), order[1]);
+
+            signal_emitter<void(int)> reentrant;
+            int late_runs = 0;
+            std::shared_ptr<receiver<void(int)>> late;
+            auto starter = reentrant.connect([&](int v) {
+                if (v == 0) {
+                    late = reentrant.connect([&](int) { ++late_runs; });
+                    reentrant.emit(1);
+                }
+            });
+            reentrant.emit(0);
+            check_eq(1, late_runs, "a nested emit started after the connect is a new emit and runs it; the outer emit does not");
+        });
+
+        test("set_blocked_callback_inside_the_blocked_callback_is_safe", [this]() {
+            signal_emitter<void(int)> sig;
+            std::string seen;
+            const std::string label = "a label long enough to live outside any small buffer";
+            sig.set_blocked_callback([&sig, &seen, label](int) {
+                sig.set_blocked_callback([](int) {});
+                seen = label;
+            });
+            sig.block();
+            sig.emit(1);
+            check_eq(label, seen, "the replaced callback finished with its captures intact");
+        });
+
+        test("loading_into_a_live_signal_replaces_its_saved_receivers", [this]() {
+            auto eng = jai::foundry::make_engine();
+            eng->execute("int hits = 0;");
+            signal_box box;
+            box.sig.script_engine(eng.get());
+            box.sig.parameter_names({"v"});
+            int cpp_hits = 0;
+            auto cpp = box.sig.connect([&](int) { ++cpp_hits; });
+            auto unnamed = box.sig.connect(std::string("hits += v;"));
+            box.sig.connect("named", std::string("hits += 100;"));
+            serialization::json_archive_writer w(2, eng.get());
+            w.begin_object("", 1);
+            w.serialize_object_content(box);
+            w.end_object();
+            const std::string json = w.str();
+            for (int pass = 0; pass < 2; ++pass) {
+                serialization::json_archive_reader r(json, eng.get());
+                std::string type_name;
+                uint32_t version = 0;
+                r.begin_object(type_name, version);
+                r(box);
+                r.end_object();
+            }
+            box.sig.emit(1);
+            check_eq((int64_t)101, eng->get_variable("hits").as_int(), "each saved receiver runs once after two loads into the same signal");
+            check_eq(1, cpp_hits, "the C++ receiver stays connected");
+            check_false(unnamed->connected(), "the load replaced the text receiver C++ held with the saved one");
+        });
+
+        test("connect_immediate_joins_every_emit_on_the_stack", [this]() {
+            signal_emitter<void(int)> sig;
+            std::vector<std::string> order;
+            std::vector<std::shared_ptr<receiver<void(int)>>> held;
+            auto outer = sig.connect([&](int v) {
+                order.push_back("outer" + std::to_string(v));
+                if (v == 0) { sig.emit(1); }
+            });
+            auto inner = sig.connect([&](int v) {
+                order.push_back("inner" + std::to_string(v));
+                if (v == 1) {
+                    held.push_back(sig.connect_immediate([&](int w) { order.push_back("immediate" + std::to_string(w)); }));
+                    held.push_back(sig.connect([&](int w) { order.push_back("plain" + std::to_string(w)); }));
+                }
+            });
+            sig.emit(0);
+            const std::vector<std::string> expected { "outer0", "outer1", "inner1", "immediate1", "inner0", "immediate0" };
+            check_eq(expected.size(), order.size());
+            for (size_t i = 0; i < expected.size() && i < order.size(); ++i) {
+                check_eq(expected[i], order[i], "the immediate receiver runs in the nested emit and in the outer one; the plain one in neither");
+            }
+            order.clear();
+            sig.emit(2);
+            check_eq((size_t)4, order.size(), "from the next emit both run like any receiver");
+        });
+
+        test("connect_immediate_covers_every_connect_form", [this]() {
+            auto eng = jai::foundry::make_engine();
+            eng->execute("int text_runs = 0; int fn_runs = 0; var counts = [](int v) -> void { fn_runs += v; };");
+            signal_emitter<void(int)> sig;
+            sig.script_engine(eng.get());
+            sig.parameter_names({"v"});
+            int named_runs = 0;
+            int handle_runs = 0;
+            std::shared_ptr<receiver<void(int)>> unnamed_text;
+            auto reattached = receiver<void(int)>::make([&](int) { ++handle_runs; });
+            bool acted = false;
+            auto first = sig.connect([&](int) {
+                if (acted) { return; }
+                acted = true;
+                sig.connect_immediate("named", [&](int) { ++named_runs; });
+                sig.connect_immediate("named_text", std::string("text_runs += v;"));
+                sig.connect_immediate("named_fn", eng->get_variable("counts"));
+                unnamed_text = sig.connect_immediate(std::string("text_runs += 10;"));
+                check_true(sig.connect_immediate(reattached));
+            });
+            sig.emit(1);
+            check_eq(1, named_runs);
+            check_eq(1, handle_runs);
+            check_eq((int64_t)11, eng->get_variable("text_runs").as_int());
+            check_eq((int64_t)1, eng->get_variable("fn_runs").as_int());
+
+            signal<void(int)> facade{ sig };
+            int facade_runs = 0;
+            std::shared_ptr<receiver<void(int)>> via_facade;
+            auto connects = facade.connect([&](int v) { if (v == 2) { via_facade = facade.connect_immediate([&](int) { ++facade_runs; }); } });
+            sig.emit(2);
+            check_eq(1, facade_runs, "the facade's connect_immediate joins the running emit");
+        });
+
+        test("connecting_a_receiver_again_moves_it", [this]() {
+            signal_emitter<void(int)> first;
+            signal_emitter<void(int)> second;
+            int runs = 0;
+            auto recv = first.connect([&](int) { ++runs; });
+            check_true(first.connect(recv), "connecting it again on the same emitter keeps one connection");
+            first.emit(1);
+            check_eq(1, runs);
+            check_true(second.connect(recv));
+            first.emit(1);
+            check_eq(1, runs, "connected elsewhere, it no longer runs on its first emitter");
+            second.emit(1);
+            check_eq(2, runs);
+            first.disconnect(recv);
+            check_true(recv->connected(), "disconnecting it from an emitter it left changes nothing");
+            check_eq((size_t)0, first.observer_count());
+            check_eq((size_t)1, second.observer_count());
+        });
+
+        test("an_emitter_never_moves", [this]() {
+            struct sync_door {
+                signal_emitter<void(int), signal_synchronized> onOpenSignal;
+                signal<void(int), signal_synchronized> onOpen{ onOpenSignal };
+            };
+            static_assert(!std::is_move_constructible_v<emit_board> && !std::is_move_assignable_v<emit_board>);
+            static_assert(!std::is_move_constructible_v<sync_door> && !std::is_move_assignable_v<sync_door>);
+            static_assert(std::is_empty_v<signal_unsynchronized::mutex_type>);
+            sync_door door;
+            int got = 0;
+            auto recv = door.onOpen.connect([&](int v) { got = v; });
+            door.onOpenSignal(7);
+            check_eq(7, got);
+        });
+
+        test("a_synchronized_emitter_takes_calls_from_several_threads", [this]() {
+            signal_emitter<void(int), signal_synchronized> sig;
+            signal<void(int), signal_synchronized> facade{ sig };
+            std::atomic<int> runs { 0 };
+            auto steady = facade.connect([&](int) { runs.fetch_add(1); });
+            constexpr int EMITS = 2000;
+            std::atomic<bool> emitting { true };
+            std::thread emitter_thread([&]() {
+                for (int i = 0; i < EMITS; ++i) { sig.emit(i); }
+                emitting = false;
+            });
+            std::thread churn_thread([&]() {
+                int cycles = 0;
+                while (emitting.load() || cycles < 100) {
+                    auto passing = facade.connect([&](int) {});
+                    facade.connect("named", [&](int) {});
+                    steady->block();
+                    steady->unblock();
+                    sig.block();
+                    sig.unblock();
+                    sig.set_blocked_callback([](int) {});
+                    sig.parameter_names({"v"});
+                    facade.disconnect(passing);
+                    facade.disconnect("named");
+                    ++cycles;
+                }
+            });
+            emitter_thread.join();
+            churn_thread.join();
+            check_true(runs.load() > 0 && runs.load() <= EMITS, "the steady receiver ran on unblocked emits only");
+            check_eq((size_t)1, sig.observer_count(), "every receiver the other thread connected has left");
+            check_false(steady->blocked());
         });
     }
 };

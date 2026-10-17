@@ -12,26 +12,30 @@
 #include <type_traits>
 #include <utility>
 #include <atomic>
-
-#ifndef JAI_SIGNALS_NO_THREADSAFE
+#include <cstdint>
 #include <mutex>
-#endif
 
 namespace jai {
 
-// Thread safety is ENABLED by default: connect/disconnect/emit are guarded by a
-// recursive_mutex so callbacks may modify the signal while it fires. Define
-// JAI_SIGNALS_NO_THREADSAFE to drop the lock (single-threaded, max performance).
-#ifndef JAI_SIGNALS_NO_THREADSAFE
-#define JAI_SIGNAL_LOCK() std::lock_guard<std::recursive_mutex> _signal_lock(state_->mutex)
-#else
-#define JAI_SIGNAL_LOCK() ((void)0)
-#endif
-
-// Forward declarations
 class engine;
 class script_value;
-template<typename T> class signal_emitter;
+
+// An emitter's threading policy, chosen per emitter at compile time. Unsynchronized (the default) takes no lock: one
+// thread at a time uses the emitter. Synchronized holds one recursive mutex through connect, disconnect, every other
+// emitter call and the whole of an emit, receivers included, so receivers may still modify the signal while it fires.
+struct signal_unsynchronized {
+	struct mutex_type {
+		void lock() {}
+		void unlock() {}
+	};
+};
+
+struct signal_synchronized {
+	using mutex_type = std::recursive_mutex;
+};
+
+template<typename T, typename Sync = signal_unsynchronized> class signal_emitter;
+template<typename T, typename Sync = signal_unsynchronized> class signal;
 
 template<typename T>
 class receiver {
@@ -41,7 +45,7 @@ public:
 	using weak_type = std::weak_ptr<receiver<T>>;
 
 	static std::shared_ptr<receiver<T>> make(std::function<T> callback) {
-		return std::shared_ptr<receiver<T>>(new receiver<T>(std::move(callback), ++unique_id_));
+		return std::shared_ptr<receiver<T>>(new receiver<T>(std::move(callback)));
 	}
 
 	static std::shared_ptr<receiver<T>> make(
@@ -49,7 +53,7 @@ public:
 		engine* eng,
 		const std::shared_ptr<std::vector<std::string>>& parameter_names = nullptr
 	) {
-		return std::shared_ptr<receiver<T>>(new receiver<T>(script, eng, parameter_names, ++unique_id_));
+		return std::shared_ptr<receiver<T>>(new receiver<T>(script, eng, parameter_names));
 	}
 
 	template<typename... Args>
@@ -110,26 +114,19 @@ public:
 	}
 
 	bool connected() const {
-		return !owner_signal_.expired();
+		return owner_.load() != nullptr;
 	}
 
-	void block() { ++is_blocked_; }
+	void block() { ++block_count_; }
 
 	void unblock() {
-		--is_blocked_;
-		if (is_blocked_ < 0) {
-			is_blocked_ = 0;
-		}
+		int current = block_count_.load();
+		while (current > 0 && !block_count_.compare_exchange_weak(current, current - 1)) {}
 	}
 
-	bool blocked() const { return is_blocked_ != 0; }
+	bool blocked() const { return block_count_.load() != 0; }
 
 	bool is_oneshot() const { return oneshot_; }
-
-	bool operator<(const receiver<T>& rhs) const { return id_ < rhs.id_; }
-	bool operator>(const receiver<T>& rhs) const { return id_ > rhs.id_; }
-	bool operator==(const receiver<T>& rhs) const { return id_ == rhs.id_; }
-	bool operator!=(const receiver<T>& rhs) const { return id_ != rhs.id_; }
 
 	const std::string& script() const { return script_callback_; }
 	bool has_script() const { return !script_callback_.empty(); }
@@ -141,25 +138,18 @@ public:
 		return ordered_parameter_names_;
 	}
 
-	int64_t id() const { return id_; }
-
 private:
-	receiver() : id_(0) {}
-
-	receiver(std::function<T> callback, int64_t id)
-		: callback_(std::move(callback))
-		, id_(id) {}
+	explicit receiver(std::function<T> callback)
+		: callback_(std::move(callback)) {}
 
 	receiver(
 		const std::string& script,
 		engine* eng,
-		const std::shared_ptr<std::vector<std::string>>& parameter_names,
-		int64_t id
+		const std::shared_ptr<std::vector<std::string>>& parameter_names
 	)
-		: id_(id)
-		, script_callback_(script)
-		, script_engine_(eng)
-		, ordered_parameter_names_(parameter_names) {}
+		: script_callback_(script)
+		, ordered_parameter_names_(parameter_names)
+		, script_engine_(eng) {}
 
 	// Implemented in signal_impl.hpp (needs the full engine definition).
 	template<typename... Args>
@@ -171,48 +161,40 @@ private:
 	void call_script();
 	bool call_script_predicate();
 
-	int is_blocked_ = 0;
+	std::atomic<int> block_count_ {0};
 	bool oneshot_ = false;
 	bool oneshot_fired_ = false;
 	std::function<T> callback_;
 	std::string script_callback_;
 	std::shared_ptr<std::vector<std::string>> ordered_parameter_names_;
 	engine* script_engine_ = nullptr;
-	std::weak_ptr<void> owner_signal_;  // Weak ref to owning signal for connected() check
+	// The emit state of the emitter this receiver is connected to; null when it is connected to none.
+	std::atomic<const void*> owner_ {nullptr};
+	// Every connect and disconnect advances it, so an emitter's entry is the live connection only while it matches.
+	std::atomic<std::uint64_t> connection_ {0};
 
-	int64_t id_;
-	static std::atomic<int64_t> unique_id_;
-
-	template<typename U> friend class signal_emitter;
+	template<typename U, typename S> friend class signal_emitter;
 };
 
-template<typename T>
-std::atomic<int64_t> receiver<T>::unique_id_ = 0;
 
-
-template<typename T>
+template<typename T, typename Sync>
 class signal_emitter {
+	using mutex_type = typename Sync::mutex_type;
+
 	// What an emit touches after a receiver returns lives here, off the emitter, so a receiver may destroy the emitter.
 	// Emit can run reentrantly (a slot may emit the same signal), so it tracks call DEPTH, not a bool: the deferred
-	// post-emit cleanup runs only when the OUTERMOST emit unwinds. Receivers hold it weakly for connected().
+	// post-emit cleanup runs only when the OUTERMOST emit unwinds.
 	struct emit_state {
-#ifndef JAI_SIGNALS_NO_THREADSAFE
-		std::recursive_mutex mutex;
-#endif
+		mutex_type mutex;
 		int depth = 0;
 		bool orphaned = false;
 		std::shared_ptr<emit_state> self;   // the destroyed emitter's hand-off to the outermost emit
 	};
-	// A moved-from emitter keeps a fresh state of its own
-	struct emit_state_handle {
-		std::shared_ptr<emit_state> ptr = std::make_shared<emit_state>();
-		emit_state_handle() = default;
-		emit_state_handle(emit_state_handle&& a_other) : ptr(std::exchange(a_other.ptr, std::make_shared<emit_state>())) {}
-		emit_state_handle& operator=(emit_state_handle&& a_other) {
-			ptr = std::exchange(a_other.ptr, std::make_shared<emit_state>());
-			return *this;
-		}
-		emit_state* operator->() const { return ptr.get(); }
+
+	struct observer_entry {
+		std::weak_ptr<receiver<T>> target;
+		std::uint64_t connection = 0;
+		bool joins_running_emits = false;
 	};
 
 public:
@@ -220,88 +202,65 @@ public:
 	using receiver_type = receiver<T>;
 	using shared_receiver_type = std::shared_ptr<receiver<T>>;
 	using weak_receiver_type = std::weak_ptr<receiver<T>>;
+	using sync_policy = Sync;
 
 	signal_emitter() = default;
 	~signal_emitter() {
+		for (const auto& entry : observers_) {
+			if (auto target = live_target(entry)) {
+				target->owner_ = nullptr;
+			}
+		}
 		// Destroyed by one of its own receivers: the emit in progress keeps the state and frees it as it unwinds
 		if (state_->depth > 0) {
 			state_->orphaned = true;
-			state_->self = state_.ptr;
+			state_->self = state_;
 		}
 	}
 
+	// A jai::signal facade refers to its emitter, so neither may move under a facade that would keep pointing back
 	signal_emitter(const signal_emitter&) = delete;
 	signal_emitter& operator=(const signal_emitter&) = delete;
-
-#ifndef JAI_SIGNALS_NO_THREADSAFE
 	signal_emitter(signal_emitter&&) = delete;
 	signal_emitter& operator=(signal_emitter&&) = delete;
-#else
-	signal_emitter(signal_emitter&&) = default;
-	signal_emitter& operator=(signal_emitter&&) = default;
-#endif
 
 	[[nodiscard]]
 	shared_receiver_type connect(std::function<T> callback) {
-		JAI_SIGNAL_LOCK();
-		auto recv = receiver<T>::make(std::move(callback));
-		recv->owner_signal_ = state_.ptr;
-		observers_.push_back(recv);
-		return recv;
+		return connect_new(receiver<T>::make(std::move(callback)), false);
 	}
 
 	[[nodiscard]]
 	shared_receiver_type connect(const std::string& script_callback) {
-		JAI_SIGNAL_LOCK();
-		auto recv = receiver<T>::make(script_callback, script_engine_, ordered_parameter_names_);
-		recv->owner_signal_ = state_.ptr;
-		observers_.push_back(recv);
-		return recv;
+		auto lock = lock_state();
+		return attach(make_script_receiver(script_callback), false);
 	}
 
 	[[nodiscard]]
 	shared_receiver_type connect_oneshot(std::function<T> callback) {
-		JAI_SIGNAL_LOCK();
 		auto recv = receiver<T>::make(std::move(callback));
 		recv->oneshot_ = true;
-		recv->owner_signal_ = state_.ptr;
-		observers_.push_back(recv);
-		return recv;
+		return connect_new(std::move(recv), false);
 	}
 
 	[[nodiscard]]
 	shared_receiver_type connect_oneshot(const std::string& script_callback) {
-		JAI_SIGNAL_LOCK();
-		auto recv = receiver<T>::make(script_callback, script_engine_, ordered_parameter_names_);
+		auto lock = lock_state();
+		auto recv = make_script_receiver(script_callback);
 		recv->oneshot_ = true;
-		recv->owner_signal_ = state_.ptr;
-		observers_.push_back(recv);
-		return recv;
+		return attach(std::move(recv), false);
 	}
 
 	bool connect(shared_receiver_type recv) {
-		JAI_SIGNAL_LOCK();
-		if (recv) {
-			recv->owner_signal_ = state_.ptr;
-			recv->oneshot_fired_ = false;
-			observers_.push_back(recv);
-			return true;
-		}
-		return false;
+		return reconnect(std::move(recv), false);
 	}
 
 	shared_receiver_type connect(const std::string& id, std::function<T> callback) {
-		JAI_SIGNAL_LOCK();
-		auto recv = connect(std::move(callback));
-		owned_connections_[id] = recv;
-		return recv;
+		return connect_named(id, receiver<T>::make(std::move(callback)), false);
 	}
 
 	shared_receiver_type connect(const std::string& id, const std::string& script_callback) {
-		JAI_SIGNAL_LOCK();
-		auto recv = connect(script_callback);
-		owned_connections_[id] = recv;
-		return recv;
+		auto lock = lock_state();
+		return connect_named(id, make_script_receiver(script_callback), false);
 	}
 
 	// Connect a script FUNCTION value as an owned, named connection. The function
@@ -309,85 +268,100 @@ public:
 	// source-string receivers. Defined in signal_impl.hpp (needs the full engine).
 	shared_receiver_type connect(const std::string& id, const script_value& fn_callback);
 
+	// A connect joins from the next emit on; connect_immediate also joins every emit already running.
+	[[nodiscard]]
+	shared_receiver_type connect_immediate(std::function<T> callback) {
+		return connect_new(receiver<T>::make(std::move(callback)), true);
+	}
+
+	[[nodiscard]]
+	shared_receiver_type connect_immediate(const std::string& script_callback) {
+		auto lock = lock_state();
+		return attach(make_script_receiver(script_callback), true);
+	}
+
+	bool connect_immediate(shared_receiver_type recv) {
+		return reconnect(std::move(recv), true);
+	}
+
+	shared_receiver_type connect_immediate(const std::string& id, std::function<T> callback) {
+		return connect_named(id, receiver<T>::make(std::move(callback)), true);
+	}
+
+	shared_receiver_type connect_immediate(const std::string& id, const std::string& script_callback) {
+		auto lock = lock_state();
+		return connect_named(id, make_script_receiver(script_callback), true);
+	}
+
+	shared_receiver_type connect_immediate(const std::string& id, const script_value& fn_callback);
+
 	shared_receiver_type connection(const std::string& id) {
-		JAI_SIGNAL_LOCK();
+		auto lock = lock_state();
 		auto it = owned_connections_.find(id);
 		return it != owned_connections_.end() ? it->second : shared_receiver_type();
 	}
 
 	bool connected(const std::string& id) const {
-		JAI_SIGNAL_LOCK();
-		return owned_connections_.find(id) != owned_connections_.end();
+		auto lock = lock_state();
+		auto it = owned_connections_.find(id);
+		return it != owned_connections_.end() && owns(*it->second);
 	}
 
 	size_t observer_count() const {
-		JAI_SIGNAL_LOCK();
-		size_t count = 0;
-		for (const auto& weak_obs : observers_) {
-			if (!weak_obs.expired()) ++count;
-		}
-		return count;
+		auto lock = lock_state();
+		return static_cast<size_t>(std::count_if(observers_.begin(), observers_.end(), [](const observer_entry& a_entry) {
+			return live_target(a_entry) != nullptr;
+		}));
 	}
 
 	void disconnect(shared_receiver_type recv) {
-		JAI_SIGNAL_LOCK();
-		if (recv) {
-			recv->owner_signal_.reset();
-			if (state_->depth == 0) {
-				remove_observer(recv);
-			} else {
-				disconnect_queue_.push_back(recv);
-			}
-		}
+		auto lock = lock_state();
+		detach(recv);
 	}
 
 	void disconnect(const std::string& id) {
-		JAI_SIGNAL_LOCK();
+		auto lock = lock_state();
 		auto it = owned_connections_.find(id);
 		if (it != owned_connections_.end()) {
-			disconnect_unlocked(it->second);
+			shared_receiver_type released = std::move(it->second);
 			owned_connections_.erase(it);
+			detach(released);
 		}
 	}
 
 	void clear() {
-		JAI_SIGNAL_LOCK();
-		for (auto& weak_obs : observers_) {
-			if (auto obs = weak_obs.lock()) {
-				obs->owner_signal_.reset();
-			}
-		}
+		auto lock = lock_state();
+		auto released_owned = std::move(owned_connections_);
+		auto released_loaded = std::move(loaded_observers_);
 		owned_connections_.clear();
-		if (state_->depth == 0) {
-			observers_.clear();
-			loaded_observers_.clear();
-		} else {
-			// Queue all for removal
-			for (auto& weak_obs : observers_) {
-				if (auto obs = weak_obs.lock()) {
-					disconnect_queue_.push_back(obs);
-				}
+		loaded_observers_.clear();
+		for (const auto& entry : observers_) {
+			if (auto target = live_target(entry)) {
+				release(*target);
 			}
 		}
+		discard_stale_entries();
 	}
 
 	void block() {
-		if (is_blocked_++ == 0) {
+		auto lock = lock_state();
+		if (block_count_++ == 0) {
 			called_while_blocked_ = false;
 		}
 	}
 
 	bool unblock() {
-		if (--is_blocked_ == 0) {
-			return called_while_blocked_;
+		auto lock = lock_state();
+		if (block_count_ == 0) {
+			return false;
 		}
-		if (is_blocked_ < 0) {
-			is_blocked_ = 0;
-		}
-		return false;
+		return --block_count_ == 0 && called_while_blocked_;
 	}
 
-	bool blocked() const { return is_blocked_ != 0; }
+	bool blocked() const {
+		auto lock = lock_state();
+		return block_count_ != 0;
+	}
 
 	template<typename... Args>
 	void operator()(Args&&... args) {
@@ -416,24 +390,33 @@ public:
 		return emit_impl_noargs<true>();
 	}
 
+	// Returns the number of connected receivers; during an emit the dead entries leave when the outermost emit returns.
 	size_t cull_dead_observers() {
-		JAI_SIGNAL_LOCK();
-		return cull_dead_observers_unlocked();
+		auto lock = lock_state();
+		discard_stale_entries();
+		return static_cast<size_t>(std::count_if(observers_.begin(), observers_.end(), [](const observer_entry& a_entry) {
+			return live_target(a_entry) != nullptr;
+		}));
 	}
 
 	signal_emitter& script_engine(engine* eng) {
+		auto lock = lock_state();
 		script_engine_ = eng;
-		for (auto& weak_obs : observers_) {
-			if (auto obs = weak_obs.lock()) {
-				obs->script_engine(eng);
+		for (const auto& entry : observers_) {
+			if (auto target = live_target(entry)) {
+				target->script_engine(eng);
 			}
 		}
 		return *this;
 	}
 
-	engine* script_engine() const { return script_engine_; }
+	engine* script_engine() const {
+		auto lock = lock_state();
+		return script_engine_;
+	}
 
 	signal_emitter& parameter_names(const std::vector<std::string>& names) {
+		auto lock = lock_state();
 		ordered_parameter_names_ = names.empty()
 			? nullptr
 			: std::make_shared<std::vector<std::string>>(names);
@@ -441,68 +424,108 @@ public:
 	}
 
 	std::vector<std::string> parameter_names() const {
+		auto lock = lock_state();
 		return ordered_parameter_names_ ? *ordered_parameter_names_ : std::vector<std::string>();
 	}
 
 	bool has_parameter_names() const {
+		auto lock = lock_state();
 		return ordered_parameter_names_ && !ordered_parameter_names_->empty();
 	}
 
 	void set_blocked_callback(std::function<T> callback) {
-		blocked_callback_ = std::move(callback);
+		auto lock = lock_state();
+		blocked_callback_ = callback ? std::make_shared<const std::function<T>>(std::move(callback)) : nullptr;
 	}
 
 private:
-	// Caller must hold the lock.
-	void disconnect_unlocked(shared_receiver_type recv) {
-		if (recv) {
-			recv->owner_signal_.reset();
-			if (state_->depth == 0) {
-				remove_observer(recv);
-			} else {
-				disconnect_queue_.push_back(recv);
-			}
+	std::lock_guard<mutex_type> lock_state() const {
+		return std::lock_guard<mutex_type>(state_->mutex);
+	}
+
+	bool owns(const receiver<T>& a_receiver) const {
+		return a_receiver.owner_.load() == state_.get();
+	}
+
+	static shared_receiver_type live_target(const observer_entry& a_entry) {
+		auto target = a_entry.target.lock();
+		return target && target->connection_.load() == a_entry.connection ? target : nullptr;
+	}
+
+	// Caller holds the lock.
+	shared_receiver_type make_script_receiver(const std::string& a_script) {
+		return receiver<T>::make(a_script, script_engine_, ordered_parameter_names_);
+	}
+
+	shared_receiver_type connect_new(shared_receiver_type a_receiver, bool a_joinsRunningEmits) {
+		auto lock = lock_state();
+		return attach(std::move(a_receiver), a_joinsRunningEmits);
+	}
+
+	bool reconnect(shared_receiver_type a_receiver, bool a_joinsRunningEmits) {
+		if (!a_receiver) {
+			return false;
 		}
+		auto lock = lock_state();
+		a_receiver->oneshot_fired_ = false;
+		attach(std::move(a_receiver), a_joinsRunningEmits);
+		return true;
 	}
 
-	// Caller must hold the lock.
-	size_t cull_dead_observers_unlocked() {
-		observers_.erase(
-			std::remove_if(observers_.begin(), observers_.end(),
-				[](const weak_receiver_type& w) { return w.expired(); }),
-			observers_.end()
-		);
-		return observers_.size();
+	shared_receiver_type connect_named(const std::string& a_id, shared_receiver_type a_receiver, bool a_joinsRunningEmits) {
+		auto lock = lock_state();
+		shared_receiver_type replaced = std::exchange(owned_connections_[a_id], a_receiver);
+		return attach(std::move(a_receiver), a_joinsRunningEmits);
 	}
 
-	// Deferred post-emit cleanup, run once the outermost emit unwinds: apply queued
-	// disconnects, remove fired one-shots, cull dead observers. Invoked from emit_scope's
-	// destructor so it still runs if a slot throws.
+	// Caller holds the lock. A receiver belongs to one emitter at a time: connecting it again, here or elsewhere, ends
+	// its earlier entry.
+	shared_receiver_type attach(shared_receiver_type a_receiver, bool a_joinsRunningEmits) {
+		a_receiver->owner_ = state_.get();
+		observers_.push_back({a_receiver, ++a_receiver->connection_, a_joinsRunningEmits});
+		return a_receiver;
+	}
+
+	static void release(receiver<T>& a_receiver) {
+		a_receiver.owner_ = nullptr;
+		++a_receiver.connection_;
+	}
+
+	// Caller holds the lock and keeps a_receiver alive, so releasing the emitter's own holds destroys nothing mid-edit.
+	void detach(const shared_receiver_type& a_receiver) {
+		if (!a_receiver || !owns(*a_receiver)) {
+			return;
+		}
+		release(*a_receiver);
+		std::erase_if(loaded_observers_, [&a_receiver](const shared_receiver_type& a_held) { return a_held == a_receiver; });
+		std::erase_if(owned_connections_, [&a_receiver](const auto& a_named) { return a_named.second == a_receiver; });
+		discard_stale_entries();
+	}
+
+	// Caller holds the lock. An emit indexes the list, so entries leave only outside of every emit.
+	void discard_stale_entries() {
+		if (state_->depth != 0) {
+			has_dead_observers_ = true;
+			return;
+		}
+		std::erase_if(observers_, [](const observer_entry& a_entry) { return live_target(a_entry) == nullptr; });
+		std::erase_if(loaded_observers_, [this](const shared_receiver_type& a_held) { return !owns(*a_held); });
+		has_dead_observers_ = false;
+	}
+
+	// Run once the outermost emit unwinds, from emit_scope's destructor so it still runs if a slot throws.
 	void drain_after_emit() {
-		for (auto& recv : disconnect_queue_) {
-			remove_observer(recv);
-		}
-		disconnect_queue_.clear();
-
-		// Remove one-shots only if any fired (skips the scan in the common case).
 		if (has_oneshots_pending_) {
-			const auto fired = [](const shared_receiver_type& a_receiver) { return a_receiver->is_oneshot() && a_receiver->oneshot_fired_; };
-			std::erase_if(observers_, [&fired](const weak_receiver_type& a_observer) {
-				auto locked = a_observer.lock();
-				if (!locked) { return true; }
-				if (!fired(locked)) { return false; }
-				locked->owner_signal_.reset();
-				return true;
-			});
-			if (!loaded_observers_.empty()) { std::erase_if(loaded_observers_, fired); }
+			for (const auto& entry : observers_) {
+				if (auto target = live_target(entry); target && target->is_oneshot() && target->oneshot_fired_) {
+					release(*target);
+				}
+			}
 			has_oneshots_pending_ = false;
+			has_dead_observers_ = true;
 		}
-
-		// Only scan/erase when this emit actually saw a dead observer (or short-circuited) —
-		// turns the common steady-state drain (live observers, no queue, no one-shots) into O(1).
 		if (has_dead_observers_) {
-			cull_dead_observers_unlocked();
-			has_dead_observers_ = false;
+			discard_stale_entries();
 		}
 	}
 
@@ -511,21 +534,15 @@ private:
 	struct emit_scope {
 		signal_emitter* self;
 		emit_state* state;
-#ifndef JAI_SIGNALS_NO_THREADSAFE
-		std::unique_lock<std::recursive_mutex> lock;
-		explicit emit_scope(signal_emitter* a_self) : self(a_self), state(a_self->state_.ptr.get()), lock(state->mutex) { ++state->depth; }
-#else
-		explicit emit_scope(signal_emitter* a_self) : self(a_self), state(a_self->state_.ptr.get()) { ++state->depth; }
-#endif
+		std::unique_lock<mutex_type> lock;
+		explicit emit_scope(signal_emitter* a_self) : self(a_self), state(a_self->state_.get()), lock(state->mutex) { ++state->depth; }
 		~emit_scope() {
 			if (--state->depth != 0) { return; }
 			if (!state->orphaned) {
 				self->drain_after_emit();
 				return;
 			}
-#ifndef JAI_SIGNALS_NO_THREADSAFE
 			lock.unlock();
-#endif
 			std::shared_ptr<emit_state> last = std::move(state->self);
 		}
 		bool emitter_alive() const { return !state->orphaned; }
@@ -542,24 +559,38 @@ private:
 		return true;
 	}
 
+	// An emit runs the receivers connected when it started, plus those connect_immediate added while it runs.
+	shared_receiver_type pass_target(size_t a_index, size_t a_presentAtStart) {
+		const observer_entry& entry = observers_[a_index];
+		if (a_index >= a_presentAtStart && !entry.joins_running_emits) {
+			return nullptr;
+		}
+		auto target = live_target(entry);
+		if (!target) {
+			has_dead_observers_ = true;
+			return nullptr;
+		}
+		return fire_oneshot_once(target) ? target : nullptr;
+	}
+
 	template<bool ShortCircuit, typename... Args>
 	bool emit_impl(Args&&... args) {
 		emit_scope scope(this);
 
-		if (blocked()) {
+		if (block_count_ != 0) {
 			called_while_blocked_ = true;
-			if (blocked_callback_) {
-				blocked_callback_(std::forward<Args>(args)...);
+			// A copy, so the callback may replace itself or destroy the emitter while it runs
+			if (auto callback = blocked_callback_) {
+				(*callback)(std::forward<Args>(args)...);
 			}
 			return true;
 		}
 
 		bool result = true;
-
+		const size_t presentAtStart = observers_.size();
 		for (size_t i = 0; i < observers_.size(); ++i) {
-			auto locked = observers_[i].lock();
-			if (!locked) { has_dead_observers_ = true; continue; }
-			if (!fire_oneshot_once(locked)) { continue; }
+			auto locked = pass_target(i, presentAtStart);
+			if (!locked) { continue; }
 
 			if constexpr (ShortCircuit) {
 				// Pass as LVALUES: forwarding rvalue args inside the loop would let the
@@ -585,20 +616,19 @@ private:
 	bool emit_impl_noargs() {
 		emit_scope scope(this);
 
-		if (blocked()) {
+		if (block_count_ != 0) {
 			called_while_blocked_ = true;
-			if (blocked_callback_) {
-				blocked_callback_();
+			if (auto callback = blocked_callback_) {
+				(*callback)();
 			}
 			return true;
 		}
 
 		bool result = true;
-
+		const size_t presentAtStart = observers_.size();
 		for (size_t i = 0; i < observers_.size(); ++i) {
-			auto locked = observers_[i].lock();
-			if (!locked) { has_dead_observers_ = true; continue; }
-			if (!fire_oneshot_once(locked)) { continue; }
+			auto locked = pass_target(i, presentAtStart);
+			if (!locked) { continue; }
 
 			if constexpr (ShortCircuit) {
 				const bool keepGoing = locked->predicate();
@@ -617,60 +647,48 @@ private:
 		return result;
 	}
 
-	void remove_observer(const shared_receiver_type& recv) {
-		observers_.erase(
-			std::remove_if(observers_.begin(), observers_.end(),
-				[&recv](const weak_receiver_type& w) {
-					auto locked = w.lock();
-					return !locked || locked->id() == recv->id();
-				}),
-			observers_.end()
-		);
-		if (!loaded_observers_.empty()) {
-			std::erase_if(loaded_observers_, [&recv](const shared_receiver_type& held) { return held->id() == recv->id(); });
-		}
-	}
-
 	// Vector, not set: receivers fire in insertion order.
-	std::vector<weak_receiver_type> observers_;
+	std::vector<observer_entry> observers_;
 	std::map<std::string, shared_receiver_type> owned_connections_;
 	// unnamed script receivers a load rebuilt: nothing outside holds them, so the emitter does (signal_serialization.hpp)
 	std::vector<shared_receiver_type> loaded_observers_;
 
-	emit_state_handle state_;
+	std::shared_ptr<emit_state> state_ = std::make_shared<emit_state>();
 
 	bool has_oneshots_pending_ = false;
-	// Set when an emit pass sees an expired observer (or stops early on short-circuit, leaving an
-	// unscanned tail) — gates the post-emit cull so a steady-state emit over live observers skips
-	// the O(n) scan entirely. Accumulates across reentrant emits like has_oneshots_pending_.
+	// Set when an entry stops being live (an expired or disconnected receiver) or a pass skipped one: gates the
+	// post-emit cull so a steady-state emit over live observers skips the O(n) scan entirely.
 	bool has_dead_observers_ = false;
-	int is_blocked_ = 0;
-	std::function<T> blocked_callback_;
-	std::vector<shared_receiver_type> disconnect_queue_;
+	int block_count_ = 0;
 	bool called_while_blocked_ = false;
+	std::shared_ptr<const std::function<T>> blocked_callback_;
 
 	std::shared_ptr<std::vector<std::string>> ordered_parameter_names_;
 	engine* script_engine_ = nullptr;
 
-	template<typename U> friend class signal;
+	template<typename U, typename S> friend class signal;
 
 	// ADL serialization hooks (named save/load so the archive's ADL dispatch finds them).
-	template<typename Archive, typename U>
-	friend void save(Archive& ar, const signal_emitter<U>& sig);
-	template<typename Archive, typename U>
-	friend void load(Archive& ar, signal_emitter<U>& sig);
+	template<typename Archive, typename U, typename S>
+	friend void save(Archive& ar, const signal_emitter<U, S>& sig);
+	template<typename Archive, typename U, typename S>
+	friend void load(Archive& ar, signal_emitter<U, S>& sig);
 };
 
+static_assert(!std::is_move_constructible_v<signal_emitter<void()>> && !std::is_move_assignable_v<signal_emitter<void()>>);
+static_assert(!std::is_move_constructible_v<signal_emitter<void(), signal_synchronized>> && !std::is_move_assignable_v<signal_emitter<void(), signal_synchronized>>);
 
-template<typename T>
+
+template<typename T, typename Sync>
 class signal {
 public:
 	using function_type = std::function<T>;
 	using receiver_type = receiver<T>;
 	using shared_receiver_type = std::shared_ptr<receiver<T>>;
 	using weak_receiver_type = std::weak_ptr<receiver<T>>;
+	using emitter_type = signal_emitter<T, Sync>;
 
-	explicit signal(signal_emitter<T>& emitter) : emitter_(emitter) {}
+	explicit signal(emitter_type& emitter) : emitter_(emitter) {}
 
 	signal(const signal& other) : emitter_(other.emitter_) {}
 
@@ -708,6 +726,32 @@ public:
 
 	shared_receiver_type connect(const std::string& id, const std::string& script_callback) {
 		return emitter_.connect(id, script_callback);
+	}
+
+	[[nodiscard]]
+	shared_receiver_type connect_immediate(std::function<T> callback) {
+		return emitter_.connect_immediate(std::move(callback));
+	}
+
+	[[nodiscard]]
+	shared_receiver_type connect_immediate(const std::string& script_callback) {
+		return emitter_.connect_immediate(script_callback);
+	}
+
+	bool connect_immediate(shared_receiver_type recv) {
+		return emitter_.connect_immediate(recv);
+	}
+
+	shared_receiver_type connect_immediate(const std::string& id, std::function<T> callback) {
+		return emitter_.connect_immediate(id, std::move(callback));
+	}
+
+	shared_receiver_type connect_immediate(const std::string& id, const script_value& fn_callback) {
+		return emitter_.connect_immediate(id, fn_callback);
+	}
+
+	shared_receiver_type connect_immediate(const std::string& id, const std::string& script_callback) {
+		return emitter_.connect_immediate(id, script_callback);
 	}
 
 	shared_receiver_type connection(const std::string& id) {
@@ -751,7 +795,7 @@ public:
 	}
 
 private:
-	signal_emitter<T>& emitter_;
+	emitter_type& emitter_;
 };
 
 } // namespace jai

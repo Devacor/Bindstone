@@ -39,9 +39,14 @@ inline instance_variables build_script_locals(
 
 } // namespace detail
 
-template<typename T>
-typename signal_emitter<T>::shared_receiver_type signal_emitter<T>::connect(const std::string& id, const script_value& fn_callback) {
+template<typename T, typename Sync>
+typename signal_emitter<T, Sync>::shared_receiver_type signal_emitter<T, Sync>::connect(const std::string& id, const script_value& fn_callback) {
 	return connect(id, convert_script_function<T>(fn_callback));
+}
+
+template<typename T, typename Sync>
+typename signal_emitter<T, Sync>::shared_receiver_type signal_emitter<T, Sync>::connect_immediate(const std::string& id, const script_value& fn_callback) {
+	return connect_immediate(id, convert_script_function<T>(fn_callback));
 }
 
 // A text receiver's failure throws out of the emit as a direct execute() of its text would (a function receiver's throws as

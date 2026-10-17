@@ -163,12 +163,6 @@ bool incdec_op(token_type t) { return t == token_type::plus_plus || t == token_t
 // intrinsic of those; a ternary as a whole value or as an operand lifted into a temp. A cast, a store or any other call lands on the
 // general form, which a block does not run.
 bool landable(const expression* e, const land_ctx* eng);
-// a free function called by a plain name: the block's door call (probe, arguments, call, landing) takes it
-bool door_call(const call_expr* ce) {
-	if (!ce->callee || ce->callee->get_type() != node_type::identifier_expr) return false;
-	auto* id = static_cast<const identifier_expr*>(ce->callee.get());
-	return !id->global_qualified && id->slot_index == SIZE_MAX;
-}
 // an operand of a block instruction: a landable value, or a global read (the fused binary's environment rows)
 bool block_operand(const expression* e, const land_ctx* eng) { return e && (e->get_type() == node_type::identifier_expr || landable(e, eng)); }
 // an operand inside an operation: a ternary lands only as a whole declaration or store (or an arm of one), never as an operand
@@ -205,7 +199,7 @@ bool landable(const expression* e, const land_ctx* eng) {
 	}
 	case node_type::call_expr: {
 		auto* ce = static_cast<const call_expr*>(e);
-		if (!math_call(ce) && !alias_call(ce, eng ? eng->eng : nullptr) && !nested_call(ce, eng) && !door_call(ce)) return false;
+		if (!math_call(ce) && !alias_call(ce, eng ? eng->eng : nullptr) && !nested_call(ce, eng)) return false;
 		for (const auto& a : ce->arguments) { if (!inner_operand(a.get(), eng)) return false; }
 		return true;
 	}
@@ -226,7 +220,6 @@ bool landable_stmt(const expression* e, const land_ctx* eng) {
 		return block_operand(a->value.get(), eng);
 	}
 	case node_type::unary_expr: { auto* u = static_cast<const unary_expr*>(e); return incdec_op(u->op.type) && u->operand && u->operand->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(u->operand.get())->slot_index != SIZE_MAX; }
-	case node_type::call_expr: return door_call(static_cast<const call_expr*>(e)) && landable(e, eng);   // a call whose result the statement drops
 	default: return false;
 	}
 }

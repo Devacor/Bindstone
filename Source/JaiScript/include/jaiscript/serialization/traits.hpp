@@ -46,6 +46,11 @@ public:
 	static std::unique_ptr<T> make_unique(Args&&... args) {
 		return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
 	}
+	// A load's default construction whatever the constructor's access (a private one through friend jai::access)
+	template<typename T>
+	static auto new_default() -> decltype(new T()) {
+		return new T();
+	}
 
 	template<typename Archive, typename T>
 	static auto load_and_construct(Archive& ar, serialization::construct<T>& c)
@@ -86,6 +91,37 @@ public:
 	template<typename Archive, typename T>
 	static auto member_serialize(Archive& ar, T& obj) -> decltype(obj.serialize(ar)) { return obj.serialize(ar); }
 };
+
+namespace serialization {
+
+template<typename T, typename = void>
+struct has_access_default_constructor : std::false_type {};
+template<typename T>
+struct has_access_default_constructor<T, std::void_t<decltype(::jai::access::new_default<T>())>> : std::true_type {};
+
+// What a load default-constructs: a public default constructor, or a private one the type opens to jai::access
+template<typename T>
+inline constexpr bool load_default_constructible = std::is_default_constructible_v<T> || has_access_default_constructor<T>::value;
+
+template<typename T>
+std::shared_ptr<T> make_default_for_load() {
+	if constexpr (std::is_default_constructible_v<T>) {
+		return std::make_shared<T>();
+	} else {
+		return std::shared_ptr<T>(::jai::access::new_default<T>());
+	}
+}
+
+template<typename T>
+std::unique_ptr<T> make_unique_default_for_load() {
+	if constexpr (std::is_default_constructible_v<T>) {
+		return std::make_unique<T>();
+	} else {
+		return std::unique_ptr<T>(::jai::access::new_default<T>());
+	}
+}
+
+} // namespace serialization
 
 namespace serialization_traits {
 

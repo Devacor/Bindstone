@@ -486,8 +486,8 @@ namespace property_serialization {
 				return;
 			}
 
-			if constexpr (std::is_default_constructible_v<elem_type>) {
-				value = std::make_shared<elem_type>();
+			if constexpr (::jai::serialization::load_default_constructible<elem_type>) {
+				value = ::jai::serialization::make_default_for_load<elem_type>();
 				dispatch_load_erased(ar, *value);
 				ar.register_deserialized_shared(id, value);
 			} else {
@@ -498,8 +498,8 @@ namespace property_serialization {
 			using elem_type = unique_ptr_element_t<T>;
 			bool has_value = ar.read_bool();
 			if (has_value) {
-				if constexpr (std::is_default_constructible_v<elem_type>) {
-					value = std::make_unique<elem_type>();
+				if constexpr (::jai::serialization::load_default_constructible<elem_type>) {
+					value = ::jai::serialization::make_unique_default_for_load<elem_type>();
 					dispatch_load_erased(ar, *value);
 				} else {
 					throw std::runtime_error("Cannot deserialize unique_ptr<T>: element type is not default constructible");
@@ -748,8 +748,8 @@ namespace property_serialization {
 					serialization::construct<T> c(ptr);
 					access::load_and_construct(ar, c);
 					ar.end_object();
-				} else if constexpr (std::is_default_constructible_v<T>) {
-					ptr = std::make_shared<T>();
+				} else if constexpr (::jai::serialization::load_default_constructible<T>) {
+					ptr = ::jai::serialization::make_default_for_load<T>();
 					ar.serialize("$val", *ptr);
 				} else {
 					throw std::runtime_error("Cannot deserialize shared_ptr<T>: type is not default constructible and has no load_and_construct");
@@ -776,8 +776,8 @@ namespace property_serialization {
 			if constexpr (has_member_load_and_construct_v<T>) {
 				serialization::construct<T> c(ptr);
 				access::load_and_construct(ar, c);
-			} else if constexpr (std::is_default_constructible_v<T>) {
-				ptr = std::make_shared<T>();
+			} else if constexpr (::jai::serialization::load_default_constructible<T>) {
+				ptr = ::jai::serialization::make_default_for_load<T>();
 				ar(*ptr);
 			} else {
 				throw std::runtime_error("Cannot deserialize shared_ptr<T>: type is not default constructible and has no load_and_construct");
@@ -825,8 +825,8 @@ namespace property_serialization {
 			if constexpr (has_load_and_construct_unique_v<T>) {
 				serialization::construct_unique<T> c(ptr);
 				access::load_and_construct(ar, c);
-			} else if constexpr (std::is_default_constructible_v<T>) {
-				ptr = std::make_unique<T>();
+			} else if constexpr (::jai::serialization::load_default_constructible<T>) {
+				ptr = ::jai::serialization::make_unique_default_for_load<T>();
 				ar.serialize("$val", *ptr);
 			} else {
 				throw std::runtime_error("Cannot deserialize unique_ptr<T>: type is not default constructible and has no load_and_construct");
@@ -838,8 +838,8 @@ namespace property_serialization {
 				if constexpr (has_load_and_construct_unique_v<T>) {
 					serialization::construct_unique<T> c(ptr);
 					access::load_and_construct(ar, c);
-				} else if constexpr (std::is_default_constructible_v<T>) {
-					ptr = std::make_unique<T>();
+				} else if constexpr (::jai::serialization::load_default_constructible<T>) {
+					ptr = ::jai::serialization::make_unique_default_for_load<T>();
 					ar(*ptr);
 				} else {
 					throw std::runtime_error("Cannot deserialize unique_ptr<T>: type is not default constructible and has no load_and_construct");

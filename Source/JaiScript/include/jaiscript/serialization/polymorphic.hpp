@@ -320,10 +320,10 @@ private:
                     return std::static_pointer_cast<void>(ptr);
                 });
             };
-        } else if constexpr (std::is_default_constructible_v<T>) {
+        } else if constexpr (::jai::serialization::load_default_constructible<T>) {
             return [](any_archive_reader& ar, std::uint32_t id) -> std::shared_ptr<void> {
                 return ar.dispatch([id](auto& concrete_ar) -> std::shared_ptr<void> {
-                    auto ptr = std::make_shared<T>();
+                    auto ptr = ::jai::serialization::make_default_for_load<T>();
                     // Register before loading properties so subtree back-references
                     // (weak_ptr / shared_ptr pointing back into this object) resolve.
                     concrete_ar.register_deserialized_shared(id, ptr);

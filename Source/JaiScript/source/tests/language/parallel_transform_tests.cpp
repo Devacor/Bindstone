@@ -3111,6 +3111,35 @@ public:
 			check_recovered(fixture, "worker arguments");
 		});
 
+		test("an_exception_escaping_a_pool_worker_chunk_fails_the_region", [this]() {
+			// A host exception the backends do not convert (no std::exception base) left the
+			// pool worker's chunk; the pool swallowed it and the region returned as if it ran.
+			// 256 elements over 4 threads deal blocks of 16: element 3 is the calling thread's
+			// chunk, 20 a pool worker's, 50 and 70 a later worker's and the caller's again.
+			struct host_failure { script_int at; };
+			const std::pair<script_int, script_int> cases[] = { {3, -1}, {20, -1}, {20, 70}, {70, 20}, {50, 20} };
+			for (const auto& [first, second] : cases) {
+				auto eng = make_engine();
+				eng->parallel_thread_count(4);
+				eng->allow_unsafe_parallel(true);
+				eng->add_function("sign", [](script_int a_x, script_int a_first, script_int a_second) -> script_int {
+					if (a_x == a_first || a_x == a_second) { throw host_failure{a_x}; }
+					return 0;
+				});
+				eng->execute("array<int> xs = []; for (int i = 0; i < 256; i++) { xs.push(i); }");
+				script_int thrown_at = -2;
+				try {
+					eng->execute("parallel_for (auto& x : xs) { x = x + sign(x, " + std::to_string(first) + ", " + std::to_string(second) + "); }");
+				} catch (const host_failure& failure) {
+					thrown_at = failure.at;
+				}
+				const script_int lowest = second < 0 ? first : std::min(first, second);
+				check_eq(lowest, thrown_at, "the region raises the host exception of its first failing iteration");
+				check_eq(script_int(256), eng->execute("parallel_for (auto& x : xs) { x = 1; } int s = 0; for (int i = 0; i < 256; i++) { s += xs[i]; } s;").as_int(),
+					"the engine runs the next region normally");
+			}
+		});
+
 		test("failed_provisioning_releases_worker_environment_cycles", [this]() {
 			std::weak_ptr<int> lifetime_probe;
 			{

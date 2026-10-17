@@ -48,6 +48,7 @@
 #include <functional>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <optional>
 #include <unordered_set>
 
@@ -64,6 +65,7 @@ namespace jai::detail {
 		std::error_code code{};
 		std::string message;
 		bool terminal = false;
+		std::exception_ptr escaped;   // a C++ exception no backend converted: the join rethrows it
 	};
 
 	// One reusable worker execution context. Built inside a region, RESET per call
@@ -408,6 +410,7 @@ namespace {
 		}
 		double best = 0.0;
 		for (int round = 0; round < 3; ++round) {
+			for (auto& task : tasks) { task.second = [] {}; }   // a submitted batch moves its tasks out
 			const auto t0 = std::chrono::steady_clock::now();
 			state.pool->submit_pinned_batch(tasks.data(), tasks.size(), &state.faults);
 			state.pool->wait_idle();
@@ -2666,20 +2669,27 @@ namespace {
 			}
 		} cursor_guard{ ctx };
 		auto failing = [&ctx]() { const size_t i = ctx.cursors.front().element_cursor_index(); return i == SIZE_MAX ? ctx.begin : std::min(i, ctx.end - 1); };
+		// The outer catch holds what escapes the backend, or the inner handler's own allocation: a pool
+		// worker's chunk has no caller to throw to, so it fails the region in iteration order like any error
 		try {
-			auto r = ctx.backend->execute_callable(ctx.chunk_payload, ctx.call_args);
-			if (ctx.backend->is_unwinding()) {
-				ctx.error = parallel_worker_error{ failing(),
-					make_error_code(runtime_error_code::evaluation_failed),
-					ctx.backend->get_current_exception().what(),
-					ctx.limits.terminal_error };
-			} else if (!r) {
-				ctx.error = parallel_worker_error{ failing(), r.error(),
-					format_error(r, *eng.get_symbolizer()), ctx.limits.terminal_error };
+			try {
+				auto r = ctx.backend->execute_callable(ctx.chunk_payload, ctx.call_args);
+				if (ctx.backend->is_unwinding()) {
+					ctx.error = parallel_worker_error{ failing(),
+						make_error_code(runtime_error_code::evaluation_failed),
+						ctx.backend->get_current_exception().what(),
+						ctx.limits.terminal_error };
+				} else if (!r) {
+					ctx.error = parallel_worker_error{ failing(), r.error(),
+						format_error(r, *eng.get_symbolizer()), ctx.limits.terminal_error };
+				}
+			} catch (const std::exception& e) {
+				ctx.error = parallel_worker_error{ failing(), make_error_code(runtime_error_code::cpp_exception),
+					e.what(), ctx.limits.terminal_error };
 			}
-		} catch (const std::exception& e) {
+		} catch (...) {
 			ctx.error = parallel_worker_error{ failing(), make_error_code(runtime_error_code::cpp_exception),
-				e.what(), ctx.limits.terminal_error };
+				std::string(), ctx.limits.terminal_error, std::current_exception() };
 		}
 	}
 
@@ -4160,6 +4170,11 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 	}
 	if (winner) {
+		if (winner->escaped) {
+			std::exception_ptr escaped = winner->escaped;
+			for (auto* ctx : contexts) { ctx->error.reset(); }
+			std::rethrow_exception(escaped);
+		}
 		if (winner->terminal) {
 			eng.execution_limits().terminal_error = true;
 		}

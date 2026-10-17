@@ -808,8 +808,9 @@ std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaratio
 	return result;
 }
 
-// a body whose first compile left a loop open with a call the inliner kept inside it compiles once more, its grafts in open loops landing by
-// the rules outside a loop; the second compile stands only when it closes every loop the first closed
+// a body whose first compile left a call the inliner kept inside a loop (open, or closed over a door call) compiles once more, its grafts in
+// those loops landing by the rules outside a loop; the second compile stands when it closes every loop the first closed and, when the first
+// left no loop open, makes fewer calls from its blocks
 std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
                                                      const std::vector<parameter>& parameters,
                                                      const std::shared_ptr<block_stmt>& body,
@@ -818,34 +819,40 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 	open_loops_.clear();
 	loop_marks_.clear();
 	auto first = compile_callable_once(name, parameters, body, local_count);
-	if (!first || first->cell_refusals.empty() || first->inline_refusals.empty() || !ir_passes_ || !typed_lowering_) return first;
+	if (!first || first->inline_refusals.empty() || !ir_passes_ || !typed_lowering_) return first;
+	auto lines_hold = [&](const chunk& c, uint32_t head, uint32_t back, uint32_t line) {
+		const ast_node* h = head < c.stmt_nodes.size() ? c.stmt_nodes[head] : nullptr;
+		const ast_node* b = back < c.stmt_nodes.size() ? c.stmt_nodes[back] : nullptr;
+		return h && b && line >= static_cast<uint32_t>(h->location.line) && line <= static_cast<uint32_t>(b->location.line);
+	};
+	auto kept_in = [&](const chunk& c, uint32_t head, uint32_t back) {
+		for (const auto& k : c.inline_refusals) { if (lines_hold(c, head, back, k.line)) return true; }
+		return false;
+	};
 	// a loop's verdict: the innermost closed loop or refusal whose span holds where the loop's body began
-	std::unordered_set<const ast_node*> open;
+	std::unordered_set<const ast_node*> retry;
+	bool any_open = false;
 	for (const auto& [stmt, at] : loop_marks_) {
-		bool refused = false; uint32_t best = UINT32_MAX;
-		for (const auto& r : first->cell_refusals) { if (r.head <= at && at <= r.back && r.back - r.head < best) { best = r.back - r.head; refused = true; } }
-		for (const auto& l : first->cell_loops) { if (!l.straight && !l.frame_program && l.head <= at && at <= l.back && l.back - l.head < best) { best = l.back - l.head; refused = false; } }
-		if (refused) { open.insert(stmt); }
+		const chunk::cell_refusal* refusal = nullptr; const chunk::cell_loop* loop = nullptr; uint32_t best = UINT32_MAX;
+		for (const auto& r : first->cell_refusals) { if (r.head <= at && at <= r.back && r.back - r.head < best) { best = r.back - r.head; refusal = &r; loop = nullptr; } }
+		for (const auto& l : first->cell_loops) { if (!l.straight && !l.frame_program && l.head <= at && at <= l.back && l.back - l.head < best) { best = l.back - l.head; loop = &l; refusal = nullptr; } }
+		if (refusal && kept_in(*first, refusal->head, refusal->back)) { retry.insert(stmt); any_open = true; }
+		else if (loop && !loop->calls.empty() && kept_in(*first, loop->head, loop->back)) { retry.insert(stmt); }
 	}
-	if (open.empty()) return first;
-	bool kept_inside = false;
-	for (const auto& k : first->inline_refusals) {
-		for (const auto& r : first->cell_refusals) {
-			const ast_node* h = r.head < first->stmt_nodes.size() ? first->stmt_nodes[r.head] : nullptr;
-			const ast_node* b = r.back < first->stmt_nodes.size() ? first->stmt_nodes[r.back] : nullptr;
-			if (h && b && k.line >= static_cast<uint32_t>(h->location.line) && k.line <= static_cast<uint32_t>(b->location.line)) { kept_inside = true; }
-		}
-	}
-	if (!kept_inside) return first;
-	size_t first_closed = 0;
-	for (const auto& l : first->cell_loops) { if (!l.straight && !l.frame_program) { ++first_closed; } }
-	open_loops_ = std::move(open);
+	if (retry.empty()) return first;
+	auto census = [](const chunk& c, size_t& closed, size_t& calls) {
+		closed = calls = 0;
+		for (const auto& l : c.cell_loops) { if (!l.straight && !l.frame_program) { ++closed; calls += l.calls.size(); } }
+	};
+	size_t first_closed, first_calls;
+	census(*first, first_closed, first_calls);
+	open_loops_ = std::move(retry);
 	loop_marks_.clear();
 	auto second = compile_callable_once(name, parameters, body, local_count);
 	open_loops_.clear();
-	size_t second_closed = 0;
-	for (const auto& l : second->cell_loops) { if (!l.straight && !l.frame_program) { ++second_closed; } }
-	return second_closed >= first_closed ? second : first;
+	size_t second_closed, second_calls;
+	census(*second, second_closed, second_calls);
+	return second_closed >= first_closed && (any_open || second_calls < first_calls) ? second : first;
 }
 
 std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,

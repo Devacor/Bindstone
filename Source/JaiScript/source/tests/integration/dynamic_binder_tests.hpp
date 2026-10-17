@@ -5,6 +5,8 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/properties/macros.hpp>
+#include <jaiscript/properties/property_serialization.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 #include <memory>
 
 namespace jai::foundry::tests {
@@ -77,6 +79,41 @@ public:
 class PropChainDerived : public property_owner<PropChainDerived, PropChainBase> {
 public:
     PropChainDerived() = default;
+};
+
+// In-place member lanes (detail/host_member.hpp): every member type a lane reads, a const member, a second base at a
+// nonzero offset, and a polymorphic schema owner whose unregistered subclass shadows a property name
+struct LaneMembers {
+    int64_t big = 7;
+    int32_t small = -3;
+    uint8_t tiny = 200;
+    uint64_t wide = 9;
+    double speed = 1.5;
+    float ratio = 0.25f;
+    bool flag = true;
+    std::string name = "lane";
+    const int fixed = 5;
+    int64_t other = 70;
+};
+
+struct LaneFirstBase { int64_t first = 11; virtual ~LaneFirstBase() = default; };
+struct LaneSecondBase { int64_t second = 22; double scale = 2.5; };
+struct LaneJoined : LaneFirstBase, LaneSecondBase { int64_t own = 33; };
+
+class LaneSchemaOwner : public property_owner<LaneSchemaOwner> {
+public:
+    JAI_PROPERTY((int), depth, 3);
+    JAI_PROPERTY((double), alpha, 0.5);
+    JAI_PROPERTY((std::string), id, std::string("owner"));
+    JAI_PROPERTY((int64_t), count, 40);
+    JAI_OBSERVABLE_PROPERTY((int), watched, 8);
+    LaneSchemaOwner() = default;
+};
+
+class LaneSchemaShadow : public property_owner<LaneSchemaShadow, LaneSchemaOwner> {
+public:
+    JAI_PROPERTY((int), depth, 99);
+    LaneSchemaShadow() = default;
 };
 
 // Base auto-registration fixtures: AutoChainBase is deliberately NOT registered by the
@@ -169,6 +206,209 @@ public:
     }
     
     void forge_tests() override {
+        // A bound member reads and writes in place once its site is warm (the first pass fills, the rest take the lane):
+        // every pass must give what the accessors give, and a store the lane does not take keeps the setter's text
+        test("host_member_lane_reads_and_writes_every_member_type", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            dynamic_binder<LaneMembers>(*eng, "LaneMembers")
+                .constructor<>()
+                .property("big", &LaneMembers::big)
+                .property("small", &LaneMembers::small)
+                .property("tiny", &LaneMembers::tiny)
+                .property("wide", &LaneMembers::wide)
+                .property("speed", &LaneMembers::speed)
+                .property("ratio", &LaneMembers::ratio)
+                .property("flag", &LaneMembers::flag)
+                .property("name", &LaneMembers::name)
+                .property("fixed", &LaneMembers::fixed)
+                .build();
+            auto out = eng->execute(R"(
+                var m = LaneMembers();
+                string s = "";
+                for (int i = 0; i < 3; ++i) {
+                    s += to_string(m.big) + "," + to_string(m.small) + "," + to_string(m.tiny) + "," + to_string(m.wide) + "," +
+                         to_string(m.speed) + "," + to_string(m.ratio) + "," + to_string(m.flag) + "," + m.name + "," + to_string(m.fixed) + "|";
+                    m.big = m.big + 1; m.small = m.small - 1; m.tiny = 201 + i; m.wide = 10 + i;
+                    m.speed = m.speed * 2.0; m.ratio = 0.5; m.flag = !m.flag; m.name = m.name + "x";
+                }
+                s += type_of(m.big) + type_of(m.speed) + type_of(m.ratio) + type_of(m.flag) + type_of(m.name);
+                s;
+            )").as_string();
+            check_eq(std::string("7,-3,200,9,1.5,0.25,true,lane,5|8,-4,201,10,3.0,0.5,false,lanex,5|9,-5,202,11,6.0,0.5,true,lanexx,5|intfloatfloatboolstring"), out);
+            auto texts = eng->execute(R"(
+                var m = LaneMembers();
+                var t = [];
+                for (int i = 0; i < 3; ++i) {
+                    try { m.small = 5000000000; } catch (e) { t.push(e.message); }
+                    try { m.tiny = 300; } catch (e) { t.push(e.message); }
+                    try { m.tiny = -1; } catch (e) { t.push(e.message); }
+                    try { m.big = "seven"; } catch (e) { t.push(e.message); }
+                    try { m.fixed = 6; } catch (e) { t.push(e.message); }
+                    try { m.flag = 1; } catch (e) { t.push(e.message); }
+                    m.speed = 3;
+                    m.wide = 12;
+                }
+                [t, m.small, m.tiny, m.speed, m.fixed, m.flag, m.wide];
+            )");
+            const auto& all = texts.as_array();
+            const auto& t = all[0].as_array();
+            check_true(t.size() % 3 == 0 && !t.empty(), "every pass raises the same set");
+            const size_t per = t.size() / 3;
+            bool same = true;
+            for (size_t i = 0; i < per; ++i) { same = same && t[i].as_string() == t[per + i].as_string() && t[i].as_string() == t[2 * per + i].as_string(); }
+            check_true(same, "a store the lane leaves to the setter raises the setter's text on every pass");
+            check_eq((int64_t)-3, all[1].as_int(), "an out-of-range store leaves the member");
+            check_eq((int64_t)200, all[2].as_int(), "a byte store out of range leaves the member");
+            check_near(3.0, all[3].as_float(), 1e-12);
+            check_eq((int64_t)5, all[4].as_int(), "a const member stays read-only");
+            check_eq((int64_t)12, all[6].as_int(), "an unsigned member takes an int in range");
+        });
+
+        test("host_member_lane_reaches_a_second_base_and_a_derived_registration", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            dynamic_binder<LaneSecondBase>(*eng, "LaneSecondBase")
+                .constructor<>()
+                .property("second", &LaneSecondBase::second)
+                .property("scale", &LaneSecondBase::scale)
+                .build();
+            dynamic_binder<LaneJoined>(*eng, "LaneJoined")
+                .constructor<>()
+                .base_class<LaneSecondBase>()
+                .property("own", &LaneJoined::own)
+                .build();
+            auto out = eng->execute(R"(
+                var j = LaneJoined();
+                var b = LaneSecondBase();
+                string s = "";
+                for (int i = 0; i < 3; ++i) {
+                    s += to_string(j.second) + "," + to_string(j.scale) + "," + to_string(j.own) + "," + to_string(b.second) + "|";
+                    j.second = j.second + 1; j.scale = j.scale + 1.0; j.own = j.own + 1; b.second = b.second - 1;
+                }
+                s;
+            )").as_string();
+            check_eq(std::string("22,2.5,33,22|23,3.5,34,21|24,4.5,35,20|"), out);
+        });
+
+        test("host_member_lane_follows_schema_properties_and_dynamic_types", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            dynamic_binder<LaneSchemaOwner>(*eng, "LaneSchemaOwner")
+                .constructor<>()
+                .auto_bind()
+                .build();
+            jai::engine* raw_eng = eng.get();
+            eng->add_function("shadowed", [raw_eng]() -> script_value {
+                std::shared_ptr<LaneSchemaOwner> held = std::make_shared<LaneSchemaShadow>();
+                return raw_eng->make_object(held);
+            });
+            auto out = eng->execute(R"(
+                shared_ptr<LaneSchemaOwner> o = new LaneSchemaOwner();
+                string s = "";
+                function read_depth(var& x) -> int { return x.depth; }
+                for (int i = 0; i < 3; ++i) {
+                    s += to_string(o.depth) + "," + to_string(o.alpha) + "," + o.id + "," + to_string(o.count) + "|";
+                    o.depth = o.depth + 1; o.alpha = o.alpha * 2.0; o.id = o.id + "!"; o.count = o.count - 1;
+                }
+                shared_ptr<LaneSchemaOwner> sh = shadowed();
+                s += to_string(read_depth(o)) + "," + to_string(read_depth(o)) + "," + to_string(read_depth(sh)) + "," + to_string(read_depth(sh)) + "," + to_string(read_depth(o)) + ";";
+                s;
+            )").as_string();
+            const std::string shadow = eng->execute("to_string(shadowed().depth)").as_string();
+            check_eq(std::string("3,0.5,owner,40|4,1.0,owner!,39|5,2.0,owner!!,38|6,6,") + shadow + "," + shadow + ",6;", out,
+                     "a site warm on one dynamic type reads another's property through its own lookup");
+            auto watched = eng->execute(R"(
+                shared_ptr<LaneSchemaOwner> o = new LaneSchemaOwner();
+                var r = [];
+                for (int i = 0; i < 2; ++i) { r.push(type_of(o.watched)); o.watched = 9 + i; }
+                r;
+            )");
+            check_true(watched.as_array()[0].as_string() == watched.as_array()[1].as_string(), "an observable property keeps its getter's value kind");
+        });
+
+        test("host_member_lane_misses_on_a_null_and_a_dead_handle", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            dynamic_binder<LaneMembers>(*eng, "LaneMembers")
+                .constructor<>()
+                .property("big", &LaneMembers::big)
+                .build();
+            auto out = eng->execute(R"(
+                function read_big(var& x) -> var { return x.big; }
+                function write_big(var& x) { x.big = 3; }
+                var live = LaneMembers();
+                read_big(live); read_big(live); write_big(live); write_big(live);
+                var warm = [];
+                var none = null;
+                try { read_big(none); } catch (e) { warm.push(e.message); }
+                try { write_big(none); } catch (e) { warm.push(e.message); }
+                function read_big_cold(var& x) -> var { return x.big; }
+                function write_big_cold(var& x) { x.big = 3; }
+                var cold = [];
+                try { read_big_cold(none); } catch (e) { cold.push(e.message); }
+                try { write_big_cold(none); } catch (e) { cold.push(e.message); }
+                [warm, cold, live.big];
+            )");
+            const auto& all = out.as_array();
+            const auto& warm = all[0].as_array();
+            const auto& cold = all[1].as_array();
+            check_eq((size_t)2, warm.size(), "a null receiver raises at a warm site");
+            check_eq((size_t)2, cold.size(), "and at a cold one");
+            check_eq(cold[0].as_string(), warm[0].as_string(), "the read's text");
+            check_eq(cold[1].as_string(), warm[1].as_string(), "the store's text");
+            check_eq((int64_t)3, all[2].as_int(), "the live receiver was written");
+        });
+
+        test("host_member_lane_misses_on_an_expired_handle", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            dynamic_binder<LaneMembers>(*eng, "LaneMembers")
+                .constructor<>()
+                .property("big", &LaneMembers::big)
+                .build();
+            auto out = eng->execute(R"(
+                function read_big(var& x) -> var { return x.big; }
+                function write_big(var& x) { x.big = 3; }
+                function read_big_cold(var& x) -> var { return x.big; }
+                function write_big_cold(var& x) { x.big = 3; }
+                shared_ptr<LaneMembers> held = new LaneMembers();
+                weak_ptr<LaneMembers> w = held;
+                read_big(held); read_big(held); write_big(held); write_big(held);
+                var locked = w.lock();
+                int seen = read_big(locked);
+                locked = null;
+                held = null;
+                var gone = w.lock();
+                var warm = [];
+                var cold = [];
+                try { read_big(gone); } catch (e) { warm.push(e.message); }
+                try { write_big(gone); } catch (e) { warm.push(e.message); }
+                try { read_big(w); } catch (e) { warm.push(e.message); }
+                try { read_big_cold(gone); } catch (e) { cold.push(e.message); }
+                try { write_big_cold(gone); } catch (e) { cold.push(e.message); }
+                try { read_big_cold(w); } catch (e) { cold.push(e.message); }
+                [warm, cold, seen];
+            )");
+            const auto& all = out.as_array();
+            const auto& warm = all[0].as_array();
+            const auto& cold = all[1].as_array();
+            check_eq(cold.size(), warm.size(), "an expired handle raises alike at warm and cold sites");
+            for (size_t i = 0; i < warm.size() && i < cold.size(); ++i) { check_eq(cold[i].as_string(), warm[i].as_string(), "the same text"); }
+            check_eq((int64_t)3, all[2].as_int(), "the live handle read the stored value");
+        });
+
+        test("host_member_lane_follows_a_rebinding", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            dynamic_binder<LaneMembers> binder(*eng, "LaneMembers");
+            binder.constructor<>().property("big", &LaneMembers::big).build();
+            eng->execute("var m = LaneMembers(); function read_big() -> int { return m.big; } function write_big(int v) { m.big = v; } var a = read_big(); var b = read_big(); write_big(8); write_big(9); var c = read_big();");
+            binder.property("big", &LaneMembers::other);
+            auto out = eng->execute("var n = LaneMembers(); write_big(71); string s = to_string(a) + \",\" + to_string(b) + \",\" + to_string(c) + \",\" + to_string(n.big) + \",\" + to_string(n.big) + \",\" + to_string(read_big()) + \",\" + to_string(read_big()); s;").as_string();
+            check_eq(std::string("7,7,9,70,70,71,71"), out, "a rebinding takes every warm site to the new member, reads and stores alike");
+        });
+
         test("a_lambda_method_without_self_ignores_the_receiver", [this]() {
             auto eng = make_engine();
             dynamic_binder<Counter>(*eng, "Counter")

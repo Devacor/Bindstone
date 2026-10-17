@@ -7942,9 +7942,9 @@ bool vm_backend::cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool e
 }
 
 
-// the entry of the loop this frame entered last in this call, the environment and its epoch unchanged: each site reached the way its last
-// resolution reached it (the landing's hold check, the range head's container read again) names the same node, so the resolution stands; a site
-// reached any other way, or any difference, resolves again
+// an entry whose sites hold their last resolution (the loop this frame entered last in this call, or the loop's row restored), the environment
+// and its epoch unchanged: each site reached the way that resolution reached it (the landing's hold check, the range head's container read
+// again) names the same node, so the resolution stands; a site reached any other way, or any difference, resolves again
 bool vm_backend::cells_sites_reenter(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
 	for (uint32_t k = 0; k < loop.sites.size(); ++k) {
@@ -7971,11 +7971,96 @@ bool vm_backend::cells_sites_reenter(frame& f, const chunk::cell_loop& loop) {
 		}
 		const script_value* cp = cs.site_slot[k] != k_invalid_u32 ? frame_slot(f, cs.site_slot[k]) : cs.site_env[k];
 		if (!cp) return false;
-		if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*cp)) return false; cp = &cp->deref(); }
-		if (cp->raw_storage_index() != script_value::TYPEID_ARRAY || cp->unchecked_array_node() != cs.site_node[off]) return false;
+		const opcode first = cell_first_op(ci.op);
+		const bool load_site = first == opcode::op_c_load || first == opcode::op_c_load_any || first == opcode::op_c_rebind || first == opcode::op_c_range;
+		if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*cp)) {
+			// dereferenced as the resolution dereferences it: a guarded load's map entry, an unguarded load's or a store's silent reference
+			// (an element reference the resolution pins resolves again: the pins are its business)
+			const bool guarded = load_site && f.code->typed_sites[ip].guard_temp != k_invalid_u32;
+			const bool silent = guarded ? ref_map_entry(*cp) : (load_site || ci.op == opcode::op_c_index_store) && lane_deref_silent(*cp);
+			if (!silent) return false;
+		}
+		if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { cp = &cp->deref(); }
+		// a load's container as its resolution reads it (a worker's borrowed view of a program array included); any other site's an array
+		bool borrowed = false;
+		const script_array* node = load_site ? lane_element_source(*cp, borrowed)
+			: cp->raw_storage_index() == script_value::TYPEID_ARRAY ? cp->unchecked_array_node() : nullptr;
+		if (!node) return false;
+		if (node != cs.site_node[off]) {
+			// a plain load's container replaced through the same path (a call's own array): the resolution would take this node, and no pin or
+			// store site names a load's node; a store, a push, an alias's source or a range resolves again
+			if (!load_site || first == opcode::op_c_rebind || first == opcode::op_c_range) return false;
+			cs.site_node[off] = node; cs.site_value[k] = cp;
+			continue;
+		}
 		if (cs.site_value[k]) { cs.site_value[k] = cp; }
 	}
 	return true;
+}
+
+// a frame with a member scope may bind a name to its receiver's field, which differs between calls
+bool vm_backend::cells_entry_scope_free(frame& f) {
+	if (!f.locals || f.top_level) return true;
+	ensure_frame_member_scope(f, environment_.get());
+	return !frame_scope_active(f);
+}
+
+// the rows of the frame's chunk: the chunk's own on the main engine; a parallel worker shares the chunk, so it keeps its rows in its private
+// record of that chunk (none: the worker resolves every entry)
+std::vector<chunk::entry_memo_row>* vm_backend::cells_entry_rows(frame& f) {
+	if (!parallel_worker_) return &f.code->entry_memos;
+	worker_chunk_env_cache* rec = worker_chunk_record(f.code);
+	return rec ? &rec->entry_rows : nullptr;
+}
+
+const chunk::entry_memo_row* vm_backend::cells_entry_row(frame& f, const chunk::cell_loop& loop) {
+	const std::vector<chunk::entry_memo_row>* rows = cells_entry_rows(f);
+	const size_t li = static_cast<size_t>(&loop - f.code->cell_loops.data());
+	if (!rows || li >= rows->size()) return nullptr;
+	const chunk::entry_memo_row& row = (*rows)[li];
+	if (row.env_of != environment_.get()) return nullptr;
+	if (row.env_serial != env_symbolizer_->env_epoch()) return nullptr;
+	if (row.sites.size() != loop.sites.size() || !cells_entry_scope_free(f)) return nullptr;
+	return &row;
+}
+
+// the row into the frame's site state; a nested member site's prefix slot is probed again (another loop's site may have cached its own at
+// the same offset)
+void vm_backend::cells_restore_sites(frame& f, const chunk::cell_loop& loop, const chunk::entry_memo_row& row) {
+	cell_state& cs = *f.cells;
+	const size_t span = loop.copy_back - loop.copy_head;
+	if (cs.site_node.size() < span) { cs.site_node.resize(span, nullptr); }
+	if (cs.site_member.size() < span) { cs.site_member.resize(span, nullptr); }
+	if (cs.site_member_class.size() < span) { cs.site_member_class.resize(span, nullptr); cs.site_member_slot.resize(span, 0); }
+	if (cs.site_node2.size() < span) { cs.site_node2.resize(span, nullptr); }
+	if (cs.site_slot.size() < loop.sites.size()) { cs.site_slot.resize(loop.sites.size(), k_invalid_u32); cs.site_env.resize(loop.sites.size(), nullptr); }
+	if (cs.site_value.size() < loop.sites.size()) { cs.site_value.resize(loop.sites.size(), nullptr); }
+	for (uint32_t k = 0; k < loop.sites.size(); ++k) {
+		const chunk::entry_memo_row::site& s = row.sites[k];
+		const size_t off = loop.sites[k] - loop.copy_head;
+		cs.site_slot[k] = s.slot; cs.site_env[k] = s.env; cs.site_value[k] = s.value;
+		cs.site_node[off] = s.node; cs.site_node2[off] = s.node2; cs.site_member[off] = s.member;
+		if (off < cs.site_prefix.size()) { cs.site_prefix[off].cd = nullptr; }
+	}
+}
+
+void vm_backend::cells_save_entry_row(frame& f, const chunk::cell_loop& loop) {
+	std::vector<chunk::entry_memo_row>* rows = cells_entry_rows(f);
+	if (!rows) return;
+	const cell_state& cs = *f.cells;
+	const size_t li = static_cast<size_t>(&loop - f.code->cell_loops.data());
+	if (rows->size() < f.code->cell_loops.size()) { rows->resize(f.code->cell_loops.size()); }
+	chunk::entry_memo_row& row = (*rows)[li];
+	row.env_of = cs.env_of; row.env_serial = cs.env_serial;
+	row.sites.resize(loop.sites.size());
+	for (uint32_t k = 0; k < loop.sites.size(); ++k) {
+		const size_t off = loop.sites[k] - loop.copy_head;
+		row.sites[k] = chunk::entry_memo_row::site{ cs.site_slot[k], cs.site_env[k], cs.site_value[k], cs.site_node[off], cs.site_node2[off], cs.site_member[off] };
+	}
+	row.env_cells.clear();
+	for (const uint32_t k : loop.entry_cells) {
+		if (loop.cells[k].env_operand != k_invalid_u32) { row.env_cells.push_back(chunk::entry_memo_row::env_cell{ k, cs.env_ptr[k] }); }
+	}
 }
 
 // an environment cell's value: the binding, or for an enum's member the enum map's entry (an int; anything else answers nothing)
@@ -8015,13 +8100,17 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 		if (st.is_map || st.is_string || st.coroutine || st.env_pushed || !st.container || !st.container->is_array()) { JAI_CELLS_COUNT(1); return false; }
 		if (st.index >= st.container->unchecked_get_array_storage()->size()) { return false; }   // no element left: the general ITER_NEXT ends the loop, no block runs for nothing
 	}
-	// this loop's environment bindings from its last entry in this call still answer while the environment and its epoch hold (the lookup cache's rule)
+	// this loop's environment bindings from its last entry in this call still answer while the environment and its epoch hold (the lookup cache's rule);
+	// across calls and other loops' entries, the loop's row holds them under the same rule
 	const bool env_reuse = cs.env_loop == &loop && cs.env_of == environment_.get() && cs.env_serial == env_symbolizer_->env_epoch();
+	const chunk::entry_memo_row* row = env_reuse ? nullptr : cells_entry_row(f, loop);
 	cs.env_loop = nullptr;
 	cs.env_of = environment_.get(); cs.env_serial = env_symbolizer_->env_epoch();
 	cs.raw_landing = 0; cs.raw_call = 0;   // no raw call is in flight at a block's entry (an earlier run may have ended in a C++ exception or an unwind)
 	++cs.entry_serial;   // a block parked in this frame for a statement does not resume over this entry's cells
 	if (cs.env_ptr.size() < loop.cells.size()) { cs.env_ptr.resize(loop.cells.size(), nullptr); }
+	if (row) { for (const chunk::entry_memo_row::env_cell& e : row->env_cells) { cs.env_ptr[e.cell] = e.binding; } }
+	const bool env_known = env_reuse || row != nullptr;
 	if (cs.payload.size() < loop.cells.size()) {
 #ifdef JAISCRIPT_VM_PROFILE
 		if (cs.payload.empty()) { ++profile_cells_records_; }
@@ -8046,7 +8135,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 	for (const uint32_t k : loop.entry_cells) {
 		const chunk::cell_loop::cell& cl = loop.cells[k];
 		if (cl.env_operand != k_invalid_u32) {
-			if (env_reuse && cs.env_ptr[k] && loop.env_operands[cl.env_operand].member_node == k_invalid_u32) {
+			if (env_known && cs.env_ptr[k] && loop.env_operands[cl.env_operand].member_node == k_invalid_u32) {
 				const script_value* v = cs.env_ptr[k];
 				const uint8_t vk = static_cast<uint8_t>(v->raw_storage_index());
 				if ((vk == kint || vk == kflt || vk == kbool || vk == kstr) && (cl.kind == 0 || vk == cl.kind)) {
@@ -8108,7 +8197,14 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 #ifdef JAISCRIPT_VM_COARSE_PROFILE
 	{ const uint64_t t1 = __rdtsc(); coarse_ecells_ += t1 - ct0; ct0 = t1; }
 #endif
-	if (!loop.sites.empty() && !(env_reuse && cells_sites_reenter(f, loop)) && !cells_resolve_sites(f, loop)) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); if (!head) { refuse_container_site(f, loop); } return false; }
+	bool resolved = !env_known;
+	if (!loop.sites.empty()) {
+		if (row) { cells_restore_sites(f, loop, *row); }
+		if (!(env_known && cells_sites_reenter(f, loop))) {
+			if (!cells_resolve_sites(f, loop)) { JAI_CELLS_COUNT(1); JAI_CELLS_COUNT(10); if (!head) { refuse_container_site(f, loop); } return false; }
+			resolved = true;
+		}
+	}
 #ifdef JAISCRIPT_VM_COARSE_PROFILE
 	{ const uint64_t t1 = __rdtsc(); coarse_esites_ += t1 - ct0; ct0 = t1; }
 	struct guard_span { uint64_t& acc; uint64_t t0; ~guard_span() { acc += __rdtsc() - t0; } } guard_span_{coarse_eguards_, ct0};
@@ -8117,6 +8213,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 	for (const auto& ms : loop.math_alias_sites) { if (!math_alias_holds(f, ms)) { JAI_CELLS_COUNT(1); if (!head) { refuse_container_site(f, loop); } return false; } }   // a stdlib alias's name rebound: the general form makes the real call
 	++cells_counters_.entries;
 	cs.env_loop = &loop;
+	if (resolved) { if (cells_entry_scope_free(f)) { cells_save_entry_row(f, loop); } } else if (row) { ++cells_counters_.row_entries; }
 	return true;
 }
 
@@ -19501,7 +19598,7 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[10], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
 			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_miss_step_[4], (unsigned long long)profile_cells_[11], (unsigned long long)profile_cells_[12], (unsigned long long)profile_cells_[13], (unsigned long long)profile_cells_[7],
 			(unsigned long long)profile_cells_[8], (unsigned long long)profile_cells_[9], (unsigned long long)profile_cells_records_, (unsigned long long)profile_cells_area_bytes_max_);
-		fprintf(stderr, "[vm-profile] cell counters: entries %llu | boundaries %llu | resumes %llu | misses %llu\n", cells_counters_.entries, cells_counters_.boundaries, cells_counters_.resumes, cells_counters_.misses);
+		fprintf(stderr, "[vm-profile] cell counters: entries %llu | boundaries %llu | resumes %llu | misses %llu | row entries %llu\n", cells_counters_.entries, cells_counters_.boundaries, cells_counters_.resumes, cells_counters_.misses, cells_counters_.row_entries);
 		fprintf(stderr, "[vm-profile] cell pushes: direct int %llu | direct float %llu | direct string %llu | value %llu\n",
 			(unsigned long long)profile_cells_push_[0], (unsigned long long)profile_cells_push_[1], (unsigned long long)profile_cells_push_[2], (unsigned long long)profile_cells_push_[3]);
 		{

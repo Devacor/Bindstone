@@ -723,6 +723,18 @@ namespace jai::vm {
             detail::host_member_hit hit;
         };
         mutable std::vector<bare_host_entry> bare_host_ic;
+        // Block-entry rows (main engine; a parallel worker keeps its own in its record of the chunk), one per cell loop: what the loop's last full entry resolved - each site's path (frame
+        // slot or environment binding) and container, each environment cell's binding - under that environment and epoch, the
+        // lookup cache's own rule. Any call's entry restores the row and the re-entry check proves it against the frame it runs in
+        struct entry_memo_row {
+            struct site { uint32_t slot; const script_value* env; const script_value* value; const script_array* node; const script_array* node2; const script_value* member; };
+            struct env_cell { uint32_t cell; const script_value* binding; };
+            const environment* env_of = nullptr;
+            uint64_t env_serial = 0;
+            std::vector<site> sites;
+            std::vector<env_cell> env_cells;
+        };
+        mutable std::vector<entry_memo_row> entry_memos;
         // Compile-time sticky-method-scope gate: true = no op parks per-call state in the
         // scope env or captures its identity beyond the call (closures/refs/try/scopes/env
         // decls), so a method body may run in ONE persistent per-dispatch method env

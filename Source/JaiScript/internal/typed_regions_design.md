@@ -346,6 +346,16 @@ entry marks the loop in the call record's cell state and the entry is not attemp
 refusal valve): a binding does not change within a call, and the guards would otherwise run at every back edge
 for nothing.
 
+Each loop keeps a block-entry row (`chunk::entry_memos`; a parallel worker keeps its own in its record of the chunk): the
+path its last full entry reached each container site by (a frame slot or an environment binding) with the node found,
+and each environment cell's binding, under the environment and epoch of that entry, the lookup cache's rule. Any later
+entry, in any call and after any other loop's entry, restores the row while the environment and epoch hold and the frame
+has no member scope (a receiver's field could take a name), then proves it against its own frame: every site read again
+through its path must name the recorded node, except that a plain load site whose path now names another node takes that
+node (the resolution would; no pin or store site names a load's node). A store, push, alias source, range or pinned
+element reference that differs, or any refusal of that proof, runs the full resolution, which writes the row again. The
+environment cells read their values through the recorded bindings, so a new value or kind is seen at every entry.
+
 A local's landing follows its declared type, which is the language's own rule: the entry records the stamp of
 each cell whose kind is decided at run time (an adopted kind: the canonical int or float of an inferred `auto` or
 unproven local, the `any` stamp of a `var`) and the flush restores it; a pinned cell needs none, its slot carries

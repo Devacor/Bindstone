@@ -1521,42 +1521,49 @@ public:
 
         test("an_import_runs_a_module_only_from_text_read_under_its_stamp", [=, this]() {
             // a save landing while a module is read (its stamp queried after the read disagrees with the one before) holds a
-            // module that ran before until a pass reads it whole; a first load reads again at once. A saver thread moves the
-            // file's mtime continuously while a long file is read, so every read in the storm overlaps a save.
+            // module that ran before until a pass reads it whole; a first load reads again at once. The engine's stamp source
+            // stands in for the saver: while a save lands it moves the file's stamp on every query, so every read is torn
             const auto dir = jai::foundry::test_temp_directory();
             const auto path = dir / "hr_torn.jai";
-            const std::string pad(8 << 20, ' ');
-            auto body = [&](int v) { return "torn_ran();\nint torn_value() { return " + std::to_string(v) + "; }\n//" + pad + "\n"; };
-            auto storm = [&](std::atomic<bool>& stop) {
-                return std::thread([&stop, path]() {
-                    std::error_code ec;
-                    auto t = std::filesystem::last_write_time(path, ec);
-                    while (!stop.load()) {
-                        t += std::chrono::seconds(1);   // whole seconds: MinGW's libstdc++ sets file times in seconds
-                        std::filesystem::last_write_time(path, t, ec);
+            auto body = [](int v) { return "torn_ran();\nint torn_value() { return " + std::to_string(v) + "; }\n"; };
+            struct landing_save {
+                bool landing = false;
+                int moves_left = -1;   // -1 = every query while landing
+                uint64_t moved = 0;
+            };
+            auto stamps = [](landing_save& a_save) {
+                return [&a_save](const std::string& a_path) -> std::optional<engine::file_stamp> {
+                    std::error_code timeEc, sizeEc;
+                    const auto mtime = std::filesystem::last_write_time(a_path, timeEc);
+                    const auto size = std::filesystem::file_size(a_path, sizeEc);
+                    if (timeEc || sizeEc) { return std::nullopt; }
+                    engine::file_stamp result{uint64_t(mtime.time_since_epoch().count()), uint64_t(size)};
+                    if (a_save.landing && a_save.moves_left != 0 && std::filesystem::path(a_path).filename() == "hr_torn.jai") {
+                        result.mtime += ++a_save.moved;   // every query sees a later save than the one before
+                        if (a_save.moves_left > 0) { --a_save.moves_left; }
                     }
-                });
+                    return result;
+                };
             };
             auto eng = make_engine();
             eng->jaibite_cache(false);
             eng->add_include_path(dir.string());
+            landing_save save;
+            eng->file_stamp_source(stamps(save));
             int runs = 0;
             eng->add_function("torn_ran", [&runs]() { ++runs; });
             put_file(path, body(1));
             eng->execute("import \"hr_torn.jai\";");
             check_eq(1, runs);
             put_file(path, body(2));
-            {
-                std::atomic<bool> stop{false};
-                std::thread saver = storm(stop);
-                bool ran = false;
-                for (int i = 0; i < 3; ++i) { ran = eng->execute("import(\"hr_torn.jai\");").as_bool() || ran; }
-                stop = true;
-                saver.join();
-                check_false(ran, "a module saved during each read does not re-run");
-                check_eq(1, runs);
-                check_eq(script_int(1), eng->execute("torn_value();").as_int(), "the program keeps the version it ran");
-            }
+            std::filesystem::last_write_time(path, std::filesystem::last_write_time(path) + std::chrono::seconds(2));
+            save.landing = true;
+            bool ran = false;
+            for (int i = 0; i < 3; ++i) { ran = eng->execute("import(\"hr_torn.jai\");").as_bool() || ran; }
+            save.landing = false;
+            check_false(ran, "a module saved during each read does not re-run");
+            check_eq(1, runs);
+            check_eq(script_int(1), eng->execute("torn_value();").as_int(), "the program keeps the version it ran");
             check_true(eng->execute("import(\"hr_torn.jai\");").as_bool(), "the next pass reads it whole and runs it");
             check_eq(2, runs);
             check_eq(script_int(2), eng->execute("torn_value();").as_int());
@@ -1564,17 +1571,18 @@ public:
             auto first = make_engine();
             first->jaibite_cache(false);
             first->add_include_path(dir.string());
+            landing_save firstSave;
+            first->file_stamp_source(stamps(firstSave));
             int first_runs = 0;
             first->add_function("torn_ran", [&first_runs]() { ++first_runs; });
-            {
-                std::atomic<bool> stop{false};
-                std::thread saver = storm(stop);
-                first->execute("import \"hr_torn.jai\";");
-                stop = true;
-                saver.join();
-            }
-            check_eq(1, first_runs, "a first load runs while the file is being saved");
+            firstSave.landing = true;
+            firstSave.moves_left = 2;
+            first->execute("import \"hr_torn.jai\";");
+            check_eq(0, firstSave.moves_left, "the save landed during the first read");
+            check_eq(1, first_runs, "a first load reads again at once and runs once");
             check_eq(script_int(2), first->execute("torn_value();").as_int());
+            check_false(first->execute("import(\"hr_torn.jai\");").as_bool(), "the whole read it ran from is remembered");
+            check_eq(1, first_runs);
             std::filesystem::remove(path);
         });
 

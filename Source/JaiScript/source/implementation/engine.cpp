@@ -1533,7 +1533,7 @@ struct engine::implementation {
 
     // mtime (100 ns FILETIME on Windows) + size from a single syscall. false = file
     // unreachable; callers fall back to the legacy read path (today's error text).
-    static bool stat_mtime_size(const std::string& path, uint64_t& mtime, uint64_t& size) {
+    static bool stat_file(const std::string& path, uint64_t& mtime, uint64_t& size) {
 #ifdef _WIN32
         entry_stat st;
         if (!stat_entry(path, st) || st.is_directory) {
@@ -1555,10 +1555,21 @@ struct engine::implementation {
 #endif
     }
 
+    // A file's stamp through the host's engine::file_stamp_source, else the file system's
+    engine::file_stamp_reading file_stamp_source;
+    bool stat_mtime_size(const std::string& path, uint64_t& mtime, uint64_t& size) const {
+        if (!file_stamp_source) { return stat_file(path, mtime, size); }
+        const std::optional<engine::file_stamp> stamp = file_stamp_source(path);
+        if (!stamp) { return false; }
+        mtime = stamp->mtime;
+        size = stamp->size;
+        return true;
+    }
+
     // A file's text read under the (mtime, size) stamp taken just before the read: the stamp queried again after it must
     // agree, or a save landed mid-read and the text may mix two versions (torn: read it again later)
     enum class stamped_read { missing, torn, stable };
-    static stamped_read read_under_stamp(const std::string& path, bool stamped, uint64_t mtime, uint64_t size, std::string& content) {
+    stamped_read read_under_stamp(const std::string& path, bool stamped, uint64_t mtime, uint64_t size, std::string& content) {
         {
             std::ifstream file(path);
             if (!file.is_open()) { return stamped_read::missing; }
@@ -1632,7 +1643,7 @@ struct engine::implementation {
     }
 
     static bool stat_sibling(const std::filesystem::path& sibling, uint64_t& mtime, uint64_t& size) {
-        return stat_mtime_size(sibling.string(), mtime, size);
+        return stat_file(sibling.string(), mtime, size);
     }
     const detail::jaibite_source_identity& identity_of(script_cache_entry& entry, const std::string& source) {
         if (!entry.identity_known) { entry.identity = detail::jaibite_identity_of(source); entry.identity_known = true; }
@@ -2461,8 +2472,8 @@ script_value engine::execute_file_source(const std::string& resolvedPath, const 
 
 bool engine::read_include_file(const std::string& resolvedPath, std::string& content) {
     uint64_t mtime = 0, size = 0;
-    const bool stamped = implementation::stat_mtime_size(resolvedPath, mtime, size);
-    const auto read = implementation::read_under_stamp(resolvedPath, stamped, mtime, size, content);
+    const bool stamped = impl->stat_mtime_size(resolvedPath, mtime, size);
+    const auto read = impl->read_under_stamp(resolvedPath, stamped, mtime, size, content);
     if (read == implementation::stamped_read::missing) { return false; }
     impl->note_closure_file(resolvedPath, stamped && read == implementation::stamped_read::stable, mtime, size);
     return true;
@@ -2984,7 +2995,7 @@ script_value engine::execute_file(const std::string& scriptPath, const instance_
     // failed verify falls through to the read below. The unit is attributed to the
     // canonical path, the spelling import uses and source breakpoints normalize to.
     uint64_t mtime = 0, size = 0;
-    bool statOk = implementation::stat_mtime_size(scriptPath, mtime, size);
+    bool statOk = impl->stat_mtime_size(scriptPath, mtime, size);
     std::string canon;   // by value: a script can re-enter execute_file and rehash the maps
     if (statOk) {
         std::string& canonSlot = impl->canonical_path_cache[scriptPath];
@@ -3030,13 +3041,13 @@ script_value engine::execute_file(const std::string& scriptPath, const instance_
     std::string content;
     bool stable = false;
     for (int attempt = 0; ; ++attempt) {
-        const auto read = implementation::read_under_stamp(scriptPath, statOk, mtime, size, content);
+        const auto read = impl->read_under_stamp(scriptPath, statOk, mtime, size, content);
         if (read == implementation::stamped_read::missing) {
             throw runtime_error("Failed to open script file: " + scriptPath);
         }
         stable = read == implementation::stamped_read::stable;
         if (stable || attempt == 3) { break; }
-        statOk = implementation::stat_mtime_size(scriptPath, mtime, size);
+        statOk = impl->stat_mtime_size(scriptPath, mtime, size);
     }
     script_value result = execute_source(content, instanceVars, attributed);
 
@@ -4557,6 +4568,10 @@ std::string engine::app_cache_dir(const std::string& app) const {
     return impl->app_cache_resolver ? impl->app_cache_resolver(app) : default_app_cache_dir(app);
 }
 
+void engine::file_stamp_source(file_stamp_reading source) {
+    impl->file_stamp_source = std::move(source);
+}
+
 void engine::time_source(clock_reading monotonic, clock_reading wall, clock_sleep sleep) {
     impl->monotonic_clock = std::move(monotonic);
     impl->wall_clock = std::move(wall);
@@ -4996,14 +5011,14 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
     }
     const auto stamp = [&](import_unit& m) -> checked_result<void> {
         ++I.import_stats_;
-        m.stamped = implementation::stat_mtime_size(m.resolved, m.mtime, m.size);
+        m.stamped = impl->stat_mtime_size(m.resolved, m.mtime, m.size);
         if (m.stamped || !m.remembered) { return {}; }
         m.remembered = false;
         ++I.import_stats_;
         auto resolved = resolve_include_path(*m.path, this, from, true);
         if (!resolved) { return resolved.error_value(); }
         m.resolved = std::move(resolved.value());
-        m.stamped = implementation::stat_mtime_size(m.resolved, m.mtime, m.size);
+        m.stamped = impl->stat_mtime_size(m.resolved, m.mtime, m.size);
         return {};
     };
 
@@ -5043,7 +5058,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             u.resolved = child;
             u.runs = crec->second.runs;
             ++I.import_stats_;
-            u.stamped = implementation::stat_mtime_size(child, u.mtime, u.size);
+            u.stamped = impl->stat_mtime_size(child, u.mtime, u.size);
             if (!u.stamped) {
                 if (!crec->second.missing && missing_now.empty()) { missing_now = child; }
                 crec->second.missing = true;
@@ -5128,13 +5143,13 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             import_unit& m = units[idx[k]];
             const bool loaded_before = I.import_cache.count(m.resolved) != 0;
             for (int attempt = 0; ; ++attempt) {
-                const auto read = implementation::read_under_stamp(m.resolved, m.stamped, m.mtime, m.size, contents[k]);
+                const auto read = impl->read_under_stamp(m.resolved, m.stamped, m.mtime, m.size, contents[k]);
                 if (read == implementation::stamped_read::missing) { throw runtime_error("Failed to open import file: " + m.resolved); }
                 if (read == implementation::stamped_read::stable) { break; }
                 if (loaded_before) { return false; }
                 if (attempt == 3) { break; }
                 ++I.import_stats_;
-                m.stamped = implementation::stat_mtime_size(m.resolved, m.mtime, m.size);
+                m.stamped = impl->stat_mtime_size(m.resolved, m.mtime, m.size);
             }
         }
 
@@ -5379,7 +5394,7 @@ script_value engine::execute_import(const std::string& resolved_path) {
             } else {
                 // Check if file has been modified
                 uint64_t current_mtime = 0, current_size = 0;
-                if (implementation::stat_mtime_size(resolved_path, current_mtime, current_size)) {
+                if (impl->stat_mtime_size(resolved_path, current_mtime, current_size)) {
                     should_import = current_mtime != it->second.mtime || current_size != it->second.size || impl->closure_moved(it->second);
                     if (should_import) {
                         // Update the stamp for next check
@@ -5409,9 +5424,9 @@ script_value engine::execute_import(const std::string& resolved_path) {
         // the next file_timestamp check import again
         implementation::import_record record;
         record.resolved_path = resolved_path;
-        const bool stamped = implementation::stat_mtime_size(resolved_path, record.mtime, record.size);
+        const bool stamped = impl->stat_mtime_size(resolved_path, record.mtime, record.size);
         std::string content;
-        const auto read = implementation::read_under_stamp(resolved_path, stamped, record.mtime, record.size, content);
+        const auto read = impl->read_under_stamp(resolved_path, stamped, record.mtime, record.size, content);
         if (read == implementation::stamped_read::missing) {
             throw runtime_error("Failed to open import file: " + resolved_path);
         }

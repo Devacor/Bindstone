@@ -106,7 +106,8 @@ protected:
     const Derived* self() const { return static_cast<const Derived*>(this); }
 
     engine* engine_ref_;
-    std::map<std::type_index, void*> user_contexts_;
+    // Hashed on std::type_index: libstdc++'s type_info::before is not a strict weak order between internal-linkage and other types
+    std::unordered_map<std::type_index, void*> user_contexts_;
 
     std::unordered_map<const void*, uint32_t> shared_ptr_ids_;
     uint32_t next_shared_id_ = 1;  // 0 reserved for null
@@ -774,7 +775,8 @@ protected:
     };
     std::unordered_map<uint32_t, deserialized_entry> cpp_shared_ptrs_;
 
-    std::map<std::type_index, void*> user_contexts_;
+    // Hashed on std::type_index: libstdc++'s type_info::before is not a strict weak order between internal-linkage and other types
+    std::unordered_map<std::type_index, void*> user_contexts_;
 
     int current_depth_ = 0;
 

@@ -15,6 +15,7 @@
 #include <string>
 #include <typeindex>
 #include <unordered_map>
+#include <unordered_set>
 #include <type_traits>
 #include <vector>
 #include <set>
@@ -138,7 +139,7 @@ public:
         auto it = base_edges_.find(from);
         if (it == base_edges_.end()) { return p; }
         for (const auto& e : it->second) { if (e.base == to) { return e.adjust(p); } }
-        std::set<std::type_index> visited{ from };
+        std::unordered_set<std::type_index> visited{ from };
         std::vector<std::pair<std::type_index, void*>> stack;
         for (const auto& e : it->second) {
             if (visited.insert(e.base).second) { stack.push_back({ e.base, e.adjust(p) }); }
@@ -170,7 +171,7 @@ public:
         std::shared_lock guard(mutex_);
         auto it = base_edges_.find(from);
         if (it == base_edges_.end()) { return false; }
-        std::set<std::type_index> visited{ from };
+        std::unordered_set<std::type_index> visited{ from };
         std::vector<std::type_index> stack;
         for (const auto& e : it->second) {
             if (e.base == to) { return true; }

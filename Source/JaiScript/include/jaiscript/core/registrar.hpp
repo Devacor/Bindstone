@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <map>
+#include <unordered_map>
 #include <typeindex>
 #include <string>
 #include <string_view>
@@ -92,13 +93,43 @@ public:
 
 private:
     type_name_registry() = default;
-    std::map<std::type_index, std::string> type_names_;
+    // Hashed on std::type_index: libstdc++'s type_info::before is not a strict weak order between internal-linkage and other types
+    std::unordered_map<std::type_index, std::string> type_names_;
     std::unordered_map<std::string, std::optional<std::type_index>> name_to_type_;
 };
 
 // ============================================================================
 // Registrar Registry - Stores registration functions per context type
 // ============================================================================
+
+namespace detail {
+	// Registrations apply in script-name order, the same on every compiler; a type registered again replaces its entry
+	template<typename Fn>
+	class registration_order {
+	public:
+		void add(std::type_index ti, const std::string& name, Fn fn) {
+			if (auto it = names_.find(ti); it != names_.end()) {
+				auto range = entries_.equal_range(it->second);
+				for (auto entry = range.first; entry != range.second; ++entry) {
+					if (entry->second.first == ti) { entries_.erase(entry); break; }
+				}
+			}
+			names_.insert_or_assign(ti, name);
+			entries_.emplace(name, std::pair<std::type_index, Fn>{ ti, std::move(fn) });
+		}
+
+		template<typename Visit>
+		void for_each(Visit&& visit) {
+			for (auto& [name, entry] : entries_) { visit(entry.second); }
+		}
+
+		[[nodiscard]] bool has(std::type_index ti) const { return names_.contains(ti); }
+
+	private:
+		std::multimap<std::string, std::pair<std::type_index, Fn>> entries_;
+		std::unordered_map<std::type_index, std::string> names_;
+	};
+}
 
 template<typename Context>
 class registrar_registry {
@@ -110,23 +141,21 @@ public:
         return registry;
     }
 
-    void add(std::type_index ti, registration_fn fn) {
-        registrations_[ti] = std::move(fn);
+    void add(std::type_index ti, const std::string& name, registration_fn fn) {
+        ordered_.add(ti, name, std::move(fn));
     }
 
     void register_all(engine& eng, const Context& ctx) {
-        for (auto& [type, fn] : registrations_) {
-            fn(eng, ctx);
-        }
+        ordered_.for_each([&](registration_fn& fn) { fn(eng, ctx); });
     }
 
     [[nodiscard]] bool has(std::type_index ti) const {
-        return registrations_.contains(ti);
+        return ordered_.has(ti);
     }
 
 private:
     registrar_registry() = default;
-    std::map<std::type_index, registration_fn> registrations_;
+    detail::registration_order<registration_fn> ordered_;
 };
 
 template<>
@@ -139,23 +168,21 @@ public:
         return registry;
     }
 
-    void add(std::type_index ti, registration_fn fn) {
-        registrations_[ti] = std::move(fn);
+    void add(std::type_index ti, const std::string& name, registration_fn fn) {
+        ordered_.add(ti, name, std::move(fn));
     }
 
     void register_all(engine& eng) {
-        for (auto& [type, fn] : registrations_) {
-            fn(eng);
-        }
+        ordered_.for_each([&](registration_fn& fn) { fn(eng); });
     }
 
     [[nodiscard]] bool has(std::type_index ti) const {
-        return registrations_.contains(ti);
+        return ordered_.has(ti);
     }
 
 private:
     registrar_registry() = default;
-    std::map<std::type_index, registration_fn> registrations_;
+    detail::registration_order<registration_fn> ordered_;
 };
 
 // ============================================================================
@@ -202,7 +229,7 @@ class registrar {
         serialization::try_auto_register<T>(name_str);
         register_polymorphic_bases<T>(BasesTag{});
         registrar_registry<Context>::instance().add(
-            std::type_index(typeid(T)),
+            std::type_index(typeid(T)), name_str,
             [name_str](engine& eng, const Context&) {
                 dynamic_binder<T> builder(eng, name_str);
                 builder.auto_bind();
@@ -217,7 +244,7 @@ class registrar {
         serialization::try_auto_register<T>(name_str);
         register_polymorphic_bases<T>(BasesTag{});
         registrar_registry<Context>::instance().add(
-            std::type_index(typeid(T)),
+            std::type_index(typeid(T)), name_str,
             [name_str, configure = std::forward<F>(configure)](engine& eng, const Context& ctx) {
                 dynamic_binder<T> builder(eng, name_str);
                 builder.auto_bind();
@@ -249,7 +276,7 @@ class registrar<T, void, BasesTag> {
         serialization::try_auto_register<T>(name_str);
         register_polymorphic_bases<T>(BasesTag{});
         registrar_registry<void>::instance().add(
-            std::type_index(typeid(T)),
+            std::type_index(typeid(T)), name_str,
             [name_str](engine& eng) {
                 dynamic_binder<T> builder(eng, name_str);
                 builder.auto_bind();
@@ -264,7 +291,7 @@ class registrar<T, void, BasesTag> {
         serialization::try_auto_register<T>(name_str);
         register_polymorphic_bases<T>(BasesTag{});
         registrar_registry<void>::instance().add(
-            std::type_index(typeid(T)),
+            std::type_index(typeid(T)), name_str,
             [name_str, configure = std::forward<F>(configure)](engine& eng) {
                 dynamic_binder<T> builder(eng, name_str);
                 builder.auto_bind();

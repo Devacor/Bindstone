@@ -992,6 +992,7 @@ void class_definition::add_field(std::string_view name, const script_value& defa
     if (!eng) return;
 
     uint64_t name_id = eng->symbolize(name);
+    if (std::find(bound_field_order_.begin(), bound_field_order_.end(), name_id) == bound_field_order_.end()) { bound_field_order_.push_back(name_id); }
 
     if (default_value.get_engine() == nullptr && !!engine_) {
         script_value value_with_engine(default_value);
@@ -1011,6 +1012,7 @@ void class_definition::add_field(const std::string& name) {
     if (!eng) return;
 
     uint64_t name_id = eng->symbolize(name);
+    if (std::find(bound_field_order_.begin(), bound_field_order_.end(), name_id) == bound_field_order_.end()) { bound_field_order_.push_back(name_id); }
     field_defaults_.insert_or_assign(name_id, script_value(std::monostate{}, engine_));
     field_defaults_cache_valid_ = false; ++defaults_version_;
     field_slots_current_ = false;

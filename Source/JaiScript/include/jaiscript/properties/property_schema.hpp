@@ -240,7 +240,8 @@ private:
 	}
 
 	mutable std::mutex mutex_;
-	std::map<std::type_index, type_property_schema> schemas_;
+	// Hashed on std::type_index: libstdc++'s type_info::before is not a strict weak order between internal-linkage and other types
+	std::unordered_map<std::type_index, type_property_schema> schemas_;
 };
 
 } // namespace jai

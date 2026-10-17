@@ -1532,7 +1532,7 @@ public:
                     std::error_code ec;
                     auto t = std::filesystem::last_write_time(path, ec);
                     while (!stop.load()) {
-                        t += std::chrono::milliseconds(1);
+                        t += std::chrono::seconds(1);   // whole seconds: MinGW's libstdc++ sets file times in seconds
                         std::filesystem::last_write_time(path, t, ec);
                     }
                 });

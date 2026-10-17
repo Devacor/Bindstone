@@ -188,10 +188,10 @@ JaiScript's and convert real code.</p>
   The idiom is <code>&amp;</code> parameters for anything heavy, cheap by design. If you write Python-shaped
   code expecting reference semantics, your first hour will surprise you; read
   <a href="guide/03-value-semantics.html">Value Semantics</a> first and it won't.</li>
-  <li><strong>Lua is faster.</strong> On microbenchmarks the VM wins or ties Lua 5.4 on statements, containers
-  and range-for, and is level on method calls; Lua runs a hot arithmetic loop about 4&times; faster and
-  call-dense recursion about 4.5&times; faster. On whole programs Lua 5.4 is ahead by 3.5 to 4.7&times;
-  (GLOOM, Gator Quest), and LuaJIT by far more. JaiScript's VM does reuse the frame for a bare self tail call,
+  <li><strong>Lua is faster.</strong> On microbenchmarks the VM wins or ties Lua 5.4 on statements, containers,
+  range-for and method calls; Lua runs a hot arithmetic loop about 3&times; faster and call-dense recursion
+  about 3&times; faster. On whole programs Lua 5.4 is ahead by 1.3 to 1.7&times; (Gator Quest, GLOOM), the
+  VM is ahead on the raymarched OSSUARY scene, and LuaJIT is far ahead of both. JaiScript's VM does reuse the frame for a bare self tail call,
   so tail recursion runs at loop speed to any depth. The head-to-head numbers, one machine, one protocol:
   <a href="embedding/11-performance.html">Performance</a>.</li>
   <li><strong>Two backends cost maintenance.</strong> That's the price of the executable spec, and shared

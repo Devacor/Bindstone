@@ -1041,4 +1041,13 @@ void class_definition::register_property_member(uint64_t field_id, cpp_member_ac
     bump_field_shape_epoch();
 }
 
+void class_definition::register_host_member_lane(uint64_t field_id, std::shared_ptr<const detail::host_member_lane> lane) {
+    if (lane) {
+        host_member_lanes_[field_id] = std::move(lane);
+    } else {
+        host_member_lanes_.erase(field_id);
+    }
+    bump_method_epoch();
+}
+
 } // namespace jai

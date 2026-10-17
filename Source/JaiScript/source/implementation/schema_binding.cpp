@@ -9,6 +9,59 @@ namespace jai::detail {
 
 namespace {
 
+// A plain (non-observable) property's in-place lane: the property object is a member of the bound object, found once
+// per receiver layout and read and written the way the bound getter and setter do (detail/host_member.hpp)
+template<typename ValueT>
+struct schema_member_lane : host_member_lane {
+	std::string name;
+	schema_property_access access;
+	uint64_t native_type_id = UINT64_MAX;
+};
+
+template<typename ValueT>
+void* schema_member_locate(const host_member_lane& lane, const script_value& receiver) {
+	const auto& self = static_cast<const schema_member_lane<ValueT>&>(lane);
+	try {
+		void* owner = self.access.extract(receiver, self.native_type_id);
+		if (!owner || self.access.owner_size == 0) { return nullptr; }
+		jai::property_base* base = self.access.find(owner, self.name);
+		auto* prop = dynamic_cast<jai::property<ValueT>*>(base);
+		if (!prop || typeid(*base) != typeid(jai::property<ValueT>)) { return nullptr; }
+		const char* begin = static_cast<const char*>(owner);
+		const char* at = reinterpret_cast<const char*>(prop);
+		if (at < begin || at + sizeof(jai::property<ValueT>) > begin + self.access.owner_size) { return nullptr; }
+		return prop;
+	} catch (...) {
+		return nullptr;
+	}
+}
+
+template<typename ValueT>
+script_value schema_member_read(const void* address, engine* eng) {
+	return script_value_from_cpp(static_cast<const jai::property<ValueT>*>(address)->get(), eng);
+}
+
+template<typename ValueT>
+bool schema_member_write(void* address, const script_value& value) {
+	return host_member_write<ValueT>(&static_cast<jai::property<ValueT>*>(address)->get(), value);
+}
+
+template<typename ValueT>
+std::shared_ptr<const host_member_lane> make_schema_member_lane(const std::string& name, const schema_property_access& access, uint64_t native_type_id) {
+	if constexpr (host_member_value<ValueT>) {
+		auto lane = std::make_shared<schema_member_lane<ValueT>>();
+		lane->name = name;
+		lane->access = access;
+		lane->native_type_id = native_type_id;
+		lane->read = &schema_member_read<ValueT>;
+		lane->write = &schema_member_write<ValueT>;
+		lane->locate = &schema_member_locate<ValueT>;
+		return lane;
+	} else {
+		return nullptr;
+	}
+}
+
 template<typename ValueT>
 void ensure_observable_ref_type_registered(engine& a_engine) {
 	using RefType = jai::observable_property_ref<ValueT>;
@@ -87,6 +140,7 @@ void register_schema_property(engine& a_engine, class_definition& class_def, ser
 	uint64_t field_id = a_engine.symbolize(name);
 	uint64_t setter_id = a_engine.symbolize("_set_" + name);
 	class_def.register_property_setter(field_id, setter_id);
+	class_def.register_host_member_lane(field_id, nullptr);
 }
 
 template<typename ValueT>
@@ -201,6 +255,7 @@ bool bind_schema_typed(engine& a_engine, class_definition& class_def, serializat
 		};
 
 		register_schema_property(a_engine, class_def, metadata, prop_name, access, std::move(getter), std::move(setter));
+		class_def.register_host_member_lane(a_engine.symbolize(prop_name), make_schema_member_lane<ValueT>(prop_name, access, class_def.get_type_id()));
 	}
 
 	return true;

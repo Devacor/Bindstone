@@ -44,6 +44,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/const_rules.hpp>   // const guards (interp parity)
 #include <jaiscript/detail/aggregate_init.hpp>
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (interp parity)
+#include <jaiscript/detail/host_member_access.hpp>
 #include <jaiscript/detail/namespace_scope.hpp>  // a namespace's variable cells and the ns::x store target (shared with the interpreter)
 #include <jaiscript/vm/disassembler.hpp>  // the listing sink's text
 #include <jaiscript/vm/chunk_manifest.hpp>  // the listing sink's manifest
@@ -14501,6 +14502,16 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 		"class {0} has no static member '{1}'", name_id, expr->member_id);
 }
 
+JAI_NOINLINE void vm_backend::fill_host_member_hit(class_definition* cd, const class_instance* inst, uint64_t member_id,
+                                                   const script_value& receiver, chunk::member_ic_entry& entry) {
+	entry.host = detail::host_member_hit{};
+	if (entry.slot != UINT32_MAX || member_id == UINT64_MAX || member_id == same_as_id_ ||
+	    builtins_.shared_ptr_methods.find(member_id) != builtins_.shared_ptr_methods.end()) {
+		return;
+	}
+	detail::host_member_fill(cd, inst, member_id, receiver, engine_, entry.host);
+}
+
 uint32_t vm_backend::member_read_slot_probe(class_definition* cd, member_expr* expr) {
 	if (expr->member_id == same_as_id_ || cd->chain_has_nonpublic() ||
 	    builtins_.shared_ptr_methods.find(expr->member_id) != builtins_.shared_ptr_methods.end()) {
@@ -14648,6 +14659,11 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 								stack_.push_back(*v);
 								return {};
 							}
+						} else if (entry.host.lane) {
+							if (void* address = detail::host_member_address(inst, entry.host)) {
+								stack_.push_back(entry.host.lane->read(address, engine_));
+								return {};
+							}
 						}
 #ifdef JAISCRIPT_VM_PROFILE
 						profile_get_member_paths_[1]++;
@@ -14657,6 +14673,7 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 						entry.cd = cd;
 						entry.epoch = cd->method_epoch();
 						entry.slot = slot;
+						fill_host_member_hit(cd, inst, expr->member_id, objd, entry);
 						// resolve through the ladder this once; hits serve from here on
 					}
 				}
@@ -14736,10 +14753,17 @@ op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
 			if (holder && holder->is_class_instance_wrapper && holder->data) {
 				auto* inst = static_cast<class_instance*>(holder->data.get());
 				const auto& entry = f.code->member_ic[static_cast<size_t>(&ins - f.code->code.data())];
-				if (class_definition* cd = inst->get_class_definition(); cd && entry.cd == cd && entry.epoch == cd->method_epoch() && entry.slot != UINT32_MAX) {
-					if (script_value* v = inst->field_slot_value(entry.slot)) {
-						frame_slot_set(f, ins.b, *v);
-						return {};
+				if (class_definition* cd = inst->get_class_definition(); cd && entry.cd == cd && entry.epoch == cd->method_epoch()) {
+					if (entry.slot != UINT32_MAX) {
+						if (script_value* v = inst->field_slot_value(entry.slot)) {
+							frame_slot_set(f, ins.b, *v);
+							return {};
+						}
+					} else if (entry.host.lane) {
+						if (void* address = detail::host_member_address(inst, entry.host)) {
+							frame_slot_set(f, ins.b, entry.host.lane->read(address, engine_));
+							return {};
+						}
 					}
 				}
 			}
@@ -15259,6 +15283,11 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 						inst->field_slot_write(entry.slot, std::move(enforced).value());
 						return op_status{};
 					}
+					if (entry.host.lane && entry.host.lane->write) {
+						if (void* address = detail::host_member_address(inst, entry.host); address && entry.host.lane->write(address, value)) {
+							return op_status{};
+						}
+					}
 				} else {
 					uint32_t slot = UINT32_MAX;
 					if (member->member_id != UINT64_MAX && !cd->chain_has_nonpublic()) {
@@ -15277,6 +15306,7 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 					entry.slot = slot;
 					entry.scalar_type = nullptr;
 					entry.scalar_kind = 0;
+					fill_host_member_hit(cd, inst, member->member_id, dereferenced, entry);
 					if (slot != UINT32_MAX) {
 						type_info* declared = cd->get_field_declared_type(member->member_id).get();
 						if (declared == ti_int_) { entry.scalar_type = declared; entry.scalar_kind = script_value::TYPEID_INT; }

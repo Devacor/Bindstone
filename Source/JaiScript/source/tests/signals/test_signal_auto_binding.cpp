@@ -55,6 +55,21 @@ public:
 	bool has_receiver(const std::string& id) { return open_emitter.connected(id); }
 };
 
+// A signal other threads connect to: the synchronized policy, declared the one-declaration way.
+class relay : public jai::property_owner<relay> {
+public:
+	typedef void PingSignature(int);
+	JAI_SYNCHRONIZED_SIGNAL_PROPERTY(PingSignature, on_ping);
+
+	jai::signal_emitter<void(int), jai::signal_synchronized> onPulseSignal;
+	jai::signal<void(int), jai::signal_synchronized> onPulse{ onPulseSignal };
+
+	void ping(int v) { on_pingSignal(v); }
+	void pulse(int v) { onPulseSignal(v); }
+	void add_text_receiver(const std::string& id, const std::string& script) { on_pingSignal.connect(id, script); }
+	bool has_receiver(const std::string& id) { return on_pingSignal.connected(id); }
+};
+
 class signal_auto_binding_tests : public suite {
 public:
 	signal_auto_binding_tests() : suite("Signal Auto Binding") {}
@@ -197,6 +212,62 @@ public:
 			};
 			run(true);
 			run(false);
+		});
+
+		test("a_script_connect_during_an_emit_joins_from_the_next_emit", [this]() {
+			auto eng = make_bound_engine();
+			auto r = eng->execute(R"(
+				string log = "";
+				var s = new Scoreboard();
+				s.on_scored.connect("a", [](var v) {
+					log += "a";
+					if (!s.on_scored.connected("b")) { s.on_scored.connect("b", [](var w) { log += "b"; }); }
+				});
+				s.score(1);
+				log += "|";
+				s.score(2);
+				log;
+			)");
+			check_eq(std::string("a|ab"), r.as<std::string>(), "script gets the same default as C++: a connect joins from the next emit");
+		});
+
+		test("a_synchronized_signal_property_binds_saves_and_loads", [this]() {
+			auto eng = jai::foundry::make_engine();
+			dynamic_binder<relay>(*eng, "Relay")
+				.constructor<>()
+				.method("ping", &relay::ping)
+				.method("pulse", &relay::pulse)
+				.property("onPulse", &relay::onPulse)
+				.auto_bind()
+				.build();
+			eng->execute("var got = 0; var r = new Relay();");
+			eng->execute("r.on_ping.connect(\"t\", [](var v) { got = got + v; });");
+			eng->execute("r.onPulse.connect(\"p\", [](var v) { got = got + 100 * v; });");
+			eng->execute("r.ping(3); r.pulse(1);");
+			check_eq((int64_t)103, eng->execute("got").as_int());
+
+			int64_t fired = 0;
+			eng->add_function("mark", [counter = &fired](int v) { *counter += v; });
+			auto original = std::make_shared<relay>();
+			original->add_text_receiver("bump", "mark(arg_0);");
+			auto restored = jai::from_json<std::shared_ptr<relay>>(*eng, jai::to_json(*eng, original));
+			check(restored != nullptr, "loaded not null");
+			check_true(restored->has_receiver("bump"), "text receiver persisted");
+			restored->ping(4);
+			check_eq((int64_t)4, fired);
+
+			auto typed = jai::foundry::make_engine();
+			bind_signal_type<void(int), jai::signal_synchronized>(*typed, "SyncSignalInt");
+			dynamic_binder<relay>(*typed, "Relay")
+				.constructor<>()
+				.method("pulse", &relay::pulse)
+				.property("onPulse", &relay::onPulse)
+				.property("onPulseEmitter", &relay::onPulseSignal)
+				.build();
+			typed->execute("var got = 0; var r = new Relay();");
+			typed->execute("r.onPulse.connect(\"p\", [](var v) { got = v; });");
+			typed->execute("r.onPulseEmitter.emit(6);");
+			check_eq((int64_t)6, typed->execute("got").as_int(), "bind_signal_type binds the synchronized pair");
 		});
 
 		// A receiver redefines the functions and the class its siblings reach, mid-emit: receivers still to run see the new

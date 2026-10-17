@@ -15,11 +15,11 @@ namespace jai {
 	// through the ADL save/load hooks. The emitter stays a plain signal_emitter on the owning
 	// class (so emission via operator() is unchanged); this just lets it ride property_mgr's
 	// save/load like any other property. Only script receivers serialize (C++ callbacks don't).
-	template<typename T>
+	template<typename T, typename Sync = signal_unsynchronized>
 	class signal_property : public property_base {
-		signal_emitter<T>& m_emitter;
+		signal_emitter<T, Sync>& m_emitter;
 	public:
-		signal_property(property_manager& reg, std::string name, signal_emitter<T>& emitter)
+		signal_property(property_manager& reg, std::string name, signal_emitter<T, Sync>& emitter)
 			: property_base(reg, std::move(name)), m_emitter(emitter) {}
 
 		void serialize(serialization::any_archive_writer& ar) const override {
@@ -46,26 +46,30 @@ namespace jai {
 // Declares a serializable, script-connectable signal as a private-emitter / public-view pair,
 // plus a hidden property that serializes the emitter under "name":
 //
-//   private: signal_emitter<Sig> emitter;   // emit source + serialized state
-//   public:  signal<Sig>         name;      // connect target (scripts / external code)
+//   private: signal_emitter<Sig, Policy> emitter;   // emit source + serialized state
+//   public:  signal<Sig, Policy>         name;      // connect target (scripts / external code)
 //
 // Emit through the emitter: emitter(args). Requires the enclosing class to be a property_owner
 // (have a property_mgr). Leaves member access at public:. The schema entry (is_signal) lets
 // dynamic_binder's auto_bind expose the generic Signal view — declaring the signal is the whole
-// registration. JAI_SIGNAL_PROPERTY(Sig, name) names the emitter nameSignal.
-#define JAI_SIGNAL_PROPERTY_AS(signature, name, emitter) \
+// registration. JAI_SIGNAL_PROPERTY(Sig, name) names the emitter nameSignal. Both are unsynchronized;
+// JAI_SYNCHRONIZED_SIGNAL_PROPERTY declares the jai::signal_synchronized pair for a signal used from several threads.
+#define JAI_SIGNAL_PROPERTY_WITH_POLICY(signature, name, emitter, policy) \
 	private: \
 		inline static const int _jai_schema_reg_##name = []{ \
 			using OwnerT = _jai_owner_type; \
 			jai::type_registry::instance().for_type<OwnerT>().add( \
-				jai::property_meta{ #name, std::type_index(typeid(jai::signal_emitter<signature>)), true, false, true }); \
+				jai::property_meta{ #name, std::type_index(typeid(jai::signal_emitter<signature, policy>)), true, false, true }); \
 			return 0; \
 		}(); \
-		jai::signal_emitter<signature> emitter; \
-		jai::signal_property<signature> _jai_signalprop_##name{ property_mgr, #name, emitter }; \
+		jai::signal_emitter<signature, policy> emitter; \
+		jai::signal_property<signature, policy> _jai_signalprop_##name{ property_mgr, #name, emitter }; \
 	public: \
-		jai::signal<signature> name{ emitter }
+		jai::signal<signature, policy> name{ emitter }
 
+#define JAI_SIGNAL_PROPERTY_AS(signature, name, emitter) JAI_SIGNAL_PROPERTY_WITH_POLICY(signature, name, emitter, jai::signal_unsynchronized)
 #define JAI_SIGNAL_PROPERTY(signature, name) JAI_SIGNAL_PROPERTY_AS(signature, name, name##Signal)
+#define JAI_SYNCHRONIZED_SIGNAL_PROPERTY_AS(signature, name, emitter) JAI_SIGNAL_PROPERTY_WITH_POLICY(signature, name, emitter, jai::signal_synchronized)
+#define JAI_SYNCHRONIZED_SIGNAL_PROPERTY(signature, name) JAI_SYNCHRONIZED_SIGNAL_PROPERTY_AS(signature, name, name##Signal)
 
 #endif

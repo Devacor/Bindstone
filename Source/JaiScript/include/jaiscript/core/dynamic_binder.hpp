@@ -58,8 +58,6 @@ namespace serialization {
     template<typename Derived, typename... Bases> struct register_relation;
 }
 
-template<typename T> class signal_emitter;
-template<typename T> class signal;
 template<typename T> class observable_property;
 
 template<typename T>
@@ -179,11 +177,11 @@ namespace dynamic_binder_validation {
     template<typename T>
     struct is_signal_type : std::false_type {};
 
-    template<typename Sig>
-    struct is_signal_type<signal_emitter<Sig>> : std::true_type {};
+    template<typename Sig, typename Sync>
+    struct is_signal_type<signal_emitter<Sig, Sync>> : std::true_type {};
 
-    template<typename Sig>
-    struct is_signal_type<signal<Sig>> : std::true_type {};
+    template<typename Sig, typename Sync>
+    struct is_signal_type<signal<Sig, Sync>> : std::true_type {};
 
     // std::function members are callback hooks (script lambdas assign into them);
     // like signals, they are opaque to scripts and need no registration.

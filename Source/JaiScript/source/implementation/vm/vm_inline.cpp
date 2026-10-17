@@ -36,6 +36,7 @@ namespace {
 constexpr size_t k_inline_max_nodes = 512;   // the cloned body and the cloned statement together
 constexpr size_t k_inline_max_hoists = 8;    // calls hoisted out of one statement
 constexpr size_t k_inline_max_tree = 4096;   // the cloned bodies of one outermost graft and every graft compiled inside it, at any depth
+constexpr size_t k_inline_call_max_nodes = 64;   // a body that keeps a call grafts only while its clone costs about what the frame it saves does
 
 struct inline_context {
 	size_t slot_offset = 0;                                        // the callee's slots move above the caller's frame
@@ -1511,6 +1512,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		if (r) { dry.pins.push_back(r); }
 		(void)clone_body(fn->body->declarations, dry, true);
 		if (!dry.ok) { refused = dry.why ? dry.why : "a body the graft does not take"; return root; }
+		if (dry.calls && dry.nodes > k_inline_call_max_nodes) { refused = "a body that calls, larger than its frame costs"; return root; }
 	}
 	if (graft_nesting_++ == 0) { graft_tree_nodes_ = 0; }
 	const bool was_off = inlining_off_;

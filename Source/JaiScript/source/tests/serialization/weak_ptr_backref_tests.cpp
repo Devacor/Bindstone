@@ -15,6 +15,7 @@
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
 #include <jaiscript/serialization/polymorphic.hpp>
+#include <jaiscript/serialization/convenience.hpp>
 #include "serialization_roundtrip.hpp"
 
 #include <memory>
@@ -198,6 +199,84 @@ private:
     JAI_PROPERTY((std::string), tag, "");
 };
 
+struct ReadOrderItem {
+    int weight = 0;
+
+    template<typename Archive>
+    void save(Archive& ar) const { ar.serialize("weight", weight); }
+    template<typename Archive>
+    void load(Archive& ar) { ar.serialize("weight", weight); }
+};
+
+struct ReadOrderSharedPair {
+    std::shared_ptr<ReadOrderItem> inventory;
+    std::shared_ptr<ReadOrderItem> equipped;
+
+    template<typename Archive>
+    void save(Archive& ar) const {
+        ar.serialize("inventory", inventory);
+        ar.serialize("equipped", equipped);
+    }
+    template<typename Archive>
+    void load(Archive& ar) {
+        ar.serialize("inventory", inventory);
+        ar.serialize("equipped", equipped);
+    }
+};
+
+struct ReadOrderSharedPairReversed {
+    std::shared_ptr<ReadOrderItem> inventory;
+    std::shared_ptr<ReadOrderItem> equipped;
+
+    template<typename Archive>
+    void load(Archive& ar) {
+        ar.serialize("equipped", equipped);
+        ar.serialize("inventory", inventory);
+    }
+};
+
+struct ReadOrderSharedThenWeak {
+    std::shared_ptr<ReadOrderItem> owner;
+    std::weak_ptr<ReadOrderItem> watcher;
+
+    template<typename Archive>
+    void save(Archive& ar) const {
+        ar.serialize("owner", owner);
+        ar.serialize("watcher", watcher);
+    }
+    template<typename Archive>
+    void load(Archive& ar) {
+        ar.serialize("watcher", watcher);
+        ar.serialize("owner", owner);
+    }
+};
+
+struct ReadOrderWeakThenShared {
+    std::shared_ptr<ReadOrderItem> owner;
+    std::weak_ptr<ReadOrderItem> watcher;
+
+    template<typename Archive>
+    void save(Archive& ar) const {
+        ar.serialize("watcher", watcher);
+        ar.serialize("owner", owner);
+    }
+    template<typename Archive>
+    void load(Archive& ar) {
+        ar.serialize("owner", owner);
+        ar.serialize("watcher", watcher);
+    }
+};
+
+template<typename Out, typename In>
+Out reload_json_as(jai::engine& eng, const In& in) {
+    return jai::from_json<Out>(eng, jai::to_json(eng, in));
+}
+
+template<typename Out, typename In>
+Out reload_binary_as(jai::engine& eng, const In& in) {
+    return jai::from_binary_string<Out>(eng, jai::to_binary_string(eng, in));
+}
+
 class weak_ptr_backref_tests : public suite {
 public:
     weak_ptr_backref_tests() : suite("WeakPtr Backref Tests") {}
@@ -294,6 +373,54 @@ public:
 
             run("json", [](engine& e, const auto& v) { return roundtrip_json(e, v); });
             run("binary", [](engine& e, const auto& v) { return roundtrip_binary(e, v); });
+        });
+        test("a_back_reference_read_before_its_definition", [&]() {
+            auto eng = make_engine();
+            auto danglingText = [](auto&& load) {
+                try {
+                    load();
+                } catch (const serialization_error& e) {
+                    return std::string(e.what());
+                }
+                return std::string();
+            };
+            auto run = [&](const std::string& fmt, auto&& reloadShared, auto&& reloadReversed, auto&& reloadWeakFirstRead, auto&& reloadSharedFirstRead) {
+                auto item = std::make_shared<ReadOrderItem>();
+                item->weight = 7;
+
+                ReadOrderSharedPair pair;
+                pair.inventory = item;
+                pair.equipped = item;
+                auto inOrder = reloadShared(pair);
+                check(inOrder.inventory != nullptr && inOrder.inventory == inOrder.equipped, fmt + ": read in the written order, both fields share one object");
+
+                auto reversedError = danglingText([&]() { reloadReversed(pair); });
+                check(reversedError.find("Dangling shared_ptr reference") != std::string::npos, fmt + ": a $id back-reference read before its definition throws, got: " + reversedError);
+
+                ReadOrderSharedThenWeak sharedThenWeak;
+                sharedThenWeak.owner = item;
+                sharedThenWeak.watcher = item;
+                auto weakFirst = reloadWeakFirstRead(sharedThenWeak);
+                check(weakFirst.owner != nullptr && weakFirst.owner->weight == 7, fmt + ": the defining shared_ptr loads");
+                check(weakFirst.watcher.expired(), fmt + ": a $ref back-reference read before its definition loads empty");
+
+                ReadOrderWeakThenShared weakThenShared;
+                weakThenShared.owner = item;
+                weakThenShared.watcher = item;
+                auto weakDefinedError = danglingText([&]() { reloadSharedFirstRead(weakThenShared); });
+                check(weakDefinedError.find("Dangling shared_ptr reference") != std::string::npos, fmt + ": a $id read before the weak_ptr that defines the object throws, got: " + weakDefinedError);
+            };
+
+            run("json",
+                [&](const auto& v) { return reload_json_as<ReadOrderSharedPair>(*eng, v); },
+                [&](const auto& v) { return reload_json_as<ReadOrderSharedPairReversed>(*eng, v); },
+                [&](const auto& v) { return reload_json_as<ReadOrderSharedThenWeak>(*eng, v); },
+                [&](const auto& v) { return reload_json_as<ReadOrderWeakThenShared>(*eng, v); });
+            run("binary",
+                [&](const auto& v) { return reload_binary_as<ReadOrderSharedPair>(*eng, v); },
+                [&](const auto& v) { return reload_binary_as<ReadOrderSharedPairReversed>(*eng, v); },
+                [&](const auto& v) { return reload_binary_as<ReadOrderSharedThenWeak>(*eng, v); },
+                [&](const auto& v) { return reload_binary_as<ReadOrderWeakThenShared>(*eng, v); });
         });
     }
 };

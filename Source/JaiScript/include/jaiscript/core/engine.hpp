@@ -570,6 +570,16 @@ namespace jai {
         // engine's clock sample.
         // engine_elapsed() counts from the system clock's reading at construction, or from zero on a host
         // monotonic provider.
+        // The (modification time, size) stamp that execute_file, include, import and their caches compare to see a file
+        // change, and that a read is checked under (a stamp that moves during the read marks the text torn). An empty
+        // source selects the file system's; a source answers nullopt for a file it cannot stamp.
+        struct file_stamp {
+            uint64_t mtime = 0;
+            uint64_t size = 0;
+        };
+        using file_stamp_reading = std::function<std::optional<file_stamp>(const std::string& a_path)>;
+        void file_stamp_source(file_stamp_reading a_source);
+
         using clock_reading = std::function<std::chrono::nanoseconds()>;
         using clock_sleep = std::function<void(std::chrono::nanoseconds)>;
         void time_source(clock_reading monotonic, clock_reading wall, clock_sleep sleep = {});

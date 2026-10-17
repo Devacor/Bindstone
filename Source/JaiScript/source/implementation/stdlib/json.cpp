@@ -280,22 +280,33 @@ namespace stdlib {
             const std::string& type_name,
             const std::function<script_value(const script_value&)>& transform,
             const std::function<void(const script_value&)>& on_constructed = {}) {
-        if (!eng->get_class_definition(type_name)) return script_value(std::monostate{}, eng);
+        const std::shared_ptr<class_definition> class_def = eng->get_class_definition(type_name);
+        if (!class_def) return script_value(std::monostate{}, eng);
 
-        // the class's constructor, called as Name() would call it; its error (or throw) is the load's
+        // the class's default constructor, called as Name() would call it whatever its access; its error (or throw) is
+        // the load's. A load reconstitutes state, so a class no constructor builds without arguments is created without
+        // one: its field initializers run, then the archive's fields (as extend builds a layer)
         script_value ctor = eng->get_variable(type_name);
         if (!ctor.is_function()) return script_value(std::monostate{}, eng);
-        checked_result<script_value> constructed = [&]() {
-            engine::construction_access_waiver waiver(eng);
-            return ctor.as_function()({});
-        }();
-        if (!constructed) {
-            throw runtime_error(eng->format_error(constructed));
+        script_value instance(std::monostate{}, eng);
+        if (default_constructible(*class_def)) {
+            checked_result<script_value> constructed = [&]() {
+                engine::construction_access_waiver waiver(eng);
+                return ctor.as_function()({});
+            }();
+            if (!constructed) {
+                throw runtime_error(eng->format_error(constructed));
+            }
+            if (eng->backend_unwinding()) {
+                throw runtime_error(eng->backend_exception_text());
+            }
+            instance = std::move(constructed.value());
+        } else {
+            auto created = class_def->create_instance();
+            if (!created) return script_value(std::monostate{}, eng);
+            instance = script_value::make_class_object(*class_def, created, eng);
+            eng->get_execution_backend()->apply_field_initializers(created, class_def);
         }
-        if (eng->backend_unwinding()) {
-            throw runtime_error(eng->backend_exception_text());
-        }
-        script_value instance = std::move(constructed.value());
         std::shared_ptr<class_instance> inst = instance.is_object() ? instance.get_class_instance() : nullptr;
         if (!inst) return script_value(std::monostate{}, eng);
         if (on_constructed) { on_constructed(instance); }

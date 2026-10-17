@@ -18,6 +18,8 @@ The token is taken while the engine is live and never derived from a pointer tha
   the engine, so a text receiver connected after the engine died gets an expired token instead of reading the dead
   engine;
 - `receiver::script_engine(eng)` (an emitter re-arming its receivers, an archive load) rebinds a script receiver;
+- an observable property's script `on_change` (`property.on_change(fn)`, `on_<name>_change(fn)`, schema_binding.cpp)
+  is a C++ receiver wrapping the script function, so it binds the function's engine explicitly after its connect;
 - `convert_script_function` captures the token in the wrapper it returns.
 
 ## Emit
@@ -43,7 +45,12 @@ method and a text receiver, then destroys the engine and emits, calls a kept con
 emitter and the receivers in every order, reports no use-after-free on either backend. The Signals suite tests
 `script_receivers_skip_once_their_engine_is_destroyed`,
 `script_receivers_held_past_their_engine_and_emitter_release_quietly` and
-`a_kept_script_callback_throws_once_its_engine_is_destroyed` hold the contract (they crash without the token).
+`a_kept_script_callback_throws_once_its_engine_is_destroyed`, and Class Builder
+`observable_property_script_receivers_skip_once_their_engine_is_destroyed`, hold the contract (they crash without the
+token).
+
+A new place that wraps a script function in a C++ receiver must bind it the same way: the emit can only skip what it
+knows belongs to an engine.
 
 If a later change makes a release consult the engine (an engine-owned release queue, say), the payload must instead
 be leaked when the token is expired: hold it behind a pointer the receiver's destructor does not free once

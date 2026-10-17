@@ -1430,6 +1430,38 @@ public:
                 "the owner's on_<name>_change");
         });
 
+        // A host object whose observable property script watched may outlive the engine: a later change skips the script
+        // callbacks (they never reach the dead engine), C++ receivers still fire, and dropping the object runs no script
+        test("observable_property_script_receivers_skip_once_their_engine_is_destroyed", [this]() {
+            int noted = 0;
+            int host = 0;
+            auto cpp_obj = std::make_shared<ObservableOwnerTest>();
+            auto hostReceiver = cpp_obj->score.on_change.connect([&host](const int&, const int& a_new) { host = a_new; });
+            {
+                auto eng = make_engine();
+                dynamic_binder<ObservableOwnerTest>(*eng, "ObservableOwnerTest")
+                    .auto_bind()
+                    .constructor<>()
+                    .build();
+                eng->add_function("note", [&noted](int v) { noted += v; });
+                eng->add_global("obj", eng->make_object(cpp_obj));
+                eng->execute(R"(
+                    class Ear { ~Ear() { note(100000); } void hear(int v) { note(v); } }
+                    var held = new Ear();
+                    obj.score.on_change([held](auto old_val, auto new_val) { held.hear(new_val); });
+                    obj.on_score_change([held](auto old_val, auto new_val) { held.hear(new_val * 10); });
+                )");
+                cpp_obj->score = 2;
+                check_eq(22, noted, "both spellings run while the engine lives");
+            }
+            const int atDeath = noted;
+            cpp_obj->score = 3;
+            check_eq(atDeath, noted, "no script callback runs after its engine is destroyed");
+            check_eq(3, host, "C++ receivers still fire");
+            cpp_obj.reset();
+            check_eq(atDeath, noted, "dropping the object releases the callbacks without running script");
+        });
+
         test("observable_property_transparent_comparison", [this]() {
             // Test that observable properties work in comparisons (transparent wrapper)
             auto eng = make_engine();

@@ -44,6 +44,7 @@ void ensure_observable_ref_type_registered(engine& a_engine) {
 			};
 
 			auto recv = obs_prop->on_change.connect(std::move(cpp_callback));
+			recv->bind_engine(eng, engine_lifetime_token(eng));
 			prop_mgr->template track_receiver<void(const ValueT&, const ValueT&)>(recv);
 
 			return script_value(std::monostate{}, eng);
@@ -132,6 +133,7 @@ void bind_observable_change_method(engine& a_engine, class_definition& class_def
 			};
 
 			auto recv = obs_prop->on_change.connect(std::move(cpp_callback));
+			recv->bind_engine(eng, engine_lifetime_token(eng));
 			mgr.template track_receiver<void(const ValueT&, const ValueT&)>(recv);
 
 			return script_value(std::monostate{}, eng);

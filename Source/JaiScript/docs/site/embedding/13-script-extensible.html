@@ -189,6 +189,8 @@ object without owning it (a raw pointer for member access, a weak pointer for <c
 extraction), so the host stays free to destroy the object whenever it likes. If a script still holds the layer
 when the object dies, the layer is <em>retired</em>: its own script fields stay readable, but any C++ member
 access reports instead of dangling.</li>
+<li>An object that only the script owns at the moment of <code>extend</code> (one it made with <code>new</code>, or
+one the host has let go of) stays the script's: its layer owns it, as a hybrid the script constructed does.</li>
 <li>A type <strong>without</strong> the slot cannot own anything, so its extended layers are engine-owned (and keep
 the object alive) until <code>script_layer_detach</code>.</li>
 </ul>

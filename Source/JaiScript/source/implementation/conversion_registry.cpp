@@ -15,6 +15,15 @@ namespace jai {
 
 namespace detail {
 
+// the catalogued text, parked whole: every consumer of a native extraction error (symbolized or not) prints it as is
+template<typename R>
+JAI_NOINLINE R retired_layer_error(engine* eng, const class_instance& instance) {
+	const class_definition* def = instance.get_class_definition();
+	const std::string text = "Script layer '" + (def ? def->get_name() : std::string()) +
+		"' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object";
+	return R(make_error_code(runtime_error_code::script_layer_retired), "{0}", eng ? eng->park_error_text(text) : 0);
+}
+
 checked_result<void*> checked_native_pointer(engine* eng, uint64_t source_id, const std::type_info& target,
 	uint64_t target_id, void* pointer) {
 	if (!pointer) {
@@ -47,8 +56,7 @@ checked_result<void*> checked_native_reference(const script_value& value, const 
 			return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch), "Cannot extract C++ receiver from null");
 		}
 		if (instance->script_layer_retired()) {
-			return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch),
-				"Script layer was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object");
+			return retired_layer_error<checked_result<void*>>(value.get_engine(), *instance);
 		}
 		auto* native = instance->native();
 		const auto* native_holder = native ? native->peek_object_holder() : nullptr;
@@ -70,8 +78,7 @@ checked_result<std::shared_ptr<void>> checked_native_object(engine* eng, const s
 			return std::shared_ptr<void>{};
 		}
 		if (instance->script_layer_retired()) {
-			return checked_result<std::shared_ptr<void>>(make_error_code(runtime_error_code::type_mismatch),
-				"Script layer was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object");
+			return retired_layer_error<checked_result<std::shared_ptr<void>>>(eng, *instance);
 		}
 		auto* native = instance->native();
 		if (!native) {

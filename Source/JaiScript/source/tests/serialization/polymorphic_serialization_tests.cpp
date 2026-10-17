@@ -1831,6 +1831,47 @@ public:
             check_throws([&]() { eng->execute("kept.health"); }, "the detached layer is retired");
         });
 
+        // Ownership follows creation: an object the script constructed and then extends stays the script's, so its layer keeps it
+        // alive (the constructed-hybrid direction) instead of the object owning a layer nobody else keeps the object for
+        test("extending_a_script_constructed_object_keeps_it_alive", [&]() {
+            auto eng = hybrid_engine();
+            eng->execute(R"(
+                shared_ptr<SlotCreature> made = new SlotCreature();
+                made.health = 44;
+                extend(made, Slotkin);
+                made.chomp = 9;
+                var local = SlotCreature();
+                local.health = 45;
+                extend(local, Slotkin);
+            )");
+            check_eq((script_int)44, eng->execute("made.health").as_int(), "a new-made object survives its extend");
+            check_eq(std::string("slotkin"), eng->execute("made.speak()").as<std::string>(), "and speaks as its layer");
+            check_eq((script_int)9, eng->execute("made.chomp").as_int(), "its layer's fields stay");
+            check_eq((script_int)45, eng->execute("local.health").as_int(), "a constructed value survives its extend");
+            check_eq(std::string("slotkin"), eng->execute("local.speak()").as<std::string>(), "and speaks as its layer");
+            auto held = std::make_shared<SlotCreature>();
+            eng->add_global("shared_held", eng->make_object(held));
+            eng->execute("extend(shared_held, Slotkin);");
+            check(eng->script_layer(*held) != nullptr, "an object the host also owns still owns its layer");
+            held.reset();
+            check_throws([&]() { eng->execute("shared_held.health"); }, "and its layer retires when the host drops it");
+        });
+
+        test("a_retired_layer_reports_the_catalogued_text_once", [&]() {
+            auto eng = hybrid_engine();
+            auto slot = std::make_shared<SlotCreature>();
+            eng->add_global("dying", eng->extend(slot, "Slotkin"));
+            eng->execute("function bare_read() -> int { return dying.health; }");
+            slot.reset();
+            const std::string expected = "Script layer 'Slotkin' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object";
+            for (const char* source : {"dying.health", "dying.health = 3;", "bare_read()", "var h = dying.health;"}) {
+                std::string message;
+                try { eng->execute(source); } catch (const std::exception& e) { message = e.what(); }
+                check_eq(expected, message, std::string("the text for ") + source);
+            }
+            check_eq(std::string("slotkin"), eng->execute("dying.speak()").as<std::string>(), "a script override still answers on the retired layer");
+        });
+
         // S6/D7: the layer moves between engines through the name-keyed representation. Slot
         // types move on extend; map types move through the explicit detach + extend pair.
         test("script_layer_moves_between_engines", [&]() {

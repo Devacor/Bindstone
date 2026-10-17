@@ -1050,7 +1050,7 @@ namespace detail {
 							}
 							auto result = detail::checked_native_reference(*this, typeid(base_type));
 							if (!result) [[unlikely]] {
-								throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2());
+								throw_checked_error(engine_, result.message(), result.symbol_id(), result.symbol_id2());
 							}
 							return *static_cast<base_type*>(result.value());
 						}

@@ -248,7 +248,7 @@ particles (3.2&times;) and recursive fibonacci (2.8&times;). LuaJIT&#x27;s JIT r
 Lua&#x27;s time.</p>
 <h3 id="whole-games-measured">Whole games, measured<a class="hlink" href="#whole-games-measured" aria-label="link">&#8203;</a></h3>
 <p>Microbenchmarks reward fast statements; games reward fast <em>frames</em>. Four complete programs are
-measured end-to-end: DOOM, GLOOM, the demoreel&#x27;s OSSUARY scene and Gator Quest&#x27;s simulation. All four
+measured end-to-end: DOOM, GLOOM, the demoreel (the whole reel on both backends, and its OSSUARY scene against the other runtimes) and Gator Quest&#x27;s simulation. All four
 ship in <code>examples/</code> and reproduce on your machine; the Lua, Squirrel and Luau ports they are timed
 against live in the separate comparison harness. JaiDoom ships as
 source and downloads its game data on first launch: the freely distributable Freedoom IWADs and the DOOM
@@ -292,6 +292,14 @@ matches the interpreter&#x27;s reference. Six runs per layout in three interleav
 0.82&times; Lua 5.4.8&#x27;s time per frame and 0.36&times; Squirrel&#x27;s; six workers trace the rows in parallel
 for 4.9&times;. <code>skull_natural.jai</code>, the same scene written the way a user would write it, runs
 2.6% slower serial (141.9 ms/frame).</td></tr>
+<tr><td><strong>Demoreel, 2026-10-17</strong>: the whole reel headless (<code>jai_demoreel --smoke --workers 1</code>):
+seventeen truecolor scenes and their transitions at 100&times;40 cells (100&times;80 half-block pixels), 1,700 frames,
+seed 20260705, fixed dt 1/30. Five runs, each on a fresh copy of the executable, on one P core; the median is shown. MSVC
+Release with LTCG, Core Ultra 9 285HX.</td><td>
+JaiScript VM: <strong>12.1 ms/frame</strong> (best 11.2)<br>
+JaiScript interpreter: <strong>183.4 ms/frame</strong> (best 175.9)</td><td>Both backends print the same frame-stream hash
+(006d304a70772e5f) in every run. On one core the VM runs the whole reel 15&times; faster than the interpreter, inside the
+reel&#x27;s 33.3 ms frame budget at its 30 fps pacing.</td></tr>
 <tr><td><strong>Gator Quest, 2026-10-17</strong>: the smoke session&#x27;s simulation (mobiles, spawners,
 combat, items, quests, bots), seed 1, 6,000 ticks with 4 bots; the in-script tick loop is timed, world
 generation is not. One process per sample on one P core, five interleaved rounds.</td><td>

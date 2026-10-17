@@ -1016,4 +1016,10 @@ namespace jai {
 		}
 	}
 
+	// Instantiated once in the library (schema_binding.cpp) for the four archives, not in every TU with a save/load ladder
+	extern template void property_manager::save<serialization::json_archive_writer>(serialization::json_archive_writer&) const;
+	extern template void property_manager::save<serialization::binary_archive_writer>(serialization::binary_archive_writer&) const;
+	extern template void property_manager::load<serialization::json_archive_reader>(serialization::json_archive_reader&);
+	extern template void property_manager::load<serialization::binary_archive_reader>(serialization::binary_archive_reader&);
+
 } // namespace jai

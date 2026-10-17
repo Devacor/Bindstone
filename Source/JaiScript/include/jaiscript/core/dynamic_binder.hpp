@@ -23,6 +23,10 @@
 #include <jaiscript/signals/signal_view.hpp>
 #include <string>
 #include <memory>
+#include <optional>
+#include <array>
+#include <bit>
+#include <cstddef>
 #include <functional>
 #include <vector>
 #include <map>
@@ -112,13 +116,7 @@ namespace dynamic_binder_detail {
             throw serialization_error("Class definition not found: " + class_name);
         }
 
-        // Create a class_instance to hold it
-        auto instance = class_def->create_instance();
-
-        // Store the C++ object in the class_instance
-        instance->set_native(script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, eng));
-
-        // Return wrapped object
+        auto instance = detail::make_native_instance(*class_def, class_name, cpp_obj, eng);
         return script_value::make_object(class_name, instance, eng);
     }
 
@@ -256,6 +254,51 @@ namespace detail {
 		}
 		return static_cast<T*>(native_cast_or_throw(checked_native_reference(val, typeid(T), target_id), val.get_engine()));
 	}
+
+	// A bound class's own conversions (schema_binding.cpp); the name is the one bound, which a later rename does not change
+	struct bound_class_conversion {
+		std::shared_ptr<class_definition> def;
+		std::string name;
+
+		script_value wrap(std::shared_ptr<void> object, engine* eng) const;
+		std::shared_ptr<void> unwrap_shared(const script_value& v, const std::type_info& type) const;
+		void require_object(const script_value& v) const;
+	};
+
+	// One engine-wide "Signal" class serves every signature through the erased table; registered the first time any
+	// signal member binds
+	void ensure_signal_view_type_registered(engine& eng);
+	script_value make_signal_view(engine* eng, const signal_script_ops& ops);
+
+	// Every bound method's ordinary call is this one callable type over a static function of the binding, so a binding
+	// instantiates std::function once per TU instead of once per method
+	struct host_method_call {
+		checked_result<script_value> (*call)(const void* state, const std::vector<script_value>& args) = nullptr;
+		std::shared_ptr<const void> state;
+
+		checked_result<script_value> operator()(const std::vector<script_value>& args) const { return call(state.get(), args); }
+	};
+
+	// A member function pointer held as bytes, so the state's type depends only on the pointer's size
+	template<size_t N>
+	struct member_call_state {
+		std::array<std::byte, N> method;
+		engine* eng;
+		uint64_t native_type_id;
+	};
+
+	// A stateless callable (empty, trivially constructible and destructible) is made at the call instead of stored
+	struct stateless_call_state {
+		engine* eng;
+		uint64_t native_type_id;
+	};
+
+	template<typename Callable>
+	struct callable_call_state {
+		mutable Callable callable;
+		engine* eng;
+		uint64_t native_type_id;
+	};
 
 	template<typename ValueT>
 	script_value script_value_from_cpp(const ValueT& value, engine* eng) {
@@ -409,7 +452,7 @@ public:
             class_def_->set_auto_registered(false);
             class_def_->rename(class_name, type_id);
         } else {
-            class_def_ = std::make_shared<class_definition>(class_name, type_id, &engine_);
+            class_def_ = detail::make_class_definition(class_name, type_id, &engine_);
         }
 
         // Initialize serialization metadata
@@ -477,13 +520,7 @@ public:
                         cpp_obj = std::make_shared<T>();
                     }
 
-                    // Create a class_instance to hold it
-                    auto instance = class_def->create_instance();
-
-                    // Store the C++ object in the class_instance
-                    instance->set_native(script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ptr));
-
-                    // Return the class_instance wrapped in a value
+                    auto instance = detail::make_native_instance(*class_def, class_name, cpp_obj, engine_ptr);
                     return script_value::make_object(class_name, instance, engine_ptr);
                 } catch (const std::exception& e) {
                     std::cerr << "Error in zero-arg constructor: " << e.what() << std::endl;
@@ -505,13 +542,7 @@ public:
                     // Extract arguments using index-based unpacking via helper
                     auto cpp_obj = helper(args, engine_ptr);
 
-                    // Create a class_instance to hold it
-                    auto instance = class_def->create_instance();
-
-                    // Store the C++ object in the class_instance
-                    instance->set_native(script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ptr));
-
-                    // Return the class_instance wrapped in a value
+                    auto instance = detail::make_native_instance(*class_def, class_name, cpp_obj, engine_ptr);
                     return script_value::make_object(class_name, instance, engine_ptr);
                 } catch (const std::exception&) {
                     throw;
@@ -589,7 +620,13 @@ public:
         else { return false; }
     }
     template<typename Method>
-    struct lane_state { Method method; engine* eng; };
+    using lane_state = detail::member_call_state<sizeof(Method)>;
+    template<typename Callable>
+    static constexpr bool stateless_callable() {
+        return std::is_empty_v<Callable> && std::is_trivially_default_constructible_v<Callable> && std::is_trivially_destructible_v<Callable>;
+    }
+    template<typename Callable>
+    using call_state_t = std::conditional_t<stateless_callable<Callable>(), detail::stateless_call_state, detail::callable_call_state<Callable>>;
     // A lane argument as its parameter reads it. A const script_value& parameter takes the value out of the caller's slot (a
     // move, no copy): the method may call back into script, which can move the buffer that slot lives in. Every other lane
     // parameter converts to a value before the call.
@@ -611,10 +648,10 @@ public:
         detail::parameter_storage::scope_guard guard(st.eng, &storage);
         std::tuple<lane_held<Args>...> held{ lane_held<Args>(args[Is])... };
         if constexpr (std::is_void_v<R>) {
-            (obj->*st.method)(std::get<Is>(held).get(st.eng)...);
+            (obj->*std::bit_cast<Method>(st.method))(std::get<Is>(held).get(st.eng)...);
             out = script_value(std::monostate{}, st.eng);
         } else {
-            R result = (obj->*st.method)(std::get<Is>(held).get(st.eng)...);
+            R result = (obj->*std::bit_cast<Method>(st.method))(std::get<Is>(held).get(st.eng)...);
             out = detail::value_converter<R>::to(result, st.eng);
         }
     }
@@ -625,25 +662,21 @@ public:
         return true;
     }
     // a callable method's lane calls the callable the ordinary call holds (one object: a stateful functor's state is shared)
-    template<typename Callable>
-    struct callable_lane_state { std::shared_ptr<Callable> callable; engine* eng; };
     template<typename R, typename ArgsTuple, typename Callable, size_t... Is>
-    static bool self_lane_call(const void* state, void* self, const script_value& receiver, script_value* args, script_value& out, std::index_sequence<Is...>) {
-        const callable_lane_state<Callable>& st = *static_cast<const callable_lane_state<Callable>*>(state);
-        Callable& callable = *st.callable;
+    static bool self_lane_call(Callable& callable, engine* eng, void* self, const script_value& receiver, script_value* args, script_value& out, std::index_sequence<Is...>) {
         detail::parameter_storage storage;
-        detail::parameter_storage::scope_guard guard(st.eng, &storage);
+        detail::parameter_storage::scope_guard guard(eng, &storage);
         T& obj = *static_cast<T*>(self);
         std::tuple<lane_held<std::tuple_element_t<Is + 1, ArgsTuple>>...> held{ lane_held<std::tuple_element_t<Is + 1, ArgsTuple>>(args[Is])... };
         if constexpr (std::is_void_v<R>) {
-            callable(obj, std::get<Is>(held).get(st.eng)...);
-            out = script_value(std::monostate{}, st.eng);
+            callable(obj, std::get<Is>(held).get(eng)...);
+            out = script_value(std::monostate{}, eng);
         } else if constexpr (std::is_reference_v<R> && std::is_same_v<std::remove_reference_t<R>, T>) {
             out = receiver;   // before the call: the receiver is the caller's slot, which a callback may move
-            callable(obj, std::get<Is>(held).get(st.eng)...);
+            callable(obj, std::get<Is>(held).get(eng)...);
         } else {
-            R result = callable(obj, std::get<Is>(held).get(st.eng)...);
-            out = detail::value_converter<R>::to(result, st.eng);
+            R result = callable(obj, std::get<Is>(held).get(eng)...);
+            out = detail::value_converter<R>::to(result, eng);
         }
         return true;
     }
@@ -652,7 +685,73 @@ public:
     template<typename R, typename ArgsTuple, typename Callable, size_t N>
     static bool self_lane(const void* state, void* self, const script_value& receiver, script_value* args, size_t argc, script_value& out) {
         if (argc != N || !self_lane_args<R, ArgsTuple, Callable>(args, std::make_index_sequence<N>{})) { return false; }
-        return self_lane_call<R, ArgsTuple, Callable>(state, self, receiver, args, out, std::make_index_sequence<N>{});
+        const call_state_t<Callable>& st = *static_cast<const call_state_t<Callable>*>(state);
+        if constexpr (stateless_callable<Callable>()) {
+            Callable callable{};
+            return self_lane_call<R, ArgsTuple, Callable>(callable, st.eng, self, receiver, args, out, std::make_index_sequence<N>{});
+        } else {
+            return self_lane_call<R, ArgsTuple, Callable>(st.callable, st.eng, self, receiver, args, out, std::make_index_sequence<N>{});
+        }
+    }
+
+    template<bool IsConst, typename R, typename Method, typename... Args>
+    static checked_result<script_value> member_method_call(const void* state, const std::vector<script_value>& args) {
+        const lane_state<Method>& st = *static_cast<const lane_state<Method>*>(state);
+        if (args.empty()) {
+            throw runtime_error("Method called without 'this' object");
+        }
+        // first arg is 'this'
+        if (args.size() != sizeof...(Args) + 1) {
+            throw_binder_arity("Method expects ", sizeof...(Args), args.size() - 1);
+        }
+        T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], st.native_type_id);
+        if constexpr (IsConst) {
+            return dynamic_binder<T>::callConstMethodImpl(cpp_obj, std::bit_cast<Method>(st.method), args, std::index_sequence_for<Args...>{}, st.eng);
+        } else {
+            return dynamic_binder<T>::callMethodImpl(cpp_obj, std::bit_cast<Method>(st.method), args, std::index_sequence_for<Args...>{}, st.eng);
+        }
+    }
+
+    template<typename R, typename ArgsTuple, typename Callable>
+    static checked_result<script_value> callable_method_call(const void* state, const std::vector<script_value>& args) {
+        using traits = detail::function_traits<Callable>;
+        const call_state_t<Callable>& st = *static_cast<const call_state_t<Callable>*>(state);
+        // args[0] is the receiver, the rest are the script arguments
+        if (args.empty()) {
+            throw runtime_error("Method called without 'this' object");
+        }
+        if (args.size() != traits::arity) {
+            throw_binder_arity("Method expects ", traits::arity - 1, args.size() - 1);
+        }
+        T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], st.native_type_id);
+        if constexpr (stateless_callable<Callable>()) {
+            Callable callable{};
+            return callLambdaWithSelf<R, ArgsTuple>(callable, cpp_obj, args, std::make_index_sequence<traits::arity>{}, st.eng);
+        } else {
+            return callLambdaWithSelf<R, ArgsTuple>(st.callable, cpp_obj, args, std::make_index_sequence<traits::arity>{}, st.eng);
+        }
+    }
+
+    template<bool IsConst, typename R, typename Method, typename... Args, typename Requirements>
+    dynamic_binder& bind_member_method(const std::string& name, Method method, Requirements required) {
+        constexpr uint64_t writeback = detail::host_writeback_mask<Args...>();
+        using State = lane_state<Method>;
+        auto state = std::make_shared<const State>(State{ std::bit_cast<std::array<std::byte, sizeof(Method)>>(method), &engine_, class_def_->get_type_id() });
+
+        // Add method to the class definition (for object.method() calls), carrying the C++
+        // parameter signature so same-arity overloads (e.g. set(float...) vs set(int...)) resolve
+        // by argument type instead of the last registration silently winning.
+        const bool unguarded = lane_unguarded(required);
+        class_def_->add_method(name, writeback_tagged<writeback>(engine_.guard_function(detail::host_method_call{ &member_method_call<IsConst, R, Method, Args...>, state }, std::move(required))), sizeof...(Args),
+            std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... }, result_info<R>());
+        if constexpr (lane_result<R>() && (lane_param<Args>() && ...)) {
+            if (unguarded) {
+                class_def_->add_native_lane(engine_.symbolize(name), &member_lane<std::conditional_t<IsConst, const T, T>, R, Method, Args...>, std::move(state));
+                return *this;
+            }
+        }
+        class_def_->withdraw_native_lane(engine_.symbolize(name));
+        return *this;
     }
     template<typename ArgsTuple, size_t... Is>
     static constexpr bool self_lane_params(std::index_sequence<Is...>) { return (lane_param<std::tuple_element_t<Is + 1, ArgsTuple>>() && ...); }
@@ -660,76 +759,13 @@ public:
     // Add method binding - member function pointer version
     template<typename R, typename... Args, typename Requirements = privilege>
     dynamic_binder& method(const std::string& name, R(T::*method)(Args...), Requirements required = privilege::none) {
-        constexpr uint64_t writeback = detail::host_writeback_mask<Args...>();
-        auto method_func = [method, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
-            if (args.empty()) {
-                throw runtime_error("Method called without 'this' object");
-            }
-            
-            // Validate argument count (first arg is 'this', so we need sizeof...(Args) + 1 total)
-            if (args.size() != sizeof...(Args) + 1) {
-                throw_binder_arity("Method expects ", sizeof...(Args), args.size() - 1);
-            }
-
-            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
-
-            // Call the method with unpacked arguments
-            return dynamic_binder<T>::callMethodImpl(cpp_obj, method, args, std::index_sequence_for<Args...>{}, engine_ptr);
-        };
-
-        // Add method to the class definition (for object.method() calls), carrying the C++
-        // parameter signature so same-arity overloads (e.g. set(float...) vs set(int...)) resolve
-        // by argument type instead of the last registration silently winning.
-        const bool unguarded = lane_unguarded(required);
-        class_def_->add_method(name, writeback_tagged<writeback>(engine_.guard_function(std::move(method_func), std::move(required))), sizeof...(Args),
-            std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... }, result_info<R>());
-        using Method = R(T::*)(Args...);
-        if constexpr (lane_result<R>() && (lane_param<Args>() && ...)) {
-            if (unguarded) {
-                class_def_->add_native_lane(engine_.symbolize(name), &member_lane<T, R, Method, Args...>,
-                    std::make_shared<const lane_state<Method>>(lane_state<Method>{ method, &engine_ }));
-                return *this;
-            }
-        }
-        class_def_->withdraw_native_lane(engine_.symbolize(name));
-        return *this;
+        return bind_member_method<false, R, R(T::*)(Args...), Args...>(name, method, std::move(required));
     }
 
     // Add const method binding
     template<typename R, typename... Args, typename Requirements = privilege>
     dynamic_binder& method(const std::string& name, R(T::*method)(Args...) const, Requirements required = privilege::none) {
-        constexpr uint64_t writeback = detail::host_writeback_mask<Args...>();
-        auto method_func = [method, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
-            if (args.empty()) {
-                throw runtime_error("Method called without 'this' object");
-            }
-
-            // Validate argument count (first arg is 'this', so we need sizeof...(Args) + 1 total)
-            if (args.size() != sizeof...(Args) + 1) {
-                throw_binder_arity("Method expects ", sizeof...(Args), args.size() - 1);
-            }
-
-            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
-
-            // Call the method with unpacked arguments
-            return dynamic_binder<T>::callConstMethodImpl(cpp_obj, method, args, std::index_sequence_for<Args...>{}, engine_ptr);
-        };
-
-        // Add method to the class definition with its C++ parameter signature (see non-const
-        // overload) so same-arity const overloads resolve by argument type.
-        const bool unguarded = lane_unguarded(required);
-        class_def_->add_method(name, writeback_tagged<writeback>(engine_.guard_function(std::move(method_func), std::move(required))), sizeof...(Args),
-            std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... }, result_info<R>());
-        using Method = R(T::*)(Args...) const;
-        if constexpr (lane_result<R>() && (lane_param<Args>() && ...)) {
-            if (unguarded) {
-                class_def_->add_native_lane(engine_.symbolize(name), &member_lane<const T, R, Method, Args...>,
-                    std::make_shared<const lane_state<Method>>(lane_state<Method>{ method, &engine_ }));
-                return *this;
-            }
-        }
-        class_def_->withdraw_native_lane(engine_.symbolize(name));
-        return *this;
+        return bind_member_method<true, R, R(T::*)(Args...) const, Args...>(name, method, std::move(required));
     }
 
     // Add lambda/callable method binding
@@ -752,36 +788,29 @@ public:
             return method(name, receiver_ignoring<typename traits::return_type>(
                 std::make_shared<CallableType>(std::forward<Callable>(callable)), static_cast<args_tuple*>(nullptr)), required);
         } else {
-            // the one callable object the ordinary call and the direct lane both invoke
-            auto owned = std::make_shared<CallableType>(std::forward<Callable>(callable));
             using R = typename traits::return_type;
-            std::shared_ptr<const callable_lane_state<CallableType>> lane;
-            if constexpr (self_lane_params<args_tuple>(std::make_index_sequence<traits::arity - 1>{}) &&
-                          (lane_result<R>() || std::is_same_v<std::remove_reference_t<R>, T>)) {
-                if (lane_unguarded(required)) { lane = std::make_shared<const callable_lane_state<CallableType>>(callable_lane_state<CallableType>{ owned, &engine_ }); }
-            }
-
+            constexpr size_t script_arity = traits::arity - 1;
             constexpr uint64_t writeback = detail::tuple_writeback_mask<args_tuple, 1>::value;
-            auto method_func = [owned, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
-                CallableType& callable = *owned;
-                // args[0] is the receiver, the rest are the script arguments
-                if (args.empty()) {
-                    throw runtime_error("Method called without 'this' object");
-                }
-                if (args.size() != traits::arity) {
-                    throw_binder_arity("Method expects ", traits::arity - 1, args.size() - 1);
-                }
-                T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
-                return callLambdaWithSelf<R, args_tuple>(callable, cpp_obj, args, std::make_index_sequence<traits::arity>{}, engine_ptr);
-            };
+            constexpr bool lane_shaped = self_lane_params<args_tuple>(std::make_index_sequence<script_arity>{}) &&
+                                         (lane_result<R>() || std::is_same_v<std::remove_reference_t<R>, T>);
+            // the one state the ordinary call and the direct lane both read (a stateful functor's state is shared)
+            std::shared_ptr<const void> state;
+            if constexpr (stateless_callable<CallableType>()) {
+                state = std::make_shared<const detail::stateless_call_state>(detail::stateless_call_state{ &engine_, class_def_->get_type_id() });
+            } else {
+                state = std::make_shared<const detail::callable_call_state<CallableType>>(
+                    detail::callable_call_state<CallableType>{ std::forward<Callable>(callable), &engine_, class_def_->get_type_id() });
+            }
+            const bool lane = lane_shaped && lane_unguarded(required);
 
             // the C++ parameter signature after the self parameter, so same-arity lambda overloads resolve by argument type
-            constexpr size_t script_arity = traits::arity - 1;
-            class_def_->add_method(name, writeback_tagged<writeback>(engine_.guard_function(std::move(method_func), std::move(required))), script_arity,
+            class_def_->add_method(name, writeback_tagged<writeback>(engine_.guard_function(detail::host_method_call{ &callable_method_call<R, args_tuple, CallableType>, state }, std::move(required))), script_arity,
                 param_sig_from_tuple<args_tuple, 1, script_arity>(), result_info<R>());
-            if (lane) {
-                class_def_->add_native_lane(engine_.symbolize(name), &self_lane<R, args_tuple, CallableType, script_arity>, std::move(lane));
-                return *this;
+            if constexpr (lane_shaped) {
+                if (lane) {
+                    class_def_->add_native_lane(engine_.symbolize(name), &self_lane<R, args_tuple, CallableType, script_arity>, std::move(state));
+                    return *this;
+                }
             }
             class_def_->withdraw_native_lane(engine_.symbolize(name));
             return *this;
@@ -917,7 +946,7 @@ private:
         // Signal members may hand out the generic view at read time — make
         // sure its type exists before any getter can run.
         if constexpr (dynamic_binder_validation::is_signal_type<P>::value) {
-            ensure_signal_view_type_registered();
+            detail::ensure_signal_view_type_registered(engine_);
         }
         // Validate that property type is registered (unless explicitly skipped)
         if constexpr (dynamic_binder_validation::needs_registration_check<P>()) {
@@ -975,8 +1004,7 @@ private:
                 if (engine_ptr->template has_registered_class<P>()) {
                     return convert_reference_with_registry(cpp_obj->*member, engine_ptr);
                 }
-                return engine_ptr->make_object(std::make_shared<signal_script_ops>(
-                    make_signal_script_ops(cpp_obj->*member)));
+                return detail::make_signal_view(engine_ptr, make_signal_script_ops(cpp_obj->*member));
             }
             else if constexpr (std::is_class_v<P> &&
                                !math_adapted<P> &&
@@ -1476,38 +1504,19 @@ private:
         }
     }
 
-    // One engine-wide "Signal" class serves every signature through the erased
-    // table; registered lazily the first time any signal member binds.
-    void ensure_signal_view_type_registered() {
-        if (engine_.is_type_registered("Signal")) { return; }
-        engine* eng = &engine_;
-        dynamic_binder<signal_script_ops> builder(engine_, "Signal");
-        builder.method("connect", [eng](signal_script_ops& self, const std::string& id, const script_value& cb) {
-            if (!self.valid()) { throw runtime_error("Signal view is not backed by a live signal"); }
-            self.connect_fn(self.source, id, cb, eng);
-        });
-        builder.method("disconnect", [](signal_script_ops& self, const std::string& id) {
-            if (self.disconnect_fn != nullptr) { self.disconnect_fn(self.source, id); }
-        });
-        builder.method("connected", [](signal_script_ops& self, const std::string& id) {
-            return self.connected_fn != nullptr && self.connected_fn(self.source, id);
-        });
-        builder.build();
-    }
-
     // JAI_SIGNAL_PROPERTY schema entries become read-only properties returning
     // the generic Signal view over the live property's erased connect table.
     // Lookup is find_reflected_property (virtual, whole chain), so inherited
     // signal properties resolve against the most-derived live object.
     void bind_signal_property_view(const std::string& prop_name) {
-        ensure_signal_view_type_registered();
+        detail::ensure_signal_view_type_registered(engine_);
         engine* eng = &engine_;
         auto getter = [prop_name, eng](T& self) -> script_value {
             if constexpr (auto_bind_concepts::is_property_owner<T>) {
                 if (jai::property_base* base = self.find_reflected_property(prop_name)) {
                     signal_script_ops ops;
                     if (base->signal_ops(ops) && ops.valid()) {
-                        return eng->make_object(std::make_shared<signal_script_ops>(ops));
+                        return detail::make_signal_view(eng, ops);
                     }
                 }
             }
@@ -1569,13 +1578,7 @@ public:
                         cpp_obj = std::make_shared<T>();
                     }
 
-                    // Create a class_instance to hold it
-                    auto instance = class_def->create_instance();
-
-                    // Store the C++ object in the class_instance
-                    instance->set_native(script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ptr));
-
-                    // Return the class_instance wrapped in a value
+                    auto instance = detail::make_native_instance(*class_def, class_name, cpp_obj, engine_ptr);
                     return script_value::make_object(class_name, instance, engine_ptr);
                 });
             }
@@ -1597,117 +1600,20 @@ public:
         engine_.get_serialization_registry().register_class(class_name_, serialization_metadata_);
         
         
+        auto registry = engine_.get_conversion_registry();
+        auto bound = std::make_shared<detail::bound_class_conversion>(detail::bound_class_conversion{class_def_, class_name_});
         // Handle conversions also work for abstract bases; no T is constructed here.
-        {
-            engine_.add_custom_conversion<std::shared_ptr<T>>(
-                // From script_value to shared_ptr<T>
-				[class_name = class_name_, class_def = class_def_](const script_value& v) -> std::shared_ptr<T> {
-					if (v.is_null()) {
-						return nullptr;
-					}
-					auto holder = v.get_object_holder();
-					if (!holder) {
-						throw_concat("Cannot convert script_value to shared_ptr<", class_name, ">");
-					}
-					return std::static_pointer_cast<T>(detail::native_cast_or_throw(
-						detail::checked_native_object(v.get_engine(), *holder, typeid(T), class_def->get_type_id()), v.get_engine()));
-				},
-                // From shared_ptr<T> to script_value
-                [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const std::shared_ptr<T>& obj) -> script_value {
-                    if (!obj) {
-                        return script_value(std::monostate{}, engine_ptr);
-                    }
-                    
-                    // Create a class_instance to wrap the object
-                    auto instance = class_def->create_instance();
-                    instance->set_native(
-                        script_value::make_cpp_object(class_name, class_def->get_type_id(), std::static_pointer_cast<void>(obj), engine_ptr));
-                    
-                    // Return wrapped in script_value
-                    return script_value::make_object(class_name, std::static_pointer_cast<void>(instance), engine_ptr);
-                }
-            );
-        }
-        
-        // Register converters for copyable types only (used for value conversions requiring copy)
-        // Non-copyable types like property_owner classes must use shared_ptr conversions instead
+        registry->register_entry(conversions::type_id::of<std::shared_ptr<T>>(), {&shared_from_script, &shared_to_script, &engine_, bound});
+
+        // Value conversions need a copy; a default-constructible class replaces any earlier registration, any other keeps it
         if constexpr (!std::is_abstract_v<T> && std::is_copy_constructible_v<T>) {
-            // Also register with conversion registry for container conversions
-            auto custom_conv = engine_.get_conversion_registry();
-            if (custom_conv && !custom_conv->template has_conversion<T>()) {
-                custom_conv->template register_conversion<T>(
-                    // From script_value to T
-					[class_def = class_def_](const script_value& v) -> T {
-						auto holder = v.get_object_holder();
-						if (!holder) {
-							throw_concat("Cannot convert non-object to ", class_def->get_name());
-						}
-						return *detail::extract_cpp_object_ptr<T>(v, class_def->get_type_id());
-					},
-                    // From T to script_value
-                    [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const T& obj) -> script_value {
-                        // Create a class_instance using the class definition
-                        auto instance = class_def->create_instance();
-
-                        // Create a shared_ptr to the C++ object (by copying)
-                        auto cpp_obj = std::make_shared<T>(obj);
-
-                        // Store the C++ object in the class_instance
-                        instance->set_native(
-                            script_value::make_cpp_object(class_name,
-                                class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_ptr));
-
-                        // Return the class_instance wrapped in a value
-                        return script_value::make_object(class_name,
-                            std::static_pointer_cast<void>(instance), engine_ptr);
-                    }
-                );
+            if constexpr (std::is_default_constructible_v<T>) {
+                registry->register_entry(conversions::type_id::of<T>(), {&value_from_script, &value_to_script, &engine_, bound});
+            } else if (!registry->template has_conversion<T>()) {
+                registry->register_entry(conversions::type_id::of<T>(), {&checked_value_from_script, &value_to_script, &engine_, bound});
             }
         }
 
-        // Shared ownership does not require T to be concrete or copyable.
-        {
-            auto custom_conv = engine_.get_conversion_registry();
-
-            // Register std::shared_ptr<T> conversion
-            if (!custom_conv->template has_conversion<std::shared_ptr<T>>()) {
-                custom_conv->template register_conversion<std::shared_ptr<T>>(
-                    // From script_value to std::shared_ptr<T>
-				[class_name = class_name_, class_def = class_def_](const script_value& v) -> std::shared_ptr<T> {
-					if (v.is_null()) {
-						return nullptr;
-					}
-					auto holder = v.get_object_holder();
-					if (!holder) {
-						throw_concat("Cannot convert script_value to shared_ptr<", class_name, ">");
-					}
-					return std::static_pointer_cast<T>(detail::native_cast_or_throw(
-						detail::checked_native_object(v.get_engine(), *holder, typeid(T), class_def->get_type_id()), v.get_engine()));
-				},
-                    // From std::shared_ptr<T> to script_value
-                    [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const std::shared_ptr<T>& obj) -> script_value {
-                        if (!obj) {
-                            return script_value(std::monostate{}, engine_ptr); // null
-                        }
-                        
-                        // Create a class_instance using the class definition
-                        auto instance = class_def->create_instance();
-                        
-                        // Store the shared_ptr directly (no copy needed)
-                        instance->set_native(
-                            script_value::make_cpp_object(class_name,
-                                class_def->get_type_id(), std::static_pointer_cast<void>(obj), engine_ptr));
-                        
-                        // Return the class_instance wrapped in a value
-                        return script_value::make_object(class_name, 
-                            std::static_pointer_cast<void>(instance), engine_ptr);
-                    }
-                );
-            }
-        }
-        
-        // Automatically register container conversions for this type
-        // Do this AFTER registering the base type conversion
         register_container_conversions();
     }
     
@@ -1773,25 +1679,6 @@ private:
             // Get the conversion manager for high-level API
             auto conv_mgr = engine_.get_conversion_manager();
             
-            // Register base type conversion
-            if constexpr (std::is_copy_constructible_v<T> && std::is_default_constructible_v<T>) {
-                engine_.add_custom_conversion<T>(
-                    // From script_value to T
-					[class_def = class_def_](const script_value& v) -> T {
-						return *detail::extract_cpp_object_ptr<T>(v, class_def->get_type_id());
-					},
-                    // From T to script_value (create a class_instance)
-                    [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const T& obj) -> script_value {
-                        auto instance = class_def->create_instance();
-                        auto cpp_obj = std::make_shared<T>(obj);
-                        instance->set_native(
-                            script_value::make_cpp_object(class_name,
-                                class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_ptr));
-                        return script_value::make_object(class_name, instance, engine_ptr);
-                    }
-                );
-            }
-            
             // Register vector conversions
             // Only register value-type vector if T is copyable
             if constexpr (std::is_copy_constructible_v<T>) {
@@ -1836,6 +1723,26 @@ private:
         }
     }
     
+    static const detail::bound_class_conversion& bound_of(const conversions::conversion_entry& entry) {
+        return *static_cast<const detail::bound_class_conversion*>(entry.state.get());
+    }
+    static void shared_from_script(const conversions::conversion_entry& entry, const script_value& v, void* out) {
+        static_cast<std::optional<std::shared_ptr<T>>*>(out)->emplace(std::static_pointer_cast<T>(bound_of(entry).unwrap_shared(v, typeid(T))));
+    }
+    static script_value shared_to_script(const conversions::conversion_entry& entry, const void* value) {
+        return bound_of(entry).wrap(std::static_pointer_cast<void>(*static_cast<const std::shared_ptr<T>*>(value)), entry.eng);
+    }
+    static void value_from_script(const conversions::conversion_entry& entry, const script_value& v, void* out) {
+        static_cast<std::optional<T>*>(out)->emplace(*detail::extract_cpp_object_ptr<T>(v, bound_of(entry).def->get_type_id()));
+    }
+    static void checked_value_from_script(const conversions::conversion_entry& entry, const script_value& v, void* out) {
+        bound_of(entry).require_object(v);
+        value_from_script(entry, v, out);
+    }
+    static script_value value_to_script(const conversions::conversion_entry& entry, const void* value) {
+        return bound_of(entry).wrap(std::make_shared<T>(*static_cast<const T*>(value)), entry.eng);
+    }
+
     // A host callable with non-const T& parameters carries its mask for the argument capture (host_writeback_function)
     template<uint64_t Mask>
     static script_function writeback_tagged(script_function fn) {

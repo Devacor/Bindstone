@@ -115,6 +115,15 @@ namespace conversions {
     throw std::runtime_error(std::string(prefix) + type_name);
 }
 
+void conversion_registry::register_entry(type_id type, conversion_entry entry) {
+    conversions_.insert_or_assign(type, std::move(entry));
+}
+
+const conversion_entry* conversion_registry::find_entry(type_id type) const {
+    auto it = conversions_.find(type);
+    return it != conversions_.end() ? &it->second : nullptr;
+}
+
 int conversion_registry::get_builtin_conversion_cost(script_value_type from, script_value_type to) const {
     using t = script_value_type;
     if (from == to) return 0;

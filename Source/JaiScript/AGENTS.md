@@ -100,6 +100,11 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
 - Binding instantiations, not header parsing, dominate consumer compile time: keep binder thunks and container
   conversions out of headers that do not need them (schema-driven primitive property binders live out of line in
   `schema_binding.cpp`).
+- A binding pays only for what is particular to it. Work that does not depend on the bound type (class and instance
+  creation, `class_definition` registration, the `Signal` view, the stdlib) is defined in the library, not in a header.
+  A stored callable is one erased type over a static function (`detail::host_method_call`, registry
+  `conversion_entry`), never a fresh lambda inside a `std::function`; a bound type's `std::vector`/`std::map` shapes
+  register eagerly and compile only where a caller names them. Measure a change by object size per bound item.
 - `signals/signal_decl.hpp` does not include `signal_impl.hpp`; headers that only declare signal members include
   `signal_decl.hpp`, and every `.cpp` that emits includes `signal.hpp` (or `signal_impl.hpp`): an emit instantiates the
   script-receiver path, so `signal_decl.hpp` alone leaves it unresolved at link time.

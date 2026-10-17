@@ -30,9 +30,14 @@ namespace conversions {
 
 // type_id is already defined in conversion_registry_fwd.hpp
 
-// Conversion function signatures
-using from_script_func = std::function<void*(const script_value&)>;
-using to_script_func = std::function<script_value(const void*)>;
+// A registration is two function pointers over shared state, so registering a type instantiates no std::function; null
+// pointers mark a standard std::vector/std::map shape, converted by the code of the caller that names the type
+struct conversion_entry {
+    void (*from_script)(const conversion_entry& entry, const script_value& v, void* out) = nullptr;   // emplaces into the caller's std::optional<T>
+    script_value (*to_script)(const conversion_entry& entry, const void* value) = nullptr;
+    engine* eng = nullptr;
+    std::shared_ptr<void> state;
+};
 
 // Registry for custom conversions
 class conversion_registry {
@@ -71,9 +76,13 @@ public:
         std::function<script_value(const T&)> to_func
     );
     
+    // Replaces any earlier registration for the type
+    void register_entry(type_id type, conversion_entry entry);
+    const conversion_entry* find_entry(type_id type) const;
+
     // Check if conversion exists for type T
     template<typename T>
-    bool has_conversion() const;
+    bool has_conversion() const { return find_entry(type_id::of<T>()) != nullptr; }
     
     // Convert from script_value to T using registered conversion
     template<typename T>
@@ -107,10 +116,7 @@ public:
     }
     
 private:
-    // Custom type conversions
-    std::map<type_id, from_script_func> from_conversions_;
-    std::map<type_id, to_script_func> to_conversions_;
-    std::map<type_id, std::function<void(void*)>> destructors_;
+    std::map<type_id, conversion_entry> conversions_;
     
     // Custom object extractor
     extractor_func custom_extractor_;

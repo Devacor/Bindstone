@@ -444,9 +444,9 @@ public:
             check_eq(std::string("[1,2][1,2,7] {\"$map\":[[1,[1,2]]]} [1,2] [1][1,2]"), result.as<std::string>());
         });
 
-        // A container the checker cannot see that is no map at run time: the names read the element's members as spelled, so a
-        // coroutine yielding pairs binds their halves and an array element raises the member read's text; a yield inside the
-        // loop resumes it
+        // A container the checker cannot see that is no map at run time: an object element's halves are its members first and
+        // second (a coroutine yielding pairs binds them); any other element raises the binding's own text, which names what the
+        // user wrote; an empty container binds nothing; a yield inside the loop resumes it
         test("structured_binding_over_a_non_map", [this]() {
             auto engine = make_engine();
             stdlib::register_all(engine);
@@ -455,7 +455,14 @@ public:
                 string out = "";
                 for (auto [k, v] : pairs()) { out += to_string(k) + to_string(v) + " "; }
                 var arr = [[1, 2]];
-                try { for (auto [k, v] : arr) { out += "unreached"; } } catch (e) { out += e + " "; }
+                try { for (auto [k, v] : arr) { out += "unreached"; } } catch (e) { out += e + " | "; }
+                try { for (auto& [key, value] : arr) { out += "unreached"; } } catch (e) { out += e + " | "; }
+                coroutine nulls() { yield null; }
+                try { for (auto [a, b] : nulls()) { out += "unreached"; } } catch (e) { out += e + " | "; }
+                var text = "ab";
+                try { for (auto [x, y] : text) { out += "unreached"; } } catch (e) { out += e + " | "; }
+                var none = [];
+                for (auto [x, y] : none) { out += "unreached"; }
                 coroutine walk(var m) {
                     for (auto [k, v] : m) { yield k + "=" + to_string(v); }
                     for (auto& [k, v] : m) { v += 100; yield k; }
@@ -465,8 +472,9 @@ public:
                 for (auto s : walk(m)) { out += s + " "; }
                 out + to_json(m)
             )");
-            check_eq(std::string("12 34 'first' is a method of array; call it with entry#.first() or wrap the call in a lambda a=1 b=2 a b a101 b102 {\"a\":1,\"b\":2}"),
-                     result.as<std::string>());
+            const std::string tail = ": a structured binding takes a map entry or a value with first and second | ";
+            check_eq("12 34 Cannot bind array to [k, v]" + tail + "Cannot bind array to [key, value]" + tail + "Cannot bind null to [a, b]" + tail +
+                     "Cannot bind char to [x, y]" + tail + "a=1 b=2 a b a101 b102 {\"a\":1,\"b\":2}", result.as<std::string>());
         });
 
         // The bindings' C++ meanings in every spelling, at program scope and in a function: by value the names hold the

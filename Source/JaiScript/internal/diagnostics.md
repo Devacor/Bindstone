@@ -464,7 +464,8 @@ unit already defined as the warning `'f' redefines the function defined in <file
 | `Cannot reduce an empty array without an initial value` | `reduce(f)` on an empty array (`array_empty`) |
 | `'??=' needs a variable, a member or an element whose index runs no code; store anything else in a local first` | parse error: `a[i++] ??= v`, `f().x ??= v` (the target is read, then perhaps stored) |
 | `A map entry binds two names, the key and the value: for (auto [k, v] : m)` | parse error: another count of names |
-| `a structured binding takes a map's entries, its key and value: cannot bind 'array' to [k, v]` | checker (load error) when the container's static type is not a map; a dynamic container that is not a map raises the member text of `.first` when the loop runs |
+| `a structured binding takes a map's entries, its key and value: cannot bind 'array' to [k, v]` | checker (load error) when the container's static type is not a map; the binding is spelled with the names written |
+| `Cannot bind array to [k, v]: a structured binding takes a map entry or a value with first and second` | a container the checker cannot see that is not a map, at an element that is no object or handle (`type_mismatch`); an object's halves are its members `first` and `second` |
 
 ## Host call failures
 

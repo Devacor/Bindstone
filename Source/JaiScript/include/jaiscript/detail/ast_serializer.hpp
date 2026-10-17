@@ -1243,7 +1243,7 @@ namespace jai::detail {
                     auto s = std::make_shared<range_for_stmt>(loc, et, vname, vid, is_ref, is_const, cont, body);
                     s->variable_slot_index = vslot;
                     track_slot(vslot, vid, false, true);
-                    stamp_map_entry_bindings(*s);
+                    stamp_map_entry_bindings(*s, symbols_);
                     result = s;
                     break;
                 }

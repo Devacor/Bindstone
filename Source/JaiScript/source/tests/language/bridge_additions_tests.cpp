@@ -509,7 +509,7 @@ public:
             stdlib::register_all(*e);
             auto report = e->check("array<int> a = [1]; for (auto [x, y] : a) { }");
             check_eq((size_t)1, report.error_count());
-            check_true(!report.diagnostics.empty() && contains(report.diagnostics[0].message, "a structured binding takes a map's entries"));
+            check_true(!report.diagnostics.empty() && contains(report.diagnostics[0].message, "a structured binding takes a map's entries, its key and value: cannot bind 'array<int>' to [x, y]"));
             check_eq((size_t)0, e->check("map<string, int> m = {\"a\": 1}; for (auto [k, v] : m) { for (auto [k2, v2] : m) { int s = v + v2; } }").diagnostics.size());
         });
 

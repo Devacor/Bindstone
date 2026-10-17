@@ -14,6 +14,7 @@
 #include <jaiscript/detail/return_conv.hpp>
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
+#include <jaiscript/detail/map_entry_binding.hpp>
 #include <algorithm>
 #include <cassert>
 #include <functional>
@@ -1809,6 +1810,7 @@ void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 	}
 	proto.is_reference = stmt->is_reference;
 	proto.binds_map_entry = stmt->binds_map_entry;
+	if (stmt->binds_map_entry) { proto.binding_text = detail::map_entry_binding_text(*stmt, *symbolizer_); }
 	if (stmt->element_type) {
 		proto.element_type = stmt->element_type;
 		proto.var_name = stmt->variable_name;

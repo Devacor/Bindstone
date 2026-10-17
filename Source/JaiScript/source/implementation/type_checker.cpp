@@ -14,6 +14,7 @@
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/method_value.hpp>
 #include <jaiscript/detail/construction.hpp>
+#include <jaiscript/detail/map_entry_binding.hpp>
 #include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_definition.hpp>
@@ -4634,9 +4635,9 @@ private:
             case node_type::range_for_stmt: {
                 auto* f = static_cast<range_for_stmt*>(s);
                 const ctype container = infer(f->container.get());
-                if (f->variable_name == "entry#" && !container.tentative && !container.is_unknown() && container.kind != ctype::map_k && container.kind != ctype::coroutine_k) {   // for (auto [k, v] : x)
+                if (f->binds_map_entry && !container.tentative && !container.is_unknown() && container.kind != ctype::map_k && container.kind != ctype::coroutine_k) {   // for (auto [k, v] : x)
                     diag(diag_level::error, f->container->location, "a structured binding takes a map's entries, its key and value: cannot bind '" +
-                         ctype_name(container) + "' to [k, v]");
+                         ctype_name(container) + "' to " + detail::map_entry_binding_spelling(*f));
                 }
                 // the elements' static type: an array's element type, a string's char; a var container, an array<var> or anything
                 // else has none

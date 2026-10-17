@@ -5,18 +5,29 @@
 
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/string_symbolizer.hpp>
 #include <optional>
+#include <string>
 
 namespace jai::detail {
 
     // A structured binding's half (member_expr::entry_half): the key, the value's copy, or a reference to the entry
     inline constexpr uint8_t entry_half_key = 1, entry_half_value = 2, entry_half_reference = 3;
 
+    // The binding as written, "[k, v]"
+    inline std::string map_entry_binding_spelling(const range_for_stmt& loop) {
+        const auto& decls = static_cast<const block_stmt&>(*loop.body).declarations;
+        return "[" + std::string(static_cast<const variable_decl&>(*decls[0]).name) + ", " +
+               std::string(static_cast<const variable_decl&>(*decls[1]).name) + "]";
+    }
+
     // for (auto [k, v] : m): the parser's shape - the hidden entry# loop variable, a body block whose first two declarations
-    // read entry#.first and entry#.second - marks the loop and each half's read. The parser and the .jaibite reader both run it.
-    inline void stamp_map_entry_bindings(range_for_stmt& loop) {
+    // read entry#.first and entry#.second - marks the loop and each half's read, and interns the binding's spelling for its
+    // run-time text. The parser and the .jaibite reader both run it.
+    inline void stamp_map_entry_bindings(range_for_stmt& loop, string_symbolizer* symbols) {
         if (loop.variable_name != "entry#" || !loop.body || loop.body->get_type() != node_type::block_stmt) { return; }
         auto& decls = static_cast<block_stmt&>(*loop.body).declarations;
         if (decls.size() < 2) { return; }
@@ -37,6 +48,25 @@ namespace jai::detail {
         halves[0]->entry_half = entry_half_key;
         halves[1]->entry_half = value_reference ? entry_half_reference : entry_half_value;
         loop.binds_map_entry = true;
+        if (symbols) { loop.binding_text_id = symbols->intern(map_entry_binding_spelling(loop)); }
+    }
+
+    // A structured binding over a container that is not a map decomposes an element that has members: an object or a handle
+    inline bool map_entry_binding_decomposes(const script_value& element) {
+        const script_value& v = element.deref();
+        return v.type() == script_value_type::jai_object_type || v.type() == script_value_type::jai_shared_ptr_type;
+    }
+
+    // The binding's interned spelling: the stamped one, else interned now (a parse without a symbolizer)
+    inline uint64_t map_entry_binding_text(const range_for_stmt& loop, string_symbolizer& symbols) {
+        return loop.binding_text_id != UINT64_MAX ? loop.binding_text_id : symbols.intern(map_entry_binding_spelling(loop));
+    }
+
+    // An element a structured binding cannot decompose: {0} its type, {1} the binding as written
+    JAI_NOINLINE inline error_propagator map_entry_binding_rejection(const script_value& element, uint64_t binding_text, engine* eng) {
+        return {make_error_code(runtime_error_code::type_mismatch),
+                "Cannot bind {0} to {1}: a structured binding takes a map entry or a value with first and second",
+                eng->get_symbolizer()->intern(slot_source_type_name(element.deref(), eng)), binding_text};
     }
 
     // The structured loop variable over a map holds the iteration's entry as a map-entry reference carrying the map's value

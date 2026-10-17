@@ -642,8 +642,10 @@ namespace jai::vm {
             std::vector<std::pair<uint64_t, const statement*>> forward_callees;
             bool epoch_checked = false;   // proof_globals or forward_callees non-empty: the guard asks inline_globals_hold
             mutable uint64_t globals_epoch = 0;
+            bool calls = false;           // the body makes calls: op_graft_depth counts the grafted frame while they run
         };
         std::vector<inline_site> inline_sites;
+        bool graft_calls = false;   // an inline site's body makes calls (the trace names its frame above them)
         struct inline_refusal { std::string callee; const char* reason = nullptr; uint32_t line = 0; };   // a call the inliner kept and the rule that kept it
         std::vector<inline_refusal> inline_refusals;   // the listing and the profile build name them; no instruction reads the table
         // Typed scalar ops (opcode.hpp op_t_*): the instruction each one was lowered from

@@ -2282,6 +2282,115 @@ function nwrites(int n) -> string { for (int i = 0; i < n; ++i) { G = G + i; F =
 				}
 			}
 		});
+		test("a_graft_keeps_the_calls_its_body_makes", [this]() {
+			// a callee within the graft budget grafts even when its body calls: the call stays a call made from the grafted body (a door call
+			// in a block), its frame one level below the grafted one; values, errors with their traces, the call-depth cap and the block's
+			// entries agree with the interpreter and with the middle end off
+			const char* defs = R"JAI(
+array<int> T = [1, 2, 3, 4, 5, 6, 7, 8];
+int LOG = 0;
+int far(int i) { if (i > 100) { throw "far " + to_string(i); } return i * 2; }
+void note(int v) { LOG = LOG + v; }
+int near(int i) { if (i < 0 || i >= 8) { return far(i); } note(i); return T[i]; }
+int outer(int i) { return near(i) + 1; }
+int run(int n, int bad) { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + outer(i == bad ? 200 : i % 10); } return acc; }
+int straight(int i) { return outer(i) * 3; }
+int rec(int d) { if (d <= 0) { throw "bottom"; } return hop(d) + 1; }
+int hop(int d) { if (d < 0) { return 0; } return rec(d - 1); }
+int deep(int d) { if (d <= 0) { return 0; } return step(d) + 1; }
+int step(int d) { if (d < 0) { return 0; } return deep(d - 1); }
+string trace(int n, int bad) { string out = ""; try { out = to_string(run(n, bad)); } catch (e) { out = to_string(e) + " @"; for (auto& fr : e.stack) { out = out + " " + fr; } } return out + " log " + to_string(LOG); }
+string traced_rec(int d) { string out = ""; try { out = to_string(rec(d)); } catch (e) { out = to_string(e) + " @"; for (auto& fr : e.stack) { out = out + " " + fr; } } return out; }
+)JAI";
+			enum class mode { interp, vm, vm_off };
+			auto run_with = [&](mode m, const std::string& call, unsigned long long* entries, size_t depth_cap = 0) -> std::string {
+				auto e = engine::make();
+				e->set_backend(m == mode::interp ? backend_type::interpreter : backend_type::vm);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
+				if (m == mode::vm_off) { e->ir_passes(false); }
+				if (depth_cap) { e->max_call_depth(backend_type::interpreter, depth_cap); e->max_call_depth(backend_type::vm, depth_cap); }
+				std::string out;
+				try { out = e->execute_file_source("D:/virtual/pilot/graft_calls.jai", std::string(defs) + " " + call).as_string(); }
+				catch (const std::exception& ex) { out = std::string("throw:") + ex.what(); }
+				if (entries) { *entries = e->cells_counters().entries; }
+				return out;
+			};
+			struct probe { const char* call; size_t cap; bool block; };
+			const probe probes[] = {
+				{ "trace(40, -1);", 0, true }, { "trace(20, 7);", 0, true }, { "to_string(straight(3)) + \" \" + to_string(straight(9));", 0, false },
+				{ "straight(300);", 0, false }, { "traced_rec(3);", 0, false }, { "traced_rec(90);", 0, false },
+				{ "to_string(deep(15));", 40, false }, { "to_string(deep(19));", 40, false }, { "to_string(deep(20));", 40, false }, { "to_string(deep(60));", 40, false },
+			};
+			for (const probe& p : probes) {
+				unsigned long long entries = 0;
+				const std::string interp = run_with(mode::interp, p.call, nullptr, p.cap), vm = run_with(mode::vm, p.call, &entries, p.cap), off = run_with(mode::vm_off, p.call, nullptr, p.cap);
+				check_eq(interp, vm, std::string(p.call) + ": both backends");
+				check_eq(off, vm, std::string(p.call) + ": the middle end off");
+				if (p.block) { check(entries > 0, std::string(p.call) + ": the loop enters its block"); }
+			}
+			check(run_with(mode::vm, "traced_rec(3);", nullptr).find("graft_calls.jai:11 ") != std::string::npos, "the grafted hop's frame names its line: " + run_with(mode::vm, "traced_rec(3);", nullptr));
+			std::string listing;
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+				e->disassembly_sink([&listing](const std::string& l, const std::string&) { listing += l; listing += "\n"; });
+				try { e->execute(std::string(defs) + " trace(4, -1);"); } catch (const std::exception& ex) { listing += std::string("throw:") + ex.what(); }
+			}
+			check(listing.find("GRAFT_DEPTH") != std::string::npos && listing.find("C_GDEPTH") != std::string::npos, "near grafts with its calls kept, in the loop's block and outside it: " + listing.substr(0, 6000));
+		});
+		test("a_graft_that_calls_follows_reloads_budgets_coroutines_and_workers", [this]() {
+			// the guard of a graft whose body calls takes the fallback when the callee is rebound, and the kept call resolves its own callee at
+			// every call; a coroutine never grafts; an execution budget expiring inside a kept call raises as the call would; a parallel region's
+			// workers take the fallback and its admission is the general form's
+			const char* defs = R"JAI(
+int far(int i) { return i * 2; }
+int near(int i) { if (i > 3) { return far(i); } return i + 1; }
+int sum(int n) { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + near(i); } return acc; }
+coroutine gen(int n) -> int { for (int i = 0; i < n; i++) { yield i; } }
+int drain(int n) { int s = 0; for (auto v : gen(n)) { s = s + v; } return s; }
+int first(int n) { auto h = gen(n); return h.next(); }
+int via(int n) { int a = first(n); return drain(n) + a + near(n); }
+int spin(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + (i % 7); } return s; }
+int slow(int n) { if (n > 0) { return spin(n); } return 0; }
+int burn(int n) { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + slow(4000000); } return acc; }
+)JAI";
+			auto run_with = [&](bool vm, const std::string& call, double budget = 0.0) -> std::string {
+				auto e = engine::make();
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
+				if (budget > 0.0) { e->execution_budget(budget); }
+				std::string out;
+				try {
+					e->execute(std::string(defs));
+					out = e->execute("to_string(sum(8));").as_string();
+					if (std::string(call) == "rebind far") { e->execute("int far(int i) { return i * 100; }"); out += " " + e->execute("to_string(sum(8));").as_string(); }
+					else if (std::string(call) == "rebind near") { e->execute("int near(int i) { return 7; }"); out += " " + e->execute("to_string(sum(8));").as_string(); }
+					else { out += " " + e->execute(call).as_string(); }
+				} catch (const std::exception& ex) { out += std::string(" throw:") + ex.what(); }
+				return out;
+			};
+			struct probe { const char* call; double budget; };
+			const probe probes[] = {
+				{ "rebind far", 0.0 }, { "rebind near", 0.0 }, { "to_string(via(5));", 0.0 },
+				{ "to_string(burn(200));", 0.2 },
+				{ "array<int> xs = [1, 2, 3, 4, 5, 6]; parallel_for (auto& x : xs) { x = near(x) + far(x); } to_json(xs);", 0.0 },
+				{ "int G = 0; int bump(int v) { G = G + v; return G; } int w(int v) { if (v > 9) { return bump(v); } return v; } array<int> ys = [1, 20]; string r = \"\"; try { parallel_for (auto& y : ys) { y = w(y); } r = to_json(ys); } catch (err) { r = \"refused \" + err; } r;", 0.0 },
+			};
+			for (const probe& p : probes) {
+				const std::string interp = run_with(false, p.call, p.budget), vm = run_with(true, p.call, p.budget);
+				if (p.budget > 0.0) {
+					check(interp.find("budget") != std::string::npos && vm.find("budget") != std::string::npos, std::string(p.call) + ": the budget raises on both backends: " + interp + " | " + vm);
+					continue;
+				}
+				check_eq(interp, vm, std::string(p.call) + ": both backends");
+			}
+			std::string listing;
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+				e->disassembly_sink([&listing](const std::string& l, const std::string&) { listing += l; listing += "\n"; });
+				try { e->execute(std::string(defs) + " via(3);"); } catch (const std::exception& ex) { listing += std::string("throw:") + ex.what(); }
+			}
+			check(listing.find("call kept gen ") != std::string::npos, "the coroutine stays a call: " + listing.substr(0, 6000));
+		});
 		test("call_arguments_and_the_callee_keep_their_source_order_across_a_getter", [this]() {
 			// Regression, with a callee-getter variant: `take(V, G + 1)` where V is a global reference to a native
 			// property whose getter steps G, the same through a local reference slot, and `F(G + 1)` where F is a reference to a
@@ -3862,10 +3971,13 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"float four(int w, float d, int x, int y) { bump(); return w + d * 2.0 + x * 3 + y * 5; }\n"
 				"int run2() { int s = 0; for (int m = 0; m < 8; ++m) { int v = two(A[m], B[m]); s = (s * 3 + v) % 1000003; } return s; }\n"
 				"int run3() { int s = 0; for (int m = 0; m < 8; ++m) { int v = three(C[m], m, B[m]); s = (s * 7 + v) % 1000003; } return s; }\n"
-				"float run4() { float s = 0.0; for (int m = 0; m < 8; ++m) { s = s + four(A[m], D[m], 7, C[(m + 3) % 8]); } return s; }\n";
-			const std::string body = "to_string(run2()) + \"|\" + to_string(run3()) + \"|\" + to_string(run4()) + \"|\" + to_string(CNT);";
-			both(prelude + body, "95060|354612|456.0|24", "element arguments from different arrays");
-			both(prelude + body, "95060|354612|456.0|24", "element arguments from different arrays, proofs off", false);
+				"float run4() { float s = 0.0; for (int m = 0; m < 8; ++m) { s = s + four(A[m], D[m], 7, C[(m + 3) % 8]); } return s; }\n"
+				"int kept(int w, int x) { switch (w) { case 0: return x; } return w * 100 + x; }\n"
+				"int run5() { int s = 0; for (int m = 0; m < 8; ++m) { int v = kept(A[m], B[m]); s = (s * 3 + v) % 1000003; } return s; }\n";
+			const std::string body = "to_string(run2()) + \"|\" + to_string(run3()) + \"|\" + to_string(run4()) + \"|\" + to_string(CNT) + \"|\" + to_string(run5());";
+			both(prelude + body, "", "element arguments from different arrays");
+			both(prelude + body, "", "element arguments from different arrays, proofs off", false);
+			check_true(run_on(true, prelude + body).rfind("95060|354612|456.0|24|", 0) == 0, "the values: " + run_on(true, prelude + body));
 			const std::string vm = run_on(true, prelude + body);
 			{
 				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
@@ -3874,7 +3986,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			const std::string l = listing_run(prelude + body);
 			const size_t at = l.find("== run2 ");
-			check_true(at != std::string::npos && l.find("-- cell loop", at) != std::string::npos && l.find("C_ARGS", at) != std::string::npos, "run2's loop closes over the call\n" + l);
+			check_true(at != std::string::npos && l.find("-- cell loop", at) != std::string::npos, "run2's loop closes over the graft\n" + l);
+			const size_t at5 = l.find("== run5 ");
+			check_true(at5 != std::string::npos && l.find("-- cell loop", at5) != std::string::npos && l.find("C_ARGS", at5) != std::string::npos, "run5's loop closes over the kept call\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
 				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
@@ -4930,7 +5044,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		test("reading_builtins_and_member_sizes_graft_in_a_body", [this]() {
 			// JaiDOOM's lump_num (`LUMP_INDEX.has(name)` then the map's element) and Gator Quest's item_stat (`d.aff_code.size()` over a class
 			// copied from a global's element): a reading builtin of a string, an array or a map the checker proved, on a name or a member chain,
-			// with arguments that cannot be callables, writes nothing and runs no user code, so the body grafts; a writing builtin keeps the call
+			// with arguments that cannot be callables, writes nothing and runs no user code, so the body grafts; a writing builtin stays a call the graft makes
 			const std::string prelude =
 				"map<string, int> IDX = {\"STBAR\": 3, \"PLAYA\": 7};\n"
 				"int lump_num(string name) { if (IDX.has(name)) { return IDX[name]; } return -1; }\n"
@@ -4953,7 +5067,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined lump_num") != std::string::npos, "lump_num grafts with its map reads: " + l);
 			check_true(l.find("-- inlined stat") != std::string::npos, "stat grafts with its member size: " + l);
 			check_true(l.find("-- inlined tail_of") != std::string::npos, "tail_of grafts with its string reads: " + l);
-			check_true(l.find("-- call kept logs") != std::string::npos, "logs (a push) stays a call: " + l);
+			check_true(l.find("-- inlined logs") != std::string::npos, "logs grafts, its push a call the graft keeps: " + l);
 		});
 		test("a_container_taken_ahead_of_a_graft_is_a_guard_the_loop_closes_over", [this]() {
 			// Gator Quest's find_target: mob_at's graft takes the global OCC's value ahead of occ_index's graft and reads its element; the value
@@ -4980,7 +5094,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_run(
 				"array<int> A = [30, 60, 0, 90];\n"
 				"array<int> LOG;\n"
-				"void deal(int m, int v) { LOG.push(v); }\n"
+				"void deal(int m, int v) { switch (m) { default: LOG.push(v); } }\n"
 				"int run() { for (int m = 0; m < A.size(); ++m) { deal(m, 1 + A[m] / 30); } return LOG.size(); }\n"
 				"run();");
 			const size_t at = l.find("== run ");
@@ -7211,7 +7325,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			// a frame program entered by a general call (its environment write keeps it off the raw entry) returns through its pad: the environment
 			// values its body wrote reach their bindings first (order band seed 23 lost two writes of a global this way)
 			const std::string src =
-				"function rec0(int n) -> int { if (n <= 0) { return 0; } return rec0(n - 1); }\n"
+				"function rec0(int n) -> int { var keep = [](int a) { return a; }; if (n <= 0) { return 0; } return rec0(n - 1); }\n"
 				"float G = 1.0;\n"
 				"int H = 10;\n"
 				"function w(float p) -> int { rec0(1); G = G - 2.25; return p * 2; }\n"

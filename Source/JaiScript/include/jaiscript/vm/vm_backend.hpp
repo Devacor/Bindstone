@@ -1003,6 +1003,7 @@ namespace jai::vm {
             size_t iter_size = 0;
             size_t cfor_size = 0;
             size_t pending_size = 0;
+            int call_depth = 0;                    // the depth at the try (no graft encloses a try): the handler restores it
             std::shared_ptr<environment> entry_env;
         };
         std::vector<try_record> try_records_;
@@ -1343,6 +1344,7 @@ namespace jai::vm {
                                                             return_conv conv, bool proven, std::string_view callee = {});
 
         void capture_stack_trace();
+        size_t graft_frames_at(const chunk& code, size_t ip, const ast_node** node);
         void absorb_nested_trace();
         op_status raise_nested_failure(const std::exception& e);
         op_status raise_nested_failure_statement(const std::exception& e);

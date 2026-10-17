@@ -316,6 +316,8 @@ namespace jai::vm {
         // compare and jump-if-false: a = left, b = right, c = target
         op_d_jlt, op_d_jle, op_d_jgt, op_d_jge, op_d_jeq, op_d_jne,
         op_iter_entry,      // a=iter proto index, b=node index (the half's member_expr), c=member_expr::entry_half: a structured binding's half from the loop variable's entry cursor, pushed for its declaration (no cursor: the member read)
+        op_graft_depth,     // a = 1 entering a graft whose body makes calls, 0 leaving it: the grafted frame counts in the call depth while it runs
+        op_c_gdepth,        // a = 1 or 0: op_graft_depth inside a block
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -653,6 +655,8 @@ namespace jai::vm {
             case opcode::op_c_cos_f: return "C_COS_F";
             case opcode::op_c_sqrt_f: return "C_SQRT_F";
             case opcode::op_c_jtruth: return "C_JTRUTH";
+            case opcode::op_graft_depth: return "GRAFT_DEPTH";
+            case opcode::op_c_gdepth: return "C_GDEPTH";
             case opcode::op_c_load_f: return "C_LOAD_F";
             case opcode::op_c_jlt_ff: return "C_JLT_FF";
             case opcode::op_c_jle_ff: return "C_JLE_FF";

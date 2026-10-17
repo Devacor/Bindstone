@@ -51,6 +51,7 @@ struct inline_context {
 	bool writes_global = false;
 	bool writes_member = false;
 	bool writes_ref = false;                                       // a store or an increment through a reference parameter: the caller's variable or element
+	bool calls = false;                                            // a call the body keeps: made from the graft, its frame one level below the grafted one
 	std::vector<const type_info*> slot_types;                      // per callee slot: its declared type (parameters and the body's declarations)
 	std::vector<uint8_t> ref_stored;                               // per callee slot: a reference parameter stored as a whole
 	std::vector<uint8_t> ref_store_unproven;                       // per callee slot: such a store the checker did not prove lands the parameter's type
@@ -161,6 +162,12 @@ bool incdec_op(token_type t) { return t == token_type::plus_plus || t == token_t
 // intrinsic of those; a ternary as a whole value or as an operand lifted into a temp. A cast, a store or any other call lands on the
 // general form, which a block does not run.
 bool landable(const expression* e, const land_ctx* eng);
+// a free function called by a plain name: the block's door call (probe, arguments, call, landing) takes it
+bool door_call(const call_expr* ce) {
+	if (!ce->callee || ce->callee->get_type() != node_type::identifier_expr) return false;
+	auto* id = static_cast<const identifier_expr*>(ce->callee.get());
+	return !id->global_qualified && id->slot_index == SIZE_MAX;
+}
 // an operand of a block instruction: a landable value, or a global read (the fused binary's environment rows)
 bool block_operand(const expression* e, const land_ctx* eng) { return e && (e->get_type() == node_type::identifier_expr || landable(e, eng)); }
 // an operand inside an operation: a ternary lands only as a whole declaration or store (or an arm of one), never as an operand
@@ -197,7 +204,7 @@ bool landable(const expression* e, const land_ctx* eng) {
 	}
 	case node_type::call_expr: {
 		auto* ce = static_cast<const call_expr*>(e);
-		if (!math_call(ce) && !alias_call(ce, eng ? eng->eng : nullptr) && !nested_call(ce, eng)) return false;
+		if (!math_call(ce) && !alias_call(ce, eng ? eng->eng : nullptr) && !nested_call(ce, eng) && !door_call(ce)) return false;
 		for (const auto& a : ce->arguments) { if (!inner_operand(a.get(), eng)) return false; }
 		return true;
 	}
@@ -218,6 +225,7 @@ bool landable_stmt(const expression* e, const land_ctx* eng) {
 		return block_operand(a->value.get(), eng);
 	}
 	case node_type::unary_expr: { auto* u = static_cast<const unary_expr*>(e); return incdec_op(u->op.type) && u->operand && u->operand->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(u->operand.get())->slot_index != SIZE_MAX; }
+	case node_type::call_expr: return door_call(static_cast<const call_expr*>(e)) && landable(e, eng);   // a call whose result the statement drops
 	default: return false;
 	}
 }
@@ -634,11 +642,11 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto* ce = static_cast<const call_expr*>(e.get());
 		if (c.replace && ce == c.replace) { ++c.nodes; return c.result ? copy_identifier(c.result.get(), e->location, c) : nullptr; }   // the statement: the call is its temp (null: a void call alone)
 		if (!c.replace && !math_call(ce) && !size_call(ce) && !reading_builtin_call(ce, c)) {
-			if (!alias_call(ce, c.lc.eng) && !nested_call(ce, &c.lc)) { c.fail("a call in the body"); return nullptr; }
-			// the alias makes the real call when its name binds anything else, a nested leaf when its guard fails: that callee may write
-			// anything, so nothing the statement reads before the graft stays in place behind it
+			if (!alias_call(ce, c.lc.eng) && !nested_call(ce, &c.lc)) { c.calls = true; }   // any other call stays a call, made from the grafted body
+			// the alias makes the real call when its name binds anything else, a nested leaf when its guard fails, a kept call always: that
+			// callee may write anything, so nothing the statement reads before the graft stays in place behind it
 			c.writes_global = c.writes_member = c.writes_ref = true;
-		}   // in a body, any other call (a script or host function, a method) is an effect the graft does not take; the statement's clone keeps its calls (the plan ordered them)
+		}   // the statement's clone keeps its calls (the plan ordered them)
 		std::vector<expression_ptr> args;
 		for (const auto& a : ce->arguments) { args.push_back(clone_expr(a, c)); }
 		auto callee = clone_expr(ce->callee, c);
@@ -1709,6 +1717,12 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	current_stmt_ = site.call_stmt;
 	chunk_->inline_sites[site_index].begin_ip = static_cast<uint32_t>(chunk_->code.size());   // the arguments are the caller's (a raise there names no callee)
 	graft_bodies_.push_back(fn->body.get());
+	if (ctx.calls) {
+		// a call the body makes runs one level below the grafted frame, as the callee's own frame would put it
+		chunk_->inline_sites[site_index].calls = true;
+		chunk_->graft_calls = true;
+		emit(opcode::op_graft_depth, 1, 0, 0);
+	}
 	inlining_off_ = false;   // a leaf the body calls grafts here, a level down, within the tree's node budget
 	for (const auto& d : body) { compile_declaration(d, false); }
 	inlining_off_ = true;
@@ -1718,6 +1732,11 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	loops_.pop_back();
 	for (const uint64_t id : added) { callable_.declared.erase(id); }
 	for (auto& n : ctx.pins) { chunk_->nodes.push_back(n); }
+	if (ctx.calls) {
+		const size_t pad = emit(opcode::op_graft_depth, 0, 0, 0);
+		for (size_t at : exits) { patch_jump(at, pad); }
+		exits.clear();
+	}
 	const size_t jump_ip = emit(opcode::op_jump, 0, 0, 0);
 	chunk_->inline_sites[site_index].fallback_ip = static_cast<uint32_t>(chunk_->code.size());
 	chunk_->code[guard_ip].b = static_cast<uint32_t>(chunk_->code.size());

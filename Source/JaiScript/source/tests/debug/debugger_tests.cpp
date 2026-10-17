@@ -429,6 +429,7 @@ public:
                 { "and or chains", "var a = 1;\nvar b = 0;\nfor (var i = 0; i < 3; i += 1) {\n    if (a > 0 && b < 2 || i == 7) {\n        b += 1;\n    }\n    var c = a > 0 && b > 1;\n    if (!(a < 0 || b > 5)) a += 1;\n}\nvar d = b;\n" },
                 { "ternary", "var a = 0;\nfor (var i = 0; i < 3; i += 1) {\n    a = i > 1 ? a + 10 : a + 1;\n    var c = (a > 5) ? 1 : 2;\n}\nvar d = a;\n" },
                 { "return with expression", "function f(int x) -> int {\n    if (x > 2) {\n        return x * 2;\n    }\n    return x + 1;\n}\nvar s = 0;\nfor (var i = 0; i < 4; i += 1) {\n    s += f(i);\n}\nvar d = s;\n" },
+                { "a graft whose body calls", "int far(int x) {\n    return x * 2;\n}\nint near(int x) {\n    if (x > 1) {\n        return far(x);\n    }\n    return x + 1;\n}\nint s = 0;\nfor (int i = 0; i < 4; i++) {\n    s = s + near(i);\n}\nauto d = s + near(5);\n" },
                 { "typed calls in a loop", "int add(int a, int b) {\n    return a + b;\n}\nint s = 0;\nfor (int i = 0; i < 4; i++) {\n    s = add(s, i);\n}\nauto d = s;\n" },
                 { "void call statement", "var total = 0;\nfunction bump(int by) {\n    total += by;\n}\nfor (var i = 0; i < 3; i += 1) {\n    bump(i);\n}\nvar d = total;\n" },
                 { "lambda", "var k = 2;\nauto mul = [k](int x) {\n    return x * k;\n};\nvar s = 0;\nfor (var i = 0; i < 3; i += 1) {\n    s += mul(i);\n}\nvar d = s;\n" },

@@ -20,9 +20,8 @@ public:
 
 #ifdef BINDSTONE_SERVER
 private:
-	std::string createPlayerQueryString(pqxx::work& transaction, const std::string& a_salt);
+	std::string createPlayerQueryString(pqxx::work& transaction, const std::string& a_salt, const std::string& a_saveState, const std::string& a_serverSaveState);
 	pqxx::result selectUser(pqxx::work* a_transaction);
-	pqxx::result createPlayer(pqxx::work* transaction, LobbyUserConnectionState* a_connection);
 public:
 	virtual void execute(LobbyUserConnectionState* a_connection) override;
 	static bool ensureAccount(pqxx::connection &a_db, const std::string &a_email, const std::string &a_handle, const std::string &a_password);

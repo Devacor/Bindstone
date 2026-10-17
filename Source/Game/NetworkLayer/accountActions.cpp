@@ -26,13 +26,49 @@ static jai::registrar<ExpectedPlayersNoted, MV::Services, jai::bases<NetworkActi
 
 
 #ifdef BINDSTONE_SERVER
-std::string CreatePlayer::createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt) {
+namespace {
+	// Filled on the database thread, read by the continuation the pool runs on the lobby's main thread.
+	struct AccountLookup {
+		enum Outcome { FAILED, NO_PLAYER, CREATED, UNVERIFIED, AUTHENTICATED, CREDENTIAL_MISMATCH };
+		Outcome outcome = FAILED;
+		int64_t id = -1;
+		std::string email;
+		std::string handle;
+		std::string state;
+		std::string serverState;
+		std::string passSalt;
+	};
+
+	bool readAuthenticatedPlayer(const pqxx::result& a_result, const std::string& a_password, AccountLookup& a_lookup) {
+		auto hashedPassword = MV::sha512(a_password, a_result[0][2].as<std::string>(), a_result[0][3].as<int>());
+		if (hashedPassword != a_result[0][1].as<std::string>()) {
+			return false;
+		}
+		a_lookup.outcome = AccountLookup::AUTHENTICATED;
+		a_lookup.state = a_result[0][4].as<std::string>();
+		a_lookup.serverState = a_result[0][5].as<std::string>();
+		a_lookup.email = a_result[0][6].as<std::string>();
+		a_lookup.handle = a_result[0][7].as<std::string>();
+		a_lookup.id = a_result[0][8].as<int64_t>();
+		return true;
+	}
+
+	LobbyUserConnectionState* liveLobbyUser(const std::weak_ptr<MV::Connection>& a_connection) {
+		auto connection = a_connection.lock();
+		if (!connection || connection->disconnected()) {
+			return nullptr;
+		}
+		return static_cast<LobbyUserConnectionState*>(connection->state());
+	}
+}
+
+std::string CreatePlayer::createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt, const std::string &a_saveState, const std::string &a_serverSaveState) {
 	static int work = 12;
 	std::stringstream query;
 	query << "INSERT INTO players(email, handle, passhash, passsalt, passiterations, state, serverstate)";
 	query << "VALUES(" << transaction.quote(email) << ", " << transaction.quote(handle) << ", ";
 	query << transaction.quote(MV::sha512(password, a_salt, work)) << ", " << transaction.quote(a_salt) << ", " << work << ", ";
-	query << transaction.quote(makeSaveString()) << ", " << transaction.quote(makeServerSaveString()) << ");";
+	query << transaction.quote(a_saveState) << ", " << transaction.quote(a_serverSaveState) << ");";
 	return query.str();
 }
 
@@ -45,60 +81,69 @@ pqxx::result CreatePlayer::selectUser(pqxx::work* a_transaction) {
 	return a_transaction->exec(activeQuery);
 }
 
-pqxx::result CreatePlayer::createPlayer(pqxx::work* transaction, LobbyUserConnectionState *a_connection) {
-	auto salt = MV::randomString(32);
-
-	a_connection->connection()->send(makeNetworkString<MessageAction>("User created, woot!"));
-	sendValidationEmail(a_connection, salt);
-	return transaction->exec(createPlayerQueryString(*transaction, salt));;
-}
-
+// Only the query and the hashing run on the database thread: the script engine, the shared RNG, the
+// connections and the player state all belong to the lobby's main thread.
 void CreatePlayer::execute(LobbyUserConnectionState* a_connection) {
+	if (email.empty() || !validateHandle(handle) || password.size() < 8) {
+		a_connection->connection()->send(makeNetworkString<LoginResponse>("Failed to supply a valid email/handle and password."));
+		return;
+	}
 	auto self = std::static_pointer_cast<CreatePlayer>(shared_from_this());
-	auto connectionLifespan = a_connection->connection();
-	a_connection->server().databasePool().task([=]() mutable {
+	std::weak_ptr<MV::Connection> connectionLifespan = a_connection->connection();
+	auto salt = MV::randomString(32);
+	auto saveState = makeSaveString();
+	auto serverSaveState = makeServerSaveString();
+	auto lookup = std::make_shared<AccountLookup>();
+	a_connection->server().databasePool().task(MV::ThreadPool::Job([self, lookup, salt, saveState, serverSaveState, database = a_connection->server().database()] {
 		try {
-			self; //force capture;
-			if (connectionLifespan->disconnected()) {
-				return;
+			pqxx::work transaction(*database);
+			auto result = self->selectUser(&transaction);
+			if (result.empty()) {
+				transaction.exec(self->createPlayerQueryString(transaction, salt, saveState, serverSaveState));
+				lookup->outcome = AccountLookup::CREATED;
+			} else if (!result[0][0].as<bool>()) {
+				lookup->outcome = AccountLookup::UNVERIFIED;
+				lookup->passSalt = result[0][2].as<std::string>();
+			} else if (!readAuthenticatedPlayer(result, self->password, *lookup)) {
+				lookup->outcome = AccountLookup::CREDENTIAL_MISMATCH;
 			}
-			if (email.empty() || !validateHandle(handle) || password.size() < 8) {
-				a_connection->connection()->send(makeNetworkString<LoginResponse>("Failed to supply a valid email/handle and password."));
-			} else {
-				auto database = a_connection->server().database();
-				pqxx::work transaction(*database);
-
-				auto result = selectUser(&transaction);
-
-				if (result.empty()) {
-					result = createPlayer(&transaction, a_connection);
-				} else if (!result[0][0].as<bool>()) {
-					a_connection->connection()->send(makeNetworkString<LoginResponse>("Player not email validated yet."));
-					sendValidationEmail(a_connection, result[0][2].as<std::string>());
-					MV::info("Need Validation: [", email, "]");
-				} else {
-					auto hashedPassword = MV::sha512(password, result[0][2].as<std::string>(), result[0][3].as<int>());
-					if (hashedPassword == result[0][1].as<std::string>()) {
-						std::string playerStateJson = result[0][4].as<std::string>();
-						if (a_connection->authenticate(result[0][8].as<int64_t>(), result[0][6].as<std::string>(), result[0][7].as<std::string>(), playerStateJson, result[0][5].as<std::string>())) {
-							a_connection->connection()->send(makeNetworkString<LoginResponse>("Successful login.", playerStateJson, true));
-							MV::info("Login Success: [", email, "]");
-						} else {
-							a_connection->connection()->send(makeNetworkString<LoginResponse>("Load Player Parse Fail: Contact Support"));
-							MV::error("Parse Fail Load Player: [", email, "]\n___\n", playerStateJson, "\n___\n");
-						}
-					} else {
-						a_connection->connection()->send(makeNetworkString<LoginResponse>("Failed to create due to existing player with different credentials."));
-						MV::info("Failed to create: [", email, "] credential mismatch for existing user!");
-					}
-				}
-
-				transaction.commit();
-			}
+			transaction.commit();
 		} catch (std::exception& e) {
-			MV::error("Failed to execute CreatePlayer: [", email, "]\nWHAT: [", e.what(), "]");
+			lookup->outcome = AccountLookup::FAILED;
+			MV::error("Failed to execute CreatePlayer: [", self->email, "]\nWHAT: [", e.what(), "]");
 		}
-	});
+	}, [self, lookup, connectionLifespan, salt] {
+		auto* state = liveLobbyUser(connectionLifespan);
+		if (!state) {
+			return;
+		}
+		switch (lookup->outcome) {
+			case AccountLookup::CREATED:
+				state->connection()->send(makeNetworkString<MessageAction>("User created, woot!"));
+				self->sendValidationEmail(state, salt);
+			break;
+			case AccountLookup::UNVERIFIED:
+				state->connection()->send(makeNetworkString<LoginResponse>("Player not email validated yet."));
+				self->sendValidationEmail(state, lookup->passSalt);
+				MV::info("Need Validation: [", self->email, "]");
+			break;
+			case AccountLookup::AUTHENTICATED:
+				if (state->authenticate(lookup->id, lookup->email, lookup->handle, lookup->state, lookup->serverState)) {
+					state->connection()->send(makeNetworkString<LoginResponse>("Successful login.", lookup->state, true));
+					MV::info("Login Success: [", self->email, "]");
+				} else {
+					state->connection()->send(makeNetworkString<LoginResponse>("Load Player Parse Fail: Contact Support"));
+					MV::error("Parse Fail Load Player: [", self->email, "]\n___\n", lookup->state, "\n___\n");
+				}
+			break;
+			case AccountLookup::CREDENTIAL_MISMATCH:
+				state->connection()->send(makeNetworkString<LoginResponse>("Failed to create due to existing player with different credentials."));
+				MV::info("Failed to create: [", self->email, "] credential mismatch for existing user!");
+			break;
+			default:
+			break;
+		}
+	}, MV::ThreadPool::Job::Continue::MAIN_THREAD));
 }
 
 bool CreatePlayer::ensureAccount(pqxx::connection &a_db, const std::string &a_email, const std::string &a_handle, const std::string &a_password) {
@@ -107,7 +152,7 @@ bool CreatePlayer::ensureAccount(pqxx::connection &a_db, const std::string &a_em
 	if (!action.selectUser(&transaction).empty()) {
 		return false;
 	}
-	transaction.exec(action.createPlayerQueryString(transaction, MV::randomString(32)));
+	transaction.exec(action.createPlayerQueryString(transaction, MV::randomString(32), makeSaveString(), makeServerSaveString()));
 	transaction.commit();
 	return true;
 }
@@ -144,56 +189,64 @@ pqxx::result LoginRequest::selectUser(pqxx::work* a_transaction) {
 }
 
 void LoginRequest::execute(LobbyUserConnectionState* a_connection) {
-
+	if (identifier.empty() || password.size() < 8) {
+		a_connection->connection()->send(makeNetworkString<LoginResponse>("Failed to supply a valid email/handle and password."));
+		return;
+	}
 	auto self = std::static_pointer_cast<LoginRequest>(shared_from_this());
-	auto connectionLifespan = a_connection->connection();
-	a_connection->server().databasePool().task([=]() mutable {
+	std::weak_ptr<MV::Connection> connectionLifespan = a_connection->connection();
+	auto lookup = std::make_shared<AccountLookup>();
+	a_connection->server().databasePool().task(MV::ThreadPool::Job([self, lookup, database = a_connection->server().database()] {
 		try {
-			self; //force capture;
-			if (connectionLifespan->disconnected()){
-				return;
+			pqxx::work transaction(*database);
+			auto result = self->selectUser(&transaction);
+			if (result.empty()) {
+				lookup->outcome = AccountLookup::NO_PLAYER;
+			} else if (!result[0][0].as<bool>()) {
+				lookup->outcome = AccountLookup::UNVERIFIED;
+			} else if (!readAuthenticatedPlayer(result, self->password, *lookup)) {
+				lookup->outcome = AccountLookup::CREDENTIAL_MISMATCH;
 			}
-			if (identifier.empty() || password.size() < 8) {
-				a_connection->connection()->send(makeNetworkString<LoginResponse>("Failed to supply a valid email/handle and password."));
-			} else {
-				auto database = a_connection->server().database();
-				auto transaction = std::make_unique<pqxx::work>(*database);
-
-				auto result = selectUser(transaction.get());
-
-				if (result.empty()) {
-					a_connection->connection()->send(makeNetworkString<LoginResponse>("No player exists."));
-				} else if (!result[0][0].as<bool>()) {
-					a_connection->connection()->send(makeNetworkString<LoginResponse>("Player not email validated yet."));
-					MV::info("Need Validation: [", identifier, "]");
-				} else {
-					auto hashedPassword = MV::sha512(password, result[0][2].as<std::string>(), result[0][3].as<int>());
-					if (hashedPassword == result[0][1].as<std::string>()) {
-						std::string playerStateJson = result[0][4].as<std::string>();
-						if (a_connection->authenticate(result[0][8].as<int64_t>(), result[0][6].as<std::string>(), result[0][7].as<std::string>(), playerStateJson, result[0][5].as<std::string>())) {
-							std::string clientJson = MV::toJson(a_connection->player()->client, a_connection->server().managers().services);
-							a_connection->connection()->send(
-								makeNetworkString<LoginResponse>("Successful login.", 
-								(!saveHash.empty() && MV::sha512(clientJson) == saveHash ? std::string() : clientJson),
-								true)
-							);
-							MV::info("Login Success: [", identifier, "]");
-						} else {
-							a_connection->connection()->send(makeNetworkString<LoginResponse>("Load Player Parse Fail: Contact Support"));
-							MV::error("Parse Fail Load Player: [", identifier, "]\n___\n", playerStateJson, "\n___\n");
-						}
-					} else {
-						a_connection->connection()->send(makeNetworkString<LoginResponse>("Failed to authenticate."));
-						MV::info("Failed to authenticate: [", identifier, "] credential mismatch for existing user!\n[", hashedPassword, "]\n[", result[0][1].as<std::string>(), "]");
-					}
-				}
-
-				transaction->commit();
-			}
+			transaction.commit();
 		} catch (std::exception& e) {
-			MV::info("Failed to execute LoginRequest: [", identifier, "]\nWHAT: [", e.what(), "]");
+			lookup->outcome = AccountLookup::FAILED;
+			MV::info("Failed to execute LoginRequest: [", self->identifier, "]\nWHAT: [", e.what(), "]");
 		}
-	});
+	}, [self, lookup, connectionLifespan] {
+		auto* state = liveLobbyUser(connectionLifespan);
+		if (!state) {
+			return;
+		}
+		switch (lookup->outcome) {
+			case AccountLookup::NO_PLAYER:
+				state->connection()->send(makeNetworkString<LoginResponse>("No player exists."));
+			break;
+			case AccountLookup::UNVERIFIED:
+				state->connection()->send(makeNetworkString<LoginResponse>("Player not email validated yet."));
+				MV::info("Need Validation: [", self->identifier, "]");
+			break;
+			case AccountLookup::AUTHENTICATED:
+				if (state->authenticate(lookup->id, lookup->email, lookup->handle, lookup->state, lookup->serverState)) {
+					std::string clientJson = MV::toJson(state->player()->client, state->server().managers().services);
+					state->connection()->send(
+						makeNetworkString<LoginResponse>("Successful login.",
+						(!self->saveHash.empty() && MV::sha512(clientJson) == self->saveHash ? std::string() : clientJson),
+						true)
+					);
+					MV::info("Login Success: [", self->identifier, "]");
+				} else {
+					state->connection()->send(makeNetworkString<LoginResponse>("Load Player Parse Fail: Contact Support"));
+					MV::error("Parse Fail Load Player: [", self->identifier, "]\n___\n", lookup->state, "\n___\n");
+				}
+			break;
+			case AccountLookup::CREDENTIAL_MISMATCH:
+				state->connection()->send(makeNetworkString<LoginResponse>("Failed to authenticate."));
+				MV::info("Failed to authenticate: [", self->identifier, "] credential mismatch for existing user!");
+			break;
+			default:
+			break;
+		}
+	}, MV::ThreadPool::Job::Continue::MAIN_THREAD));
 }
 
 void FindMatchRequest::execute(LobbyUserConnectionState* a_connection) {

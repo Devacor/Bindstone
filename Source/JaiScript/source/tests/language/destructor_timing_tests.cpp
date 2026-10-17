@@ -166,6 +166,41 @@ public:
             )", "BTD~C~B!");
         });
 
+        // C++ [class.base.init]: bases first, then members in declaration order (a member without an initializer is
+        // default-constructed at its turn), then the body; destruction reverses it
+        test("bases_then_members_then_the_body_at_every_level", [this]() {
+            const std::string members = R"(
+                class M { string tag = ""; M() { LOG = LOG + "m"; } M(string t) { tag = t; LOG = LOG + t; } ~M() { LOG = LOG + "~" + tag; } }
+                class A { M ma = M("a"); A() { LOG = LOG + "A"; } ~A() { LOG = LOG + "~A"; } }
+                class B : A { M mb = M("b"); M plain; B() { LOG = LOG + "B"; } ~B() { LOG = LOG + "~B"; } }
+                class C : B { M mc = M("c"); C() { LOG = LOG + "C"; } ~C() { LOG = LOG + "~C"; } }
+            )";
+            expect_log(members + "function f() -> void { A a; LOG = LOG + \"|\"; } f(); LOG;", "aA|~A~a");
+            expect_log(members + "function f() -> void { B b; LOG = LOG + \"|\"; } f(); LOG;", "aAbmB|~B~~b~A~a");
+            expect_log(members + "function f() -> void { C c; LOG = LOG + \"|\"; } f(); LOG;", "aAbmBcC|~C~c~B~~b~A~a");
+        });
+
+        test("a_throwing_base_leaves_later_members_unconstructed", [this]() {
+            expect_log(R"(
+                class M { M() { LOG = LOG + "M"; } ~M() { LOG = LOG + "~M"; } }
+                class B { B() { LOG = LOG + "B"; throw "b"; } ~B() { LOG = LOG + "~B"; } }
+                class D : B { M m; D() { LOG = LOG + "D"; } ~D() { LOG = LOG + "~D"; } }
+                function f() -> void { try { D d; } catch (e) { LOG = LOG + "!"; } }
+                f(); LOG;
+            )", "B!");
+        });
+
+        test("a_throwing_member_destroys_the_members_before_it_and_the_bases", [this]() {
+            expect_log(R"(
+                class M { string tag = ""; M(string t) { tag = t; LOG = LOG + t; } ~M() { LOG = LOG + "~" + tag; } }
+                class Bad { Bad() { LOG = LOG + "X"; throw "m"; } ~Bad() { LOG = LOG + "~X"; } }
+                class A { M ma = M("a"); A() { LOG = LOG + "A"; } ~A() { LOG = LOG + "~A"; } }
+                class T : A { M mt = M("t"); Bad bad; M after = M("z"); T() { LOG = LOG + "T"; } ~T() { LOG = LOG + "~T"; } }
+                function f() -> void { try { T t; } catch (e) { LOG = LOG + "!"; } }
+                f(); LOG;
+            )", "aAtX~t~A~a!");
+        });
+
         test("a_throwing_hybrid_body_destroys_its_cpp_base_once", [this]() {
             struct counted_base { std::shared_ptr<int> deaths; ~counted_base() { if (deaths) { ++*deaths; } } };
             auto deaths = std::make_shared<int>(0);

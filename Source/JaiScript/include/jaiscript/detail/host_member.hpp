@@ -20,7 +20,13 @@ struct host_member_lane {
 	bool (*write)(void* address, const script_value& value) = nullptr;   // null: the member is read-only
 	// the member's address in the receiver's C++ object, or null where the lane cannot reach it (never throws)
 	void* (*locate)(const host_member_lane& lane, const script_value& receiver) = nullptr;
+	// whether read serves the member's current value (null: always); a declined read takes the getter
+	bool (*serves)(const void* address) = nullptr;
 };
+
+inline bool host_member_serves(const host_member_lane& lane, const void* address) {
+	return !lane.serves || lane.serves(address);
+}
 
 inline constexpr int32_t k_no_slot_check = INT32_MIN;
 

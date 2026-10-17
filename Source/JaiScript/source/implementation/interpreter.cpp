@@ -3615,7 +3615,8 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         if (member_scope_.state == detail::member_scope_state::instance && member_scope_.this_storage) {
             if (class_instance* self = detail::host_this_instance(*member_scope_.this_storage)) {
                 const detail::host_member_lane* lane = nullptr;
-                if (void* address = host_member_row_hit(expr, self->get_class_definition(), self, lane)) {
+                if (void* address = host_member_row_hit(expr, self->get_class_definition(), self, lane);
+                    address && detail::host_member_serves(*lane, address)) {
                     push_value(lane->read(address, engine_));
                     return checked_result<void>();
                 }
@@ -3635,7 +3636,8 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
             } else if (member.what == detail::member_probe_hit::kind::cpp_property) {
                 const detail::host_member_lane* lane = nullptr;
                 if (void* address = host_member_cached(expr, expr->symbol_id, member.instance->get_class_definition(), member.instance,
-                                                       *member_scope_.this_storage, lane)) {
+                                                       *member_scope_.this_storage, lane);
+                    address && detail::host_member_serves(*lane, address)) {
                     push_value(lane->read(address, engine_));
                     return checked_result<void>();
                 }
@@ -9176,7 +9178,8 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
                 if (target.instance) {
                     const detail::host_member_lane* lane = nullptr;
-                    if (void* address = host_member_cached(expr, expr->member_id, target.class_def, target.instance.get(), objectValue, lane)) {
+                    if (void* address = host_member_cached(expr, expr->member_id, target.class_def, target.instance.get(), objectValue, lane);
+                        address && detail::host_member_serves(*lane, address)) {
                         push_value(lane->read(address, engine_));
                         return {};
                     }

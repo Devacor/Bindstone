@@ -293,6 +293,38 @@ public:
             check_eq((int64_t)12, all[6].as_int(), "an unsigned member takes an int in range");
         });
 
+        // A script_value member (the library's pair) takes the lane too: every warm pass reads what the getter reads (a
+        // container half is the member's own), a scalar store lands in place, and a store the lane leaves to the setter (a
+        // container, or through a by-reference entry's half with the map's value type) keeps the setter's result and text
+        test("host_member_lane_reads_and_writes_script_value_members", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto out = eng->execute(R"(
+                var p = pair(1, [2]);
+                map<string, int> m = {"a": 1};
+                string s = "";
+                for (int i = 0; i < 3; ++i) {
+                    s += to_string(p.first) + to_json(p.second) + ",";
+                    p.first = p.first + 1;
+                    p.second.push(i);
+                    var copy = p.second;
+                    copy.push(99);
+                    if (i == 1) { p.second = [7]; p.first = "t"; }
+                }
+                s += to_string(p.first) + to_json(p.second) + "|";
+                for (int i = 0; i < 3; ++i) {
+                    for (auto& kv : m) {
+                        kv.second = kv.second + 1;
+                        s += to_string(kv.second);
+                        var bad = "x";
+                        try { kv.second = bad; } catch (e) { s += "!"; }
+                    }
+                }
+                s + to_json(m);
+            )").as_string();
+            check_eq(std::string("1[2],2[2,0],t[7],t1[7,2]|2!3!4!{\"a\":4}"), out);
+        });
+
         test("host_member_lane_reaches_a_second_base_and_a_derived_registration", [this]() {
             auto eng = make_engine();
             jai::stdlib::register_all(*eng);

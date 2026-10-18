@@ -209,6 +209,32 @@ class Car : Engine { int idle = this.rpm; }      // no constructor: Engine() sti
 class Truck : Engine { int load = 0; Truck() { load = rpm * 2; } }
 Car().idle + Truck().load;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== result: 2400</code></pre></div>
+<p><strong>A constructor or destructor calls its own class&#x27;s overrides, as in C++.</strong> While a class&#x27;s field initializers, constructor body or destructor body run, the object is that class: a virtual call on it, bare, through <code>this</code> or through any other handle to the object, runs that class&#x27;s version, and <code>super::</code> names that class&#x27;s base. Once its constructor returns, the next derived class&#x27;s overrides apply; destruction runs the same steps in reverse. A copy taken there is a copy of that class&#x27;s object.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Shape {
+    Shape() { print("Shape(): " + name()); }
+    ~Shape() { print("~Shape(): " + name()); }
+    string name() { return "shape"; }
+}
+class Circle : Shape {
+    Circle() { print("Circle(): " + name()); }
+    ~Circle() { print("~Circle(): " + name()); }
+    string name() override { return "circle"; }
+}
+function draw() -> void {
+    Circle c;
+    print("constructed: " + c.name());
+}
+draw();</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Shape(): shape
+Circle(): circle
+constructed: circle
+~Circle(): circle
+~Shape(): shape</code></pre></div>
+<p>A call there to a method only a derived class declares therefore reaches nothing. The strict checker reports it at load. With checking off, the call raises <code>Cannot call &#x27;layout&#x27; while &#x27;Widget&#x27; is under construction: only a class derived from it declares it</code>, or <code>under destruction</code> from a destructor. Name lookup is unchanged: a name the class does not declare goes on to the program-scope functions, so a global <code>layout</code> would answer the call. A lambda the constructor creates may run after it returns, so the checker does not flag calls inside the lambda.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Widget { Widget() { layout(); } }
+class Button : Widget { void layout() { } }
+Button b;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">try.jai:1:27: error: Cannot call &#x27;layout&#x27; while &#x27;Widget&#x27; is under construction: only a class derived from it declares it</code></pre></div>
 <h2 id="a-subtype-member-through-a-base-typed-receiver">A subtype member through a base-typed receiver<a class="hlink" href="#a-subtype-member-through-a-base-typed-receiver" aria-label="link">&#8203;</a></h2>
 <p>Once a variable is declared <code>Cat</code>, the checker holds you to <code>Cat</code>&#x27;s members, exactly like C++. The object inside may well be a <code>Tiger</code>, but reaching for a member only <code>Tiger</code> declares is a load error:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat { int a = 0; }

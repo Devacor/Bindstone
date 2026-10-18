@@ -139,7 +139,10 @@ void class_definition::expand_destroy_level(class_instance* instance, const clas
                                             std::vector<detail::release_action>& actions, const class_definition* constructed) const {
     if (!level || (kept && (kept == level || kept->derives_from(level)))) { return; }
     if (engine_ && (!constructed || constructed->derives_from(level))) {
-        if (const script_value* body = level->destructor_body(*engine_)) { run_destructor_body(instance, level, *body); }
+        if (const script_value* body = level->destructor_body(*engine_)) {
+            detail::dispatch_level_scope level_dispatch(*instance, const_cast<class_definition*>(level), class_instance::cdtor_phase::destruction);
+            run_destructor_body(instance, level, *body);
+        }
     }
     for (const auto& parent : level->parent_classes_) {
         if (parent) { actions.push_back({parent.get(), 0}); }

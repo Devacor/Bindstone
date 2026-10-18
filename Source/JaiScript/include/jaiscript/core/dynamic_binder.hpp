@@ -1640,6 +1640,7 @@ public:
             };
             hooks.detach = [](void* object) { static_cast<T*>(object)->jai_script_slot().detach_script_layer(); };
             hooks.read = [](const void* object) { return static_cast<const T*>(object)->jai_script_slot().script_layer(); };
+            hooks.slot = [](const void* object) -> const script_extensible* { return &static_cast<const T*>(object)->jai_script_slot(); };
             class_def_->set_script_slot_hooks(hooks);
         }
 

@@ -2568,7 +2568,7 @@ interpreter::member_target interpreter::resolve_member_target(const script_value
             // A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
             // S1): re-point the handle itself, so every copy of it - and every receiver site,
             // getters, setters, bound methods, the vm's caches - sees the layer from now on.
-            if (target.class_def && !target.class_def->is_script_class() && target.class_def->extended_ever()) {
+            if (target.class_def && target.class_def->wrapped_object_has_layer(*target.instance)) {
                 if (auto hooks = target.class_def->slot_hooks()) {
                     auto layer = hooks->read(target.instance->cpp_object_pointer());
                     if (layer && layer != target.instance && layer->get_engine() == engine_) {
@@ -2596,7 +2596,7 @@ bool interpreter::object_to_bool_via_method(const script_value& value) {
         auto* oh = h->get();
         if (oh->is_class_instance_wrapper && oh->data) {
             if (auto* cd = static_cast<class_instance*>(oh->data.get())->get_class_definition();
-                cd && (cd->is_script_class() || !cd->extended_ever()) && !cd->may_define_to_bool()) {
+                cd && !cd->may_define_to_bool() && !cd->wrapped_object_has_layer(*static_cast<class_instance*>(oh->data.get()))) {
                 return true;
             }
         }
@@ -3611,6 +3611,16 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
                 return checked_result<void>();
             }
         }
+        // a C++ member of the method's receiver reached in place (detail/host_member_access.hpp), the row filled below
+        if (member_scope_.state == detail::member_scope_state::instance && member_scope_.this_storage) {
+            if (class_instance* self = detail::host_this_instance(*member_scope_.this_storage)) {
+                const detail::host_member_lane* lane = nullptr;
+                if (void* address = host_member_row_hit(expr, self->get_class_definition(), self, lane)) {
+                    push_value(lane->read(address, engine_));
+                    return checked_result<void>();
+                }
+            }
+        }
         auto member = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
                                                  member_scope_.statics, expr->symbol_id, /*want_methods*/ true);
         if (member) {
@@ -3623,6 +3633,12 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
                     push_value(std::move(member.method_value));   // static method: unbound callable
                 }
             } else if (member.what == detail::member_probe_hit::kind::cpp_property) {
+                const detail::host_member_lane* lane = nullptr;
+                if (void* address = host_member_cached(expr, expr->symbol_id, member.instance->get_class_definition(), member.instance,
+                                                       *member_scope_.this_storage, lane)) {
+                    push_value(lane->read(address, engine_));
+                    return checked_result<void>();
+                }
                 auto read = detail::read_bare_cpp_property(*member_scope_.this_storage, member.instance,
                                                            member.method_value, member.getter_id, expr->symbol_id);
                 if (!read) {
@@ -4554,18 +4570,28 @@ checked_result<script_value> interpreter::assign_math_component(script_value& ba
 }
 
 // a bound C++ member reached in place (detail/host_member_access.hpp): the row fills once per node, class and method epoch
-void* interpreter::host_member_cached(const member_expr* node, class_definition* cd, class_instance* inst, const script_value& receiver,
-                                      const detail::host_member_lane*& lane) {
+void* interpreter::host_member_cached(const void* node, uint64_t member_id, class_definition* cd, class_instance* inst,
+                                      const script_value& receiver, const detail::host_member_lane*& lane) {
     host_member_row& row = host_member_rows_[(reinterpret_cast<uintptr_t>(node) >> 4) & 127];
     if (row.node != node || row.cd != cd || row.epoch != cd->method_epoch()) {
         row.node = node;
         row.cd = cd;
         row.epoch = cd->method_epoch();
-        if (node->member_id == UINT64_MAX || !detail::host_member_fill(cd, inst, node->member_id, receiver, engine_, row.hit)) {
+        if (member_id == UINT64_MAX || !detail::host_member_fill(cd, inst, member_id, receiver, engine_, row.hit)) {
             row.hit = detail::host_member_hit{};
         }
     }
     if (!row.hit.lane) {
+        return nullptr;
+    }
+    lane = row.hit.lane;
+    return detail::host_member_address(inst, row.hit);
+}
+
+void* interpreter::host_member_row_hit(const void* node, const class_definition* cd, const class_instance* inst,
+                                       const detail::host_member_lane*& lane) {
+    const host_member_row& row = host_member_rows_[(reinterpret_cast<uintptr_t>(node) >> 4) & 127];
+    if (row.node != node || row.cd != cd || !row.hit.lane || row.epoch != cd->method_epoch()) {
         return nullptr;
     }
     lane = row.hit.lane;
@@ -4613,7 +4639,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     if (!setter.is_null() && !setter.is_invalid() && setter.is_function()) {
         if (target.instance) {
             const detail::host_member_lane* lane = nullptr;
-            if (void* address = host_member_cached(memberExpr, target.class_def, target.instance.get(), objectValue, lane);
+            if (void* address = host_member_cached(memberExpr, memberExpr->member_id, target.class_def, target.instance.get(), objectValue, lane);
                 address && lane->write && lane->write(address, value)) {
                 return {};
             }
@@ -9144,7 +9170,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
                 if (target.instance) {
                     const detail::host_member_lane* lane = nullptr;
-                    if (void* address = host_member_cached(expr, target.class_def, target.instance.get(), objectValue, lane)) {
+                    if (void* address = host_member_cached(expr, expr->member_id, target.class_def, target.instance.get(), objectValue, lane)) {
                         push_value(lane->read(address, engine_));
                         return {};
                     }

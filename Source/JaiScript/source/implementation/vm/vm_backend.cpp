@@ -1346,7 +1346,7 @@ vm_backend::member_target vm_backend::resolve_member_target(const script_value& 
 			// A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
 			// S1): re-point the handle itself, so every copy of it - and every receiver site,
 			// getters, setters, bound methods, the caches - sees the layer from now on.
-			if (target.class_def && !target.class_def->is_script_class() && target.class_def->extended_ever()) {
+			if (target.class_def && target.class_def->wrapped_object_has_layer(*target.instance)) {
 				if (auto hooks = target.class_def->slot_hooks()) {
 					auto layer = hooks->read(target.instance->cpp_object_pointer());
 					if (layer && layer != target.instance && layer->get_engine() == engine_) {
@@ -1383,7 +1383,7 @@ bool vm_backend::object_to_bool_via_method(const script_value& value) {
 		auto* oh = h->get();
 		if (oh->is_class_instance_wrapper && oh->data) {
 			if (auto* cd = static_cast<class_instance*>(oh->data.get())->get_class_definition();
-			    cd && (cd->is_script_class() || !cd->extended_ever()) && !cd->may_define_to_bool()) {
+			    cd && !cd->may_define_to_bool() && !cd->wrapped_object_has_layer(*static_cast<class_instance*>(oh->data.get()))) {
 				return true;
 			}
 		}
@@ -2757,6 +2757,10 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 					}
 				}
 			}
+			if (script_value read = make_null(); bare_host_read(f, f.ip * 3, read)) {
+				stack_.push_back(std::move(read));
+				return {};
+			}
 			auto member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
 			                                         f.locals->scope_static, sym, /*want_methods*/ true);
 			if (member) {
@@ -2770,6 +2774,10 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 					return {};
 				}
 				if (member.what == detail::member_probe_hit::kind::cpp_property) {
+					if (script_value lane_read = make_null(); bare_host_fill_read(f, f.ip * 3, sym, member.instance, lane_read)) {
+						stack_.push_back(std::move(lane_read));
+						return {};
+					}
 					auto read = detail::read_bare_cpp_property(*f.locals->scope_this, member.instance,
 					                                           member.method_value, member.getter_id, sym);
 					if (!read) {
@@ -4553,6 +4561,10 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 					}
 				}
 			}
+			if (script_value read = make_null(); bare_host_read(f, cache_slot, read)) {
+				scratch.emplace(std::move(read));
+				return &scratch.value();
+			}
 			auto member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
 			                                         f.locals->scope_static, sym, /*want_methods*/ true);
 			if (member) {
@@ -4573,6 +4585,10 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 					return &scratch.value();
 				}
 				if (member.what == detail::member_probe_hit::kind::cpp_property) {
+					if (script_value lane_read = make_null(); bare_host_fill_read(f, cache_slot, sym, member.instance, lane_read)) {
+						scratch.emplace(std::move(lane_read));
+						return &scratch.value();
+					}
 					if (observed) { *observed = true; }   // a getter: user code
 					auto read = detail::read_bare_cpp_property(*f.locals->scope_this, member.instance,
 					                                           member.method_value, member.getter_id, sym);
@@ -12124,6 +12140,7 @@ bool vm_backend::park_sibling_method(frame& f, const call_site& site) {
 	pending_callee& pc = pending_callees_.emplace_back();
 	pc.value = site.mic_method;
 	pc.method = site.mic_dispatch;
+	pc.native_entry = site.mic_dispatch ? nullptr : site.mic_native.entry;
 	pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
 	return true;
 }
@@ -12142,12 +12159,26 @@ void vm_backend::arm_sibling_method(frame& f, const call_site& site, const scrip
 	class_instance& inst = *static_cast<class_instance*>(holder->data.get());
 	class_definition* cd = inst.get_class_definition();
 	const uint64_t sym = f.code->symbols[site.callee.symbol];
-	if (!cd || cd->chain_has_nonpublic() || !cd->single_method_overload(sym)) return;
+	if (!cd || cd->chain_has_nonpublic()) return;
 	const script_value method = inst.get_method(sym, false);
 	if (method.raw_storage_index() != script_value::TYPEID_FUNCTION || thunk->payload.bound_dispatch->raw_storage_index() != script_value::TYPEID_FUNCTION ||
 	    &method.unchecked_as_function() != &thunk->payload.bound_dispatch->unchecked_as_function()) return;
 	const auto* dispatch = method.unchecked_as_function().target<script_method_dispatch>();
-	if (!dispatch || dispatch->eng != engine_) return;
+	if (!dispatch) {
+		// the receiver's C++ base method: parked on its direct lane when the base has one for this receiver's object
+		if (!method.unchecked_as_function().target<class_definition::cpp_method_dispatch>() ||
+		    !detail::host_method_fill(cd, &inst, sym, engine_, site.mic_native)) {
+			return;
+		}
+		site.mic_cd = cd;
+		site.mic_epoch = cd->method_epoch();
+		site.mic_field_free = !cd->chain_declares_field(sym) && cd->field_slot(sym) == class_definition::k_no_field_slot;
+		site.mic_method = method;
+		site.mic_dispatch = nullptr;
+		return;
+	}
+	if (dispatch->eng != engine_ || !cd->single_method_overload(sym)) return;
+	site.mic_native = detail::host_method_hit{};
 	site.mic_cd = cd;
 	site.mic_epoch = cd->method_epoch();
 	site.mic_field_free = !cd->chain_declares_field(sym) && cd->field_slot(sym) == class_definition::k_no_field_slot;
@@ -12686,6 +12717,28 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 		}
 		pc.value = make_bound_method_thunk(*f.locals->scope_this, std::move(pc.value));
 		pc.method = nullptr;
+	} else if (pc.native_entry) {
+		// a C++ base method parked by the probe's IC: its direct lane on the frame's receiver, else the bound method it would have minted
+		const size_t slice_base = stack_.size() - argc;
+		const script_value& receiver = *f.locals->scope_this;
+		if (class_instance* inst = detail::host_this_instance(receiver)) {
+			if (void* self = detail::host_method_self(inst, site.mic_native); self && site.mic_native.entry == pc.native_entry) {
+				script_value result = make_null();
+				bool taken = false;
+				try {
+					taken = (*static_cast<const class_definition::native_entry*>(pc.native_entry))(self, receiver, stack_.data() + slice_base, argc, result);
+				} catch (...) {
+					return call_threw(slice_base);
+				}
+				if (taken) {
+					stack_.truncate(slice_base);
+					stack_.push_back(std::move(result));
+					return {};
+				}
+			}
+		}
+		pc.value = make_bound_method_thunk(receiver, std::move(pc.value));
+		pc.native_entry = nullptr;
 	}
 	// Bound-method thunk (bare sibling calls): SLICE-enter before any collection —
 	// the args on the stack bind in place, the receiver rides in from the payload,
@@ -14509,6 +14562,64 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 		"class {0} has no static member '{1}'", name_id, expr->member_id);
 }
 
+bool vm_backend::bare_host_read(frame& f, size_t cache_slot, script_value& out) {
+	const auto& table = f.code->bare_host_ic;
+	if (cache_slot >= table.size() || parallel_worker_) { return false; }
+	const chunk::bare_host_entry& entry = table[cache_slot];
+	if (!entry.hit.lane || !f.locals->scope_this) { return false; }
+	class_instance* inst = detail::host_this_instance(*f.locals->scope_this);
+	if (!inst || inst->get_class_definition() != entry.cd || entry.cd->method_epoch() != entry.epoch) { return false; }
+	void* address = detail::host_member_address(inst, entry.hit);
+	if (!address) { return false; }
+	out = entry.hit.lane->read(address, engine_);
+	return true;
+}
+
+JAI_NOINLINE bool vm_backend::bare_host_fill_read(frame& f, size_t cache_slot, uint64_t sym, class_instance* inst, script_value& out) {
+	if (!cached_global_env_ || parallel_worker_ || cache_slot == SIZE_MAX || !inst || !f.locals->scope_this) { return false; }
+	auto& table = f.code->bare_host_ic;
+	if (table.size() <= cache_slot) { table.resize(f.code->code.size() * 3); }
+	if (table.size() <= cache_slot) { return false; }
+	chunk::bare_host_entry& entry = table[cache_slot];
+	class_definition* cd = inst->get_class_definition();
+	entry.cd = cd;
+	entry.epoch = cd->method_epoch();
+	if (!detail::host_member_fill(cd, inst, sym, *f.locals->scope_this, engine_, entry.hit)) { return false; }
+	void* address = detail::host_member_address(inst, entry.hit);
+	if (!address) { return false; }
+	out = entry.hit.lane->read(address, engine_);
+	return true;
+}
+
+bool vm_backend::native_site_call(const call_site& site, class_definition& cd, class_instance& inst, const script_value& receiver,
+                                  uint64_t id, size_t args_base, size_t argc, op_status& out) {
+	const uint64_t stamp = cd.is_script_class() ? cd.method_epoch() : cd.native_stamp();
+	if (site.nat_cd != &cd || site.nat_stamp != stamp || site.nat_shape != cd.field_shape_epoch()) [[unlikely]] {
+		if (!cached_global_env_) { return false; }
+		site.nat_cd = &cd;
+		site.nat_stamp = stamp;
+		site.nat_shape = cd.field_shape_epoch();
+		site.nat_field_free = !cd.chain_declares_field(id) && cd.field_slot(id) == class_definition::k_no_field_slot;
+		detail::host_method_fill(&cd, &inst, id, engine_, site.nat_hit);
+	}
+	if (!site.nat_hit.entry || native_field_shadowed(site, inst, id)) { return false; }
+	void* self = detail::host_method_self(&inst, site.nat_hit);
+	if (!self) { return false; }
+	script_value result = make_null();
+	bool taken = false;
+	try {
+		taken = (*static_cast<const class_definition::native_entry*>(site.nat_hit.entry))(self, receiver, stack_.data() + args_base, argc, result);
+	} catch (...) {
+		out = call_threw(args_base - 1);
+		return true;
+	}
+	if (!taken) { return false; }
+	stack_.truncate(args_base - 1);
+	stack_.push_back(std::move(result));
+	out = {};
+	return true;
+}
+
 JAI_NOINLINE void vm_backend::fill_host_member_hit(class_definition* cd, const class_instance* inst, uint64_t member_id,
                                                    const script_value& receiver, chunk::member_ic_entry& entry) {
 	entry.host = detail::host_member_hit{};
@@ -14525,8 +14636,8 @@ uint32_t vm_backend::member_read_slot_probe(class_definition* cd, member_expr* e
 		return UINT32_MAX;
 	}
 	const uint32_t fslot = cd->field_slot(expr->member_id);
-	if (fslot == class_definition::k_no_field_slot) {
-		return UINT32_MAX;
+	if (fslot == class_definition::k_no_field_slot || cd->slot_is_cpp_property(fslot)) {
+		return UINT32_MAX;   // a C++ property's placeholder holds no cell: the object answers (the host member lane, else the ladder)
 	}
 	if (cd->has_property_getters()) {
 		uint64_t getter_id = expr->getter_id;
@@ -15299,7 +15410,7 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 					uint32_t slot = UINT32_MAX;
 					if (member->member_id != UINT64_MAX && !cd->chain_has_nonpublic()) {
 						const uint32_t fslot = cd->field_slot(member->member_id);
-						if (fslot != class_definition::k_no_field_slot) {
+						if (fslot != class_definition::k_no_field_slot && !cd->slot_is_cpp_property(fslot)) {
 							auto [setter_id, setter_view] =
 								symbolizer_->get_setter_id_with_view(member->member_id);
 							if (!cd->user_accessor(setter_id) &&
@@ -16098,32 +16209,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					// A host class's direct lane (class_definition::native_method): the bound method's body on the
 					// C++ object, the receiver and arguments read in place; a declined shape takes the ordinary call
 					if (!parallel_worker_ && cd && cd->has_native_methods()) {
-						const class_definition::native_entry* native = nullptr;
-						void* self = nullptr;
-						if (site.nat_cd == cd && site.nat_stamp == cd->native_stamp() && site.nat_shape == cd->field_shape_epoch()) {
-							if (site.nat_entry && !native_field_shadowed(site, *inst, member->member_id)) {
-								native = static_cast<const class_definition::native_entry*>(site.nat_entry);
-								self = inst->cpp_object_pointer();
-							}
-						} else {
-							native = native_site_miss(site, *cd, *inst, member->member_id, self);
-						}
-						if (native) {
-							if (self) {
-								script_value out = make_null();
-								bool taken = false;
-								try {
-									taken = (*native)(self, objd, stack_.data() + args_base, argc, out);
-								} catch (...) {
-									return call_threw(args_base - 1);
-								}
-								if (taken) {
-									stack_.truncate(args_base - 1);
-									stack_.push_back(std::move(out));
-									return {};
-								}
-							}
-						}
+						if (op_status st; native_site_call(site, *cd, *inst, objd, member->member_id, args_base, argc, st)) { return st; }
 					}
 					// Worker pin (pre-resolved at the barrier): slice-enter directly
 					if (parallel_worker_ && cd) [[unlikely]] {
@@ -16165,6 +16251,10 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 					else { ++profile_slice_gate_[3]; }   // mic guard failed (unarmed/epoch/class/field)
 #endif
+					// a script layer's C++ base method (the script method cache never holds one, so a script method it serves never gets here)
+					if (!parallel_worker_ && cd && cd->is_script_class()) {
+						if (op_status st; native_site_call(site, *cd, *inst, objd, member->member_id, args_base, argc, st)) { return st; }
+					}
 				}
 			} else if (detail::math::is_kind(receiver_type)) {
 				// a vector's method (detail/math_intrinsics.hpp call_vec_method): the receiver and arguments read in place,

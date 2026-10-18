@@ -13053,12 +13053,7 @@ checked_result<void> interpreter::evaluate_field_initializers(std::shared_ptr<cl
     detail::dispatch_level_scope level_dispatch(*instance, class_def.get(), class_instance::cdtor_phase::construction);   // KEEP BYTE-PARALLEL with the vm
     auto initialize_field = [&](uint64_t field_id, const expression_ptr& initializer_ast) -> checked_result<void> {
         auto result = dispatch_expr(initializer_ast.get());
-        if (!result) {
-            if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
-                return result.error_value();
-            }
-            throw_concat("Failed to evaluate field initializer for '", string_symbolizer_->get_string(field_id), "'");
-        }
+        if (!result) { return result.error_value(); }   // KEEP BYTE-PARALLEL with the vm: the initializer's own error
         script_value field_value = initializer_store_value(pop_value(), initializer_ast.get());
         if (!field_value.has_valid_engine() && engine_) {
             field_value.set_engine(engine_);
@@ -13875,16 +13870,19 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     auto cleanup = [&](bool clear_this = true) {
         // capture before pop_back: deeper frames are still present
         if (is_unwinding_ && !trace_captured_) capture_stack_trace();
-        // Move the frame out and destroy it LAST: releasing its locals can fire script
-        // destructors that reenter call_function and grow call_stack_, which must never
-        // happen mid-pop_back (vector reentrancy UB). Mirrors the VM's stable-record
-        // teardown: destructors fire after the caller env/state is restored.
         detail::shared_cell_release shared_cells{engine_};   // declared first: its check runs after the frame's locals die
+        {
+            // The locals die while this frame is still the innermost one, as C++ destroys them inside the function: a destructor
+            // they fire traces through it (KEEP BYTE-PARALLEL with the vm). Moved out first, so a destructor reentering
+            // call_function only grows call_stack_ above this frame.
+            const size_t dying_index = call_stack_.size() - 1;
+            if ((call_stack_[dying_index].boxed_cells || (function.body && function.body->shares_cells)) && !parallel_worker_) [[unlikely]] {
+                script_value::gather_shared_cells(call_stack_[dying_index].locals.data(), call_stack_[dying_index].locals.size(), shared_cells.cells);
+            }
+            reverse_destroyed_values dying_locals = std::move(call_stack_[dying_index].locals);
+        }
         call_frame dying_frame = std::move(call_stack_.back());
         call_stack_.pop_back();
-        if ((dying_frame.boxed_cells || (function.body && function.body->shares_cells)) && !parallel_worker_) [[unlikely]] {
-            script_value::gather_shared_cells(dying_frame.locals.data(), dying_frame.locals.size(), shared_cells.cells);
-        }
 
         auto function_env = environment_;
         if (clear_this) {

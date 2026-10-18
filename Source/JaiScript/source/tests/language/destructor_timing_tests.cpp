@@ -815,6 +815,103 @@ public:
                 }
             }
         });
+
+        test("a_reload_replaces_and_adds_destructors", [this]() {
+            for (int variant = 0; variant < 2; ++variant) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(eng);
+                if (variant == 1) {
+                    eng->type_proofs(false);
+                    eng->ir_passes(false);
+                }
+                std::string got;
+                try {
+                    eng->execute(R"(
+                        string LOG = "";
+                        class A { int a = 1; ~A() { LOG = LOG + "old"; } }
+                        class B : A { int b = 2; }
+                        class C { int c = 3; }
+                    )");
+                    eng->execute(R"(class A { int a = 1; ~A() { LOG = LOG + "new"; } })");
+                    eng->execute(R"(class C { int c = 3; ~C() { LOG = LOG + "c"; } })");
+                    got = eng->execute("function f() -> void { B b; A a; C c; } f(); LOG;").as_string();
+                } catch (const std::exception& e) {
+                    got = std::string("threw: ") + e.what();
+                }
+                check_eq(std::string("cnewnew"), got, variant == 0 ? "default engine" : "proofs and passes off");
+            }
+        });
+
+        // C++ destroys a local inside the function that declares it, so the frames of an error its destructor raises run through it
+        test("a_destructor_error_at_a_scope_exit_traces_through_the_function", [this]() {
+            const std::string program =
+                "class Bad { ~Bad() { throw \"teardown\"; } }\n"
+                "function g() -> void {\n"
+                "    Bad b;\n"
+                "}\n"
+                "g();\n";
+            std::string got;
+            auto thrower = make_engine();
+            try {
+                thrower->execute(program);
+            } catch (const std::exception& e) {
+                got = e.what();
+            }
+            check_true(got.find("teardown") != std::string::npos, got);
+            check_eq(std::string("at ~Bad (<script>:1);at g (<script>:3);at <script> (<script>:5);"), trace_frames(thrower->format_stack_trace()));
+
+            std::string reported;
+            auto eng = make_engine();
+            eng->static_checking(check_mode::off);
+            eng->set_script_error_handler([&reported](const std::string& message) { if (reported.empty()) { reported = message; } });
+            try {
+                eng->execute("class Worse { ~Worse() { nowhere(); } }\nfunction h() -> void {\n    Worse w;\n}\nh();\n");
+            } catch (const std::exception& e) {
+                reported = e.what();
+            }
+            check_true(reported.find("nowhere") != std::string::npos, reported);
+            check_eq(std::string("at ~Worse (<script>:1);at h (<script>:3);at <script> (<script>:5);"), trace_frames(reported));
+        });
+
+        // A member initializer's own error leaves the constructor as raised, at every level: what a catch receives is what was thrown
+        test("an_initializer_error_propagates_as_raised_at_every_level", [this]() {
+            auto run = [this](const std::string& program) {
+                std::string got;
+                auto eng = make_engine();
+                jai::stdlib::register_all(eng);
+                eng->static_checking(check_mode::off);
+                try {
+                    got = eng->execute(program).as_string();
+                } catch (const std::exception& e) {
+                    got = std::string("threw: ") + e.what();
+                }
+                return got;
+            };
+            const std::string catcher = " string r = \"none\"; try { B b; } catch (e) { r = to_string(e); } r;";
+            check_eq(std::string("Undefined variable 'zz'"), run("class B { int z = zz; }" + catcher), "the class's own field");
+            check_eq(std::string("Undefined variable 'zz'"), run("class A { int s = zz; A() {} } class B : A { B() {} }" + catcher), "a base's field");
+            check_eq(std::string("Undefined variable 'zz'"), run("class A { int s = zz; } class B : A { }" + catcher), "a constructor-less base's field");
+            check_eq(std::string("Undefined variable 'zz'"), run("class A { A(int v) {} } class B : A { B() : super(zz) {} }" + catcher), "a super() argument");
+            check_eq(std::string("42"), run("int boom() { throw 42; } class A { int s = boom(); A() {} } class B : A { B() {} }" + catcher),
+                     "a thrown value arrives intact");
+            check_eq(std::string("Undefined variable 'zz'|1"),
+                     run("string LOG = \"\"; class A { int a = 1; A() {} ~A() { LOG = LOG + to_string(a); } } class B : A { int s = zz; B() {} }"
+                         " string r = \"none\"; try { B b; } catch (e) { r = to_string(e); } r + \"|\" + LOG;"),
+                     "the constructed base is destroyed");
+        });
+    }
+
+    // the frames of the first error a program raises, as the engine's stack trace lists them
+    static std::string trace_frames(const std::string& text) {
+        std::string result;
+        size_t at = 0;
+        while ((at = text.find("at ", at)) != std::string::npos) {
+            const size_t end = text.find('\n', at);
+            result += text.substr(at, end == std::string::npos ? std::string::npos : end - at) + ";";
+            if (end == std::string::npos) { break; }
+            at = end;
+        }
+        return result;
     }
 
     static constexpr const char* k_family = R"(

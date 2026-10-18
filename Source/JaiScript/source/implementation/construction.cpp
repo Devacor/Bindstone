@@ -47,19 +47,13 @@ namespace {
 		return result;
 	}
 
-	// an initializer list's arguments, each taken as it evaluates; a failure other than the depth limit raises a_failure
+	// an initializer list's arguments, each taken as it evaluates; a failure propagates as raised
 	checked_result<void> evaluate_initializer_arguments(construction_host& host, const constructor_initializer& initializer, const std::shared_ptr<environment>& env,
-	                                                    bool fields_run_code, const class_definition* binding_class, const char* a_failure,
-	                                                    std::vector<script_value>& result) {
+	                                                    bool fields_run_code, const class_definition* binding_class, std::vector<script_value>& result) {
 		result.reserve(initializer.arguments.size());
 		for (const auto& arg_expr : initializer.arguments) {
 			auto evaluated = host.evaluate(arg_expr, env);
-			if (!evaluated) {
-				if (evaluated.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
-					return evaluated.error_value();
-				}
-				return checked_result<void>(make_error_code(runtime_error_code::evaluation_failed), a_failure);
-			}
+			if (!evaluated) { return evaluated.error_value(); }
 			result.push_back(std::move(evaluated.value()));
 			capture_initializer_argument(initializer, result.size() - 1, fields_run_code, result.back(),
 			                             [&] { return constructor_binding(binding_class, result.size() - 1); });
@@ -133,7 +127,7 @@ namespace {
 				if (ancestor) {
 					auto level_env = construction_level_environment(host, definition_env, this_value, entry.script_class.get(), *entry.ctor, entry.args);
 					std::vector<script_value> ancestor_args;
-					auto evaluated = evaluate_initializer_arguments(host, init, level_env, fields_run_code, ancestor.get(), "Failed to evaluate super() argument", ancestor_args);
+					auto evaluated = evaluate_initializer_arguments(host, init, level_env, fields_run_code, ancestor.get(), ancestor_args);
 					if (!evaluated || host.unwinding) { return evaluated; }
 					if (auto ancestor_script = std::dynamic_pointer_cast<script_class_definition>(ancestor)) {
 						auto ancestor_ctor = select_base_constructor(*ancestor_script, ancestor_args, host.eng);
@@ -161,11 +155,8 @@ namespace {
 				if (!initializer_ast) { continue; }
 				auto evaluated = host.evaluate(initializer_ast, level_env);
 				if (host.unwinding) { return {}; }
-				if (evaluated) {
-					instance.set_field(field_id, initializer_store_value(std::move(evaluated.value()), initializer_ast.get()));
-				} else if (evaluated.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
-					return evaluated.error_value();
-				}
+				if (!evaluated) { return evaluated.error_value(); }
+				instance.set_field(field_id, initializer_store_value(std::move(evaluated.value()), initializer_ast.get()));
 			}
 			initializer_depth.reset();
 			auto body = host.run_constructor_body(it->ctor, definition_env, this_value, it->script_class.get(), it->args);
@@ -186,8 +177,7 @@ namespace {
 			return checked_result<void>(make_error_code(runtime_error_code::no_constructor_found), "Cannot call super() - class has no base class");
 		}
 		std::vector<script_value> init_args;
-		auto evaluated = evaluate_initializer_arguments(host, initializer, init_env, !cls->chain_initializers_all_literal(), parent.get(),
-		                                                "Failed to evaluate constructor initializer argument", init_args);
+		auto evaluated = evaluate_initializer_arguments(host, initializer, init_env, !cls->chain_initializers_all_literal(), parent.get(), init_args);
 		if (!evaluated || host.unwinding) { return evaluated; }
 		auto parent_script = std::dynamic_pointer_cast<script_class_definition>(parent);
 		if (!parent_script) {
@@ -270,8 +260,7 @@ checked_result<script_value> initialize_members(construction_host& host, const s
 			if (host.unwinding) { return this_value; }
 		} else if (initializer.target == "this") {
 			std::vector<script_value> init_args;
-			auto evaluated = evaluate_initializer_arguments(host, initializer, init_env, !all_literal, cls.get(),
-			                                                "Failed to evaluate constructor initializer argument", init_args);
+			auto evaluated = evaluate_initializer_arguments(host, initializer, init_env, !all_literal, cls.get(), init_args);
 			if (!evaluated) { return evaluated.error_value(); }
 			if (host.unwinding) { return this_value; }
 			std::vector<std::shared_ptr<function_decl>> other_ctors;

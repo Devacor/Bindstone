@@ -783,6 +783,10 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
                 class_def->add_constructor_from_ast(std::static_pointer_cast<function_decl>(member.declaration));
             } else if (method_name.size() > 1 && method_name[0] == '~') {   // "~" alone is operator~
                 class_def->add_destructor_from_ast(std::static_pointer_cast<function_decl>(member.declaration), env);
+                if (is_redefinition && eng) {   // the redefinition's method set replaces the class's, so the new destructor joins it
+                    const uint64_t destructor_id = class_def->destructor_id(*eng);
+                    new_methods[destructor_id] = class_def->get_method(destructor_id, false);
+                }
             } else {
                 uint64_t method_id = func_decl->name_id;
                 auto method_ast = std::static_pointer_cast<function_decl>(member.declaration);

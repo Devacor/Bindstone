@@ -281,6 +281,9 @@ public:
         dispatch_phase_ = phase;
     }
     cdtor_phase dispatch_phase() const { return dispatch_phase_; }
+    // The cells reordered from `from`'s slot layout into `to`'s; cells of fields `to` does not declare trail its slots in `from`'s
+    // order, so the reverse call restores `from`'s layout. Cells never move, so references into them stay valid.
+    void relayout_fields(const class_definition& from, const class_definition& to);
 
     bool is_script_class() const;
     bool is_cpp_class() const;
@@ -2730,6 +2733,31 @@ inline size_t class_instance::field_value_count() const {
     return n;
 }
 
+inline void class_instance::relayout_fields(const class_definition& from, const class_definition& to) {
+    const size_t held = flat_fields_.size();
+    const size_t from_slots = from.field_slot_count();
+    const size_t to_slots = to.field_slot_count();
+    std::vector<field_cell> result(to_slots);
+    std::vector<field_cell> foreign;
+    for (size_t slot = 0; slot < held; ++slot) {
+        const uint32_t target = slot < from_slots ? to.field_slot(from.slot_field(static_cast<uint32_t>(slot))) : class_definition::k_no_field_slot;
+        if (target != class_definition::k_no_field_slot && target < to_slots) {
+            result[target] = std::move(flat_fields_[slot]);
+        } else {
+            foreign.push_back(std::move(flat_fields_[slot]));
+        }
+    }
+    size_t next = 0;
+    for (size_t slot = 0; slot < to_slots && next < foreign.size(); ++slot) {
+        if (from.field_slot(to.slot_field(static_cast<uint32_t>(slot))) == class_definition::k_no_field_slot) {
+            result[slot] = std::move(foreign[next++]);
+        }
+    }
+    for (; next < foreign.size(); ++next) { result.push_back(std::move(foreign[next])); }
+    flat_fields_.resize(result.size());
+    for (size_t slot = 0; slot < result.size(); ++slot) { flat_fields_[slot] = std::move(result[slot]); }
+}
+
 inline void class_instance::copy_fields_from(const class_instance& other) {
     other.for_each_field([&](uint64_t id, const script_value& value) {
         materialize_field(id, value.clone_element());
@@ -2739,24 +2767,34 @@ inline void class_instance::copy_fields_from(const class_instance& other) {
 
 namespace detail {
 
-// class_instance::dispatch_as for a scope: the object answers as `level` until the scope ends
+// class_instance::dispatch_as for a scope: the object answers as `level` until the scope ends. Code compiled against the level reads
+// its slots, so an instance whose layout does not extend the level's (a base that gained fields on reload, a second base) is laid
+// out as the level for the span.
 class dispatch_level_scope {
 public:
     dispatch_level_scope(class_instance& a_instance, class_definition* a_level, class_instance::cdtor_phase a_phase) :
         instance(a_instance),
         restore(a_instance.get_class_definition()),
         restorePhase(a_instance.dispatch_phase()) {
-        // only a script level whose field slots the instance's layout extends: code compiled against it reads the right cells
-        const bool answers = a_level && restore && a_level != restore && a_level->is_script_class() && a_level->slot_prefix_of(*restore);
-        instance.dispatch_as(answers ? a_level : restore, a_phase);
+        if (a_level && restore && a_level != restore && a_level->is_script_class()) {
+            level = a_level;
+            relaid = !a_level->slot_prefix_of(*restore);
+            if (relaid) { instance.relayout_fields(*restore, *a_level); }
+        }
+        instance.dispatch_as(level ? level : restore, a_phase);
     }
-    ~dispatch_level_scope() { instance.dispatch_as(restore, restorePhase); }
+    ~dispatch_level_scope() {
+        if (relaid) { instance.relayout_fields(*level, *restore); }
+        instance.dispatch_as(restore, restorePhase);
+    }
     dispatch_level_scope(const dispatch_level_scope&) = delete;
     dispatch_level_scope& operator=(const dispatch_level_scope&) = delete;
 private:
     class_instance& instance;
     class_definition* restore;
     class_instance::cdtor_phase restorePhase;
+    class_definition* level {nullptr};
+    bool relaid {false};
 };
 
 // The ONE conversion table for every typed slot (docs/site/embedding/06-static-checking.html "One conversion table"):

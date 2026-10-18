@@ -17422,12 +17422,7 @@ checked_result<void> vm_backend::evaluate_field_initializers(std::shared_ptr<cla
 			}
 		}
 		auto result = eval_expression(initializer_ast, init_env);
-		if (!result) {
-			if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
-				return result.error_value();
-			}
-			throw_concat("Failed to evaluate field initializer for '", symbolizer_->get_string(field_id), "'");
-		}
+		if (!result) { return result.error_value(); }   // KEEP BYTE-PARALLEL with the interpreter: the initializer's own error
 		script_value field_value = initializer_store_value(std::move(result.value()), initializer_ast.get());
 		if (!field_value.has_valid_engine() && engine_) {
 			field_value.set_engine(engine_);

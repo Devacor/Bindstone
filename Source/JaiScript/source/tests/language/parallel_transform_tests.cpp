@@ -12,6 +12,7 @@
 #include <jaiscript/core/jaibite.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <cstring>
+#include <tuple>
 #include <new>
 #include <thread>
 #include <atomic>
@@ -2883,6 +2884,38 @@ public:
 					check_eq((int64_t)2, vals[1].as_int());
 					check_eq((int64_t)3, vals[2].as_int());
 				}
+			}
+		});
+
+		test("prewarm_covers_var_and_auto_copies_of_handles_and_typed_containers", [this]() {
+			// a var copy of a handle takes its rebindable twin, of a typed container its dynamic twin, auto takes the plain
+			// spelling back and lock() a shared_ptr: every shape is interned at the barrier, never by a worker
+			const std::string prelude = R"(
+				class C { int x = 0; }
+				array<shared_ptr<C>> hs = [];
+				array<weak_ptr<C>> ws = [];
+				array<array<int>> grid = [];
+				array<map<string, int>> ms = [];
+				for (int i = 0; i < 64; i++) { shared_ptr<C> h = new C(); hs.push(h); ws.push(h); grid.push([i]); ms.push({"a": i}); }
+			)";
+			const std::string tally = R"(
+				int total = 0;
+				for (auto h : hs) { total += h.x; }
+				return total;
+			)";
+			const std::vector<std::tuple<std::string, int64_t, bool>> bodies {
+				{"parallel_for (var p : hs) { var u = p; u.x = u.x + 1; }", 64, false},
+				{"parallel_for (auto p : hs) { var u = p; auto v = u; v.x = v.x + 2; }", 128, false},
+				{"parallel_for (var w : ws) { var l = w.lock(); int k = l.x; }", 0, true},   // a handle out of a weak element is unprovable
+				{"parallel_for (var r : grid) { var c = r; int n = c.size(); }", 0, false},
+				{"parallel_for (var m : ms) { var c = m; int n = c[\"a\"]; }", 0, false},
+			};
+			for (const auto& [body, expected, unsafe] : bodies) {
+				auto e = make_engine();
+				e->allow_unsafe_parallel(unsafe);
+				e->parallel_thread_count(4);
+				auto r = e->execute(prelude + body + tally);
+				check_eq(expected, r.as_int(), body);
 			}
 		});
 

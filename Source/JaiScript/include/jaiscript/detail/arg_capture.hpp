@@ -11,6 +11,7 @@
 #include <jaiscript/core/script_class.hpp>
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/return_conv.hpp>
 #include <jaiscript/detail/transient_read.hpp>
 #include <bit>
 
@@ -175,6 +176,21 @@ namespace jai::detail {
     inline const script_value* early_bound_reference(const script_value& v) {
         const auto* holder = deferred_argument(v);
         return holder && holder->argument_source->minted ? &holder->argument_source->lvalue : nullptr;
+    }
+
+    // A by-value parameter's default binds as the argument it stands in for, as `T p = default;` would hold: the parameter's
+    // conversion, then a copy when the result is still an existing object's storage (a temporary is the parameter itself)
+    template <typename Convert>
+    inline checked_result<script_value> default_argument_value(const script_value& evaluated, const parameter& p, Convert&& convert) {
+        const script_value& source = evaluated.deref();
+        auto converted = convert(source);
+        if (!converted) { return converted; }
+        script_value result = std::move(converted.value());
+        if (result.is_reference()) { result = script_value(result.deref()); }
+        if ((evaluated.is_reference() || is_lvalue_shaped_expr(p.default_value.get())) && same_heavy_node(result, source)) {
+            result = clone_for_assignment(result);
+        }
+        return result;
     }
 
     inline const script_value& argument_for_binding(const script_value& v, arg_binding b) {

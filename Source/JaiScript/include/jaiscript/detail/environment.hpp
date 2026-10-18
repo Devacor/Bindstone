@@ -435,14 +435,24 @@ namespace jai {
         return target.clone();
     }
 
-    // Lvalue-shaped initializer / assignment source (identifier, member, subscript): an
-    // existing object the store must copy. Everything else (call, construction, literal,
-    // operator result) is a temporary the store may move. Shared by both backends.
+    // Lvalue-shaped initializer / assignment source (identifier, member, subscript, and a
+    // conditional or ?? with such an operand, which may yield it): an existing object the
+    // store must copy. Everything else (call, construction, literal, operator result) is a
+    // temporary the store may move. Shared by both backends.
     inline bool is_lvalue_shaped_expr(const expression* e) noexcept {
         if (!e) return false;
         const node_type t = e->get_type();
         if (t == node_type::identifier_expr || t == node_type::member_expr) return true;
-        return t == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket;
+        if (t == node_type::ternary_expr) {
+            const auto* n = static_cast<const ternary_expr*>(e);
+            return is_lvalue_shaped_expr(n->then_expression.get()) || is_lvalue_shaped_expr(n->else_expression.get());
+        }
+        if (t != node_type::binary_expr) return false;
+        const auto* b = static_cast<const binary_expr*>(e);
+        if (b->op.type == token_type::question_question) {
+            return is_lvalue_shaped_expr(b->left.get()) || is_lvalue_shaped_expr(b->right.get());
+        }
+        return b->op.type == token_type::left_bracket;
     }
 
     // The decl copy rule for an evaluated initializer (`T x = e`, `T f = e` in a class body,

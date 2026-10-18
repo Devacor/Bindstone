@@ -2744,6 +2744,18 @@ namespace {
 			pending.pop_back();
 			if (!t || !seen.insert(t).second) { continue; }
 			eng.get_type_info_reference(t);
+			// a var declaration takes a handle's rebindable twin and a typed container's dynamic twin; auto and typed
+			// declarations take the plain spelling back
+			if (t->base_type == script_value_type::jai_shared_ptr_type && t->element_type()) {
+				type_info* pointee = t->element_type().get();
+				pending.push_back(t->dynamic_pointee ? eng.get_type_info_shared_ptr(pointee) : eng.get_type_info_shared_ptr_dynamic(pointee));
+			} else if (t->base_type == script_value_type::jai_weak_ptr_type && t->element_type()) {
+				pending.push_back(eng.get_type_info_shared_ptr(t->element_type().get()));   // lock()
+			} else if (t->base_type == script_value_type::jai_array_type) {
+				pending.push_back(t->dynamic_slot ? eng.get_type_info_array(t->element_type().get()) : eng.get_type_info_array_dynamic(t));
+			} else if (t->base_type == script_value_type::jai_map_type) {
+				pending.push_back(t->dynamic_slot ? eng.get_type_info_map(t->key_type().get(), t->value_type().get()) : eng.get_type_info_map_dynamic(t));
+			}
 			pending.push_back(t->element_type().get());
 			pending.push_back(t->key_type().get());
 			pending.push_back(t->value_type().get());

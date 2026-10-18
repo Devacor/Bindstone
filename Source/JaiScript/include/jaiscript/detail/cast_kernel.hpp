@@ -94,7 +94,7 @@ namespace jai::detail {
 			// a handle keeps its own type, so a copy of the loop variable shares the object as a copy of the handle does
 			const type_info_ptr& tag = element.get_type_info();
 			const bool handle = tag && (tag->base_type == script_value_type::jai_shared_ptr_type || tag->base_type == script_value_type::jai_weak_ptr_type);
-			if (!by_ref && !handle) { element.set_type_info(declared); }
+			if (!by_ref && !handle) { var_stamp(element, declared, eng); }
 			return element;
 		}
 		if (!range_for_declared(declared.get())) { return element; }

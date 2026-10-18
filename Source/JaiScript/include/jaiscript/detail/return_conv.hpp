@@ -132,6 +132,12 @@ namespace jai::detail {
         if (lvalue_read || v.is_reference()) { v = clone_for_assignment(v); }
     }
 
+    // A yield hands out what a return of the same operand would (materialize_return_value), except that no slot moves
+    // out: the body resumes and still owns its locals, so a named local copies like any lvalue
+    inline bool yield_operand_is_lvalue(const expression* e) noexcept {
+        return classify_return_operand(e) != return_operand_temporary;
+    }
+
     inline bool same_heavy_node(const script_value& a, const script_value& b) noexcept {
         const size_t idx = a.raw_storage_index();
         if (idx != b.raw_storage_index()) return false;

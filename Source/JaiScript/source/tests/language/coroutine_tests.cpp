@@ -1,5 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <chrono>
 

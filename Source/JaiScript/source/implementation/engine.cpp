@@ -1,4 +1,10 @@
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/core/execution_backend.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
+#include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/lexer.hpp>
+#include <jaiscript/detail/parser.hpp>
+#include <jaiscript/detail/interpreter.hpp>
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/float_text.hpp>

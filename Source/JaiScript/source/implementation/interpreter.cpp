@@ -1,4 +1,10 @@
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/core/execution_backend.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
+#include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/lexer.hpp>
+#include <jaiscript/detail/parser.hpp>
+#include <jaiscript/detail/interpreter.hpp>
 #include <jaiscript/detail/host_member_access.hpp>
 #include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <jaiscript/detail/uniquely_held.hpp>

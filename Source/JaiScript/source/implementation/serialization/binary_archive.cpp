@@ -1,4 +1,5 @@
 #include <jaiscript/serialization/binary_archive.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 
 namespace jai::serialization {
 

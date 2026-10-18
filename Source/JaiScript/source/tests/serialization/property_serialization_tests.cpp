@@ -1,4 +1,5 @@
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/properties/property.hpp>
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/properties/property_serialization.hpp>

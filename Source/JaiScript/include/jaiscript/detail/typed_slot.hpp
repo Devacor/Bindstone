@@ -11,7 +11,7 @@
 // its own texts (docs/site/embedding/06-static-checking.html "One conversion table"). A user conversion that fails
 // propagates its own error.
 
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/script_class.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/container_enforce.hpp>

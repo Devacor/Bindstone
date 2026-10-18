@@ -1,6 +1,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/core/engine_impl.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>

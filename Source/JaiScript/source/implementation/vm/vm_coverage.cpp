@@ -5,7 +5,7 @@
 #include <jaiscript/vm/vm_backend.hpp>
 #include <jaiscript/vm/coverage.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/script_class.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>
 #include <algorithm>

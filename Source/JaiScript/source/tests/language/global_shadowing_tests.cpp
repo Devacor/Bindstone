@@ -6,6 +6,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/detail/environment.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <string>
 #include <functional>

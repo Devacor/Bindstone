@@ -2,6 +2,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/convenience.hpp>

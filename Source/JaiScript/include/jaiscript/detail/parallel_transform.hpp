@@ -14,6 +14,7 @@
 
 #include <jaiscript/core/checked_result.hpp>
 #include <jaiscript/core/value.hpp>
+#include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/fault_injection.hpp>
 #include <jaiscript/detail/thread_pool.hpp>

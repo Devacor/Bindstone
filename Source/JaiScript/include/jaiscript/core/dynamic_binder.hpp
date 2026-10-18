@@ -38,7 +38,6 @@
 #include <set>
 #include <algorithm>
 #include <type_traits>
-#include <iostream>
 #include <typeindex>
 
 // class_instance, class_definition, access_level, delegation_type
@@ -593,46 +592,28 @@ public:
             // Zero-argument constructor
             engine* engine_ptr = &engine_;
             engine_.add_overloaded_function(class_name_, 0, [class_def = class_def_, class_name = class_name_, engine_ptr](const std::vector<script_value>& args) -> script_value {
-                try {
-                    // Create the C++ object
-                    std::shared_ptr<T> cpp_obj;
-
-                    // Check if T has an engine constructor and use it if available
-                    if constexpr (has_engine_constructor<T>) {
-                        // Use the engine-aware constructor
-                        cpp_obj = std::make_shared<T>(engine_ptr);
-                    } else {
-                        // Use the default constructor
-                        cpp_obj = std::make_shared<T>();
-                    }
-
-                    auto instance = detail::make_native_instance(*class_def, class_name, cpp_obj, engine_ptr);
-                    return script_value::make_object(class_name, instance, engine_ptr);
-                } catch (const std::exception& e) {
-                    std::cerr << "Error in zero-arg constructor: " << e.what() << std::endl;
-                    throw;
+                std::shared_ptr<T> cpp_obj;
+                if constexpr (has_engine_constructor<T>) {
+                    cpp_obj = std::make_shared<T>(engine_ptr);
+                } else {
+                    cpp_obj = std::make_shared<T>();
                 }
+                auto instance = detail::make_native_instance(*class_def, class_name, cpp_obj, engine_ptr);
+                return script_value::make_object(class_name, instance, engine_ptr);
             });
         } else {
-            // Multi-argument constructor
             engine* engine_ptr = &engine_;
 
-            // Helper to avoid template parameter pack in lambda (MSVC workaround)
-            using constructor_helper = std::shared_ptr<T>(*)(const std::vector<script_value>&, engine*);
-            constructor_helper helper = [](const std::vector<script_value>& args, engine* eng) -> std::shared_ptr<T> {
+            // A function pointer keeps the Args pack out of the registered lambda (MSVC)
+            using construct_from_script_args = std::shared_ptr<T>(*)(const std::vector<script_value>&, engine*);
+            construct_from_script_args construct_native = [](const std::vector<script_value>& args, engine* eng) -> std::shared_ptr<T> {
                 return dynamic_binder<T>::template createObjectImpl<Args...>(args, std::index_sequence_for<Args...>{}, eng);
             };
 
-            engine_.add_overloaded_function_with_full_types(class_name_, sizeof...(Args), writeback_tagged<detail::host_writeback_mask<Args...>()>([class_def = class_def_, class_name = class_name_, engine_ptr, helper](const std::vector<script_value>& args) -> script_value {
-                try {
-                    // Extract arguments using index-based unpacking via helper
-                    auto cpp_obj = helper(args, engine_ptr);
-
-                    auto instance = detail::make_native_instance(*class_def, class_name, cpp_obj, engine_ptr);
-                    return script_value::make_object(class_name, instance, engine_ptr);
-                } catch (const std::exception&) {
-                    throw;
-                }
+            engine_.add_overloaded_function_with_full_types(class_name_, sizeof...(Args), writeback_tagged<detail::host_writeback_mask<Args...>()>([class_def = class_def_, class_name = class_name_, engine_ptr, construct_native](const std::vector<script_value>& args) -> script_value {
+                auto cpp_obj = construct_native(args, engine_ptr);
+                auto instance = detail::make_native_instance(*class_def, class_name, cpp_obj, engine_ptr);
+                return script_value::make_object(class_name, instance, engine_ptr);
             }),
             std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... });
         }
@@ -2034,7 +2015,5 @@ private:
 
 } // namespace jai
 
-// Include script class after class_definition is complete
-#include "script_class.hpp"
 
 #endif // __JAISCRIPT_CORE_dynamic_binder_HPP__

@@ -1,6 +1,6 @@
 #include <jaiscript/stdlib/reflection.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/environment.hpp>

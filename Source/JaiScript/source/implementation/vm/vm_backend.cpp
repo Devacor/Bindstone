@@ -16,7 +16,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/enum_value.hpp>
 #include <jaiscript/detail/inline_variable.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/script_class.hpp>
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/script_namespace.hpp>

@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_CORE_OVERLOAD_RESOLUTION_HPP__
 #define __JAISCRIPT_CORE_OVERLOAD_RESOLUTION_HPP__
 
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <climits>
 #include <memory>

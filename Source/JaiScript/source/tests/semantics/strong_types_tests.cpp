@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/bound_array.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <array>

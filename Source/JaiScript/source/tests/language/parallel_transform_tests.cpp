@@ -5,7 +5,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <map>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_capture_kind (classification pins)
 #include <jaiscript/stdlib/stdlib.hpp>

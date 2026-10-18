@@ -5090,7 +5090,7 @@ private:
         bool is_ctor = class_ctx_ && fn->name == class_ctx_name_;
         fn_stack_.push_back(std::move(ctx));
         mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
-        define_params(fn->parameters, fn->location, /*warn_field_shadows=*/!is_ctor);
+        define_params(fn->parameters, fn->location, /*warn_field_shadows=*/!is_ctor, /*binds_copies=*/fn->is_coroutine);
         fn_stack_.back().in_ctor_initializers = true;
         for (const auto& init : fn->initializers) {
             for (const auto& arg : init.arguments) { infer(arg.get()); }
@@ -5109,8 +5109,28 @@ private:
         capture_stack_.swap(saved_captures);
     }
 
+    // A default no evaluation can turn into storage (a literal, a construction, a lambda, an operator's result); a conditional, a call
+    // or a cast may yield a reference, and the bind judges those
+    static bool default_never_names_storage(const expression* e) {
+        switch (e->get_type()) {
+        case node_type::literal_expr: case node_type::array_literal_expr: case node_type::map_literal_expr:
+        case node_type::lambda_expr: case node_type::new_expr:
+            return true;
+        case node_type::unary_expr: {
+            const token_type op = static_cast<const unary_expr*>(e)->op.type;
+            return op != token_type::plus_plus && op != token_type::minus_minus;
+        }
+        case node_type::binary_expr: {
+            const token_type op = static_cast<const binary_expr*>(e)->op.type;
+            return op != token_type::left_bracket && op != token_type::question_question;
+        }
+        default:
+            return false;
+        }
+    }
+
     void define_params(const std::vector<parameter>& params, const source_location& fn_loc,
-                       bool warn_field_shadows = true) {
+                       bool warn_field_shadows = true, bool binds_copies = false) {
         for (const auto& p : params) {
             ctype pt = ctype_from_type_info(p.type.get());
             if (p.default_value) {
@@ -5119,6 +5139,9 @@ private:
                     diag(diag_level::error, p.default_value->location,
                          "default value of '" + p.name + "' declared '" +
                          (p.type ? p.type->canonical_name() : "auto") + "' has type '" + ctype_name(dv) + "'");
+                }
+                if (p.is_reference && !p.is_const && !binds_copies && default_never_names_storage(p.default_value.get())) {   // a coroutine binds a copy
+                    diag(diag_level::error, p.default_value->location, "cannot bind non-lvalue default to reference parameter '" + p.name + "'");
                 }
             }
             warn_shadow("parameter", p.name, fn_loc, warn_field_shadows);

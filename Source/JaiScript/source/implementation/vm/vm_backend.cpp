@@ -1057,7 +1057,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 				}
 				script_value default_val = std::move(stack_.back());
 				stack_.pop_back();
-				if (!param.is_reference) {   // a by-value default binds its converted copy (bind_parameters parity)
+				{   // a coroutine binds every parameter by value, a reference one's default too (the interpreter's value_params)
 					auto bound = detail::default_argument_value(default_val, param, [&](const script_value& v) {
 						return try_convert_for_parameter(v, param.type, detail::slot_site{detail::slot_kind::parameter, param.name, function->name, false});
 					});
@@ -22018,6 +22018,9 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 						return raise_from(bound);
 					}
 					default_val = std::move(bound.value());
+				}
+				if (!detail::default_binds_reference(param, default_val)) {
+					return raise_from(detail::non_lvalue_default_error(param, *symbolizer_));
 				}
 				if (param.ref_escaping && !default_val.is_reference()) {
 					default_val = script_value::make_cell_reference(std::move(default_val), engine_);

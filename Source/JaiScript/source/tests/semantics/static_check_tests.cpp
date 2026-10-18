@@ -1947,6 +1947,34 @@ public:
             }
         });
 
+        // A reference parameter's default names storage as in C++: a literal or an operator's result is a load error, and at the bind
+        // (checking off) a default yielding no reference raises; a const T& default binds a temporary, an lvalue default binds it
+        test("a_reference_parameters_default_must_name_storage", [this]() {
+            auto e = make_engine();
+            auto r = e->check("int peek(int& p = 5) { return p; }\nvoid push_one(array<int>& xs = [1]) { xs.push(2); }\nauto lf = [](int& q = 2 + 3) { return q; };");
+            check_eq((size_t)3, error_count(r), r.format());
+            check_true(has_diag(r, dlevel::error, "cannot bind non-lvalue default to reference parameter 'p'"), r.format());
+            check_true(has_diag(r, dlevel::error, "cannot bind non-lvalue default to reference parameter 'xs'"), r.format());
+            check_true(has_diag(r, dlevel::error, "cannot bind non-lvalue default to reference parameter 'q'"), r.format());
+            check_eq((size_t)0, error_count(e->check("int g = 1;\narray<int> cs = [1];\nclass C { static int s = 2; int f = 3; }\nC c = C();\n"
+                "int a(int& p = g) { return p; }\nint b(int& p = cs[0]) { return p; }\nint d(int& p = C::s) { return p; }\nint h(int& p = c.f) { return p; }\n"
+                "int k(const int& p = 5) { return p; }\nint m(int& p = true ? g : g) { return p; }")));
+
+            auto off = make_engine();
+            off->static_checking(check_mode::off);
+            check_eq(std::string("Cannot bind non-lvalue default to reference parameter 'p'"),
+                off->execute("int peek(int& p = 5) { return p; }\nvar msg = \"\";\ntry { peek(); } catch (err) { msg = err; }\nmsg;").to_string());
+            check_eq(std::string("Cannot bind non-lvalue default to reference parameter 'q'"),
+                off->execute("auto lf = [](int& q = 2 + 3) { return q; };\nvar msg = \"\";\ntry { lf(); } catch (err) { msg = err; }\nmsg;").to_string());
+            check_eq((size_t)0, error_count(e->check("coroutine int gen(int& p = 5) { yield p; }\nauto g = gen();")), "a coroutine binds a copy of its default");
+            check_eq(std::string("5 1"),
+                off->execute("int g = 1;\ncoroutine int lit(int& p = 5) { yield p; }\ncoroutine int named(int& p = g) { p = 9; yield p; }\n"
+                             "auto a = lit();\nauto b = named();\nint first = a.next();\nb.next();\n\"\" + first + \" \" + g;").to_string());
+            check_eq(std::string("7 5 11"),
+                off->execute("int peek(int& p = 5) { return p; }\nint v = 7;\nint k(const int& p = 5) { return p; }\nint g = 1;\nvoid bump(int& p = g) { p += 10; }\nbump();\n"
+                             "\"\" + peek(v) + \" \" + k() + \" \" + g;").to_string());
+        });
+
         test("string_reference_temporaries_mutate_privately_and_variables_alias", [this]() {
             const std::string source = R"JAI(
                 string normalize(string& value) {

@@ -13898,6 +13898,10 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                         default_val = std::move(bound.value());
                     }
                 }
+                if (!is_unwinding_ && !detail::default_binds_reference(param, default_val)) {
+                    cleanup();
+                    return detail::non_lvalue_default_error(param, *string_symbolizer_);
+                }
                 if (param.ref_escaping && !default_val.is_reference()) {
                     default_val = script_value::make_cell_reference(std::move(default_val), engine_);
                 }

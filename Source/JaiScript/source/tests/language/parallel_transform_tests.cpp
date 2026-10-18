@@ -1946,7 +1946,7 @@ public:
 				return "no-error";
 			)");
 			auto msg = r.as<std::string>();
-			check_true(msg.find("cannot be mutated in place") != std::string::npos);
+			check_true(msg.find("cannot be proven exclusive") != std::string::npos);
 		});
 
 		// shared_ptr-tagged elements alias by script-visible design: a live alias makes the
@@ -1964,7 +1964,7 @@ public:
 				return "no-error";
 			)");
 			auto msg = r.as<std::string>();
-			check_true(msg.find("parallel_for: element 0 cannot be mutated in place") != std::string::npos, msg);
+			check_true(msg.find("parallel_for: element 0 cannot be proven exclusive") != std::string::npos, msg);
 
 			auto r2 = e->execute(R"(
 				class Q2 { int x = 0; }
@@ -2775,7 +2775,7 @@ public:
 				return "no-error";
 			)");
 			auto msg = r.as<std::string>();
-			check_true(msg.find("cannot be mutated in place") != std::string::npos);
+			check_true(msg.find("cannot be proven exclusive") != std::string::npos);
 		});
 
 		test("prewarm_class_reached_through_typed_array_field", [this]() {

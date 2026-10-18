@@ -47,6 +47,7 @@ OLD_TEXTS = [
     r"Maximum JSON nesting depth",
     r"Maximum serialization depth",
     r"Maximum deserialization depth",
+    r"cannot be mutated in place",
 ]
 
 

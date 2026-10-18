@@ -545,6 +545,47 @@ public:
             check_eq(std::string("3;500;3;500;"), r);
         });
 
+        // Extending objects of two C++ types under the declared base into one script class gives one shared class: one identity,
+        // one static field, one reload; each object's native keeps its own dynamic type; and a warm site alternating between
+        // them reaches each object's member through its own layout, never a delta measured on the other
+        test("one_script_class_serves_objects_of_different_cpp_types", [this]() {
+            auto keep = std::make_shared<std::vector<std::shared_ptr<LaneSchemaOwner>>>();
+            auto eng = layer_engine(keep);
+            eng->add_function("shadow_depth", [](LaneSchemaShadow& shadow) -> int64_t { return shadow.depth.get(); });
+            eng->execute(R"(
+                class Ext : LaneSchemaOwner {
+                    static int made = 0;
+                    int tag() { return 1; }
+                    int bare() { return depth; }
+                }
+                var p = held();
+                extend(p, Ext);
+                var q = held_shadow();
+                extend(q, Ext);
+                Ext::made = Ext::made + 1;
+                function rd(var& x) -> int { return x.depth; }
+                function wr(var& x, int v) { x.depth = v; }
+                function call(var& x) -> int { return x.d0(); }
+                function row(var& x) -> string { return to_string(rd(x)) + "," + to_string(call(x)) + "," + to_string(x.bare()) + "," + to_string(x.tag()); }
+            )");
+            check_eq(std::string("Ext"), eng->execute("reflect::type_name(p);").as_string(), "the plain-typed object's class");
+            check_eq(std::string("Ext"), eng->execute("reflect::type_name(q);").as_string(), "the derived-typed object's class");
+            const std::string p_json = eng->execute("to_json(p);").as_string();
+            const std::string q_json = eng->execute("to_json(q);").as_string();
+            check_true(p_json.find("\"Ext\"") != std::string::npos && q_json.find("\"Ext\"") != std::string::npos, "both save as Ext: " + p_json + " / " + q_json);
+            check_eq((script_int)1, eng->execute("Ext::made;").as_int(), "one static field");
+            check_eq((script_int)99, eng->execute("shadow_depth(q);").as_int(), "the derived-typed native keeps its dynamic type");
+            check_throws([&]() { eng->execute("shadow_depth(p);"); }, "the plain-typed native is no LaneSchemaShadow");
+            std::string rows;
+            for (int i = 0; i < 3; ++i) {
+                rows += eng->execute("row(p) + \"|\" + row(q) + \";\";").as_string();
+                eng->execute("wr(p, rd(p) + 1); wr(q, rd(q) + 1);");
+            }
+            check_eq(std::string("3,3,3,1|99,3,99,1;4,4,4,1|100,3,100,1;5,5,5,1|101,3,101,1;"), rows, "each object through its own layout");
+            eng->execute("class Ext : LaneSchemaOwner { static int made = 0; int tag() { return 2; } int bare() { return depth; } }");
+            check_eq(std::string("6,6,6,2|102,3,102,2;"), eng->execute("row(p) + \"|\" + row(q) + \";\";").as_string(), "one reload updates both");
+        });
+
         // A reload that gives the layer's class an override, or takes it away, turns a warm site with it
         test("layer_lanes_follow_a_reload_of_the_layer_class", [this]() {
             auto keep = std::make_shared<std::vector<std::shared_ptr<LaneSchemaOwner>>>();
@@ -600,7 +641,7 @@ public:
             eng->execute("class Ext : LaneSchemaOwner { int tag() { return 1; } } class ShadowExt : LaneSchemaShadow { int tag() { return 2; } } var e = held(); extend(e, Ext);");
             std::string message;
             try { eng->execute("extend(e, ShadowExt);"); } catch (const std::exception& error) { message = error.what(); }
-            check_eq(std::string("extend: 'ShadowExt' derives the C++ class 'LaneSchemaShadow', which this object is not"), message);
+            check_eq(std::string("extend: 'ShadowExt' derives the C++ class 'LaneSchemaShadow', which is not the object's C++ class 'LaneSchemaOwner' or one of its bases"), message);
             check_eq((script_int)1, eng->execute("e.tag();").as_int(), "the layer keeps its class");
             check_eq((script_int)3, eng->execute("e.d0();").as_int(), "and its object");
         });

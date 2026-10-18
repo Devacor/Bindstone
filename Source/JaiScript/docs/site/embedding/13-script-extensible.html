@@ -109,8 +109,9 @@ print(raw.bite, " ", raw.fangs, " ", raw.speak());</code></pre></div>
 17 1 voidspawn</code></pre></div>
 <p>The rules:</p>
 <ul>
-<li><strong>The class must derive the object's C++ class</strong> (through any chain of script classes).
-Anything else is refused, naming both classes.</li>
+<li><strong>The class's C++ base must be the object's C++ class or one of its bases</strong> (through any chain of script
+classes). The object keeps its own C++ type, so objects of different C++ types under one base share one script class.
+Anything else is refused, naming the class and its C++ base.</li>
 <li><strong>Same class: no-op.</strong> The current layer is returned.</li>
 <li><strong>Another class: re-derive.</strong> Every field both classes declare keeps its value
 (<code>bite</code> above), the new class's own fields take their initializers (<code>fangs</code>), the new
@@ -222,8 +223,8 @@ call: <code>b-&gt;extend(obj, "Goblin")</code>; a type without the slot needs th
 another's lookup. Layers are movable, never shared between threads: the same rule every script value follows.</p>
 
 <h2 id="errors-and-cost">Errors and cost<a class="hlink" href="#errors-and-cost" aria-label="link">&#8203;</a></h2>
-<p>Inside the engine every refusal is an error code: <code>extend_rejected</code> (the class does not derive
-the object's class, the argument is not a class, arity) and <code>script_layer_retired</code> (a detached,
+<p>Inside the engine every refusal is an error code: <code>extend_rejected</code> (the class's C++ base is not
+the object's C++ class or one of its bases, the argument is not a class, arity) and <code>script_layer_retired</code> (a detached,
 moved, or outlived layer reached for its object), so script catches them like any runtime error; the C++
 <code>engine::extend</code> throws at its boundary.</p>
 <p>The lookup that hands script the layer is a pointer read on the object's slot (no allocation per crossing). In a creature-simulation workload the class-based scripts measured a few

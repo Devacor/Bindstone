@@ -1508,7 +1508,7 @@ checked_result<expression_ptr> parser::primary() {
             arguments.reserve(4);
             do {
                 JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                arguments.push_back(std::move(arg));
+                arguments.push_back(bound_conditional(std::move(arg)));
             } while (match(token_type::comma));
         }
 
@@ -1541,6 +1541,7 @@ checked_result<expression_ptr> parser::primary() {
         JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after cast type"));
         JAISCRIPT_TRY_ASSIGN(auto operand, expression());
         JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after cast operand"));
+        if (by_reference) { operand = bound_conditional(std::move(operand)); }
         return std::make_shared<cast_expr>(castToken.location, target, by_reference, std::move(operand));
     }
 
@@ -1605,7 +1606,7 @@ checked_result<expression_ptr> parser::primary() {
                         arguments.reserve(4);
                         do {
                             JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                            arguments.push_back(std::move(arg));
+                            arguments.push_back(bound_conditional(std::move(arg)));
                         } while (match(token_type::comma));
                     }
 
@@ -1619,7 +1620,7 @@ checked_result<expression_ptr> parser::primary() {
                     if (!check(token_type::right_paren)) {
                         do {
                             JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                            arguments.push_back(std::move(arg));
+                            arguments.push_back(bound_conditional(std::move(arg)));
                         } while (match(token_type::comma));
                     }
 
@@ -1797,7 +1798,7 @@ checked_result<expression_ptr> parser::primary() {
                             arguments.reserve(4);
                             do {
                                 JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                                arguments.push_back(std::move(arg));
+                                arguments.push_back(bound_conditional(std::move(arg)));
                             } while (match(token_type::comma));
                         }
 
@@ -2600,7 +2601,7 @@ checked_result<expression_ptr> parser::postfix() {
                     arguments.reserve(4);
                     do {
                         JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                        arguments.push_back(std::move(arg));
+                        arguments.push_back(bound_conditional(std::move(arg)));
                     } while (match(token_type::comma));
                 }
 
@@ -2826,6 +2827,25 @@ expression_ptr parser::bound_reference(const expression_ptr& piece) {
     auto cast = std::make_shared<cast_expr>(piece->location, store_type_info(type_info::make_any(*symbolizer_)), true, lvalue_target(piece));
     cast->implicit_ref = true;
     return cast;
+}
+
+// A conditional whose arms both name storage, where a reference may bind it (an argument, a T& declaration, default or return,
+// a cast<T&> operand), reads its arms as references, so the binding names the variable the condition picks (C++)
+expression_ptr parser::bound_conditional(expression_ptr value) {
+    if (!detail::conditional_names_storage(value.get())) { return value; }
+    auto* c = static_cast<ternary_expr*>(value.get());
+    for (expression_ptr* arm : {&c->then_expression, &c->else_expression}) {
+        if ((*arm)->get_type() == node_type::ternary_expr) {
+            *arm = bound_conditional(*arm);
+        } else if ((*arm)->get_type() != node_type::cast_expr || !static_cast<cast_expr*>(arm->get())->by_reference) {
+            // a member may name no storage (an enumerator, a computed property): the arm keeps its value then
+            auto cast = std::make_shared<cast_expr>((*arm)->location, store_type_info(type_info::make_any(*symbolizer_)), true, *arm);
+            cast->implicit_ref = true;
+            cast->binding_ref = true;
+            *arm = cast;
+        }
+    }
+    return value;
 }
 
 // Stub for declaration
@@ -3187,7 +3207,7 @@ checked_result<expression_ptr> parser::finish_call(expression_ptr callee) {
         arguments.reserve(4);
         do {
             JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-            arguments.push_back(std::move(arg));
+            arguments.push_back(bound_conditional(std::move(arg)));
         } while (match(token_type::comma));
     }
 
@@ -3276,6 +3296,7 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
 
             if (match(token_type::equal)) {
                 JAISCRIPT_TRY_ASSIGN(param.default_value, expression());
+                if (is_reference) { param.default_value = bound_conditional(std::move(param.default_value)); }
             }
 
             params.push_back(std::move(param));
@@ -3408,6 +3429,8 @@ checked_result<expression_ptr> parser::finish_lambda_body(std::shared_ptr<lambda
     in_coroutine_ = false;
     coroutine_scope ctor_scope{in_constructor_, in_constructor_};
     in_constructor_ = false;
+    coroutine_scope ref_return_scope{returns_reference_, returns_reference_};
+    returns_reference_ = lambda->return_type && lambda->return_type->base_type == script_value_type::jai_reference_type;
     if (expression_body && !check(token_type::left_brace)) {
         const source_location at = peek().location;
         auto value = expression();
@@ -3416,7 +3439,7 @@ checked_result<expression_ptr> parser::finish_lambda_body(std::shared_ptr<lambda
             return value.error_value();
         }
         std::vector<declaration_ptr> body;
-        auto ret = std::make_shared<return_stmt>(at, value.value());
+        auto ret = std::make_shared<return_stmt>(at, returns_reference_ ? bound_conditional(value.value()) : value.value());
         body.push_back(std::make_shared<statement_decl>(at, ret));
         lambda->body = std::make_shared<block_stmt>(at, std::move(body));
         lambda->local_count = exit_function_scope();
@@ -4031,6 +4054,7 @@ checked_result<statement_ptr> parser::return_statement() {
             return make_error_code(parse_error_code::unexpected_token);
         }
         JAISCRIPT_TRY_ASSIGN(value, expression());
+        if (returns_reference_ && !in_coroutine_) { value = bound_conditional(std::move(value)); }
     }
 
     JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after return value"));
@@ -5423,7 +5447,7 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
                 if (!check(token_type::right_paren)) {
                     do {
                         JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                        args.push_back(std::move(arg));
+                        args.push_back(bound_conditional(std::move(arg)));
                     } while (match(token_type::comma));
                 }
                 JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after super arguments"));
@@ -5435,7 +5459,7 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
                 if (!check(token_type::right_paren)) {
                     do {
                         JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                        args.push_back(std::move(arg));
+                        args.push_back(bound_conditional(std::move(arg)));
                     } while (match(token_type::comma));
                 }
                 JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after this arguments"));
@@ -5446,6 +5470,9 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
             }
         } while (match(token_type::comma));
     }
+
+    coroutine_scope ref_return_scope{returns_reference_, returns_reference_};
+    returns_reference_ = func->return_type && func->return_type->base_type == script_value_type::jai_reference_type;
 
     // Enter function scope for slot-based local variable tracking
     const bool nested_function = in_function_scope();
@@ -5559,6 +5586,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
     expression_ptr initializer = nullptr;
     if (match(token_type::equal)) {
         JAISCRIPT_TRY_ASSIGN(initializer, expression());
+        if (is_reference) { initializer = bound_conditional(std::move(initializer)); }
     } else if ((check(token_type::left_brace) || check(token_type::left_paren)) && type && !is_reference) {
         // Type name{args...} / Type name(args...): construction with the declared type (a primitive takes its one value)
         const bool brace = check(token_type::left_brace);
@@ -5568,7 +5596,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
             arguments.reserve(4);
             do {
                 JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                arguments.push_back(std::move(arg));
+                arguments.push_back(bound_conditional(std::move(arg)));
             } while (match(token_type::comma));
         }
         JAISCRIPT_TRY(consume(brace ? token_type::right_brace : token_type::right_paren, "Expected closing bracket after constructor arguments"));

@@ -1975,6 +1975,23 @@ public:
                              "\"\" + peek(v) + \" \" + k() + \" \" + g;").to_string());
         });
 
+        // A conditional of two arm types is a converted temporary (C++), so a non-const reference cannot bind it in any position;
+        // one arm type binds, and a const reference or a by-value parameter takes the mixed conditional
+        test("a_reference_to_a_conditional_needs_one_arm_type", [this]() {
+            auto e = make_engine();
+            const std::string decls = "bool flag = true;\nint g = 1;\nfloat f = 2.5;\nint h = 2;\nvoid set9(int& p) { p = 9; }\n";
+            const std::string text = "cannot bind a reference to a conditional of 'int' and 'float': its arms must have one type";
+            for (const std::string body : {"int& r = flag ? g : f;", "auto& r = flag ? g : f;", "set9(flag ? g : f);",
+                                           "function rr() -> int& { return flag ? g : f; }", "void d(int& p = flag ? g : f) { }",
+                                           "cast<int&>(flag ? g : f) = 3;"}) {
+                auto r = e->check(decls + body);
+                check_eq((size_t)1, error_count(r), body + "\n" + r.format());
+                check_true(has_diag(r, dlevel::error, text), r.format());
+            }
+            check_eq((size_t)0, error_count(e->check(decls + "auto& r = flag ? g : h;\nset9(flag ? g : h);\nconst auto& k = flag ? g : f;\n"
+                "void byval(float p) { }\nbyval(flag ? g : f);")));
+        });
+
         test("string_reference_temporaries_mutate_privately_and_variables_alias", [this]() {
             const std::string source = R"JAI(
                 string normalize(string& value) {

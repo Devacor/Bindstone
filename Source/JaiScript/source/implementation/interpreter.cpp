@@ -10406,6 +10406,13 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
     }
 
     if (expr->implicit_ref) {
+        if (expr->binding_ref && !operand.is_reference()) {   // the arm's storage when it names one, else its value (KEEP BYTE-PARALLEL with the vm's exec_cast)
+            if (auto storage = named_storage_reference(expr->operand.get()); storage && *storage) { operand = std::move(storage->value()); }
+            if (!operand.is_reference()) {
+                push_value(std::move(operand));
+                return {};
+            }
+        }
         if (!operand.is_reference()) {
             return non_lvalue_target(expr->operand.get());
         }

@@ -2438,6 +2438,7 @@ namespace jai::vm {
         op_status exec_import(frame& f, const vm_instruction& ins);
         op_status exec_ref_return_bind(frame& f, const vm_instruction& ins);
         op_status exec_ref_return_lvalue(frame& f, const vm_instruction& ins);
+        std::optional<script_value> binding_arm_storage(frame& f, const expression* e);
         op_status exec_ref_target_store(frame& f, const vm_instruction& ins);
         op_status exec_const_guard(frame& f, const vm_instruction& ins);
         // scoped const folding (internal/const.md section 10)

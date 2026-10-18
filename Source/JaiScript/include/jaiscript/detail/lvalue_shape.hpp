@@ -126,6 +126,35 @@ namespace jai::detail {
 		}
 	}
 
+	// What a reference binding can name without running code that may return by value: a variable, a member, an element,
+	// cast<T&>, a conditional of those
+	inline bool names_storage(const expression* e) {
+		if (!e) { return false; }
+		switch (e->get_type()) {
+			case node_type::identifier_expr:
+				return true;
+			case node_type::member_expr: {
+				const auto* m = static_cast<const member_expr*>(e);
+				return !m->null_safe && !m->is_arrow;
+			}
+			case node_type::binary_expr:
+				return static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket;
+			case node_type::cast_expr:
+				return static_cast<const cast_expr*>(e)->by_reference;
+			case node_type::ternary_expr: {
+				const auto* t = static_cast<const ternary_expr*>(e);
+				return names_storage(t->then_expression.get()) && names_storage(t->else_expression.get());
+			}
+			default:
+				return false;
+		}
+	}
+
+	// A conditional whose arms both name storage is the lvalue it picks (C++): a reference binding names the chosen arm
+	inline bool conditional_names_storage(const expression* e) {
+		return e && e->get_type() == node_type::ternary_expr && names_storage(e);
+	}
+
 	// An assignment target that evaluates to the reference it stores through (after the parser's rewrite): cast<T&>(e), a
 	// call, a conditional whose arms are (implicit casts), an assignment that yields its destination
 	inline bool reference_target(const expression* t) {

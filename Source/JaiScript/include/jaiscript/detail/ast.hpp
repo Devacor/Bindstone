@@ -587,6 +587,9 @@ namespace jai {
         // A piece of an assignment target the parser made read as a reference (a conditional's arm, an inner assignment's
         // target): no type verdict, and a value that is no reference is no lvalue
         bool implicit_ref = false;
+        // An implicit arm where a reference may bind (an argument, a T& declaration, default or return): the arm is read as a
+        // value, and its storage, when it names one, replaces the value
+        bool binding_ref = false;
         expression_ptr operand;
         mutable const_site const_check;   // cast<T&>(c) / cast<shared_ptr<T>>(c) of a const
 

@@ -53,6 +53,7 @@ namespace jai {
         expression_ptr desugar_incdec(const token& op, const expression_ptr& target, bool postfix);
         expression_ptr lvalue_target(const expression_ptr& target);
         expression_ptr bound_reference(const expression_ptr& piece);
+        expression_ptr bound_conditional(expression_ptr value);
 
         // token buffer for handling >> splitting in generic contexts
         std::optional<token> pushed_back_token_;
@@ -233,6 +234,7 @@ namespace jai {
         bool in_switch_case_ = false;  // Track if we're inside a switch case
         bool in_coroutine_ = false;
         bool in_constructor_ = false;   // the body being parsed is a constructor's own (a value return is an error)
+        bool returns_reference_ = false;   // the body being parsed returns T&: its return operand binds as a reference
         // Armed by a coroutine head; parse_function_body consumes it for exactly the next
         // body, so nested functions and lambdas never inherit yield permission
         bool coroutine_body_pending_ = false;

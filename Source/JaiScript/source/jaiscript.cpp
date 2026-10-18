@@ -20,6 +20,8 @@
 #include "implementation/type_checker.cpp"
 #include "implementation/aggregate_lowering.cpp"
 #include "implementation/schema_binding.cpp"
+#include "implementation/serialization/json_archive.cpp"
+#include "implementation/serialization/binary_archive.cpp"
 #include "implementation/vm/vm_compiler.cpp"
 #include "implementation/vm/vm_inline.cpp"
 #include "implementation/vm/vm_backend.cpp"

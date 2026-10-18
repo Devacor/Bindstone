@@ -194,8 +194,7 @@ public:
             check_eq(under, run("class A { A() { LOG = LOG + helper(); } }" + classes + "string r = \"\"; try { B b; } catch (e) { r = e; } r;"), "bare");
             check_eq(under, run("class A { A() { LOG = LOG + this.helper(); } }" + classes + "string r = \"\"; try { B b; } catch (e) { r = e; } r;"), "this.");
             check_eq(under, run("class A { A() { peek(this); } }" + classes + "string r = \"\"; try { B b; } catch (e) { r = e; } r;"), "another handle");
-            const std::string initializer = run("class A { string s = helper(); }" + classes + "string r = \"\"; try { B b; } catch (e) { r = e; } r;");
-            check_true(initializer.find("Failed to evaluate field initializer for 's'") != std::string::npos, "a field initializer's error: " + initializer);
+            check_eq(under, run("class A { string s = helper(); }" + classes + "string r = \"\"; try { B b; } catch (e) { r = e; } r;"), "field initializer");
             check_eq(std::string("Cannot call 'helper' while 'B' is under construction: only a class derived from it declares it"),
                      run("class A { } class B : A { B() { helper(); } } class C : B { string helper() { return \"h\"; } }"
                          " string r = \"\"; try { B b; } catch (e) { r = e; } r;"), "the most-derived level's own body");
@@ -231,6 +230,68 @@ public:
             check_eq(std::string(), load("string helper() { return \"g\"; } class A { A() { helper(); } }" + derived), "a global answers it");
             const std::string nobody = load("class A { A() { helper(); } }");
             check_true(nobody.find("use of undeclared identifier 'helper'") != std::string::npos, nobody);
+        });
+
+        test("a_base_that_gained_a_field_on_reload_constructs_and_destroys_with_its_own_overrides", [this]() {
+            for (int variant = 0; variant < 2; ++variant) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(eng);
+                if (variant == 1) {
+                    eng->type_proofs(false);
+                    eng->ir_passes(false);
+                }
+                std::string got;
+                try {
+                    eng->execute(R"(
+                        string LOG = "";
+                        class A { int a = 1; A() { } ~A() { } string describe() { return "a"; } }
+                        class B : A { int b = 2; B() { } string describe() override { return "b"; } }
+                        function warm() -> void { B first; }
+                        warm();
+                    )");
+                    eng->execute(R"(class A {
+                        int a = 1; string tag = "t"; int a2 = 7;
+                        A() { LOG = LOG + describe() + tag + to_string(a2) + to_string(a); }
+                        ~A() { LOG = LOG + describe() + to_string(a2); }
+                        string describe() { return "a"; }
+                    })");
+                    got = eng->execute(R"(
+                        function f() -> void {
+                            B second;
+                            second.b = 5;
+                            LOG = LOG + "|" + to_string(second.a) + to_string(second.a2) + to_string(second.b) + second.describe() + second.tag + "|";
+                        }
+                        f(); LOG;
+                    )").as_string();
+                } catch (const std::exception& e) {
+                    got = std::string("threw: ") + e.what();
+                }
+                check_eq(std::string("at71|175bt|a7"), got, variant == 0 ? "default engine" : "proofs and passes off");
+            }
+        });
+
+        test("a_second_base_initializes_and_destroys_with_its_own_overrides", [this]() {
+            for (bool vm_passes : {true, false}) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(eng);
+                eng->static_checking(check_mode::off);   // the checker's override rule sees a second base, the declaration's does not
+                eng->type_proofs(vm_passes);
+                eng->ir_passes(vm_passes);
+                std::string got;
+                try {
+                    got = eng->execute(R"(
+                        string LOG = "";
+                        class A { int a = 1; }
+                        class C { int c = 2; string s = describe(); ~C() { LOG = LOG + describe() + to_string(c) + s; } string describe() { return "c"; } }
+                        class D : A, C { int d = 3; string describe() { return "d"; } }
+                        function f() -> void { D o; LOG = LOG + o.describe() + to_string(o.a) + to_string(o.c) + to_string(o.d) + o.s + "|"; }
+                        f(); LOG;
+                    )").as_string();
+                } catch (const std::exception& e) {
+                    got = std::string("threw: ") + e.what();
+                }
+                check_eq(std::string("d123c|c2c"), got, "C's layout is not a prefix of D's");
+            }
         });
     }
 };

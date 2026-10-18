@@ -2419,6 +2419,9 @@ private:
     std::shared_ptr<class_definition> cpp_base_class_;
     script_slot_hooks script_slot_hooks_;
     bool extended_ever_ = false;
+    // the script_extensible slot's offset in this class's objects, measured on the first plain wrapper asked (read and written
+    // through atomic_ref: workers may ask first)
+    mutable int32_t wrapper_slot_offset_ = INT32_MIN;
 
     std::unordered_map<uint64_t, uint64_t> property_setter_ids_;
     std::unordered_map<uint64_t, uint64_t> property_getter_ids_;
@@ -3786,8 +3789,15 @@ inline checked_result<script_value> class_definition::enforce_static_write(uint6
 
 inline bool class_definition::wrapped_object_has_layer(const class_instance& inst) const {
     if (!script_slot_hooks_.slot || is_script_class()) { return false; }
-    const void* object = inst.cpp_object_pointer();
-    return object && script_slot_hooks_.slot(object)->has_script_layer();
+    const char* object = static_cast<const char*>(inst.cpp_object_pointer());
+    if (!object) { return false; }
+    std::atomic_ref<int32_t> offset(wrapper_slot_offset_);
+    int32_t at = offset.load(std::memory_order_relaxed);
+    if (at == INT32_MIN) [[unlikely]] {
+        at = static_cast<int32_t>(reinterpret_cast<const char*>(script_slot_hooks_.slot(object)) - object);
+        offset.store(at, std::memory_order_relaxed);
+    }
+    return reinterpret_cast<const script_extensible*>(object + at)->has_script_layer();
 }
 
 inline void class_instance::note_script_layer_owner(const script_value& value) {

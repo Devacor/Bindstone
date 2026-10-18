@@ -14591,33 +14591,22 @@ JAI_NOINLINE bool vm_backend::bare_host_fill_read(frame& f, size_t cache_slot, u
 	return true;
 }
 
-bool vm_backend::native_site_call(const call_site& site, class_definition& cd, class_instance& inst, const script_value& receiver,
-                                  uint64_t id, size_t args_base, size_t argc, op_status& out) {
+JAI_NOINLINE void vm_backend::native_site_refill(const call_site& site, class_definition& cd, class_instance& inst, uint64_t id, uint64_t stamp) {
+	site.nat_cd = &cd;
+	site.nat_stamp = stamp;
+	site.nat_shape = cd.field_shape_epoch();
+	site.nat_field_free = !cd.chain_declares_field(id) && cd.field_slot(id) == class_definition::k_no_field_slot;
+	detail::host_method_fill(&cd, &inst, id, engine_, site.nat_hit);
+}
+
+JAI_FORCEINLINE void* vm_backend::native_site_self(const call_site& site, class_definition& cd, class_instance& inst, uint64_t id) {
 	const uint64_t stamp = cd.is_script_class() ? cd.method_epoch() : cd.native_stamp();
 	if (site.nat_cd != &cd || site.nat_stamp != stamp || site.nat_shape != cd.field_shape_epoch()) [[unlikely]] {
-		if (!cached_global_env_) { return false; }
-		site.nat_cd = &cd;
-		site.nat_stamp = stamp;
-		site.nat_shape = cd.field_shape_epoch();
-		site.nat_field_free = !cd.chain_declares_field(id) && cd.field_slot(id) == class_definition::k_no_field_slot;
-		detail::host_method_fill(&cd, &inst, id, engine_, site.nat_hit);
+		if (!cached_global_env_) { return nullptr; }
+		native_site_refill(site, cd, inst, id, stamp);
 	}
-	if (!site.nat_hit.entry || native_field_shadowed(site, inst, id)) { return false; }
-	void* self = detail::host_method_self(&inst, site.nat_hit);
-	if (!self) { return false; }
-	script_value result = make_null();
-	bool taken = false;
-	try {
-		taken = (*static_cast<const class_definition::native_entry*>(site.nat_hit.entry))(self, receiver, stack_.data() + args_base, argc, result);
-	} catch (...) {
-		out = call_threw(args_base - 1);
-		return true;
-	}
-	if (!taken) { return false; }
-	stack_.truncate(args_base - 1);
-	stack_.push_back(std::move(result));
-	out = {};
-	return true;
+	if (!site.nat_hit.entry || native_field_shadowed(site, inst, id)) { return nullptr; }
+	return detail::host_method_self(&inst, site.nat_hit);
 }
 
 JAI_NOINLINE void vm_backend::fill_host_member_hit(class_definition* cd, const class_instance* inst, uint64_t member_id,
@@ -16209,7 +16198,20 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					// A host class's direct lane (class_definition::native_method): the bound method's body on the
 					// C++ object, the receiver and arguments read in place; a declined shape takes the ordinary call
 					if (!parallel_worker_ && cd && cd->has_native_methods()) {
-						if (op_status st; native_site_call(site, *cd, *inst, objd, member->member_id, args_base, argc, st)) { return st; }
+						if (void* self = native_site_self(site, *cd, *inst, member->member_id)) {
+							script_value out = make_null();
+							bool taken = false;
+							try {
+								taken = (*static_cast<const class_definition::native_entry*>(site.nat_hit.entry))(self, objd, stack_.data() + args_base, argc, out);
+							} catch (...) {
+								return call_threw(args_base - 1);
+							}
+							if (taken) {
+								stack_.truncate(args_base - 1);
+								stack_.push_back(std::move(out));
+								return {};
+							}
+						}
 					}
 					// Worker pin (pre-resolved at the barrier): slice-enter directly
 					if (parallel_worker_ && cd) [[unlikely]] {
@@ -16253,7 +16255,20 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 #endif
 					// a script layer's C++ base method (the script method cache never holds one, so a script method it serves never gets here)
 					if (!parallel_worker_ && cd && cd->is_script_class()) {
-						if (op_status st; native_site_call(site, *cd, *inst, objd, member->member_id, args_base, argc, st)) { return st; }
+						if (void* self = native_site_self(site, *cd, *inst, member->member_id)) {
+							script_value out = make_null();
+							bool taken = false;
+							try {
+								taken = (*static_cast<const class_definition::native_entry*>(site.nat_hit.entry))(self, objd, stack_.data() + args_base, argc, out);
+							} catch (...) {
+								return call_threw(args_base - 1);
+							}
+							if (taken) {
+								stack_.truncate(args_base - 1);
+								stack_.push_back(std::move(out));
+								return {};
+							}
+						}
 					}
 				}
 			} else if (detail::math::is_kind(receiver_type)) {

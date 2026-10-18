@@ -298,7 +298,7 @@ public:
             for (size_t i = 0; i < std::size(expected); ++i) { check_eq(expected[i], v[i].as<bool>(), "row " + std::to_string(i)); }
         });
 
-        test("memberwise_equality_early_out_and_depth_cap", [this]() {
+        test("memberwise_equality_early_out_at_any_depth", [this]() {
             auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto r = eng->execute(R"(
@@ -308,10 +308,11 @@ public:
                 bool r2 = xs == zs; int after_size = E::calls;
                 bool r3 = xs == xs; int after_self = E::calls;
                 var deep = []; var deep2 = [];
-                for (int i = 0; i < 205; i++) { deep = [deep]; deep2 = [deep2]; }
-                string err = "";
-                try { bool x = deep == deep2; } catch (e) { err = e; }
-                return [r1, after_mismatch, r2, after_size, r3, after_self, err];
+                for (int i = 0; i < 300; i++) { deep = [deep]; deep2 = [deep2]; }
+                bool deep_equal = deep == deep2;
+                deep2 = [deep2];
+                bool deeper_equal = deep == deep2;
+                return [r1, after_mismatch, r2, after_size, r3, after_self, deep_equal, deeper_equal];
             )");
             const auto& v = r.as_array();
             check_eq(false, v[0].as<bool>());
@@ -320,7 +321,29 @@ public:
             check_eq((int64_t)2, v[3].as_int(), "a size mismatch compares no element");
             check_eq(true, v[4].as<bool>());
             check_eq((int64_t)5, v[5].as_int(), "a container compared with itself compares its elements, as a C++ container does (a NaN element is unequal to itself)");
-            check_eq(std::string("Cannot compare: the values nest deeper than 200 levels"), v[6].as<std::string>());
+            check_eq(true, v[6].as<bool>(), "values compare at any depth");
+            check_eq(false, v[7].as<bool>());
+        });
+
+        test("memberwise_equality_survives_an_operator_that_changes_the_operands", [this]() {
+            // the comparison holds both containers: an operator== that empties or replaces one never frees what it walks
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto r = eng->execute(R"(
+                var xs = [];
+                int mode = 0;
+                class E { int a = 0; E() {} bool operator==(E o) { if (mode == 0) { xs.clear(); } else { xs = []; } return true; } }
+                xs = [[E(), E()], [E()]]; var ys = [[E(), E()], [E()]];
+                bool emptied = xs == ys;
+                mode = 1;
+                xs = [[E(), E()], [E()]];
+                bool replaced = xs == ys;
+                return [emptied, replaced, xs.size()];
+            )");
+            const auto& v = r.as_array();
+            check_eq(false, v[0].as<bool>(), "an emptied array no longer matches");
+            check_eq(true, v[1].as<bool>(), "a replaced array is compared as it was");
+            check_eq((int64_t)0, v[2].as_int());
         });
 
         test("same_object_is_identity", [this]() {

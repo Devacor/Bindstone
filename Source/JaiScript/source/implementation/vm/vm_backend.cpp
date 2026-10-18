@@ -2234,7 +2234,10 @@ struct vm_backend::binary_host {
 	bool unwinding() const noexcept { return vm.is_unwinding_; }
 	bool parallel_worker() const noexcept { return vm.parallel_worker_; }
 	size_t& equality_depth() noexcept { return vm.structural_equality_depth_; }
-	checked_result<script_value> spaceship(const script_value& a, const script_value& b) { return vm.handle_spaceship(a, b); }
+	checked_result<script_value> spaceship_member(const script_value& a, const script_value& b, detail::order_walk* walk) {
+		if (a.is_reference() || b.is_reference()) { return spaceship_member(a.deref(), b.deref(), walk); }   // as handle_spaceship
+		return detail::spaceship_operands(*this, vm.op_spaceship_id_, a, b, walk);
+	}
 	checked_result<script_value> equal(const script_value& l, const script_value& r) { return vm.handle_equal(l, r); }
 };
 

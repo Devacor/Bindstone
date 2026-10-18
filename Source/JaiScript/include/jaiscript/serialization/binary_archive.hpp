@@ -98,8 +98,8 @@ public:
     }
     
     // Buffered mode: collect properties during begin_object..end_object, then flush with sizes
-    // Buffered mode: collect properties during begin_object..end_object, then flush with sizes
     void begin_object() {
+        enter_host_record(object_write_stack_.size());
         write_uint8(0x01); // Object marker
         write_string("");  // Empty type name
         write_uint32(0);   // Version 0
@@ -107,6 +107,7 @@ public:
     }
 
     void begin_object(const std::string& type_name, uint32_t version) {
+        enter_host_record(object_write_stack_.size());
         write_uint8(0x01); // Object marker
         write_string(type_name);
         write_uint32(version);

@@ -412,7 +412,7 @@ namespace jai::vm {
         // arbitrary env reach are unsafe off-thread) checks this, gated by
         // engine::allow_unsafe_parallel. Never set on the engine's own backend.
         bool parallel_worker_ = false;
-        size_t structural_equality_depth_ = 0;   // memberwise == recursion guard (detail/structural_equality.hpp)
+        size_t structural_equality_depth_ = 0;   // memberwise ==/<=> levels nested natively (detail/structural_equality.hpp)
         // parallel_for chunk loop: the worker's element cursor (a reference value owned by the
         // worker slot) that op_parallel_advance re-points and op_parallel_element pushes
         std::vector<script_value>* parallel_cursors_ = nullptr;   // [0] = the range, then the zip's arrays

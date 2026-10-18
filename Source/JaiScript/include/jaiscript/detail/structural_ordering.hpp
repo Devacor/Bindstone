@@ -28,10 +28,151 @@ namespace jai::detail {
 		}
 		return std::nullopt;
 	}
-	template<class Compare, class Unwinding>
-	std::optional<checked_result<script_value>> builtin_order(const script_value& a_left_in, const script_value& a_right_in,
-		engine* a_engine, size_t& a_depth, Compare&& a_compare, Unwinding&& a_unwinding) {
+	// A lexicographic <=> in progress: one frame per pair of arrays or maps under comparison, each holding the pair's members
+	struct order_frame {
+		bool is_map = false;
+		size_t index = 0;
+		std::vector<script_value> left_values, right_values;
+		std::vector<std::pair<script_value, script_value>> left_entries, right_entries;
+	};
+	struct order_walk {
+		inline_frame_stack<order_frame> frames;
+		bool opened = false;   // the last member pair joined the walk as a frame
+	};
+
+	// A member pair's <=> answer as an order: its sign, 0 while a throw unwinds, or the error
+	template<class Host>
+	checked_result<script_value> member_order(Host& a_host, checked_result<script_value>&& a_answer) {
+		if (!a_answer) { return a_answer.error_value(); }
+		engine* eng = a_host.engine();
+		if (a_host.unwinding()) { return script_value(script_int(0), eng); }
+		const auto& value = a_answer.value().deref();
+		if (value.is_int()) { return script_value(order_sign(value.unchecked_as_int()), eng); }
+		if (value.is_float()) { return script_value(order_sign(value.unchecked_as_float()), eng); }
+		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "operator<=> must return a numeric ordering");
+	}
+
+	// The first nonzero member order, error or unwind anywhere answers the whole comparison, as each level returned it
+	template<class Host>
+	checked_result<script_value> run_order_walk(Host& a_host, order_walk& a_walk) {
+		engine* eng = a_host.engine();
+		auto result = [eng](script_int a_order) { return checked_result<script_value>(script_value(a_order, eng)); };
+		while (true) {
+			order_frame& frame = a_walk.frames.top();
+			const size_t ln = frame.is_map ? frame.left_entries.size() : frame.left_values.size();
+			const size_t rn = frame.is_map ? frame.right_entries.size() : frame.right_values.size();
+			script_int order = 0;
+			if (frame.index < std::min(ln, rn)) {
+				const size_t i = frame.index++;
+				const script_value* x = nullptr;
+				const script_value* y = nullptr;
+				if (frame.is_map) {
+					const auto& li = frame.left_entries[i]; const auto& ri = frame.right_entries[i];
+					// Keys retain map lookup/iteration identity semantics; values use language ordering.
+					order = order_sign(li.first <=> ri.first);
+					x = &li.second;
+					y = &ri.second;
+				} else {
+					x = &frame.left_values[i];
+					y = &frame.right_values[i];
+				}
+				if (order == 0) {
+					a_walk.opened = false;
+					auto answer = a_host.spaceship_member(*x, *y, &a_walk);
+					if (a_walk.opened) { continue; }
+					auto ordered = member_order(a_host, std::move(answer));
+					if (!ordered || a_host.unwinding() || ordered.value().unchecked_as_int() != 0) { return ordered; }
+					continue;
+				}
+			} else {
+				order = ln < rn ? -1 : ln > rn ? 1 : 0;
+			}
+			a_walk.frames.pop();
+			if (a_walk.frames.empty()) { return result(order); }
+			if (a_host.unwinding()) { return result(0); }
+			if (order != 0) { return result(order); }
+		}
+	}
+
+	// Two arrays or maps: their order when typed buffers settle it, else their members into a_frame
+	inline std::optional<script_int> settled_order(const script_value& a_left, const script_value& a_right, engine* a_engine, order_frame& a_frame) {
+		if (a_left.is_array()) {
+			const auto left = a_left.unchecked_get_array_storage(), right = a_right.unchecked_get_array_storage();
+			if (left->kind() == right->kind()) {
+				switch (left->kind()) {
+					case script_array::kind_t::i64: return order_sign(std::lexicographical_compare_three_way(left->ints().begin(), left->ints().end(), right->ints().begin(), right->ints().end()));
+					case script_array::kind_t::f64: return order_sign(std::lexicographical_compare_three_way(left->floats().begin(), left->floats().end(), right->floats().begin(), right->floats().end(), [](auto a, auto b) { const auto cmp = float_order(a,b); return cmp < 0 ? std::weak_ordering::less : cmp > 0 ? std::weak_ordering::greater : std::weak_ordering::equivalent; }));
+					case script_array::kind_t::b8: case script_array::kind_t::c8: case script_array::kind_t::u8:
+						return order_sign(std::lexicographical_compare_three_way(left->bytes().begin(), left->bytes().end(), right->bytes().begin(), right->bytes().end()));
+					case script_array::kind_t::i8:
+						return order_sign(std::lexicographical_compare_three_way(left->bytes().begin(), left->bytes().end(), right->bytes().begin(), right->bytes().end(), [](uint8_t a, uint8_t b) { return static_cast<int8_t>(a) <=> static_cast<int8_t>(b); }));
+					case script_array::kind_t::str:
+						return order_sign(std::lexicographical_compare_three_way(left->strs().begin(), left->strs().end(), right->strs().begin(), right->strs().end(), [](const auto& a, const auto& b) { return *a <=> *b; }));
+					case script_array::kind_t::v2: case script_array::kind_t::iv2: case script_array::kind_t::v3: case script_array::kind_t::iv3: case script_array::kind_t::v4: case script_array::kind_t::rgba: {
+						const size_t count = std::min(left->size(), right->size()), stride = script_array::vec_stride(left->kind());
+						for (size_t i = 0; i < count; ++i) {
+							for (size_t lane = 0; lane < stride; ++lane) {
+								const uint32_t lw = left->vec_word(i,lane), rw = right->vec_word(i,lane);
+								const auto cmp = script_array::vec_integral(left->kind()) ? order_sign(std::bit_cast<int32_t>(lw) <=> std::bit_cast<int32_t>(rw)) : float_order(std::bit_cast<float>(lw), std::bit_cast<float>(rw));
+								if (cmp) { return cmp; }
+							}
+						}
+						return script_int(left->size() < right->size() ? -1 : left->size() > right->size() ? 1 : 0);
+					}
+					default: break;
+				}
+			}
+			a_frame.left_values = left->materialize_values(a_engine);
+			a_frame.right_values = right->materialize_values(a_engine);
+			return std::nullopt;
+		}
+		const auto left = a_left.unchecked_get_map_storage(), right = a_right.unchecked_get_map_storage();
+		a_frame.is_map = true;
+		a_frame.left_entries.assign(left->begin(), left->end());
+		a_frame.right_entries.assign(right->begin(), right->end());
+		return std::nullopt;
+	}
+
+	inline std::optional<script_int> open_order(const script_value& a_left, const script_value& a_right, engine* a_engine, order_walk& a_walk) {
+		order_frame frame;
+		if (auto settled = settled_order(a_left, a_right, a_engine, frame)) { return settled; }
+		a_walk.frames.push() = std::move(frame);
+		return std::nullopt;
+	}
+
+	// A native level, while the comparison is shallow
+	template<class Host>
+	checked_result<script_value> native_order(Host& a_host, const script_value& a_left, const script_value& a_right) {
+		engine* eng = a_host.engine();
+		order_frame frame;
+		if (auto settled = settled_order(a_left, a_right, eng, frame)) { return script_value(*settled, eng); }
+		compare_depth_scope scope(a_host.equality_depth());
+		const size_t ln = frame.is_map ? frame.left_entries.size() : frame.left_values.size();
+		const size_t rn = frame.is_map ? frame.right_entries.size() : frame.right_values.size();
+		for (size_t i = 0; i < std::min(ln, rn); ++i) {
+			const script_value* x = nullptr;
+			const script_value* y = nullptr;
+			if (frame.is_map) {
+				const auto& li = frame.left_entries[i]; const auto& ri = frame.right_entries[i];
+				// Keys retain map lookup/iteration identity semantics; values use language ordering.
+				if (const auto cmp = order_sign(li.first <=> ri.first)) { return script_value(cmp, eng); }
+				x = &li.second;
+				y = &ri.second;
+			} else {
+				x = &frame.left_values[i];
+				y = &frame.right_values[i];
+			}
+			auto answer = member_order(a_host, a_host.spaceship_member(*x, *y, nullptr));
+			if (!answer || a_host.unwinding() || answer.value().unchecked_as_int() != 0) { return answer; }
+		}
+		return script_value(script_int(ln < rn ? -1 : ln > rn ? 1 : 0), eng);
+	}
+
+	// Inside a walk (a_walk set) a pair of arrays or maps joins it as a frame and the walk carries the answer
+	template<class Host>
+	std::optional<checked_result<script_value>> builtin_order(Host& a_host, const script_value& a_left_in, const script_value& a_right_in, order_walk* a_walk) {
 		const auto& a_left = a_left_in.deref(); const auto& a_right = a_right_in.deref();
+		engine* const a_engine = a_host.engine();
 		auto result = [&](script_int a_order) { return script_value(a_order, a_engine); };
 		if (a_left.is_null() && a_right.is_null()) { return result(0); }
 		if (a_left.is_bool() && a_right.is_bool()) { return result(script_int(a_left.unchecked_as_bool()) - script_int(a_right.unchecked_as_bool())); }
@@ -57,63 +198,14 @@ namespace jai::detail {
 			return result(ln < rn ? -1 : ln > rn ? 1 : 0);
 		}
 		if (!((a_left.is_array() && a_right.is_array()) || (a_left.is_map() && a_right.is_map()))) { return std::nullopt; }
-		if (a_depth >= k_structural_equality_max_depth) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), structural_equality_depth_text);
+		if (!a_walk && a_host.equality_depth() < k_inline_compare_depth) { return native_order(a_host, a_left, a_right); }
+		if (a_walk) {
+			if (auto answered = open_order(a_left, a_right, a_engine, *a_walk)) { return result(*answered); }
+			a_walk->opened = true;
+			return result(0);
 		}
-		equality_depth_scope depth(a_depth);
-		auto element_order = [&](const script_value& a, const script_value& b) -> checked_result<script_value> {
-			auto answer = a_compare(a, b);
-			if (!answer) { return answer.error_value(); }
-			if (a_unwinding()) { return result(0); }
-			const auto& value = answer.value().deref();
-			if (value.is_int()) { return result(order_sign(value.unchecked_as_int())); }
-			if (value.is_float()) { return result(order_sign(value.unchecked_as_float())); }
-			return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "operator<=> must return a numeric ordering");
-		};
-		if (a_left.is_array()) {
-			const auto left = a_left.unchecked_get_array_storage(), right = a_right.unchecked_get_array_storage();
-			if (left->kind() == right->kind()) {
-				switch (left->kind()) {
-					case script_array::kind_t::i64: return result(order_sign(std::lexicographical_compare_three_way(left->ints().begin(), left->ints().end(), right->ints().begin(), right->ints().end())));
-					case script_array::kind_t::f64: return result(order_sign(std::lexicographical_compare_three_way(left->floats().begin(), left->floats().end(), right->floats().begin(), right->floats().end(), [](auto a, auto b) { const auto cmp = float_order(a,b); return cmp < 0 ? std::weak_ordering::less : cmp > 0 ? std::weak_ordering::greater : std::weak_ordering::equivalent; })));
-					case script_array::kind_t::b8: case script_array::kind_t::c8: case script_array::kind_t::u8:
-						return result(order_sign(std::lexicographical_compare_three_way(left->bytes().begin(), left->bytes().end(), right->bytes().begin(), right->bytes().end())));
-					case script_array::kind_t::i8:
-						return result(order_sign(std::lexicographical_compare_three_way(left->bytes().begin(), left->bytes().end(), right->bytes().begin(), right->bytes().end(), [](uint8_t a, uint8_t b) { return static_cast<int8_t>(a) <=> static_cast<int8_t>(b); })));
-					case script_array::kind_t::str:
-						return result(order_sign(std::lexicographical_compare_three_way(left->strs().begin(), left->strs().end(), right->strs().begin(), right->strs().end(), [](const auto& a, const auto& b) { return *a <=> *b; })));
-					case script_array::kind_t::v2: case script_array::kind_t::iv2: case script_array::kind_t::v3: case script_array::kind_t::iv3: case script_array::kind_t::v4: case script_array::kind_t::rgba: {
-						const size_t count = std::min(left->size(), right->size()), stride = script_array::vec_stride(left->kind());
-						for (size_t i = 0; i < count; ++i) {
-							for (size_t lane = 0; lane < stride; ++lane) {
-								const uint32_t lw = left->vec_word(i,lane), rw = right->vec_word(i,lane);
-								const auto cmp = script_array::vec_integral(left->kind()) ? order_sign(std::bit_cast<int32_t>(lw) <=> std::bit_cast<int32_t>(rw)) : float_order(std::bit_cast<float>(lw), std::bit_cast<float>(rw));
-								if (cmp) { return result(cmp); }
-							}
-						}
-						return result(left->size() < right->size() ? -1 : left->size() > right->size() ? 1 : 0);
-					}
-					default: break;
-				}
-			}
-			const auto leftValues = left->materialize_values(a_engine), rightValues = right->materialize_values(a_engine);
-			const auto ln = leftValues.size(), rn = rightValues.size();
-			for (size_t i = 0; i < std::min(ln, rn); ++i) {
-				auto answer = element_order(leftValues[i], rightValues[i]);
-				if (!answer || a_unwinding() || answer.value().unchecked_as_int() != 0) { return answer; }
-			}
-			return result(ln < rn ? -1 : ln > rn ? 1 : 0);
-		}
-		const auto left = a_left.unchecked_get_map_storage(), right = a_right.unchecked_get_map_storage();
-		using Entry = std::pair<script_value, script_value>;
-		std::vector<Entry> leftEntries(left->begin(), left->end()), rightEntries(right->begin(), right->end());
-		for (size_t i = 0; i < std::min(leftEntries.size(), rightEntries.size()); ++i) {
-			const auto& li = leftEntries[i]; const auto& ri = rightEntries[i];
-			// Keys retain map lookup/iteration identity semantics; values use language ordering.
-			if (const auto cmp = order_sign(li.first <=> ri.first)) { return result(cmp); }
-			auto answer = element_order(li.second, ri.second);
-			if (!answer || a_unwinding() || answer.value().unchecked_as_int() != 0) { return answer; }
-		}
-		return result(leftEntries.size() < rightEntries.size() ? -1 : leftEntries.size() > rightEntries.size() ? 1 : 0);
+		order_walk own;
+		if (auto answered = open_order(a_left, a_right, a_engine, own)) { return result(*answered); }
+		return run_order_walk(a_host, own);
 	}
 }

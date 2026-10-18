@@ -5,10 +5,10 @@
 
 #include <jaiscript/serialization/archive.hpp>
 
-// Records a load of host types nests at most where the host thread's stack cannot be asked: a host type's own load
-// (serialize, load, load_and_construct) recurses natively once per record it opens, so the reader raises at the stack's
-// margin (detail::native_stack_low) or at this many levels, whichever comes first. Script values never count: their walks
-// run on work lists
+// Records host types nest at most where the host thread's stack cannot be asked: a host type's own save or load (serialize,
+// save, load, load_and_construct) recurses natively once per record it opens, so the writer and the reader raise at the
+// stack's margin (detail::native_stack_low) or at this many levels, whichever comes first. Script values never count:
+// their walks run on work lists
 #ifndef JAI_MAX_HOST_RECORD_DEPTH
 #define JAI_MAX_HOST_RECORD_DEPTH 1024
 #endif
@@ -63,6 +63,18 @@ private:
 
 namespace jai {
 namespace serialization {
+
+[[noreturn]] JAI_NOINLINE inline void throw_host_record_depth() {
+    throw serialization_error("Maximum record nesting depth (" + std::to_string(JAI_MAX_HOST_RECORD_DEPTH) + ") exceeded");
+}
+[[noreturn]] JAI_NOINLINE inline void throw_host_record_stack() {
+    throw serialization_error("Record nesting depth exceeds the host thread's stack");
+}
+// Before an archive opens a record: open_records are the ones already open
+inline void enter_host_record(size_t open_records) {
+    if (open_records >= JAI_MAX_HOST_RECORD_DEPTH) [[unlikely]] { throw_host_record_depth(); }
+    if (jai::detail::native_stack_low()) [[unlikely]] { throw_host_record_stack(); }
+}
 
 // ADL-findable free-function detection. Must live at namespace scope: inside the
 // archive classes, unqualified save/load/serialize would bind to the archives' own
@@ -811,18 +823,6 @@ protected:
     std::unordered_map<std::type_index, void*> user_contexts_;
 
     uint32_t version_ = 0;
-
-    [[noreturn]] JAI_NOINLINE static void throw_record_depth() {
-        throw serialization_error("Maximum record nesting depth (" + std::to_string(JAI_MAX_HOST_RECORD_DEPTH) + ") exceeded");
-    }
-    [[noreturn]] JAI_NOINLINE static void throw_record_stack() {
-        throw serialization_error("Record nesting depth exceeds the host thread's stack");
-    }
-    // Before a reader opens a record: open_records are the ones already open
-    static void enter_host_record(size_t open_records) {
-        if (open_records >= JAI_MAX_HOST_RECORD_DEPTH) [[unlikely]] { throw_record_depth(); }
-        if (detail::native_stack_low()) [[unlikely]] { throw_record_stack(); }
-    }
 
 public:
     explicit archive_reader_impl(engine* eng) : engine_ref_(eng) {}

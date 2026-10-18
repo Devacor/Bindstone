@@ -1505,7 +1505,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		if (r) { dry.pins.push_back(r); }
 		(void)clone_body(fn->body->declarations, dry, true);
 		if (!dry.ok) { refused = dry.why ? dry.why : "a body the graft does not take"; return root; }
-		if (dry.calls && dry.nodes > k_inline_call_max_nodes) { refused = "a body that calls, larger than its frame costs"; return root; }
+		if (dry.calls && (dry.nodes > k_inline_call_max_nodes || body_has_loop(fn->body.get()))) { refused = "a body that calls, costing more than its frame"; return root; }   // a loop amortizes the frame
 	}
 	if (graft_nesting_++ == 0) { graft_tree_nodes_ = 0; }
 	const bool was_off = inlining_off_;

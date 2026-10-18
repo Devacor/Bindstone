@@ -1,5 +1,5 @@
-// Values nest as deep as memory allows: parsing, from_json/from_binary, to_json/to_binary and deep copy walk them on work
-// lists, so a host thread's ordinary stack (1 MB here, as a host's main thread) never bounds the depth
+// Values nest as deep as memory allows: parsing, from_json/from_binary, to_json/to_binary, deep copy, == and <=> walk them
+// on work lists, so a host thread's ordinary stack (1 MB here, as a host's main thread) never bounds the depth
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
@@ -8,11 +8,13 @@
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/serialization/convenience.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 
 #include <exception>
 #include <stdexcept>
 #include <functional>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -28,8 +30,8 @@ using namespace jai::foundry;
 namespace jai::foundry::tests {
 
 namespace deep_detail {
-	// Runs body on a thread with a 1 MB stack and rethrows what it threw
-	void on_small_stack(const std::function<void()>& body) {
+	// Runs body on a thread with a stack of stack_bytes and rethrows what it threw
+	void on_small_stack(const std::function<void()>& body, size_t stack_bytes = 1024 * 1024) {
 		struct run {
 			const std::function<void()>* body;
 			std::exception_ptr failure;
@@ -37,7 +39,6 @@ namespace deep_detail {
 				try { (*self->body)(); } catch (...) { self->failure = std::current_exception(); }
 			}
 		} state{&body, nullptr};
-		const size_t stack_bytes = 1024 * 1024;
 #if defined(_WIN32)
 		struct thunk { static DWORD WINAPI entry(LPVOID self) { run::go(static_cast<run*>(self)); return 0; } };
 		HANDLE thread = CreateThread(nullptr, stack_bytes, &thunk::entry, &state, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
@@ -60,13 +61,42 @@ namespace deep_detail {
 
 	constexpr int k_depth = 100000;
 
-	std::string nested_arrays(int depth) { return std::string(depth, '[') + std::string(depth, ']'); }
-	std::string nested_maps(int depth) {
+	std::string nested_arrays(int depth, const std::string& leaf = "") { return std::string(depth, '[') + leaf + std::string(depth, ']'); }
+	std::string nested_maps(int depth, const std::string& leaf = "1") {
 		std::string result;
-		result.reserve(static_cast<size_t>(depth) * 6 + 1);
+		result.reserve(static_cast<size_t>(depth) * 6 + leaf.size());
 		for (int i = 0; i < depth; ++i) { result += "{\"a\":"; }
-		result += "1";
+		result += leaf;
 		result.append(static_cast<size_t>(depth), '}');
+		return result;
+	}
+	std::string nested_links(int depth, int last) {
+		std::string result;
+		for (int i = 0; i < depth; ++i) { result += "{\"_type_\":\"Link\",\"n\":" + std::to_string(i == depth - 1 ? last : i) + ",\"next\":"; }
+		result += "null";
+		result.append(static_cast<size_t>(depth), '}');
+		return result;
+	}
+
+	// A copyable host type whose copy constructor reports its id: the order of the reports is the order a copy visits
+	struct copy_hook {
+		engine* eng = nullptr;
+		script_int id = 0;
+		copy_hook() = default;
+		explicit copy_hook(engine* a_engine) : eng(a_engine) {}
+		copy_hook(const copy_hook& a_other) : eng(a_other.eng), id(a_other.id) { eng->get_output_stream() << id << " "; }
+		copy_hook& operator=(const copy_hook&) = default;
+	};
+
+	// Ids in the order a copy of the copy test's nest reaches them: each level's first hook, the level below, then its last
+	// hook (and, for a script class over the host type, its own C++ object after its fields)
+	std::string expected_copy_order(int depth, bool own_object) {
+		std::string result;
+		for (int i = 0; i <= depth; ++i) { result += std::to_string(i) + " "; }
+		for (int i = depth; i >= 0; --i) {
+			if (i < depth || own_object) { result += std::to_string(1000 + i) + " "; }
+			if (own_object) { result += std::to_string(2000 + i) + " "; }
+		}
 		return result;
 	}
 
@@ -187,29 +217,151 @@ public:
 			});
 		});
 
-		test("a_deep_host_record_chain_loads_or_raises_cleanly", [this]() {
-			// a host type's own serialize recurses natively: an ordinary chain loads, a deep one loads whole or meets the guard
+		test("deep_values_compare_and_order", [this]() {
 			on_small_stack([this]() {
-				auto eng = make_engine();
-				for (int depth : {200, 1500}) {
-					for (bool binary : {false, true}) {
-						std::string error;
-						size_t length = 0;
-						try {
-							length = binary ? host_chain_length(jai::from_binary<std::shared_ptr<host_link>>(*eng, host_chain_binary(static_cast<size_t>(depth))))
-							                : host_chain_length(jai::from_json<std::shared_ptr<host_link>>(*eng, host_chain_json(depth)));
-						} catch (const serialization_error& e) {
-							error = e.what();
-						}
-						const std::string what = std::string(binary ? "binary " : "json ") + std::to_string(depth) + ": " + error;
-						if (depth == 200) {
-							check_eq(size_t(200), length, what);
-						} else {
-							check_true(length == size_t(depth) || error.find("depth") != std::string::npos, what);
-						}
-					}
+				struct nest { std::string same; std::string other; bool ordered; };
+				const nest nests[] = {
+					{nested_arrays(k_depth, "1"), nested_arrays(k_depth, "2"), true},
+					{nested_maps(k_depth, "1"), nested_maps(k_depth, "2"), true},
+					{nested_links(k_depth, 1), nested_links(k_depth, 2), false},
+				};
+				for (const nest& n : nests) {
+					auto eng = make_engine();
+					stdlib::register_all(*eng);
+					eng->execution_budget(0);
+					eng->add_global("same", eng->make_value(n.same));
+					eng->add_global("other", eng->make_value(n.other));
+					eng->add_global("ordered", eng->make_value(n.ordered));
+					const std::string result = eng->execute(R"(
+						class Link { int n = 0; var next = null; }
+						var a = from_json(same);
+						var b = from_json(same);
+						var c = from_json(other);
+						string out = to_string(a == b) + " " + to_string(a != c) + " " + to_string(a == c);
+						if (ordered) { out += " " + to_string(a <=> b) + " " + to_string(a <=> c) + " " + to_string(a < c) + " " + to_string(c >= a); }
+						a = null;
+						b = null;
+						c = null;
+						out;
+					)").as<std::string>();
+					check_eq(std::string(n.ordered ? "true true false 0 -1 true true" : "true true false"), result, n.same.substr(0, 12));
 				}
 			});
+		});
+
+		test("deep_members_keep_their_operators", [this]() {
+			// past the native depth each member pair still runs the full ==/<=>: a class's operators, and a throw that leaves
+			auto eng = make_engine();
+			stdlib::register_all(*eng);
+			const std::string result = eng->execute(R"(
+				class V { int a = 0; V() {} V(int x) { a = x; } bool operator==(V o) { return a == o.a; } int operator<=>(V o) { if (a < 0) { throw "bad"; } return a - o.a; } }
+				function nest(var leaf, int n, bool maps) { var x = leaf; for (int i = 0; i < n; i++) { if (maps) { x = {"a": x, "b": i}; } else { x = [x, i]; } } return x; }
+				string out = "";
+				for (bool maps : [false, true]) {
+					var a = nest(V(1), 100, maps); var b = nest(V(1), 100, maps); var c = nest(V(2), 100, maps);
+					out += to_string(a == b) + " " + to_string(a == c) + " " + to_string(a <=> c) + " " + to_string(c > a);
+					try { var r = nest(V(-1), 100, maps) < c; out += " ordered|"; } catch (e) { out += " " + e + "|"; }
+				}
+				out;
+			)").as<std::string>();
+			check_eq(std::string("true false -1 true bad|true false -1 true bad|"), result);
+		});
+
+		test("a_copy_runs_copy_hooks_in_order_at_any_depth", [this]() {
+			// a copy visits a value as C++ copies it: members in declaration order, a member's own members before the next
+			// member, a script class's C++ object after its fields, past the depth where the copy leaves the native stack too
+			const int depth = 3 * static_cast<int>(detail::k_inline_copy_depth) / 2;
+			struct shape { const char* build; bool own_object; };
+			const shape shapes[] = {
+				{"var cur = [hook(depth)]; for (int i = depth - 1; i >= 0; i--) { cur = [hook(i), cur, hook(1000 + i)]; }", false},
+				{"var cur = {\"a\": hook(depth)}; for (int i = depth - 1; i >= 0; i--) { cur = {\"a\": hook(i), \"b\": cur, \"c\": hook(1000 + i)}; }", false},
+				{"var cur = node(depth, null); for (int i = depth - 1; i >= 0; i--) { cur = node(i, cur); }", true},
+			};
+			for (const shape& s : shapes) {
+				auto eng = make_engine();
+				stdlib::register_all(*eng);
+				dynamic_binder<copy_hook>(*eng, "Hook").property("id", &copy_hook::id).build();
+				auto out = std::make_shared<std::ostringstream>();
+				eng->set_output_stream(out);
+				eng->add_global("depth", eng->make_value(static_cast<script_int>(depth)));
+				eng->execute(R"(
+					class Node : Hook { var before = null; var next = null; var after = null; }
+					function hook(int id) { var h = Hook(); h.id = id; return h; }
+					function node(int i, var next) { var n = Node(); n.id = 2000 + i; n.before = hook(i); n.next = next; n.after = hook(1000 + i); return n; }
+				)");
+				eng->execute(s.build);
+				out->str("");
+				eng->execute("var copy = cur;");
+				check_eq(expected_copy_order(depth, s.own_object), out->str(), s.build);
+			}
+		});
+
+		test("a_deep_host_record_chain_meets_the_record_guard_on_load", [this]() {
+			// a host type's own load recurses natively once per record: an ordinary chain loads, and a deep one meets the
+			// 1024-record backstop on a roomy stack and the stack margin on a tight one (on a 1 MB thread a Debug build meets
+			// the margin and a Release build the backstop, so each guard is pinned where its outcome is certain)
+			auto load = [](engine& eng, int depth, bool binary) {
+				std::string error;
+				size_t length = 0;
+				try {
+					length = binary ? host_chain_length(jai::from_binary<std::shared_ptr<host_link>>(eng, host_chain_binary(static_cast<size_t>(depth))))
+					                : host_chain_length(jai::from_json<std::shared_ptr<host_link>>(eng, host_chain_json(depth)));
+				} catch (const serialization_error& e) {
+					error = e.what();
+				}
+				return error.empty() ? std::to_string(length) : error;
+			};
+			auto eng = make_engine();
+			for (bool binary : {false, true}) {
+				const std::string format = binary ? "binary" : "json";
+				on_small_stack([&]() { check_eq(std::string("200"), load(*eng, 200, binary), format); });
+				on_small_stack([&]() {
+					check_eq(std::string("Maximum record nesting depth (1024) exceeded"), load(*eng, 1500, binary), format);
+				}, 64 * 1024 * 1024);
+#if defined(_WIN32)
+				on_small_stack([&]() {
+					check_eq(std::string("Record nesting depth exceeds the host thread's stack"), load(*eng, 1000, binary), format);
+				}, 320 * 1024);
+#endif
+			}
+		});
+
+		test("a_deep_host_record_chain_meets_the_record_guard_on_save", [this]() {
+			auto chain = [](int depth) {
+				std::shared_ptr<host_link> head;
+				for (int i = depth; i-- > 0;) {
+					auto link = std::make_shared<host_link>();
+					link->n = i;
+					link->next = std::move(head);
+					head = std::move(link);
+				}
+				return head;
+			};
+			auto save = [](engine& eng, const std::shared_ptr<host_link>& head, bool binary) {
+				try {
+					if (binary) { jai::to_binary(eng, head); } else { jai::to_json(eng, head); }
+				} catch (const serialization_error& e) {
+					return std::string(e.what());
+				}
+				return std::string("saved");
+			};
+			auto eng = make_engine();
+			for (bool binary : {false, true}) {
+				const std::string format = binary ? "binary" : "json";
+				auto ordinary = chain(200);
+				on_small_stack([&]() { check_eq(std::string("saved"), save(*eng, ordinary, binary), format); });
+				host_chain_length(std::move(ordinary));
+				auto deep = chain(1500);
+				on_small_stack([&]() {
+					check_eq(std::string("Maximum record nesting depth (1024) exceeded"), save(*eng, deep, binary), format);
+				}, 64 * 1024 * 1024);
+#if defined(_WIN32)
+				on_small_stack([&]() {
+					check_eq(std::string("Record nesting depth exceeds the host thread's stack"), save(*eng, deep, binary), format);
+				}, 320 * 1024);
+#endif
+				host_chain_length(std::move(deep));
+			}
 		});
 	}
 };

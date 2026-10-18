@@ -1402,7 +1402,7 @@ namespace jai {
             ~unit_override_scope() { in->unit_override_ = prev; in->unit_override_depth_ = prev_depth; in->sync_unit(); }
         };
         struct unit_sync_scope { interpreter* in; ~unit_sync_scope() { in->sync_unit(); } };   // the frame below's unit again when this scope ends
-        size_t structural_equality_depth_ = 0;   // memberwise == recursion guard (detail/structural_equality.hpp)
+        size_t structural_equality_depth_ = 0;   // memberwise ==/<=> levels nested natively (detail/structural_equality.hpp)
         // Barrier-provisioned method pins for the active region (worker instances only)
         const detail::parallel_method_pin_table* parallel_method_pins_ = nullptr;
 

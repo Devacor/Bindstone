@@ -48,6 +48,7 @@ OLD_TEXTS = [
     r"Maximum serialization depth",
     r"Maximum deserialization depth",
     r"cannot be mutated in place",
+    r"Cannot compare: the values nest deeper",
 ]
 
 

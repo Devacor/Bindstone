@@ -100,14 +100,19 @@ namespace detail {
 }
 
     namespace detail {
-        // A deep copy's deferred child: its source and the placeholder slot its copy fills (script_value::clone_level)
-        struct deep_copy_item;
-        using deep_copy_work = std::vector<deep_copy_item>;
-        // Completes every deferred child of a deep copy, and the children they defer in turn
-        void finish_deep_copy(deep_copy_work& work);
-        // Containers and instances a deep copy nests natively before it defers to its work list: the common shallow value
-        // copies as the recursive walk always did, a deep one spends memory, never native depth
+        // Containers and instances a deep copy nests natively: deeper, the rest of the subtree runs on a work list of steps
+        // taken from the back in the order the native walk takes them, so a deep value spends memory, never native depth
         inline constexpr unsigned k_inline_copy_depth = 32;
+        // One step of that list: a value into its placeholder, a map entry into its copied map, an object slot onto its
+        // copied array, or the end of an instance's copy (its C++ object, after its fields)
+        struct deep_copy_item {
+            enum class step : uint8_t { value, entry, slot, finish, finish_overflow };
+            step what;
+            const void* source;
+            void* dest;
+            size_t index = 0;
+        };
+        using deep_copy_work = std::vector<deep_copy_item>;
     }
 
     class script_value {
@@ -250,11 +255,13 @@ namespace detail {
                     return type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type;
             }
         }
-        // One level of a deep copy: nested containers and instances copy inline while depth stays under
-        // detail::k_inline_copy_depth and past it fill placeholders the work list completes (clone() drives it)
+        // One level of a deep copy: nested containers and instances copy inline up to detail::k_inline_copy_depth; at it
+        // the subtree's copy runs on its own work list, and past it (a level of that list) every child is a step on it
         script_value clone_level(detail::deep_copy_work& work, unsigned depth) const;
-        // clone_element's rule into dest, which must not move until the work list is done: the copy now, or a placeholder
+        // clone_element's rule into dest, which must not move until the work list is done
         void clone_element_into(script_value& dest, detail::deep_copy_work& work, unsigned depth) const;
+        // The copy of a subtree below detail::k_inline_copy_depth, on a work list
+        void clone_subtree_into(script_value& dest) const;
 
         // Parallel-region detach (parallel_transform v0): deep copy where EVERY heavy
         // node gets a fresh strong_ptr - including strings, which clone() and plain
@@ -273,10 +280,12 @@ namespace detail {
         // recognize results that alias a worker-provisioned value.
         script_value parallel_detached_copy(std::vector<type_info*>* collected_types = nullptr,
                                             std::vector<const void*>* collected_nodes = nullptr) const;
-        // One level of the detach, its nested containers inline while shallow and through the work list past
-        // detail::k_inline_copy_depth, as clone_level
+        // One level of the detach, its nested values inline up to detail::k_inline_copy_depth and on a work list below, as
+        // clone_level
         script_value parallel_detached_level(std::vector<type_info*>* collected_types, std::vector<const void*>* collected_nodes,
                                              detail::deep_copy_work& work, unsigned depth) const;
+        void parallel_detached_subtree_into(script_value& dest, std::vector<type_info*>* collected_types,
+                                            std::vector<const void*>* collected_nodes) const;
 
         // === Parallel captured-read borrow (internal/parallel_design.md, captured reads) ===
         // A borrow VIEW of an enclosing container: one raw tagged pointer, so copying the
@@ -2761,12 +2770,6 @@ namespace detail {
 
     inline script_array::script_array() = default;
     inline script_array::script_array(kind_t k) : kind_(k) {}
-    namespace detail {
-        struct deep_copy_item {
-            script_value source;
-            script_value* dest;
-        };
-    }
 
     inline script_array::script_array(const script_array&) = default;
     inline script_array::script_array(script_array&&) noexcept = default;

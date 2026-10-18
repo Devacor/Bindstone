@@ -1194,16 +1194,17 @@ private:
 				run();
 			)", "ordered,raised");
 		});
-		test("memberwise_equality_depth_cap", [this]() {
-			expect("depth cap", R"(
-				function nest(int n) { var a = 0; for (int i = 0; i < n; i++) { a = [a]; } return a; }
+		test("memberwise_equality_and_order_at_any_depth", [this]() {
+			expect("any depth", R"(
+				function nest(int n, int leaf) { var a = leaf; for (int i = 0; i < n; i++) { a = [a]; } return a; }
 				function run() -> string {
-					string s = to_string(nest(150) == nest(150)) + ",";
-					try { var r = nest(260) == nest(260); s += to_string(r); } catch (e) { s += e; }
+					string s = to_string(nest(150, 0) == nest(150, 0)) + ",";
+					s += to_string(nest(300, 0) == nest(300, 0)) + "," + to_string(nest(300, 0) == nest(300, 1)) + ",";
+					s += to_string(nest(300, 0) <=> nest(300, 1)) + "," + to_string(nest(300, 2) > nest(300, 1));
 					return s;
 				}
 				run();
-			)", "true,Cannot compare: the values nest deeper than 200 levels");
+			)", "true,true,false,-1,true");
 		});
 	}
 

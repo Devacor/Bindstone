@@ -66,6 +66,8 @@ public:
     }
 
     void begin_object() {
+        enter_host_record(open_records_);
+        ++open_records_;
         auto ctx = this->current_context();
         bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
@@ -81,6 +83,8 @@ public:
     }
 
     void begin_object(const std::string& type_name, uint32_t version) {
+        enter_host_record(open_records_);
+        ++open_records_;
         auto ctx = this->current_context();
         bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
@@ -104,6 +108,7 @@ public:
     }
 
     void end_object() {
+        --open_records_;
         json_depth_--;
         container_stack_.pop();
         first_in_container_.pop();
@@ -636,6 +641,7 @@ private:
     int indent_;
     bool charges_indentation_ = false;
     int json_depth_;  // JSON nesting depth (separate from serialization depth tracking in base)
+    size_t open_records_ = 0;
     std::ostringstream oss_;
     std::stack<ContainerType> container_stack_;
     std::stack<bool> first_in_container_;

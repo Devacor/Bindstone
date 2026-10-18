@@ -15,8 +15,9 @@
 //   std::optional<checked_result<bool>> object_equality(l, r); bool defines_custom_equality(const script_value&)
 //   std::optional<checked_result<bool>> object_inequality(l, r)   // a declared operator!=, ahead of !(l == r)
 //   object_comparison_reversed(l, r, id), object_spaceship_reversed(l, r), object_spaceship_equality(l, r)   // <=> answers
-//   bool unwinding(); bool parallel_worker(); size_t& equality_depth()
-//   checked_result<script_value> equal(l, r)   // the backend's == entry, for memberwise element comparison
+//   bool unwinding(); bool parallel_worker(); size_t& equality_depth()   // memberwise ==/<=> levels nested natively
+//   checked_result<script_value> equal(l, r)   // the backend's == entry
+//   checked_result<script_value> spaceship_member(l, r, order_walk*)   // the backend's <=> on a member pair of a walk
 
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/detail/structural_ordering.hpp>
@@ -205,7 +206,7 @@ namespace jai::detail {
 			return binary_ordering<Op>(h, method_id, char_promoted(left, h.engine()), char_promoted(right, h.engine()));
 		}
 		if (auto fast = ordering_on_values<Op>(h, left, right, li, ri)) { return std::move(*fast); }
-		if (auto builtin = builtin_order(left, right, h.engine(), h.equality_depth(), [&](const script_value& a, const script_value& b) { return h.spaceship(a,b); }, [&] { return h.unwinding(); })) {
+		if (auto builtin = builtin_order(h, left, right, nullptr)) {
 			if (!*builtin) { return builtin->error_value(); }
 			return h.make_bool(ordered<Op>(builtin->value().unchecked_as_int(), script_int{0}));
 		}
@@ -243,14 +244,15 @@ namespace jai::detail {
 	}
 
 	// == : memberwise on heavy values (detail/structural_equality.hpp), identity for handles and host objects. A bound
-	// operand is not decoded: an opaque host pointer compares by identity.
+	// operand is not decoded: an opaque host pointer compares by identity. walk is the memberwise comparison this pair is a
+	// member of (null for an operator's own operands).
 	template <class Host>
-	checked_result<script_value> binary_equal(Host& h, const script_value& left, const script_value& right) {
+	checked_result<script_value> equal_operands(Host& h, const script_value& left, const script_value& right, equality_walk* walk) {
 		if (utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
-			return utf8_rewrapped(binary_equal(h, utf8_unwrapped(left, h.engine()), utf8_unwrapped(right, h.engine())), h.engine());
+			return utf8_rewrapped(equal_operands(h, utf8_unwrapped(left, h.engine()), utf8_unwrapped(right, h.engine()), walk), h.engine());
 		}
 		if (char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
-			return binary_equal(h, char_promoted(left, h.engine()), char_promoted(right, h.engine()));
+			return equal_operands(h, char_promoted(left, h.engine()), char_promoted(right, h.engine()), walk);
 		}
 		if (auto expired = weak_equals_null(left, right)) { return h.make_bool(*expired); }
 		if (auto identity = builtin_identity_equal(left, right)) { return h.make_bool(*identity); }
@@ -283,9 +285,15 @@ namespace jai::detail {
 			return h.make_bool(unwrapped_left.get_cpp_bound_ptr() == unwrapped_right.get_cpp_bound_ptr());
 		}
 
-		auto element_equal = [&h](const script_value& a, const script_value& b) { return h.equal(a, b); };
-		if (left.is_array() && right.is_array()) { return arrays_equal(left, right, h.engine(), h.equality_depth(), element_equal); }
-		if (left.is_map() && right.is_map()) { return maps_equal(left, right, h.engine(), h.equality_depth(), element_equal); }
+		const bool native = !walk && h.equality_depth() < k_inline_compare_depth;
+		if (left.is_array() && right.is_array()) {
+			if (native) { return arrays_equal(h, left, right); }
+			return compare_members(h, walk, [&](equality_walk& w) { return open_arrays_equal(left, right, w); });
+		}
+		if (left.is_map() && right.is_map()) {
+			if (native) { return maps_equal(h, left, right); }
+			return compare_members(h, walk, [&](equality_walk& w) { return open_maps_equal(left, right, w); });
+		}
 
 		// safe-mode workers: the operator wall would skip a custom operator== and the structural answer would diverge
 		// from the serial loop
@@ -302,12 +310,20 @@ namespace jai::detail {
 			return h.make_bool(from_spaceship->value());
 		}
 		// script class instances: same class, fieldwise
-		if (auto structural = instances_equal(left, right, h.engine(), h.equality_depth(), element_equal)) { return std::move(*structural); }
+		if (auto instances = script_instance_pair(left, right)) {
+			if (native) { return instances_equal(h, left, right, instances->first, instances->second); }
+			return compare_members(h, walk, [&](equality_walk& w) { return open_instances_equal(left, right, instances->first, instances->second, w); });
+		}
 		// host objects and other holders: the same object_holder
 		auto left_holder = const_cast<script_value&>(left).get_object_holder();
 		auto right_holder = const_cast<script_value&>(right).get_object_holder();
 		if (left_holder && right_holder) { return h.make_bool(left_holder == right_holder); }
 		return h.make_bool(false);
+	}
+
+	template <class Host>
+	checked_result<script_value> binary_equal(Host& h, const script_value& left, const script_value& right) {
+		return equal_operands(h, left, right, nullptr);
 	}
 
 	template <class Host>
@@ -322,16 +338,17 @@ namespace jai::detail {
 		return h.make_bool(!equal.value().unchecked_as_bool());
 	}
 
+	// <=>; walk is the lexicographic comparison this pair is a member of (null for an operator's own operands)
 	template <class Host>
-	checked_result<script_value> binary_spaceship(Host& h, uint64_t method_id, const script_value& left, const script_value& right) {
+	checked_result<script_value> spaceship_operands(Host& h, uint64_t method_id, const script_value& left, const script_value& right, order_walk* walk) {
 		if (left.raw_storage_index() == script_value::TYPEID_CPP_BOUND || right.raw_storage_index() == script_value::TYPEID_CPP_BOUND) {
-			return binary_spaceship(h, method_id, left.raw_storage_index() == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, right.raw_storage_index() == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+			return spaceship_operands(h, method_id, left.raw_storage_index() == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, right.raw_storage_index() == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right, walk);
 		}
 		if (utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
-			return utf8_rewrapped(binary_spaceship(h, method_id, utf8_unwrapped(left, h.engine()), utf8_unwrapped(right, h.engine())), h.engine());
+			return utf8_rewrapped(spaceship_operands(h, method_id, utf8_unwrapped(left, h.engine()), utf8_unwrapped(right, h.engine()), walk), h.engine());
 		}
 		if (char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
-			return binary_spaceship(h, method_id, char_promoted(left, h.engine()), char_promoted(right, h.engine()));
+			return spaceship_operands(h, method_id, char_promoted(left, h.engine()), char_promoted(right, h.engine()), walk);
 		}
 		auto sign = [&h](auto cmp) { return h.make_int(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0))); };
 		if (left.raw_storage_index() == script_value::TYPEID_INT && right.raw_storage_index() == script_value::TYPEID_INT) {
@@ -343,13 +360,18 @@ namespace jai::detail {
 			return h.make_int(float_order(lf, rf));
 		}
 		if (left.is_string() && right.is_string()) { return sign(left.unchecked_as_string().compare(right.unchecked_as_string())); }
-		if (auto builtin = builtin_order(left, right, h.engine(), h.equality_depth(), [&](const script_value& a, const script_value& b) { return h.spaceship(a,b); }, [&] { return h.unwinding(); })) { return std::move(*builtin); }
+		if (auto builtin = builtin_order(h, left, right, walk)) { return std::move(*builtin); }
 		if (math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] { return math::ordering_error(left, right); }
 		if (auto custom = h.object_arithmetic(left, right, method_id)) { return std::move(*custom); }
 		if (!h.unwinding()) {
 			if (auto reversed = h.object_spaceship_reversed(left, right)) { return std::move(*reversed); }
 		}
 		return type_mismatch_error("Invalid operands for <=> operator");
+	}
+
+	template <class Host>
+	checked_result<script_value> binary_spaceship(Host& h, uint64_t method_id, const script_value& left, const script_value& right) {
+		return spaceship_operands(h, method_id, left, right, nullptr);
 	}
 
 	template <bit_op Op>

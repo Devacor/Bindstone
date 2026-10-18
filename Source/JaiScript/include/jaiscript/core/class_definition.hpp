@@ -321,8 +321,11 @@ public:
     }
 
     std::shared_ptr<class_instance> deep_copy() const;
-    // One level of a deep copy (script_value::clone_level): a field a deep value holds fills from the work list
+    // One level of a deep copy (script_value::clone_level); past detail::k_inline_copy_depth its fields and then its end
+    // (finish_deep_copy_level) are steps on the work list
     std::shared_ptr<class_instance> deep_copy_level(detail::deep_copy_work& work, unsigned depth) const;
+    // The end of an instance's copy, after its fields: its C++ object, then the copy joins its class's live instances
+    void finish_deep_copy_level(class_instance& copy, bool overflow) const;
 
     void copy_fields_from(const class_instance& other);
 
@@ -3996,9 +3999,36 @@ inline const script_value& class_instance::native_or_throw() const {
 
 inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
     detail::deep_copy_work work;
-    auto result = deep_copy_level(work, 0);
-    detail::finish_deep_copy(work);
-    return result;
+    return deep_copy_level(work, 0);
+}
+
+inline void class_instance::finish_deep_copy_level(class_instance& copy, bool overflow) const {
+    if (overflow) {
+        // the copies landed in overflow (no definition yet, matching the old no-enforcement order); adopt it, then slot them
+        copy.class_def_ = class_def_;
+        copy.rehome_overflow_fields();
+    }
+    // The copied C++ object is a new identity (its registered copy function, else the value's own copy); the copy registers
+    // as its script layer once the definition is attached
+    if (const script_value* held = native()) {
+        const script_value& value = *held;
+        bool copied = false;
+        if (!value.is_null() && class_def_ && class_def_->has_copy_function()) {
+            if (auto cpp_obj = extract_cpp_object_impl(value)) {
+                auto new_cpp_obj = class_def_->copy_object(cpp_obj.get());
+                if (!new_cpp_obj) {
+                    throw runtime_error("Failed to copy C++ object of type '" + std::string(get_class_name()) +
+                        "'. The registered copy function returned null.");
+                }
+                copy.set_native(script_value::make_cpp_object(get_class_name(), class_def_->get_type_id(), new_cpp_obj, value.get_engine()));
+                copied = true;
+            }
+        }
+        if (!copied) { copy.set_native(value.clone_element()); }
+    }
+    if (class_def_) {
+        class_def_->register_live_instance(&copy);
+    }
 }
 
 inline std::shared_ptr<class_instance> class_instance::deep_copy_level(detail::deep_copy_work& work, unsigned depth) const {
@@ -4009,27 +4039,14 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy_level(detail::d
 #ifdef JAISCRIPT_VM_COVERAGE
     census::add_weight(flat_fields_.size());
 #endif
-
-    // The copied C++ object is a new identity (its registered copy function, else the value's own copy); the copy registers
-    // as its script layer once the definition is attached
-    auto copy_native = [&](class_instance& to) {
-        const script_value* held = native();
-        if (!held) { return; }
-        const script_value& value = *held;
-        if (!value.is_null() && class_def_ && class_def_->has_copy_function()) {
-            if (auto cpp_obj = extract_cpp_object_impl(value)) {
-                auto new_cpp_obj = class_def_->copy_object(cpp_obj.get());
-                if (!new_cpp_obj) {
-                    throw runtime_error("Failed to copy C++ object of type '" + std::string(get_class_name()) +
-                        "'. The registered copy function returned null.");
-                }
-                to.set_native(script_value::make_cpp_object(get_class_name(), class_def_->get_type_id(), new_cpp_obj, value.get_engine()));
-                return;
-            }
-        }
-        to.set_native(value.clone_element());
-    };
-    if (class_def_ && !overflow_fields_) {
+    const bool flat = class_def_ && !overflow_fields_;
+    const bool stepped = depth > detail::k_inline_copy_depth;
+    size_t first_step = work.size();
+    if (stepped) {
+        work.push_back({flat ? detail::deep_copy_item::step::finish : detail::deep_copy_item::step::finish_overflow, this, new_instance.get()});
+        first_step = work.size();
+    }
+    if (flat) {
         // Slot-to-slot copy with the definition attached up front: the general path
         // below routes every field through the overflow map and rehomes it (one map
         // node + one cell per field); flat instances copy their cells directly. Cells
@@ -4057,24 +4074,16 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy_level(detail::d
             new_instance->flat_fields_[slot] = new_instance->make_cell(script_value(std::monostate{}, engine_));
             cell->clone_element_into(*new_instance->flat_fields_[slot], work, depth);
         }
-        copy_native(*new_instance);
-        class_def_->register_live_instance(new_instance.get());
-        return new_instance;
+    } else {
+        for_each_field([&](uint64_t id, const script_value& value) {
+            value.clone_element_into(new_instance->materialize_field(id, script_value(std::monostate{}, engine_)), work, depth);
+        });
     }
-    for_each_field([&](uint64_t id, const script_value& value) {
-        new_instance->set_field(id, value.clone_element());
-    });
-
-    // The copies above landed in overflow (no definition yet, matching the old
-    // no-enforcement order); adopt the definition then slot them.
-    new_instance->class_def_ = class_def_;
-    new_instance->rehome_overflow_fields();
-    copy_native(*new_instance);
-
-    if (class_def_) {
-        class_def_->register_live_instance(new_instance.get());
+    if (stepped) {
+        std::reverse(work.begin() + static_cast<ptrdiff_t>(first_step), work.end());
+    } else {
+        finish_deep_copy_level(*new_instance, !flat);
     }
-
     return new_instance;
 }
 

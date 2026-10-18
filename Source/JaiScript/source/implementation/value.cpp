@@ -1332,17 +1332,7 @@ script_value script_value::clone_uncounted() const {
 script_value script_value::clone() const {
 #endif
     detail::deep_copy_work work;
-    script_value result = clone_level(work, 0);
-    detail::finish_deep_copy(work);
-    return result;
-}
-
-void detail::finish_deep_copy(deep_copy_work& work) {
-    while (!work.empty()) {
-        deep_copy_item item = std::move(work.back());
-        work.pop_back();
-        *item.dest = item.source.clone_level(work, 0);
-    }
+    return clone_level(work, 0);
 }
 
 void script_value::clone_element_into(script_value& dest, detail::deep_copy_work& work, unsigned depth) const {
@@ -1350,8 +1340,47 @@ void script_value::clone_element_into(script_value& dest, detail::deep_copy_work
         dest = *this;
     } else if (depth < detail::k_inline_copy_depth) {
         dest = clone_level(work, depth + 1);
+    } else if (depth == detail::k_inline_copy_depth) {
+        clone_subtree_into(dest);
     } else {
-        work.push_back({*this, &dest});
+        work.push_back({detail::deep_copy_item::step::value, this, &dest});
+    }
+}
+
+// Each level pushes its steps reversed, so the back of the list is always the next step the native walk would take
+void script_value::clone_subtree_into(script_value& dest) const {
+    using step = detail::deep_copy_item::step;
+    constexpr unsigned stepped = detail::k_inline_copy_depth + 1;
+    detail::deep_copy_work work;
+    dest = clone_level(work, stepped);
+    while (!work.empty()) {
+        const detail::deep_copy_item item = work.back();
+        work.pop_back();
+        switch (item.what) {
+            case step::value:
+                *static_cast<script_value*>(item.dest) = static_cast<const script_value*>(item.source)->clone_level(work, stepped);
+                break;
+            case step::entry: {
+                const auto& [key, value] = *static_cast<const script_map::value_type*>(item.source);
+                auto& copied = *static_cast<script_map*>(item.dest);
+                if (value.element_copies_shallow()) {
+                    copied.emplace(key.clone_element(), value);
+                } else {
+                    auto placed = copied.emplace(key.clone_element(), script_value(std::monostate{}, engine_));
+                    work.push_back({step::value, &value, &placed.first->second});
+                }
+                break;
+            }
+            case step::slot: {
+                script_value element = static_cast<const script_array*>(item.source)->get(item.index, engine_);
+                static_cast<script_array*>(item.dest)->push(element.element_copies_shallow() ? std::move(element) : element.clone_level(work, stepped));
+                break;
+            }
+            case step::finish:
+            case step::finish_overflow:
+                static_cast<const class_instance*>(item.source)->finish_deep_copy_level(*static_cast<class_instance*>(item.dest), item.what == step::finish_overflow);
+                break;
+        }
     }
 }
 
@@ -1427,10 +1456,22 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                 engine_->execution_limits().memory_charge_deferred(sizeof(obj_slot) * (n + 1));
                 auto new_node = make_strong<script_array>(script_array::kind_t::obj);
                 new_node->reserve(n);
-                for (size_t i = 0; i < n; ++i) {
-                    // a slot holds the object itself, never a placeholder: the element copies its own level now and defers below it
-                    script_value element = other_node.get(i, engine_);
-                    new_node->push(element.element_copies_shallow() ? std::move(element) : element.clone_level(work, depth + 1));
+                if (depth > detail::k_inline_copy_depth) {
+                    // a slot holds the object itself, never a placeholder: each one is a step that copies and pushes it
+                    for (size_t i = n; i-- > 0;) { work.push_back({detail::deep_copy_item::step::slot, &other_node, new_node.get(), i}); }
+                } else {
+                    for (size_t i = 0; i < n; ++i) {
+                        script_value element = other_node.get(i, engine_);
+                        if (element.element_copies_shallow()) {
+                            new_node->push(std::move(element));
+                        } else if (depth < detail::k_inline_copy_depth) {
+                            new_node->push(element.clone_level(work, depth + 1));
+                        } else {
+                            script_value copied(std::monostate{}, engine_);
+                            element.clone_subtree_into(copied);
+                            new_node->push(std::move(copied));
+                        }
+                    }
                 }
                 result.storage_ = new_node;
                 break;
@@ -1450,6 +1491,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             auto new_node = make_strong<script_array>();
             auto& copied = new_node->values();
             copied.reserve(other_array.size());   // no reallocation: a deferred element's placeholder stays where it is
+            const size_t first_step = work.size();
             for (const auto& elem : other_array) {
                 if (elem.element_copies_shallow()) {
                     copied.push_back(elem);
@@ -1458,6 +1500,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                     elem.clone_element_into(copied.back(), work, depth);
                 }
             }
+            std::reverse(work.begin() + static_cast<ptrdiff_t>(first_step), work.end());
             result.storage_ = new_node;
             break;
         }
@@ -1467,6 +1510,14 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             // loop back-edge); key/value clones charge themselves recursively
             engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (other_map.size() + 1));
             auto new_map = make_strong<script_map>();
+            if (depth > detail::k_inline_copy_depth) {
+                // an entry is one step (its key, then its value's whole copy) so keys and values interleave as below
+                const size_t first_step = work.size();
+                for (const auto& entry : other_map) { work.push_back({detail::deep_copy_item::step::entry, &entry, new_map.get()}); }
+                std::reverse(work.begin() + static_cast<ptrdiff_t>(first_step), work.end());
+                result.storage_ = new_map;
+                break;
+            }
             for (const auto& [key, value] : other_map) {
                 if (value.element_copies_shallow()) {
                     new_map->emplace(key.clone_element(), value);
@@ -1623,24 +1674,51 @@ namespace {
 script_value script_value::parallel_detached_copy(std::vector<type_info*>* collected_types,
                                                   std::vector<const void*>* collected_nodes) const {
     detail::deep_copy_work work;
-    script_value result = parallel_detached_level(collected_types, collected_nodes, work, 0);
+    return parallel_detached_level(collected_types, collected_nodes, work, 0);
+}
+
+// As clone_subtree_into: the steps read the source by pointer, never by a handle copy
+void script_value::parallel_detached_subtree_into(script_value& dest, std::vector<type_info*>* collected_types,
+                                                  std::vector<const void*>* collected_nodes) const {
+    using step = detail::deep_copy_item::step;
+    constexpr unsigned stepped = detail::k_inline_copy_depth + 1;
+    detail::deep_copy_work work;
+    dest = parallel_detached_level(collected_types, collected_nodes, work, stepped);
     while (!work.empty()) {
-        detail::deep_copy_item item = std::move(work.back());
+        const detail::deep_copy_item item = work.back();
         work.pop_back();
-        *item.dest = item.source.parallel_detached_level(collected_types, collected_nodes, work, 0);
+        if (item.what == step::entry) {
+            const auto& [key, value] = *static_cast<const script_map::value_type*>(item.source);
+            auto placed = static_cast<script_map*>(item.dest)->emplace(key.parallel_detached_copy(collected_types, collected_nodes), script_value(std::monostate{}, engine_));
+            work.push_back({step::value, &value, &placed.first->second});
+        } else {
+            *static_cast<script_value*>(item.dest) = static_cast<const script_value*>(item.source)->parallel_detached_level(collected_types, collected_nodes, work, stepped);
+        }
     }
-    return result;
 }
 
 script_value script_value::parallel_detached_level(std::vector<type_info*>* collected_types, std::vector<const void*>* collected_nodes,
                                                    detail::deep_copy_work& work, unsigned depth) const {
-    // a container element detaches inline while shallow, past that into a placeholder the work list fills
     auto detach_into = [&](const script_value& element, script_value& dest) {
-        const size_t kind = element.raw_storage_index();
-        if (depth < detail::k_inline_copy_depth || (kind != TYPEID_ARRAY && kind != TYPEID_MAP && kind != TYPEID_REFERENCE)) {
+        if (depth < detail::k_inline_copy_depth) {
             dest = element.parallel_detached_level(collected_types, collected_nodes, work, depth + 1);
+        } else if (depth == detail::k_inline_copy_depth) {
+            element.parallel_detached_subtree_into(dest, collected_types, collected_nodes);
         } else {
-            work.push_back({element, &dest});
+            work.push_back({detail::deep_copy_item::step::value, &element, &dest});
+        }
+    };
+    const size_t first_step = work.size();
+    auto steps_in_order = [&]() { std::reverse(work.begin() + static_cast<ptrdiff_t>(first_step), work.end()); };
+    auto detach_entries = [&](const script_map& from, script_map& fresh) {
+        if (depth > detail::k_inline_copy_depth) {
+            for (const auto& entry : from) { work.push_back({detail::deep_copy_item::step::entry, &entry, &fresh}); }
+            steps_in_order();
+            return;
+        }
+        for (const auto& [key, val] : from) {
+            auto placed = fresh.emplace(key.parallel_detached_copy(collected_types, collected_nodes), script_value(std::monostate{}, engine_));
+            detach_into(val, placed.first->second);
         }
     };
     if (!engine_) {
@@ -1720,6 +1798,7 @@ script_value script_value::parallel_detached_level(std::vector<type_info*>* coll
                 fresh->values().push_back(script_value(std::monostate{}, engine_));
                 detach_into(elem, fresh->values().back());
             }
+            steps_in_order();
             if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
             result.storage_ = fresh;
             break;
@@ -1729,18 +1808,21 @@ script_value script_value::parallel_detached_level(std::vector<type_info*>* coll
             if (!handle) { break; }
             engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (handle->size() + 1));
             auto fresh = make_strong<script_map>();
-            for (const auto& [key, val] : *handle) {
-                auto placed = fresh->emplace(key.parallel_detached_copy(collected_types, collected_nodes), script_value(std::monostate{}, engine_));
-                detach_into(val, placed.first->second);
-            }
+            detach_entries(*handle, *fresh);
             if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
             result.storage_ = fresh;
             break;
         }
         case TYPEID_CPP_BOUND: {
             if (bound_semantic_index() != TYPEID_NULL) {
-                // Decode, then re-detach so bound strings get fresh storage too
-                return bound_decoded_temp().parallel_detached_level(collected_types, collected_nodes, work, depth);
+                // Decode, then re-detach so bound strings get fresh storage too; below the inline depth the decoded temporary
+                // detaches whole here, since steps would outlive it
+                const script_value decoded = bound_decoded_temp();
+                if (depth <= detail::k_inline_copy_depth) {
+                    return decoded.parallel_detached_level(collected_types, collected_nodes, work, depth);
+                }
+                decoded.parallel_detached_subtree_into(result, collected_types, collected_nodes);
+                return result;
             }
             throw runtime_error("value is not value-semantic (bound host object)");
         }
@@ -1763,15 +1845,13 @@ script_value script_value::parallel_detached_level(std::vector<type_info*>* coll
                     fresh->values().push_back(script_value(std::monostate{}, engine_));
                     detach_into(elem, fresh->values().back());
                 }
+                steps_in_order();
                 if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
                 result.storage_ = fresh;
             } else if (const auto* map = parallel_borrow_map()) {
                 engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (map->size() + 1));
                 auto fresh = make_strong<script_map>();
-                for (const auto& [key, val] : *map) {
-                    auto placed = fresh->emplace(key.parallel_detached_copy(collected_types, collected_nodes), script_value(std::monostate{}, engine_));
-                    detach_into(val, placed.first->second);
-                }
+                detach_entries(*map, *fresh);
                 if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
                 result.storage_ = fresh;
             }

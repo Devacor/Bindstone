@@ -3819,10 +3819,9 @@ checked_result<statement_ptr> parser::for_statement() {
     bool is_reference = false;
     type_info_ptr element_type = nullptr;
 
-    // Check if we have a type followed by optional & and identifier : pattern
-    if (check(token_type::auto_keyword) || check(token_type::var_keyword) || check(token_type::int_keyword) ||
-        check(token_type::float_keyword) || check(token_type::string_keyword) || check(token_type::bool_keyword) ||
-        check(token_type::char_keyword) || check(token_type::identifier)) {
+    // Check if we have a type followed by optional & and identifier : pattern (every type spelling: array<int>,
+    // map<string, int>, shared_ptr<C>, weak_ptr<C> start with keywords)
+    if (is_type_keyword_token(peek().type) || check(token_type::identifier)) {
 
         // Parse the type
         auto element_type_result = parse_type();

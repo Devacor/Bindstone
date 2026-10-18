@@ -143,6 +143,8 @@ inline bool host_method_fill(class_definition* cd, const class_instance* inst, u
 	const void* stored = nullptr;
 	host_receiver_layout layout;
 	if (!host_receiver_measure(cd, inst, owner, eng, stored, out.delta, layout)) { return false; }
+	// the method's object sits at the registered cast from the stored type: no dynamic type moves it
+	layout.vptr = nullptr;
 	out.entry = entry;
 	out.layout = layout;
 	return true;

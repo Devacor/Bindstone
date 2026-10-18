@@ -1072,15 +1072,6 @@ void class_definition::add_method(const std::string& name, script_function func,
     add_method(name, std::move(func), arity, {});
 }
 
-bool class_definition::defines_method(uint64_t id) const {
-    if (methods_.find(id) != methods_.end()) { return true; }
-    for (const auto& parent : parent_classes_) {
-        if (parent && parent->defines_method(id)) { return true; }
-    }
-    if (cpp_base_class_ && cpp_base_class_->defines_method(id)) { return true; }
-    return false;
-}
-
 void class_definition::rebuild_field_slots() const {
     cpp_property_slots_.assign(slot_to_field_.size(), 0);
     std::function<void(const class_definition&)> walk = [&](const class_definition& cd) {
@@ -1132,16 +1123,6 @@ void class_definition::rebuild_field_slots() const {
     bump_method_epoch();   // resolution chain changed
 
     return true;
-}
-
-std::shared_ptr<class_definition> class_definition::find_cpp_base_class() const {
-    if (cpp_base_class_) { return cpp_base_class_; }
-    for (const auto& parent : parent_classes_) {
-        if (parent) {
-            if (auto found = parent->find_cpp_base_class()) { return found; }
-        }
-    }
-    return nullptr;
 }
 
 void class_definition::intern_name() const {

@@ -667,7 +667,14 @@ public:
     // builtin handle method. Cheap: no symbolizer / no throw.
     // A script class of the chain (this one or a script ancestor) defines a method of the name: it answers before the C++ base's
     inline bool script_chain_defines_method(uint64_t id) const;
-    bool defines_method(uint64_t id) const;
+    bool defines_method(uint64_t id) const {
+        if (methods_.find(id) != methods_.end()) { return true; }
+        for (const auto& parent : parent_classes_) {
+            if (parent && parent->defines_method(id)) { return true; }
+        }
+        if (cpp_base_class_ && cpp_base_class_->defines_method(id)) { return true; }
+        return false;
+    }
 
     // Truthiness probe memo (is_truthy on objects): does the chain define to_bool()?
     // get_method's exact chain (defines_method); valid while method_epoch_ holds
@@ -796,7 +803,15 @@ public:
     // Nearest C++ base anywhere up the script parent chain — the class an instance's
     // native object is typed as. cpp_base_class_ is only set on the script class whose DIRECT
     // first base is C++, so multi-level hybrids (script : script : C++) must walk.
-    std::shared_ptr<class_definition> find_cpp_base_class() const;
+    std::shared_ptr<class_definition> find_cpp_base_class() const {
+        if (cpp_base_class_) { return cpp_base_class_; }
+        for (const auto& parent : parent_classes_) {
+            if (parent) {
+                if (auto found = parent->find_cpp_base_class()) { return found; }
+            }
+        }
+        return nullptr;
+    }
 
     void register_property_setter(uint64_t field_id, uint64_t setter_id);
 

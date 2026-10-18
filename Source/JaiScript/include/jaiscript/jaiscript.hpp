@@ -32,8 +32,6 @@
 #include "core/function_binder.hpp"
 
 // 7. Execution backends (depends on value)
-#include "core/execution_backend.hpp"
-
 // 8. Engine (depends on all above)
 #include "core/engine.hpp"
 
@@ -42,11 +40,6 @@
 
 #include "core/static_binder.hpp"
 #include "core/template_binder.hpp"
-
-#include "detail/ast.hpp"
-#include "detail/lexer.hpp"
-#include "detail/parser.hpp"
-#include "detail/interpreter.hpp"
 
 #include "serialization/archive_impl.hpp"
 #include "serialization/convenience.hpp"

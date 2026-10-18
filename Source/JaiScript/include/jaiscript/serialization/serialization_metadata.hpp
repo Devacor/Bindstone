@@ -43,32 +43,88 @@ template<typename Archive> struct reader_archive_id_trait {
     static constexpr reader_archive_id value = reader_archive_id::unknown;
 };
 
-// Uses function pointers (manual vtable) for minimal indirection.
+// The type-erased archives forward through one table of named functions per concrete archive (a manual vtable). The
+// entries are never lambdas: MSVC numbers the lambdas in a constructor template's member initializers per translation
+// unit, so two units can give one lambda name different bodies and the linker keeps either.
+struct writer_operations {
+    void (*write_property_name)(void*, const std::string&);
+    void (*write_int8)(void*, int8_t);
+    void (*write_int16)(void*, int16_t);
+    void (*write_int32)(void*, int32_t);
+    void (*write_int64)(void*, int64_t);
+    void (*write_uint8)(void*, uint8_t);
+    void (*write_uint16)(void*, uint16_t);
+    void (*write_uint32)(void*, uint32_t);
+    void (*write_uint64)(void*, uint64_t);
+    void (*write_float32)(void*, float);
+    void (*write_float64)(void*, double);
+    void (*write_bool)(void*, bool);
+    void (*write_string)(void*, const std::string&);
+    void (*begin_object)(void*, const std::string&, uint32_t);
+    void (*end_object)(void*);
+    void (*begin_array)(void*, size_t);
+    void (*end_array)(void*);
+    void (*begin_map)(void*, size_t);
+    void (*end_map)(void*);
+    void (*write_map_key)(void*, const std::string&);
+    std::pair<uint32_t, bool> (*get_or_assign_shared_id)(void*, const void*);
+};
+
+template<typename Archive>
+struct archive_writer_thunks {
+    static void write_property_name(void* p, const std::string& n) { static_cast<Archive*>(p)->write_property_name(n); }
+    static void write_int8(void* p, int8_t v) { static_cast<Archive*>(p)->write_int8(v); }
+    static void write_int16(void* p, int16_t v) { static_cast<Archive*>(p)->write_int16(v); }
+    static void write_int32(void* p, int32_t v) { static_cast<Archive*>(p)->write_int32(v); }
+    static void write_int64(void* p, int64_t v) { static_cast<Archive*>(p)->write_int64(v); }
+    static void write_uint8(void* p, uint8_t v) { static_cast<Archive*>(p)->write_uint8(v); }
+    static void write_uint16(void* p, uint16_t v) { static_cast<Archive*>(p)->write_uint16(v); }
+    static void write_uint32(void* p, uint32_t v) { static_cast<Archive*>(p)->write_uint32(v); }
+    static void write_uint64(void* p, uint64_t v) { static_cast<Archive*>(p)->write_uint64(v); }
+    static void write_float32(void* p, float v) { static_cast<Archive*>(p)->write_float32(v); }
+    static void write_float64(void* p, double v) { static_cast<Archive*>(p)->write_float64(v); }
+    static void write_bool(void* p, bool v) { static_cast<Archive*>(p)->write_bool(v); }
+    static void write_string(void* p, const std::string& v) { static_cast<Archive*>(p)->write_string(v); }
+    static void begin_object(void* p, const std::string& t, uint32_t v) { static_cast<Archive*>(p)->begin_object(t, v); }
+    static void end_object(void* p) { static_cast<Archive*>(p)->end_object(); }
+    static void begin_array(void* p, size_t s) { static_cast<Archive*>(p)->begin_array(s); }
+    static void end_array(void* p) { static_cast<Archive*>(p)->end_array(); }
+    static void begin_map(void* p, size_t s) { static_cast<Archive*>(p)->begin_map(s); }
+    static void end_map(void* p) { static_cast<Archive*>(p)->end_map(); }
+    static void write_map_key(void* p, const std::string& k) { static_cast<Archive*>(p)->write_map_key(k); }
+    static std::pair<uint32_t, bool> get_or_assign_shared_id(void* p, const void* raw) { return static_cast<Archive*>(p)->get_or_assign_shared_id(raw); }
+};
+
+template<typename Archive>
+inline constexpr writer_operations writer_operations_of {
+    &archive_writer_thunks<Archive>::write_property_name,
+    &archive_writer_thunks<Archive>::write_int8,
+    &archive_writer_thunks<Archive>::write_int16,
+    &archive_writer_thunks<Archive>::write_int32,
+    &archive_writer_thunks<Archive>::write_int64,
+    &archive_writer_thunks<Archive>::write_uint8,
+    &archive_writer_thunks<Archive>::write_uint16,
+    &archive_writer_thunks<Archive>::write_uint32,
+    &archive_writer_thunks<Archive>::write_uint64,
+    &archive_writer_thunks<Archive>::write_float32,
+    &archive_writer_thunks<Archive>::write_float64,
+    &archive_writer_thunks<Archive>::write_bool,
+    &archive_writer_thunks<Archive>::write_string,
+    &archive_writer_thunks<Archive>::begin_object,
+    &archive_writer_thunks<Archive>::end_object,
+    &archive_writer_thunks<Archive>::begin_array,
+    &archive_writer_thunks<Archive>::end_array,
+    &archive_writer_thunks<Archive>::begin_map,
+    &archive_writer_thunks<Archive>::end_map,
+    &archive_writer_thunks<Archive>::write_map_key,
+    &archive_writer_thunks<Archive>::get_or_assign_shared_id,
+};
+
 // Only used for dynamic/runtime polymorphism - static code uses CRTP directly.
 class any_archive_writer {
     void* ptr_;
     writer_archive_id id_;
-    void (*write_property_name_)(void*, const std::string&);
-    void (*write_int8_)(void*, int8_t);
-    void (*write_int16_)(void*, int16_t);
-    void (*write_int32_)(void*, int32_t);
-    void (*write_int64_)(void*, int64_t);
-    void (*write_uint8_)(void*, uint8_t);
-    void (*write_uint16_)(void*, uint16_t);
-    void (*write_uint32_)(void*, uint32_t);
-    void (*write_uint64_)(void*, uint64_t);
-    void (*write_float32_)(void*, float);
-    void (*write_float64_)(void*, double);
-    void (*write_bool_)(void*, bool);
-    void (*write_string_)(void*, const std::string&);
-    void (*begin_object_)(void*, const std::string&, uint32_t);
-    void (*end_object_)(void*);
-    void (*begin_array_)(void*, size_t);
-    void (*end_array_)(void*);
-    void (*begin_map_)(void*, size_t);
-    void (*end_map_)(void*);
-    void (*write_map_key_)(void*, const std::string&);
-    std::pair<uint32_t, bool> (*get_or_assign_shared_id_)(void*, const void*);
+    const writer_operations* operations_;
 
 public:
     static constexpr bool is_text_format = true; // Conservative default for type-erased
@@ -77,50 +133,29 @@ public:
     explicit any_archive_writer(Archive& ar)
         : ptr_(&ar)
         , id_(writer_archive_id_trait<std::decay_t<Archive>>::value)
-        , write_property_name_([](void* p, const std::string& n) { static_cast<Archive*>(p)->write_property_name(n); })
-        , write_int8_([](void* p, int8_t v) { static_cast<Archive*>(p)->write_int8(v); })
-        , write_int16_([](void* p, int16_t v) { static_cast<Archive*>(p)->write_int16(v); })
-        , write_int32_([](void* p, int32_t v) { static_cast<Archive*>(p)->write_int32(v); })
-        , write_int64_([](void* p, int64_t v) { static_cast<Archive*>(p)->write_int64(v); })
-        , write_uint8_([](void* p, uint8_t v) { static_cast<Archive*>(p)->write_uint8(v); })
-        , write_uint16_([](void* p, uint16_t v) { static_cast<Archive*>(p)->write_uint16(v); })
-        , write_uint32_([](void* p, uint32_t v) { static_cast<Archive*>(p)->write_uint32(v); })
-        , write_uint64_([](void* p, uint64_t v) { static_cast<Archive*>(p)->write_uint64(v); })
-        , write_float32_([](void* p, float v) { static_cast<Archive*>(p)->write_float32(v); })
-        , write_float64_([](void* p, double v) { static_cast<Archive*>(p)->write_float64(v); })
-        , write_bool_([](void* p, bool v) { static_cast<Archive*>(p)->write_bool(v); })
-        , write_string_([](void* p, const std::string& v) { static_cast<Archive*>(p)->write_string(v); })
-        , begin_object_([](void* p, const std::string& t, uint32_t v) { static_cast<Archive*>(p)->begin_object(t, v); })
-        , end_object_([](void* p) { static_cast<Archive*>(p)->end_object(); })
-        , begin_array_([](void* p, size_t s) { static_cast<Archive*>(p)->begin_array(s); })
-        , end_array_([](void* p) { static_cast<Archive*>(p)->end_array(); })
-        , begin_map_([](void* p, size_t s) { static_cast<Archive*>(p)->begin_map(s); })
-        , end_map_([](void* p) { static_cast<Archive*>(p)->end_map(); })
-        , write_map_key_([](void* p, const std::string& k) { static_cast<Archive*>(p)->write_map_key(k); })
-        , get_or_assign_shared_id_([](void* p, const void* raw) { return static_cast<Archive*>(p)->get_or_assign_shared_id(raw); })
-    {}
+        , operations_(&writer_operations_of<Archive>) {}
 
-    void write_property_name(const std::string& name) { write_property_name_(ptr_, name); }
-    void write_int8(int8_t v) { write_int8_(ptr_, v); }
-    void write_int16(int16_t v) { write_int16_(ptr_, v); }
-    void write_int32(int32_t v) { write_int32_(ptr_, v); }
-    void write_int64(int64_t v) { write_int64_(ptr_, v); }
-    void write_uint8(uint8_t v) { write_uint8_(ptr_, v); }
-    void write_uint16(uint16_t v) { write_uint16_(ptr_, v); }
-    void write_uint32(uint32_t v) { write_uint32_(ptr_, v); }
-    void write_uint64(uint64_t v) { write_uint64_(ptr_, v); }
-    void write_float32(float v) { write_float32_(ptr_, v); }
-    void write_float64(double v) { write_float64_(ptr_, v); }
-    void write_bool(bool v) { write_bool_(ptr_, v); }
-    void write_string(const std::string& v) { write_string_(ptr_, v); }
-    void begin_object(const std::string& type, uint32_t version) { begin_object_(ptr_, type, version); }
-    void end_object() { end_object_(ptr_); }
-    void begin_array(size_t size) { begin_array_(ptr_, size); }
-    void end_array() { end_array_(ptr_); }
-    void begin_map(size_t size) { begin_map_(ptr_, size); }
-    void end_map() { end_map_(ptr_); }
-    void write_map_key(const std::string& key) { write_map_key_(ptr_, key); }
-    std::pair<uint32_t, bool> get_or_assign_shared_id(const void* raw) { return get_or_assign_shared_id_(ptr_, raw); }
+    void write_property_name(const std::string& name) { operations_->write_property_name(ptr_, name); }
+    void write_int8(int8_t v) { operations_->write_int8(ptr_, v); }
+    void write_int16(int16_t v) { operations_->write_int16(ptr_, v); }
+    void write_int32(int32_t v) { operations_->write_int32(ptr_, v); }
+    void write_int64(int64_t v) { operations_->write_int64(ptr_, v); }
+    void write_uint8(uint8_t v) { operations_->write_uint8(ptr_, v); }
+    void write_uint16(uint16_t v) { operations_->write_uint16(ptr_, v); }
+    void write_uint32(uint32_t v) { operations_->write_uint32(ptr_, v); }
+    void write_uint64(uint64_t v) { operations_->write_uint64(ptr_, v); }
+    void write_float32(float v) { operations_->write_float32(ptr_, v); }
+    void write_float64(double v) { operations_->write_float64(ptr_, v); }
+    void write_bool(bool v) { operations_->write_bool(ptr_, v); }
+    void write_string(const std::string& v) { operations_->write_string(ptr_, v); }
+    void begin_object(const std::string& type, uint32_t version) { operations_->begin_object(ptr_, type, version); }
+    void end_object() { operations_->end_object(ptr_); }
+    void begin_array(size_t size) { operations_->begin_array(ptr_, size); }
+    void end_array() { operations_->end_array(ptr_); }
+    void begin_map(size_t size) { operations_->begin_map(ptr_, size); }
+    void end_map() { operations_->end_map(ptr_); }
+    void write_map_key(const std::string& key) { operations_->write_map_key(ptr_, key); }
+    std::pair<uint32_t, bool> get_or_assign_shared_id(const void* raw) { return operations_->get_or_assign_shared_id(ptr_, raw); }
 
     writer_archive_id archive_id() const { return id_; }
     void* raw_ptr() const { return ptr_; }
@@ -131,127 +166,164 @@ public:
     decltype(auto) dispatch(Fn&& fn);
 };
 
-class any_archive_reader {
-    void* ptr_;
-    reader_archive_id id_;
-    bool (*seek_property_)(void*, const std::string&);
-    bool (*read_property_name_)(void*, std::string&);
-    int8_t (*read_int8_)(void*);
-    int16_t (*read_int16_)(void*);
-    int32_t (*read_int32_)(void*);
-    int64_t (*read_int64_)(void*);
-    uint8_t (*read_uint8_)(void*);
-    uint16_t (*read_uint16_)(void*);
-    uint32_t (*read_uint32_)(void*);
-    uint64_t (*read_uint64_)(void*);
-    float (*read_float32_)(void*);
-    double (*read_float64_)(void*);
-    bool (*read_bool_)(void*);
-    std::string (*read_string_)(void*);
-    bool (*begin_object_)(void*, std::string&, uint32_t&);
-    void (*end_object_)(void*);
-    size_t (*begin_array_)(void*);
-    void (*end_array_)(void*);
-    size_t (*begin_map_)(void*);
-    void (*end_map_)(void*);
-    bool (*read_map_key_)(void*, std::string&);
-    bool (*has_property_)(void*, const std::string&);
-    bool (*needs_property_keys_)(void*);
-    void* (*get_engine_)(void*);  // Returns engine*
-    void* (*get_user_context_)(void*, std::type_index);  // Returns user context by type_index
-    void (*clear_property_value_)(void*);
+struct reader_operations {
+    bool (*seek_property)(void*, const std::string&);
+    bool (*read_property_name)(void*, std::string&);
+    int8_t (*read_int8)(void*);
+    int16_t (*read_int16)(void*);
+    int32_t (*read_int32)(void*);
+    int64_t (*read_int64)(void*);
+    uint8_t (*read_uint8)(void*);
+    uint16_t (*read_uint16)(void*);
+    uint32_t (*read_uint32)(void*);
+    uint64_t (*read_uint64)(void*);
+    float (*read_float32)(void*);
+    double (*read_float64)(void*);
+    bool (*read_bool)(void*);
+    std::string (*read_string)(void*);
+    bool (*begin_object)(void*, std::string&, uint32_t&);
+    void (*end_object)(void*);
+    size_t (*begin_array)(void*);
+    void (*end_array)(void*);
+    size_t (*begin_map)(void*);
+    void (*end_map)(void*);
+    bool (*read_map_key)(void*, std::string&);
+    bool (*has_property)(void*, const std::string&);
+    bool needs_property_keys;
+    void* (*get_engine)(void*);
+    void* (*get_user_context)(void*, std::type_index);
+    void (*clear_property_value)(void*);
     // Shared pointer ID tracking for type-erased smart pointer deserialization. The void
     // pointers carry a type_index so multiple-inheritance base-offset adjustment can happen
     // on the concrete side (this header can't see polymorphic_registry).
-    bool (*has_deserialized_shared_)(void*, uint32_t);
-    std::shared_ptr<void> (*get_deserialized_shared_adjusted_)(void*, uint32_t, std::type_index);
-    void (*register_deserialized_shared_typed_)(void*, uint32_t, std::shared_ptr<void>, std::type_index);
+    bool (*has_deserialized_shared)(void*, uint32_t);
+    std::shared_ptr<void> (*get_deserialized_shared_adjusted)(void*, uint32_t, std::type_index);
+    void (*register_deserialized_shared_typed)(void*, uint32_t, std::shared_ptr<void>, std::type_index);
+};
+
+template<typename Archive>
+struct archive_reader_thunks {
+    static bool seek_property(void* p, const std::string& n) { return static_cast<Archive*>(p)->seek_property(n); }
+    static bool read_property_name(void* p, std::string& n) { return static_cast<Archive*>(p)->read_property_name(n); }
+    static int8_t read_int8(void* p) { return static_cast<Archive*>(p)->read_int8(); }
+    static int16_t read_int16(void* p) { return static_cast<Archive*>(p)->read_int16(); }
+    static int32_t read_int32(void* p) { return static_cast<Archive*>(p)->read_int32(); }
+    static int64_t read_int64(void* p) { return static_cast<Archive*>(p)->read_int64(); }
+    static uint8_t read_uint8(void* p) { return static_cast<Archive*>(p)->read_uint8(); }
+    static uint16_t read_uint16(void* p) { return static_cast<Archive*>(p)->read_uint16(); }
+    static uint32_t read_uint32(void* p) { return static_cast<Archive*>(p)->read_uint32(); }
+    static uint64_t read_uint64(void* p) { return static_cast<Archive*>(p)->read_uint64(); }
+    static float read_float32(void* p) { return static_cast<Archive*>(p)->read_float32(); }
+    static double read_float64(void* p) { return static_cast<Archive*>(p)->read_float64(); }
+    static bool read_bool(void* p) { return static_cast<Archive*>(p)->read_bool(); }
+    static std::string read_string(void* p) { return static_cast<Archive*>(p)->read_string(); }
+    static bool begin_object(void* p, std::string& t, uint32_t& v) { return static_cast<Archive*>(p)->begin_object(t, v); }
+    static void end_object(void* p) { static_cast<Archive*>(p)->end_object(); }
+    static size_t begin_array(void* p) { return static_cast<Archive*>(p)->begin_array(); }
+    static void end_array(void* p) { static_cast<Archive*>(p)->end_array(); }
+    static size_t begin_map(void* p) { return static_cast<Archive*>(p)->begin_map(); }
+    static void end_map(void* p) { static_cast<Archive*>(p)->end_map(); }
+    static bool read_map_key(void* p, std::string& k) { return static_cast<Archive*>(p)->read_map_key(k); }
+    static bool has_property(void* p, const std::string& n) { return static_cast<Archive*>(p)->has_property(n); }
+    static void* get_engine(void* p) { return static_cast<void*>(static_cast<Archive*>(p)->get_engine()); }
+    static void* get_user_context(void* p, std::type_index ti) { return static_cast<Archive*>(p)->get_user_context_raw(ti); }
+    static void clear_property_value(void* p) { static_cast<Archive*>(p)->clear_property_value(); }
+    static bool has_deserialized_shared(void* p, uint32_t id) { return static_cast<Archive*>(p)->has_deserialized_shared(id); }
+    // The concrete side adjusts the complete pointer to the target base subobject
+    static std::shared_ptr<void> get_deserialized_shared_adjusted(void* p, uint32_t id, std::type_index target) {
+        return static_cast<Archive*>(p)->get_deserialized_shared_adjusted(id, target);
+    }
+    static void register_deserialized_shared_typed(void* p, uint32_t id, std::shared_ptr<void> complete, std::type_index type) {
+        static_cast<Archive*>(p)->register_deserialized_shared_typed(id, std::move(complete), type);
+    }
+};
+
+template<typename Archive>
+inline constexpr reader_operations reader_operations_of {
+    &archive_reader_thunks<Archive>::seek_property,
+    &archive_reader_thunks<Archive>::read_property_name,
+    &archive_reader_thunks<Archive>::read_int8,
+    &archive_reader_thunks<Archive>::read_int16,
+    &archive_reader_thunks<Archive>::read_int32,
+    &archive_reader_thunks<Archive>::read_int64,
+    &archive_reader_thunks<Archive>::read_uint8,
+    &archive_reader_thunks<Archive>::read_uint16,
+    &archive_reader_thunks<Archive>::read_uint32,
+    &archive_reader_thunks<Archive>::read_uint64,
+    &archive_reader_thunks<Archive>::read_float32,
+    &archive_reader_thunks<Archive>::read_float64,
+    &archive_reader_thunks<Archive>::read_bool,
+    &archive_reader_thunks<Archive>::read_string,
+    &archive_reader_thunks<Archive>::begin_object,
+    &archive_reader_thunks<Archive>::end_object,
+    &archive_reader_thunks<Archive>::begin_array,
+    &archive_reader_thunks<Archive>::end_array,
+    &archive_reader_thunks<Archive>::begin_map,
+    &archive_reader_thunks<Archive>::end_map,
+    &archive_reader_thunks<Archive>::read_map_key,
+    &archive_reader_thunks<Archive>::has_property,
+    Archive::needs_property_keys,
+    &archive_reader_thunks<Archive>::get_engine,
+    &archive_reader_thunks<Archive>::get_user_context,
+    &archive_reader_thunks<Archive>::clear_property_value,
+    &archive_reader_thunks<Archive>::has_deserialized_shared,
+    &archive_reader_thunks<Archive>::get_deserialized_shared_adjusted,
+    &archive_reader_thunks<Archive>::register_deserialized_shared_typed,
+};
+
+class any_archive_reader {
+    void* ptr_;
+    reader_archive_id id_;
+    const reader_operations* operations_;
 
 public:
     template<typename Archive>
     explicit any_archive_reader(Archive& ar)
         : ptr_(&ar)
         , id_(reader_archive_id_trait<std::decay_t<Archive>>::value)
-        , seek_property_([](void* p, const std::string& n) { return static_cast<Archive*>(p)->seek_property(n); })
-        , read_property_name_([](void* p, std::string& n) { return static_cast<Archive*>(p)->read_property_name(n); })
-        , read_int8_([](void* p) { return static_cast<Archive*>(p)->read_int8(); })
-        , read_int16_([](void* p) { return static_cast<Archive*>(p)->read_int16(); })
-        , read_int32_([](void* p) { return static_cast<Archive*>(p)->read_int32(); })
-        , read_int64_([](void* p) { return static_cast<Archive*>(p)->read_int64(); })
-        , read_uint8_([](void* p) { return static_cast<Archive*>(p)->read_uint8(); })
-        , read_uint16_([](void* p) { return static_cast<Archive*>(p)->read_uint16(); })
-        , read_uint32_([](void* p) { return static_cast<Archive*>(p)->read_uint32(); })
-        , read_uint64_([](void* p) { return static_cast<Archive*>(p)->read_uint64(); })
-        , read_float32_([](void* p) { return static_cast<Archive*>(p)->read_float32(); })
-        , read_float64_([](void* p) { return static_cast<Archive*>(p)->read_float64(); })
-        , read_bool_([](void* p) { return static_cast<Archive*>(p)->read_bool(); })
-        , read_string_([](void* p) { return static_cast<Archive*>(p)->read_string(); })
-        , begin_object_([](void* p, std::string& t, uint32_t& v) { return static_cast<Archive*>(p)->begin_object(t, v); })
-        , end_object_([](void* p) { static_cast<Archive*>(p)->end_object(); })
-        , begin_array_([](void* p) { return static_cast<Archive*>(p)->begin_array(); })
-        , end_array_([](void* p) { static_cast<Archive*>(p)->end_array(); })
-        , begin_map_([](void* p) { return static_cast<Archive*>(p)->begin_map(); })
-        , end_map_([](void* p) { static_cast<Archive*>(p)->end_map(); })
-        , read_map_key_([](void* p, std::string& k) { return static_cast<Archive*>(p)->read_map_key(k); })
-        , has_property_([](void* p, const std::string& n) { return static_cast<Archive*>(p)->has_property(n); })
-        , needs_property_keys_([](void*) { return Archive::needs_property_keys; })
-        , get_engine_([](void* p) { return static_cast<void*>(static_cast<Archive*>(p)->get_engine()); })
-        , get_user_context_([](void* p, std::type_index ti) -> void* {
-            auto& ar = *static_cast<Archive*>(p);
-            return ar.get_user_context_raw(ti);
-        })
-        , clear_property_value_([](void* p) { static_cast<Archive*>(p)->clear_property_value(); })
-        , has_deserialized_shared_([](void* p, uint32_t id) { return static_cast<Archive*>(p)->has_deserialized_shared(id); })
-        , get_deserialized_shared_adjusted_([](void* p, uint32_t id, std::type_index target) -> std::shared_ptr<void> {
-            // Concrete side adjusts the complete pointer to the target base subobject.
-            return static_cast<Archive*>(p)->get_deserialized_shared_adjusted(id, target);
-        })
-        , register_deserialized_shared_typed_([](void* p, uint32_t id, std::shared_ptr<void> complete, std::type_index type) {
-            static_cast<Archive*>(p)->register_deserialized_shared_typed(id, std::move(complete), type);
-        })
-    {}
+        , operations_(&reader_operations_of<Archive>) {}
 
-    bool seek_property(const std::string& name) { return seek_property_(ptr_, name); }
-    bool read_property_name(std::string& name) { return read_property_name_(ptr_, name); }
-    int8_t read_int8() { return read_int8_(ptr_); }
-    int16_t read_int16() { return read_int16_(ptr_); }
-    int32_t read_int32() { return read_int32_(ptr_); }
-    int64_t read_int64() { return read_int64_(ptr_); }
-    uint8_t read_uint8() { return read_uint8_(ptr_); }
-    uint16_t read_uint16() { return read_uint16_(ptr_); }
-    uint32_t read_uint32() { return read_uint32_(ptr_); }
-    uint64_t read_uint64() { return read_uint64_(ptr_); }
-    float read_float32() { return read_float32_(ptr_); }
-    double read_float64() { return read_float64_(ptr_); }
-    bool read_bool() { return read_bool_(ptr_); }
-    std::string read_string() { return read_string_(ptr_); }
-    bool begin_object(std::string& type, uint32_t& version) { return begin_object_(ptr_, type, version); }
-    void end_object() { end_object_(ptr_); }
-    size_t begin_array() { return begin_array_(ptr_); }
-    void end_array() { end_array_(ptr_); }
-    size_t begin_map() { return begin_map_(ptr_); }
-    void end_map() { end_map_(ptr_); }
-    bool read_map_key(std::string& key) { return read_map_key_(ptr_, key); }
-    bool has_property(const std::string& name) { return has_property_(ptr_, name); }
-    bool needs_property_keys() { return needs_property_keys_(ptr_); }
+    bool seek_property(const std::string& name) { return operations_->seek_property(ptr_, name); }
+    bool read_property_name(std::string& name) { return operations_->read_property_name(ptr_, name); }
+    int8_t read_int8() { return operations_->read_int8(ptr_); }
+    int16_t read_int16() { return operations_->read_int16(ptr_); }
+    int32_t read_int32() { return operations_->read_int32(ptr_); }
+    int64_t read_int64() { return operations_->read_int64(ptr_); }
+    uint8_t read_uint8() { return operations_->read_uint8(ptr_); }
+    uint16_t read_uint16() { return operations_->read_uint16(ptr_); }
+    uint32_t read_uint32() { return operations_->read_uint32(ptr_); }
+    uint64_t read_uint64() { return operations_->read_uint64(ptr_); }
+    float read_float32() { return operations_->read_float32(ptr_); }
+    double read_float64() { return operations_->read_float64(ptr_); }
+    bool read_bool() { return operations_->read_bool(ptr_); }
+    std::string read_string() { return operations_->read_string(ptr_); }
+    bool begin_object(std::string& type, uint32_t& version) { return operations_->begin_object(ptr_, type, version); }
+    void end_object() { operations_->end_object(ptr_); }
+    size_t begin_array() { return operations_->begin_array(ptr_); }
+    void end_array() { operations_->end_array(ptr_); }
+    size_t begin_map() { return operations_->begin_map(ptr_); }
+    void end_map() { operations_->end_map(ptr_); }
+    bool read_map_key(std::string& key) { return operations_->read_map_key(ptr_, key); }
+    bool has_property(const std::string& name) { return operations_->has_property(ptr_, name); }
+    bool needs_property_keys() { return operations_->needs_property_keys; }
 
     template<typename Engine>
-    Engine* get_engine() { return static_cast<Engine*>(get_engine_(ptr_)); }
+    Engine* get_engine() { return static_cast<Engine*>(operations_->get_engine(ptr_)); }
 
     template<typename ContextType>
     ContextType* get_user_context() {
-        void* raw = get_user_context_(ptr_, std::type_index(typeid(ContextType)));
+        void* raw = operations_->get_user_context(ptr_, std::type_index(typeid(ContextType)));
         return static_cast<ContextType*>(raw);
     }
 
-    bool has_deserialized_shared(uint32_t id) { return has_deserialized_shared_(ptr_, id); }
+    bool has_deserialized_shared(uint32_t id) { return operations_->has_deserialized_shared(ptr_, id); }
 
     // Get a previously deserialized shared_ptr by ID, cast to the target type. The void is
     // already adjusted to T's subobject, so the static_pointer_cast reinterprets a correct
     // address (multiple-inheritance safe).
     template<typename T>
     std::shared_ptr<T> get_deserialized_shared(uint32_t id) {
-        auto void_ptr = get_deserialized_shared_adjusted_(ptr_, id, std::type_index(typeid(T)));
+        auto void_ptr = operations_->get_deserialized_shared_adjusted(ptr_, id, std::type_index(typeid(T)));
         return std::static_pointer_cast<T>(void_ptr);
     }
 
@@ -262,16 +334,16 @@ public:
         if (!ptr) { return; }
         if constexpr (std::is_polymorphic_v<T>) {
             void* complete = dynamic_cast<void*>(ptr.get());
-            register_deserialized_shared_typed_(ptr_, id, std::shared_ptr<void>(ptr, complete), std::type_index(typeid(*ptr)));
+            operations_->register_deserialized_shared_typed(ptr_, id, std::shared_ptr<void>(ptr, complete), std::type_index(typeid(*ptr)));
         } else {
-            register_deserialized_shared_typed_(ptr_, id, std::static_pointer_cast<void>(ptr), std::type_index(typeid(T)));
+            operations_->register_deserialized_shared_typed(ptr_, id, std::static_pointer_cast<void>(ptr), std::type_index(typeid(T)));
         }
     }
 
     reader_archive_id archive_id() const { return id_; }
     void* raw_ptr() const { return ptr_; }
 
-    void clear_property_value() { clear_property_value_(ptr_); }
+    void clear_property_value() { operations_->clear_property_value(ptr_); }
 
     // Usage: ar.dispatch([&](auto& concrete_ar) { concrete_ar(make_nvp("name", value)); });
     // Implementation is in archive.hpp after concrete archive definitions

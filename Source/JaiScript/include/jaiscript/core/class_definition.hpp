@@ -106,7 +106,7 @@ class class_definition;
 
 class class_instance : public std::enable_shared_from_this<class_instance> {
 public:
-    class_instance(std::string_view class_name, engine* eng = nullptr);
+    inline class_instance(std::string_view class_name, engine* eng = nullptr);
     struct interned_name_t {};
     // a name already in the engine's interned table (a class definition's cached view): no copy, no lookup
     class_instance(interned_name_t, std::string_view interned, engine* eng)
@@ -123,18 +123,18 @@ public:
     // allocation goes with its control block (detail::block_head_allocator)
     inline static void free_allocation(class_instance* instance) noexcept;
 
-    ~class_instance();
+    inline ~class_instance();
 
     // Enforcing write (C++ API surface): converts to the field's declared type like '='
     // on locals, throws runtime_error on an impossible conversion. Null passes through
     // (typed-null placeholders: create_instance defaults, uninitialized fields).
     // Defined out-of-line (needs class_definition + the conversion kernel).
-    void set_field(uint64_t id, const script_value& value);
+    inline void set_field(uint64_t id, const script_value& value);
 
-    void set_field_unchecked(uint64_t id, const script_value& value);
+    inline void set_field_unchecked(uint64_t id, const script_value& value);
     // create_instance's plan landing: fresh instance, no references, no overflow - one
     // cell copy per planned slot (materialize_field's slot arm without the hash)
-    void seed_fields_from_plan(const std::vector<std::pair<uint32_t, script_value>>& plan, uint32_t slot_count);
+    inline void seed_fields_from_plan(const std::vector<std::pair<uint32_t, script_value>>& plan, uint32_t slot_count);
     bool seeded_from_plan() const { return seeded_from_plan_; }
 
     // Records this instance as its C++ object's script layer when its native object lands on a
@@ -142,24 +142,24 @@ public:
     // when its base registered one, else the engine's weak map. Called from set_native so
     // every path — binder-ctor super() in both backends, extend, archive load — registers
     // identically (internal/script_extensible.md).
-    void note_script_layer_owner(const script_value& value);
+    inline void note_script_layer_owner(const script_value& value);
 
     // Script-write enforcement: declared-type fields convert like '=' on locals or error
     // with the locals-identical text; 'var' (any) fields pass through; undeclared ('auto')
     // fields infer from the current value's tag then enforce. Callers store the returned
     // value via set_field_unchecked. Defined out-of-line.
-    checked_result<script_value> enforce_field_write(uint64_t id, script_value value) const;
+    inline checked_result<script_value> enforce_field_write(uint64_t id, script_value value) const;
     // A store into field id: a by-value class field holding an instance takes the source in place (the copy assignment or a
     // user operator=; the field keeps its object, which is the result); otherwise copy() makes the stored value and the
     // field's conversion runs (enforce_field_write). The source is the store's own operand, never a copy of it, so an lvalue
     // source runs no extra destructor
-    std::optional<checked_result<void>> assign_field_in_place(uint64_t id, const script_value& source) const;
+    inline std::optional<checked_result<void>> assign_field_in_place(uint64_t id, const script_value& source) const;
     template <class Copy> checked_result<script_value> field_store(uint64_t id, const script_value& source, Copy&& copy) const;
 
-    const script_value& get_field(uint64_t id, bool throw_if_missing = true) const;
-    script_value& get_field(uint64_t id, bool throw_if_missing = true);
+    inline const script_value& get_field(uint64_t id, bool throw_if_missing = true) const;
+    inline script_value& get_field(uint64_t id, bool throw_if_missing = true);
 
-    bool has_field(uint64_t id) const;
+    inline bool has_field(uint64_t id) const;
 
     inline bool has_field_value(uint64_t id) const;
     // Runtime-added fields (a user field can shadow a method by name)
@@ -213,21 +213,21 @@ public:
 
     // Hot-reload field migration; defined out-of-line (needs class_definition + the
     // conversion kernel for declared-type retypes).
-    void migrate_fields(const std::set<uint64_t>& old_field_ids,
+    inline void migrate_fields(const std::set<uint64_t>& old_field_ids,
                        const std::unordered_map<uint64_t, script_value>& new_field_defaults,
                        bool preseeded = false);
 
-    script_value get_method(uint64_t id, bool throw_if_missing = true) const;
+    inline script_value get_method(uint64_t id, bool throw_if_missing = true) const;
 
     inline void set_class_definition(const std::shared_ptr<class_definition>& class_def);
-    void set_class_definition(class_definition* class_def);
+    inline void set_class_definition(class_definition* class_def);
 
     // Re-class this instance in place (extend's re-derive, an assignment of another class): every field cell moves to the
     // new definition's slot for its id - cells never relocate, so captured field addresses
     // survive exactly as under hot reload - and ids the new class does not declare stay
     // reachable in overflow, or with drop_undeclared go absent (their cells retire holding the absent marker until the
     // instance dies). Every handle to this instance sees the new class; a chain with a destructor arms it.
-    void reclass(const std::shared_ptr<class_definition>& class_def, bool drop_undeclared = false);
+    inline void reclass(const std::shared_ptr<class_definition>& class_def, bool drop_undeclared = false);
     // Armed when the instance was minted (the allocation's deleter runs the chain of its class at death)
     void note_destructor_armed() noexcept { destructor_armed_ = true; }
 
@@ -236,7 +236,7 @@ public:
     // storage has no map to hand out. fn(uint64_t id, script_value& value).
     template <typename F> void for_each_field(F&& fn);
     template <typename F> void for_each_field(F&& fn) const;
-    size_t field_value_count() const;
+    inline size_t field_value_count() const;
 
     class_definition* get_class_definition() const {
         return class_def_;
@@ -248,7 +248,7 @@ public:
     cdtor_phase dispatch_phase() const { return dispatch_phase_; }
     // The cells reordered from `from`'s slot layout into `to`'s; cells of fields `to` does not declare trail its slots in `from`'s
     // order, so the reverse call restores `from`'s layout. Cells never move, so references into them stay valid.
-    void relayout_fields(const class_definition& from, const class_definition& to);
+    inline void relayout_fields(const class_definition& from, const class_definition& to);
 
     bool is_script_class() const;
     bool is_cpp_class() const;
@@ -270,21 +270,21 @@ public:
     // The C++ object's address (owning or not); null without one. A raw read - no handle copies - for member resolution.
     inline void* cpp_object_pointer() const;
 
-    std::shared_ptr<class_instance> deep_copy() const;
+    inline std::shared_ptr<class_instance> deep_copy() const;
     // One level of a deep copy (script_value::clone_level); past detail::k_inline_copy_depth its fields and then its end
     // (finish_deep_copy_level) are steps on the work list
-    std::shared_ptr<class_instance> deep_copy_level(detail::deep_copy_work& work, unsigned depth) const;
+    inline std::shared_ptr<class_instance> deep_copy_level(detail::deep_copy_work& work, unsigned depth) const;
     // The end of an instance's copy, after its fields: its C++ object, then the copy joins its class's live instances
-    void finish_deep_copy_level(class_instance& copy, bool overflow) const;
+    inline void finish_deep_copy_level(class_instance& copy, bool overflow) const;
 
-    void copy_fields_from(const class_instance& other);
+    inline void copy_fields_from(const class_instance& other);
 
     // The C++ object behind the instance (a bound class's instance, a script class over a bound base, an extended
     // object): never a field, so no script name reaches it; the bound members reach it through the class
     const script_value* native() const { return extras_ && extras_->native ? &*extras_->native : nullptr; }
-    const script_value& native_or_throw() const;
-    void set_native(const script_value& value);
-    bool native_lookup_enabled() const;
+    inline const script_value& native_or_throw() const;
+    inline void set_native(const script_value& value);
+    inline bool native_lookup_enabled() const;
 
 private:
     std::string_view class_name_;   // the engine's interned text (empty for an instance built without an engine)
@@ -368,8 +368,8 @@ private:
     // Store WITHOUT reference write-through (the old map's raw insert_or_assign shape:
     // copy_fields_from and lazy-default materialization replace a held reference value
     // itself); returns the stored cell. set_field_unchecked keeps write-through.
-    script_value& materialize_field(uint64_t id, script_value&& v);
-    void rehome_overflow_fields();
+    inline script_value& materialize_field(uint64_t id, script_value&& v);
+    inline void rehome_overflow_fields();
     class_definition* class_def_ = nullptr;
     engine* engine_ = nullptr;
     bool script_layer_retired_ = false;
@@ -396,7 +396,7 @@ private:
     friend class class_definition;
     mutable script_value invalid_value_;
 
-    static std::shared_ptr<void> extract_cpp_object_impl(const script_value& val);
+    inline static std::shared_ptr<void> extract_cpp_object_impl(const script_value& val);
     inline bool fields_cascade() const noexcept;
     // The dying instance's members past the native depth go to the release stack (class_registry.cpp)
     void release_fields() noexcept;
@@ -508,28 +508,28 @@ public:
     // add_static_script_method) — args normalize like add_method's.
     void add_static_method(uint64_t name_id, script_function func, size_t arity = SIZE_MAX);
 
-    void add_script_method(std::string_view name, std::shared_ptr<function_decl> ast, std::shared_ptr<environment> definition_env);
+    inline void add_script_method(std::string_view name, std::shared_ptr<function_decl> ast, std::shared_ptr<environment> definition_env);
 
-    void add_static_script_method(std::string_view name, std::shared_ptr<function_decl> ast, std::shared_ptr<environment> definition_env);
+    inline void add_static_script_method(std::string_view name, std::shared_ptr<function_decl> ast, std::shared_ptr<environment> definition_env);
 
     // Shared cache-aware overload resolution for script methods (defined in
     // overload_resolution.hpp). Span core resolves against a caller stack slice
     // (call-arg windows); the vector overload forwards.
-    checked_result<std::shared_ptr<function_decl>> resolve_method_overload(uint64_t name_id, const script_value* args, size_t argc) const;
-    checked_result<std::shared_ptr<function_decl>> resolve_method_overload(uint64_t name_id, const std::vector<script_value>& args) const;
+    inline checked_result<std::shared_ptr<function_decl>> resolve_method_overload(uint64_t name_id, const script_value* args, size_t argc) const;
+    inline checked_result<std::shared_ptr<function_decl>> resolve_method_overload(uint64_t name_id, const std::vector<script_value>& args) const;
     // Same resolution, answered as a pointer to the class-owned handle (overload table
     // or resolution cache): the in-loop call paths pin through the record instead of
     // paying a shared_ptr copy per call
-    checked_result<const std::shared_ptr<function_decl>*> resolve_method_overload_ref(uint64_t name_id, const script_value* args, size_t argc) const;
-    const std::shared_ptr<function_decl>* resolve_method_overload_core(uint64_t name_id, const script_value* args, size_t argc, std::error_code& ec) const;
-    error_propagator method_overload_miss(std::error_code ec, uint64_t name_id, const script_value* args, size_t argc) const;
+    inline checked_result<const std::shared_ptr<function_decl>*> resolve_method_overload_ref(uint64_t name_id, const script_value* args, size_t argc) const;
+    inline const std::shared_ptr<function_decl>* resolve_method_overload_core(uint64_t name_id, const script_value* args, size_t argc, std::error_code& ec) const;
+    inline error_propagator method_overload_miss(std::error_code ec, uint64_t name_id, const script_value* args, size_t argc) const;
 
     // Single-overload probe for inline-cache fill: the lone overload for name_id, or
     // nullptr when the name has zero or multiple overloads.
     inline function_decl* single_method_overload(uint64_t name_id) const;
     inline std::shared_ptr<function_decl> single_method_overload_ptr(uint64_t name_id) const;
     // argc alone picks name_id's overload (one overload, or one that takes argc): its resolution ignores argument types
-    bool method_arity_decides(uint64_t name_id, size_t argc) const;
+    inline bool method_arity_decides(uint64_t name_id, size_t argc) const;
 
     // Reflection enumeration (reflect::methods / method_arguments): this class's OWN
     // tables — script overload sets (AST decls carry names/types/defaults), the typed
@@ -611,7 +611,7 @@ public:
     // Script-write enforcement for statics: enforce_field_write's ladder over the static's
     // declared type (its held tag when 'auto'). Callers store the returned value via
     // set_static_field. Defined out-of-line.
-    checked_result<script_value> enforce_static_write(uint64_t id, script_value value) const;
+    inline checked_result<script_value> enforce_static_write(uint64_t id, script_value value) const;
     // The static twin of class_instance::field_store
     template <class Copy> checked_result<script_value> static_store(uint64_t id, const script_value& source, Copy&& copy) const;
 
@@ -684,7 +684,7 @@ public:
 
     inline bool has_static_method(uint64_t id) const;
 
-    bool has_static_method_with_arity(uint64_t name_id, size_t arity) const;
+    inline bool has_static_method_with_arity(uint64_t name_id, size_t arity) const;
 
     // C++ name lookup of a static through the inheritance chain: this class, then its
     // bases depth-first; an instance member of the name at a level hides the bases' statics.
@@ -794,7 +794,7 @@ public:
     const script_slot_hooks* slot_hooks() const { return script_slot_hooks_.attach ? &script_slot_hooks_ : nullptr; }
     // A plain wrapper's object that carries a script layer: the layer is the object's identity, so the handle re-points to it.
     // Asked of the object itself (its slot), never of the class's history: extending one object changes nothing class-wide.
-    bool wrapped_object_has_layer(const class_instance& inst) const;
+    inline bool wrapped_object_has_layer(const class_instance& inst) const;
     // Set once an object of this C++ class has been extended; only the static checker reads it (a later-checked script may
     // reach layer members through the class's static type)
     void note_extended() { extended_ever_ = true; }

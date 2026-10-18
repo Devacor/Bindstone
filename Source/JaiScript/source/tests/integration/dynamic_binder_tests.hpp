@@ -593,6 +593,18 @@ public:
             }
         });
 
+        // A layer re-derives only into a class whose C++ base the object is: a plain base's object never becomes a derived base's
+        test("a_layer_does_not_re_derive_past_its_objects_cpp_class", [this]() {
+            auto keep = std::make_shared<std::vector<std::shared_ptr<LaneSchemaOwner>>>();
+            auto eng = layer_engine(keep);
+            eng->execute("class Ext : LaneSchemaOwner { int tag() { return 1; } } class ShadowExt : LaneSchemaShadow { int tag() { return 2; } } var e = held(); extend(e, Ext);");
+            std::string message;
+            try { eng->execute("extend(e, ShadowExt);"); } catch (const std::exception& error) { message = error.what(); }
+            check_eq(std::string("extend: 'ShadowExt' derives the C++ class 'LaneSchemaShadow', which this object is not"), message);
+            check_eq((script_int)1, eng->execute("e.tag();").as_int(), "the layer keeps its class");
+            check_eq((script_int)3, eng->execute("e.d0();").as_int(), "and its object");
+        });
+
         // A plain wrapper of an object that gained a layer through another handle re-points to the layer for methods too
         test("host_method_lane_yields_to_a_layer_added_through_another_handle", [this]() {
             auto keep = std::make_shared<std::vector<std::shared_ptr<LaneSchemaOwner>>>();

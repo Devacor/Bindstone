@@ -3681,9 +3681,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			}
 			if (plan.inplace) {
 				return usage("element " + std::to_string(proof.failed) +
-				             " cannot be mutated in place (only value-semantic shapes - primitives, strings,"
-				             " value containers, flat value-class instances - are provably exclusive;"
-				             " engine::allow_unsafe_parallel(true) overrides)");
+				             " cannot be proven exclusive (only value-semantic shapes are: primitives, strings,"
+				             " value containers, flat value-class instances; engine::allow_unsafe_parallel(true) overrides)");
 			}
 			const script_value failed_element = typed_obj ? node.get(proof.failed, &eng) : source[proof.failed];
 			const char* what = non_value_semantic_what(failed_element);
@@ -3718,7 +3717,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			element_proof zproof = prove_elements(eng, zv, *znode, znode->values(), reach_filter{}, plan.prefix);
 			if (zproof.failed != SIZE_MAX) {
 				return usage("zipped array " + std::to_string(j + 1) + " element " + std::to_string(zproof.failed) +
-				             (zproof.what.empty() ? std::string(" cannot be mutated in place") : ": " + zproof.what));
+				             (zproof.what.empty() ? std::string(" cannot be proven exclusive") : ": " + zproof.what));
 			}
 			zip_tags.insert(zip_tags.end(), zproof.tags.begin(), zproof.tags.end());
 			for (const class_definition* cd : zproof.element_classes) {

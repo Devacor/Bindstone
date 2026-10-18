@@ -193,6 +193,16 @@ namespace jai::detail {
         return result;
     }
 
+    // A reference parameter's default must name storage, as in C++; a const one binds a temporary
+    inline bool default_binds_reference(const parameter& p, const script_value& bound) noexcept {
+        return !p.is_reference || p.is_const || bound.is_reference();
+    }
+    JAI_NOINLINE inline checked_result<script_value> non_lvalue_default_error(const parameter& p, string_symbolizer& symbols) {
+        if (p.symbol_id == UINT64_MAX) { p.symbol_id = symbols.intern(p.name); }
+        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference),
+            "Cannot bind non-lvalue default to reference parameter '{0}'", p.symbol_id);
+    }
+
     inline const script_value& argument_for_binding(const script_value& v, arg_binding b) {
         if (const auto* holder = deferred_argument(v)) {
             if (b == arg_binding::copy) return *holder->cell();

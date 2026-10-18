@@ -273,6 +273,14 @@ public:
     class_definition* get_class_definition() const {
         return class_def_;
     }
+    // C++ [class.cdtor]: the class whose constructor, field initializers or destructor body is running answers the
+    // object's virtual calls, so construction and destruction point the instance at that level for the span
+    enum class cdtor_phase : uint8_t { none, construction, destruction };
+    void dispatch_as(class_definition* level, cdtor_phase phase) {
+        class_def_ = level;
+        dispatch_phase_ = phase;
+    }
+    cdtor_phase dispatch_phase() const { return dispatch_phase_; }
 
     bool is_script_class() const;
     bool is_cpp_class() const;
@@ -439,6 +447,7 @@ private:
     std::atomic<bool> registered_{false};   // in the class's registry list (read unlocked by its own dying owner)
     uint16_t constructed_below_ = k_nothing_constructed;
     uint32_t live_field_refs_ = 0;
+    cdtor_phase dispatch_phase_ = cdtor_phase::none;
     // What few instances hold, boxed so the rest pay one pointer: the C++ object (released after the fields, as a C++ base
     // dies after the derived members) and the cells a re-class retired
     struct instance_extras {
@@ -1363,6 +1372,13 @@ public:
         return has_cpp_property_slots_ && cpp_property_slots_[slot] != 0;
     }
     uint64_t slot_field(uint32_t slot) const { return slot_to_field_[slot]; }
+    // Every slot this class assigns holds the same field in `derived`'s layout (single inheritance, no later appends)
+    bool slot_prefix_of(const class_definition& derived) const {
+        ensure_field_slots();
+        derived.ensure_field_slots();
+        return slot_to_field_.size() <= derived.slot_to_field_.size() &&
+               std::equal(slot_to_field_.begin(), slot_to_field_.end(), derived.slot_to_field_.begin());
+    }
     uint32_t field_slot_count() const {
         ensure_field_slots();
         return static_cast<uint32_t>(slot_to_field_.size());
@@ -2670,7 +2686,8 @@ inline void class_instance::reclass(const std::shared_ptr<class_definition>& cla
 template <typename F>
 inline void class_instance::for_each_field(F&& fn) {
     if (class_def_) {
-        const size_t n = flat_fields_.size();
+        // a base answering for the object during its constructor or destructor knows its own slots only
+        const size_t n = std::min(flat_fields_.size(), static_cast<size_t>(class_def_->field_slot_count()));
         for (size_t slot = 0; slot < n; ++slot) {
             script_value* v = flat_fields_[slot].get();
             if (v && v->raw_storage_index() != script_value::TYPEID_INVALID) {
@@ -2688,7 +2705,8 @@ inline void class_instance::for_each_field(F&& fn) {
 template <typename F>
 inline void class_instance::for_each_field(F&& fn) const {
     if (class_def_) {
-        const size_t n = flat_fields_.size();
+        // a base answering for the object during its constructor or destructor knows its own slots only
+        const size_t n = std::min(flat_fields_.size(), static_cast<size_t>(class_def_->field_slot_count()));
         for (size_t slot = 0; slot < n; ++slot) {
             const script_value* v = flat_fields_[slot].get();
             if (v && v->raw_storage_index() != script_value::TYPEID_INVALID) {
@@ -2717,6 +2735,26 @@ inline void class_instance::copy_fields_from(const class_instance& other) {
 }
 
 namespace detail {
+
+// class_instance::dispatch_as for a scope: the object answers as `level` until the scope ends
+class dispatch_level_scope {
+public:
+    dispatch_level_scope(class_instance& a_instance, class_definition* a_level, class_instance::cdtor_phase a_phase) :
+        instance(a_instance),
+        restore(a_instance.get_class_definition()),
+        restorePhase(a_instance.dispatch_phase()) {
+        // only a script level whose field slots the instance's layout extends: code compiled against it reads the right cells
+        const bool answers = a_level && restore && a_level != restore && a_level->is_script_class() && a_level->slot_prefix_of(*restore);
+        instance.dispatch_as(answers ? a_level : restore, a_phase);
+    }
+    ~dispatch_level_scope() { instance.dispatch_as(restore, restorePhase); }
+    dispatch_level_scope(const dispatch_level_scope&) = delete;
+    dispatch_level_scope& operator=(const dispatch_level_scope&) = delete;
+private:
+    class_instance& instance;
+    class_definition* restore;
+    class_instance::cdtor_phase restorePhase;
+};
 
 // The ONE conversion table for every typed slot (docs/site/embedding/06-static-checking.html "One conversion table"):
 // declaration/initializer, `=`, compound store-back, the cast<T> value form, by-value
@@ -3996,10 +4034,13 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy_level(detail::d
         // below routes every field through the overflow map and rehomes it (one map
         // node + one cell per field); flat instances copy their cells directly. Cells
         // clone through references exactly as set_field(id, value.clone()) did.
+        // a copy taken while a base answers for the object is that base's object: its slots only
+        const size_t slots = dispatch_phase_ == cdtor_phase::none ? flat_fields_.size()
+                                                                  : (std::min)(flat_fields_.size(), static_cast<size_t>(class_def_->field_slot_count()));
         new_instance->class_def_ = class_def_;
-        new_instance->reserve_cell_arena(flat_fields_.size());
-        new_instance->flat_fields_.resize(flat_fields_.size());
-        for (size_t slot = 0; slot < flat_fields_.size(); ++slot) {
+        new_instance->reserve_cell_arena(slots);
+        new_instance->flat_fields_.resize(slots);
+        for (size_t slot = 0; slot < slots; ++slot) {
             const auto& cell = flat_fields_[slot];
             if (!cell) { continue; }
             const size_t kind = cell->raw_storage_index();

@@ -13,6 +13,7 @@
 #include <jaiscript/detail/inline_variable.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/method_value.hpp>
+#include <jaiscript/detail/construction.hpp>
 #include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_definition.hpp>
@@ -524,6 +525,8 @@ private:
     std::vector<fn_ctx> fn_stack_;
     sclass* class_ctx_ = nullptr;
     std::string_view class_ctx_name_{};
+    enum class cdtor_ctx : uint8_t { none, construction, destruction };
+    cdtor_ctx cdtor_ctx_ = cdtor_ctx::none;   // code the class's constructor, field initializers or destructor run (not a lambda they create)
     std::string_view ov_class_{};   // the class whose methods infer_call_impl resolved the call to (empty: not a method call)
 
     static ref_write_callee ref_write_callee_of(const function_decl* f) {
@@ -561,6 +564,16 @@ private:
             }
         }
         return out;
+    }
+
+    // C++ [class.cdtor]: a constructor, field initializer or destructor reaches its own class's members only, so a call there to a
+    // name only a derived class declares is the refusal the backends raise
+    bool report_cdtor_call(std::string_view name, const source_location& loc) {
+        if (cdtor_ctx_ == cdtor_ctx::none || !class_ctx_ || overrides_of(class_ctx_name_, name).empty()) { return false; }
+        diag(diag_level::error, loc, format_error_message(cdtor_ctx_ == cdtor_ctx::construction ? detail::k_call_under_construction
+                                                                                                 : detail::k_call_under_destruction,
+                                                          name, class_ctx_name_));
+        return true;
     }
 
     // -------------------------------------------------------------- diagnostics
@@ -4101,6 +4114,7 @@ private:
 			}
 			if (eng_.has_variable(name)) { note_global_use(id->name); return {}; }
 			if (engine_knows_name(name)) { return {}; }
+			if (!id->global_qualified && report_cdtor_call(id->name, id->location)) { return {}; }
 			if (all_names_.count(id->name)) { return {}; }
 			if (stale_field_context()) { return {}; }
 			undeclared(id->location, id->name);
@@ -4173,6 +4187,10 @@ private:
 					if (ctype t; handle_builtin_result(m->member, t)) { return t; }
 				}
 				if (stale_shape_receiver(recv, m->object.get())) { return {}; }
+				if (hit.certain && !want_static && m->object->get_type() == node_type::this_expr && recv.cls == class_ctx_name_ &&
+					report_cdtor_call(m->member, m->location)) {
+					return {};
+				}
 				if (hit.certain) {
 					size_t rl = 0, rc = 0;
 					if (auto it = classes_.find(recv.cls); it != classes_.end()) {
@@ -5088,6 +5106,9 @@ private:
         // Constructor params shadowing the field they initialize (C(int hp) { this.hp = hp; })
         // is the established idiom - no field-shadow warnings on ctor params.
         bool is_ctor = class_ctx_ && fn->name == class_ctx_name_;
+        const cdtor_ctx enclosing_cdtor = cdtor_ctx_;
+        cdtor_ctx_ = is_ctor ? cdtor_ctx::construction
+                   : (class_ctx_ && !fn->is_static && fn->name.size() > 1 && fn->name[0] == '~') ? cdtor_ctx::destruction : cdtor_ctx::none;
         fn_stack_.push_back(std::move(ctx));
         mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
         define_params(fn->parameters, fn->location, /*warn_field_shadows=*/!is_ctor, /*binds_copies=*/fn->is_coroutine);
@@ -5107,6 +5128,7 @@ private:
         fn_stack_.pop_back();
         scopes_.pop_back();
         capture_stack_.swap(saved_captures);
+        cdtor_ctx_ = enclosing_cdtor;
     }
 
     // A default no evaluation can turn into storage (a literal, a construction, a lambda, an operator's result); a conditional, a call
@@ -5201,7 +5223,9 @@ private:
 										   f->name, cd->name, f->location);
 				if (!f->type && !f->function_spelling) { f->auto_spelled = true; }
 				if (f->initializer) {
+					const cdtor_ctx enclosing_cdtor = std::exchange(cdtor_ctx_, f->is_static ? cdtor_ctx::none : cdtor_ctx::construction);
 					ctype init = infer(f->initializer.get());
+					cdtor_ctx_ = enclosing_cdtor;
 					if (f->auto_spelled) { type_auto_slot(f, numeric_ternary_type(f->initializer.get(), init)); }   // an auto field: its initializer's static type
 					if ((f->type && !f->auto_spelled) || f->function_spelling) {
 						ctype ft = declared_variable_type(f);
@@ -5265,6 +5289,9 @@ private:
             undeclared(l->location, cap.name);
         }
         capture_stack_.push_back(capture_ctx{scopes_.size(), l});
+        // the body may run after the constructor or destructor that creates the lambda has returned
+        const cdtor_ctx enclosing_cdtor = std::exchange(cdtor_ctx_, cdtor_ctx::none);
+        struct restore_cdtor { cdtor_ctx& slot; cdtor_ctx was; ~restore_cdtor() { slot = was; } } restore{cdtor_ctx_, enclosing_cdtor};
 
         scopes_.emplace_back();
         fn_ctx ctx{l->return_type.get(), /*is_coroutine=*/false, "lambda",

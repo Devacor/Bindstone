@@ -115,6 +115,13 @@ namespace jai::detail {
 		return result;
 	}
 
+	// A call that resolved nowhere on an object under construction or destruction, to a method only a class derived from the level
+	// answering for it declares (C++ [class.cdtor]): the refusal both backends raise in place of the miss they would raise, and the
+	// strict checker's text for the same call when it sees one
+	inline constexpr std::string_view k_call_under_construction = "Cannot call '{0}' while '{1}' is under construction: only a class derived from it declares it";
+	inline constexpr std::string_view k_call_under_destruction = "Cannot call '{0}' while '{1}' is under destruction: only a class derived from it declares it";
+	std::optional<error_propagator> refuse_cdtor_call(class_instance* instance, uint64_t name_id);
+
 	// A constructor that completed arms its instance's destructor
 	inline void construction_completed(const script_value& instance_value) {
 		const auto holder = instance_value.get_object_holder();

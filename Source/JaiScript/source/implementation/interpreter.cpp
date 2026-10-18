@@ -3655,6 +3655,9 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
             push_value(beyond->deref());
             return checked_result<void>();
         }
+        if (identifier_callee_lookup_ && member_scope_.this_storage) {   // KEEP BYTE-PARALLEL with vm_backend::fused_ident_value
+            if (auto refused = detail::refuse_cdtor_call(member_scope_.this_storage->get_class_instance().get(), expr->symbol_id)) { return *refused; }
+        }
         uint64_t scoped_name_id = string_symbolizer_->intern(expr->name);
         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
             "Undefined variable '{0}'", scoped_name_id);
@@ -3709,6 +3712,9 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
                                                                             expr->symbol_id)) {
                         push_value(owner->get_static_field(expr->symbol_id));
                         return checked_result<void>();
+                    }
+                    if (identifier_callee_lookup_) {
+                        if (auto refused = detail::refuse_cdtor_call(instance.get(), expr->symbol_id)) { return *refused; }
                     }
                 }
             }
@@ -9229,6 +9235,9 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         }
     }
 
+    if (as_callee) {   // KEEP BYTE-PARALLEL with vm_backend::exec_probe_member and member_access_value
+        if (auto refused = detail::refuse_cdtor_call(target.instance.get(), member_id)) { return *refused; }
+    }
     raise_no_member(target.class_name(), expr->member, expr->location);
     push_value(make_value());  // Push null for failed member access
     return {};
@@ -13016,6 +13025,7 @@ checked_result<void> interpreter::evaluate_field_initializers(std::shared_ptr<cl
         member_scope_.floor = init_env->parent_raw();
     }
 
+    detail::dispatch_level_scope level_dispatch(*instance, class_def.get(), class_instance::cdtor_phase::construction);   // KEEP BYTE-PARALLEL with the vm
     auto initialize_field = [&](uint64_t field_id, const expression_ptr& initializer_ast) -> checked_result<void> {
         auto result = dispatch_expr(initializer_ast.get());
         if (!result) {

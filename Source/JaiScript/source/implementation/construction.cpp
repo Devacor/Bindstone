@@ -1,5 +1,6 @@
 #include <jaiscript/detail/construction.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/aggregate_init.hpp>
 #include <jaiscript/detail/arg_capture.hpp>
@@ -154,6 +155,7 @@ namespace {
 		}
 		for (size_t below = chain.size(); below > 0; --below) {
 			auto* it = &chain[below - 1];
+			dispatch_level_scope level_dispatch(instance, it->script_class.get(), class_instance::cdtor_phase::construction);
 			auto level_env = construction_level_environment(host, definition_env, this_value, it->script_class.get(), *it->ctor, it->args);
 			for (const auto& [field_id, initializer_ast] : it->script_class->get_field_initializer_asts()) {
 				if (!initializer_ast) { continue; }
@@ -352,6 +354,22 @@ checked_result<script_value> construct_default_instance(construction_host& host,
 	auto initialized = host.evaluate_field_initializers(instance, cls, init_env, false, aggregate.fills() ? &aggregate : nullptr);
 	if (!initialized) { return initialized.error_value(); }
 	return this_value;
+}
+
+JAI_NOINLINE std::optional<error_propagator> refuse_cdtor_call(class_instance* instance, uint64_t name_id) {
+	if (!instance) { return std::nullopt; }
+	auto phase = instance->dispatch_phase();
+	if (phase == class_instance::cdtor_phase::none && instance->construction_pending()) { phase = class_instance::cdtor_phase::construction; }
+	const class_definition* level = instance->get_class_definition();
+	engine* eng = instance->get_engine();
+	if (phase == class_instance::cdtor_phase::none || !level || !eng || !level->get_method(name_id, false).is_invalid()) { return std::nullopt; }
+	for (const auto& [name, cls] : eng->get_class_registry().script_classes_) {
+		if (cls.get() == level || !cls->derives_from(level) || cls->get_method(name_id, false).is_invalid()) { continue; }
+		return error_propagator{make_error_code(runtime_error_code::member_not_found),
+			phase == class_instance::cdtor_phase::construction ? k_call_under_construction : k_call_under_destruction,
+			name_id, level->get_type_id()};
+	}
+	return std::nullopt;
 }
 
 }

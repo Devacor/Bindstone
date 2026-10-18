@@ -4613,6 +4613,12 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 			        : environment_->get_value_ptr(sym)) {
 				return &binding_value(*beyond, observed);
 			}
+			if (probe_callee_resolving_ && f.locals->scope_this) {   // KEEP BYTE-PARALLEL with interpreter::visit_identifier_expr
+				if (auto refused = detail::refuse_cdtor_call(f.locals->scope_this->get_class_instance().get(), sym)) {
+					raise_from(*refused);
+					return nullptr;
+				}
+			}
 			raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(sym), sym);
 			return nullptr;
 		}
@@ -4663,6 +4669,12 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 				if (class_definition* owner = detail::bare_static_owner(frame_declaring_class(f), instance->get_class_definition(), sym)) {
 					scratch.emplace(owner->get_static_field(sym));
 					return &scratch.value();
+				}
+				if (probe_callee_resolving_) {
+					if (auto refused = detail::refuse_cdtor_call(instance.get(), sym)) {
+						raise_from(*refused);
+						return nullptr;
+					}
 				}
 			}
 		}
@@ -12536,6 +12548,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			}
 		}
 	}
+	if (auto refused = detail::refuse_cdtor_call(target.instance.get(), member_id)) { return raise_from(*refused); }   // KEEP BYTE-PARALLEL with interpreter::member_read_on
 	raise_no_member(target.class_name(), member->member, member->location);
 	return {};
 }
@@ -14322,6 +14335,9 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		}
 	}
 
+	if (as_callee) {   // KEEP BYTE-PARALLEL with interpreter::member_read_on
+		if (auto refused = detail::refuse_cdtor_call(target.instance.get(), expr->member_id)) { return raise_from(*refused); }
+	}
 	raise_no_member(target.class_name(), expr->member, expr->location);
 	out = make_null();
 	return {};
@@ -17287,6 +17303,7 @@ checked_result<void> vm_backend::evaluate_field_initializers(std::shared_ptr<cla
 		}
 	}
 
+	detail::dispatch_level_scope level_dispatch(*instance, class_def.get(), class_instance::cdtor_phase::construction);   // KEEP BYTE-PARALLEL with the interpreter
 	auto initialize_field = [&](uint64_t field_id, const expression_ptr& initializer_ast) -> checked_result<void> {
 		// Scalar-literal initializers stamp the literal through materialize_constant
 		// (op_const's exact kernel, so the value carries the same engine + type

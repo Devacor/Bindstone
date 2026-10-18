@@ -955,6 +955,28 @@ private:
 				"" + h.x;
 			)", "17", check_mode::off);
 		});
+		// A range-for variable may be spelled with any type, template types included (shared_ptr<C>, weak_ptr<C>, array<int>,
+		// map<string, int>, const and & forms): the loop parsed them as a for(;;) initializer
+		test("a_range_for_variable_takes_every_type_spelling", [this]() {
+			expect("template-typed loops", R"(
+				class C { int x = 1; }
+				shared_ptr<C> h = new C();
+				array<shared_ptr<C>> hs = [h];
+				for (shared_ptr<C> v : hs) { v.x = 5; }
+				for (const shared_ptr<C>& v : hs) { v.x += 1; }
+				weak_ptr<C> w = h;
+				array<weak_ptr<C>> ws = [w];
+				int alive = 0;
+				for (weak_ptr<C> v : ws) { if (v.lock()) { alive += 1; } }
+				array<array<int>> grid = [[1, 2], [3]];
+				int cells = 0;
+				for (array<int> row : grid) { cells += row.size(); row.push(9); }
+				for (array<int>& row : grid) { row.push(7); }
+				array<map<string, int>> ms = [{"a": 1}];
+				for (map<string, int> m : ms) { m["a"] = 50; }
+				return "" + h.x + " " + alive + " " + cells + " " + grid[0].size() + " " + ms[0]["a"];
+			)", "6 1 3 3 1");
+		});
 		test("aggregate_copies_copy_values_and_share_handles", [this]() {
 			expect("aggregate copy", R"(
 				class In { int x = 1; }

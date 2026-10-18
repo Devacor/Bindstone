@@ -17443,16 +17443,109 @@ checked_result<void> vm_backend::evaluate_field_initializers(std::shared_ptr<cla
 	return {};
 }
 
+// an initializer no evaluation can change: a literal, or an array or map literal of such
+static bool constant_initializer(const expression* e) {
+	if (!e) { return false; }
+	switch (e->get_type()) {
+		case node_type::literal_expr:
+			return true;
+		case node_type::array_literal_expr:
+			for (const auto& element : static_cast<const array_literal_expr*>(e)->elements) {
+				if (!constant_initializer(element.get())) { return false; }
+			}
+			return true;
+		case node_type::map_literal_expr:
+			for (const auto& [key, value] : static_cast<const map_literal_expr*>(e)->entries) {
+				if (!constant_initializer(key.get()) || !constant_initializer(value.get())) { return false; }
+			}
+			return true;
+		default:
+			return false;
+	}
+}
+
+// every initializer of the chain evaluate_field_initializers runs is constant; the ids it initializes, first-seen order
+static bool constant_initializer_chain(const script_class_definition& cls, std::vector<uint64_t>& ids, int depth = 0) {
+	if (depth > 64) { return false; }
+	for (const auto& parent : cls.get_parent_classes()) {
+		if (const auto* parent_script = dynamic_cast<const script_class_definition*>(parent.get())) {
+			if (!constant_initializer_chain(*parent_script, ids, depth + 1)) { return false; }
+		}
+	}
+	for (const auto& [field_id, initializer] : cls.get_field_initializer_asts()) {
+		if (!initializer) { continue; }
+		if (!constant_initializer(initializer.get())) { return false; }
+		if (std::find(ids.begin(), ids.end(), field_id) == ids.end()) { ids.push_back(field_id); }
+	}
+	return true;
+}
+
 void vm_backend::apply_field_initializers(const std::shared_ptr<class_instance>& instance,
                                           const std::shared_ptr<class_definition>& class_def) {
+	if (!instance || !class_def) { return; }
+	field_init_plan& plan = field_init_plans_[class_def.get()];
+	const bool current = plan.checked && plan.epoch == class_def->method_epoch() && plan.shape == class_def->field_shape_epoch();
+	if (current && plan.armed) {
+		for (const auto& [field_id, value] : plan.values) { instance->set_field(field_id, value.clone()); }
+		return;
+	}
+	if (!current) {
+		plan = field_init_plan{};
+		plan.epoch = class_def->method_epoch();
+		plan.shape = class_def->field_shape_epoch();
+	}
 	auto script_def = std::dynamic_pointer_cast<script_class_definition>(class_def);
-	if (!script_def || !instance) { return; }
+	if (!script_def) { return; }
 	auto this_value = script_value::make_class_object(*class_def, instance, engine_);
 	auto init_env = std::make_shared<environment>(engine_ ? engine_->get_global_environment() : environment_, symbolizer_);
 	init_env->define(symbolizer_->get_this_id(), this_value);
 	init_env->set_access_context(class_def.get());
 	auto initialized = evaluate_field_initializers(instance, script_def, init_env, false);
 	if (!initialized) { throw runtime_error(format_error(initialized, *symbolizer_)); }
+	if (plan.checked || parallel_worker_) { return; }
+	plan.checked = true;
+	std::vector<uint64_t> ids;
+	if (!constant_initializer_chain(*script_def, ids)) { return; }
+	plan.values.reserve(ids.size());
+	for (uint64_t field_id : ids) {
+		const script_value* stored = instance->find_field_value(field_id);
+		if (!stored) { plan.values.clear(); return; }
+		plan.values.emplace_back(field_id, stored->clone());
+	}
+	plan.armed = true;
+}
+
+bool vm_backend::seed_fresh_layer_fields(const std::shared_ptr<class_instance>& instance, const std::shared_ptr<class_definition>& class_def) {
+	if (parallel_worker_ || !instance || !class_def) { return false; }
+	auto it = fresh_layer_plans_.find(class_def.get());
+	if (it == fresh_layer_plans_.end() || !it->second.armed || it->second.epoch != class_def->method_epoch() ||
+	    it->second.shape != class_def->field_shape_epoch()) {
+		return false;
+	}
+	for (const auto& [slot, value] : it->second.values) { instance->field_slot_write(slot, value.clone()); }
+	return true;
+}
+
+void vm_backend::note_fresh_layer_fields(const std::shared_ptr<class_instance>& instance, const std::shared_ptr<class_definition>& class_def) {
+	if (parallel_worker_ || !instance || !class_def) { return; }
+	fresh_layer_plan& plan = fresh_layer_plans_[class_def.get()];
+	if (plan.checked && plan.epoch == class_def->method_epoch() && plan.shape == class_def->field_shape_epoch()) { return; }
+	plan = fresh_layer_plan{};
+	plan.epoch = class_def->method_epoch();
+	plan.shape = class_def->field_shape_epoch();
+	plan.checked = true;
+	const auto* script_def = dynamic_cast<const script_class_definition*>(class_def.get());
+	std::vector<uint64_t> ids;
+	if (!script_def || !constant_initializer_chain(*script_def, ids)) { return; }
+	bool clean = true;
+	instance->for_each_field([&](uint64_t field_id, const script_value& value) {
+		const uint32_t slot = class_def->field_slot(field_id);
+		if (slot == class_definition::k_no_field_slot) { clean = false; return; }   // an overflow field is this object's own
+		if (class_def->slot_is_cpp_property(slot)) { return; }
+		plan.values.emplace_back(slot, value.clone());
+	});
+	if (!clean) { plan.values.clear(); return; }
+	plan.armed = true;
 }
 
 struct vm_backend::construction_lender final : detail::construction_host {

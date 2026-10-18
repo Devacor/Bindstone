@@ -1588,6 +1588,28 @@ namespace jai::vm {
                                          const detail::aggregate_plan* aggregate = nullptr);
         void apply_field_initializers(const std::shared_ptr<class_instance>& instance,
                                       const std::shared_ptr<class_definition>& class_def) override;
+        // A script class whose field initializers are all constants (literals, and array and map literals of them): the values
+        // its first instance stored, written into every later one with no initializer environment or evaluation. Keyed by the
+        // class's method and field-shape epochs (a reload re-plans).
+        struct field_init_plan {
+            uint64_t epoch = 0;
+            uint64_t shape = 0;
+            bool checked = false;
+            bool armed = false;
+            std::vector<std::pair<uint64_t, script_value>> values;
+        };
+        std::unordered_map<const class_definition*, field_init_plan> field_init_plans_;
+        // A fresh layer's whole starting field state for a class whose initializers are all constants (the same keys)
+        struct fresh_layer_plan {
+            uint64_t epoch = 0;
+            uint64_t shape = 0;
+            bool checked = false;
+            bool armed = false;
+            std::vector<std::pair<uint32_t, script_value>> values;   // by slot
+        };
+        std::unordered_map<const class_definition*, fresh_layer_plan> fresh_layer_plans_;
+        bool seed_fresh_layer_fields(const std::shared_ptr<class_instance>& instance, const std::shared_ptr<class_definition>& class_def) override;
+        void note_fresh_layer_fields(const std::shared_ptr<class_instance>& instance, const std::shared_ptr<class_definition>& class_def) override;
 
         // Mirrors visit_member_expr's non-static path; unwinding cases leave out null
         // Lexical access context for member enforcement: an env-untouched frame

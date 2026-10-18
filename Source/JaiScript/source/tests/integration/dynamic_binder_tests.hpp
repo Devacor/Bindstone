@@ -618,6 +618,37 @@ public:
             check_eq(std::string("6,6,6,2|102,3,102,2;"), eng->execute("row(p) + \"|\" + row(q) + \";\";").as_string(), "one reload updates both");
         });
 
+        // Every extend into a class gives its fields their initializers' values: constants (literals, array and map literals of
+        // them) as fresh copies per object, other initializers evaluated per object, and a reload's new initializers from then on
+        test("extend_initializes_each_layer_like_a_construction", [this]() {
+            auto keep = std::make_shared<std::vector<std::shared_ptr<LaneSchemaOwner>>>();
+            auto eng = layer_engine(keep);
+            auto out = eng->execute(R"(
+                int calls = 0;
+                function next_id() -> int { calls = calls + 1; return calls; }
+                class Plain : LaneSchemaOwner { int hp = 7; float speed = 1.5; string tag = "x"; var stacks = []; var table = {"a": 1}; bool on = true; }
+                class Counted : Plain { int id = next_id(); }
+                string s = "";
+                for (int i = 0; i < 3; ++i) {
+                    var p = held();
+                    extend(p, Plain);
+                    s += to_string(p.hp) + "," + to_string(p.speed) + "," + p.tag + "," + to_string(p.stacks.size()) + "," +
+                         to_string(p.table["a"]) + "," + to_string(p.on) + ";";
+                    p.hp = 0; p.tag = "changed"; p.stacks.push(i); p.table["a"] = 9;
+                    var c = held();
+                    extend(c, Counted);
+                    s += to_string(c.id) + "," + to_string(c.stacks.size()) + "|";
+                    c.stacks.push(1);
+                }
+                s;
+            )").as_string();
+            check_eq(std::string("7,1.5,x,0,1,true;1,0|7,1.5,x,0,1,true;2,0|7,1.5,x,0,1,true;3,0|"), out,
+                     "constants arrive fresh per object, a computed initializer runs per object");
+            eng->execute("class Plain : LaneSchemaOwner { int hp = 70; float speed = 1.5; string tag = \"y\"; var stacks = [1, 2]; var table = {\"a\": 1}; bool on = true; }");
+            check_eq(std::string("70,y,2"), eng->execute("var r = held(); extend(r, Plain); to_string(r.hp) + \",\" + r.tag + \",\" + to_string(r.stacks.size());").as_string(),
+                     "a reload's initializers apply to the next extend");
+        });
+
         // A reload that gives the layer's class an override, or takes it away, turns a warm site with it
         test("layer_lanes_follow_a_reload_of_the_layer_class", [this]() {
             auto keep = std::make_shared<std::vector<std::shared_ptr<LaneSchemaOwner>>>();

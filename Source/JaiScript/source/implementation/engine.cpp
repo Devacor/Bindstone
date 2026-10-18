@@ -308,7 +308,20 @@ static int object_param_cost(
             // Exact match; shared_ptr<T> -> T counts as a small conversion.
             return argType == script_value_type::jai_shared_ptr_type && paramInfo.base_type == script_value_type::jai_object_type ? 1 : 0;
         }
-        return argClassDef->is_subtype_of(expectedClassName) ? 1 : -1;
+        if (argClassDef->is_subtype_of(expectedClassName)) { return 1; }
+        // a layer speaks for its object as the object's own C++ type too: a Sprite under class Ext : Node is a Sprite
+        if (instance && argClassDef->is_script_class() && classes_by_name) {
+            const script_value* native = instance->native();
+            const auto* native_holder = native ? native->peek_object_holder() : nullptr;
+            if (native_holder && !native_holder->is_class_instance_wrapper && !native_holder->type_name.empty()) {
+                auto stored = classes_by_name->find(native_holder->type_name);
+                if (stored != classes_by_name->end() &&
+                    (stored->second->get_name() == expectedClassName || stored->second->is_subtype_of(expectedClassName))) {
+                    return 1;
+                }
+            }
+        }
+        return -1;
     }
     if (argClassName) {
         return *argClassName == expectedClassName ? 0 : -1;
@@ -5775,14 +5788,15 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
         return as_layer();
     }
 
-    // A C++ wrapper or a layer: Class must derive the object's C++ base
+    // A C++ wrapper or a layer: Class's C++ base must be the object's C++ class or one of its bases
     auto base = instance_def->is_script_class() ? instance_def->find_cpp_base_class()
                                                 : get_class_definition(instance_def->get_type_id());
     if (!base) {
         return result(make_error_code(runtime_error_code::extend_rejected),
             "extend: the object's class '{0}' has no bound C++ base", instance_def->get_type_id());
     }
-    if (!script_def->derives_from(base.get())) {
+    auto script_base = script_def->find_cpp_base_class();
+    if (!script_base) {
         return result(make_error_code(runtime_error_code::extend_rejected),
             "extend: '{0}' does not derive '{1}' (the object's C++ class)", class_id, base->get_type_id());
     }
@@ -5798,14 +5812,15 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
         return result(make_error_code(runtime_error_code::extend_rejected),
             "extend: the C++ object behind '{0}' no longer exists", instance_def->get_type_id());
     }
-    // a layer re-derived into a class over a more derived C++ base must hold that base's object
-    if (instance_def->is_script_class()) {
-        auto script_base = script_def->find_cpp_base_class();
-        auto stored_def = cpp_holder->type_id != UINT64_MAX ? get_class_definition(cpp_holder->type_id) : nullptr;
-        if (script_base && stored_def && !stored_def->derives_from(script_base.get())) {
-            return result(make_error_code(runtime_error_code::extend_rejected),
-                "extend: '{0}' derives the C++ class '{1}', which this object is not", class_id, script_base->get_type_id());
-        }
+    // the class's C++ base is the object's C++ class or one of its bases, asked of the object's own stored type; the layer then
+    // speaks for the object as that type, so objects of different C++ types share one script class
+    if (auto stored_def = cpp_holder->type_id != UINT64_MAX ? get_class_definition(cpp_holder->type_id) : nullptr) {
+        base = stored_def;
+    }
+    if (!base->derives_from(script_base.get())) {
+        const std::string text = "extend: '" + script_def->get_name() + "' derives the C++ class '" + script_base->get_name() +
+            "', which is not the object's C++ class '" + base->get_name() + "' or one of its bases";
+        return result(make_error_code(runtime_error_code::extend_rejected), "{0}", park_error_text(text));
     }
     void* key = cpp_object.get();
     auto existing = base->slot_hooks() ? base->slot_hooks()->read(key) : script_layer_of(key);

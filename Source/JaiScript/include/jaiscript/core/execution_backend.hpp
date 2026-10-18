@@ -221,6 +221,11 @@ public:
     // environment (a class declared inside a function sees globals here). No ctor body.
     virtual void apply_field_initializers(const std::shared_ptr<class_instance>& instance,
                                           const std::shared_ptr<class_definition>& class_def) = 0;
+    // A fresh layer (an extended object that held no script fields): every field's starting value at once, from what the
+    // class's first fresh layer held after its defaults and initializers, when those are all constants. False: the caller
+    // seeds defaults and runs apply_field_initializers, then hands the result to note_fresh_layer_fields.
+    virtual bool seed_fresh_layer_fields(const std::shared_ptr<class_instance>&, const std::shared_ptr<class_definition>&) { return false; }
+    virtual void note_fresh_layer_fields(const std::shared_ptr<class_instance>&, const std::shared_ptr<class_definition>&) {}
     
     // Variable access (needed by engine)
     virtual script_value get_variable(const std::string& name) const = 0;

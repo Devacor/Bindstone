@@ -5748,12 +5748,19 @@ void reclass_in_place(engine& eng, const std::shared_ptr<class_instance>& instan
         }
         carried.emplace_back(id, value);
     });
+    const bool fresh = old_def && old_def->is_cpp_class();   // a plain wrapper holds no script state
     instance->reclass(script_def);
-    for (const auto& [id, default_value] : script_def->get_all_field_defaults()) {
-        if (!instance->has_field_value(id)) { instance->set_field(id, default_value); }
-    }
     // a script class exists, so the backend that defined it does
-    if (auto* backend = eng.get_execution_backend()) { backend->apply_field_initializers(instance, script_def); }
+    auto* backend = eng.get_execution_backend();
+    if (!(fresh && backend && backend->seed_fresh_layer_fields(instance, script_def))) {
+        for (const auto& [id, default_value] : script_def->get_all_field_defaults()) {
+            if (!instance->has_field_value(id)) { instance->set_field(id, default_value); }
+        }
+        if (backend) {
+            backend->apply_field_initializers(instance, script_def);
+            if (fresh) { backend->note_fresh_layer_fields(instance, script_def); }
+        }
+    }
     for (auto& [id, value] : carried) {
         if (instance->has_field(id)) { instance->set_field(id, value); }
     }
@@ -5814,8 +5821,8 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
     }
     // the class's C++ base is the object's C++ class or one of its bases, asked of the object's own stored type; the layer then
     // speaks for the object as that type, so objects of different C++ types share one script class
-    if (auto stored_def = cpp_holder->type_id != UINT64_MAX ? get_class_definition(cpp_holder->type_id) : nullptr) {
-        base = stored_def;
+    if (cpp_holder->type_id != UINT64_MAX && cpp_holder->type_id != base->get_type_id()) {
+        if (auto stored_def = get_class_definition(cpp_holder->type_id)) { base = std::move(stored_def); }
     }
     if (!base->derives_from(script_base.get())) {
         const std::string text = "extend: '" + script_def->get_name() + "' derives the C++ class '" + script_base->get_name() +

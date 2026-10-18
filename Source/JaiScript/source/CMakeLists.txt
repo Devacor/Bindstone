@@ -19,6 +19,8 @@ set(JAISCRIPT_SOURCES
     implementation/parser.cpp
     implementation/runtime_errors.cpp
     implementation/schema_binding.cpp
+    implementation/serialization/binary_archive.cpp
+    implementation/serialization/json_archive.cpp
     implementation/stdlib/containers.cpp
     implementation/stdlib/io.cpp
     implementation/stdlib/json.cpp

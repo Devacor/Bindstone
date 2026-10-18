@@ -5798,6 +5798,15 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
         return result(make_error_code(runtime_error_code::extend_rejected),
             "extend: the C++ object behind '{0}' no longer exists", instance_def->get_type_id());
     }
+    // a layer re-derived into a class over a more derived C++ base must hold that base's object
+    if (instance_def->is_script_class()) {
+        auto script_base = script_def->find_cpp_base_class();
+        auto stored_def = cpp_holder->type_id != UINT64_MAX ? get_class_definition(cpp_holder->type_id) : nullptr;
+        if (script_base && stored_def && !stored_def->derives_from(script_base.get())) {
+            return result(make_error_code(runtime_error_code::extend_rejected),
+                "extend: '{0}' derives the C++ class '{1}', which this object is not", class_id, script_base->get_type_id());
+        }
+    }
     void* key = cpp_object.get();
     auto existing = base->slot_hooks() ? base->slot_hooks()->read(key) : script_layer_of(key);
 

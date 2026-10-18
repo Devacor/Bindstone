@@ -9,6 +9,9 @@
 #include "MV/Render/textures.h"
 
 #include <memory>
+#include <filesystem>
+#include <chrono>
+#include "MV/Utility/generalUtility.h"
 
 using namespace jai::foundry;
 using namespace MV;
@@ -57,6 +60,32 @@ public:
             auto shapeUV = pack->percentBounds(pack->shape("a").bounds);
             check(shapeUV.minPoint.x > 0.0f && shapeUV.minPoint.y > 0.0f,
                   "packed shape UVs must be inset from the atlas edge");
+        });
+
+        test("an atlas png is rewritten only when its pixels change", [] {
+            auto fileName = (std::filesystem::temp_directory_path() / "mv_atlas_save_test.png").string();
+            std::filesystem::remove(fileName);
+            std::vector<uint8_t> pixels {
+                255, 0, 0, 255,   0, 128, 0, 128,
+                0, 0, 0, 0,       10, 20, 30, 40
+            };
+            MV::savePixelsAsPng(fileName, pixels, MV::Size<int>(2, 2));
+            check(std::filesystem::exists(fileName), "the first save writes the file");
+            auto firstBytes = MV::fileContents(fileName);
+            std::filesystem::last_write_time(fileName, std::filesystem::file_time_type::clock::now() - std::chrono::hours(1));
+            auto staleTime = std::filesystem::last_write_time(fileName);
+
+            MV::savePixelsAsPng(fileName, pixels, MV::Size<int>(2, 2));
+            check(std::filesystem::last_write_time(fileName) == staleTime, "identical pixels leave the file untouched");
+
+            pixels[4] = 1;
+            MV::savePixelsAsPng(fileName, pixels, MV::Size<int>(2, 2));
+            check(std::filesystem::last_write_time(fileName) != staleTime, "changed pixels rewrite the file");
+
+            pixels[4] = 0;
+            MV::savePixelsAsPng(fileName, pixels, MV::Size<int>(2, 2));
+            check(MV::fileContents(fileName) == firstBytes, "the same pixels encode to the same bytes");
+            std::filesystem::remove(fileName);
         });
     }
 };

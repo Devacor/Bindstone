@@ -26,6 +26,8 @@ namespace MV {
 	GLenum getInternalTextureFormat(SDL_Surface* img);
 
 	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture, GLuint a_width, GLuint a_height);
+	// RGBA8 rows, top first; an existing file that already decodes to these pixels is left untouched.
+	void savePixelsAsPng(const std::string &a_fileName, const std::vector<uint8_t> &a_pixels, const Size<int> &a_size);
 
 	//Requires a 4 point vector. IE: Shrink to 4 before calling this if you use 9-slicing etc.
 	bool clearTexturePoints(std::vector<DrawPoint> &a_points);

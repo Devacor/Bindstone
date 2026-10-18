@@ -18266,6 +18266,37 @@ op_status vm_backend::exec_ref_return_bind(frame& f, const vm_instruction& ins) 
 	return {};
 }
 
+// A binding arm's storage (exec_ref_return_bind's and exec_ref_return_lvalue's lookups), nothing when it names none (KEEP
+// BYTE-PARALLEL with the interpreter's named_storage_reference)
+std::optional<script_value> vm_backend::binding_arm_storage(frame& f, const expression* e) {
+	if (e->get_type() == node_type::identifier_expr) {
+		auto* ident = static_cast<const identifier_expr*>(e);
+		const uint64_t symbol_id = ident->symbol_id != UINT64_MAX ? ident->symbol_id : symbolizer_->intern(ident->name);
+		script_value* storage = nullptr;
+		if (ident->global_qualified) {
+			storage = engine_->get_global_environment()->get_value_ptr(symbol_id);
+		} else {
+			if (ident->slot_index != SIZE_MAX && f.locals && !f.top_level) { storage = frame_slot(f, ident->slot_index); }
+			const bool method_frame = f.locals && f.locals->is_method && f.locals->this_object_ptr;
+			if (!storage && method_frame) { storage = frame_this_member_ptr(f, symbol_id); }
+			if (!storage && environment_) { storage = environment_->get_value_ptr(symbol_id); }
+			if (!storage) {
+				if (auto minted = bind_bare_cpp_property_ref(f, symbol_id); minted && *minted) { return std::move(minted->value()); }
+			}
+		}
+		if (!storage) { return std::nullopt; }
+		return share_env_ref(*storage);
+	}
+	if (!detail::is_ref_bindable_lvalue(e)) { return std::nullopt; }
+	ensure_frame_member_scope(f, environment_.get());
+	auto resolved = detail::resolve_ref_lvalue(e, caller_view(&f), environment_.get(), engine_, symbolizer_);
+	if (resolved) { return std::move(resolved.value()); }
+	if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) { return std::nullopt; }
+	auto part = component_reference(&f, e, environment_);
+	if (part && part.value().is_reference()) { return std::move(part.value()); }
+	return std::nullopt;
+}
+
 op_status vm_backend::exec_ref_return_lvalue(frame& f, const vm_instruction& ins) {
 	if (ins.c == 1) {
 		// C::s and ns::x are lvalues: the storage replaces the read (KEEP BYTE-PARALLEL with the interpreter's visit_return_stmt)
@@ -18417,6 +18448,13 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 	}
 
 	if (expr->implicit_ref) {
+		if (expr->binding_ref && !operand.is_reference()) {   // the arm's storage when it names one, else its value (KEEP BYTE-PARALLEL with the interpreter's visit_cast_expr)
+			if (auto storage = binding_arm_storage(f, expr->operand.get())) { operand = std::move(*storage); }
+			if (!operand.is_reference()) {
+				stack_.push_back(std::move(operand));
+				return {};
+			}
+		}
 		if (!operand.is_reference()) {
 			return non_lvalue_target(expr->operand.get());
 		}

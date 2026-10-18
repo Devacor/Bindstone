@@ -435,6 +435,17 @@ private:
         ctype then_type{};
         ctype else_type{};
     } last_mixed_ternary_;
+    std::unordered_map<const expression*, mixed_ternary_note> mixed_ternaries_;   // every mixed conditional, for the reference bindings
+
+    // A reference bound to a conditional names the arm the condition picks; arms of two types make a converted temporary in C++,
+    // which a non-const reference cannot bind
+    void report_mixed_reference_conditional(const expression* e) {
+        if (!detail::conditional_names_storage(e)) { return; }
+        auto found = mixed_ternaries_.find(e);
+        if (found == mixed_ternaries_.end()) { return; }
+        diag(diag_level::error, e->location, "cannot bind a reference to a conditional of '" + ctype_name(found->second.then_type) + "' and '" +
+             ctype_name(found->second.else_type) + "': its arms must have one type");
+    }
 
     struct var_entry {
         ctype type;
@@ -3661,6 +3672,7 @@ private:
 				}
 				if (!a.is_unknown() && !b.is_unknown() && a.kind != ctype::null_k && b.kind != ctype::null_k) {   // a T-or-null arm pair is a nullable value, never a type mix
 					last_mixed_ternary_ = {e, a, b};
+					mixed_ternaries_[e] = last_mixed_ternary_;
 				}
 				ctype mixed{};
 				mixed.const_key = a.const_key || b.const_key;
@@ -3706,6 +3718,7 @@ private:
 					return operand_t;
 				}
 				ctype operand_t = infer(c->operand.get());
+				if (c->by_reference) { report_mixed_reference_conditional(c->operand.get()); }
 				check_const_cast(c);
 				ctype t = ctype_from_type_info(c->target.get());
 				if (t.kind == ctype::object_k && !known_class(t.cls) && !extra_global(std::string(t.cls))) {
@@ -4013,6 +4026,17 @@ private:
                     if (!aliasing) { break; }
                 }
                 if (viable && aliasing) { map_key_alias(c->arguments[i]->location, c->arguments[i].get()); }
+            }
+            // a conditional of two arm types where every viable overload binds the parameter by non-const reference
+            for (size_t i = 0; i < c->arguments.size() && i < args.size(); ++i) {
+                if (!detail::conditional_names_storage(c->arguments[i].get())) { continue; }
+                bool all_ref = false;
+                for (const auto* fn : *ov) {
+                    if (!script_fn_viable(fn, args, !free_callee && arity_rivals(*ov, args.size()))) { continue; }
+                    all_ref = !fn->is_coroutine && i < fn->parameters.size() && fn->parameters[i].is_reference && !fn->parameters[i].is_const;
+                    if (!all_ref) { break; }
+                }
+                if (all_ref) { report_mixed_reference_conditional(c->arguments[i].get()); }
             }
             // a literal where every viable overload binds the parameter by reference: a string literal binds a writable
             // temporary for a string& overload; otherwise it binds a temporary when the callee (every override of a method)
@@ -4762,6 +4786,7 @@ private:
 
 	void check_return_impl(return_stmt* r, uint8_t& proof) {
 		ctype value = r->value ? infer(r->value.get()) : ctype::make(ctype::null_k);
+		if (r->binds_reference) { report_mixed_reference_conditional(r->value.get()); }
 		if (fn_stack_.empty()) { return; }
 		const fn_ctx& fn = fn_stack_.back();
 		if (r->value && value.const_key && (r->binds_reference || handle_type(fn.ret))) {
@@ -4972,6 +4997,7 @@ private:
 		bool is_handle_decl = handle_type(decl->type.get());
 		if (has_init) {
 			init = infer(decl->initializer.get());
+			if (is_reference_decl && !decl->is_const) { report_mixed_reference_conditional(decl->initializer.get()); }
 			if (init.const_key && (is_reference_decl || is_handle_decl)) {
 				map_key_alias(decl->location, decl->initializer.get());
 			}
@@ -5162,8 +5188,11 @@ private:
                          "default value of '" + p.name + "' declared '" +
                          (p.type ? p.type->canonical_name() : "auto") + "' has type '" + ctype_name(dv) + "'");
                 }
-                if (p.is_reference && !p.is_const && !binds_copies && default_never_names_storage(p.default_value.get())) {   // a coroutine binds a copy
-                    diag(diag_level::error, p.default_value->location, "cannot bind non-lvalue default to reference parameter '" + p.name + "'");
+                if (p.is_reference && !p.is_const && !binds_copies) {   // a coroutine binds a copy
+                    if (default_never_names_storage(p.default_value.get())) {
+                        diag(diag_level::error, p.default_value->location, "cannot bind non-lvalue default to reference parameter '" + p.name + "'");
+                    }
+                    report_mixed_reference_conditional(p.default_value.get());
                 }
             }
             warn_shadow("parameter", p.name, fn_loc, warn_field_shadows);

@@ -1044,6 +1044,63 @@ private:
 				"" + cs[0].x + " " + truncated() + " " + widened() + " " + pushed + " " + g + " " + c.x;
 			)", "0 2 1.0 refused 11 3");
 		});
+		// A conditional whose arms both name storage is the lvalue it picks (C++): a T& argument, an auto& or T& declaration, a T&
+		// default, a -> T& return, a cast<T&> operand and an assignment target bind or write the chosen variable and never the other,
+		// whichever arm is chosen; a by-value store, return or yield of it still copies, and a mixed arm stays a temporary
+		test("a_conditional_of_lvalues_binds_as_a_reference", [this]() {
+			expect("conditional lvalues", R"(
+				class C { int x = 0; }
+				string run(bool pick) {
+					int g = 1;
+					int h = 2;
+					C c = C();
+					C d = C();
+					array<int> xs = [1, 2];
+					void set(int& p, int v) { p = v; }
+					set(pick ? g : h, 3);
+					auto& r = pick ? g : h; r += 10;
+					int& q = pick ? xs[0] : xs[1]; q = 7;
+					void bump(C& p) { p.x += 5; }
+					bump(pick ? c : d);
+					cast<int&>(pick ? g : h) += 100;
+					(pick ? c.x : d.x) = 9;
+					return "" + g + "," + h + "," + xs[0] + "," + xs[1] + "," + c.x + "," + d.x;
+				}
+				int G = 1;
+				int H = 2;
+				bool PICK = true;
+				function pick_ref() -> int& { return PICK ? G : H; }
+				void defaulted(int& p = PICK ? G : H) { p = 40; }
+				pick_ref() = 30;
+				PICK = false;
+				defaulted();
+				function by_value() -> int { return PICK ? G : H; }
+				int copied = by_value(); copied = 0;
+				var held = PICK ? G : H; held = 0;
+				coroutine int gen() { yield PICK ? G : H; }
+				var co = gen();
+				int yielded = co.next(); yielded = 0;
+				string mixed = "bound";
+				try { int& m = PICK ? G : 5; m = 0; } catch (e) { mixed = "refused"; }
+				run(true) + " | " + run(false) + " | " + G + "," + H + " " + mixed;
+			)", "113,2,7,2,9,0 | 1,113,1,7,0,9 | 30,40 refused", check_mode::off);
+		});
+		// A member arm may name no storage (an enumerator, a computed property): passed by value the conditional yields its value, and a
+		// reference binds only the arm that names storage (the arm raised Cannot take reference of non-lvalue expression in cast<T&>)
+		test("a_conditional_arm_that_names_no_storage_keeps_its_value", [this]() {
+			expect("non-storage arms", R"(
+				enum Fx { bones, blood }
+				class P { int v = 3; int _get_twice() { return v * 2; } }
+				P p = P();
+				int show(int x) { return x; }
+				void set9(int& r) { r = 9; }
+				bool flag = true;
+				string out = "" + show(flag ? Fx.blood : Fx.bones) + show(flag ? p.twice : p.v);
+				try { set9(flag ? p.twice : p.v); out += " bound"; } catch (e) { out += " refused"; }
+				set9(!flag ? p.twice : p.v);
+				out + " " + p.v;
+			)", "16 refused 9", check_mode::off);
+		});
 		// A range-for variable may be spelled with any type, template types included (shared_ptr<C>, weak_ptr<C>, array<int>,
 		// map<string, int>, const and & forms): the loop parsed them as a for(;;) initializer
 		test("a_range_for_variable_takes_every_type_spelling", [this]() {

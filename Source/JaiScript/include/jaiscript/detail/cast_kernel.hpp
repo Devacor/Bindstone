@@ -25,7 +25,7 @@ namespace jai::detail {
 	enum class cast_operand_mode : uint8_t { value = 0, identifier = 1, lvalue_chain = 2 };
 
 	inline cast_operand_mode cast_operand_mode_of(const cast_expr* c) {
-		if (!c->by_reference || !c->operand) {
+		if (!c->by_reference || !c->operand || c->binding_ref) {   // a binding arm reads its value, then looks for its storage
 			return cast_operand_mode::value;
 		}
 		if (c->operand->get_type() == node_type::identifier_expr) {

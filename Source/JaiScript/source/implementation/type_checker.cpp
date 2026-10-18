@@ -17,7 +17,7 @@
 #include <jaiscript/detail/map_entry_binding.hpp>
 #include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/script_class.hpp>
 #include <jaiscript/core/script_namespace.hpp>

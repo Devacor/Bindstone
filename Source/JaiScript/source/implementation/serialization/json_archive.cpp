@@ -1,4 +1,6 @@
 #include <jaiscript/serialization/json_archive.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
+#include <jaiscript/detail/builtin_methods.hpp>
 
 namespace jai::serialization {
 

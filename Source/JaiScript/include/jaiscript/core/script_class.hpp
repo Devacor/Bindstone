@@ -8,7 +8,7 @@
 #include <climits>
 
 // Include class_definition (extracted from dynamic_binder.hpp for faster compilation)
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/overload_resolution.hpp>
 
 // Needed for the inline thunk implementations at the end (execute_callable seam)

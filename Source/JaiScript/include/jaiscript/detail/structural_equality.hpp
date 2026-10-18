@@ -9,7 +9,7 @@
 // same_object(x, y) (engine.cpp).
 // KEEP BYTE-PARALLEL: both backends reach these through binary_equal (binary_handlers.hpp).
 #include <jaiscript/core/value.hpp>
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <cstring>
 #include <optional>
 #include <utility>

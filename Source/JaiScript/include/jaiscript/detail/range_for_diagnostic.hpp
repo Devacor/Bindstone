@@ -1,7 +1,7 @@
 #pragma once
 
 #include <jaiscript/core/checked_result.hpp>
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 
 #include <string_view>

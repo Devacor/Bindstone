@@ -4,7 +4,7 @@
 // from, and the pair a plain loop variable holds.
 
 #include <jaiscript/core/value.hpp>
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/environment.hpp>

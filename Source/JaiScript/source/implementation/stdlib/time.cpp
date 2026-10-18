@@ -1,6 +1,7 @@
 #include <jaiscript/stdlib/time.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/format_spec.hpp>
 #include <chrono>

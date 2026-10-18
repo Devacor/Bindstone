@@ -10,7 +10,7 @@
 // Both backends call these verbatim - never re-implement them inline.
 
 #include <jaiscript/core/value.hpp>
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <cstdint>
 
 namespace jai::detail {

@@ -2,7 +2,7 @@
 #ifndef __JAISCRIPT_DETAIL_HOST_MEMBER_ACCESS_HPP__
 #define __JAISCRIPT_DETAIL_HOST_MEMBER_ACCESS_HPP__
 
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/host_member.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 

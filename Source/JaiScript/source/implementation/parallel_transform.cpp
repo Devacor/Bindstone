@@ -26,7 +26,7 @@
 //   engine's terminal rail.
 
 #include <jaiscript/core/class_registry.hpp>
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/core/runtime_errors.hpp>

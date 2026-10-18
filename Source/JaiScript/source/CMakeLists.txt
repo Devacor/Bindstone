@@ -21,6 +21,7 @@ set(JAISCRIPT_SOURCES
     implementation/schema_binding.cpp
     implementation/serialization/binary_archive.cpp
     implementation/serialization/json_archive.cpp
+    implementation/serialization/polymorphic.cpp
     implementation/stdlib/containers.cpp
     implementation/stdlib/io.cpp
     implementation/stdlib/json.cpp

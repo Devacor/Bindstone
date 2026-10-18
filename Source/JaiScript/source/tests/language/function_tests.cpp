@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <filesystem>
 #include <fstream>

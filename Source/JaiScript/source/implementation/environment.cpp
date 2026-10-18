@@ -1,7 +1,7 @@
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
-#include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/execution_backend.hpp>

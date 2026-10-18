@@ -1,6 +1,7 @@
 #include "jaiscript/core/class_registry.hpp"
 #include "jaiscript/core/dynamic_binder.hpp"
 #include "jaiscript/core/engine.hpp"
+#include "jaiscript/detail/class_runtime.hpp"
 #include "jaiscript/detail/release_machine.hpp"
 #include "jaiscript/detail/namespace_scope.hpp"
 #include "jaiscript/detail/ast_serializer.hpp"
@@ -1065,6 +1066,124 @@ void class_definition::register_host_member_lane(uint64_t field_id, std::shared_
         host_member_lanes_.erase(field_id);
     }
     bump_method_epoch();
+}
+
+void class_definition::add_method(const std::string& name, script_function func, size_t arity) {
+    add_method(name, std::move(func), arity, {});
+}
+
+bool class_definition::defines_method(uint64_t id) const {
+    if (methods_.find(id) != methods_.end()) { return true; }
+    for (const auto& parent : parent_classes_) {
+        if (parent && parent->defines_method(id)) { return true; }
+    }
+    if (cpp_base_class_ && cpp_base_class_->defines_method(id)) { return true; }
+    return false;
+}
+
+void class_definition::rebuild_field_slots() const {
+    cpp_property_slots_.assign(slot_to_field_.size(), 0);
+    std::function<void(const class_definition&)> walk = [&](const class_definition& cd) {
+        for (const auto& parent : cd.parent_classes_) {
+            if (parent) walk(*parent);
+        }
+        const uint8_t cpp_declared = cd.is_cpp_class() ? 1 : 0;
+        cd.for_each_own_field_id([&](uint64_t id) {
+            auto it = field_slots_.find(id);
+            if (it == field_slots_.end()) {
+                it = field_slots_.emplace(id, static_cast<uint32_t>(slot_to_field_.size())).first;
+                slot_to_field_.push_back(id);
+                cpp_property_slots_.push_back(0);
+            }
+            // A binder .property() placeholder marks its slot; a script declaration
+            // anywhere in the chain (walked base-first) shadows it
+            cpp_property_slots_[it->second] = cpp_declared;
+        });
+    };
+    walk(*this);
+    has_cpp_property_slots_ = std::find(cpp_property_slots_.begin(), cpp_property_slots_.end(), 1) != cpp_property_slots_.end();
+    field_slots_current_ = true;
+}
+
+[[nodiscard]] bool class_definition::add_parent(std::shared_ptr<class_definition> parent) {
+    if (!parent) return true;
+
+    for (const auto& existing : parent_classes_) {
+        if (existing.get() == parent.get()) {
+            return true;
+        }
+    }
+
+    parent_classes_.push_back(parent);
+    field_defaults_cache_valid_ = false; ++defaults_version_;
+    field_slots_current_ = false;
+
+    if (has_diamond_inheritance()) {
+        parent_classes_.pop_back();
+        return false;
+    }
+
+    parent->add_derived_class(shared_from_this());
+    if (parent->has_property_getters()) {
+        has_property_getters_ = true;
+    }
+    refresh_access_chain_flag();
+    bump_field_shape_epoch();
+    bump_method_epoch();   // resolution chain changed
+
+    return true;
+}
+
+std::shared_ptr<class_definition> class_definition::find_cpp_base_class() const {
+    if (cpp_base_class_) { return cpp_base_class_; }
+    for (const auto& parent : parent_classes_) {
+        if (parent) {
+            if (auto found = parent->find_cpp_base_class()) { return found; }
+        }
+    }
+    return nullptr;
+}
+
+void class_definition::intern_name() const {
+    const auto [id, view] = engine_->get_symbolizer()->intern_with_view(name_);
+    interned_name_id_ = id;
+    interned_name_ = view;
+}
+
+void class_definition::rename(const std::string& name, uint64_t type_id) {
+    name_ = name;
+    type_id_ = type_id;
+}
+
+bool class_definition::has_live_instances() const {
+    for (const class_instance* i = registry_head_; i; i = i->registry_next_) {
+        if (!i->weak_from_this().expired()) { return true; }
+    }
+    return false;
+}
+
+void class_definition::add_native_lane(uint64_t id, native_lane fn, std::shared_ptr<const void> state) {
+    restamp_native_methods();
+    if (!native_lane_names_.insert(id).second) {
+        auto it = native_methods_.find(id);
+        if (it != native_methods_.end() && !it->second.plain) { native_methods_.erase(it); }
+        return;
+    }
+    auto [it, fresh] = native_methods_.try_emplace(id);
+    if (!fresh && it->second.plain) return;
+    it->second.lane = fn; it->second.state = std::move(state);
+}
+
+void class_definition::withdraw_native_lane(uint64_t id) {
+    restamp_native_methods();
+    native_lane_names_.insert(id);
+    auto it = native_methods_.find(id);
+    if (it != native_methods_.end() && !it->second.plain) { native_methods_.erase(it); }
+}
+
+void class_definition::set_copy_function(copy_function copier) {
+    copy_function_ = std::move(copier);
+    bump_method_epoch();   // nocopy verdicts of script classes over this base re-evaluate
 }
 
 } // namespace jai

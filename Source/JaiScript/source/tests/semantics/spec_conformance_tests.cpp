@@ -955,6 +955,95 @@ private:
 				"" + h.x;
 			)", "17", check_mode::off);
 		});
+		// A var loop variable takes a typed container element as var x = element; would: its value keeps the element type
+		// while the slot stays a var (the loop stamped it a plain var, and a row of array<array<int>> took a string)
+		test("a_range_for_var_variable_keeps_a_typed_containers_element_type", [this]() {
+			expect("loop typed containers", R"(
+				array<array<int>> grid = [[1]];
+				array<map<string, int>> ms = [{"a": 1}];
+				string out = "";
+				for (var row : grid) { try { row.push("s"); out += "taken "; } catch (e) { out += "refused "; } row = "whole"; out += row + " "; }
+				for (var m : ms) { try { m["b"] = "s"; out += "taken "; } catch (e) { out += "refused "; } m = 3; out += m + " "; }
+				var direct = grid[0];
+				try { direct.push("s"); out += "taken"; } catch (e) { out += "refused"; }
+				out;
+			)", "refused whole refused 3 refused");
+		});
+		// A conditional or ?? over an existing object yields that object, so a store from it copies as a store from the name does
+		// (the declaration, the literal and the var-slot assignment took it as a temporary and aliased the source)
+		test("a_store_from_a_conditional_over_an_existing_object_copies_it", [this]() {
+			expect("conditional stores", R"(
+				class C { int x = 0; }
+				C c = C();
+				C d = C();
+				bool flag = true;
+				var a = flag ? c : d; a.x = 1;
+				C b = flag ? c : C(); b.x = 2;
+				auto e = flag ? (flag ? c : d) : d; e.x = 3;
+				var l = [flag ? c : d]; l[0].x = 4;
+				var m = {"k": flag ? c : d}; m["k"].x = 5;
+				var g = null; g = flag ? c : d; g.x = 6;
+				var n = c ?? d; n.x = 7;
+				function local() { C mine = C(); var t = flag ? mine : mine; t.x = 8; return mine.x; }
+				"" + c.x + d.x + local() + a.x + b.x + e.x + l[0].x + m["k"].x + g.x + n.x;
+			)", "0001234567");
+		});
+		// A yield hands out what a return of the same operand would: an existing object (a global, the coroutine's own local, an
+		// element) copies, so the receiver never aliases it (the yielded value shared the source's storage)
+		test("a_yield_hands_out_a_copy_of_an_existing_object", [this]() {
+			expect("yield copies", R"(
+				class C { int x = 0; }
+				C c = C();
+				string out = "";
+				coroutine global_gen() { yield c; }
+				var g = global_gen();
+				var y1 = g.next(); y1.x = 7;
+				out += "" + c.x;
+				coroutine local_gen() { C mine = C(); yield mine; out += "" + mine.x; mine.x = 3; yield mine; }
+				var l = local_gen();
+				var y2 = l.next(); y2.x = 9;
+				var y3 = l.next();
+				out += "" + y2.x + y3.x;
+				coroutine element_gen() { array<C> cs = [C()]; yield cs[0]; out += "" + cs[0].x; }
+				var el = element_gen();
+				var y4 = el.next(); y4.x = 5; el.next();
+				coroutine temp_gen() { yield C(); }
+				var tg = temp_gen();
+				var y5 = tg.next(); y5.x = 4;
+				out += "" + y5.x;
+				out;
+			)", "009304");
+		});
+		// A default argument binds as the argument it stands in for: a by-value parameter takes its converted copy (an existing object
+		// copies, int p = 2.7 holds 2), a reference parameter binds the storage it names (the default was bound raw: aliased, unconverted,
+		// and int& p = g wrote a private copy)
+		test("a_default_argument_binds_as_the_argument_it_stands_in_for", [this]() {
+			expect("defaults", R"(
+				class C { int x = 0; }
+				C c = C();
+				array<C> cs = [C()];
+				int g = 1;
+				bool flag = true;
+				function by_value(C p = c) { p.x = 7; }
+				function untyped(var p = c) { p.x = 7; }
+				function element(C p = cs[0]) { p.x = 7; }
+				function conditional(C p = flag ? c : c) { p.x = 7; }
+				class K { void m(C p = c) { p.x = 7; } }
+				var lam = [](C p = c) { p.x = 7; };
+				by_value(); untyped(); element(); conditional(); K().m(); lam();
+				function truncated(int p = 2.7) { return p; }
+				function widened(float p = 1) { return p; }
+				function typed_row(array<int> p = [1, 2]) { return p; }
+				var row = typed_row();
+				string pushed = "taken";
+				try { row.push("s"); } catch (e) { pushed = "refused"; }
+				function bump(int& p = g) { p += 10; }
+				bump();
+				function touch(C& p = c) { p.x = 3; }
+				touch();
+				"" + cs[0].x + " " + truncated() + " " + widened() + " " + pushed + " " + g + " " + c.x;
+			)", "0 2 1.0 refused 11 3");
+		});
 		// A range-for variable may be spelled with any type, template types included (shared_ptr<C>, weak_ptr<C>, array<int>,
 		// map<string, int>, const and & forms): the loop parsed them as a for(;;) initializer
 		test("a_range_for_variable_takes_every_type_spelling", [this]() {

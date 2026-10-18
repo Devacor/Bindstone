@@ -1057,6 +1057,18 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 				}
 				script_value default_val = std::move(stack_.back());
 				stack_.pop_back();
+				if (!param.is_reference) {   // a by-value default binds its converted copy (bind_parameters parity)
+					auto bound = detail::default_argument_value(default_val, param, [&](const script_value& v) {
+						return try_convert_for_parameter(v, param.type, detail::slot_site{detail::slot_kind::parameter, param.name, function->name, false});
+					});
+					if (!bound) {
+						environment_ = prev_env;
+						active_coroutine_ = prev_active;
+						handle.set_status(coroutine_handle::status::failed);
+						return bound.error_value();
+					}
+					default_val = std::move(bound.value());
+				}
 				if (param.ref_escaping && !default_val.is_reference()) {
 					default_val = script_value::make_cell_reference(std::move(default_val), engine_);
 				}
@@ -19843,6 +19855,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			// run_fiber entry frames — in-loop callees are always popped before this op.
 			case opcode::op_yield:
 				assert(call_records_top_ == records_base);
+				if (ins.a) { detail::materialize_return_value(stack_.back(), ins.b != 0); }   // KEEP BYTE-PARALLEL with the interpreter's visit_yield_expr_t
 				if (ins.a && f.return_conv_class != 0) {
 					VM_TRY_OP(exec_yield_convert(f));
 					if (is_unwinding_) [[unlikely]] { break; }   // a converting ctor / to_X() threw: the loop bottom unwinds
@@ -21997,6 +22010,15 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				}
 				script_value default_val = std::move(stack_.back());
 				stack_.pop_back();
+				if (!param.is_reference) {   // a by-value default binds its converted copy (KEEP BYTE-PARALLEL with the interpreter's call_function)
+					auto bound = detail::default_argument_value(default_val, param, [&](const script_value& v) {
+						return try_convert_for_parameter(v, param.type, detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name, false});
+					});
+					if (!bound) {
+						return raise_from(bound);
+					}
+					default_val = std::move(bound.value());
+				}
 				if (param.ref_escaping && !default_val.is_reference()) {
 					default_val = script_value::make_cell_reference(std::move(default_val), engine_);
 				}
@@ -22262,7 +22284,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 	}
 	// A T& parameter binds a T, judged on the bound lvalue so a non-lvalue argument keeps its own text (KEEP BYTE-PARALLEL with
 	// the interpreter's call_function)
-	for (size_t i = 0; i < parameters.size() && i < argc; ++i) {
+	for (size_t i = 0; i < parameters.size() && !is_unwinding_; ++i) {
 		const parameter& param = parameters[i];
 		if (!param.is_reference || !param.type) { continue; }
 		const script_value* bound = frame_slot(callee, param.slot_index);

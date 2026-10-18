@@ -1174,6 +1174,8 @@ namespace jai {
         void raise_no_member(std::string_view kind, std::string_view member, const source_location& location);
         checked_result<void> bare_method_value_error(const identifier_expr* expr, const script_value& self);   // a bare method name without a call
         std::optional<checked_result<void>> bare_method_reference_error(const identifier_expr* expr);   // a reference to a bare method name
+        std::optional<checked_result<script_value>> named_storage_reference(expression* value);
+        std::optional<checked_result<script_value>> static_storage_reference(const member_expr* member);
 
         // One resolution for every shape a C++/script object reaches the interpreter in:
         // class_instance wrappers (make_object, script classes), cpp_bound non-owning

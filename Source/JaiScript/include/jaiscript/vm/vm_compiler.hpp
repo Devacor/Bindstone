@@ -157,6 +157,7 @@ namespace jai::vm {
         void compile_unary_into_temp(const expression_ptr& e, fused_operand& out);
         void deref_ahead_of(const expression* pushed, const expression* later);
         bool copy_ahead_of(const expression* pushed, const expression* later);
+        bool compile_storage_reference(const expression_ptr& value);
         uint32_t literal_taken_operands(const std::vector<bool>& taken);
         size_t emit_arg_capture(const std::vector<uint8_t>& captures, size_t k, const expression_ptr& arg, uint32_t where, uint32_t form);
         bool ternary_temp_operand(const expression* e);

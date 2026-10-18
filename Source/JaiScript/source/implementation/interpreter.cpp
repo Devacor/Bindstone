@@ -4007,12 +4007,8 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                 return detail::index_out_of_bounds_error(string_symbolizer_, detail::array_index_out_of_bounds_text, detail::array_index_out_of_bounds_slotless, index, node->size());
             }
 
-            // Check if the left side is an lvalue (variable, member access, or subscript)
-            // These should allow modification, even if use_count == 1
-            const bool is_lvalue = detail::subscript_base_is_lvalue(expr->left->get_type() == node_type::identifier_expr ||
-                            expr->left->get_type() == node_type::member_expr ||
-                            (expr->left->get_type() == node_type::binary_expr &&
-                             static_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket), left_raw);
+            // An lvalue-shaped base allows modification, even if use_count == 1 (KEEP BYTE-PARALLEL with vm_backend::exec_index)
+            const bool is_lvalue = detail::subscript_base_is_lvalue(is_lvalue_shaped_expr(expr->left.get()), left_raw);
 
             // Transient read (transient_read.hpp): the consumer provably discards
             // identity, so skip the reference mint and push a shallow element copy.
@@ -4042,11 +4038,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
             try {
                 auto& map = const_cast<script_map&>(left.as_map());
 
-                // Check if the left side is an lvalue (variable, member access, or subscript)
-                const bool is_lvalue = detail::subscript_base_is_lvalue(expr->left->get_type() == node_type::identifier_expr ||
-                                expr->left->get_type() == node_type::member_expr ||
-                                (expr->left->get_type() == node_type::binary_expr &&
-                                 static_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket), left_raw);
+                const bool is_lvalue = detail::subscript_base_is_lvalue(is_lvalue_shaped_expr(expr->left.get()), left_raw);
 
                 // Transient map read: copy branch below (never inserts, never mints)
                 const bool transient_read = expr->transient_element_read && !want_lvalue_write && !has_custom_binary_ops_;
@@ -6326,15 +6318,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     // C++ style move/copy semantics:
                     // - If RHS is a variable/field/index read (lvalue), clone for value semantics
                     // - If RHS is a temporary (function result, constructor, literal, operator), move
-                    bool is_lvalue_read = (expr->value->get_type() == node_type::identifier_expr ||
-                                          expr->value->get_type() == node_type::member_expr);
-                    // Also check for subscript access (binary_expr with left_bracket operator)
-                    if (!is_lvalue_read && expr->value->get_type() == node_type::binary_expr) {
-                        auto* bin = static_cast<binary_expr*>(expr->value.get());
-                        if (bin->op.type == token_type::left_bracket) {
-                            is_lvalue_read = true;
-                        }
-                    }
+                    const bool is_lvalue_read = is_lvalue_expression(expr->value.get());
 
                     if (is_lvalue_read) {
                         // Reading from a storage location - the kernel deep-copies
@@ -6371,15 +6355,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 bool assigned_to_member = false;
 
                 // Determine if RHS is lvalue (needs clone) or temporary (can move)
-                bool is_lvalue_read = (expr->value->get_type() == node_type::identifier_expr ||
-                                      expr->value->get_type() == node_type::member_expr);
-                // Also check for subscript access (binary_expr with left_bracket operator)
-                if (!is_lvalue_read && expr->value->get_type() == node_type::binary_expr) {
-                    auto* bin = static_cast<binary_expr*>(expr->value.get());
-                    if (bin->op.type == token_type::left_bracket) {
-                        is_lvalue_read = true;
-                    }
-                }
+                const bool is_lvalue_read = is_lvalue_expression(expr->value.get());
 
                 script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
                 if (this_ptr) {
@@ -10497,6 +10473,7 @@ checked_result<void> interpreter::visit_yield_expr_t(yield_expr* expr, const rep
     if (expr->value) {
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_operand, 0, {});
         value = pop_value();
+        if (!is_unwinding_) { detail::materialize_return_value(value, detail::yield_operand_is_lvalue(expr->value.get())); }   // KEEP BYTE-PARALLEL with the vm's op_yield
         // A yield hands out the declared type like a return (the return's table and identity lanes, the yield's text).
         // KEEP BYTE-PARALLEL with the vm's exec_yield_convert.
         if (!is_unwinding_ && !call_stack_.empty()) {
@@ -11882,6 +11859,57 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
     return {};
 }
 
+// The storage a T& producer (a `-> T&` return, a reference parameter's default) binds when its operand names it: a variable
+// (its slot or environment cell, boxed on demand, or a hybrid's bare C++ property) or an owner-pinned lvalue chain. nullopt:
+// the operand names no storage. KEEP BYTE-PARALLEL with the vm's exec_ref_return_bind / exec_ref_return_lvalue
+std::optional<checked_result<script_value>> interpreter::named_storage_reference(expression* value) {
+    if (value->get_type() == node_type::identifier_expr) {
+        auto* ident = static_cast<identifier_expr*>(value);
+        if (ident->symbol_id == UINT64_MAX) {
+            ident->symbol_id = string_symbolizer_->intern(ident->name);
+        }
+        script_value* storage = nullptr;
+        if (ident->global_qualified) {
+            // ::name - GLOBAL env only (slots, captures, member scope all skipped)
+            storage = get_global_environment()->get_value_ptr(ident->symbol_id);
+        } else {
+            if (ident->slot_index != SIZE_MAX && !call_stack_.empty()) {
+                storage = call_stack_.back().get_local(ident->slot_index);
+            }
+            if (!storage) {
+                storage = environment_->get_value_ptr(ident->symbol_id);
+            }
+        }
+        if (storage) { return checked_result<script_value>(share_boxed_slot(*storage)); }
+        if (auto minted = bind_bare_cpp_property_ref(ident->symbol_id, ident->global_qualified)) { return std::move(minted); }
+        if (auto method = bare_method_reference_error(ident)) { return checked_result<script_value>(method->error_value()); }
+        return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable),
+            environment_->undefined_text(ident->symbol_id, "Cannot take reference of undefined variable"), ident->symbol_id);
+    }
+    if (!detail::is_ref_bindable_lvalue(value)) { return std::nullopt; }
+    auto resolved = detail::resolve_ref_lvalue(value, detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
+        environment_.get(), engine_, string_symbolizer_);
+    if (resolved) { return std::move(resolved); }
+    // a math component returns a COMPONENT reference; anything else keeps the kernel's verdict
+    auto part = resolved.error() == make_error_code(runtime_error_code::invalid_reference)
+        ? component_reference(value, call_stack_.empty() ? nullptr : &call_stack_.back(), environment_)
+        : checked_result<script_value>(make_value());
+    if (!part || !part.value().is_reference()) { return std::move(resolved); }
+    return std::move(part);
+}
+
+// C::s and ns::x after their read: the static's storage. nullopt: the member is no static storage
+std::optional<checked_result<script_value>> interpreter::static_storage_reference(const member_expr* member) {
+    auto cell = detail::static_member_lvalue(*engine_, member, *environment_, *string_symbolizer_, environment_->find_access_context());
+    if (!cell) { return std::nullopt; }
+    if (!*cell) { return checked_result<script_value>(cell->error_value()); }
+    script_value& storage = *cell->value();
+    if (storage.is_reference() && !storage.get_reference_holder()) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+    }
+    return checked_result<script_value>(share_boxed_slot(storage));
+}
+
 template<bool Replaying>
 checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
     if (stmt->const_check) [[unlikely]] { JAISCRIPT_TRY(const_guard_at(stmt, stmt->const_check)); }
@@ -11891,68 +11919,18 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
             // Ref-return producer: bind the operand as a reference instead of
             // evaluating a copy. KEEP semantics parallel with the vm's
             // exec_ref_return_bind/exec_ref_return_lvalue.
-            if (stmt->value->get_type() == node_type::identifier_expr) {
-                auto* ident = static_cast<identifier_expr*>(stmt->value.get());
-                if (ident->symbol_id == UINT64_MAX) {
-                    ident->symbol_id = string_symbolizer_->intern(ident->name);
-                }
-                script_value* storage = nullptr;
-                if (ident->global_qualified) {
-                    // ::name - GLOBAL env only (slots, captures, member scope all skipped)
-                    storage = get_global_environment()->get_value_ptr(ident->symbol_id);
-                } else {
-                    if (ident->slot_index != SIZE_MAX && !call_stack_.empty()) {
-                        storage = call_stack_.back().get_local(ident->slot_index);
-                    }
-                    if (!storage) {
-                        storage = environment_->get_value_ptr(ident->symbol_id);
-                    }
-                }
-                if (!storage) {
-                    // A hybrid's bare C++ property (KEEP BYTE-PARALLEL with the vm's exec_ref_return_bind)
-                    if (auto minted = bind_bare_cpp_property_ref(ident->symbol_id, ident->global_qualified)) {
-                        if (!*minted) {
-                            return minted->error_value();
-                        }
-                        out.emplace(std::move(minted->value()));
-                    } else {
-                        if (auto method = bare_method_reference_error(ident)) { return *method; }
-                        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                            environment_->undefined_text(ident->symbol_id, "Cannot take reference of undefined variable"), ident->symbol_id);
-                    }
-                } else {
-                    out.emplace(share_boxed_slot(*storage));
-                }
-            } else if (detail::is_ref_bindable_lvalue(stmt->value.get())) {
-                auto resolved = detail::resolve_ref_lvalue(stmt->value.get(),
-                    detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
-                    environment_.get(), engine_, string_symbolizer_);
-                if (!resolved) {
-                    // a math component returns a COMPONENT reference; anything else keeps the kernel's verdict
-                    auto part = resolved.error() == make_error_code(runtime_error_code::invalid_reference)
-                        ? component_reference(stmt->value.get(), call_stack_.empty() ? nullptr : &call_stack_.back(), environment_)
-                        : checked_result<script_value>(make_value());
-                    if (!part || !part.value().is_reference()) {
-                        return resolved.error_value();
-                    }
-                    out.emplace(std::move(part.value()));
-                } else {
-                    out.emplace(std::move(resolved.value()));
-                }
+            if (auto bound = named_storage_reference(stmt->value.get())) {
+                if (!*bound) { return bound->error_value(); }
+                out.emplace(std::move(bound->value()));
             } else if (stmt->value->get_type() == node_type::member_expr && static_cast<const member_expr*>(stmt->value.get())->is_static) {
                 // C::s and ns::x are lvalues: the read first, then its storage replaces it (KEEP BYTE-PARALLEL with the vm's
                 // exec_ref_return_lvalue)
                 JAISCRIPT_TRY_ROOT(stmt, stmt->value.get());
                 out.emplace(pop_value());
                 if (!is_unwinding_) {
-                    if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(stmt->value.get()), *environment_,
-                                                                 *string_symbolizer_, environment_->find_access_context())) {
+                    if (auto cell = static_storage_reference(static_cast<const member_expr*>(stmt->value.get()))) {
                         if (!*cell) { return cell->error_value(); }
-                        script_value& storage = *cell->value();
-                        if (storage.is_reference() && !storage.get_reference_holder()) {
-                            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-                        }
-                        out.emplace(share_boxed_slot(storage));
+                        out.emplace(std::move(cell->value()));
                     }
                 }
             }
@@ -13881,12 +13859,45 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         if (i >= args.size()) {
             // Must have a default value (validated by argument count check above)
             if (param.default_value) {
-                auto default_result = dispatch_expr(param.default_value.get());
-                if (!default_result) {
-                    cleanup();
-                    return default_result.error_value();
+                // The default binds as the argument it stands in for: a reference parameter the storage it names, a by-value
+                // one its converted copy (KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
+                script_value default_val = make_value();
+                auto storage = param.is_reference ? named_storage_reference(param.default_value.get()) : std::nullopt;
+                if (storage) {
+                    if (!*storage) {
+                        cleanup();
+                        return storage->error_value();
+                    }
+                    default_val = std::move(storage->value());
+                } else {
+                    auto default_result = dispatch_expr(param.default_value.get());
+                    if (!default_result) {
+                        cleanup();
+                        return default_result.error_value();
+                    }
+                    default_val = pop_value();
+                    if (!is_unwinding_ && param.is_reference) {
+                        const expression* d = param.default_value.get();
+                        if (d->get_type() == node_type::member_expr && static_cast<const member_expr*>(d)->is_static) {
+                            if (auto cell = static_storage_reference(static_cast<const member_expr*>(d))) {
+                                if (!*cell) {
+                                    cleanup();
+                                    return cell->error_value();
+                                }
+                                default_val = std::move(cell->value());
+                            }
+                        }
+                    } else if (!is_unwinding_) {
+                        auto bound = detail::default_argument_value(default_val, param, [&](const script_value& v) {
+                            return try_convert_for_parameter(v, param.type, detail::slot_site{detail::slot_kind::parameter, param.name, function.name, false});
+                        });
+                        if (!bound) {
+                            cleanup();
+                            return bound.error_value();
+                        }
+                        default_val = std::move(bound.value());
+                    }
                 }
-                script_value default_val = pop_value();
                 if (param.ref_escaping && !default_val.is_reference()) {
                     default_val = script_value::make_cell_reference(std::move(default_val), engine_);
                 }
@@ -14052,7 +14063,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     }
     // A T& parameter binds a T, judged on the bound lvalue so a non-lvalue argument keeps its own text (KEEP BYTE-PARALLEL with
     // vm_backend::bind_parameters)
-    for (size_t i = 0; i < function.parameters().size() && i < args.size(); ++i) {
+    for (size_t i = 0; i < function.parameters().size() && !is_unwinding_; ++i) {
         const auto& param = function.parameters()[i];
         if (!param.is_reference || !param.type) { continue; }
         const script_value* bound = call_stack_[frame_index].get_local(param.slot_index);

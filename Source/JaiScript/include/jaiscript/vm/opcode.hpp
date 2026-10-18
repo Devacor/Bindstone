@@ -90,7 +90,7 @@ namespace jai::vm {
         op_cfor_back,       // a=counted_for_proto index; steps + cmp via cached pointers, always jumps; budget check
         op_cfor_pop,        // pops the counted-for state (generic-exit / break label)
 
-        op_yield,           // a=has value (pops it); suspends the active fiber, resume value is null
+        op_yield,           // a=has value (pops it), b=the operand is an existing object (copied out); suspends the active fiber, resume value is null
         op_include,         // a=literal path message index (k_invalid_u32 = expr), b=path-is-expr; pushes result
         op_import,          // a=node index of the site (import_decl or import_expr), b=computed path values popped, c=1: pushes whether a module (re)ran
 

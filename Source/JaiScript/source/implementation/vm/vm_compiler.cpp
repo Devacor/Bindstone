@@ -906,7 +906,9 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 			auto saved_stmt = current_stmt_;
 			auto default_chunk = std::make_shared<chunk>();
 			chunk_ = default_chunk.get();
-			compile_expression(parameters[i].default_value);
+			if (!parameters[i].is_reference || !compile_storage_reference(parameters[i].default_value)) {
+				compile_expression(parameters[i].default_value);
+			}
 			emit(opcode::op_halt);
 			chunk_ = saved_chunk;
 			current_stmt_ = saved_stmt;
@@ -1229,23 +1231,7 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 			}
 		}
 		if (rs->value) {
-			if (rs->binds_reference && rs->value->get_type() == node_type::identifier_expr) {
-				// Ref-return producer: bind the named storage as a reference (share the
-				// cell, boxing on demand) instead of loading a copy
-				auto* ident = static_cast<identifier_expr*>(rs->value.get());
-				if (ident->symbol_id == UINT64_MAX) {
-					ident->symbol_id = symbolizer_->intern(ident->name);
-				}
-				emit(opcode::op_ref_return_bind, identifier_slot_operand(ident), add_symbol(ident->symbol_id),
-				     ident->global_qualified ? load_flag_global_only : 0u);
-			} else if (rs->binds_reference && detail::is_ref_bindable_lvalue(rs->value.get())) {
-				// Field/subscript/chain operand: owner-pinned reference via the shared kernel
-				emit(opcode::op_ref_return_lvalue, add_node(rs->value));
-			} else if (rs->binds_reference && rs->value->get_type() == node_type::member_expr &&
-			           static_cast<const member_expr*>(rs->value.get())->is_static) {
-				// C::s / ns::x: the read first, then its storage replaces it
-				compile_expression(rs->value);
-				emit(opcode::op_ref_return_lvalue, add_node(rs->value), 0, 1);
+			if (rs->binds_reference && compile_storage_reference(rs->value)) {
 			} else if (clean_exit && rs->value->get_type() == node_type::identifier_expr) {
 				// Structural LOAD+RETURN fusion (`return n;` - half of fib's dynamic
 				// returns): whole-node gate, resolution mirrors op_load exactly at runtime
@@ -2445,7 +2431,7 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 			compile_expression(ye->value);
 			has_value = 1;
 		}
-		emit(opcode::op_yield, has_value);
+		emit(opcode::op_yield, has_value, ye->value && detail::yield_operand_is_lvalue(ye->value.get()) ? 1u : 0u);
 		return;
 	}
 	default:
@@ -6520,6 +6506,31 @@ bool vm_compiler::binary_lands_fused(binary_expr* b) {
 	const int ln = lift_fusible_nodes(b->left.get());
 	const int rn = ln >= 0 ? lift_fusible_nodes(b->right.get()) : -1;
 	return lift_partners_ok(b) && ln >= 0 && rn >= 0 && ln + rn >= 1 && ln + rn <= 16;
+}
+
+// The storage a T& producer (a `-> T&` return, a reference parameter's default) binds when its operand names it: a variable shares
+// its cell (boxing on demand), an lvalue chain mints an owner-pinned reference, C::s / ns::x reads first and its storage replaces the
+// read. false: the operand names no storage and nothing was emitted
+bool vm_compiler::compile_storage_reference(const expression_ptr& value) {
+	if (value->get_type() == node_type::identifier_expr) {
+		auto* ident = static_cast<identifier_expr*>(value.get());
+		if (ident->symbol_id == UINT64_MAX) {
+			ident->symbol_id = symbolizer_->intern(ident->name);
+		}
+		emit(opcode::op_ref_return_bind, identifier_slot_operand(ident), add_symbol(ident->symbol_id),
+		     ident->global_qualified ? load_flag_global_only : 0u);
+		return true;
+	}
+	if (detail::is_ref_bindable_lvalue(value.get())) {
+		emit(opcode::op_ref_return_lvalue, add_node(value));
+		return true;
+	}
+	if (value->get_type() == node_type::member_expr && static_cast<const member_expr*>(value.get())->is_static) {
+		compile_expression(value);
+		emit(opcode::op_ref_return_lvalue, add_node(value), 0, 1);
+		return true;
+	}
+	return false;
 }
 
 // a literal's existing object (a name, a member, an element) ahead of a later element that may write it: its copy is taken now, as the

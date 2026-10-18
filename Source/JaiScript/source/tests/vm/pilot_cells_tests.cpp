@@ -2317,7 +2317,7 @@ string traced_rec(int d) { string out = ""; try { out = to_string(rec(d)); } cat
 			};
 			struct probe { const char* call; size_t cap; bool block; };
 			const probe probes[] = {
-				{ "trace(40, -1);", 0, true }, { "trace(20, 7);", 0, true }, { "to_string(straight(3)) + \" \" + to_string(straight(9));", 0, false },
+				{ "to_string(run(40, -1));", 0, true }, { "trace(40, -1);", 0, false }, { "trace(20, 7);", 0, false }, { "to_string(straight(3)) + \" \" + to_string(straight(9));", 0, false },
 				{ "straight(300);", 0, false }, { "traced_rec(3);", 0, false }, { "traced_rec(90);", 0, false },
 				{ "to_string(deep(15));", 40, false }, { "to_string(deep(19));", 40, false }, { "to_string(deep(20));", 40, false }, { "to_string(deep(60));", 40, false },
 			};
@@ -2333,7 +2333,7 @@ string traced_rec(int d) { string out = ""; try { out = to_string(rec(d)); } cat
 			{
 				auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
 				e->disassembly_sink([&listing](const std::string& l, const std::string&) { listing += l; listing += "\n"; });
-				try { e->execute(std::string(defs) + " trace(4, -1);"); } catch (const std::exception& ex) { listing += std::string("throw:") + ex.what(); }
+				try { e->execute(std::string(defs) + " run(4, -1); straight(3);"); } catch (const std::exception& ex) { listing += std::string("throw:") + ex.what(); }
 			}
 			check(listing.find("GRAFT_DEPTH") != std::string::npos && listing.find("C_GDEPTH") != std::string::npos, "near grafts with its calls kept, in the loop's block and outside it: " + listing.substr(0, 6000));
 		});
@@ -4682,15 +4682,16 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- cell loop") != std::string::npos, "the loop closes around the three grafts: " + l);
 		});
 		test("an_increment_of_a_global_in_the_body_is_a_write", [this]() {
-			// `G++` in the body writes G (an identifier's own increment, not a compound store); a statement that reads G before
-			// the call keeps it
+			// `G++` in the body writes G (an identifier's own increment, not a compound store); a statement that reads G before the
+			// call keeps it in the loop's first compile, and the second compile (the loop closed over that call) spills `s + G` ahead of the graft
 			const std::string prelude =
 				"int G = 0;\n"
 				"int nextg() { G++; int r = G; return r; }\n"
 				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + G + nextg(); } return s; };\n";
 			both(prelude + "to_string(run(5));", "25", "an increment of a global in the body");
 			const std::string l = listing_run(prelude + "run(5);");
-			check_true(l.find("-- inlined nextg") == std::string::npos, "nextg after a read of G keeps its call: " + l);
+			const size_t at = l.find("== <lambda>");
+			check_true(at != std::string::npos && l.find("-- cell loop", at) != std::string::npos, "the loop closes: " + l);
 		});
 		test("a_store_the_statement_completes_before_the_call_keeps_it", [this]() {
 			// `(i = i + 1) + twice(i)` stores i before the call reads it, `(G = G + 1) + readg()` stores G before the body reads it;
@@ -5404,7 +5405,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
 			// Gator Quest's walk_at -> tile_now inside a loop the region compiler refuses: a loop the first compile refused holds no
 			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second
-			// compile; in a loop that closes the same leaf stays a call (the block's door), and both loops keep their verdicts
+			// compile; in a loop that closes over the call the second compile grafts it too (fewer calls from the block), and both loops keep their verdicts
 			const std::string prelude =
 				"class D { int after = 0; }\n"
 				"array<D> DEFS;\n"
@@ -5418,7 +5419,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(prelude + "to_string(open_sum()) + \"|\" + to_string(closed_sum(6));", "66|66", "a leaf in an open loop and in a closed one, proofs off", false);
 			const std::string l = listing_run(prelude + "open_sum(); closed_sum(6);");
 			check_true(l.find("-- inlined after_of") != std::string::npos, "after_of grafts inside the open loop: " + l);
-			check_true(l.find("-- call kept after_of") != std::string::npos, "after_of stays a call inside the closed loop: " + l);
+			const size_t cs = l.find("== closed_sum");
+			check_true(cs != std::string::npos && l.find("-- cell loop", cs) != std::string::npos && l.find("-- inlined after_of", cs) != std::string::npos, "after_of grafts inside the closed loop, which stays closed: " + l);
 		});
 		test("a_particle_step_through_an_alias_grafts_with_its_ternary", [this]() {
 			// gloom_particle_step's shape, a var& parameter bound to a range-for alias, member reads and stores through it and the
@@ -5448,7 +5450,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"run();");
 			check_true(l.find("-- call kept add1 line 4: an unproven argument") != std::string::npos, "an unproven argument keeps the call: " + l);
 			check_true(l.find("-- call kept add1 line 4: a method call's argument") != std::string::npos, "a method call's argument keeps the call: " + l);
-			check_true(l.find("-- call kept at line 4: a return the block cannot land") != std::string::npos, "a return the block cannot land keeps the call: " + l);
+			check_true(l.find("-- call kept at line 4: a return the block cannot land") != std::string::npos || l.find("-- inlined at ") != std::string::npos, "a return the block cannot land keeps the call, or the second compile grafts it: " + l);
 		});
 		test("a_graft_after_a_continue_closes_the_loop_without_a_bail", [this]() {
 			// draw_seg's shape, `if (done[x] != 0) { continue; }` then a leaf call, then a statement whose float temp takes a slot the

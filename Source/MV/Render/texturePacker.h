@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <limits>
 #include <string>
+#include <optional>
+#include <array>
 
 #include "boxaabb.h"
 #include "points.h"
@@ -81,6 +83,9 @@ namespace MV {
 		Render::Device* device() const { return renderer ? renderer->device() : nullptr; }
 
 		void consolidate(const std::string &a_fileName, SharedTextures *a_shared);
+
+		// Premultiplied RGBA8, composited on the CPU so every machine writes identical bytes; nullopt when a shape is not a file texture at 1:1 scale.
+		std::optional<std::vector<uint8_t>> premultipliedComposite(Size<int> &a_canvasSize) const;
 
 		std::string identifier() const{
 			return id;

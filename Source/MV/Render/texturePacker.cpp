@@ -272,8 +272,55 @@ namespace MV{
 		}
 	}
 
+	std::optional<std::vector<uint8_t>> TexturePack::premultipliedComposite(Size<int> &a_canvasSize) const {
+		a_canvasSize = {static_cast<int>(roundUpPowerOfTwo(contentExtent.width)), static_cast<int>(roundUpPowerOfTwo(contentExtent.height))};
+		auto toByte = [](PointPrecision a_channel) {return static_cast<uint8_t>(std::lround(std::clamp(a_channel, 0.0f, 1.0f) * 255.0f));};
+		const std::array<uint8_t, 4> backgroundPixel {toByte(background.R), toByte(background.G), toByte(background.B), toByte(background.A)};
+		std::vector<uint8_t> result(static_cast<size_t>(a_canvasSize.width) * a_canvasSize.height * 4);
+		for (size_t i = 0; i < result.size(); i += 4) {
+			std::copy(backgroundPixel.begin(), backgroundPixel.end(), result.begin() + i);
+		}
+		for (auto&& shape : shapes) {
+			auto fileTexture = std::dynamic_pointer_cast<FileTextureDefinition>(shape.texture);
+			if (!fileTexture) {
+				return std::nullopt;
+			}
+			auto decoded = decodeTextureSurface(fileTexture->fileTextureParameters());
+			if (!decoded) {
+				return std::nullopt;
+			}
+			auto rgba = OwnedSurface::make(SDL_ConvertSurfaceFormat(decoded->get(), SDL_PIXELFORMAT_RGBA32, 0));
+			SDL_Surface* source = rgba->get();
+			if (!source || source->w != shape.bounds.width() || source->h != shape.bounds.height()) {
+				return std::nullopt;
+			}
+			for (int y = 0; y < source->h; ++y) {
+				const auto* sourceRow = static_cast<const uint8_t*>(source->pixels) + static_cast<size_t>(y) * source->pitch;
+				auto* targetRow = result.data() + (static_cast<size_t>(shape.bounds.minPoint.y + y) * a_canvasSize.width + shape.bounds.minPoint.x) * 4;
+				for (int x = 0; x < source->w; ++x) {
+					const uint8_t* texel = sourceRow + x * 4;
+					uint8_t* pixel = targetRow + x * 4;
+					const unsigned alpha = texel[3];
+					// premultiply.frag's rgb * a, rounded exactly where a GPU's float-to-unorm conversion varies by driver.
+					pixel[0] = static_cast<uint8_t>((texel[0] * alpha + 127) / 255);
+					pixel[1] = static_cast<uint8_t>((texel[1] * alpha + 127) / 255);
+					pixel[2] = static_cast<uint8_t>((texel[2] * alpha + 127) / 255);
+					pixel[3] = static_cast<uint8_t>(alpha);
+				}
+			}
+		}
+		return result;
+	}
+
 	void TexturePack::consolidate(const std::string & a_fileName, SharedTextures* a_shared){
-		fullHandle()->texture()->save(a_fileName);
+		if (!RUNNING_IN_HEADLESS) {
+			Size<int> canvasSize;
+			if (auto composite = premultipliedComposite(canvasSize)) {
+				savePixelsAsPng(a_fileName, *composite, canvasSize);
+			} else {
+				fullHandle()->texture()->save(a_fileName);
+			}
+		}
 		consolidatedTexture = a_shared->file(a_fileName);
 		for(auto&& shape : shapes){
 			shape.texture = nullptr;

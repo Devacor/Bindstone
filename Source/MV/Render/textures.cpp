@@ -5,6 +5,7 @@
 #include <chrono>
 #include <future>
 #include <set>
+#include <cstring>
 #include <SDL_image.h>
 #include "MV/Utility/generalUtility.h"
 #include "MV/Utility/threadPool.hpp"
@@ -941,7 +942,33 @@ namespace MV {
 		glBindFramebuffer(GL_FRAMEBUFFER, prev_fbo);
 		glDeleteFramebuffers(1, &fbo);
 
-		SDL_Surface *surf = SDL_CreateRGBSurfaceFrom(&pixels[0], a_width, a_height, 32, a_width * 4, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+		savePixelsAsPng(a_fileName, pixels, Size<int>(static_cast<int>(a_width), static_cast<int>(a_height)));
+	}
+
+	bool pngHoldsPixels(const std::string &a_fileName, const std::vector<uint8_t> &a_pixels, const Size<int> &a_size) {
+		auto existing = OwnedSurface::make(IMG_Load(a_fileName.c_str()));
+		if (!existing->get()) {
+			return false;
+		}
+		auto rgba = OwnedSurface::make(SDL_ConvertSurfaceFormat(existing->get(), SDL_PIXELFORMAT_RGBA32, 0));
+		SDL_Surface* surface = rgba->get();
+		if (!surface || surface->w != a_size.width || surface->h != a_size.height) {
+			return false;
+		}
+		const size_t rowBytes = static_cast<size_t>(a_size.width) * 4;
+		for (int y = 0; y < a_size.height; ++y) {
+			if (std::memcmp(static_cast<const uint8_t*>(surface->pixels) + static_cast<size_t>(y) * surface->pitch, a_pixels.data() + y * rowBytes, rowBytes) != 0) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	void savePixelsAsPng(const std::string &a_fileName, const std::vector<uint8_t> &a_pixels, const Size<int> &a_size) {
+		if (pngHoldsPixels(a_fileName, a_pixels, a_size)) {
+			return;
+		}
+		SDL_Surface *surf = SDL_CreateRGBSurfaceFrom(const_cast<uint8_t*>(a_pixels.data()), a_size.width, a_size.height, 32, a_size.width * 4, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
 		IMG_SavePNG(surf, a_fileName.c_str());
 		SDL_FreeSurface(surf);
 	}

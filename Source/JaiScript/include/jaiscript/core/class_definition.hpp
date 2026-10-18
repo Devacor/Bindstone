@@ -5,6 +5,7 @@
 
 #include "engine.hpp"
 #include "native_cast.hpp"
+#include "script_extensible.hpp"
 #include <jaiscript/detail/fault_injection.hpp>
 #include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/math_values.hpp>
@@ -1049,6 +1050,15 @@ public:
     // Chain-aware (this class + script parents + cpp base): does ANY resolvable user
     // method with this name exist? Used to let a user class method WIN over a same-named
     // builtin handle method. Cheap: no symbolizer / no throw.
+    // A script class of the chain (this one or a script ancestor) defines a method of the name: it answers before the C++ base's
+    bool script_chain_defines_method(uint64_t id) const {
+        if (!is_script_class()) { return false; }
+        if (methods_.find(id) != methods_.end() && auto_accessor_ids_.find(id) == auto_accessor_ids_.end()) { return true; }
+        for (const auto& parent : parent_classes_) {
+            if (parent && parent->script_chain_defines_method(id)) { return true; }
+        }
+        return false;
+    }
     bool defines_method(uint64_t id) const {
         if (methods_.find(id) != methods_.end()) { return true; }
         for (const auto& parent : parent_classes_) {
@@ -1538,13 +1548,16 @@ public:
         void (*own)(void* object, const std::shared_ptr<class_instance>& layer) = nullptr;
         void (*detach)(void* object) = nullptr;
         std::shared_ptr<class_instance> (*read)(const void* object) = nullptr;
+        const script_extensible* (*slot)(const void* object) = nullptr;
     };
     void set_script_slot_hooks(const script_slot_hooks& hooks) { script_slot_hooks_ = hooks; }
     const script_slot_hooks* slot_hooks() const { return script_slot_hooks_.attach ? &script_slot_hooks_ : nullptr; }
-    // Set once an object of this C++ class has been extended: only then does member
-    // resolution on a plain wrapper of the class consult the object's slot (a wrapper made
-    // before the extend still resolves to the layer). Definitions never extended pay nothing.
-    void note_extended() { if (!extended_ever_) { extended_ever_ = true; restamp_native_methods(); } }
+    // A plain wrapper's object that carries a script layer: the layer is the object's identity, so the handle re-points to it.
+    // Asked of the object itself (its slot), never of the class's history: extending one object changes nothing class-wide.
+    bool wrapped_object_has_layer(const class_instance& inst) const;
+    // Set once an object of this C++ class has been extended; only the static checker reads it (a later-checked script may
+    // reach layer members through the class's static type)
+    void note_extended() { extended_ever_ = true; }
     bool extended_ever() const { return extended_ever_; }
 
     // Nearest C++ base anywhere up the script parent chain — the class an instance's
@@ -2753,7 +2766,7 @@ inline slot_class_view resolve_slot_class(const script_value& v, engine* eng) {
         view.instance = std::static_pointer_cast<class_instance>(holder->data);
         if (view.instance) {
             view.def = view.instance->get_class_definition();
-            if (view.def && !view.def->is_script_class() && view.def->extended_ever()) {
+            if (view.def && view.def->wrapped_object_has_layer(*view.instance)) {
                 if (auto hooks = view.def->slot_hooks()) {
                     auto layer = hooks->read(view.instance->cpp_object_pointer());
                     if (layer && layer != view.instance && layer->get_engine() == eng) {
@@ -3769,6 +3782,12 @@ inline checked_result<script_value> class_definition::enforce_static_write(uint6
         return std::move(value);
     }
     return detail::declared_slot_write(it->second, [&] { return get_static_field_ptr(id); }, std::move(value), engine_, id, this, true);
+}
+
+inline bool class_definition::wrapped_object_has_layer(const class_instance& inst) const {
+    if (!script_slot_hooks_.slot || is_script_class()) { return false; }
+    const void* object = inst.cpp_object_pointer();
+    return object && script_slot_hooks_.slot(object)->has_script_layer();
 }
 
 inline void class_instance::note_script_layer_owner(const script_value& value) {

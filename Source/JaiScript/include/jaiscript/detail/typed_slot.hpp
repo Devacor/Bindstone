@@ -35,7 +35,7 @@ namespace jai::detail {
                 // KEEP BYTE-PARALLEL with the backends' object_to_bool_via_method (class to_bool memo)
                 auto view = resolve_slot_class(v, eng);
                 bool truthy = true;
-                if (view.def && !((view.def->is_script_class() || !view.def->extended_ever()) && !view.def->may_define_to_bool())) {
+                if (view.def && view.def->may_define_to_bool()) {
                     script_value method = view.def->get_method(eng->get_symbolizer()->intern("to_bool"), false);
                     if (!method.is_null() && !method.is_invalid() && method.is_function()) {
                         script_value bound = make_bound_method(v, method);

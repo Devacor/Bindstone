@@ -153,6 +153,8 @@ namespace jai::vm {
         mutable uint64_t mic_epoch = 0;
         mutable script_value mic_method{std::monostate{}, nullptr};
         mutable const script_method_dispatch* mic_dispatch = nullptr;
+        // a bare sibling call of the receiver's C++ base method (mic_dispatch null, mic_method the host method): its direct lane
+        mutable detail::host_method_hit mic_native;
         mutable std::shared_ptr<function_decl> mic_resolved;
         mutable bool mic_static = false;
         mutable bool mic_field_free = false;   // no field in the class chain is named like the method
@@ -164,9 +166,9 @@ namespace jai::vm {
         // Host native-lane memo (class_definition::native_entry) for one receiver class, null entry included: validated on
         // (class identity, native_stamp, field_shape_epoch); a hit still asks the instance for a field of the method's name
         mutable const class_definition* nat_cd = nullptr;
-        mutable uint64_t nat_stamp = 0;
+        mutable uint64_t nat_stamp = 0;   // a host class's native_stamp; a script layer's method_epoch
         mutable uint64_t nat_shape = 0;
-        mutable const void* nat_entry = nullptr;
+        mutable detail::host_method_hit nat_hit;   // the entry (null: no lane) and the receiver layout it was measured under
         mutable bool nat_field_free = false;
         std::vector<uint32_t> staged_argument_slots;   // immutable owned temps released if this call is abandoned before invocation
         // op_new: the class name's symbol, interned when the site compiles
@@ -712,6 +714,14 @@ namespace jai::vm {
             detail::host_member_hit host;       // slot UINT32_MAX on a bound C++ class: the member's in-place lane, when it has one
         };
         mutable std::vector<member_ic_entry> member_ic;
+        // A bare name in a method that reads a C++ member of the receiver, by env cache slot (ip * 3 + operand): the receiver
+        // class, its method epoch and the member's lane. Sized on the first such read.
+        struct bare_host_entry {
+            const class_definition* cd = nullptr;
+            uint64_t epoch = 0;
+            detail::host_member_hit hit;
+        };
+        mutable std::vector<bare_host_entry> bare_host_ic;
         // Compile-time sticky-method-scope gate: true = no op parks per-call state in the
         // scope env or captures its identity beyond the call (closures/refs/try/scopes/env
         // decls), so a method body may run in ONE persistent per-dispatch method env

@@ -5724,7 +5724,17 @@ namespace {
 void reclass_in_place(engine& eng, const std::shared_ptr<class_instance>& instance,
                       const std::shared_ptr<class_definition>& script_def) {
     std::vector<std::pair<uint64_t, script_value>> carried;
-    instance->for_each_field([&](uint64_t id, const script_value& value) { carried.emplace_back(id, value); });
+    // a C++ property's placeholder is no script state: the object holds the property, and a script field the new class declares
+    // under its name keeps its initializer
+    const class_definition* old_def = instance->get_class_definition();
+    instance->for_each_field([&](uint64_t id, const script_value& value) {
+        if (old_def && old_def->is_cpp_class()) { return; }
+        if (old_def) {
+            const uint32_t slot = old_def->field_slot(id);
+            if (slot != class_definition::k_no_field_slot && old_def->slot_is_cpp_property(slot)) { return; }
+        }
+        carried.emplace_back(id, value);
+    });
     instance->reclass(script_def);
     for (const auto& [id, default_value] : script_def->get_all_field_defaults()) {
         if (!instance->has_field_value(id)) { instance->set_field(id, default_value); }

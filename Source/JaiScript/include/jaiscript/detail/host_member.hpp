@@ -22,13 +22,30 @@ struct host_member_lane {
 	void* (*locate)(const host_member_lane& lane, const script_value& receiver) = nullptr;
 };
 
-// A located member for one receiver layout: the member sits at stored pointer + delta while the receiver's C++
-// object is held under the same registered type and, for a polymorphic one, has the same dynamic type (vptr)
+inline constexpr int32_t k_no_slot_check = INT32_MIN;
+
+// One receiver layout: the receiver's C++ object held under the same registered type and, for a polymorphic one, with the
+// same dynamic type (vptr). A plain wrapper of a script-extensible type also requires the object's slot to hold no layer
+// (slot_offset from the stored pointer): an object that gained one answers through its layer.
+struct host_receiver_layout {
+	uint64_t stored_type = UINT64_MAX;
+	const void* vptr = nullptr;
+	int32_t slot_offset = k_no_slot_check;
+};
+
+// A located member for one receiver layout: the member sits at stored pointer + delta
 struct host_member_hit {
 	const host_member_lane* lane = nullptr;
 	std::ptrdiff_t delta = 0;
-	uint64_t stored_type = UINT64_MAX;
-	const void* vptr = nullptr;
+	host_receiver_layout layout;
+};
+
+// A bound method's direct lane (a class_definition::native_entry) for one receiver layout: the object the method was
+// bound on sits at stored pointer + delta
+struct host_method_hit {
+	const void* entry = nullptr;
+	std::ptrdiff_t delta = 0;
+	host_receiver_layout layout;
 };
 
 } // namespace jai::detail

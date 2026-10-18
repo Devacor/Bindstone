@@ -205,6 +205,34 @@ public:
         Point::point_count = 0;
     }
     
+    // LaneSchemaOwner bound with two methods, and objects the host makes and keeps: held() a LaneSchemaOwner,
+    // held_shadow() a LaneSchemaShadow handed over as its base
+    static std::shared_ptr<engine> layer_engine(std::shared_ptr<std::vector<std::shared_ptr<LaneSchemaOwner>>> keep) {
+        auto eng = make_engine();
+        jai::stdlib::register_all(*eng);
+        dynamic_binder<LaneSchemaOwner>(*eng, "LaneSchemaOwner")
+            .constructor<>()
+            .method("d0", [](LaneSchemaOwner& self) -> int64_t { return self.depth.get(); })
+            .method("bump", [](LaneSchemaOwner& self, int64_t by) -> int64_t { self.depth = self.depth.get() + static_cast<int>(by); return self.depth.get(); })
+            .auto_bind()
+            .build();
+        dynamic_binder<LaneSchemaShadow>(*eng, "LaneSchemaShadow")
+            .constructor<>()
+            .base_class<LaneSchemaOwner>()
+            .auto_bind()
+            .build();
+        jai::engine* raw = eng.get();
+        eng->add_function("held", [raw, keep]() -> script_value {
+            keep->push_back(std::make_shared<LaneSchemaOwner>());
+            return raw->make_object(keep->back());
+        });
+        eng->add_function("held_shadow", [raw, keep]() -> script_value {
+            keep->push_back(std::make_shared<LaneSchemaShadow>());
+            return raw->make_object(keep->back());
+        });
+        return eng;
+    }
+
     void forge_tests() override {
         // A bound member reads and writes in place once its site is warm (the first pass fills, the rest take the lane):
         // every pass must give what the accessors give, and a store the lane does not take keeps the setter's text
@@ -421,6 +449,166 @@ public:
                 int r3 = read_depth(a);
                 int r4 = read_depth(a);
                 to_string(r1) + "," + to_string(r2) + "," + to_string(r3) + "," + to_string(r4);
+            )").as_string();
+            check_eq(std::string("3,3,1000,1000"), out);
+        });
+
+        // An extended object and a constructed hybrid read, write and call their C++ base's members at warm sites, from outside
+        // and as bare names in their own methods, and the host sees every write
+        test("layer_lanes_serve_extended_objects_and_hybrids", [this]() {
+            auto keep = std::make_shared<std::vector<std::shared_ptr<LaneSchemaOwner>>>();
+            auto eng = layer_engine(keep);
+            auto out = eng->execute(R"(
+                class Ext : LaneSchemaOwner {
+                    int bonus = 2;
+                    int bare_read() { return depth + bonus; }
+                    int bare_call() { return d0() + bump(1); }
+                }
+                var e = held();
+                extend(e, Ext);
+                var h = Ext();
+                function rd(var& x) -> int { return x.depth; }
+                function wr(var& x, int v) { x.depth = v; }
+                function call(var& x) -> int { return x.d0(); }
+                function call1(var& x, int by) -> int { return x.bump(by); }
+                string s = "";
+                for (int i = 0; i < 3; ++i) {
+                    s += to_string(rd(e)) + "," + to_string(rd(h)) + "," + to_string(call(e)) + "," + to_string(call(h)) + "," +
+                         to_string(e.bare_read()) + "," + to_string(h.bare_call()) + "," + to_string(call1(e, 2)) + "|";
+                    wr(e, 10 + i);
+                    wr(h, 20 + i);
+                }
+                s;
+            )").as_string();
+            check_eq(std::string("3,3,3,3,5,7,5|10,20,10,20,12,41,12|11,21,11,21,13,43,13|"), out);
+            check_eq(12, keep->at(0)->depth.get(), "the host object holds the last write");
+        });
+
+        // A layer whose script chain answers the name itself (a field, a _get_ accessor, a method override, here or in a script
+        // parent) never takes the C++ base's lane, at sites warm on a layer that does not
+        test("layer_lanes_yield_to_the_script_chain", [this]() {
+            auto keep = std::make_shared<std::vector<std::shared_ptr<LaneSchemaOwner>>>();
+            auto eng = layer_engine(keep);
+            auto out = eng->execute(R"(
+                class Plain : LaneSchemaOwner {
+                    int bare_read() { return depth; }
+                    int bare_call() { return d0(); }
+                }
+                class Fielded : Plain { int depth = 500; }
+                class Accessed : Plain { int _get_depth() override { return 600; } }
+                class Overridden : Plain { int d0() override { return 700; } }
+                class Mid : Plain { int _get_depth() override { return 800; } int d0() override { return 801; } }
+                class Below : Mid {}
+                function rd(var& x) -> int { return x.depth; }
+                function call(var& x) -> int { return x.d0(); }
+                var a = held(); extend(a, Plain);
+                var b = held(); extend(b, Fielded);
+                var c = held(); extend(c, Accessed);
+                var d = held(); extend(d, Overridden);
+                var e = held(); extend(e, Below);
+                function row(var& o) -> string {
+                    return to_string(rd(o)) + "," + to_string(call(o)) + "," + to_string(o.bare_read()) + "," + to_string(o.bare_call()) + ";";
+                }
+                string s = "";
+                for (int round = 0; round < 2; ++round) {
+                    s += row(a) + row(b) + row(c) + row(d) + row(e) + "|";
+                }
+                s;
+            )").as_string();
+            const std::string round = "3,3,3,3;500,3,500,3;600,3,600,3;3,700,3,700;800,801,800,801;|";
+            check_eq(round + round, out);
+        });
+
+        // A bare name in a method, warm on a layer whose script field shadows the C++ property, reads the property itself on a
+        // layer without that field (a placeholder slot is no cell)
+        test("a_bare_member_site_warm_on_a_shadowing_field_reads_the_property_elsewhere", [this]() {
+            auto keep = std::make_shared<std::vector<std::shared_ptr<LaneSchemaOwner>>>();
+            auto eng = layer_engine(keep);
+            eng->execute(R"(
+                class Plain : LaneSchemaOwner {
+                    int bare_read() { return depth; }
+                    int bare_call() { return d0(); }
+                }
+                class Fielded : Plain { int depth = 500; }
+                class Accessed : Plain { int _get_depth() override { return 600; } }
+                function rd(var& x) -> int { return x.depth; }
+                function call(var& x) -> int { return x.d0(); }
+                var a = held(); extend(a, Plain);
+                var b = held(); extend(b, Fielded);
+                function row(var& o) -> string { return to_string(o.bare_read()); }
+            )");
+            std::string r;
+            for (const char* q : {"a.bare_read();", "b.bare_read();", "row(a);", "row(b);"}) {
+                try { auto v = eng->execute(q); r += v.is_null() ? std::string("null") : v.is_string() ? v.as_string() : std::to_string(v.as_int()); } catch (const std::exception& e) { r += std::string("E:") + e.what(); }
+                r += ";";
+            }
+            check_eq(std::string("3;500;3;500;"), r);
+        });
+
+        // A reload that gives the layer's class an override, or takes it away, turns a warm site with it
+        test("layer_lanes_follow_a_reload_of_the_layer_class", [this]() {
+            auto keep = std::make_shared<std::vector<std::shared_ptr<LaneSchemaOwner>>>();
+            auto eng = layer_engine(keep);
+            eng->execute(R"(
+                class Ext : LaneSchemaOwner { int bare() { return depth + d0(); } }
+                var e = held();
+                extend(e, Ext);
+                function rd(var& x) -> int { return x.depth; }
+                function call(var& x) -> int { return x.d0(); }
+                function all() -> string { return to_string(rd(e)) + "," + to_string(call(e)) + "," + to_string(e.bare()); }
+            )");
+            check_eq(std::string("3,3,6"), eng->execute("all();").as_string());
+            check_eq(std::string("3,3,6"), eng->execute("all();").as_string());
+            eng->execute("class Ext : LaneSchemaOwner { int _get_depth() override { return 40; } int d0() override { return 50; } int bare() { return depth + d0(); } }");
+            check_eq(std::string("40,50,90"), eng->execute("all();").as_string());
+            eng->execute("class Ext : LaneSchemaOwner { int bare() { return depth + d0(); } }");
+            check_eq(std::string("3,3,6"), eng->execute("all();").as_string());
+        });
+
+        // A warm layer site whose layer was retired (its object died, it was detached, or it moved to another engine) reports the
+        // catalogued text, never a stale address
+        test("layer_lanes_miss_on_a_retired_layer", [this]() {
+            const std::string text = "Script layer 'Ext' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object";
+            for (int how = 0; how < 3; ++how) {
+                auto keep = std::make_shared<std::vector<std::shared_ptr<LaneSchemaOwner>>>();
+                auto eng = layer_engine(keep);
+                auto other = layer_engine(keep);
+                const char* source = R"(
+                    class Ext : LaneSchemaOwner { int bare() { return depth; } int bare_call() { return d0(); } }
+                    function rd(var& x) -> int { return x.depth; }
+                    function call(var& x) -> int { return x.d0(); }
+                )";
+                eng->execute(source);
+                other->execute(source);
+                eng->execute("var e = held(); extend(e, Ext); int warm = 0; for (int i = 0; i < 3; ++i) { warm += rd(e) + call(e) + e.bare() + e.bare_call(); }");
+                std::shared_ptr<LaneSchemaOwner> object = keep->back();
+                if (how == 0) { keep->clear(); object.reset(); }
+                if (how == 1) { check_false(eng->script_layer_detach(object).empty(), "detach returns the fields"); }
+                if (how == 2) { (void)other->extend(object, "Ext"); }
+                for (const char* probe : {"rd(e);", "call(e);", "e.bare();", "e.bare_call();"}) {
+                    std::string message;
+                    try { eng->execute(probe); } catch (const std::exception& error) { message = error.what(); }
+                    check_eq(text, message, std::string("retire ") + std::to_string(how) + " through " + probe);
+                }
+            }
+        });
+
+        // A plain wrapper of an object that gained a layer through another handle re-points to the layer for methods too
+        test("host_method_lane_yields_to_a_layer_added_through_another_handle", [this]() {
+            auto keep = std::make_shared<std::vector<std::shared_ptr<LaneSchemaOwner>>>();
+            auto eng = layer_engine(keep);
+            auto shared = std::make_shared<LaneSchemaOwner>();
+            jai::engine* raw = eng.get();
+            eng->add_function("same", [raw, shared]() -> script_value { return raw->make_object(shared); });
+            auto out = eng->execute(R"(
+                class Over : LaneSchemaOwner { int d0() override { return 1000; } }
+                shared_ptr<LaneSchemaOwner> a = same();
+                shared_ptr<LaneSchemaOwner> b = same();
+                function call(var& x) -> int { return x.d0(); }
+                int r1 = call(a);
+                int r2 = call(a);
+                extend(b, Over);
+                to_string(r1) + "," + to_string(r2) + "," + to_string(call(a)) + "," + to_string(call(a));
             )").as_string();
             check_eq(std::string("3,3,1000,1000"), out);
         });

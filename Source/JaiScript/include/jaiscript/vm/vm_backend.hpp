@@ -961,6 +961,7 @@ namespace jai::vm {
             const std::vector<uint32_t>* staged_slots = nullptr;
             const script_method_dispatch* method = nullptr;   // a bare sibling method of this frame's class: value is its dispatcher, the receiver the frame's this
             const script_function* host_fn = nullptr;   // a host callable the call's site cached at the probe, borrowed: the site's while it caches it, else retired
+            const void* native_entry = nullptr;   // a bare sibling call of the frame receiver's C++ base method: value is the host method, the lane the site's mic_native
             // a host callable held by pin, or borrowed from its site (no fn): invoked with the arguments as they are
             bool native() const { return !fn && (pin || host_fn); }
             const script_function& native_fn() const { return pin ? *pin : *host_fn; }
@@ -1741,6 +1742,11 @@ namespace jai::vm {
                 // defaults/errors exactly as a find_field_value miss would
                 return instance->field_slot_value(entry.this_field_slot);
             }
+            // another class at the site: a C++ property's placeholder is no cell (the object answers, through the member probe)
+            if (const class_definition* cd = instance->get_class_definition()) {
+                const uint32_t slot = cd->field_slot(sym);
+                if (slot != class_definition::k_no_field_slot && cd->slot_is_cpp_property(slot)) { return nullptr; }
+            }
             return instance->find_field_value(sym);
         }
         // Method-IC field-shadow guard: a field named like the method shadows it. The
@@ -1759,21 +1765,14 @@ namespace jai::vm {
             if (site.nat_field_free && !inst.has_user_overflow_fields()) { return false; }
             return inst.has_field(id);
         }
-        // the uncached native-lane lookup (a field of the name is the member the call reads); arms the site's memo
-        const class_definition::native_entry* native_site_miss(const call_site& site, class_definition& cd, const class_instance& inst,
-                                                               uint64_t id, void*& self) {
-            const class_definition::native_entry* entry = cd.extended_ever() ? nullptr : cd.find_native_method(id);
-            if (cached_global_env_) {
-                site.nat_cd = &cd;
-                site.nat_stamp = cd.native_stamp();
-                site.nat_shape = cd.field_shape_epoch();
-                site.nat_entry = entry;
-                site.nat_field_free = !cd.chain_declares_field(id) && cd.field_slot(id) == class_definition::k_no_field_slot;
-            }
-            if (!entry || inst.has_field(id)) { return nullptr; }
-            self = inst.cpp_object_pointer();
-            return entry;
-        }
+        // A bound method's direct lane at a method call site (detail/host_member_access.hpp host_method_fill): the receiver class's
+        // own, or a script layer's C++ base's. True when the lane ran the call (out holds the status); false sends the call on.
+        bool native_site_call(const call_site& site, class_definition& cd, class_instance& inst, const script_value& receiver,
+                              uint64_t id, size_t args_base, size_t argc, op_status& out);
+        // A bare name read in a method that names a C++ member of the receiver: the value through the lane the slot holds for
+        // the receiver's class (never fills), and the fill once the member probe answered cpp_property
+        bool bare_host_read(frame& f, size_t cache_slot, script_value& out);
+        bool bare_host_fill_read(frame& f, size_t cache_slot, uint64_t sym, class_instance* inst, script_value& out);
         void this_field_ic_arm(frame& f, size_t cache_slot, class_instance* instance, uint64_t sym) {
             if (!cached_global_env_ || cache_slot == SIZE_MAX) { return; }
             if (!f.locals || !f.locals->is_method) { return; }

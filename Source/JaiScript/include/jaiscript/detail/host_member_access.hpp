@@ -4,10 +4,12 @@
 
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/detail/host_member.hpp>
+#include <jaiscript/detail/string_symbolizer.hpp>
 
 namespace jai::detail {
 
-// The C++ object a bound class's instance holds: its holder (the registered type it is stored under) and address
+// The C++ object an instance holds (a bound class's wrapper, a constructed hybrid, an extended object's layer): its holder
+// (the registered type it is stored under) and address
 inline const script_value::object_holder* host_member_stored(const class_instance* inst, const void*& stored) {
 	const script_value* native = inst->native();
 	if (!native || native->raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
@@ -17,37 +19,139 @@ inline const script_value::object_holder* host_member_stored(const class_instanc
 	return stored ? holder.get() : nullptr;
 }
 
-// A member's lane for this receiver when it may replace the bound accessors: a pure bound C++ class (no script layer,
-// no access-controlled chain) whose member has a lane the receiver's object reaches. The hit fixes the layout it was
-// measured under: the stored type and, for a polymorphic stored type, the object's vptr. KEEP BYTE-PARALLEL: both
-// backends fill through here and read through host_member_address.
-inline bool host_member_fill(class_definition* cd, const class_instance* inst, uint64_t member_id,
-                             const script_value& receiver, engine* eng, host_member_hit& out) {
-	out = host_member_hit{};
-	if (!cd->is_cpp_class() || cd->extended_ever() || cd->chain_has_nonpublic()) { return false; }
-	const host_member_lane* lane = cd->host_member_lane_for(member_id);
-	if (!lane || !lane->locate) { return false; }
-	const void* stored = nullptr;
+// The instance a method's receiver (this) holds, read raw: null for anything but a class instance
+inline class_instance* host_this_instance(const script_value& self) {
+	const size_t kind = self.raw_storage_index();
+	if (kind != script_value::TYPEID_OBJECT && kind != script_value::TYPEID_SHARED_PTR) { return nullptr; }
+	const auto& holder = const_cast<script_value&>(self).get_object_holder();
+	if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return nullptr; }
+	return static_cast<class_instance*>(holder->data.get());
+}
+
+// A script class of a layer's chain answers the name before its C++ base: a script field (not a C++ property's
+// placeholder), a user _get_/_set_ accessor or a script method of the name
+inline bool host_layer_answers(const class_definition* cd, uint64_t member_id, engine* eng) {
+	const uint32_t slot = cd->field_slot(member_id);
+	if (slot != class_definition::k_no_field_slot && !cd->slot_is_cpp_property(slot)) { return true; }
+	auto* symbols = eng->get_symbolizer();
+	if (cd->script_declares_user_accessor(symbols->get_getter_id_with_view(member_id).first) ||
+	    cd->script_declares_user_accessor(symbols->get_setter_id_with_view(member_id).first)) {
+		return true;
+	}
+	return cd->script_chain_defines_method(member_id);
+}
+
+// The layout an instance's object has now, for a lane bound on `owner`: the stored type, its vptr when polymorphic, the offset
+// to owner's part, and for a plain wrapper of a script-extensible type the offset to its slot. False when the object cannot
+// reach owner's part.
+inline bool host_receiver_measure(const class_definition* cd, const class_instance* inst, const class_definition* owner,
+                                  engine* eng, const void*& stored, std::ptrdiff_t& owner_delta, host_receiver_layout& out) {
 	const script_value::object_holder* holder = host_member_stored(inst, stored);
 	if (!holder || holder->type_id == UINT64_MAX) { return false; }
 	auto stored_def = eng->get_class_definition(holder->type_id);
 	if (!stored_def || !stored_def->is_cpp_class()) { return false; }
+	owner_delta = 0;
+	if (owner && holder->type_id != owner->get_type_id()) {
+		if (!owner->cpp_type()) { return false; }
+		void* adjusted = stored_def->adjust_cpp_pointer(const_cast<void*>(stored), *owner->cpp_type());
+		if (!adjusted) { return false; }
+		owner_delta = static_cast<const char*>(adjusted) - static_cast<const char*>(stored);
+	}
+	out.stored_type = holder->type_id;
+	out.vptr = stored_def->cpp_polymorphic() ? *static_cast<const void* const*>(stored) : nullptr;
+	out.slot_offset = k_no_slot_check;
+	if (!cd->is_script_class()) {
+		if (const auto* hooks = stored_def->slot_hooks(); hooks && hooks->slot) {
+			const std::ptrdiff_t offset = reinterpret_cast<const char*>(hooks->slot(stored)) - static_cast<const char*>(stored);
+			if (offset < INT32_MIN + 1 || offset > INT32_MAX) { return false; }
+			out.slot_offset = static_cast<int32_t>(offset);
+		}
+	}
+	return true;
+}
+
+// The receiver's object when it still has the layout: the instance is no retired layer, the stored type and vptr match,
+// and a plain wrapper's object carries no layer. Null otherwise.
+inline const char* host_receiver_object(const class_instance* inst, const host_receiver_layout& layout) {
+	if (inst->script_layer_retired()) { return nullptr; }
+	const void* stored = nullptr;
+	const script_value::object_holder* holder = host_member_stored(inst, stored);
+	if (!holder || holder->type_id != layout.stored_type) { return nullptr; }
+	if (layout.vptr && *static_cast<const void* const*>(stored) != layout.vptr) { return nullptr; }
+	const char* object = static_cast<const char*>(stored);
+	if (layout.slot_offset != k_no_slot_check &&
+	    reinterpret_cast<const script_extensible*>(object + layout.slot_offset)->has_script_layer()) {
+		return nullptr;
+	}
+	return object;
+}
+
+// A member's lane for this receiver when it may replace the bound accessors: a bound C++ class's wrapper, or a layer (an
+// extended object, a constructed hybrid) whose script chain does not answer the name itself, on an all-public chain, whose
+// member has a lane the receiver's object reaches. KEEP BYTE-PARALLEL: both backends fill through here and read through
+// host_member_address.
+inline bool host_member_fill(class_definition* cd, const class_instance* inst, uint64_t member_id,
+                             const script_value& receiver, engine* eng, host_member_hit& out) {
+	out = host_member_hit{};
+	if (cd->chain_has_nonpublic()) { return false; }
+	if (cd->is_script_class()) {
+		if (inst->script_layer_retired() || host_layer_answers(cd, member_id, eng)) { return false; }
+	} else if (!cd->is_cpp_class()) {
+		return false;
+	}
+	const host_member_lane* lane = cd->host_member_lane_for(member_id);
+	if (!lane || !lane->locate) { return false; }
+	const void* stored = nullptr;
+	std::ptrdiff_t owner_delta = 0;
+	host_receiver_layout layout;
+	if (!host_receiver_measure(cd, inst, nullptr, eng, stored, owner_delta, layout)) { return false; }
+	if (layout.slot_offset != k_no_slot_check &&
+	    reinterpret_cast<const script_extensible*>(static_cast<const char*>(stored) + layout.slot_offset)->has_script_layer()) {
+		return false;
+	}
 	void* address = lane->locate(*lane, receiver);
 	if (!address) { return false; }
 	out.lane = lane;
 	out.delta = static_cast<const char*>(address) - static_cast<const char*>(stored);
-	out.stored_type = holder->type_id;
-	out.vptr = stored_def->cpp_polymorphic() ? *static_cast<const void* const*>(stored) : nullptr;
+	out.layout = layout;
 	return true;
 }
 
 // The member's address when the receiver's object still has the layout the hit was measured under, else null
 inline void* host_member_address(const class_instance* inst, const host_member_hit& hit) {
+	const char* object = host_receiver_object(inst, hit.layout);
+	return object ? const_cast<char*>(object) + hit.delta : nullptr;
+}
+
+// A bound method's direct lane for this receiver: the receiver class's own (a bound C++ class's wrapper), or for a layer
+// whose script chain defines no method of the name, its C++ base's, reached at the base's offset in the stored object
+inline bool host_method_fill(class_definition* cd, const class_instance* inst, uint64_t method_id, engine* eng,
+                             host_method_hit& out) {
+	out = host_method_hit{};
+	const class_definition* owner = cd;
+	std::shared_ptr<class_definition> base;
+	if (cd->is_script_class()) {
+		if (inst->script_layer_retired() || cd->chain_has_nonpublic() || cd->script_chain_defines_method(method_id)) { return false; }
+		base = cd->find_cpp_base_class();
+		if (!base) { return false; }
+		owner = base.get();
+	} else if (!cd->is_cpp_class()) {
+		return false;
+	}
+	const class_definition::native_entry* entry = owner->find_native_method(method_id);
+	if (!entry) { return false; }
 	const void* stored = nullptr;
-	const script_value::object_holder* holder = host_member_stored(inst, stored);
-	if (!holder || holder->type_id != hit.stored_type) { return nullptr; }
-	if (hit.vptr && *static_cast<const void* const*>(stored) != hit.vptr) { return nullptr; }
-	return const_cast<char*>(static_cast<const char*>(stored)) + hit.delta;
+	host_receiver_layout layout;
+	if (!host_receiver_measure(cd, inst, owner, eng, stored, out.delta, layout)) { return false; }
+	out.entry = entry;
+	out.layout = layout;
+	return true;
+}
+
+// The object the method runs on when the receiver still has the layout the hit was measured under, else null
+inline void* host_method_self(const class_instance* inst, const host_method_hit& hit) {
+	const char* object = host_receiver_object(inst, hit.layout);
+	return object ? const_cast<char*>(object) + hit.delta : nullptr;
 }
 
 } // namespace jai::detail

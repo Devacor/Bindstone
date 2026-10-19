@@ -3,6 +3,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include "MV/Network/network.h"
+#include "MV/Network/tlsAsio.h"
 #include "MV/Network/download.h"
 #include "MV/Network/email.h"
 #include "tls_test_pki.hpp"
@@ -48,7 +49,7 @@ private:
 };
 
 std::shared_ptr<MV::Server> makeServer(const MV::TlsConfig& a_tls, std::shared_ptr<Record> a_record, const MV::MessageLimits& a_limits = {}) {
-	return std::make_shared<MV::Server>(asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), 0), a_tls, [a_record](const std::shared_ptr<MV::Connection>& a_connection) {
+	return std::make_shared<MV::Server>("127.0.0.1", uint16_t{0}, a_tls, [a_record](const std::shared_ptr<MV::Connection>& a_connection) {
 		return std::make_unique<EchoState>(a_connection, a_record);
 	}, a_limits);
 }
@@ -124,7 +125,7 @@ struct RawTlsPeer {
 
 	asio::error_code send(const std::string& a_content) {
 		asio::error_code result;
-		asio::write(stream, MV::NetworkMessage::make(a_content)->wire(), result);
+		asio::write(stream, asio::buffer(MV::NetworkMessage::make(a_content)->wire()), result);
 		return result;
 	}
 
@@ -413,7 +414,7 @@ public:
 			});
 			PlainPeer peer(server->port());
 			auto plaintext = MV::NetworkMessage::make("LoginRequest password=hunter2");
-			asio::write(peer.socket, plaintext->wire());
+			asio::write(peer.socket, asio::buffer(plaintext->wire()));
 			auto start = std::chrono::steady_clock::now();
 			peer.waitUntilClosed();
 			auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
@@ -488,11 +489,11 @@ public:
 			{
 				auto log = std::make_shared<HttpsLog>();
 				OneShotServer server(fakeHttps(good, log));
-				MV::HttpRequest request(MV::Url("https://localhost:" + std::to_string(server.port) + "/file.txt"));
-				request.trustedCaFile = pki.caFile;
-				auto download = MV::DownloadRequest::make(request);
-				check_true(download->success(), "a certificate for localhost downloads from localhost: " + download->response().errorMessage);
-				check_eq(std::string("hello"), download->response().body);
+				MV::DownloadOptions options;
+				options.trustedCaFile = pki.caFile;
+				auto result = MV::downloadBlocking(MV::Url("https://localhost:" + std::to_string(server.port) + "/file.txt"), options);
+				check_true(result.ok(), "a certificate for localhost downloads from localhost: " + result.errorMessage);
+				check_eq(std::string("hello"), result.response.body);
 			}
 			{
 				auto log = std::make_shared<HttpsLog>();
@@ -501,20 +502,20 @@ public:
 				SSL_CTX_set_tlsext_servername_callback(sni->native_handle(), recordServerName);
 				SSL_CTX_set_tlsext_servername_arg(sni->native_handle(), &serverName);
 				OneShotServer server(fakeHttps(sni, log));
-				MV::HttpRequest request(MV::Url("https://localhost:" + std::to_string(server.port) + "/"));
-				request.trustedCaFile = pki.caFile;
-				MV::DownloadRequest::make(request);
+				MV::DownloadOptions options;
+				options.trustedCaFile = pki.caFile;
+				MV::downloadBlocking(MV::Url("https://localhost:" + std::to_string(server.port) + "/"), options);
 				server.finish();
 				check_eq(std::string("localhost"), serverName, "the client names the host it wants (SNI)");
 			}
 			for (auto&& [host, names] : std::vector<std::pair<std::string, std::string>> {{"localhost", "DNS:other.example"}, {"127.0.0.1", "DNS:localhost"}}) {
 				auto log = std::make_shared<HttpsLog>();
 				OneShotServer server(fakeHttps(MV::makeTlsServerContext(pki.serverConfig(pki.issue("wrong host", names))), log));
-				MV::HttpRequest request(MV::Url("https://" + host + ":" + std::to_string(server.port) + "/secret"));
-				request.trustedCaFile = pki.caFile;
-				auto download = MV::DownloadRequest::make(request);
-				check_true(!download->success(), host + " with a certificate for " + names + " fails");
-				check_true(contains(download->response().errorMessage, "mismatch"), "on the name: " + download->response().errorMessage);
+				MV::DownloadOptions options;
+				options.trustedCaFile = pki.caFile;
+				auto result = MV::downloadBlocking(MV::Url("https://" + host + ":" + std::to_string(server.port) + "/secret"), options);
+				check_true(result.error == MV::DownloadError::TLS, host + " with a certificate for " + names + " fails its TLS");
+				check_true(contains(result.errorMessage, "mismatch"), "on the name: " + result.errorMessage);
 				server.finish();
 				std::lock_guard<std::mutex> guard(log->lock);
 				check_true(log->request.empty(), "and sends no request");
@@ -529,9 +530,9 @@ public:
 				auto log = std::make_shared<SmtpLog>();
 				OneShotServer server(fakeSmtp(MV::makeTlsServerContext(pki.serverConfig(pki.localServer())), log));
 				auto email = MV::Email::make("localhost", std::to_string(server.port), {"test-user", "test-password"});
-				email->trustedCaFile(pki.caFile)->send(addresses, "Welcome", "Hello.");
+				auto result = email->trustedCaFile(pki.caFile)->sendBlocking(addresses, "Welcome", "Hello.");
 				server.finish();
-				check_true(email->succeeded(), "a certificate for the SMTP host sends: " + email->lastResponse().message);
+				check_true(result.ok(), "a certificate for the SMTP host sends: " + result.errorMessage);
 				std::lock_guard<std::mutex> guard(log->lock);
 				check_true(log->tlsEstablished && log->secureCommands.size() == 7, "every command after STARTTLS went over TLS");
 				check_true(contains(log->secureCommands[1], "AUTH LOGIN"), "including the login");
@@ -544,10 +545,10 @@ public:
 				auto log = std::make_shared<SmtpLog>();
 				OneShotServer server(fakeSmtp(context, log));
 				auto email = MV::Email::make("localhost", std::to_string(server.port), {"test-user", "test-password"});
-				email->trustedCaFile(pki.caFile)->send(addresses, "Welcome", "Hello.");
+				auto result = email->trustedCaFile(pki.caFile)->sendBlocking(addresses, "Welcome", "Hello.");
 				server.finish();
-				check_true(email->failed(), what + ": the send fails");
-				check_true(contains(email->lastResponse().message, "certificate verify failed"), what + ": saying why: " + email->lastResponse().message);
+				check_true(result.error == MV::EmailError::TLS, what + ": the send fails its TLS");
+				check_true(contains(result.errorMessage, "certificate verify failed"), what + ": saying why: " + result.errorMessage);
 				std::lock_guard<std::mutex> guard(log->lock);
 				check_true(log->secureCommands.empty(), what + ": no credentials or mail reach it");
 			}

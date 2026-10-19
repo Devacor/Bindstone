@@ -560,16 +560,22 @@ namespace MV {
 			execute();
 		}
 
+		// Runs what was queued before the call; an action may queue more, which the next execute() runs.
 		void execute() {
-			std::lock_guard<std::mutex> guard(lock);
-			for (auto&& action : actions) {
+			std::vector<std::function<void()>> running;
+			{
+				std::lock_guard<std::mutex> guard(lock);
+				running.swap(actions);
+			}
+			for (auto&& action : running) {
 				try {
 					action();
 				} catch (std::exception &e) {
-					onException(e);
+					if (onException) {
+						onException(e);
+					}
 				}
 			}
-			actions.clear();
 		}
 
 		CallbackQueue& then(std::function<void()> a_action) {

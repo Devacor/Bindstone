@@ -4,10 +4,15 @@ Networking helpers including client/server wrappers and HTTP utilities.
 
 Key files:
 - `network.h` / `network.cpp` – connection and client/server abstractions.
-- `tls.h` / `tls.cpp` – TLS contexts with the settings below, peer verification, certificate identity.
+- `tls.h` / `tls.cpp` – TLS configuration and certificate identity; `tlsAsio.h` – the contexts with the settings below
+  and peer verification.
+- `networkContext.h` – an io_context run by a `jai::thread_pool`, shared by downloads and email.
 - `networkObject.h` – `NetworkObject` / `NetworkObjectPool`: the synchronized object state a match replicates.
 - `webServer.h` / `webServer.cpp` – simple web server implementation.
-- `download.*`, `url.*`, `email.h` – HTTP download, URL and email utilities.
+- `download.*`, `url.*`, `email.*` – HTTP download, URL and email utilities.
+
+No header here includes asio: each class keeps its asio state in an `Asio*` struct its `.cpp` defines, and
+`tlsAsio.h` / `networkContextAsio.h` are included only from `.cpp` files.
 
 Used by both game and lobby servers as well as the client.
 

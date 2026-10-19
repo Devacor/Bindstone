@@ -40,7 +40,7 @@ GameServer::GameServer(Managers &a_managers, const std::string &a_identity, unsi
 	manager(a_managers),
 	ourIdentity(a_identity),
 	gameData(a_managers, true),
-	ourUserServer(std::make_shared<MV::Server>(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), a_port), GameCertificates::gameServer(a_identity),
+	ourUserServer(std::make_shared<MV::Server>("0.0.0.0", a_port, GameCertificates::gameServer(a_identity),
 		[this](const std::shared_ptr<MV::Connection> &a_connection) {
 			return std::make_unique<GameUserConnectionState>(a_connection, *this);
 		})) {

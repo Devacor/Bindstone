@@ -66,10 +66,19 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\download.cpp">
       <Filter>MV\Network</Filter>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\email.cpp">
+      <Filter>MV\Network</Filter>
+    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\network.cpp">
       <Filter>MV\Network</Filter>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkContext.cpp">
+      <Filter>MV\Network</Filter>
+    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\url.cpp">
+      <Filter>MV\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\tls.cpp">
       <Filter>MV\Network</Filter>
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Physics\collider.cpp">
@@ -210,7 +219,19 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkObject.h">
       <Filter>MV\Network</Filter>
     </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkContext.h">
+      <Filter>MV\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkContextAsio.h">
+      <Filter>MV\Network</Filter>
+    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\package.h">
+      <Filter>MV\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\tlsAsio.h">
+      <Filter>MV\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\tls.h">
       <Filter>MV\Network</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\url.h">

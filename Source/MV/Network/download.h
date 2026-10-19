@@ -1,35 +1,31 @@
 #ifndef _MV_DOWNLOAD_H_
 #define _MV_DOWNLOAD_H_
 
-#include <string>
-#include <iostream>
+#include <chrono>
+#include <cstddef>
+#include <functional>
 #include <istream>
-#include <ostream>
-#include <fstream>
-#include <algorithm>
 #include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <ostream>
 #include <set>
 #include <string>
+#include <vector>
 #include "MV/Network/url.h"
-#include "MV/Network/tls.h"
-#include <asio.hpp>
-#include <asio/ssl.hpp>
-#include "MV/Utility/log.h"
-#include <jaiscript/thread_pool.hpp>
-
-
-#include <asio/ssl/context.hpp>
-
+#include "MV/Network/networkContext.h"
+#include "MV/Utility/generalUtility.h"
 
 namespace MV {
 	struct HttpResponse {
-		//canonical response data for returning a result.
-		std::string version;
+		std::string version = "HTTP/1.1";
 		int status = 0;
 		std::string message;
 
+		// Keys are lower case.
 		std::map<std::string, std::string> headerValues;
-		std::string body; //populated by DownloadRequest on success.
+		std::string body;
 
 		static HttpResponse make200(const std::string &a_content = "", const std::string& a_contentType = "text/html;charset=utf-8") {
 			HttpResponse result;
@@ -66,50 +62,34 @@ namespace MV {
 		void setContent(const std::string& a_body, const std::string& a_contentType = "text/html;charset=utf-8") {
 			headerValues["content-type"] = a_contentType;
 			body = a_body;
-			expectedBodyLength = body.size();
 		}
 
-		//populated by the process of running a DownloadRequest.
-		size_t expectedBodyLength = 0;
-		bool headerComplete = false;
-		bool readAllData = false;
-		std::string errorMessage;
-
-		std::vector<std::string> bounces;
-		
-		bool success() const {
-			//implicitly complete and status will always be that way if readAllData is true, but for clarity, these are the conditions for success.
-			return headerComplete && status == 200 && readAllData;
+		bool ok() const {
+			return status >= 200 && status < 300;
 		}
 
-		HttpResponse() {
-		}
+		// The status line and headers, replacing any read before; framing the body is the reader's job.
+		void readHeader(std::istream& a_stream);
 
-		HttpResponse(std::istream& response_stream) {
-			readHeader(response_stream);
-		}
-
-		void readHeader(std::istream& response_stream);
-
-		void writeResponse(std::ostream& response_stream) const;
+		void writeResponse(std::ostream& a_stream) const;
 		std::string to_string() const;
 	};
 
 	struct HttpRequest {
 		enum class Type { GET, POST };
-		HttpRequest() :
-			type(Type::GET) {
+
+		HttpRequest() {
 		}
 
 		HttpRequest(const MV::Url& a_url) :
-			url(a_url),
-			type(Type::GET) {
+			url(a_url) {
 		}
 
 		HttpRequest(const MV::Url& a_url, const std::map<std::string, std::string>& a_postParams) :
 			HttpRequest(a_url, MV::Url::makeQueryString(a_postParams, ""), "application/x-www-form-urlencoded") {
 		}
-		//a_postContentType could be text/plain or any other valid Content-Type.
+
+		// a_postContentType is any Content-Type: text/plain, application/octet-stream, ...
 		HttpRequest(const MV::Url& a_url, const std::string& a_postBody, const std::string& a_postContentType = "application/json") :
 			url(a_url),
 			type(Type::POST),
@@ -117,273 +97,178 @@ namespace MV {
 			postContentType(a_postContentType) {
 		}
 
-		HttpRequest(const HttpRequest&) = default;
-		HttpRequest(HttpRequest&&) = default;
-		HttpRequest& operator=(const HttpRequest&) = default;
-
-		inline void writeRequest(std::ostream& a_os) const {
+		void writeRequest(std::ostream& a_os) const {
 			writeRequest(a_os, url);
 		}
 		void writeRequest(std::ostream& a_os, const MV::Url& a_url) const;
 
 		void readHeaderFromStream(std::istream& a_is);
 
-		std::map<std::string, std::string> parsePostParameters() const; //from post body
-		std::map<std::string, std::string> parseGetParameters() const; //from url
+		std::map<std::string, std::string> parsePostParameters() const;
+		std::map<std::string, std::string> parseGetParameters() const;
 
 		MV::Url url;
-		Type type;
+		Type type = Type::GET;
 		std::string version = "HTTP/1.1";
 		std::string postBody;
 		std::string postContentType;
-		// https only: trust just this CA (PEM) instead of the system's root certificates.
-		std::string trustedCaFile;
 
 		size_t expectedBodyLength = 0;
 		std::map<std::string, std::string> headerValues;
 	};
 
-	std::ostream& operator<<(std::ostream& os, const HttpResponse& obj);
-	std::istream& operator>>(std::istream& a_is, HttpResponse& a_obj);
+	std::ostream& operator<<(std::ostream& a_os, const HttpResponse& a_response);
+	std::istream& operator>>(std::istream& a_is, HttpResponse& a_response);
+
+	enum class DownloadError { NONE, CANCELLED, TIMED_OUT, START, RESOLVE, CONNECT, TLS, WRITE, READ, MALFORMED_BODY, TRUNCATED_BODY, BODY_TOO_LARGE, TOO_MANY_REDIRECTS };
+
+	struct DownloadResult {
+		DownloadError error = DownloadError::NONE;
+		// What went wrong, for logs; empty on success.
+		std::string errorMessage;
+		// The last response, after any redirects; status 0 when none arrived.
+		HttpResponse response;
+		// Every URL that answered with a redirect, in order.
+		std::vector<MV::Url> redirects;
+		MV::Url finalUrl;
+
+		// A whole response arrived, whatever its status.
+		bool received() const {
+			return error == DownloadError::NONE;
+		}
+
+		// A whole 2xx response arrived.
+		bool ok() const {
+			return received() && response.ok();
+		}
+	};
+
+	struct DownloadOptions {
+		// The whole download, redirects included, fails with TIMED_OUT when it runs longer.
+		std::chrono::milliseconds timeout {std::chrono::seconds(60)};
+		// A longer body fails with BODY_TOO_LARGE; 0 accepts any length.
+		size_t maxBodyBytes = 0;
+		// https only: trust just this CA (PEM) instead of the system's root certificates.
+		std::string trustedCaFile;
+		// (total bytes, fraction arrived) after each read, once the length is known.
+		std::function<void(size_t, float)> onProgress;
+		// When set, onProgress and the completion callback are queued here and run when its owner calls execute();
+		// otherwise they run on the thread running the download.
+		std::shared_ptr<CallbackQueue> callbackQueue;
+	};
 
 	class DownloadRequest : public std::enable_shared_from_this<DownloadRequest> {
+		friend class DownloadPool;
+		friend DownloadResult downloadBlocking(const HttpRequest& a_request, DownloadOptions a_options);
 	public:
-		//Single threaded blocking method. Fire this from a non-ui thread if you use it at all.
-		static std::shared_ptr<DownloadRequest> make(const HttpRequest& a_target) {
-			auto result = std::shared_ptr<DownloadRequest>(new DownloadRequest(a_target));
-			result->ioService = std::make_shared<asio::io_context>();
-			result->start();
-			result->ioService->run();
-			return result;
-		}
+		struct AsioDownload;
+		using CompletionCallback = std::function<void(const std::shared_ptr<DownloadRequest>&)>;
 
-		static std::shared_ptr<DownloadRequest> make(const MV::Url& a_url) {
-			return make(HttpRequest{ a_url });
-		}
+		// Runs on a_context's threads; a_onComplete runs once, when the download succeeds or fails.
+		static std::shared_ptr<DownloadRequest> make(const std::shared_ptr<NetworkContext>& a_context, const HttpRequest& a_request, CompletionCallback a_onComplete, DownloadOptions a_options = {});
 
-		//onComplete is called on success or error at the end of the download.
-		//onProgress(totalBytes, percentBytesDownloaded) is called after each chunk arrives.
-		static std::shared_ptr<DownloadRequest> make(const std::shared_ptr<asio::io_context>& a_ioService, const HttpRequest& a_target, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void(size_t, float)> a_onProgress = {}, bool a_delayStart = false) {
-			auto result = std::shared_ptr<DownloadRequest>(new DownloadRequest(a_target));
-			result->onComplete = a_onComplete;
-			result->onProgress = a_onProgress;
-			result->ioService = a_ioService;
-			if (!a_delayStart) {
-				result->start();
-			}
-			return result;
-		}
-
-		static std::shared_ptr<DownloadRequest> make(const std::shared_ptr<asio::io_context>& a_ioService, const MV::Url& a_url, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void(size_t, float)> a_onProgress = {}, bool a_delayStart = false) {
-			return make(a_ioService, HttpRequest{ a_url }, a_onComplete, a_onProgress, a_delayStart);
-		}
-		
-		bool success() const {
-			return headerData.success();
-		}
-
-		HttpResponse& response() {
-			return headerData;
-		}
-
-		MV::Url finalUrl() {
-			return currentUrl;
-		}
-
-		MV::Url inputUrl() {
-			return target.url;
-		}
-		
-		void cancel() {
-			std::scoped_lock<std::recursive_mutex> lock(criticalPath);
-			if(!onCompleteCalled){
-				cancelled = true;
-			}
-		}
-		
-		//automatically called unless initiated with delayStart
-		void start();
-	private:
-		DownloadRequest(const HttpRequest &a_target) :
-			target(a_target),
-			streamOutput(std::make_shared<std::ostringstream >(std::ofstream::out | std::ofstream::binary)) {
-		}
 		DownloadRequest(const DownloadRequest&) = delete;
 		DownloadRequest& operator=(const DownloadRequest&) = delete;
-		
-		bool handleCancellation(){
-			if(cancelled){
-				handleDownloadFailure("Download cancelled.");
-				return true;
-			}
-			return false;
+		~DownloadRequest();
+
+		// Fails the download with CANCELLED unless it already finished; safe from any thread.
+		void cancel();
+
+		bool complete() const;
+
+		// Read it once complete() is true, or from the completion callback.
+		const DownloadResult& result() const {
+			return ourResult;
 		}
-		
-		void handleDownloadFailure(const asio::error_code& err, const std::string &a_errorMessage);
-		void handleDownloadFailure(const std::string &a_errorMessage);
-		
+
+		const HttpRequest& request() const {
+			return ourRequest;
+		}
+
+	private:
+		DownloadRequest(const HttpRequest& a_request, DownloadOptions a_options);
+
+		void start();
+
+		bool handleCancellation();
+		void fail(DownloadError a_error, const std::error_code& a_err, const std::string& a_what);
+		void fail(DownloadError a_error, const std::string& a_message);
+
 		void initializeSocket();
 		void closeSockets();
 		void callOnComplete();
+		void deliver(std::function<void()> a_callback);
 
 		void initiateRequest(const MV::Url& a_url);
 
-		void handleResolve(const asio::error_code& err, asio::ip::tcp::resolver::iterator endpoint_iterator);
-		void handleConnect(const asio::error_code& err, asio::ip::tcp::resolver::iterator endpoint_iterator);
-		void handleWriteRequest(const asio::error_code& err);
-		void handleReadHeaders(const asio::error_code& err);
-		void handleReadContent(const asio::error_code& err);
+		void handleWriteRequest(const std::error_code& a_err);
+		void handleReadHeaders(const std::error_code& a_err);
+		void handleReadContent(const std::error_code& a_err);
 		void initiateReadingMoreContent(size_t a_minimumTransferAmount);
-		void continueReadingContent();
+		void continueReadingContent(bool a_endOfStream);
+		void finishBody();
 
-		bool readResponseToStream() {
-			if (intermediateResponse->size() > 0) {
-				if (intermediateResponse->size() > 1) {
-					(*streamOutput) << &(*intermediateResponse);
-					return true;
-				} else {
-					char input = getResponseChar();
-					if (input != 0) {
-						(*streamOutput) << input;
-						return true;
-					}
-				}
-			}
-			return false;
-		}
+		HttpRequest ourRequest;
+		DownloadOptions options;
+		DownloadResult ourResult;
 
-		char getResponseChar() {
-			if (intermediateResponse->size() == 1) {
-				std::ostringstream result;
-				result << &(*intermediateResponse);
-				return result.str()[0];
-			}
-			return '!';
-		}
-		
-		MV::Url currentUrl;
-		HttpRequest target;
+		std::unique_ptr<AsioDownload> asioDownload;
 
-		std::shared_ptr<asio::io_context> ioService;
-		std::unique_ptr<asio::ip::tcp::resolver> resolver;
-		std::unique_ptr<asio::ip::tcp::socket> socket;
-		struct SSLSocket {
-			SSLSocket(asio::io_context &a_ioService, const std::shared_ptr<asio::ssl::context> &a_context) :
-				context(a_context),
-				socket(a_ioService, *a_context) {
-			}
+		std::string bodyBytes;
+		size_t expectedBodyBytes = 0;
+		bool chunkedBody = false;
 
-			std::shared_ptr<asio::ssl::context> context;
-			TlsStream socket;
-		};
-		std::shared_ptr<SSLSocket> sslSocket;
-		
-		asio::ip::tcp* activeSocket = nullptr;
+		CompletionCallback onComplete;
+		// Runs on the network thread even when onComplete is queued, so the pool forgets a finished download at once.
+		CompletionCallback releaseFromPool;
 
-		std::unique_ptr<std::istream> responseStream;
+		static constexpr size_t ChunkSize = 64 * 1024;
 
-		std::unique_ptr<asio::streambuf> request;
-		std::unique_ptr<asio::streambuf> intermediateResponse;
-
-		std::shared_ptr<std::ostringstream> streamOutput;
-
-		HttpResponse headerData;
-
-		std::function<void(std::shared_ptr<DownloadRequest>)> onComplete;
-		std::function<void (size_t, float)> onProgress;
-		
-		static constexpr size_t ChunkSize = 256;
-		size_t amountReadSoFar = 0;
-		
-		//Mutex is only necessary for the cancellation path. Otherwise it runs in an implicit callback strand.
-		std::recursive_mutex criticalPath;
+		// Every handler takes the lock: a context may run a request's handlers on different threads, and cancel() comes from any thread.
+		mutable std::recursive_mutex criticalPath;
 		bool cancelled = false;
 		bool onCompleteCalled = false;
 	};
 
-	//Very plain blocking method for downloading a string, returns "" on error.
-	std::string DownloadString(const MV::Url& a_url);
+	// Runs the download on the calling thread and returns when it finishes.
+	DownloadResult downloadBlocking(const HttpRequest& a_request, DownloadOptions a_options = {});
 
-	std::string GetLocalIpV4();
+	// The body of a 2xx response, or nullopt; blocks like downloadBlocking.
+	std::optional<std::string> downloadStringBlocking(const MV::Url& a_url);
 
+	std::string localIpV4();
+
+	// Destroying the pool cancels the downloads still running on it.
 	class DownloadPool : public std::enable_shared_from_this<DownloadPool> {
 	public:
-		~DownloadPool(){
-			cancelAll();
-			ioService->stop();
-		}
-		static std::shared_ptr<DownloadPool> make(){
-			return std::shared_ptr<DownloadPool>(new DownloadPool());
-		}
-		static std::shared_ptr<DownloadPool> make(size_t a_threads){
+		// 0 threads = jai::thread_pool's default worker count
+		static std::shared_ptr<DownloadPool> make(size_t a_threads = 0) {
 			return std::shared_ptr<DownloadPool>(new DownloadPool(a_threads));
 		}
-		
-		std::shared_ptr<asio::io_context> service() {
-			return ioService;
-		}
-		
-		std::shared_ptr<DownloadRequest> make(const HttpRequest& a_target, std::function<void (std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void (size_t, float)> a_onProgress = {}) {
-			auto self = shared_from_this();
-			auto newRequest = DownloadRequest::make(ioService, a_target, [this, self, a_onComplete](std::shared_ptr<DownloadRequest> a_requestSelf){
-				{
-					std::scoped_lock<std::mutex> lock(activeRequestsMutex);
-					activeRequests.erase(a_requestSelf);
-				}
-				a_onComplete(a_requestSelf);
-			}, a_onProgress, true);
-			
-			{
-				std::scoped_lock<std::mutex> lock(activeRequestsMutex);
-				activeRequests.insert(newRequest);
-			}
-			//Order matters here, we don't want to start a download request only to have it finish before we've even registered it with this class.
-			newRequest->start();
-			
-			return newRequest;
-		}
 
-		std::shared_ptr<DownloadRequest> make(const MV::Url& a_url, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void(size_t, float)> a_onProgress = {}) {
-			return make(HttpRequest{ a_url }, a_onComplete, a_onProgress);
-		}
-		
-		void cancelAll(){
-			std::scoped_lock<std::mutex> lock(activeRequestsMutex);
-			for(auto&& item : activeRequests){
-				item->cancel();
-			}
-			activeRequests.clear();
-		}
-	private:
-		DownloadPool() :
-			pool(),
-			ioService(std::make_shared<asio::io_context>()),
-			keepIoServiceRunning(*ioService){
-			initialize();
-		}
-		DownloadPool(size_t a_threads) :
-			pool(a_threads),
-			ioService(std::make_shared<asio::io_context>()),
-			keepIoServiceRunning(*ioService){
-			initialize();
-		}
 		DownloadPool(const DownloadPool&) = delete;
 		DownloadPool& operator=(const DownloadPool&) = delete;
-		
-		void initialize(){
-			initializeThreadPool(pool);
-			for(size_t i = 0;i < pool.worker_count();++i){
-				pool.submit([ioService=ioService](){
-					ioService->run();
-				});
-			}
+		~DownloadPool() {
+			cancelAll();
 		}
-		
-		jai::thread_pool pool;
-		std::shared_ptr<asio::io_context> ioService;
-		asio::io_service::work keepIoServiceRunning;
+
+		const std::shared_ptr<NetworkContext>& context() const {
+			return ourContext;
+		}
+
+		std::shared_ptr<DownloadRequest> download(const HttpRequest& a_request, DownloadRequest::CompletionCallback a_onComplete, DownloadOptions a_options = {});
+
+		void cancelAll();
+
+	private:
+		explicit DownloadPool(size_t a_threads) :
+			ourContext(std::make_shared<NetworkContext>(a_threads)) {
+		}
+
+		std::shared_ptr<NetworkContext> ourContext;
 		std::mutex activeRequestsMutex;
 		std::set<std::shared_ptr<DownloadRequest>> activeRequests;
 	};
 }
+
 #endif

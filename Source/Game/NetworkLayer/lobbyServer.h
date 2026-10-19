@@ -335,8 +335,7 @@ public:
 			MV::warning("Email disabled (no ServerConfig/smtp.config), skipped: ", a_title);
 			return;
 		}
-		auto emailer = MV::Email::make(emailService, smtpConfig[0], smtpConfig[1], { smtpConfig[2], smtpConfig[3] });
-		emailer->send(a_addresses, a_title, a_message);
+		MV::Email::make(smtpConfig[0], smtpConfig[1], { smtpConfig[2], smtpConfig[3] })->send(emailContext, a_addresses, a_title, a_message);
 	}
 
 	MatchQueue& ranked() {
@@ -374,9 +373,8 @@ private:
 	std::shared_ptr<MV::Server> ourGameServer;
 
 	jai::thread_pool threadPool;
-	std::shared_ptr<asio::io_context> emailService = std::make_shared<asio::io_context>();
-	asio::executor_work_guard<asio::io_context::executor_type> emailServiceWork = asio::make_work_guard(*emailService);
-	jai::thread_pool emailPool;
+	// One thread: the SMTP conversation has not been tried on more
+	std::shared_ptr<MV::NetworkContext> emailContext = std::make_shared<MV::NetworkContext>(1);
 	jai::thread_pool dbPool;
 
 	MatchQueue rankedQueue;

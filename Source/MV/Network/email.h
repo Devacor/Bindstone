@@ -1,53 +1,44 @@
 #ifndef _MV_EMAIL_H_
 #define _MV_EMAIL_H_
 
-#include <iostream>
-#include <string>
+#include <algorithm>
+#include <functional>
 #include <memory>
-#include "MV/Utility/stringUtility.h"
-#include "MV/Network/tls.h"
-#include <jaiscript/serialization/convenience.hpp>
-#include <asio.hpp>
-#include <asio/ssl.hpp>
-#include <asio/ssl/stream.hpp>
+#include <mutex>
+#include <string>
+#include <system_error>
+#include <vector>
+#include "MV/Network/networkContext.h"
+#include "MV/Utility/generalUtility.h"
 
 namespace MV {
-	
+
 	struct SmtpResponse {
 		int status = 0;
 		std::string message;
 		std::vector<std::string> lines;
+	};
 
-		SmtpResponse() {
-		}
+	enum class EmailError { NONE, START, RESOLVE, CONNECT, TLS, WRITE, READ, REJECTED };
 
-		SmtpResponse(std::istream& response_stream) {
-			read(response_stream);
-		}
+	struct EmailResult {
+		EmailError error = EmailError::NONE;
+		// What went wrong, for logs; empty on success.
+		std::string errorMessage;
+		// The server's last reply.
+		SmtpResponse lastReply;
 
-		void read(std::istream& response_stream) {
-			lines.clear();
-			message.clear();
-			std::string status_code;
-			response_stream >> status_code;
-			try {
-				status = std::stoi(status_code);
-			} catch (...) {
-				status = 0;
-			}
-
-			getline_platform_agnostic(response_stream, message);
-			info(status_code, message);
-			std::string line;
-			while (getline_platform_agnostic(response_stream, line) && !line.empty()) {
-				lines.push_back(line);
-				info("L: ", line);
-			}
+		bool ok() const {
+			return error == EmailError::NONE;
 		}
 	};
 
+	// One plain-text message to one recipient over STARTTLS with AUTH LOGIN: no MIME parts, no CC or BCC.
 	class Email : public std::enable_shared_from_this<Email> {
 	public:
+		struct AsioSmtp;
+		using CompletionCallback = std::function<void(const std::shared_ptr<Email>&)>;
+
 		struct Credentials {
 			Credentials(const std::string &a_name, const std::string &a_password) :
 				name(a_name),
@@ -96,17 +87,18 @@ namespace MV {
 			}
 		};
 
-		static std::shared_ptr<Email> make(const std::string &a_host, const std::string &a_port, const Credentials &a_credentials) {
-			auto result = std::shared_ptr<Email>(new Email(a_host, a_port, a_credentials));
-			return result;
-		}
+		static std::shared_ptr<Email> make(const std::string &a_host, const std::string &a_port, const Credentials &a_credentials);
 
-		static std::shared_ptr<Email> make(const std::shared_ptr<asio::io_context> &a_suppliedService, const std::string &a_host, const std::string &a_port, const Credentials &a_credentials, MainThreadCallback a_onFinish = MainThreadCallback()) {
-			auto result = std::shared_ptr<Email>(new Email(a_host, a_port, a_credentials));
-			result->onFinish = a_onFinish;
-			result->ioService = a_suppliedService;
-			return result;
-		}
+		Email(const Email&) = delete;
+		Email& operator=(const Email&) = delete;
+		~Email();
+
+		// Runs the SMTP conversation on the calling thread and returns its outcome.
+		EmailResult sendBlocking(const Addresses &a_addresses, const std::string &a_title, const std::string &a_message);
+
+		// Returns at once: the conversation runs on a_context's threads, and a_onComplete runs once it ends, queued on
+		// a_callbackQueue when one is given. An Email sends one message.
+		void send(const std::shared_ptr<NetworkContext> &a_context, const Addresses &a_addresses, const std::string &a_title, const std::string &a_message, CompletionCallback a_onComplete = {}, std::shared_ptr<CallbackQueue> a_callbackQueue = {});
 
 		// Trust only this CA (PEM) for the server's certificate instead of the system's root certificates.
 		std::shared_ptr<Email> trustedCaFile(const std::string &a_caFile) {
@@ -114,284 +106,58 @@ namespace MV {
 			return shared_from_this();
 		}
 
-		void send(const Addresses &a_addresses, const std::string &a_title, const std::string &a_message) {
-			addresses = a_addresses;
-			try {
-				bool needToCallRun = initializeSocket();
-				storeMessageString(a_title, a_message);
-				initiateConnection();
-				if (needToCallRun) {
-					ioService->run();
-				}
-			} catch (...) {
-				alertFailure();
-			}
-		}
-
-		int failed() {
-			std::lock_guard<std::mutex> guard(lock);
-			return done && !success;
-		}
-
-		SmtpResponse lastResponse() {
-			return activeResponse;
-		}
-
-		bool succeeded() {
-			std::lock_guard<std::mutex> guard(lock);
-			return done && success;
-		}
-
-		bool complete() {
+		bool complete() const {
 			std::lock_guard<std::mutex> guard(lock);
 			return done;
 		}
 
-	private:
-		Email(const std::string& a_host, const std::string &a_port, const Credentials &a_credentials) :
-			credentials(a_credentials),
-			host(a_host),
-			port(a_port){
-		}
-
-		//returns true if we own our own ioService created
-		bool initializeSocket() {
-			bool created = false;
-			if (!ioService) {
-				ioService = std::make_shared<asio::io_context>();
-				created = true;
-			}
-
-			resolver = std::make_unique<asio::ip::tcp::resolver>(*ioService);
-			tlsContext = makePublicTlsClientContext(ourTrustedCaFile);
-			socket = std::make_unique<TlsStream>(*ioService, *tlsContext);
-
-			return created;
-		}
-
-		void storeMessageString(const std::string &a_title, const std::string &a_message) {
-			std::stringstream output;
-			output << "Subject: " << a_title << "\r\n";
-			output << "From: " << (addresses.fromName.empty() ? "" : ("\"" + addresses.fromName + "\"")) << " <" << addresses.from << ">\r\n";
-			output << "To: " << (addresses.toName.empty() ? "" : ("\"" + addresses.toName + "\"")) << " <" << addresses.to << ">\r\n";
-			output << "\r\n";
-			output << a_message;
-			output << "\r\n" << "." << "\r\n";
-			message = output.str();
-		}
-
-		std::string domainFromEmail(const std::string &a_email) {
-			auto atLocation = a_email.find('@');
-			if (atLocation < (a_email.size() + 1) && atLocation > 0) {
-				return a_email.substr(atLocation + 1, a_email.size() - (atLocation + 1));
-			}
-			return "";
-		}
-
-		void initiateConnection() {
-			request = std::make_unique<asio::streambuf>();
-			response = std::make_unique<asio::streambuf>();
-			using asio::ip::tcp;
-
-			tcp::resolver::query query(host, port);
-			resolver->async_resolve(query, std::bind(&Email::handleResolve, shared_from_this(), std::placeholders::_1, std::placeholders::_2));
-		}
-
-		void handleResolve(const asio::error_code& err, asio::ip::tcp::resolver::iterator endpoint_iterator) {
-			if (!err) {
-				// Attempt a connection to the first endpoint in the list. Each endpoint
-				// will be tried until we successfully establish a connection.
-				asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-				socket->lowest_layer().async_connect(endpoint, std::bind(&Email::handleConnect, shared_from_this(), std::placeholders::_1, ++endpoint_iterator));
-			} else {
-				activeResponse.message = err.message();
-				alertFailure();
-			}
-		}
-
-		void handleConnect(const asio::error_code& err, asio::ip::tcp::resolver::iterator endpoint_iterator) {
-			if (!err) {
-				smtpHandshake();
-			} else if (endpoint_iterator != asio::ip::tcp::resolver::iterator()) {
-				// The connection failed. Try the next endpoint in the list.
-				socket->lowest_layer().close();
-				asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-				socket->lowest_layer().async_connect(endpoint, std::bind(&Email::handleConnect, shared_from_this(), std::placeholders::_1, ++endpoint_iterator));
-			} else {
-				activeResponse.message = err.message();
-				alertFailure();
-			}
-		}
-
-		void smtpHandshake() {
-			auto self = shared_from_this();
-			listenForMessageUnsecure({220}, [this, self] {
-				sendInternalUnsecure("EHLO " + domainFromEmail(addresses.from) + "\r\n", {250}, [this, self] {
-					sendInternalUnsecure("STARTTLS\r\n", { 220 }, [this, self] {
-						try {
-							verifyTlsPeerAs(*socket, host);
-						} catch (std::exception &e) {
-							activeResponse.message = e.what();
-							alertFailure();
-							return;
-						}
-						socket->async_handshake(asio::ssl::stream_base::client, [this, self](const asio::error_code& a_err) {
-							if (!a_err) {
-								secureLogin();
-							} else {
-								activeResponse.message = "TLS handshake with " + host + " failed: " + describeTlsFailure(a_err, *socket);
-								error("[email] ", activeResponse.message);
-								alertFailure();
-							}
-						});
-					});
-				});
-			});
-		}
-
-		void secureLogin() {
-			auto self = shared_from_this();
-			sendInternal("EHLO " + domainFromEmail(addresses.from) + "\r\n", {250}, [this, self] {
-				sendInternal("AUTH LOGIN\r\n", { 334 }, [this, self] {
-					sendInternal(jai::base64_encode(credentials.name) + "\r\n", { 334 }, [this, self] {
-						sendInternal(jai::base64_encode(credentials.password) + "\r\n", { 235 }, [this, self] {
-							sendMessageAndQuit();
-						});
-					});
-				});
-			});
-		}
-
-		void sendMessageAndQuit() {
-			auto self = shared_from_this();
-			sendInternal("MAIL FROM:<" + addresses.from + ">\r\n", {250}, [this, self] {
-				sendInternal("RCPT TO:<" + addresses.to + ">\r\n", {250, 251}, [this, self] {
-					sendInternal("DATA\r\n", {354}, [this, self] {
-						sendInternal(message, { 250 }, [this, self] {
-							std::lock_guard<std::mutex> guard(lock);
-							success = true;
-							done = true;
-							onFinish();
-							sendInternal("QUIT\r\n", {}, [this, self] {
-								info("Email Complete [", addresses.from, "] -> [", addresses.to, "]");
-							});
-						});
-					});
-				});
-			});
-		}
-
-		void listenForMessage(std::vector<int> a_validResponses, std::function<void ()> a_callback) {
-			auto self = shared_from_this();
-			asio::async_read_until(*socket, *response, "\r\n", [this, a_validResponses, self, a_callback](const asio::error_code& a_err, size_t a_amount) {
-				if (!a_err) {
-					responseStream = std::make_unique<std::istream>(&(*response));
-					activeResponse.read(*responseStream);
-					if (a_validResponses.empty() || std::find(a_validResponses.begin(), a_validResponses.end(), activeResponse.status) != a_validResponses.end()) {
-						if (a_callback) { a_callback(); }
-					} else if(!a_validResponses.empty()) {
-						alertFailure();
-					}
-				} else {
-					activeResponse.message = a_err.message();
-					alertFailure();
-				}
-			});
-		}
-
-		void alertFailure() {
+		// Final once complete() is true.
+		EmailResult result() const {
 			std::lock_guard<std::mutex> guard(lock);
-			success = false;
-			done = true;
-			onFinish();
+			return ourResult;
 		}
 
-		void sendInternal(const std::string &a_content, std::vector<int> a_validResponses = std::vector<int>(), std::function<void()> a_callback = std::function<void()>()) {
-			auto self = shared_from_this();
-			ioService->post([=] {
-				self; //force capture
-				auto payload = std::make_shared<std::string>(a_content);
-				asio::async_write(*socket, asio::buffer(*payload), [this,a_validResponses,self,a_callback,payload](asio::error_code a_err, size_t a_amount) {
-					if (!a_err) {
-						if (a_callback) {
-							listenForMessage(a_validResponses, a_callback);
-						}
-					} else {
-						activeResponse.message = a_err.message();
-						alertFailure();
-					}
-				});
-			});
-		}
+	private:
+		Email(const std::string& a_host, const std::string &a_port, const Credentials &a_credentials);
 
-		void listenForMessageUnsecure(std::vector<int> a_validResponses, std::function<void()> a_callback) {
-			auto self = shared_from_this();
-			asio::async_read_until(socket->next_layer(), *response, "\r\n", [this, self, a_validResponses, a_callback](const asio::error_code& a_err, size_t a_amount) {
-				if (!a_err) {
-					responseStream = std::make_unique<std::istream>(&(*response));
-					activeResponse.read(*responseStream);
-					if (std::find(a_validResponses.begin(), a_validResponses.end(), activeResponse.status) != a_validResponses.end()) {
-						a_callback();
-					} else if (!a_validResponses.empty()) {
-						alertFailure();
-					}
-				} else {
-					activeResponse.message = a_err.message();
-					alertFailure();
-				}
-			});
-		}
+		void begin(const std::shared_ptr<NetworkContext> &a_context, const Addresses &a_addresses, const std::string &a_title, const std::string &a_message);
+		void storeMessageString(const std::string &a_title, const std::string &a_message);
+		std::string domainFromEmail(const std::string &a_email);
 
-		void sendInternalUnsecure(const std::string &a_content, std::vector<int> a_validResponses = std::vector<int>(), std::function<void()> a_callback = std::function<void()>()) {
-			ioService->post([=] {
-				auto self = shared_from_this();
+		void initiateConnection();
+		void smtpHandshake();
+		void secureLogin();
+		void sendMessageAndQuit();
 
-				auto payload = std::make_shared<std::string>(a_content);
-				asio::async_write(socket->next_layer(), asio::buffer(*payload), [this, a_validResponses, self, a_callback, payload](asio::error_code a_err, size_t a_amount) {
-					if (!a_err) {
-						if (a_callback) {
-							listenForMessageUnsecure(a_validResponses, a_callback);
-						}
-					} else {
-						activeResponse.message = a_err.message();
-						alertFailure();
-					}
-				});
-			});
-		}
+		// Writes a_content and, when a_onReply is set, reads the server's reply; a reply outside a_validResponses fails the send.
+		void command(const std::string &a_content, std::vector<int> a_validResponses, std::function<void()> a_onReply, bool a_secure);
+		void readReply(std::vector<int> a_validResponses, std::function<void()> a_onReply, bool a_secure);
 
-		std::shared_ptr<asio::io_context> ioService;
-		std::unique_ptr<asio::ip::tcp::resolver> resolver;
-		//asio::ip::tcp::socket socket;
+		void succeed();
+		void fail(EmailError a_error, const std::string &a_reason);
+		void fail(EmailError a_error, const std::error_code &a_err, const std::string &a_what);
+		void finish();
 
-		std::shared_ptr<asio::ssl::context> tlsContext;
-		std::unique_ptr<TlsStream> socket;
-		std::string ourTrustedCaFile;
+		std::unique_ptr<AsioSmtp> asioSmtp;
 
-		std::unique_ptr<std::istream> responseStream;
+		mutable std::mutex lock;
 
-		std::unique_ptr<asio::streambuf> request;
-		std::unique_ptr<asio::streambuf> response;
-
-		std::mutex lock;
-
-		bool success = false;
+		bool started = false;
 		bool done = false;
-		std::string errorMessage;
-
-
-
-		SmtpResponse activeResponse;
+		EmailResult ourResult;
+		SmtpResponse pendingReply;
 
 		Addresses addresses;
 		std::string message;
 
 		Credentials credentials;
-		
+
 		std::string host;
 		std::string port;
+		std::string ourTrustedCaFile;
 
-		MainThreadCallback onFinish;
+		CompletionCallback onComplete;
+		std::shared_ptr<CallbackQueue> callbackQueue;
 	};
 
 }

@@ -97,3 +97,8 @@ External/ChaiScript-6.1.0/
 # Visual Studio upgrade log artifact
 UpgradeLog.htm
 drive_*.bmp
+# TLS keys and certificates (Tools/LocalServer/make_certs.py): never tracked
+/Certificates/Tls/
+*.key
+*.p12
+*.pfx

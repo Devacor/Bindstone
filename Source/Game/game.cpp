@@ -62,6 +62,7 @@ Game::Game(Managers& a_managers) :
 	MV::initializeSpineBindings();
 	MV::initializeFilesystem();
 	if (!MV::RUNNING_IN_HEADLESS) {
+		MV::logOpenSslVersion();
 		initializeClientConnection();
 	}
 	initializeWindow();
@@ -71,7 +72,7 @@ void Game::initializeClientConnection() {
 	auto lobbyAddressConfig = MV::fileLines("ServerConfig/lobbyClientAddress.config");
 	std::string lobbyAddress = lobbyAddressConfig.empty() ? "http://localhost:22325" : lobbyAddressConfig[0];
 
-	ourLobbyClient = MV::Client::make(MV::Url{ lobbyAddress }, [=](const std::string &a_message) {
+	ourLobbyClient = MV::Client::make(MV::Url{ lobbyAddress }, GameCertificates::player(), [=](const std::string &a_message) {
 		auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message, gameData.managers().services);
 		value->execute(*this);
 	}, [=](const std::string &a_dcreason) {

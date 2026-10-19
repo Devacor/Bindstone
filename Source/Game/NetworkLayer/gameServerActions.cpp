@@ -24,8 +24,26 @@ static jai::registrar<RequestBuildingUpgrade, MV::Services, jai::bases<NetworkAc
 static jai::registrar<RequestFullGameState, MV::Services, jai::bases<NetworkAction>> _regRequestFullGameState("RequestFullGameState");
 
 #ifdef BINDSTONE_SERVER
+// 22326 is mutual TLS, so the CA vouched for the certificate; it must be a game server's and name the host players are sent to.
 void GameServerAvailable::execute(LobbyGameConnectionState* a_connection) {
-	a_connection->connection()->authenticate();
+	auto connection = a_connection->connection();
+	auto& certificate = connection->peerCertificate();
+	auto host = MV::Url(ourUrl).host();
+	std::string refusal;
+	if (!certificate) {
+		refusal = "it presented no client certificate";
+	} else if (!certificate->commonName.starts_with(GameCertificates::GAME_SERVER_CLIENT_PREFIX)) {
+		refusal = "its certificate (" + certificate->describe() + ") is not a game server's";
+	} else if (!certificate->names(host)) {
+		refusal = "it advertises [" + host + "] but its certificate (" + certificate->describe() + ") does not name that host";
+	}
+	if (!refusal.empty()) {
+		MV::error("Refused game server registration from [", connection->peerAddress(), "]: ", refusal);
+		connection->disconnect();
+		return;
+	}
+	MV::info("Game server [", certificate->commonName.substr(GameCertificates::GAME_SERVER_CLIENT_PREFIX.size()), "] registered from [", connection->peerAddress(), "] for ", ourUrl, ":", ourPort, " (", connection->tlsSession(), ", certificate ", certificate->describe(), ")");
+	connection->authenticate();
 	a_connection->setEndpoint(ourUrl, ourPort);
 }
 

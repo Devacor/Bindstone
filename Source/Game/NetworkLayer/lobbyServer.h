@@ -5,6 +5,7 @@
 #include "MV/Utility/package.h"
 #include "MV/Network/package.h"
 #include "Game/NetworkLayer/package.h"
+#include "Game/NetworkLayer/certificates.h"
 #include "Game/managers.h"
 
 #include "Game/player.h"

@@ -20,6 +20,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\tapDevice.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\download.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\network.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\tls.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\url.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\webServer.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Physics\collider.cpp" />
@@ -120,6 +121,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\network.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkObject.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\package.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\tls.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\url.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\webServer.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Physics\collider.h" />

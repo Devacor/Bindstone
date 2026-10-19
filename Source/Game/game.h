@@ -10,6 +10,7 @@
 #include "Game/Instance/gameInstance.h"
 #include "Game/Interface/interfaceManager.h"
 #include "Game/NetworkLayer/package.h"
+#include "Game/NetworkLayer/certificates.h"
 #include "MV/Network/package.h"
 
 #include <string>
@@ -53,8 +54,8 @@ public:
 	}
 
 	void enterGameServer(const std::string &gameServer, int64_t secret) {
-		std::cout << "Game Found: " << gameServer << " Secret: " << secret << std::endl;
-		ourGameClient = MV::Client::make(MV::Url{ gameServer }, [=](const std::string &a_message) {
+		std::cout << "Game Found: " << gameServer << std::endl;
+		ourGameClient = MV::Client::make(MV::Url{ gameServer }, GameCertificates::player(), [=](const std::string &a_message) {
 			auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message, managers().services);
 			value->execute(*this);
 		}, [=](const std::string &a_dcreason) {

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "archive_impl.hpp"
-#include <jaiscript/detail/math_values.hpp>
 #include <vector>
 #include <cstring>
 #include <algorithm>
@@ -13,10 +12,11 @@ namespace serialization {
 
 class binary_archive_writer : public archive_writer_impl<binary_archive_writer> {
 public:
-    binary_archive_writer() : archive_writer_impl<binary_archive_writer>() {}
+    binary_archive_writer();
     explicit binary_archive_writer(std::vector<uint8_t>& buffer);
-    explicit binary_archive_writer(engine* eng) : archive_writer_impl<binary_archive_writer>(eng) {}
+    explicit binary_archive_writer(engine* eng);
     binary_archive_writer(std::vector<uint8_t>& buffer, engine* eng);
+    ~binary_archive_writer();
 
     static constexpr bool needs_property_keys = true;
     static constexpr bool is_text_format = false;
@@ -132,7 +132,7 @@ public:
 
     explicit binary_archive_reader(const void* data, size_t size, engine* eng);
 
-    ~binary_archive_reader() = default;
+    ~binary_archive_reader();
 
 private:
     // Object state for pre-read property access with offset-based seeking

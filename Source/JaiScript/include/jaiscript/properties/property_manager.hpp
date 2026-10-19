@@ -28,7 +28,8 @@ namespace jai {
 
 	class property_manager {
 	public:
-		property_manager() = default;
+		property_manager();
+		~property_manager();
 
 		property_manager(property_manager&&) = delete;
 		property_manager& operator=(property_manager&&) = delete;
@@ -66,7 +67,7 @@ namespace jai {
 			}
 		}
 
-		inline property_base* get(const std::string& key) const;
+		property_base* get(const std::string& key) const;
 
 		template<typename T>
 		inline property<T>* get(const std::string& key) const;
@@ -81,7 +82,7 @@ namespace jai {
 		template<typename Archive>
 		void load(Archive& ar);
 
-		inline void clone_to_target(property_manager& target) const;
+		void clone_to_target(property_manager& target) const;
 
 	private:
 		std::map<std::string, property_base*> m_properties;
@@ -92,24 +93,6 @@ namespace jai {
 	inline property_base::property_base(property_manager& property_register, std::string name)
 		: property_base(std::move(name)) {
 		property_register.add(this);
-	}
-
-	inline void property_manager::add(property_base* prop) {
-		m_properties[prop->name()] = prop;
-	}
-
-	inline void property_manager::clone_to_target(property_manager& target) const {
-		for (auto& [k, v] : m_properties) {
-			auto it = target.m_properties.find(k);
-			if (it != target.m_properties.end()) {
-				v->clone_to_target(*it->second);
-			}
-		}
-	}
-
-	inline property_base* property_manager::get(const std::string& key) const {
-		auto it = m_properties.find(key);
-		return it != m_properties.end() ? it->second : nullptr;
 	}
 
 	template<typename T>

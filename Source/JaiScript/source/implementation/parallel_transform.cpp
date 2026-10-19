@@ -28,6 +28,7 @@
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
@@ -4081,7 +4082,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			// Starting threads is the engine's cost, not the script's: an oversubscribed host can take seconds, so the
 			// execution budget (the caller's deadline and the workers' armed ones) does not count it
 			const auto built_in = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - build_start);
-			eng.extend_execution_deadline(built_in);
+			eng.time().extend_execution_deadline(built_in);
 			for (size_t k = 0; k < worker_count; ++k) { contexts[k]->backend->extend_execution_deadline(built_in); }
 		}
 		for (size_t k = 1; k < worker_count; ++k) {

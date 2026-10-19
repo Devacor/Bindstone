@@ -1,5 +1,6 @@
 #include <jaiscript/stdlib/time.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/script_namespace.hpp>
@@ -68,7 +69,7 @@ namespace stdlib {
     }
 
     // time:: namespace (docs/site/guide/14-time.html): clocks through the engine's time source
-    // (engine::time_source), stopwatches and calendar dates
+    // (engine_time::source), stopwatches and calendar dates
     void register_time_functions(engine& eng_ref) {
         engine* eng = &eng_ref;
         using R = checked_result<script_value>;
@@ -205,7 +206,7 @@ namespace stdlib {
             return false;
         };
         auto make_date = [](engine* e, const date& d) -> R { return detail::value_converter<date>::to(d, e); };
-        auto wall_ms = [](engine* e) { return time_calendar::floor_div(static_cast<int64_t>(e->wall_now().count()), 1000000); };
+        auto wall_ms = [](engine* e) { return time_calendar::floor_div(static_cast<int64_t>(e->time().wall_now().count()), 1000000); };
         auto zoned_now = [=](engine* e, bool in_utc) -> R {
             date d;
             if (!date::from_unix_ms(wall_ms(e), in_utc, d)) return value_error(e, "time: the current time is outside the supported range");
@@ -226,7 +227,7 @@ namespace stdlib {
         });
         def("unix_time", sig(0, 0, {}, svt::jai_float_type), [=](engine* e, const args_t& a) -> R {
             if (!a.empty()) return count_error("time::unix_time expects no arguments");
-            return script_value(std::chrono::duration<double>(e->wall_now()).count(), e);
+            return script_value(std::chrono::duration<double>(e->time().wall_now()).count(), e);
         });
         def("unix_ms", sig(0, 0, {}, svt::jai_int_type), [=](engine* e, const args_t& a) -> R {
             if (!a.empty()) return count_error("time::unix_ms expects no arguments");
@@ -299,14 +300,14 @@ namespace stdlib {
             if (a.size() != 1) return count_error("time::sleep expects exactly 1 argument (seconds)");
             double seconds = 0.0;
             if (!number(a[0], seconds)) return type_error("time::sleep expects a number of seconds");
-            if (seconds > 0.0) { e->sleep_for(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(seconds > 1e9 ? 1e9 : seconds))); }
+            if (seconds > 0.0) { e->time().sleep_for(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(seconds > 1e9 ? 1e9 : seconds))); }
             return script_value(std::monostate{}, e);
         });
         def("sleep_ms", sig(1, 1, {svt::jai_float_type}, svt::jai_null_type), [=](engine* e, const args_t& a) -> R {
             if (a.size() != 1) return count_error("time::sleep_ms expects exactly 1 argument (milliseconds)");
             double ms = 0.0;
             if (!number(a[0], ms)) return type_error("time::sleep_ms expects a number of milliseconds");
-            if (ms > 0.0) { e->sleep_for(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double, std::milli>(ms > 1e12 ? 1e12 : ms))); }
+            if (ms > 0.0) { e->time().sleep_for(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double, std::milli>(ms > 1e12 ? 1e12 : ms))); }
             return script_value(std::monostate{}, e);
         });
 

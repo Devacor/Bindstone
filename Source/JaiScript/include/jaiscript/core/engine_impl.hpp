@@ -140,7 +140,7 @@ script_value engine::make_object(std::shared_ptr<T> data) {
 
     // Fallback: store as raw C++ object (properties won't work)
     std::string type_name = get_registered_name<T>();
-    auto type_id = get_symbolizer()->intern(type_name);
+    auto type_id = symbolize(type_name);
     return script_value::make_cpp_object(type_name, type_id, std::static_pointer_cast<void>(data), this);
 }
 

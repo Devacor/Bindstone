@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>
 #include <atomic>
@@ -1850,7 +1851,7 @@ public:
                     jai::stdlib::register_all(*eng);
                     eng->add_include_path(dir.string());
                     auto fake = std::make_shared<std::chrono::nanoseconds>(std::chrono::seconds(100));
-                    if (host_clock) { eng->time_source([fake] { return *fake += std::chrono::seconds(1000); }, {}, {}); }
+                    if (host_clock) { eng->time().source([fake] { return *fake += std::chrono::seconds(1000); }, {}, {}); }
                     engine* raw = eng.get();
                     eng->add_function("stats", [raw]() { return static_cast<script_int>(raw->import_stat_count()); });
                     eng->add_function("wait_ms", [](script_int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); });

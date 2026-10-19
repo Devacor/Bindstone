@@ -432,6 +432,34 @@ namespace detail {
 	// A property of a math-adapted type reads and writes as its math kind (schema_binding.cpp)
 	void bind_schema_math_property(engine& a_engine, class_definition& class_def, serialization::class_metadata& metadata,
 		const std::string& prop_name, const math_property_bridge& bridge, const schema_property_access& access);
+
+	// A math property auto_bind defers to build(), where a bound method of the same name takes the spelling instead
+	struct pending_math_property {
+		std::string name;
+		math_property_bridge bridge;
+		schema_property_access access;
+	};
+	void bind_pending_math_properties(engine& a_engine, class_definition& class_def, serialization::class_metadata& metadata,
+		std::vector<pending_math_property>& pending);
+
+	// A getter-only property rejects every store spelling through its setter (the bare, this., obj. and reference-store
+	// landings all funnel to _set_<name>), so the text lives once (schema_binding.cpp)
+	void register_read_only_setter(engine& a_engine, class_definition& class_def, const std::string& name);
+
+	// What every native constructor of a class needs; one type for every class, so constructors share one erased call
+	struct native_constructor_state {
+		std::shared_ptr<class_definition> class_def;
+		std::string class_name;
+		engine* eng;
+	};
+
+	// The address of a bound data member inside its receiver: one erased callable type for every member
+	struct host_member_address {
+		void* (*address)(const void* state, const script_value& receiver) = nullptr;
+		std::shared_ptr<const void> state;
+
+		void* operator()(const script_value& receiver) const { return address(state.get(), receiver); }
+	};
 } // namespace detail
 
 // ============================================================================
@@ -513,7 +541,7 @@ public:
         }
 
         // Intern the class name for fast type comparisons
-        uint64_t type_id = engine.get_symbolizer()->intern(class_name);
+        uint64_t type_id = engine.symbolize(class_name);
 
         // Adopt an auto-registered projection of this type (base_class<B> materializes
         // unregistered property_owner bases under their derived name): the explicit
@@ -589,37 +617,41 @@ public:
 
         // Register the constructor as an overloaded function
         if constexpr (sizeof...(Args) == 0) {
-            // Zero-argument constructor
-            engine* engine_ptr = &engine_;
-            engine_.add_overloaded_function(class_name_, 0, [class_def = class_def_, class_name = class_name_, engine_ptr](const std::vector<script_value>& args) -> script_value {
-                std::shared_ptr<T> cpp_obj;
-                if constexpr (has_engine_constructor<T>) {
-                    cpp_obj = std::make_shared<T>(engine_ptr);
-                } else {
-                    cpp_obj = std::make_shared<T>();
-                }
-                auto instance = detail::make_native_instance(*class_def, class_name, cpp_obj, engine_ptr);
-                return script_value::make_object(class_name, instance, engine_ptr);
-            });
+            engine_.add_overloaded_function(class_name_, 0, detail::host_method_call{ &native_constructor_call<>, constructor_state() });
         } else {
-            engine* engine_ptr = &engine_;
-
-            // A function pointer keeps the Args pack out of the registered lambda (MSVC)
-            using construct_from_script_args = std::shared_ptr<T>(*)(const std::vector<script_value>&, engine*);
-            construct_from_script_args construct_native = [](const std::vector<script_value>& args, engine* eng) -> std::shared_ptr<T> {
-                return dynamic_binder<T>::template createObjectImpl<Args...>(args, std::index_sequence_for<Args...>{}, eng);
-            };
-
-            engine_.add_overloaded_function_with_full_types(class_name_, sizeof...(Args), writeback_tagged<detail::host_writeback_mask<Args...>()>([class_def = class_def_, class_name = class_name_, engine_ptr, construct_native](const std::vector<script_value>& args) -> script_value {
-                auto cpp_obj = construct_native(args, engine_ptr);
-                auto instance = detail::make_native_instance(*class_def, class_name, cpp_obj, engine_ptr);
-                return script_value::make_object(class_name, instance, engine_ptr);
-            }),
-            std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... });
+            engine_.add_overloaded_function_with_full_types(class_name_, sizeof...(Args),
+                writeback_tagged<detail::host_writeback_mask<Args...>()>(detail::host_method_call{ &native_constructor_call<Args...>, constructor_state() }),
+                std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... });
         }
 
         return *this;
     }
+
+private:
+    std::shared_ptr<const void> constructor_state() const {
+        return std::make_shared<const detail::native_constructor_state>(detail::native_constructor_state{ class_def_, class_name_, &engine_ });
+    }
+
+    template<typename... Args>
+    static checked_result<script_value> native_constructor_call(const void* state, const std::vector<script_value>& args) {
+        const detail::native_constructor_state& st = *static_cast<const detail::native_constructor_state*>(state);
+        std::shared_ptr<T> cpp_obj;
+        if constexpr (sizeof...(Args) != 0) {
+            cpp_obj = dynamic_binder<T>::template createObjectImpl<Args...>(args, std::index_sequence_for<Args...>{}, st.eng);
+        } else if constexpr (has_engine_constructor<T>) {
+            cpp_obj = std::make_shared<T>(st.eng);
+        } else {
+            cpp_obj = std::make_shared<T>();
+        }
+        auto instance = detail::make_native_instance(*st.class_def, st.class_name, cpp_obj, st.eng);
+        return script_value::make_object(st.class_name, instance, st.eng);
+    }
+
+    static std::shared_ptr<void> copy_native_object(const void* src) {
+        return std::make_shared<T>(*static_cast<const T*>(src));
+    }
+
+public:
     
     // Build a C++ parameter signature from `Count` tuple elements starting at `Offset` (the offset
     // skips the leading self parameter of a lambda method). Used to register typed overloads.
@@ -993,18 +1025,86 @@ public:
     }
 
 private:
-    // A getter-only property rejects every store spelling through its setter (the bare,
-    // this., obj. and reference-store landings all funnel to _set_<name>), so the text
-    // lives once. field_id is interned here, never on the error path.
-    void register_read_only_setter(const std::string& name) {
-        const uint64_t field_id = engine_.symbolize(name);
-        const uint64_t setter_id = engine_.symbolize("_set_" + name);
-        class_def_->add_method("_set_" + name, [field_id](const std::vector<script_value>&) -> checked_result<script_value> {
-            return checked_result<script_value>(make_error_code(runtime_error_code::invalid_assignment_target),
-                                                "Cannot assign to '{0}': it is read-only", field_id);
-        });
-        class_def_->register_property_setter(field_id, setter_id);
-        class_def_->register_property_read_only(field_id);
+    template<typename P>
+    using property_state = detail::member_call_state<sizeof(P T::*)>;
+
+    template<typename P>
+    static checked_result<script_value> property_get_call(const void* state, const std::vector<script_value>& args) {
+        const property_state<P>& st = *static_cast<const property_state<P>*>(state);
+        if (args.empty()) {
+            throw runtime_error("Property getter called without 'this' object");
+        }
+        const auto member = std::bit_cast<P T::*>(st.method);
+        engine* engine_ptr = st.eng;
+        T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], st.native_type_id);
+
+        // Special handling for std::vector<T> - wrap in bound_cpp_vector for zero-copy access
+        if constexpr (is_specialization_v<P, std::vector>) {
+            using element_type = typename P::value_type;
+            auto wrapper = std::make_shared<bound_cpp_vector<element_type>>(
+                cpp_obj->*member, engine_ptr);
+            return engine_ptr->make_object(wrapper);
+        }
+        else if constexpr (dynamic_binder_validation::is_signal_type<P>::value) {
+            // Typed per-signature bindings (bind_signal_type) take precedence
+            // when present; otherwise the generic "Signal" view serves the
+            // member ceremony-free through the erased connect table.
+            if (engine_ptr->template has_registered_class<P>()) {
+                return convert_reference_with_registry(cpp_obj->*member, engine_ptr);
+            }
+            return detail::make_signal_view(engine_ptr, make_signal_script_ops(cpp_obj->*member));
+        }
+        else if constexpr (std::is_class_v<P> &&
+                           !math_adapted<P> &&
+                           !std::is_same_v<P, std::string> &&
+                           !std::is_same_v<P, script_value> &&
+                           !dynamic_binder_validation::is_std_container<P>::value &&
+                           !dynamic_binder_validation::is_std_function<P>::value &&
+                           !is_specialization_v<P, std::shared_ptr> &&
+                           !is_specialization_v<P, std::weak_ptr> &&
+                           !is_specialization_v<P, std::unique_ptr>) {
+            // Registered class members bind by reference (cpp_bound) so mutation and
+            // signal connect act on the live member, not a copy (which non-copyables
+            // like signal_emitter would reject outright); unregistered copyables copy.
+            return convert_reference_with_registry(cpp_obj->*member, engine_ptr);
+        }
+        else {
+            return detail::value_converter<P>::to(cpp_obj->*member, engine_ptr);
+        }
+    }
+
+    template<typename P>
+    static checked_result<script_value> property_set_call(const void* state, const std::vector<script_value>& args) {
+        const property_state<P>& st = *static_cast<const property_state<P>*>(state);
+        if (args.size() < 2) {
+            throw runtime_error("Property setter requires 'this' and value");
+        }
+        const auto member = std::bit_cast<P T::*>(st.method);
+        engine* engine_ptr = st.eng;
+        T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], st.native_type_id);
+
+        if constexpr (std::is_same_v<P, script_value>) {
+            script_value& held = cpp_obj->*member;
+            if (held.is_reference()) {
+                auto stored = detail::store_through_held_reference(held, args[1], engine_ptr);
+                if (!stored) { return stored.error_value(); }
+            } else {
+                held = args[1].clone();
+            }
+        } else if constexpr (dynamic_binder_validation::is_std_function<P>::value) {
+            // Script lambdas assign into C++ callback hooks (spawn/update pattern)
+            cpp_obj->*member = detail::value_converter<P>::from(args[1], engine_ptr);
+        } else {
+            cpp_obj->*member = args[1].as<P>();
+        }
+        return script_value(std::monostate{}, engine_ptr); // null
+    }
+
+    template<typename P>
+    static void* property_member_address(const void* state, const script_value& receiver) {
+        const property_state<P>& st = *static_cast<const property_state<P>*>(state);
+        T* cpp_obj = detail::extract_cpp_object_ptr<T>(receiver, st.native_type_id);
+        return cpp_obj ? static_cast<void*>(&(cpp_obj->*std::bit_cast<P T::*>(st.method))) : nullptr;
     }
 
     // Internal implementation for property registration with validation
@@ -1038,7 +1138,6 @@ private:
         }
 
         // Register the property as a special field that knows how to access the C++ member
-        // We'll store a lambda that can get/set the value
         class_def_->add_field(name, script_value(std::monostate{}, &engine_)); // Register field name
 
         // Register serialization metadata
@@ -1048,83 +1147,24 @@ private:
         prop_meta.read_only = !std::is_copy_assignable_v<P>;
         serialization_metadata_.properties.push_back(prop_meta);
         
+        using State = property_state<P>;
+        auto state = std::make_shared<const State>(State{ std::bit_cast<std::array<std::byte, sizeof(P T::*)>>(member), &engine_, class_def_->get_type_id() });
+
         // Add a special method that handles property access
         // The interpreter's visitMemberExpr will need to check for these
-        class_def_->add_method("_get_" + name, [member, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
-            if (args.empty()) {
-                throw runtime_error("Property getter called without 'this' object");
-            }
-
-            T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
-
-            // Special handling for std::vector<T> - wrap in bound_cpp_vector for zero-copy access
-            if constexpr (is_specialization_v<P, std::vector>) {
-                using element_type = typename P::value_type;
-                auto wrapper = std::make_shared<bound_cpp_vector<element_type>>(
-                    cpp_obj->*member, engine_ptr);
-                return engine_ptr->make_object(wrapper);
-            }
-            else if constexpr (dynamic_binder_validation::is_signal_type<P>::value) {
-                // Typed per-signature bindings (bind_signal_type) take precedence
-                // when present; otherwise the generic "Signal" view serves the
-                // member ceremony-free through the erased connect table.
-                if (engine_ptr->template has_registered_class<P>()) {
-                    return convert_reference_with_registry(cpp_obj->*member, engine_ptr);
-                }
-                return detail::make_signal_view(engine_ptr, make_signal_script_ops(cpp_obj->*member));
-            }
-            else if constexpr (std::is_class_v<P> &&
-                               !math_adapted<P> &&
-                               !std::is_same_v<P, std::string> &&
-                               !std::is_same_v<P, script_value> &&
-                               !dynamic_binder_validation::is_std_container<P>::value &&
-                               !dynamic_binder_validation::is_std_function<P>::value &&
-                               !is_specialization_v<P, std::shared_ptr> &&
-                               !is_specialization_v<P, std::weak_ptr> &&
-                               !is_specialization_v<P, std::unique_ptr>) {
-                // Registered class members bind by reference (cpp_bound) so mutation and
-                // signal connect act on the live member, not a copy (which non-copyables
-                // like signal_emitter would reject outright); unregistered copyables copy.
-                return convert_reference_with_registry(cpp_obj->*member, engine_ptr);
-            }
-            else {
-                return detail::value_converter<P>::to(cpp_obj->*member, engine_ptr);
-            }
-        });
+        class_def_->add_method("_get_" + name, detail::host_method_call{ &property_get_call<P>, state });
         class_def_->register_property_getter(engine_.symbolize(name), engine_.symbolize("_get_" + name));
 
         // Only create setter for copy-assignable types
         if constexpr (std::is_copy_assignable_v<P>) {
-            class_def_->add_method("_set_" + name, [member, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> checked_result<script_value> {
-                if (args.size() < 2) {
-                    throw runtime_error("Property setter requires 'this' and value");
-                }
-
-                T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
-
-                if constexpr (std::is_same_v<P, script_value>) {
-                    script_value& held = cpp_obj->*member;
-                    if (held.is_reference()) {
-                        auto stored = detail::store_through_held_reference(held, args[1], engine_ptr);
-                        if (!stored) { return stored.error_value(); }
-                    } else {
-                        held = args[1].clone();
-                    }
-                } else if constexpr (dynamic_binder_validation::is_std_function<P>::value) {
-                    // Script lambdas assign into C++ callback hooks (spawn/update pattern)
-                    cpp_obj->*member = detail::value_converter<P>::from(args[1], engine_ptr);
-                } else {
-                    cpp_obj->*member = args[1].as<P>();
-                }
-                return script_value(std::monostate{}, engine_ptr); // null
-            });
+            class_def_->add_method("_set_" + name, detail::host_method_call{ &property_set_call<P>, state });
 
             // Register field_id -> setter_id mapping for fast runtime lookup
             uint64_t field_id = engine_.symbolize(name);
             uint64_t setter_id = engine_.symbolize("_set_" + name);
             class_def_->register_property_setter(field_id, setter_id);
         } else {
-            register_read_only_setter(name);
+            detail::register_read_only_setter(engine_, *class_def_, name);
         }
 
         if constexpr (detail::host_member_value<P> && !std::is_const_v<P>) {
@@ -1138,10 +1178,7 @@ private:
         if constexpr (script_value::cpp_bound_encoding<P>::capable) {
             using encoding = script_value::cpp_bound_encoding<P>;
             class_def_->register_property_member(engine_.symbolize(name), class_definition::cpp_member_accessor{
-                [member, native_type_id = class_def_->get_type_id()](const script_value& receiver) -> void* {
-                    T* cpp_obj = detail::extract_cpp_object_ptr<T>(receiver, native_type_id);
-                    return cpp_obj ? static_cast<void*>(&(cpp_obj->*member)) : nullptr;
-                },
+                detail::host_member_address{ &property_member_address<P>, state },
                 encoding::size_and_sign, encoding::semantic_index});
         }
 
@@ -1222,7 +1259,7 @@ public:
 
         // Add setter method - use different implementations based on setter type
         if constexpr (is_read_only) {
-            register_read_only_setter(name);
+            detail::register_read_only_setter(engine_, *class_def_, name);
             return *this;
         } else if constexpr (std::is_member_function_pointer_v<std::decay_t<Setter>>) {
             // Member function pointer setter
@@ -1618,11 +1655,7 @@ public:
 
         // A bound method of the same name is the class's chosen spelling (Palette's color() /
         // color(c)); the property stays reachable through it
-        for (const pending_math_property& pending : pending_math_properties_) {
-            if (class_def_->defines_method(engine_.symbolize(pending.name))) continue;
-            detail::bind_schema_math_property(engine_, *class_def_, serialization_metadata_, pending.name, pending.bridge, pending.access);
-        }
-        pending_math_properties_.clear();
+        detail::bind_pending_math_properties(engine_, *class_def_, serialization_metadata_, pending_math_properties_);
 
         if constexpr (std::is_base_of_v<script_extensible, T>) {
             class_definition::script_slot_hooks hooks;
@@ -1644,31 +1677,14 @@ public:
         // 3. Type is not abstract
         if constexpr (!std::is_abstract_v<T> && std::is_default_constructible_v<T>) {
             if (!has_explicit_constructor_) {
-                // Auto-register default constructor
-                engine* engine_ptr = &engine_;
-                engine_.add_overloaded_function(class_name_, 0, [class_def = class_def_, class_name = class_name_, engine_ptr](const std::vector<script_value>& args) -> script_value {
-                    // Create the C++ object
-                    std::shared_ptr<T> cpp_obj;
-
-                    // Check if T has an engine constructor and use it if available
-                    if constexpr (has_engine_constructor<T>) {
-                        cpp_obj = std::make_shared<T>(engine_ptr);
-                    } else {
-                        cpp_obj = std::make_shared<T>();
-                    }
-
-                    auto instance = detail::make_native_instance(*class_def, class_name, cpp_obj, engine_ptr);
-                    return script_value::make_object(class_name, instance, engine_ptr);
-                });
+                // Auto-register default constructor (with the engine when T takes one)
+                engine_.add_overloaded_function(class_name_, 0, detail::host_method_call{ &native_constructor_call<>, constructor_state() });
             }
         }
 
         // Register automatic copy function for copyable types
         if constexpr (std::is_copy_constructible_v<T>) {
-            class_def_->set_copy_function([](const void* src) -> std::shared_ptr<void> {
-                const T* typed_src = static_cast<const T*>(src);
-                return std::make_shared<T>(*typed_src);
-            });
+            class_def_->set_copy_function(&copy_native_object);
         }
         
         class_def_->set_cpp_backed(true);   // reflect::is_cpp_bound's class-form answer
@@ -1743,12 +1759,7 @@ private:
     std::string class_name_;
     std::shared_ptr<class_definition> class_def_;
     serialization::class_metadata serialization_metadata_;
-    struct pending_math_property {
-        std::string name;
-        math_property_bridge bridge;
-        detail::schema_property_access access;
-    };
-    std::vector<pending_math_property> pending_math_properties_;
+    std::vector<detail::pending_math_property> pending_math_properties_;
     bool has_explicit_constructor_ = false;  // Track if user registered any constructor
     bool built_ = false;  // Track if build() was called
     

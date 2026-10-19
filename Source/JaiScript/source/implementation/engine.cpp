@@ -1,4 +1,5 @@
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/ast.hpp>
@@ -1611,8 +1612,8 @@ struct engine::implementation {
     std::string root_source_file_;   // engine::root_source_file
     std::function<std::string(const std::string&)> app_data_resolver;    // engine::app_directory_resolvers
     std::function<std::string(const std::string&)> app_cache_resolver;
-    engine::clock_reading monotonic_clock, wall_clock;   // engine::time_source (empty = system)
-    engine::clock_sleep sleep_clock;
+    engine_time::clock_reading monotonic_clock, wall_clock;   // engine_time::source (empty = system)
+    engine_time::clock_sleep sleep_clock;
     std::chrono::nanoseconds system_origin = std::chrono::steady_clock::now().time_since_epoch();
     std::chrono::nanoseconds entry_start{};
     uint64_t entry_generation = 0;
@@ -4110,8 +4111,8 @@ void engine::execution_budget(double seconds) {
     // Not yet constructed: wire_backend applies the stored value at first use
 }
 
-void engine::extend_execution_deadline(std::chrono::nanoseconds by) {
-    if (impl->backend) { impl->backend->extend_execution_deadline(by); }
+void engine_time::extend_execution_deadline(std::chrono::nanoseconds by) {
+    if (owner_->impl->backend) { owner_->impl->backend->extend_execution_deadline(by); }
 }
 
 void engine::execution_step_budget(uint64_t checks) {
@@ -4649,38 +4650,46 @@ void engine::file_stamp_source(file_stamp_reading source) {
     impl->file_stamp_source = std::move(source);
 }
 
-void engine::time_source(clock_reading monotonic, clock_reading wall, clock_sleep sleep) {
+engine_time engine::time() {
+    return engine_time(*this);
+}
+
+void engine_time::source(clock_reading monotonic, clock_reading wall, clock_sleep sleep) {
+    auto& impl = owner_->impl;
     impl->monotonic_clock = std::move(monotonic);
     impl->wall_clock = std::move(wall);
     impl->sleep_clock = std::move(sleep);
     impl->stamped_generation = UINT64_MAX;   // an entry stamp from the previous source means nothing on this one
 }
 
-std::chrono::nanoseconds engine::monotonic_now() {
+std::chrono::nanoseconds engine_time::monotonic_now() {
+    auto& impl = owner_->impl;
     if (impl->monotonic_clock) { return impl->monotonic_clock(); }
     const auto now = std::chrono::steady_clock::now();
-    if (!parallel_region_active()) { impl->limits_.note_clock_sample(now); }
+    if (!owner_->parallel_region_active()) { impl->limits_.note_clock_sample(now); }
     return now.time_since_epoch();
 }
 
-std::chrono::nanoseconds engine::wall_now() {
+std::chrono::nanoseconds engine_time::wall_now() {
+    auto& impl = owner_->impl;
     return impl->wall_clock ? impl->wall_clock()
                             : std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch());
 }
 
-void engine::sleep_for(std::chrono::nanoseconds duration) {
+void engine_time::sleep_for(std::chrono::nanoseconds duration) {
+    auto& impl = owner_->impl;
     if (impl->sleep_clock) { impl->sleep_clock(duration); }
     else if (duration.count() > 0) { std::this_thread::sleep_for(duration); }
-    if (!impl->monotonic_clock && !parallel_region_active()) { impl->limits_.note_clock_sample(std::chrono::steady_clock::now()); }
+    if (!impl->monotonic_clock && !owner_->parallel_region_active()) { impl->limits_.note_clock_sample(std::chrono::steady_clock::now()); }
 }
 
 double engine::engine_elapsed() {
     const auto origin = impl->monotonic_clock ? std::chrono::nanoseconds{} : impl->system_origin;
-    return std::chrono::duration<double>(monotonic_now() - origin).count();
+    return std::chrono::duration<double>(time().monotonic_now() - origin).count();
 }
 
 double engine::execute_elapsed() {
-    const auto now = monotonic_now();
+    const auto now = time().monotonic_now();
     if (impl->stamped_generation != impl->entry_generation) {   // an entry that began before any loaded program named execute_elapsed counts from here
         impl->entry_stamps = true;
         impl->entry_start = now;
@@ -4699,7 +4708,7 @@ bool engine::unit_rerun(unit_stamp unit) const {
 void engine::note_host_entry() {
     ++impl->entry_generation;
     if (impl->entry_stamps) {
-        impl->entry_start = monotonic_now();
+        impl->entry_start = time().monotonic_now();
         impl->stamped_generation = impl->entry_generation;
     }
 }

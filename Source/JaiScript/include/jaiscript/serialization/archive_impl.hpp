@@ -111,14 +111,15 @@ enum class SerializationContext {
     ObjectBody      // Inside an object body - don't wrap the next complex value
 };
 
-template<class Derived>
-class archive_writer_impl : public archive_base {
-public:
-    struct is_writer_tag {};
-
+// The writer state no archive type changes, defined in the library (archive_core.cpp) so a host translation unit
+// never instantiates its containers
+class archive_writer_core : public archive_base {
 protected:
-    Derived* self() { return static_cast<Derived*>(this); }
-    const Derived* self() const { return static_cast<const Derived*>(this); }
+    explicit archive_writer_core(engine* eng);
+    ~archive_writer_core();
+
+    // The id of raw_ptr, and whether this call assigned it (its first sighting); 0 for null
+    std::pair<uint32_t, bool> track_shared_ptr(const void* raw_ptr);
 
     engine* engine_ref_;
     // Hashed on std::type_index: libstdc++'s type_info::before is not a strict weak order between internal-linkage and other types
@@ -129,20 +130,53 @@ protected:
 
     std::stack<SerializationContext> context_stack_;
 
-    std::pair<uint32_t, bool> track_shared_ptr(const void* raw_ptr) {
-        if (raw_ptr == nullptr) {
-            return {0, false};  // null pointer
-        }
+    uint32_t version_ = 0;
 
-        auto it = shared_ptr_ids_.find(raw_ptr);
-        if (it != shared_ptr_ids_.end()) {
-            return {it->second, false};  // Already seen
-        }
+public:
+    SerializationContext current_context() const;
+    void push_context(SerializationContext ctx);
+    void pop_context();
 
-        uint32_t id = next_shared_id_++;
-        shared_ptr_ids_[raw_ptr] = id;
-        return {id, true};
+    // Complex types with save/serialize/property_mgr need object wrapping UNLESS
+    // we're already inside an object body that was created for this value.
+    // ObjectBody context means the object wrapper was already written externally.
+    bool needs_object_wrapper() const;
+
+    // Transition from PropertyValue/MapValue context after writing a value
+    void consume_value_context();
+
+    void set_engine(engine* eng) { engine_ref_ = eng; }
+    engine* get_engine() const { return engine_ref_; }
+
+    template<typename ContextType>
+    ContextType* get_user_context() const {
+        return static_cast<ContextType*>(get_user_context_raw(std::type_index(typeid(ContextType))));
     }
+
+    template<typename ContextType>
+    void set_user_context(ContextType* context) {
+        set_user_context_raw(std::type_index(typeid(ContextType)), const_cast<std::remove_cv_t<ContextType>*>(context));
+    }
+
+    // The context set for ti, else the archive's engine when ti names engine, else null
+    void* get_user_context_raw(std::type_index ti) const;
+    void set_user_context_raw(std::type_index ti, void* context);
+
+    std::pair<uint32_t, bool> get_or_assign_shared_id(const void* raw_ptr) { return track_shared_ptr(raw_ptr); }
+    uint32_t lookup_shared_id(const void* raw_ptr) const;
+
+    void set_version(uint32_t version) { version_ = version; }
+    uint32_t get_version() const { return version_; }
+};
+
+template<class Derived>
+class archive_writer_impl : public archive_writer_core {
+public:
+    struct is_writer_tag {};
+
+protected:
+    Derived* self() { return static_cast<Derived*>(this); }
+    const Derived* self() const { return static_cast<const Derived*>(this); }
 
     // The object a locked weak handle serializes as, the first time the archive sees it
     template <class Holder>
@@ -214,92 +248,8 @@ protected:
         return false;
     }
 
-    std::map<std::string, bool> property_enabled_;
-    uint32_t version_ = 0;
-
 public:
-    explicit archive_writer_impl(engine* eng = nullptr) : engine_ref_(eng) {
-        context_stack_.push(SerializationContext::Root);
-    }
-
-    ~archive_writer_impl() = default;
-
-    SerializationContext current_context() const {
-        return context_stack_.empty() ? SerializationContext::Root : context_stack_.top();
-    }
-
-    void push_context(SerializationContext ctx) {
-        context_stack_.push(ctx);
-    }
-
-    void pop_context() {
-        if (!context_stack_.empty() && context_stack_.top() != SerializationContext::Root) {
-            context_stack_.pop();
-        }
-    }
-
-    // Complex types with save/serialize/property_mgr need object wrapping UNLESS
-    // we're already inside an object body that was created for this value.
-    // ObjectBody context means the object wrapper was already written externally.
-    bool needs_object_wrapper() const {
-        auto ctx = current_context();
-        return ctx != SerializationContext::ObjectBody;
-    }
-
-    // Transition from PropertyValue/MapValue context after writing a value
-    void consume_value_context() {
-        auto ctx = current_context();
-        if (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue) {
-            pop_context();
-        }
-    }
-
-    void set_engine(engine* eng) {
-        engine_ref_ = eng;
-    }
-
-    engine* get_engine() const {
-        return engine_ref_;
-    }
-
-    template<typename ContextType>
-    ContextType* get_user_context() const {
-        auto it = user_contexts_.find(std::type_index(typeid(ContextType)));
-        if (it != user_contexts_.end()) {
-            return static_cast<ContextType*>(it->second);
-        }
-        if constexpr (std::is_same_v<std::remove_cv_t<ContextType>, engine>) {
-            return engine_ref_;
-        } else {
-            return nullptr;
-        }
-    }
-
-    template<typename ContextType>
-    void set_user_context(ContextType* context) {
-        user_contexts_[std::type_index(typeid(ContextType))] = context;
-    }
-
-    void* get_user_context_raw(std::type_index ti) const {
-        auto it = user_contexts_.find(ti);
-        if (it != user_contexts_.end()) {
-            return it->second;
-        }
-        return ti == engine_context_type_index() ? static_cast<void*>(engine_ref_) : nullptr;
-    }
-
-    std::pair<uint32_t, bool> get_or_assign_shared_id(const void* raw_ptr) {
-        return track_shared_ptr(raw_ptr);
-    }
-
-    uint32_t lookup_shared_id(const void* raw_ptr) const {
-        if (raw_ptr == nullptr) return 0;
-        auto it = shared_ptr_ids_.find(raw_ptr);
-        return it != shared_ptr_ids_.end() ? it->second : 0;
-    }
-
-    void set_version(uint32_t version) { version_ = version; }
-    uint32_t get_version() const { return version_; }
+    explicit archive_writer_impl(engine* eng = nullptr) : archive_writer_core(eng) {}
 
     template<typename T>
     std::enable_if_t<std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string>>
@@ -782,33 +732,21 @@ public:
 // All deserialization functions call I/O methods through self() for static dispatch.
 // Derived classes implement I/O methods as regular (non-virtual) methods.
 
-template<class Derived>
-class archive_reader_impl : public archive_base {
-public:
-    struct is_reader_tag {};
-
+// The reader state no archive type changes, defined in the library (archive_core.cpp) so a host translation unit
+// never instantiates its containers
+class archive_reader_core : public archive_base {
 protected:
-    Derived* self() { return static_cast<Derived*>(this); }
-    const Derived* self() const { return static_cast<const Derived*>(this); }
+    explicit archive_reader_core(engine* eng);
+    ~archive_reader_core();
+
+    // Records the complete object of an id's first load and its dynamic type
+    void store_deserialized(uint32_t id, std::shared_ptr<void> complete, std::type_index type);
 
     engine* engine_ref_;
 
     // The outermost read is one load: a load session opens there and completes when it returns, so the script
     // post_load hooks of everything it loaded run once the whole archive is loaded (a read that throws drops them)
     int read_depth_ = 0;
-    struct read_scope {
-        archive_reader_impl* reader;
-        std::optional<engine::load_session> session;
-        explicit read_scope(archive_reader_impl* a_reader) : reader(a_reader) {
-            if (reader->read_depth_++ == 0 && reader->engine_ref_) { session.emplace(reader->engine_ref_); }
-        }
-        ~read_scope() { --reader->read_depth_; }
-        read_scope(const read_scope&) = delete;
-        read_scope& operator=(const read_scope&) = delete;
-        void done() {
-            if (session) { session->complete(); }
-        }
-    };
 
     // C++ shared_ptr tracking for property serialization (type-erased). The stored pointer
     // is the COMPLETE object (most-derived) and `type` its dynamic type, so a back-reference
@@ -825,9 +763,6 @@ protected:
     uint32_t version_ = 0;
 
 public:
-    explicit archive_reader_impl(engine* eng) : engine_ref_(eng) {}
-    ~archive_reader_impl() = default;
-
     void set_engine(engine* eng) { engine_ref_ = eng; }
     engine* get_engine() const { return engine_ref_; }
 
@@ -838,9 +773,9 @@ public:
             // Store the complete object + its dynamic type so back-refs through any base
             // view adjust correctly (the aliasing shared_ptr keeps the original owner).
             void* complete = dynamic_cast<void*>(ptr.get());
-            cpp_shared_ptrs_[id] = deserialized_entry{ std::shared_ptr<void>(ptr, complete), std::type_index(typeid(*ptr)) };
+            store_deserialized(id, std::shared_ptr<void>(ptr, complete), std::type_index(typeid(*ptr)));
         } else {
-            cpp_shared_ptrs_[id] = deserialized_entry{ std::static_pointer_cast<void>(ptr), std::type_index(typeid(T)) };
+            store_deserialized(id, std::static_pointer_cast<void>(ptr), std::type_index(typeid(T)));
         }
     }
 
@@ -850,63 +785,64 @@ public:
         return std::static_pointer_cast<T>(adjusted);
     }
 
-    bool has_deserialized_shared(uint32_t id) const {
-        return id != 0 && cpp_shared_ptrs_.find(id) != cpp_shared_ptrs_.end();
-    }
+    bool has_deserialized_shared(uint32_t id) const;
 
     // Type-erased back-ref retrieval: returns the stored object as a void shared_ptr whose
     // pointer is already adjusted from the complete object to the `target` base subobject,
     // so the caller's static_pointer_cast<target> is a plain reinterpret of a correct
     // address. Used by both the templated get above and any_archive_reader.
-    std::shared_ptr<void> get_deserialized_shared_adjusted(uint32_t id, std::type_index target) const {
-        if (id == 0) return nullptr;
-        auto it = cpp_shared_ptrs_.find(id);
-        if (it == cpp_shared_ptrs_.end()) return nullptr;
-        // A back-reference may request a different base view than the original load; reject it
-        // unless the stored dynamic type is actually assignable to that base, so a tampered id
-        // can't reinterpret an unrelated object through `target` (type confusion). B5.
-        if (!polymorphic_registry::instance().is_assignable(it->second.type, target)) {
-            throw serialization_error("Back-referenced object is not a subtype of the requested type");
-        }
-        void* adjusted = polymorphic_registry::instance().adjust_to_base(it->second.type, target, it->second.object.get());
-        return std::shared_ptr<void>(it->second.object, adjusted);
-    }
+    std::shared_ptr<void> get_deserialized_shared_adjusted(uint32_t id, std::type_index target) const;
 
     // Type-erased registration: `complete` is the most-derived pointer, `type` its dynamic
     // type (computed by the caller, which still has the static type).
     void register_deserialized_shared_typed(uint32_t id, std::shared_ptr<void> complete, std::type_index type) {
         if (id != 0 && complete) {
-            cpp_shared_ptrs_[id] = deserialized_entry{ std::move(complete), type };
+            store_deserialized(id, std::move(complete), type);
         }
     }
 
     template<typename ContextType>
     ContextType* get_user_context() const {
-        auto it = user_contexts_.find(std::type_index(typeid(ContextType)));
-        if (it != user_contexts_.end()) {
-            return static_cast<ContextType*>(it->second);
-        }
-        if constexpr (std::is_same_v<std::remove_cv_t<ContextType>, engine>) {
-            return engine_ref_;
-        } else {
-            return nullptr;
-        }
+        return static_cast<ContextType*>(get_user_context_raw(std::type_index(typeid(ContextType))));
     }
 
     template<typename ContextType>
     void set_user_context(ContextType* context) {
-        user_contexts_[std::type_index(typeid(ContextType))] = context;
+        set_user_context_raw(std::type_index(typeid(ContextType)), const_cast<std::remove_cv_t<ContextType>*>(context));
     }
 
-    void* get_user_context_raw(std::type_index ti) const {
-        auto it = user_contexts_.find(ti);
-        if (it != user_contexts_.end()) {
-            return it->second;
-        }
-        return ti == engine_context_type_index() ? static_cast<void*>(engine_ref_) : nullptr;
-    }
+    // The context set for ti, else the archive's engine when ti names engine, else null
+    void* get_user_context_raw(std::type_index ti) const;
+    void set_user_context_raw(std::type_index ti, void* context);
 
     uint32_t get_version() const { return version_; }
+};
+
+template<class Derived>
+class archive_reader_impl : public archive_reader_core {
+public:
+    struct is_reader_tag {};
+
+protected:
+    Derived* self() { return static_cast<Derived*>(this); }
+    const Derived* self() const { return static_cast<const Derived*>(this); }
+
+    struct read_scope {
+        archive_reader_impl* reader;
+        std::optional<engine::load_session> session;
+        explicit read_scope(archive_reader_impl* a_reader) : reader(a_reader) {
+            if (reader->read_depth_++ == 0 && reader->engine_ref_) { session.emplace(reader->engine_ref_); }
+        }
+        ~read_scope() { --reader->read_depth_; }
+        read_scope(const read_scope&) = delete;
+        read_scope& operator=(const read_scope&) = delete;
+        void done() {
+            if (session) { session->complete(); }
+        }
+    };
+
+public:
+    explicit archive_reader_impl(engine* eng) : archive_reader_core(eng) {}
 
     template<typename T>
     std::enable_if_t<std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string>>

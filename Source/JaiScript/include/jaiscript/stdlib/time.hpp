@@ -4,6 +4,7 @@
 #define __JAISCRIPT_STDLIB_TIME_HPP__
 
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/engine_time.hpp>
 
 #include <chrono>
 #include <cmath>
@@ -30,12 +31,12 @@ namespace stdlib {
 
         static double seconds(std::chrono::nanoseconds n) { return std::chrono::duration<double>(n).count(); }
         bool idle() const { return !running && !paused; }
-        std::chrono::nanoseconds elapsed_now() const { return running ? accumulated + (eng->monotonic_now() - run_start) : accumulated; }
+        std::chrono::nanoseconds elapsed_now() const { return running ? accumulated + (eng->time().monotonic_now() - run_start) : accumulated; }
 
         void start() {
             accumulated = {};
             delta_mark = {};
-            run_start = eng->monotonic_now();
+            run_start = eng->time().monotonic_now();
             running = true;
             paused = false;
         }
@@ -57,7 +58,7 @@ namespace stdlib {
         double elapsed() const { return idle() ? 0.0 : seconds(elapsed_now()); }
         double pause() {
             if (running) {
-                accumulated += eng->monotonic_now() - run_start;
+                accumulated += eng->time().monotonic_now() - run_start;
                 running = false;
                 paused = true;
             }
@@ -66,7 +67,7 @@ namespace stdlib {
         double resume() {
             if (idle()) { start(); return 0.0; }
             if (running) return seconds(elapsed_now());
-            run_start = eng->monotonic_now();
+            run_start = eng->time().monotonic_now();
             running = true;
             paused = false;
             return seconds(accumulated);
@@ -269,10 +270,8 @@ namespace stdlib {
     };
 
     // time:: namespace (docs/site/guide/14-time.html): clocks through the engine's time source
-    // (engine::time_source), stopwatches and calendar dates (source/implementation/stdlib/time.cpp)
+    // (engine_time::source), stopwatches and calendar dates (source/implementation/stdlib/time.cpp)
     void register_time_functions(engine& eng_ref);
-    inline void register_time_functions(const std::shared_ptr<engine>& e) { register_time_functions(*e); }
-    inline void register_time_functions(engine* e) { register_time_functions(*e); }
 
 } // namespace stdlib
 } // namespace jai

@@ -8,7 +8,7 @@
 #include <cstring>
 #include <SDL_image.h>
 #include "MV/Utility/generalUtility.h"
-#include <jaiscript/detail/thread_pool.hpp>
+#include <jaiscript/thread_pool.hpp>
 #include "MV/Render/points.h"
 #include "sharedTextures.h"
 

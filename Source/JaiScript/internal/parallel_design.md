@@ -285,13 +285,13 @@ latches terminal) — a livelocking or allocation-bombing body fails the loop, n
 
 ## 7. Threads are `jai::thread_pool`
 
-JaiScript owns the pool: `include/jaiscript/detail/thread_pool.hpp` (shared queue + pinned
-`submit_to`) is the `parallel_for` substrate. Standard C++ only
+JaiScript owns the pool: `include/jaiscript/thread_pool.hpp` (shared queue + pinned
+`submit_to`, public, its body in `source/implementation/thread_pool.cpp`) is the `parallel_for` substrate. Standard C++ only
 (`std::thread`/`std::mutex`/`std::condition_variable`), no OS APIs — JaiScript stays the base
 library. A host uses the same class for its own work: `submit(task, then, where)` and
 `submit_batch(tasks, then, where)` continue on a worker or posted, and `post` / `run_posted` is the
 queue the host's own thread drains (MV's pools are instances of it). The parallel regions use only
-`submit_to` / `submit_pinned_batch` and their own pool instance.
+`submit_to` / `submit_pinned_batch` (the library's `detail/thread_pool_access.hpp`) and their own pool instance.
 
 ## 8. Kept invariants
 
@@ -408,7 +408,7 @@ body-locals.
 
 ## 12. Sequencing sketch
 
-1. **`jai::thread_pool` lands** (DONE — `detail/thread_pool.hpp`, §7) with pinned-worker mode + foundry coverage.
+1. **`jai::thread_pool` lands** (DONE — `thread_pool.hpp`, §7) with pinned-worker mode + foundry coverage.
 1.5. **`parallel_transform` v0 lands** (DONE — the builtin ahead of the statement:
    value-semantic elements, fail-closed admission walk, per-worker execution contexts
    built at the call and torn down at the join, static chunks + optional weight hint,

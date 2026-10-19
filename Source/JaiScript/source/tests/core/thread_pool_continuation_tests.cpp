@@ -1,5 +1,5 @@
 #include <jaiscript/testing/foundry.hpp>
-#include <jaiscript/detail/thread_pool.hpp>
+#include <jaiscript/thread_pool.hpp>
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -46,8 +46,9 @@ public:
                 pool.on_exception([&](std::exception_ptr) { ++exceptions; });
                 std::atomic<int> ran{0};
                 std::atomic<int> continued{0};
+                std::thread::id ran_on;
                 std::thread::id continued_on;
-                pool.submit([&]() { ++ran; }, [&]() {
+                pool.submit([&]() { ran_on = std::this_thread::get_id(); ++ran; }, [&]() {
                     continued_on = std::this_thread::get_id();
                     if (ran.load() == 1) { ++continued; }
                 }, where);
@@ -55,8 +56,8 @@ public:
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 pool.run_posted();
                 check_eq(1, continued.load());
-                const auto expected_thread = where == then_on::pool ? pool.worker_thread_id(0) : std::this_thread::get_id();
-                check(continued_on == expected_thread, "pool continues on the worker, posted on the draining thread");
+                const auto expected_thread = where == then_on::pool ? ran_on : std::this_thread::get_id();
+                check(continued_on == expected_thread, "pool continues on the worker that ran the task, posted on the draining thread");
                 check_eq(0, exceptions.load());
             }
         });

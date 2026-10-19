@@ -1,7 +1,7 @@
 #include "Game/gameEditor.h"
 #include "Game/Instance/arenaInstance.h"
 #include "Game/NetworkLayer/synchronizeAction.h"
-#include <jaiscript/detail/thread_pool.hpp>
+#include <jaiscript/thread_pool.hpp>
 #include "MV/Utility/services.hpp"
 
 #include "MV/Serialization/serialize.h"

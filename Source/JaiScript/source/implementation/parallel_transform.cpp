@@ -31,6 +31,7 @@
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
+#include <jaiscript/detail/thread_pool_access.hpp>
 #include <jaiscript/detail/ref_param_writes.hpp>
 #include <jaiscript/detail/interpreter.hpp>
 #include <jaiscript/detail/environment.hpp>
@@ -411,7 +412,7 @@ namespace {
 		for (int round = 0; round < 3; ++round) {
 			for (auto& task : tasks) { task.second = [] {}; }   // a submitted batch moves its tasks out
 			const auto t0 = std::chrono::steady_clock::now();
-			state.pool->submit_pinned_batch(tasks.data(), tasks.size(), &state.faults);
+			detail::thread_pool_access::submit_pinned_batch(*state.pool, tasks.data(), tasks.size(), &state.faults);
 			state.pool->wait_idle();
 			const double ns = static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count());
 			const double per_worker = ns / static_cast<double>(workers);
@@ -4071,9 +4072,9 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
 			const auto build_start = std::chrono::steady_clock::now();
 			state.faults.checkpoint("region.pool_create");
-			state.pool = std::make_unique<jai::thread_pool>(
+			state.pool = detail::thread_pool_access::make(
 				std::max(pool_workers_needed, eng.parallel_thread_count() > 1 ? eng.parallel_thread_count() - 1 : size_t(1)), &state.faults);
-			state.pool->spin_budget(std::chrono::microseconds(state.spin_wait_us));
+			state.pool->spin_budget_ns(static_cast<int64_t>(state.spin_wait_us) * 1000);
 			region_guard.pending_pool = state.pool.get();
 			calibrate_pool_overhead(state);
 			region_guard.pending_pool = nullptr;   // calibration joined each completed batch
@@ -4085,7 +4086,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 		for (size_t k = 1; k < worker_count; ++k) {
 			state.faults.checkpoint("region.table_entry", k);
-			table.entries.push_back({ state.pool->worker_thread_id(k - 1), &contexts[k]->limits, &contexts[k]->pending_instances });
+			table.entries.push_back({ detail::thread_pool_access::worker_thread_id(*state.pool, k - 1), &contexts[k]->limits, &contexts[k]->pending_instances });
 		}
 	}
 	region_guard.prepared = true;
@@ -4115,7 +4116,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	}
 	if (!region_tasks.empty()) {
 		region_guard.pending_pool = state.pool.get();   // BEFORE a possibly partial submission
-		state.pool->submit_pinned_batch(region_tasks.data(), region_tasks.size(), &state.faults);
+		detail::thread_pool_access::submit_pinned_batch(*state.pool, region_tasks.data(), region_tasks.size(), &state.faults);
 	}
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t2 = __rdtsc();

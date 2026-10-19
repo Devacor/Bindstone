@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/strong_ptr.hpp>
-#include <jaiscript/detail/thread_pool.hpp>
+#include <jaiscript/detail/fault_injection.hpp>
+#include <jaiscript/detail/thread_pool_access.hpp>
 #include <atomic>
 #include <chrono>
 #include <future>
@@ -433,7 +434,7 @@ public:
                 auto faults = injection.hook();
                 bool caught_original = false;
                 try {
-                    pool.submit_pinned_batch(batch.data(), batch.size(), &faults);
+                    jai::detail::thread_pool_access::submit_pinned_batch(pool, batch.data(), batch.size(), &faults);
                 } catch (const thread_pool_fault_detail::injected_failure& error) {
                     caught_original = std::string_view(error.what()) == "Injected thread_pool failure";
                 }
@@ -453,7 +454,7 @@ public:
 
                 std::atomic<bool> following_done{false};
                 std::pair<size_t, thread_pool::task_type> following{0, [&]() { following_done = true; }};
-                pool.submit_pinned_batch(&following, 1);
+                jai::detail::thread_pool_access::submit_pinned_batch(pool, &following, 1);
                 pool.wait_idle();
                 check(following_done.load(), "following batch must execute normally");
             }
@@ -467,7 +468,7 @@ public:
             auto faults = injection.hook();
             bool caught_original = false;
             try {
-                pool.submit_pinned_batch(&batch, 1, &faults);
+                jai::detail::thread_pool_access::submit_pinned_batch(pool, &batch, 1, &faults);
             } catch (const thread_pool_fault_detail::injected_failure&) {
                 caught_original = true;
             }
@@ -494,7 +495,7 @@ public:
                 auto faults = injection.hook();
                 bool caught_original = false;
                 try {
-                    thread_pool broken(3, &faults);
+                    auto broken = jai::detail::thread_pool_access::make(3, &faults);
                 } catch (const thread_pool_fault_detail::injected_failure& error) {
                     caught_original = std::string_view(error.what()) == "Injected thread_pool failure";
                 }
@@ -539,12 +540,12 @@ public:
             for (size_t w = 0; w < pool.worker_count(); ++w) {
                 check_eq(seen[w].size(), size_t(20));
                 for (const auto& id : seen[w]) {
-                    check(id == pool.worker_thread_id(w));
+                    check(id == jai::detail::thread_pool_access::worker_thread_id(pool, w));
                 }
             }
             // distinct workers really are distinct threads
-            check(pool.worker_thread_id(0) != pool.worker_thread_id(1));
-            check(pool.worker_thread_id(1) != pool.worker_thread_id(2));
+            check(jai::detail::thread_pool_access::worker_thread_id(pool, 0) != jai::detail::thread_pool_access::worker_thread_id(pool, 1));
+            check(jai::detail::thread_pool_access::worker_thread_id(pool, 1) != jai::detail::thread_pool_access::worker_thread_id(pool, 2));
         });
 
         test("pinned_tasks_preserve_submission_order", [this]() {

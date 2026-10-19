@@ -29,6 +29,7 @@ set(JAISCRIPT_SOURCES
     implementation/stdlib/stdlib.cpp
     implementation/stdlib/strings.cpp
     implementation/stdlib/time.cpp
+    implementation/thread_pool.cpp
     implementation/type_checker.cpp
     implementation/type_info.cpp
     implementation/value.cpp
@@ -113,7 +114,7 @@ if(MSVC)
 
     # The binder headers overflow the default section limit in a consumer's Debug TU too
     target_compile_options(jaiscript PUBLIC /bigobj)
-    # A consumer TU's inline copies of the headers (thread_pool's lock guards) win COMDAT
+    # A consumer TU's inline copies of the headers (their lock guards) win COMDAT
     # selection, so every consumer needs unwinding even when CMAKE_CXX_FLAGS is overridden
     target_compile_options(jaiscript PUBLIC /EHsc)
 else()

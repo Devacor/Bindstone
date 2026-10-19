@@ -4405,7 +4405,7 @@ void engine::allow_unsafe_parallel(bool allowed) {
 void engine::parallel_spin_wait_us(size_t microseconds) {
     auto& state = parallel_state();
     state.spin_wait_us = microseconds;
-    if (state.pool) { state.pool->spin_budget(std::chrono::microseconds(microseconds)); }
+    if (state.pool) { state.pool->spin_budget_ns(static_cast<int64_t>(microseconds) * 1000); }
 }
 
 size_t engine::parallel_spin_wait_us() const {

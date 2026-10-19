@@ -3,7 +3,7 @@
 #define BINDSTONE_SERVER
 #endif
 #include "Game/gameEditor.h"
-#include <jaiscript/detail/thread_pool.hpp>
+#include <jaiscript/thread_pool.hpp>
 
 #include "MV/ArtificialIntelligence/pathfinding.h"
 #include "MV/Serialization/serialize.h"

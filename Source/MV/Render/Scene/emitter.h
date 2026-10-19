@@ -2,7 +2,7 @@
 #define _MV_SCENE_EMITTER_H_
 
 #include "sprite.h"
-#include <jaiscript/detail/thread_pool.hpp>
+#include <jaiscript/thread_pool.hpp>
 #include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
 #include <functional>

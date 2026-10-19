@@ -3,7 +3,7 @@
 // io_context pools (DownloadPool, the lobby's email pool) whose workers block in run(). Foundry, built into mv_tests.exe.
 
 #include <jaiscript/testing/foundry.hpp>
-#include <jaiscript/detail/thread_pool.hpp>
+#include <jaiscript/thread_pool.hpp>
 #include "MV/Utility/log.h"
 #include "MV/Utility/services.hpp"
 
@@ -79,7 +79,7 @@ public:
 			{
 				jai::thread_pool pool(2);
 				MV::initializeThreadPool(pool);
-				check(pool.spin_budget() == std::chrono::nanoseconds{0}, "MV's pools never spin between batches");
+				check(pool.spin_budget_ns() == 0, "MV's pools never spin between batches");
 				pool.submit([]() { throw std::runtime_error("decode failed"); });
 				pool.submit([]() { throw 7; });
 				pool.wait_idle();

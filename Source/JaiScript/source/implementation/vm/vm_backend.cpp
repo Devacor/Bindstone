@@ -17167,7 +17167,7 @@ op_status vm_backend::exec_class_decl(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 	return vm_check(detail::declare_script_class(decl, detail::class_declaration_host{
 		engine_, symbolizer_, environment_, class_definition_type_id_, class_lookup_, current_unit(),
-		[this](const expression_ptr& e) { return eval_expression(e, nullptr); },
+		[this](const expression_ptr& e, const std::shared_ptr<environment>& env) { return eval_expression(e, env); },
 		[this] {
 			if (is_unwinding_) {
 				is_unwinding_ = false;

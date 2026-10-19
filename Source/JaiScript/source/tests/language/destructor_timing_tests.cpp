@@ -816,6 +816,119 @@ public:
             }
         });
 
+        // C++ [class.base.init]: every base constructs in declaration order (each with its own bases first), then the members, then
+        // the body; destruction runs the reverse
+        test("every_base_constructs_in_declaration_order_and_dies_in_reverse", [this]() {
+            const std::string family = R"(
+                class A { int a = 1; A() { LOG = LOG + "A"; } ~A() { LOG = LOG + "~A"; } }
+                class P { int p = 2; P() { LOG = LOG + "P"; } ~P() { LOG = LOG + "~P"; } }
+                class B : A { int b = 3; B() { LOG = LOG + "B"; } ~B() { LOG = LOG + "~B"; } }
+                class C { int c = 4; C() { LOG = LOG + "C"; } ~C() { LOG = LOG + "~C"; } }
+                class Q : P, C { int q = 5; Q() { LOG = LOG + "Q"; } ~Q() { LOG = LOG + "~Q"; } }
+                class D : B, Q { Token t = Token("t"); D() { LOG = LOG + "D"; } ~D() { LOG = LOG + "~D"; } }
+                class E : B, Q { }
+                class F : A, C { int f = a + c; }
+            )";
+            expect_log(family + "function f() -> void { D d; LOG = LOG + \"|\"; } f(); LOG;", "ABPCQD|~Dt~Q~C~P~B~A");
+            expect_log(family + "function f() -> void { E e; LOG = LOG + \"|\"; } f(); LOG;", "ABPCQ|~Q~C~P~B~A");
+            expect_log(family + "function f() -> void { F o; LOG = LOG + to_string(o.f) + \"|\"; } f(); LOG;", "AC5|~C~A");
+        });
+
+        // C++ [class.base.init]: an initializer list names any base, in any order; the bases still construct in declaration order, an
+        // unnamed one default-constructed, and super(...) is the first
+        test("an_initializer_list_names_each_base", [this]() {
+            const std::string family = R"JAI(
+                class A { int a = 0; A(int v) { a = v; LOG = LOG + "A" + to_string(v); } }
+                class C { int c = 0; C() { c = -1; LOG = LOG + "C()"; } C(int v) { c = v; LOG = LOG + "C" + to_string(v); } }
+                class D : A, C { D() : C(2), A(1) { LOG = LOG + "D"; } }
+                class E : A, C { E() : super(3) { LOG = LOG + "E"; } }
+                class F : A, C { F(int x) : A(x), C(x * 10) { LOG = LOG + to_string(a + c); } }
+            )JAI";
+            expect_log(family + "D d; LOG;", "A1C2D");
+            expect_log(family + "E e; LOG;", "A3C()E");
+            expect_log(family + "F f = F(4); LOG;", "A4C4044");
+        });
+
+        test("an_initializer_list_names_only_bases_once_and_every_base_without_a_default", [this]() {
+            const std::string prelude = "class A { A() {} A(int v) {} } class C { C() {} } class N { N(int v) {} } ";
+            const std::vector<std::pair<std::string, std::string>> cases = {
+                {"class H : C, N { H() {} } H h;", "Class 'H' must construct base 'N': it has no default constructor"},
+                {"class H : C, N { } H h;", "Class 'H' must construct base 'N': it has no default constructor"},
+                {"class K : A { K() : C() {} }", "Class 'K' has no base 'C' to construct"},
+                {"class L : A { L() : super(1), A(2) {} }", "Class 'L' constructs base 'A' twice"},
+                {"class M : A, C { M() : C(), C() {} }", "Class 'M' constructs base 'C' twice"},
+            };
+            for (const auto& [program, text] : cases) {
+                for (check_mode mode : {check_mode::strict, check_mode::off}) {
+                    auto eng = make_engine();
+                    eng->static_checking(mode);
+                    std::string got;
+                    try {
+                        eng->execute(prelude + program);
+                    } catch (const std::exception& e) {
+                        got = e.what();
+                    }
+                    check_true(got.find(text) != std::string::npos, (mode == check_mode::strict ? "strict: " : "checking off: ") + program + " -> " + got);
+                }
+            }
+        });
+
+        test("a_throw_in_a_later_base_destroys_the_bases_before_it", [this]() {
+            const std::string family = R"(
+                class A { A() { LOG = LOG + "A"; } ~A() { LOG = LOG + "~A"; } }
+                class Late { Late() { throw "boom"; } ~Late() { LOG = LOG + "~Late"; } }
+                class C { C() { LOG = LOG + "C"; } ~C() { LOG = LOG + "~C"; } }
+                class D : A, Late { D() { LOG = LOG + "D"; } ~D() { LOG = LOG + "~D"; } }
+                class G : A, C { G() { throw "body"; } ~G() { LOG = LOG + "~G"; } }
+            )";
+            expect_log(family + "try { D d; } catch (e) { LOG = LOG + \"|\" + e; } LOG;", "A~A|boom");
+            expect_log(family + "try { G g; } catch (e) { LOG = LOG + \"|\" + e; } LOG;", "AC~C~A|body");
+        });
+
+        test("an_override_of_a_later_base_s_method_is_an_override", [this]() {
+            for (check_mode mode : {check_mode::strict, check_mode::off}) {
+                auto eng = make_engine();
+                eng->static_checking(mode);
+                std::string got;
+                try {
+                    got = eng->execute(R"(
+                        class A { int a = 0; }
+                        class C { string who() { return "c"; } string only() { return "o"; } }
+                        class D : A, C { string who() override { return "d"; } }
+                        D d; d.who() + d.only();
+                    )").as_string();
+                } catch (const std::exception& e) {
+                    got = std::string("threw: ") + e.what();
+                }
+                check_eq(std::string("do"), got, mode == check_mode::strict ? "strict" : "checking off");
+            }
+        });
+
+        test("a_diamond_is_refused_at_load_and_at_declaration", [this]() {
+            const std::string diamond = "class A { int a = 0; } class B : A { } class C : A { } class D : B, C { }";
+            const std::string text = "Class 'D' inherits 'A' through both 'B' and 'C' (diamond inheritance is not supported)";
+            for (check_mode mode : {check_mode::strict, check_mode::off}) {
+                auto eng = make_engine();
+                eng->static_checking(mode);
+                std::string got;
+                try {
+                    eng->execute(diamond);
+                } catch (const std::exception& e) {
+                    got = e.what();
+                }
+                check_true(got.find(text) != std::string::npos, (mode == check_mode::strict ? "strict: " : "checking off: ") + got);
+            }
+            auto eng = make_engine();
+            eng->static_checking(check_mode::off);
+            std::string direct;
+            try {
+                eng->execute("class A { int a = 0; } class B : A { } class D : A, B { }");
+            } catch (const std::exception& e) {
+                direct = e.what();
+            }
+            check_true(direct.find("Class 'D' inherits 'A' through both 'A' and 'B' (diamond inheritance is not supported)") != std::string::npos, direct);
+        });
+
         test("a_reload_replaces_and_adds_destructors", [this]() {
             for (int variant = 0; variant < 2; ++variant) {
                 auto eng = make_engine();

@@ -167,19 +167,20 @@ public:
 
     engine* get_engine() const { return engine_; }
 
-    // A retired layer (engine::script_layer_detach, or a move to another engine) keeps
-    // owning its object so old handles never dangle, but every C++ extraction through it
-    // throws instead of reaching an object another layer now speaks for.
     // Set while a script constructor has not completed. A throw out of it destroys only the levels whose constructors
-    // completed (C++ [except.ctor]): the levels below the top `constructed_below()` of the class it was created as
+    // completed (C++ [except.ctor]): the first `constructed_levels()` of its class's construction_order()
     void construction_pending(bool pending) { construction_pending_ = pending; }
     bool construction_pending() const { return construction_pending_; }
     static constexpr uint16_t k_nothing_constructed = UINT16_MAX;
-    void constructed_below(uint16_t levels) { constructed_below_ = levels; }
-    uint16_t constructed_below() const { return constructed_below_; }
-    // The deepest level a pending instance's destruction runs bodies for; null when no level completed
+    void constructed_levels(uint16_t levels) { constructed_levels_ = levels; }
+    uint16_t constructed_levels() const { return constructed_levels_; }
+    // A pending instance whose destruction runs some level's body: its class; null when no level completed
     const class_definition* constructed_level() const;
+    bool level_constructed(const class_definition* level) const;
 
+    // A retired layer (engine::script_layer_detach, or a move to another engine) keeps
+    // owning its object so old handles never dangle, but every C++ extraction through it
+    // throws instead of reaching an object another layer now speaks for.
     void retire_script_layer() { script_layer_retired_ = true; }
     bool script_layer_retired() const { return script_layer_retired_; }
     // Live field references pinned on this instance (make_field_reference / ~reference_holder).
@@ -378,7 +379,7 @@ private:
     bool destructor_armed_ = false;
     bool late_destructor_ = false;   // armed by a re-class, not by the allocation: ~class_instance runs the chain
     std::atomic<bool> registered_{false};   // in the class's registry list (read unlocked by its own dying owner)
-    uint16_t constructed_below_ = k_nothing_constructed;
+    uint16_t constructed_levels_ = k_nothing_constructed;
     uint32_t live_field_refs_ = 0;
     cdtor_phase dispatch_phase_ = cdtor_phase::none;
     // What few instances hold, boxed so the rest pay one pointer: the C++ object (released after the fields, as a C++ base
@@ -772,6 +773,18 @@ public:
     // get_parent() without the shared_ptr copy (construction paths ask it per instance)
     inline const class_definition* parent_ptr() const;
 
+    // C++ construction order: every base's levels in declaration order, then the class itself (no diamond, so each level once)
+    inline const std::vector<const class_definition*>& construction_order() const;
+    // How many levels have constructed once `level` has
+    inline uint16_t constructed_through(const class_definition* level) const;
+
+    // A class two of `parents` both reach (a base itself or one of its bases), with the first two bases it is reached through
+    struct diamond {
+        const class_definition* shared = nullptr;
+        const class_definition* first = nullptr;
+        const class_definition* second = nullptr;
+    };
+    static inline diamond find_diamond(const std::vector<std::shared_ptr<class_definition>>& parents);
     inline bool has_diamond_inheritance() const;
 
     inline void add_derived_class(std::weak_ptr<class_definition> derived);
@@ -1043,6 +1056,8 @@ public:
     };
 
     inline method_info find_method(std::string_view name);
+    // Every base in declaration order, each one's own bases before the next (get_method's order)
+    inline method_info find_inherited_method(uint64_t name_id, std::string_view name);
 
     // Structural identity for hot reload: the class_decl subtree serialized WITHOUT
     // source locations (detail::structural_node_key). Exact compare — no collision
@@ -1200,6 +1215,8 @@ private:
     mutable uint64_t dtor_body_epoch_ = 0;
     mutable const script_value* dtor_body_ = nullptr;
     mutable uint64_t dtor_memo_epoch_ = 0;   // method_epoch_ starts at 1 => first mint fills
+    mutable std::vector<const class_definition*> construction_order_;
+    mutable uint64_t construction_order_epoch_ = 0;
     mutable bool has_script_dtor_ = false;
 
     bool is_transparent_wrapper_ = false;

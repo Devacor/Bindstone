@@ -23,6 +23,20 @@ namespace detail {
     inline std::string missing_override_text(std::string_view name, std::string_view owner) {
         return "Method '" + std::string(name) + "' redefines '" + std::string(owner) + "::" + std::string(name) + "': mark it 'override'";
     }
+    // A constructor's initializer list against the class's bases (C++ [class.base.init]); both backends and the strict checker
+    inline constexpr std::string_view k_base_needs_naming = "Class '{0}' must construct base '{1}': it has no default constructor";
+    inline constexpr std::string_view k_not_a_base = "Class '{0}' has no base '{1}' to construct";
+    inline constexpr std::string_view k_base_named_twice = "Class '{0}' constructs base '{1}' twice";
+    // An initializer naming a base: its class name, or the name after the namespace a base declared in one carries
+    inline bool initializer_names(std::string_view target, std::string_view base_name) {
+        if (target == base_name) { return true; }
+        return base_name.size() > target.size() + 2 && base_name.substr(base_name.size() - target.size()) == target &&
+               base_name.substr(base_name.size() - target.size() - 2, 2) == "::";
+    }
+    inline std::string diamond_inheritance_text(std::string_view cls, std::string_view shared, std::string_view first, std::string_view second) {
+        return "Class '" + std::string(cls) + "' inherits '" + std::string(shared) + "' through both '" + std::string(first) + "' and '" +
+               std::string(second) + "' (diamond inheritance is not supported)";
+    }
     inline std::string override_without_base_text(std::string_view name) {
         return "Method '" + std::string(name) + "' marked as override but no base class method found";
     }
@@ -152,12 +166,15 @@ public:
 
     // C++ implicit construction: a base chain that runs code (a declared constructor or a C++ class above) must be
     // constructed by a class that declares no constructor of its own
+    // Some base runs code when the class is constructed: a C++ base, or a script base with a constructor or such a base of its own
     bool base_needs_construction() const {
-        const class_definition* parent = parent_ptr();   // the base super() reaches
-        if (!parent) { return false; }
-        if (!parent->is_script_class()) { return true; }
-        const auto& script_parent = static_cast<const script_class_definition&>(*parent);
-        return !script_parent.get_constructor_asts().empty() || script_parent.base_needs_construction();
+        for (const auto& parent : get_parent_classes()) {
+            if (!parent) { continue; }
+            if (!parent->is_script_class()) { return true; }
+            const auto& script_parent = static_cast<const script_class_definition&>(*parent);
+            if (!script_parent.get_constructor_asts().empty() || script_parent.base_needs_construction()) { return true; }
+        }
+        return false;
     }
 
     // A constructor's initializer list as it runs: one naming none over a base that needs construction is `: super()`

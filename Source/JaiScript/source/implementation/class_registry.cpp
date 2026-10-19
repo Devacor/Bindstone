@@ -200,7 +200,7 @@ void class_definition::run_destructor_body(class_instance* instance, const class
 void class_definition::expand_destroy_level(class_instance* instance, const class_definition* level, const class_definition* kept,
                                             std::vector<detail::release_action>& actions, const class_definition* constructed) const {
     if (!level || (kept && (kept == level || kept->derives_from(level)))) { return; }
-    if (engine_ && (!constructed || constructed->derives_from(level))) {
+    if (engine_ && (!constructed || instance->level_constructed(level))) {
         if (const script_value* body = level->destructor_body(*engine_)) {
             detail::dispatch_level_scope level_dispatch(*instance, const_cast<class_definition*>(level), class_instance::cdtor_phase::destruction);
             run_destructor_body(instance, level, *body);
@@ -219,10 +219,14 @@ script_value class_definition::take_field_for_destroy(class_instance* instance, 
 }
 
 const class_definition* class_instance::constructed_level() const {
-    if (constructed_below_ == k_nothing_constructed) { return nullptr; }
-    const class_definition* level = class_def_;
-    for (uint16_t up = 0; level && up < constructed_below_; ++up) { level = level->parent_ptr(); }
-    return level;
+    return constructed_levels_ == k_nothing_constructed || constructed_levels_ == 0 ? nullptr : class_def_;
+}
+
+bool class_instance::level_constructed(const class_definition* level) const {
+    if (!class_def_ || constructed_levels_ == k_nothing_constructed) { return false; }
+    const auto& order = class_def_->construction_order();
+    const auto it = std::find(order.begin(), order.end(), level);
+    return it != order.end() && static_cast<size_t>(it - order.begin()) < constructed_levels_;
 }
 
 void class_definition::destroy_levels(class_instance* instance, const class_definition* level, const class_definition* kept,
@@ -593,6 +597,61 @@ void class_registry::validate_class_hierarchy(const std::string& class_name) {
 namespace detail {
 
 namespace {
+    // What each live object of a reloaded class (or of a class derived from it) held in the fields whose initializer needs the object
+    struct reloaded_object {
+        std::weak_ptr<class_instance> instance;
+        std::vector<uint8_t> held;   // per field: 0 absent, 1 null, 2 a value
+    };
+
+    std::vector<reloaded_object> live_fields_before_reload(engine& eng, const class_definition& cls, const std::vector<uint64_t>& fields) {
+        std::vector<reloaded_object> result;
+        if (fields.empty()) { return result; }
+        for (const auto& [name, script_class] : eng.get_class_registry().script_classes_) {
+            if (!script_class || !script_class->derives_from(&cls)) { continue; }
+            for (const auto& weak : script_class->registered_instances()) {
+                auto instance = weak.lock();
+                if (!instance) { continue; }
+                reloaded_object object{weak, {}};
+                for (uint64_t field : fields) {
+                    const script_value* v = instance->has_field(field) ? instance->find_field_value(field) : nullptr;
+                    object.held.push_back(!v ? 0 : v->is_null() ? 1 : 2);
+                }
+                result.push_back(std::move(object));
+            }
+        }
+        return result;
+    }
+
+    // A field a reload added to a live object, or reset to its default, starts as construction would make it: its initializer evaluated
+    // with 'this' bound to the object and the declaring class answering for it. An initializer's error stays with its object, as a
+    // migrate hook's does: the field keeps its declared default.
+    void initialize_reloaded_fields(const class_declaration_host& host, script_class_definition& cls, const std::vector<uint64_t>& fields,
+                                    const std::vector<reloaded_object>& objects) {
+        for (const auto& object : objects) {
+            auto instance = object.instance.lock();
+            if (!instance || !instance->get_class_definition()) { continue; }
+            script_value this_value = script_value::make_class_object(*instance->get_class_definition(), instance, host.eng);
+            auto env = std::make_shared<environment>(host.env, host.symbols, this_value);
+            env->set_access_context(&cls);
+            env->define(host.symbols->get_this_id(), this_value);
+            dispatch_level_scope level_dispatch(*instance, &cls, class_instance::cdtor_phase::construction);
+            for (size_t i = 0; i < fields.size(); ++i) {
+                const script_value* now = instance->find_field_value(fields[i]);
+                const bool fresh = object.held[i] == 0 || (object.held[i] == 2 && (!now || now->is_null()));
+                if (!fresh) { continue; }
+                auto initializer = cls.get_field_initializer_ast(fields[i]);
+                if (!initializer) { continue; }
+                auto evaluated = host.eval(initializer, env);
+                if (!evaluated) {
+                    host.discard_unwinding();
+                    continue;
+                }
+                auto stored = instance->field_store(fields[i], evaluated.value(), [&] { return evaluated.value(); });
+                if (stored) { instance->set_field_unchecked(fields[i], std::move(stored.value())); }
+            }
+        }
+    }
+
     // The synthesized accessors of a field (a user _get_/_set_ keeps its id)
     script_function field_getter(uint64_t field_id) {
         return [field_id](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -725,6 +784,10 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
             }
         }
 
+        if (const auto diamond = class_definition::find_diamond(parent_defs); diamond.shared) {
+            return checked_result<void>(make_error_code(runtime_error_code::multiple_inheritance), "{0}",
+                symbols->intern(detail::diamond_inheritance_text(decl->name, diamond.shared->get_name(), diamond.first->get_name(), diamond.second->get_name())));
+        }
         if (!parent_defs.empty() && !class_def->set_parents(parent_defs)) {
             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
         }
@@ -797,7 +860,7 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
                 bool preserve_existing = is_redefinition && field_id != 0 && class_def->has_static_field(field_id) && !var_decl->is_const;   // a class constant has no state to keep (internal/const.md)
 
                 if (initializer_ast && !preserve_existing) {
-                    auto init_result = host.eval(initializer_ast);
+                    auto init_result = host.eval(initializer_ast, nullptr);
                     if (!init_result) {
                         return init_result.error_value();
                     }
@@ -894,20 +957,46 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
     reflect_field_order_instance.insert(reflect_field_order_instance.end(), reflect_field_order_static.begin(), reflect_field_order_static.end());
     class_def->set_field_order(std::move(reflect_field_order_instance));
 
+    // Every name an initializer list gives is a base, named once (super(...) is the first)
+    for (const auto& member : decl->members) {
+        const auto* ctor = member.declaration && member.declaration->get_type() == node_type::function_decl
+            ? static_cast<const function_decl*>(member.declaration.get()) : nullptr;
+        if (!ctor || ctor->name != decl->name) { continue; }
+        std::vector<int> named(decl->base_classes.size(), 0);
+        for (const auto& init : ctor->initializers) {
+            if (init.target == "this") { continue; }
+            size_t index = init.target == "super" && !decl->base_classes.empty() ? 0 : SIZE_MAX;
+            for (size_t i = 0; index == SIZE_MAX && i < decl->base_classes.size(); ++i) {
+                if (initializer_names(init.target, decl->base_classes[i])) { index = i; }
+            }
+            if (index == SIZE_MAX) {
+                if (init.target == "super") { continue; }   // a base-less class's super() raises when it runs
+                return checked_result<void>(make_error_code(runtime_error_code::no_constructor_found), k_not_a_base, decl->name_id, symbols->intern(init.target));
+            }
+            if (++named[index] == 2) {
+                return checked_result<void>(make_error_code(runtime_error_code::no_constructor_found), k_base_named_twice, decl->name_id,
+                                            symbols->intern(decl->base_classes[index]));
+            }
+        }
+    }
+
     if (is_redefinition) {
         std::unordered_map<uint64_t, script_value> field_defaults_with_engine;
         field_defaults_with_engine.reserve(new_field_defaults.size());
+        std::vector<uint64_t> per_instance_fields;   // initializers that need the object they initialize
 
         for (const auto& [field_id, value] : new_field_defaults) {
             auto initializer_ast = class_def->get_field_initializer_ast(field_id);
             script_value evaluated_value = value;
 
             if (initializer_ast) {
-                auto init_result = host.eval(initializer_ast);
-                if (!init_result) {
-                    return init_result.error_value();
+                auto init_result = host.eval(initializer_ast, nullptr);
+                if (init_result) {
+                    evaluated_value = initializer_store_value(std::move(init_result.value()), initializer_ast.get());
+                } else {
+                    host.discard_unwinding();
+                    per_instance_fields.push_back(field_id);
                 }
-                evaluated_value = initializer_store_value(std::move(init_result.value()), initializer_ast.get());
             }
             if (!evaluated_value.has_valid_engine() && eng) {
                 evaluated_value.set_engine(eng);
@@ -946,8 +1035,10 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
             }
         }
 
+        auto reloaded_fields = live_fields_before_reload(*eng, *class_def, per_instance_fields);
         class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, eng, structurally_identical);
         class_def->set_auto_accessor_ids(std::move(synthesized_accessor_ids));
+        initialize_reloaded_fields(host, *class_def, per_instance_fields, reloaded_fields);
 
         if (structural_key.empty()) {
             try {

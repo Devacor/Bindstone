@@ -204,6 +204,18 @@ Tiger().speak();</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">try.jai:2:26: error: method &#x27;speak&#x27; redefines &#x27;Cat::speak&#x27;: mark it &#x27;override&#x27;</code></pre></div>
 <p>Assigning a derived instance to a base-typed variable is allowed; the reverse (parent to child), siblings, and structurally-identical unrelated classes are rejected.</p>
 <p><strong>The base is constructed first, as in C++.</strong> A constructor that names no <code>: super(...)</code>, and a class that declares no constructor at all, default-construct the base: its default constructor runs (a C++ base class is created) before the derived class&#x27;s field initializers and body, so they can read the base&#x27;s state. A base whose constructors all need arguments has no default constructor, and constructing the derived class raises <code>Base &#x27;Cat&#x27; has no default constructor; call super(...)</code> (the strict checker reports it at load when it sees both classes).</p>
+<p>A class may name several bases. They construct in declaration order, each with its own bases first, then the class&#x27;s members and its body run; destruction runs the same steps in reverse. An initializer list names a base to pass it arguments, as in C++ (<code>Car() : Engine(800), Radio(98.5) {}</code>); the order it names them in changes nothing, <code>super(...)</code> is the first base, and an unnamed base is default-constructed. A later base with no default constructor must be named (<code>Class &#x27;Car&#x27; must construct base &#x27;Radio&#x27;: it has no default constructor</code>); an initializer list may name only bases, each once (<code>Class &#x27;Car&#x27; has no base &#x27;Wheel&#x27; to construct</code>, <code>Class &#x27;Car&#x27; constructs base &#x27;Engine&#x27; twice</code>). The checker reports all three at load. A class two bases both reach is a diamond, which JaiScript does not support: the checker reports it at load, and with checking off the declaration raises <code>Class &#x27;D&#x27; inherits &#x27;A&#x27; through both &#x27;B&#x27; and &#x27;C&#x27; (diamond inheritance is not supported)</code>.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Engine { int rpm = 0; Engine(int r) { rpm = r; print("Engine " + to_string(r)); } ~Engine() { print("~Engine"); } }
+class Radio { Radio() { print("Radio"); } ~Radio() { print("~Radio"); } }
+class Car : Engine, Radio { Car() : Engine(800) { print("Car"); } ~Car() { print("~Car"); } }
+function drive() -> void { Car c; }
+drive();</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Engine 800
+Radio
+Car
+~Car
+~Radio
+~Engine</code></pre></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Engine { int rpm = 0; Engine() { rpm = 800; } }
 class Car : Engine { int idle = this.rpm; }      // no constructor: Engine() still runs first
 class Truck : Engine { int load = 0; Truck() { load = rpm * 2; } }
@@ -503,7 +515,7 @@ print("{}", twice([]() { return c(); }));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">11
 13</code></pre></div>
 <h2 id="hot-reload-with-permissive-migration">Hot reload with permissive migration<a class="hlink" href="#hot-reload-with-permissive-migration" aria-label="link">&#8203;</a></h2>
-<p>Re-executing a <code>class</code> declaration on the same engine <strong>reloads</strong> the class. Live instances migrate permissively: fields that still exist <strong>keep their current values</strong> (including still-default ones), brand-new fields get the new defaults, removed fields drop. The two <code>execute()</code> calls below run on one engine (marked <code>//=== execute</code>):</p>
+<p>Re-executing a <code>class</code> declaration on the same engine <strong>reloads</strong> the class. Live instances migrate permissively: fields that still exist <strong>keep their current values</strong> (including still-default ones), brand-new fields get the new defaults, removed fields drop. A new field whose initializer reads the object (a method call, another field) runs it on each live instance with <code>this</code> bound, as construction would, so every instance starts from its own state. The two <code>execute()</code> calls below run on one engine (marked <code>//=== execute</code>):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Config {
     auto version = 1;
     auto name = "default";

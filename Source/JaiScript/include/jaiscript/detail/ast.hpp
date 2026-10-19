@@ -938,7 +938,7 @@ namespace jai {
     
     // Constructor initialization entry (for : super(args), : this(args))
     struct constructor_initializer {
-        std::string target; // "super" or "this"
+        std::string target; // "super", "this" or the name of the base it constructs
         std::vector<expression_ptr> arguments;
         std::vector<uint8_t> arg_captures;
 

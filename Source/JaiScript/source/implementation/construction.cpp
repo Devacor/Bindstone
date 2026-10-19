@@ -155,7 +155,10 @@ namespace {
 	checked_result<void> construct_script_bases(construction_host& host, const std::shared_ptr<script_class_definition>& cls,
 	                                            const std::shared_ptr<environment>& definition_env, class_instance& instance,
 	                                            const script_value& this_value, std::vector<constructor_chain_entry>& chain,
-	                                            std::optional<call_depth_guard>& initializer_depth) {
+	                                            std::optional<call_depth_guard>& initializer_depth, size_t delegation_depth = 0) {
+		if (delegation_depth > k_max_constructor_delegation_depth) {
+			return raise_call_depth();   // a delegation cycle (ill-formed in C++) raises instead of recursing without end
+		}
 		const bool fields_run_code = !cls->chain_initializers_all_literal();
 		for (size_t level = 0; level < chain.size(); ++level) {
 			auto& entry = chain[level];
@@ -192,16 +195,41 @@ namespace {
 		for (size_t below = chain.size(); below > 0; --below) {
 			auto* it = &chain[below - 1];
 			auto level_env = construction_level_environment(host, definition_env, this_value, it->script_class.get(), *it->ctor, it->args);
-			auto further = construct_further_bases(host, cls, *it->script_class, it->ctor.get(), level_env, definition_env, instance, this_value, initializer_depth);
-			if (!further || host.unwinding) { return further; }
-			it = &chain[below - 1];
+			const auto& level_initializers = it->script_class->effective_initializers(*it->ctor);
+			const auto delegation = std::find_if(level_initializers.begin(), level_initializers.end(), [](const constructor_initializer& init) { return init.target == "this"; });
+			if (delegation != level_initializers.end()) {
+				// C++ delegation: the target constructor constructs the level (its bases, its members and its body) ahead of this body
+				std::vector<script_value> target_args;
+				auto evaluated = evaluate_initializer_arguments(host, *delegation, level_env, fields_run_code, it->script_class.get(), target_args);
+				if (!evaluated || host.unwinding) { return evaluated; }
+				std::vector<std::shared_ptr<function_decl>> other_ctors;
+				for (const auto& candidate : it->script_class->get_constructor_asts()) { if (candidate != it->ctor) { other_ctors.push_back(candidate); } }
+				auto target_pick = select_declaration(other_ctors, target_args, it->script_class->get_type_id(), host.eng);
+				if (!target_pick) { return target_pick.error_value(); }
+				if (!target_pick.value()) {
+					return overload_miss(make_error_code(runtime_error_code::no_constructor_found), it->script_class->get_type_id(), target_args.data(),
+					                     target_args.size(), host.eng, true);
+				}
+				std::vector<constructor_chain_entry> target_chain;
+				target_chain.push_back({it->script_class, std::move(target_pick.value()), std::move(target_args)});
+				auto constructed = construct_script_bases(host, cls, definition_env, instance, this_value, target_chain, initializer_depth, delegation_depth + 1);
+				if (!constructed || host.unwinding) { return constructed; }
+				it = &chain[below - 1];
+			}
+			if (delegation == level_initializers.end()) {
+				auto further = construct_further_bases(host, cls, *it->script_class, it->ctor.get(), level_env, definition_env, instance, this_value, initializer_depth);
+				if (!further || host.unwinding) { return further; }
+				it = &chain[below - 1];
+			}
 			dispatch_level_scope level_dispatch(instance, it->script_class.get(), class_instance::cdtor_phase::construction);
-			for (const auto& [field_id, initializer_ast] : it->script_class->get_field_initializer_asts()) {
-				if (!initializer_ast) { continue; }
-				auto evaluated = host.evaluate(initializer_ast, level_env);
-				if (host.unwinding) { return {}; }
-				if (!evaluated) { return evaluated.error_value(); }
-				instance.set_field(field_id, initializer_store_value(std::move(evaluated.value()), initializer_ast.get()));
+			if (delegation == level_initializers.end()) {
+				for (const auto& [field_id, initializer_ast] : it->script_class->get_field_initializer_asts()) {
+					if (!initializer_ast) { continue; }
+					auto evaluated = host.evaluate(initializer_ast, level_env);
+					if (host.unwinding) { return {}; }
+					if (!evaluated) { return evaluated.error_value(); }
+					instance.set_field(field_id, initializer_store_value(std::move(evaluated.value()), initializer_ast.get()));
+				}
 			}
 			initializer_depth.reset();
 			auto body = host.run_constructor_body(it->ctor, definition_env, this_value, it->script_class.get(), it->args);

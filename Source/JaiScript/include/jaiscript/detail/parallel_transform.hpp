@@ -216,6 +216,7 @@ namespace jai::detail {
         // zero calls per element - when fn only reads its parameter and returns only from its
         // top level; otherwise the call-form skeleton above. Hot reload mints a fresh body.
         std::unordered_map<const void*, std::shared_ptr<function_decl>> transform_inline_wrappers;
+        std::unordered_map<const void*, std::shared_ptr<function_decl>> reduce_wrappers;   // parallel_reduce chunk loops by step body
         std::string error_text;                            // owns the message a re-raise views
         std::vector<size_t> last_chunk_bounds;             // instrumentation (tests/bench)
         // Instrumentation: how the most recent region provisioned each captured name
@@ -303,6 +304,8 @@ namespace jai::detail {
 
     // The builtin bodies (registered by the engine constructor).
     checked_result<script_value> run_parallel_transform(engine& eng, const std::vector<script_value>& args);
+    // parallel_reduce(xs, init, step, combine): chunks sized by xs.size() alone fold in element order, then combine in chunk order
+    checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<script_value>& args);
 
     // parallel_for (auto& x : arr) { body } — the in-place fork-join statement
     // (parallel_for v1). Both backends call this after evaluating the container in the

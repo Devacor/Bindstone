@@ -34,6 +34,7 @@
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/detail/thread_pool_access.hpp>
 #include <jaiscript/detail/ref_param_writes.hpp>
+#include <jaiscript/detail/lvalue_shape.hpp>
 #include <jaiscript/detail/interpreter.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/ast.hpp>
@@ -2036,12 +2037,12 @@ namespace {
 	}
 
 	parallel_admission build_admission(engine& eng, const std::shared_ptr<script_defined_function>& fn,
-	                                   bool inplace_root = false) {
+	                                   bool inplace_root = false, const char* prefix = "parallel_for") {
 		admission_builder builder(eng);
 		if (inplace_root) {
 			builder.inplace_root = true;
 			builder.adm.inplace_root = true;
-			builder.prefix = "parallel_for";
+			builder.prefix = prefix;
 		} else {
 			builder.adm.transform_cursor = true;
 		}
@@ -2069,13 +2070,13 @@ namespace {
 
 	const parallel_admission* admit_cached(engine& eng, parallel_engine_state& state,
 	                                       const std::shared_ptr<script_defined_function>& fn,
-	                                       bool inplace_root = false) {
+	                                       bool inplace_root = false, const char* prefix = "parallel_for") {
 		const void* key = fn->body.get();
 		auto it = state.admission_cache.find(key);
 		if (it != state.admission_cache.end() && admission_graph_current(eng, it->second)) {
 			return &it->second;
 		}
-		auto [pos, inserted] = state.admission_cache.insert_or_assign(key, build_admission(eng, fn, inplace_root));
+		auto [pos, inserted] = state.admission_cache.insert_or_assign(key, build_admission(eng, fn, inplace_root, prefix));
 		(void)inserted;
 		return &pos->second;
 	}
@@ -2329,6 +2330,7 @@ namespace {
 		// return needs no cast, exactly as the typed return skipped its conversion
 		std::vector<uint8_t> return_proofs;
 		size_t next_return = 0;
+		bool discard_value = false;   // the value is evaluated and dropped: nothing is stored
 	};
 	void collect_return_proofs(const statement_ptr& slot, std::vector<uint8_t>& out) {
 		if (!slot) { return; }
@@ -2373,7 +2375,11 @@ namespace {
 			const uint8_t proof = ctx.next_return < ctx.return_proofs.size() ? ctx.return_proofs[ctx.next_return] : proof_none;
 			++ctx.next_return;
 			std::vector<declaration_ptr> decls;
-			if (r->value) {
+			if (r->value && ctx.discard_value) {
+				if (r->value->get_type() != node_type::identifier_expr) {   // `return acc;` names what the element already wrote
+					decls.push_back(std::make_shared<expression_decl>(r->location, r->value));
+				}
+			} else if (r->value) {
 				auto target = std::make_shared<identifier_expr>(r->location, ctx.out_name, ctx.out_symbol);
 				target->slot_index = ctx.out_slot;
 				expression_ptr value = r->value;
@@ -4409,6 +4415,319 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 		return checked_result<script_value>(ran.error(), std::string_view(state.error_text));
 	}
 	return out;
+}
+
+// parallel_reduce(xs, init, step, combine): xs splits into chunks whose size depends on xs.size() alone; a region over the chunks'
+// accumulators (each init's copy) folds every chunk's elements in order with step, its body grafted into the chunk loop (a
+// `T& acc` step mutates the accumulator in place, a by-value step's returns store into it), and the chunk results combine left
+// to right, so the result is the same on every machine. step is the region's body: lambdas and their captures follow
+// parallel_for's capture rules, writes to enclosing state are refused
+namespace {
+	inline constexpr size_t k_reduce_chunks = 64;      // at most this many chunks
+	inline constexpr size_t k_reduce_min_chunk = 16;   // elements per chunk at least
+
+	size_t reduce_chunk_size(size_t n) { return std::max(k_reduce_min_chunk, (n + k_reduce_chunks - 1) / k_reduce_chunks); }
+
+	// The chunk loop per mode: __c0 the chunk's accumulator, __c1 its chunk number; the graft forms declare step's own
+	// parameters per element (__a, by value only, and __x) in front of the placeholder, the call forms call the step
+	constexpr const char* k_reduce_chunk_head =
+		"function __jai_reduce_chunk(var& __c0, var& __c1, int __n) { for (int __k = 0; __k < __n; __k = __jai_parallel_advance(__k)) { "
+		"int __lo = __c1 * __jai_reduce_s; int __hi = __lo + __jai_reduce_s; if (__hi > __jai_reduce_n) { __hi = __jai_reduce_n; } "
+		"for (int __i = __lo; __i < __hi; __i++) { ";
+	constexpr const char* k_reduce_chunk_tail = " } } }";
+
+	// Every identifier and declaration of the skeleton (the graft not yet in): slots move past step's frame, __c0 / __a / __x
+	// become step's own parameters where the mode binds them
+	struct reduce_slot_map {
+		size_t base = 0;
+		bool in_place = false;
+		const parameter* acc = nullptr;
+		const parameter* element = nullptr;
+	};
+	void map_reduce_expr(expression_ptr& e, const reduce_slot_map& m);
+	void map_reduce_decl(declaration_ptr& d, const reduce_slot_map& m);
+	void map_reduce_var(variable_decl* v, const reduce_slot_map& m) {
+		map_reduce_expr(v->initializer, m);
+		const parameter* as = v->name == "__a" ? m.acc : v->name == "__x" ? m.element : nullptr;
+		if (as) {
+			v->name = as->name;
+			v->name_id = as->symbol_id;
+			v->slot_index = as == m.acc ? 0 : 1;
+			v->type = as->type;
+			v->decl_fast_flags = variable_decl::classify_decl_fast(v->type);
+		} else if (v->slot_index != SIZE_MAX) {
+			v->slot_index += m.base;
+		}
+	}
+	void map_reduce_stmt(statement_ptr& s, const reduce_slot_map& m) {
+		if (!s) { return; }
+		switch (s->get_type()) {
+		case node_type::block_stmt:
+			for (auto& d : static_cast<block_stmt*>(s.get())->declarations) { map_reduce_decl(d, m); }
+			return;
+		case node_type::for_stmt: {
+			auto* n = static_cast<for_stmt*>(s.get());
+			map_reduce_decl(n->initializer, m); map_reduce_expr(n->condition, m); map_reduce_expr(n->update, m); map_reduce_stmt(n->body, m);
+			return;
+		}
+		case node_type::if_stmt: {
+			auto* n = static_cast<if_stmt*>(s.get());
+			map_reduce_expr(n->condition, m); map_reduce_stmt(n->then_statement, m); map_reduce_stmt(n->else_statement, m);
+			return;
+		}
+		case node_type::variable_decl:
+			map_reduce_var(static_cast<variable_decl*>(s.get()), m);
+			return;
+		case node_type::expression_stmt:
+			map_reduce_expr(static_cast<expression_stmt*>(s.get())->expression, m);
+			return;
+		default:
+			return;
+		}
+	}
+	void map_reduce_decl(declaration_ptr& d, const reduce_slot_map& m) {
+		if (!d) { return; }
+		if (d->get_type() == node_type::statement_decl) { map_reduce_stmt(static_cast<statement_decl*>(d.get())->statement, m); return; }
+		if (d->get_type() == node_type::expression_decl) { map_reduce_expr(static_cast<expression_decl*>(d.get())->expression, m); return; }
+		if (d->get_type() == node_type::variable_decl) { map_reduce_var(static_cast<variable_decl*>(d.get()), m); }
+	}
+	void map_reduce_expr(expression_ptr& e, const reduce_slot_map& m) {
+		if (!e) { return; }
+		switch (e->get_type()) {
+		case node_type::identifier_expr: {
+			auto* id = static_cast<identifier_expr*>(e.get());
+			if (id->name == "__c0" && m.in_place) {
+				id->name = m.acc->name;
+				id->symbol_id = m.acc->symbol_id;
+				id->slot_index = 0;
+			} else if (id->slot_index != SIZE_MAX) {
+				id->slot_index += m.base;
+			}
+			return;
+		}
+		case node_type::binary_expr: { auto* b = static_cast<binary_expr*>(e.get()); map_reduce_expr(b->left, m); map_reduce_expr(b->right, m); return; }
+		case node_type::unary_expr: map_reduce_expr(static_cast<unary_expr*>(e.get())->operand, m); return;
+		case node_type::assignment_expr: { auto* a = static_cast<assignment_expr*>(e.get()); map_reduce_expr(a->target, m); map_reduce_expr(a->value, m); return; }
+		case node_type::call_expr: {
+			auto* c = static_cast<call_expr*>(e.get());
+			map_reduce_expr(c->callee, m);
+			for (auto& arg : c->arguments) { map_reduce_expr(arg, m); }
+			return;
+		}
+		default:
+			return;
+		}
+	}
+
+	// The chunk loop for step, built once per step body: step's body grafted when it returns only from its top level, else the
+	// call form (a return inside a nested loop keeps its meaning)
+	const std::shared_ptr<function_decl>& build_reduce_wrapper(engine& eng, parallel_engine_state& state, const std::shared_ptr<script_defined_function>& step) {
+		auto found = state.reduce_wrappers.find(static_cast<const void*>(step->body.get()));
+		if (found != state.reduce_wrappers.end()) { return found->second; }
+		const auto& params = step->parameters();
+		const bool in_place = params[0].is_reference;
+		body_control_scan scan;
+		statement_ptr body_view = step->body;
+		scan_parallel_body_control(body_view, 0, 0, scan);
+		const bool graft = !scan.nested_return && !scan.bad_break;
+		std::string source = k_reduce_chunk_head;
+		if (!graft) {
+			source += in_place ? "__jai_parallel_body(__c0, __jai_reduce_xs[__i]);" : "__c0 = __jai_parallel_body(__c0, __jai_reduce_xs[__i]);";
+		} else {
+			source += in_place ? "var __x = __jai_reduce_xs[__i]; __jai_parallel_placeholder();" : "var __a = __c0; var __x = __jai_reduce_xs[__i]; __jai_parallel_placeholder();";
+		}
+		source += k_reduce_chunk_tail;
+		auto decl = parse_chunk_skeleton(eng, source.c_str());
+		if (!graft) {
+			return state.reduce_wrappers.emplace(static_cast<const void*>(step->body.get()), std::move(decl)).first->second;
+		}
+		parameter acc = params[0];
+		parameter element = params[1];
+		if (acc.symbol_id == UINT64_MAX) { acc.symbol_id = eng.symbolize(acc.name); }
+		if (element.symbol_id == UINT64_MAX) { element.symbol_id = eng.symbolize(element.name); }
+		reduce_slot_map map;
+		map.base = step->local_count;   // step's frame: its two parameters and its locals
+		map.in_place = in_place;
+		map.acc = &acc;
+		map.element = &element;
+		const size_t skeleton_slots = decl->local_count;
+		for (size_t j = 0; j < decl->parameters.size(); ++j) { decl->parameters[j].slot_index += map.base; }
+		if (in_place) {   // the chunk's accumulator IS step's acc
+			parameter bound = acc;
+			bound.slot_index = 0;
+			bound.is_reference = true;
+			decl->parameters[0] = bound;
+		}
+		statement_ptr skeleton_body = decl->body;
+		map_reduce_stmt(skeleton_body, map);
+		transform_return_ctx rctx;
+		rctx.eng = &eng;
+		if (in_place) {
+			rctx.discard_value = true;   // the accumulator is already written: a return only ends the element
+		} else {
+			rctx.out_name = std::string_view("__c0");
+			rctx.out_symbol = eng.symbolize("__c0");
+			rctx.out_slot = map.base;
+			const return_conv conv = classify_return_conv(step->return_type.get());
+			if (conv != return_conv::none && conv != return_conv::ref) { rctx.cast_to = step->return_type; }
+			collect_return_proofs(body_view, rctx.return_proofs);
+		}
+		statement_ptr grafted = clone_statement(eng, body_view, *step);
+		rewrite_transform_returns(grafted, 0, rctx);
+		// the placeholder sits in the innermost loop: replace it wherever the walk finds it
+		std::function<void(statement_ptr&)> place = [&](statement_ptr& s) {
+			if (!s) { return; }
+			if (s->get_type() == node_type::for_stmt) { place(static_cast<for_stmt*>(s.get())->body); return; }
+			if (s->get_type() != node_type::block_stmt) { return; }
+			for (auto& bd : static_cast<block_stmt*>(s.get())->declarations) {
+				if (bd->get_type() == node_type::statement_decl) { place(static_cast<statement_decl*>(bd.get())->statement); continue; }
+				if (bd->get_type() != node_type::expression_decl) { continue; }
+				auto* ed = static_cast<expression_decl*>(bd.get());
+				if (ed->expression && ed->expression->get_type() == node_type::call_expr) {
+					auto* call = static_cast<call_expr*>(ed->expression.get());
+					if (call->callee->get_type() == node_type::identifier_expr &&
+					    static_cast<identifier_expr*>(call->callee.get())->name == "__jai_parallel_placeholder") {
+						bd = std::make_shared<statement_decl>(bd->location, grafted);
+					}
+				}
+			}
+		};
+		place(skeleton_body);
+		decl->local_count = map.base + skeleton_slots;
+		return state.reduce_wrappers.emplace(static_cast<const void*>(step->body.get()), std::move(decl)).first->second;
+	}
+}
+
+checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<script_value>& args) {
+	parallel_engine_state& state = eng.parallel_state();
+	auto raise = [&state](std::error_code code, std::string message) {
+		state.error_text = std::move(message);
+		return checked_result<script_value>(code, std::string_view(state.error_text));
+	};
+	auto usage = [&raise](std::string message) {
+		return raise(make_error_code(runtime_error_code::unsupported_operation), std::move(message));
+	};
+	if (state.region_running) {
+		return usage("parallel_reduce: nested parallel regions are not supported");
+	}
+	if (args.size() != 4) {
+		return usage("parallel_reduce: expected (array, init, step, combine)");
+	}
+	const script_value& xs = args[0].is_reference() ? args[0].deref() : args[0];
+	if (!xs.is_array()) {
+		return usage("parallel_reduce: first argument must be an array");
+	}
+	const script_value& init = args[1].is_reference() ? args[1].deref() : args[1];
+	const script_callable* callbacks[2] = { payload_from_function_value(args[2]), payload_from_function_value(args[3]) };
+	const char* const roles[2] = { "step", "combine" };
+	const char* const shapes[2] = { "(acc, x)", "(a, b)" };
+	for (size_t k = 0; k < 2; ++k) {
+		const script_callable* cb = callbacks[k];
+		if (!cb || cb->kind != script_callable::kind_type::function || !cb->fn || !cb->fn->body) {
+			return usage(std::string("parallel_reduce: ") + roles[k] + " must be a script function or lambda");
+		}
+		if (cb->fn->parameters().size() != 2) {
+			return usage(std::string("parallel_reduce: ") + roles[k] + " must take two parameters " + shapes[k]);
+		}
+	}
+	const std::shared_ptr<script_defined_function>& step = callbacks[0]->fn;
+	if (step->parameters()[1].is_reference) {
+		return usage("parallel_reduce: step takes its element by value (the elements are the input's, never written)");
+	}
+	execution_backend* backend = eng.get_execution_backend();
+	const size_t n = xs.unchecked_array_node()->size();
+	parallel_admission adm;
+	std::shared_ptr<function_decl> wrapper;
+	{
+		struct running_guard {
+			parallel_engine_state& s;
+			running_guard(parallel_engine_state& state_ref) : s(state_ref) { s.region_running = true; }
+			~running_guard() { s.region_running = false; }
+		} guard(state);
+		const parallel_admission* step_adm = admit_cached(eng, state, step, /*inplace_root*/ true, "parallel_reduce");
+		if (!step_adm->admitted) {
+			return raise(step_adm->code, step_adm->message);
+		}
+		const parallel_admission* combine_adm = admit_cached(eng, state, callbacks[1]->fn, /*inplace_root*/ true, "parallel_reduce");
+		if (!combine_adm->admitted) {
+			return raise(combine_adm->code, combine_adm->message);
+		}
+		adm = *step_adm;
+		wrapper = build_reduce_wrapper(eng, state, step);
+	}
+	if (n == 0) {
+		return clone_for_assignment(init);
+	}
+	const size_t chunk = reduce_chunk_size(n);
+	const size_t chunks = (n + chunk - 1) / chunk;
+	script_value accs = script_value::make_array(nullptr, &eng);
+	script_value ids = script_value::make_array(nullptr, &eng);
+	{
+		auto& acc_values = accs.unchecked_get_array_storage()->values();
+		auto& id_values = ids.unchecked_get_array_storage()->values();
+		acc_values.reserve(chunks);
+		id_values.reserve(chunks);
+		for (size_t c = 0; c < chunks; ++c) {
+			acc_values.push_back(clone_for_assignment(init));   // each chunk's own copy of init
+			id_values.emplace_back(static_cast<script_int>(c), &eng);
+		}
+	}
+	// the chunk loop's own reads ride the captures: the input (a borrow when it holds primitives), the chunk size and the count,
+	// resolved beside step's closure so a lambda's captures provision as parallel_for's do
+	auto capture_env = std::make_shared<environment>(step->closure_env ? step->closure_env : eng.get_global_environment(), eng.get_symbolizer());
+	const uint64_t xs_id = eng.symbolize("__jai_reduce_xs"), s_id = eng.symbolize("__jai_reduce_s"), n_id = eng.symbolize("__jai_reduce_n");
+	capture_env->define(xs_id, xs);
+	capture_env->define(s_id, script_value(static_cast<script_int>(chunk), &eng));
+	capture_env->define(n_id, script_value(static_cast<script_int>(n), &eng));
+	auto* sym = eng.get_symbolizer();
+	adm.captures.push_back({ xs_id, sym->get_string(xs_id), true });
+	adm.captures.push_back({ s_id, sym->get_string(s_id), true });
+	adm.captures.push_back({ n_id, sym->get_string(n_id), true });
+	// the graft declares step's parameters and stores its results in the chunk loop: their shapes warm with the region's
+	for (const auto& p : step->parameters()) {
+		if (p.type) { adm.referenced_types.push_back(p.type.get()); }
+		if (const type_info* declared = parameter_declared_ref(p)) { eng.get_type_info_declared_reference(const_cast<type_info*>(declared)); }   // an escaping T& parameter's bind marks its reference with it
+	}
+	if (step->return_type) { adm.referenced_types.push_back(step->return_type.get()); }
+
+	std::vector<script_value> containers;
+	containers.reserve(2);
+	containers.push_back(accs);
+	containers.push_back(ids);
+	{
+		struct running_guard {
+			parallel_engine_state& s;
+			running_guard(parallel_engine_state& state_ref) : s(state_ref) { s.region_running = true; }
+			~running_guard() { s.region_running = false; }
+		} guard(state);
+		region_plan plan;
+		plan.prefix = "parallel_reduce";
+		plan.containers = &containers;
+		plan.root_fn = step;
+		plan.adm = &adm;
+		plan.chunk_wrapper = &wrapper;
+		plan.capture_env = capture_env;
+		plan.inplace = true;
+		auto ran = run_region(eng, plan);
+		if (!ran) {
+			return checked_result<script_value>(ran.error(), std::string_view(state.error_text));
+		}
+	}
+	// left to right in chunk order: the one combine order on every machine
+	engine::external_call_guard call_guard(&eng);
+	const script_array* chunk_results = accs.unchecked_array_node();
+	script_value result = chunk_results->get(0, &eng);
+	std::vector<script_value> combine_args(2, script_value(std::monostate{}, &eng));
+	for (size_t c = 1; c < chunks; ++c) {
+		combine_args[0] = std::move(result);
+		combine_args[1] = chunk_results->get(c, &eng);
+		auto combined = backend->execute_callable(*callbacks[1], combine_args);
+		if (!combined || backend->is_unwinding()) {
+			return combined;
+		}
+		result = combined.value().is_reference() ? script_value(combined.value().deref()) : std::move(combined.value());
+	}
+	return result;
 }
 
 // parallel_for (see parallel_transform.hpp): the in-place fork-join statement over one array

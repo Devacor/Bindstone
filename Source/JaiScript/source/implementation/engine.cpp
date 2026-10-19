@@ -2516,6 +2516,9 @@ void engine::initialize_engine_reference() {
     add_variadic_function("parallel_transform", [this](const std::vector<script_value>& args) -> checked_result<script_value> {
         return detail::run_parallel_transform(*this, args);
     });
+    add_functionWithArity("parallel_reduce", [this](const std::vector<script_value>& args) -> checked_result<script_value> {
+        return detail::run_parallel_reduce(*this, args);
+    }, 4);
 
     // binary::reader / writer / layout and the width tokens (detail/binary_data.hpp): string's reader() builtin
     // returns a binary::reader, so the library exists on every engine

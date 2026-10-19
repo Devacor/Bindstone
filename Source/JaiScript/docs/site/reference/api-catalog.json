@@ -2224,6 +2224,18 @@
     },
     {
       "owner": "global",
+      "name": "parallel_reduce",
+      "signature": "parallel_reduce(values: array<T>, init: A, step: function(A, T) -> A, combine: function(A, A) -> A) -> A",
+      "provider": "core",
+      "effect": "callback, parallel",
+      "notes": "Chunks sized by values.size() alone fold in element order from a copy of init each, then combine left to right in chunk order: the same result on every machine.",
+      "source": "source/implementation/engine.cpp",
+      "form": "function",
+      "availability": "Every engine",
+      "display": "parallel_reduce(values: array<T>, init: A, step: function(A, T) -> A, combine: function(A, A) -> A) -> A"
+    },
+    {
+      "owner": "global",
       "name": "shared_from_this",
       "signature": "shared_from_this() -> shared_ptr<T>",
       "provider": "core",

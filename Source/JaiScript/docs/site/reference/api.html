@@ -580,6 +580,9 @@ print(v[&quot;hp&quot;], &quot; &quot;, v[&quot;tags&quot;][0]);</code></pre></d
 <div class="api-entry" data-provider="stdlib" data-search="pair(first: var, second: var) -&gt; pair construct the element type of a range-for over a map; pair() holds two nulls. register_all() or area registration"><h3 id="api-d95dce9ea7cb"><code>pair(first: var, second: var) -&gt; pair</code></h3><p><strong>register_all() or area registration</strong> &middot; construct</p>
 <p>The element type of a range-for over a map; pair() holds two nulls.</p>
 </div>
+<div class="api-entry" data-provider="core" data-search="parallel_reduce(values: array&lt;t&gt;, init: a, step: function(a, t) -&gt; a, combine: function(a, a) -&gt; a) -&gt; a callback, parallel chunks sized by values.size() alone fold in element order from a copy of init each, then combine left to right in chunk order: the same result on every machine. every engine"><h3 id="api-0ff573305596"><code>parallel_reduce(values: array&lt;T&gt;, init: A, step: function(A, T) -&gt; A, combine: function(A, A) -&gt; A) -&gt; A</code></h3><p><strong>Every engine</strong> &middot; callback, parallel</p>
+<p>Chunks sized by values.size() alone fold in element order from a copy of init each, then combine left to right in chunk order: the same result on every machine.</p>
+</div>
 <div class="api-entry" data-provider="core" data-search="parallel_transform(values: array&lt;t&gt;, callback: function(t) -&gt; r, weight: function(t) -&gt; number = default) -&gt; array&lt;r&gt; callback, parallel admission and ordered results follow the parallel contract. every engine"><h3 id="api-ca1e1aead2ea"><code>parallel_transform(values: array&lt;T&gt;, callback: function(T) -&gt; R, weight: function(T) -&gt; number = default) -&gt; array&lt;R&gt;</code></h3><p><strong>Every engine</strong> &middot; callback, parallel</p>
 <p>Admission and ordered results follow the parallel contract.</p>
 </div>

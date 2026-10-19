@@ -25,6 +25,7 @@ static jai::registrar<RequestFullGameState, MV::Services, jai::bases<NetworkActi
 
 #ifdef BINDSTONE_SERVER
 void GameServerAvailable::execute(LobbyGameConnectionState* a_connection) {
+	a_connection->connection()->authenticate();
 	a_connection->setEndpoint(ourUrl, ourPort);
 }
 
@@ -43,6 +44,9 @@ void AssignPlayersToGame::execute(GameServer& a_server) {
 void GetInitialGameState::execute(GameUserConnectionState* a_connection, GameServer &a_game) {
 	auto player = a_game.userConnected(secret);
 	a_connection->authenticate(player, secret);
+	if (player) {
+		a_connection->connection()->authenticate();
+	}
 	if (a_game.allUsersConnected()) {
 		a_game.lobby()->send(makeNetworkString<GameServerStateChange>(GameServerStateChange::OCCUPIED));
 		a_game.server()->sendAll(makeNetworkString<SuppliedInitialGameState>(a_game.leftPlayer(), a_game.rightPlayer(), a_game.instance()->networkPool()));

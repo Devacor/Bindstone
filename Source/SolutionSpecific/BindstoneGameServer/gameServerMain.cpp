@@ -18,6 +18,7 @@
 #include <jaiscript/core/engine.hpp>
 #include "MV/Script/script.h"
 
+#include <cstring>
 #include <fstream>
 
 #include "glm/mat4x4.hpp"
@@ -208,7 +209,13 @@ std::ostream& operator<<(std::ostream& os, const glm::mat4x4& a_matrix) {
 	return os;
 }
 
-int main(int, char *[]) {
+int main(int argc, char *argv[]) {
+	std::string identity = "local";
+	for (int i = 1; i + 1 < argc; ++i) {
+		if (strcmp(argv[i], "-identity") == 0) {
+			identity = argv[i + 1];
+		}
+	}
 	Managers managers({"", ""});
 	managers.timer.start();
 	/*
@@ -269,7 +276,7 @@ int main(int, char *[]) {
 	MV::Services::instance().connect<jai::engine>(jaiEngine.get());
 
 	bool done = false;
-	auto server = std::make_shared<GameServer>(managers);
+	auto server = std::make_shared<GameServer>(managers, identity);
 	MV::Task statDisplay;
 	statDisplay.also("PrintBandwidth", [&](MV::Task&, double) {
 		if (server->server()) {

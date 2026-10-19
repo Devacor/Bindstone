@@ -10,6 +10,7 @@
 #include "Game/player.h"
 
 #include "Game/NetworkLayer/gameServerActions.h"
+#include "Game/NetworkLayer/certificates.h"
 #include "MV/Utility/stringUtility.h"
 
 #include <string>
@@ -61,7 +62,8 @@ private:
 
 class GameServer {
 public:
-	GameServer(Managers &a_managers, unsigned short a_port = 0);
+	// a_identity names this game server's certificates (Certificates/Tls/gameservers/<a_identity>/).
+	GameServer(Managers &a_managers, const std::string &a_identity = "local", unsigned short a_port = 0);
 
 	void update(double dt);
 
@@ -158,7 +160,7 @@ private:
 	void initializeClientToLobbyServer() {
 		auto lobbyAddressConfig = MV::fileLines("ServerConfig/lobbyGameServerAddress.config");
 		auto localHostServerAddress = lobbyAddressConfig.empty() ? "http://localhost:22326" : lobbyAddressConfig[0];
-		ourLobbyClient = MV::Client::make(MV::Url{ localHostServerAddress }, [=](const std::string &a_message) {
+		ourLobbyClient = MV::Client::make(MV::Url{ localHostServerAddress }, GameCertificates::gameServerToLobby(ourIdentity), [=](const std::string &a_message) {
 			auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message, manager.services);
 			try {
 				value->execute(*this);
@@ -202,6 +204,7 @@ private:
 	jai::thread_pool threadPool;
 
 	Managers &manager;
+	std::string ourIdentity;
 	bool done;
 	bool resultReported = false;
 

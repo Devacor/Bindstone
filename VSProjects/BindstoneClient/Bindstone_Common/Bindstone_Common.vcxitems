@@ -45,6 +45,7 @@
     <ClInclude Include="$(SolutionDir)Source\Game\Interface\interfaceManager.h" />
     <ClInclude Include="$(SolutionDir)Source\Game\managers.h" />
     <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\accountActions.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\certificates.h" />
     <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\clientActions.h" />
     <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\gameServer.h" />
     <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\gameServerActions.h" />

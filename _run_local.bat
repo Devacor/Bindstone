@@ -14,6 +14,10 @@ for %%E in (LobbyServer GameServer Bindstone) do (
 call "%ROOT%Tools\LocalServer\setup_local_db.bat"
 if errorlevel 1 exit /b 1
 
+REM TLS certificates for the lobby and the local game server (Certificates\Tls\, gitignored): made once, renewed near expiry
+python "%ROOT%Tools\LocalServer\make_certs.py"
+if errorlevel 1 echo Certificate generation failed - see Tools\LocalServer\make_certs.py && exit /b 1
+
 start "LobbyServer (%CONFIG%)" /D "%ROOT%" "%BIN%\LobbyServer.exe"
 timeout /t 2 /nobreak >nul
 start "GameServer (%CONFIG%)" /D "%ROOT%" "%BIN%\GameServer.exe"

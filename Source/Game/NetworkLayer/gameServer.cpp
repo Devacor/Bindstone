@@ -30,15 +30,18 @@ void GameUserConnectionState::message(const std::string &a_message) {
 	action->execute(this, ourServer);
 }
 
-GameServer::GameServer(Managers &a_managers, unsigned short a_port) :
+GameServer::GameServer(Managers &a_managers, const std::string &a_identity, unsigned short a_port) :
 	manager(a_managers),
+	ourIdentity(a_identity),
 	gameData(a_managers, true),
-	ourUserServer(std::make_shared<MV::Server>(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), a_port),
+	ourUserServer(std::make_shared<MV::Server>(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), a_port), GameCertificates::gameServer(a_identity),
 		[this](const std::shared_ptr<MV::Connection> &a_connection) {
 			return std::make_unique<GameUserConnectionState>(a_connection, *this);
 		})) {
 
 	MV::initializeThreadPool(threadPool);
+	MV::logOpenSslVersion();
+	MV::info("Game server [", ourIdentity, "] listening with TLS on port ", ourUserServer->port());
 	MV::Size<> worldSize(960, 640);
 	MV::Size<int> windowSize(960, 640);
 

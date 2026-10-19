@@ -1,9 +1,11 @@
 # Local server stack (lobby + matchmaking + database)
 
-`run_local.bat` at the repo root is the one-click: it ensures a local PostgreSQL is
+`_run_local.bat` at the repo root is the one-click: it ensures a local PostgreSQL is
 running (portable binaries, downloaded on first run — no installer/admin/service),
-then launches LobbyServer, GameServer, and two clients auto-logged-in as `test1` and
-`test2`. Pass `Debug` to use the Debug binaries (default `Release`).
+makes the TLS certificates if they are missing or near expiry (`make_certs.py`, into the
+gitignored `Certificates/Tls/`), then launches LobbyServer, GameServer, and two clients
+auto-logged-in as `test1` and `test2`. Pass `Debug` to use the Debug binaries (default `Release`).
+Every link is TLS; `Source/MV/Network/AGENTS.md` explains the certificates and how to make more.
 
 ## Pieces
 

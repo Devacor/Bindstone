@@ -40,7 +40,7 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
 - **MV Texture Handles** — 9-slice margins squeeze proportionally in a box smaller than the
   margins; flipX survives a pack-based `postLoadInitialize`; `logicalSize` scales by texture
   size, not content size.
-- **MV Network** — `Server`/`Connection`/`Client` on loopback: connection state lives and dies on
+- **MV Network** — `Server`/`Connection`/`Client` on loopback over TLS: connection state lives and dies on
   the updating thread, messages arrive whole and in order, a close flushes queued writes first; and
   the message limits (`MessageLimits`): an oversized header (4 GiB, over 32 KiB before
   `authenticate()`, over 2 MiB after) is rejected before allocating, the unread cap pauses reading
@@ -48,6 +48,14 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
   undrained paused inbox are rejected at the unread timeout, each rejection reaching the peer as a
   `ProtocolFrame` reason code before the close; the client learns the server's limit from the
   announcement and `send` throws `MessageTooLargeException` past it.
+- **MV TLS** — certificates made at test time by a throwaway CA (`tls_test_pki.hpp`, temp folder): a link
+  negotiates TLS 1.3 (1.2 on an OpenSSL without it) with an AEAD cipher and carries messages both ways; a client
+  refuses a server certificate from another CA (also one with the CA's exact name), one naming another host (DNS
+  and IP), an expired or not-yet-valid one, and a client certificate posing as a server; a server requiring client
+  certificates refuses none, another CA's and a server certificate, never building a connection state or reading
+  what they send, and exposes a valid one's identity (`PeerCertificate`); a plaintext peer of the old protocol and
+  silent peers are closed (the latter at the handshake deadline) and a client gives up on a server that never
+  handshakes; a missing CA file fails each attempt with the reason until it exists.
 - **Pathfinding** — `Map` budget, `NavigationAgent` paths/signals, footprint block counts
   across moves, clones and off-map placement.
 - **MV Utility** — `angle2D`/`angle2DRad` overloads, `wrappingDistance` and `wrappingMix` (the

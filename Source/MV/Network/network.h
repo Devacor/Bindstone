@@ -20,6 +20,7 @@
 #include <optional>
 #include <string>
 #include "MV/Network/url.h"
+#include "MV/Network/tls.h"
 #include "MV/Utility/generalUtility.h"
 #include <asio.hpp>
 #include "MV/Utility/log.h"
@@ -31,6 +32,8 @@ namespace MV {
 		size_t authenticatedMaxUnreadBytes {8 * 1024 * 1024};
 		size_t unauthenticatedMaxUnreadBytes {512 * 1024};
 		std::chrono::milliseconds unreadTimeout {std::chrono::seconds(30)};
+		// A peer that connects and does not finish the TLS handshake in time is dropped.
+		std::chrono::milliseconds handshakeTimeout {std::chrono::seconds(10)};
 
 		uint32_t maxMessageBytes(bool a_authenticated) const {
 			return a_authenticated ? authenticatedMaxMessageBytes : unauthenticatedMaxMessageBytes;
@@ -63,24 +66,22 @@ namespace MV {
 	};
 
 	struct NetworkMessage {
-		NetworkMessage() {
-		}
-
-		NetworkMessage(const std::string &a_content) :
-			content(a_content) {
-		}
-
+		// An outgoing message: header and content in one buffer, so TLS sends it as one record.
+		static std::shared_ptr<NetworkMessage> make(const std::string &a_content);
 		static std::shared_ptr<NetworkMessage> make(const ProtocolFrame &a_frame);
 
 		uint32_t headerValue() const;
 
 		uint32_t headerAndContentSize() const;
 
-		// The buffers point into this message, which must outlive the write.
-		std::array<asio::const_buffer, 2> wire();
+		// Points into this message, which must outlive the write.
+		asio::const_buffer wire() const {
+			return asio::buffer(wireBytes);
+		}
 
 		std::array<uint8_t, 4> headerBuffer {0, 0, 0, 0};
 		std::string content;
+		std::string wireBytes;
 		bool protocol = false;
 	};
 
@@ -116,23 +117,26 @@ namespace MV {
 	};
 
 
-	inline void closeSocket(std::shared_ptr<asio::ip::tcp::socket> &socket) {
-		if (socket) {
-			if (socket->is_open()) {
-				asio::error_code ec; //don't really care
-				socket->shutdown(asio::ip::tcp::socket::shutdown_both, ec);
-				socket->close();
+	inline void closeSocket(std::shared_ptr<TlsStream> &a_stream) {
+		if (a_stream) {
+			auto& socket = a_stream->lowest_layer();
+			if (socket.is_open()) {
+				asio::error_code ignored;
+				socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignored);
+				socket.close(ignored);
 			}
-			socket.reset();
+			a_stream.reset();
 		}
 	}
 
+	// Every connection is TLS: the server is verified against a_tls.trustedCaFile and the URL's host, and
+	// a_tls.certificateFile, when set, is presented as this client's certificate.
 	class Client : public std::enable_shared_from_this<Client> {
 	public:
 		enum ConnectionState { DISCONNECTED, CONNECTING, CONNECTING_SUCCESS, CONNECTED };
 
-		static std::shared_ptr<Client> make(const MV::Url& a_url, const std::function<void(const std::string &)> &a_onMessageGet, const std::function<void(const std::string &)> &a_onConnectionFail, const std::function<void()> &a_onInitialized = std::function<void ()>(), const MessageLimits& a_limits = {}) {
-			auto self = std::shared_ptr<Client>(new Client(a_url, a_onMessageGet, a_onConnectionFail, a_onInitialized, a_limits));
+		static std::shared_ptr<Client> make(const MV::Url& a_url, const TlsConfig& a_tls, const std::function<void(const std::string &)> &a_onMessageGet, const std::function<void(const std::string &)> &a_onConnectionFail, const std::function<void()> &a_onInitialized = std::function<void ()>(), const MessageLimits& a_limits = {}) {
+			auto self = std::shared_ptr<Client>(new Client(a_url, a_tls, a_onMessageGet, a_onConnectionFail, a_onInitialized, a_limits));
 			self->initialize();
 			return self;
 		}
@@ -167,6 +171,12 @@ namespace MV {
 			return ourRejection;
 		}
 
+		// The negotiated protocol and cipher of the current connection, once connected.
+		std::string tlsSession() const {
+			std::lock_guard<std::mutex> guard(errorLock);
+			return ourTlsSession;
+		}
+
 		void update();
 
 		void reconnect() {
@@ -194,10 +204,12 @@ namespace MV {
 		void disconnect();
 
 	private:
-		Client(const MV::Url& a_url, const std::function<void(const std::string &)> &a_onMessageGet, const std::function<void(const std::string &)> &a_onConnectionFail, const std::function<void()> &a_onInitialized, const MessageLimits& a_limits) :
+		Client(const MV::Url& a_url, const TlsConfig& a_tls, const std::function<void(const std::string &)> &a_onMessageGet, const std::function<void(const std::string &)> &a_onConnectionFail, const std::function<void()> &a_onInitialized, const MessageLimits& a_limits) :
 			url(a_url),
 			ourLimits(a_limits),
+			tlsConfig(a_tls),
 			resolver(ioService),
+			handshakeDeadline(ioService),
 			onMessageGet(a_onMessageGet),
 			onConnectionFail(a_onConnectionFail),
 			onInitialized(a_onInitialized),
@@ -210,8 +222,9 @@ namespace MV {
 
 		void initiateConnection();
 
-		void connectTo(const std::shared_ptr<asio::ip::tcp::socket>& a_attempt, asio::ip::tcp::resolver::iterator a_endpoints);
-		void handleConnect(const std::shared_ptr<asio::ip::tcp::socket>& a_attempt, const asio::error_code& a_err, asio::ip::tcp::resolver::iterator a_nextEndpoint);
+		void connectTo(const std::shared_ptr<TlsStream>& a_attempt, asio::ip::tcp::resolver::iterator a_endpoints);
+		void handleConnect(const std::shared_ptr<TlsStream>& a_attempt, const asio::error_code& a_err, asio::ip::tcp::resolver::iterator a_nextEndpoint);
+		void handshake(const std::shared_ptr<TlsStream>& a_attempt);
 
 		void initiateRead();
 		void writeNext();
@@ -227,15 +240,20 @@ namespace MV {
 
 		MV::Url url;
 		const MessageLimits ourLimits;
+		const TlsConfig tlsConfig;
+		// Built by the first connection attempt, so a missing certificate fails that attempt instead of the constructor.
+		std::shared_ptr<asio::ssl::context> tlsContext;
 
 		std::mutex inboxLock;
-		std::mutex errorLock;
+		mutable std::mutex errorLock;
 
 		asio::io_context ioService;
-		// The resolver, socket and outbox belong to the network thread; handlers capture this, never own it.
+		// The resolver, stream and outbox belong to the network thread; handlers capture this, never own it.
 		asio::ip::tcp::resolver resolver;
-		std::shared_ptr<asio::ip::tcp::socket> socket;
+		std::shared_ptr<TlsStream> socket;
+		asio::steady_timer handshakeDeadline;
 		std::deque<std::shared_ptr<NetworkMessage>> outbox;
+		std::string ourTlsSession;
 
 		std::vector<std::shared_ptr<NetworkMessage>> inbox;
 
@@ -297,10 +315,12 @@ namespace MV {
 	};
 
 	// The network-thread half of a Connection: its handlers own this, never the Connection, so the
-	// Connection and its game state die on the thread that updates the Server.
+	// Connection and its game state die on the thread that updates the Server. It reaches the Server
+	// (through a_onReady) only once its TLS handshake succeeds; a peer that fails or stalls the
+	// handshake is closed without ever becoming a Connection.
 	class ConnectionSocket : public std::enable_shared_from_this<ConnectionSocket> {
 	public:
-		ConnectionSocket(const std::shared_ptr<asio::ip::tcp::socket> &a_socket, asio::io_context& a_ioService, const MessageLimits& a_limits);
+		ConnectionSocket(const std::shared_ptr<TlsStream> &a_stream, const std::shared_ptr<asio::ssl::context> &a_tlsContext, asio::io_context& a_ioService, const MessageLimits& a_limits, std::function<void(const std::shared_ptr<ConnectionSocket> &)> a_onReady);
 
 		void start();
 		void send(const std::string &a_content);
@@ -327,7 +347,21 @@ namespace MV {
 			return ourLoopback;
 		}
 
+		// Set before the socket reaches the Server and never changed after.
+		const std::optional<PeerCertificate>& peerCertificate() const {
+			return ourPeerCertificate;
+		}
+
+		const std::string& tlsSession() const {
+			return ourTlsSession;
+		}
+
+		const std::string& peerAddress() const {
+			return ourPeerAddress;
+		}
+
 	private:
+		void handshakeComplete(const asio::error_code &a_err);
 		void queue(const std::shared_ptr<NetworkMessage> &a_message);
 		void push(const std::shared_ptr<NetworkMessage> &a_message);
 		void initiateRead();
@@ -335,20 +369,24 @@ namespace MV {
 		void receive(const std::shared_ptr<NetworkMessage> &a_message);
 		void resumeBelowCap();
 		void resumeReading();
-		void armUnreadDeadline();
-		void disarmUnreadDeadline();
-		void unreadDeadlineReached();
+		void armDeadline(std::chrono::milliseconds a_timeout);
+		void disarmDeadline();
+		void deadlineReached();
 		void reject(ProtocolCode a_code, uint32_t a_value, const std::string &a_reason);
 		void writeNext();
 		void beginClose();
 		void linger();
+		void shutdownTls();
 		void discardNext();
 		void closeNow();
 		void handleError(const asio::error_code &a_err, const std::string &a_section);
 
 		asio::io_context& ioService;
-		std::shared_ptr<asio::ip::tcp::socket> socket;
+		std::shared_ptr<asio::ssl::context> tlsContext;
+		std::shared_ptr<TlsStream> socket;
+		std::function<void(const std::shared_ptr<ConnectionSocket> &)> onReady;
 		std::deque<std::shared_ptr<NetworkMessage>> outbox;
+		bool handshaking = false;
 		bool closing = false;
 		bool lingering = false;
 		asio::steady_timer closeDeadline;
@@ -358,7 +396,11 @@ namespace MV {
 		std::atomic<bool> ourAuthenticated {false};
 		bool reading = false;
 		bool awaitingContent = false;
-		asio::steady_timer unreadDeadline;
+		asio::steady_timer deadline;
+
+		std::optional<PeerCertificate> ourPeerCertificate;
+		std::string ourTlsSession;
+		const std::string ourPeerAddress;
 
 		std::mutex inboxLock;
 		std::vector<std::shared_ptr<NetworkMessage>> inbox;
@@ -424,6 +466,19 @@ namespace MV {
 			return socket->loopback();
 		}
 
+		// The client certificate the TLS handshake verified; empty unless the Server requires one.
+		const std::optional<PeerCertificate>& peerCertificate() const {
+			return socket->peerCertificate();
+		}
+
+		const std::string& tlsSession() const {
+			return socket->tlsSession();
+		}
+
+		const std::string& peerAddress() const {
+			return socket->peerAddress();
+		}
+
 	private:
 		std::shared_ptr<ConnectionSocket> socket;
 		std::unique_ptr<ConnectionStateBase> ourState = nullptr;
@@ -456,11 +511,12 @@ namespace MV {
 		std::deque<std::pair<double, size_t>> packets;
 	};
 
-	// Connections are accepted on the network thread and adopted, updated and dropped by update(); every
-	// other member is used only from the thread that calls update().
+	// Connections are accepted and TLS-handshaken on the network thread, then adopted, updated and dropped by
+	// update(); every other member is used only from the thread that calls update(). The constructor throws
+	// when a_tls's certificate, key or CA cannot be loaded.
 	class Server {
 	public:
-		Server(const asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase> (const std::shared_ptr<Connection> &)> a_connectionStateFactory, const MessageLimits& a_limits = {});
+		Server(const asio::ip::tcp::endpoint& a_endpoint, const TlsConfig& a_tls, std::function<std::unique_ptr<ConnectionStateBase> (const std::shared_ptr<Connection> &)> a_connectionStateFactory, const MessageLimits& a_limits = {});
 
 		~Server();
 
@@ -492,6 +548,7 @@ namespace MV {
 		void adoptAcceptedConnections();
 
 		const MessageLimits ourLimits;
+		std::shared_ptr<asio::ssl::context> tlsContext;
 
 		asio::io_context ioService;
 		asio::ip::tcp::acceptor acceptor;

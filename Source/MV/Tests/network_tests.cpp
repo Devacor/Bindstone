@@ -1,8 +1,9 @@
-// MV::Server / MV::Client threading and message-limit regression tests, Foundry framework.
+// MV::Server / MV::Client threading and message-limit regression tests, Foundry framework, over TLS.
 // Built into mv_tests.exe (see build_tests.bat); auto-registers with the Foundry runner.
 
 #include <jaiscript/testing/foundry.hpp>
 #include "MV/Network/network.h"
+#include "tls_test_pki.hpp"
 
 #include <windows.h>
 #include <psapi.h>
@@ -69,8 +70,18 @@ private:
 	bool echo;
 };
 
+TestPki& networkPki() {
+	static TestPki pki("network");
+	return pki;
+}
+
+const TestPki::Issued& networkServerIdentity() {
+	static TestPki::Issued identity = networkPki().localServer();
+	return identity;
+}
+
 std::shared_ptr<MV::Server> makeServer(std::shared_ptr<StateRecord> a_record, bool a_echo = false, const MV::MessageLimits& a_limits = {}) {
-	return std::make_shared<MV::Server>(asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), 0), [a_record, a_echo](const std::shared_ptr<MV::Connection>& a_connection) {
+	return std::make_shared<MV::Server>(asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), 0), networkPki().serverConfig(networkServerIdentity()), [a_record, a_echo](const std::shared_ptr<MV::Connection>& a_connection) {
 		return std::make_unique<RecordingState>(a_connection, a_record, a_echo);
 	}, a_limits);
 }
@@ -109,15 +120,20 @@ bool pumpUntil(const std::function<void()>& a_pump, Condition a_condition, doubl
 	return false;
 }
 
+// A hand-driven TLS client: speaks the framing directly, so a test can send what MV::Client never would.
 struct RawPeer {
-	explicit RawPeer(uint16_t a_port) {
-		socket.connect(asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), a_port));
+	explicit RawPeer(uint16_t a_port, const MV::TlsConfig& a_tls = networkPki().clientConfig()) :
+		context(MV::makeTlsClientContext(a_tls)),
+		socket(io, *context) {
+
+		socket.lowest_layer().connect(asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), a_port));
+		MV::verifyTlsPeerAs(socket, "127.0.0.1");
+		socket.handshake(asio::ssl::stream_base::client, handshakeError);
 	}
 
 	asio::error_code send(const std::string& a_content) {
 		asio::error_code result;
-		MV::NetworkMessage message(a_content);
-		asio::write(socket, message.wire(), result);
+		asio::write(socket, MV::NetworkMessage::make(a_content)->wire(), result);
 		return result;
 	}
 
@@ -147,16 +163,26 @@ struct RawPeer {
 		return a_error ? std::string() : message.content;
 	}
 
+	size_t available() {
+		return socket.lowest_layer().available();
+	}
+
 	void close() {
 		asio::error_code ignored;
-		socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignored);
-		socket.close(ignored);
+		socket.lowest_layer().shutdown(asio::ip::tcp::socket::shutdown_both, ignored);
+		socket.lowest_layer().close(ignored);
 	}
 
 	asio::io_context io;
-	asio::ip::tcp::socket socket {io};
+	std::shared_ptr<asio::ssl::context> context;
+	MV::TlsStream socket;
+	asio::error_code handshakeError;
 	bool protocolFrame = false;
 };
+
+bool closedByPeer(const asio::error_code& a_error) {
+	return a_error == asio::error::eof || a_error == asio::ssl::error::stream_truncated || a_error == asio::error::connection_reset || a_error == asio::error::connection_aborted;
+}
 
 std::optional<MV::ProtocolFrame> receiveFrame(RawPeer& a_peer) {
 	asio::error_code error;
@@ -175,7 +201,7 @@ void expectRejection(RawPeer& a_peer, MV::ProtocolCode a_code, uint32_t a_value)
 	check_true(!frame->reason.empty(), "the rejection carries a reason");
 	asio::error_code error;
 	a_peer.receive(error);
-	check_true(error == asio::error::eof || error == asio::error::connection_reset || error == asio::error::connection_aborted, "then the server closes the socket");
+	check_true(closedByPeer(error), "then the server closes the connection (" + error.message() + ")");
 }
 
 struct ClientRecord {
@@ -187,8 +213,8 @@ struct ClientRecord {
 	int initialized = 0;
 };
 
-std::shared_ptr<MV::Client> makeClient(uint16_t a_port, std::shared_ptr<ClientRecord> a_record, const MV::MessageLimits& a_limits = {}) {
-	return MV::Client::make(MV::Url{"http://127.0.0.1:" + std::to_string(a_port)}, [a_record](const std::string& a_message) {
+std::shared_ptr<MV::Client> makeClient(uint16_t a_port, std::shared_ptr<ClientRecord> a_record, const MV::MessageLimits& a_limits = {}, const MV::TlsConfig& a_tls = networkPki().clientConfig(), const std::string& a_host = "127.0.0.1") {
+	return MV::Client::make(MV::Url{"http://" + a_host + ":" + std::to_string(a_port)}, a_tls, [a_record](const std::string& a_message) {
 		a_record->messagedOn = std::this_thread::get_id();
 		a_record->received.push_back(a_message);
 	}, [a_record](const std::string& a_reason) {
@@ -200,41 +226,45 @@ std::shared_ptr<MV::Client> makeClient(uint16_t a_port, std::shared_ptr<ClientRe
 	}, a_limits);
 }
 
-// Floods from its own thread without blocking, so a failed check can stop it while the server is not reading.
+// Floods through TLS from its own thread. TLS records cannot be written non-blocking and resumed, so a
+// flood the server never drains is ended by closing the socket once the test is done with it.
 struct Flooder {
-	Flooder(RawPeer& a_peer, size_t a_messageSize, size_t a_count) {
-		a_peer.socket.non_blocking(true);
-		thread = std::thread([&a_peer, a_messageSize, a_count, this] {
-			for (size_t i = 0; i < a_count; ++i) {
+	Flooder(RawPeer& a_peer, size_t a_messageSize, size_t a_count) :
+		peer(a_peer) {
+
+		thread = std::thread([this, a_messageSize, a_count] {
+			for (size_t i = 0; i < a_count && !stopping; ++i) {
 				std::string bytes {static_cast<char>(a_messageSize >> 24), static_cast<char>(a_messageSize >> 16), static_cast<char>(a_messageSize >> 8), static_cast<char>(a_messageSize)};
 				bytes.append(a_messageSize, static_cast<char>('a' + i % 26));
-				size_t written = 0;
-				while (written < bytes.size()) {
-					asio::error_code error;
-					written += a_peer.socket.write_some(asio::buffer(bytes.data() + written, bytes.size() - written), error);
-					if (error == asio::error::would_block) {
-						if (stopping) {
-							return;
-						}
-						std::this_thread::sleep_for(std::chrono::milliseconds(1));
-					} else if (error) {
-						failed = true;
-						return;
-					}
+				asio::error_code error;
+				asio::write(peer.socket, asio::buffer(bytes), error);
+				if (error) {
+					failed = true;
+					break;
 				}
 				++sent;
 			}
+			finished = true;
 		});
 	}
 
 	~Flooder() {
 		stopping = true;
+		for (int i = 0; i < 3000 && !finished; ++i) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+		if (!finished) {
+			asio::error_code ignored;
+			peer.socket.lowest_layer().close(ignored);
+		}
 		thread.join();
 	}
 
+	RawPeer& peer;
 	std::atomic<size_t> sent {0};
 	std::atomic<bool> failed {false};
 	std::atomic<bool> stopping {false};
+	std::atomic<bool> finished {false};
 	std::thread thread;
 };
 
@@ -309,7 +339,7 @@ public:
 			check_eq(std::string("Logged in elsewhere."), peer.receive(error));
 			check_true(peer.receive(error) == farewell, "a large final message arrives whole");
 			peer.receive(error);
-			check_true(error == asio::error::eof || error == asio::error::connection_reset, "then the server closes the socket");
+			check_true(closedByPeer(error), "then the server closes the connection (" + error.message() + ")");
 		});
 
 		test("a client whose last owner lets go is destroyed at once, not kept alive by its pending read", [this]() {
@@ -506,7 +536,7 @@ public:
 			check_true(secondDrain > 0, "reading resumed after the drain");
 			check_true(pumpUntil(pump, [&] { return recordedCount(*record) == total; }, 20.0), "every message arrives once the inbox keeps draining");
 			check_true(server->connections().size() == 1, "the paused connection was never dropped");
-			check_eq(static_cast<size_t>(0), peer.socket.available(), "backpressure sends the peer nothing");
+			check_eq(static_cast<size_t>(0), peer.available(), "backpressure sends the peer nothing");
 			std::lock_guard<std::mutex> guard(record->lock);
 			for (size_t i = 0; i < total; ++i) {
 				check_true(record->messages[i] == std::string(messageSize, static_cast<char>('a' + i % 26)), "messages arrive whole and in order");
@@ -533,7 +563,7 @@ public:
 			check_true(firstDrain <= limits.authenticatedMaxUnreadBytes + messageSize, "the inbox stops growing at the cap (held " + std::to_string(firstDrain) + " bytes)");
 			check_true(firstDrain > limits.unauthenticatedMaxUnreadBytes + messageSize, "authentication raised the cap (held " + std::to_string(firstDrain) + " bytes)");
 			check_true(pumpUntil(pump, [&] { return recordedCount(*record) == total; }, 20.0), "every message arrives once the inbox keeps draining");
-			check_eq(static_cast<size_t>(0), peer.socket.available(), "backpressure sends the peer nothing");
+			check_eq(static_cast<size_t>(0), peer.available(), "backpressure sends the peer nothing");
 		});
 
 		test("a message that trickles in slower than the unread timeout is told MESSAGE_TIMEOUT and dropped, while idle time between messages is not", [this]() {
@@ -581,7 +611,6 @@ public:
 				check_true(pumpUntil(pump, [&] { return server->connections().empty(); }, 0.5), "the stalled connection is dropped");
 				check_true(recordedBytes(*record) <= limits.unauthenticatedMaxUnreadBytes + 16 * KIB, "nothing past the cap was read");
 			}
-			peer.socket.non_blocking(false);
 			expectRejection(peer, MV::ProtocolCode::INBOX_TIMEOUT, 200);
 		});
 

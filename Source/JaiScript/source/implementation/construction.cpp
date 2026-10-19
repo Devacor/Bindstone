@@ -31,7 +31,7 @@ void stamp_literal_field_initializers(class_instance& instance, const script_cla
 namespace {
 	std::shared_ptr<environment> construction_member_environment(construction_host& host, const std::shared_ptr<environment>& parent,
 	                                                             const script_value& this_value, class_definition* access) {
-		auto result = std::make_shared<environment>(parent, host.symbols);
+		auto result = std::make_shared<environment>(parent, host.env_symbols);
 		result->define(host.symbols->get_this_id(), this_value);
 		result->set_access_context(access);
 		return result;
@@ -42,7 +42,9 @@ namespace {
 	                                                            const function_decl& ctor, const std::vector<script_value>& args) {
 		auto result = construction_member_environment(host, definition_env, this_value, level);
 		for (size_t i = 0; i < ctor.parameters.size() && i < args.size(); ++i) {
-			result->define(ctor.parameters[i].name, args[i]);
+			const parameter& param = ctor.parameters[i];
+			if (param.symbol_id == UINT64_MAX) { param.symbol_id = host.symbols->intern(param.name); }
+			result->define(param.symbol_id, args[i]);
 		}
 		return result;
 	}
@@ -420,7 +422,8 @@ checked_result<script_value> construct_default_instance(construction_host& host,
 		auto instance = cls->create_instance();
 		instance->construction_pending(true);
 		auto this_value = script_value::make_class_object(*cls, instance, host.eng);
-		auto members = initialize_members(host, cls, host.global_environment(), instance, this_value, cls->implicit_default_constructor(),
+		auto sandbox = host.parallel_sandbox();
+		auto members = initialize_members(host, cls, sandbox ? sandbox : host.global_environment(), instance, this_value, cls->implicit_default_constructor(),
 		                                  args, member_depth, 0, nullptr);
 		if (!members) { return members; }
 		if (!host.unwinding) { instance->construction_pending(false); }
@@ -433,12 +436,8 @@ checked_result<script_value> construct_default_instance(construction_host& host,
 		if (!instance->seeded_from_plan()) { stamp_literal_field_initializers(*instance, *cls, false, host.eng); }
 		return this_value;
 	}
-	// the chain's root: the global environment, or a worker's root
-	auto root = host.current_environment();
-	for (int hops = 0; root && root->get_parent() && hops < 65536; ++hops) {
-		root = root->get_parent();
-	}
-	auto init_env = construction_member_environment(host, root, this_value, cls.get());
+	auto sandbox = host.parallel_sandbox();
+	auto init_env = construction_member_environment(host, sandbox ? sandbox : environment_chain_root(host.current_environment()), this_value, cls.get());
 	auto initialized = host.evaluate_field_initializers(instance, cls, init_env, false, aggregate.fills() ? &aggregate : nullptr);
 	if (!initialized) { return initialized.error_value(); }
 	return this_value;

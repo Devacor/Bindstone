@@ -137,7 +137,7 @@ checked_result<script_value> script_callable_thunk::operator()(const std::vector
 }
 
 checked_result<script_value> engine::checked_host_entry(host_entry_body run, void* context) {
-    execution_backend* backend = get_execution_backend();
+    execution_backend* backend = calling_backend();
     if (!backend) {
         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
     }
@@ -1955,6 +1955,15 @@ std::unique_lock<std::mutex> engine::parallel_instance_registry_lock() {
 std::vector<std::weak_ptr<class_instance>>* engine::parallel_pending_registrations() {
     if (!impl->parallel_ || !impl->parallel_->active_region) { return nullptr; }
     return impl->parallel_->active_region->find_pending(std::this_thread::get_id());
+}
+
+execution_backend* engine::region_chunk_backend() const {
+    if (impl->parallel_ && impl->parallel_->active_region) {
+        if (const auto* chunk = impl->parallel_->active_region->find_entry(std::this_thread::get_id()); chunk && chunk->backend) {
+            return chunk->backend;
+        }
+    }
+    return get_execution_backend();
 }
 
 void engine::recover_parallel_registrations() {

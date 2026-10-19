@@ -114,6 +114,9 @@ namespace jai {
         // Returns checked_result to avoid exceptions in regular control flow
         checked_result<script_value> get(const std::string& name) const;
         checked_result<script_value> get(uint64_t id) const;
+        // A program's name looked up by its id in the program's symbolizer (a parallel worker's environments intern into
+        // a private one)
+        checked_result<script_value> get(const std::string& name, const string_symbolizer& program_symbols) const;
 
         // Get a reference to variable value (for avoiding copies)
         // Returns checked_result to avoid exceptions in regular control flow

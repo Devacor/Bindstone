@@ -7,6 +7,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/class_registry.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_capture_kind (classification pins)
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/core/jaibite.hpp>
@@ -2390,7 +2391,7 @@ public:
 				{ "literal_string", "value 2208" },
 				{ "captured_string_table", "value 2208" },
 				{ "skipped_subtree", "value 252000" },
-				{ "new_argument", "error parallel_for: 'new' is not allowed in a parallel body" },
+				{ "new_argument", "value 16128" },
 			};
 			const char* driver = " array<Cell> cells = []; for (int i = 0; i < 64; ++i) { cells.push(Cell(i)); }"
 			                     " for (int round = 0; round < 3; ++round) { parallel_for (auto& cell : cells) { cell.v = cell.calc(); } }"
@@ -2413,6 +2414,231 @@ public:
 				if (want != expected.end()) {
 					check_true(seen[0].rfind(want->second, 0) == 0, std::string(sh.name) + ": expected '" + want->second + "', got '" + seen[0] + "'");
 				}
+			}
+		});
+
+		// Runs src serially (parallel_for spelled for) on the interpreter, then in parallel at 1, 3 and 8 workers on both backends:
+		// every run returns the serial value
+		auto parallel_matches_serial = [this](const std::string& src, const std::string& label) {
+			std::string serial_src = src;
+			for (size_t at = serial_src.find("parallel_for"); at != std::string::npos; at = serial_src.find("parallel_for", at)) { serial_src.replace(at, 12, "for"); }
+			std::string expected;
+			{
+				auto e = make_engine();
+				jai::stdlib::register_all(*e);
+				e->set_backend(jai::backend_type::interpreter);
+				expected = e->execute(serial_src).to_string();
+			}
+			for (bool vm : {false, true}) {
+				for (size_t workers : {size_t(1), size_t(3), size_t(8)}) {
+					auto e = make_engine();
+					jai::stdlib::register_all(*e);
+					e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					e->parallel_thread_count(workers);
+					e->execution_budget(0);
+					std::string got;
+					try { got = e->execute(src).to_string(); } catch (const std::exception& ex) { got = std::string("error ") + ex.what(); }
+					check_eq(expected, got, label + (vm ? " vm " : " interp ") + std::to_string(workers) + " workers");
+				}
+			}
+		};
+		auto parallel_error = [this](const std::string& src, bool vm) -> std::string {
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+			e->parallel_thread_count(8);
+			e->execution_budget(0);
+			try { e->execute(src); } catch (const std::exception& ex) { return ex.what(); }
+			return "no error";
+		};
+
+		test("bodies_construct_script_classes", [parallel_matches_serial]() {
+			// hits[r] = Hit(...): every worker constructs into the slot its element names; the constructor builds a nested object,
+			// reads a captured global and calls a script function and a math builtin, and the strings it mints are its own
+			parallel_matches_serial(R"(
+				float SCALE = 0.5;
+				string PREFIX = "hit-";
+				float spread(float d) { return d * SCALE + math::sqrt(d); }
+				class Vec { float x = 0.0; float y = 0.0; Vec() {} Vec(float a, float b) { x = a; y = b; } }
+				class Hit {
+					int id = -1;
+					float dist = 0.0;
+					Vec at;
+					string tag = PREFIX;
+					Hit() {}
+					Hit(int i, float d) { at = Vec(d, spread(d)); id = i; dist = d; tag = tag + to_string(i); }
+					float score() { return dist + at.y + tag.size(); }
+				}
+				array<int> rays;
+				for (int i = 0; i < 300; ++i) { rays.push(i); }
+				array<Hit> hits;
+				for (int i = 0; i < 300; ++i) { hits.push(Hit()); }
+				float total = 0.0;
+				for (int round = 0; round < 3; ++round) {
+					parallel_for (int r : rays) { hits[r] = Hit(r + round, r * 0.25); }
+					for (auto& h : hits) { total += h.score(); }
+				}
+				to_string(total) + " " + hits[17].tag + " " + to_string(hits[299].at.y);
+			)", "Hit example");
+		});
+
+		test("every_construction_form_runs_in_a_body", [parallel_matches_serial]() {
+			// Name n(args), Name n;, Name(args), new Name(args), a class without a constructor whose field initializers read
+			// captured globals, a delegating constructor, a base constructed with arguments and one default-constructed, a
+			// method on the new object, and a construction nested in another constructor
+			parallel_matches_serial(R"(
+				float SCALE = 3.0;
+				string LABEL = "cell";
+				float twice(float v) { return v * 2.0; }
+				class Base { int base_v = 1; string name = LABEL; Base() {} Base(int b) { base_v = b; } }
+				class Mixin { int m = 4; }
+				class Inner : Base, Mixin {
+					float w = SCALE * 2.0;
+					Inner() : super(5) {}
+					Inner(float a) : super(cast<int>(a)) { w = twice(a) + m; }
+					Inner(float a, float b) : this(a + b) { w = w + 1.0; }
+					float score() { return w + base_v + name.size(); }
+				}
+				class Plain { float p = SCALE; array<int> list = [1, 2, 3]; string s = LABEL + "!"; }
+				class Outer {
+					Inner in;
+					Plain pl;
+					int tally = 0;
+					Outer(int k) { in = Inner(cast<float>(k), 1.0); tally = k + in.base_v; }
+				}
+				array<int> xs;
+				for (int i = 0; i < 200; ++i) { xs.push(i); }
+				array<float> out;
+				for (int i = 0; i < 200; ++i) { out.push(0.0); }
+				array<shared_ptr<Inner>> handles;
+				for (int i = 0; i < 200; ++i) { handles.push(null); }
+				parallel_for (auto& x : xs) {
+					Outer o(x);
+					Plain p;
+					Inner q;
+					shared_ptr<Inner> h = new Inner(cast<float>(x));
+					handles[x] = new Inner(cast<float>(x), 2.0);
+					out[x] = o.in.score() + o.tally + p.p + p.list.size() + p.s.size() + q.score() + h->score() + Inner(1.0).score();
+				}
+				float total = 0.0;
+				for (float v : out) { total += v; }
+				for (auto& h : handles) { total += h->score(); }
+				to_string(total);
+			)", "construction forms");
+		});
+
+		test("reduce_accumulators_are_constructed_objects", [parallel_matches_serial]() {
+			// step and combine construct the accumulator they return; the fold is the serial one at every worker count
+			parallel_matches_serial(R"(
+				class Stats {
+					int n = 0;
+					float sum = 0.0;
+					string tag = "s";
+					Stats() {}
+					Stats(float s, int c) { sum = s; n = c; tag = "s" + to_string(c); }
+				}
+				array<int> xs;
+				for (int i = 0; i < 1000; ++i) { xs.push(i * 3 % 17); }
+				Stats by_value = parallel_reduce(xs, Stats(), [](Stats acc, int x) -> Stats { return Stats(acc.sum + x * 0.5, acc.n + 1); },
+				                                 [](Stats a, Stats b) -> Stats { return Stats(a.sum + b.sum, a.n + b.n); });
+				Stats in_place = parallel_reduce(xs, Stats(), [](Stats& acc, int x) { acc = Stats(acc.sum + x, acc.n + 1); },
+				                                 [](Stats a, Stats b) -> Stats { return Stats(a.sum + b.sum, a.n + b.n); });
+				to_string(by_value.sum) + " " + by_value.tag + " " + to_string(in_place.sum) + " " + in_place.tag;
+			)", "reduce accumulators");
+		});
+
+		test("destructors_of_objects_dying_on_a_worker_run_there", [this, parallel_matches_serial, parallel_error]() {
+			// An object constructed in the body dies in it, and an element a body replaces dies on its worker: each destructor
+			// runs on that worker's backend (it once ran on the engine's from a pool thread); one that throws fails the statement
+			parallel_matches_serial(R"(
+				class Res { int v = 0; array<int> held = [1, 2]; Res() {} Res(int a) { v = a; } ~Res() { v = -1; held = []; } }
+				class Slot { Res r; int k = 0; Slot() {} Slot(int a) { r = Res(a); k = a; } ~Slot() { k = 0; } }
+				array<Slot> slots;
+				for (int i = 0; i < 200; ++i) { slots.push(Slot(i)); }
+				parallel_for (auto& s : slots) {
+					Res temp(s.k);
+					Slot other = Slot(s.k + 1);
+					s = other;
+					s.k = s.k + temp.v;
+				}
+				int total = 0;
+				for (auto& s : slots) { total += s.k + s.r.v; }
+				total;
+			)", "worker destructors");
+			// an index-written array of objects, typed and untyped: the body reads its slot's object and replaces it
+			parallel_matches_serial(R"(
+				class Res { int v = 0; string s = "r"; Res() {} Res(int a) { v = a; s = s + to_string(a); } ~Res() { v = -1; } }
+				array<int> xs;
+				for (int i = 0; i < 100; ++i) { xs.push(i); }
+				array<Res> out;
+				for (int i = 0; i < 100; ++i) { out.push(Res(i)); }
+				var loose = [];
+				for (int i = 0; i < 100; ++i) { loose.push(Res(i)); }
+				parallel_for (int x : xs) {
+					Res old = out[x];
+					out[x] = Res(old.v * 2);
+					var l = loose[x];
+					loose[x] = Res(l.v + 1);
+				}
+				int total = 0;
+				for (auto& r : out) { total += r.v + r.s.size(); }
+				for (var r : loose) { total += r.v; }
+				to_string(total) + " " + out[9].s + " " + loose[9].s;
+			)", "index-written objects");
+			const char* throwing = R"(
+				class T { int v = 0; T(int a) { v = a; } ~T() { if (v == 3) { throw "destructor " + to_string(v); } } }
+				array<int> xs = [1, 2, 3, 4];
+				parallel_for (auto& x : xs) { T t(x); x = t.v * 10; }
+				0;
+			)";
+			for (bool vm : {false, true}) {
+				check_true(parallel_error(throwing, vm).find("destructor 3") != std::string::npos, std::string("a throwing destructor fails the statement ") + (vm ? "vm" : "interp"));
+			}
+		});
+
+		test("constructions_that_reach_unprovable_code_are_refused", [this, parallel_error]() {
+			struct refusal { const char* name; const char* source; const char* text; };
+			const refusal refusals[] = {
+				{ "enclosing write", "int next_id = 0; class Tick { int id = 0; Tick() { id = next_id; next_id++; } } array<int> xs = [1, 2]; parallel_for (auto& x : xs) { Tick t; x = t.id; }",
+				  "parallel_for: body writes enclosing state 'next_id' in the constructor of 'Tick' at 1:" },
+				{ "static write", "class T { static int count = 0; int v = 0; T() { count++; v = 1; } } array<int> xs = [1, 2]; parallel_for (auto& x : xs) { T t; x = t.v; }",
+				  "parallel_for: body writes enclosing state 'count' in the constructor of 'T' at 1:" },
+				{ "field initializer", "int next = 0; int take_id() { next++; return next; } class T { int id = take_id(); } array<int> xs = [1, 2]; parallel_for (auto& x : xs) { T t; x = t.id; }",
+				  "parallel_for: body writes enclosing state 'next' in a field initializer of 'T' at 1:" },
+				{ "base constructor", "int made = 0; class Base { int b = 0; Base() { made = made + 1; } } class D : Base { int d = 2; D(int a) : super() { d = a; } } array<int> xs = [1, 2]; parallel_for (auto& x : xs) { D t(x); x = t.d; }",
+				  "parallel_for: body writes enclosing state 'made' in the constructor of 'Base' at 1:" },
+				{ "destructor", "int deaths = 0; class H { int v = 0; ~H() { deaths++; } } array<int> xs = [1, 2]; parallel_for (auto& x : xs) { H h; x = h.v; }",
+				  "parallel_for: body writes enclosing state 'deaths' in the destructor of 'H' at 1:" },
+				{ "written array destructor", "int deaths = 0; class Res { int v = 0; ~Res() { deaths++; } } array<int> xs = [0, 1]; var loose = [Res(), Res()]; parallel_for (int x : xs) { loose[x] = 5; }",
+				  "parallel_for: body writes enclosing state 'deaths' in the destructor of 'Res' at 1:" },
+				{ "unprovable call", "class T { int v = 0; T(int a) { print(a); v = a; } } array<int> xs = [1, 2]; parallel_for (auto& x : xs) { T t(x); x = t.v; }",
+				  "parallel_for: host function 'print' is not callable in a parallel body in the constructor of 'T' at 1:" },
+				{ "reduce step", "int calls = 0; class Acc { int n = 0; Acc() {} Acc(int a) { calls++; n = a; } } array<int> xs = [1, 2]; parallel_reduce(xs, Acc(), [](Acc a, int x) -> Acc { return Acc(a.n + x); }, [](Acc a, Acc b) -> Acc { return a; });",
+				  "parallel_reduce: body writes enclosing state 'calls' in the constructor of 'Acc' at 1:" },
+			};
+			for (const refusal& r : refusals) {
+				for (bool vm : {false, true}) {
+					const std::string got = parallel_error(r.source, vm);
+					check_true(got.rfind(r.text, 0) == 0, std::string(r.name) + (vm ? " vm" : " interp") + ": expected '" + r.text + "', got '" + got + "'");
+				}
+			}
+			struct host_point { int64_t v = 0; };
+			for (bool vm : {false, true}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(*e);
+				e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				dynamic_binder<host_point>(*e, "HostPoint").constructor<>().property("v", &host_point::v).build();
+				e->parallel_thread_count(8);
+				auto refused = [&](const char* src) -> std::string {
+					try { e->execute(src); } catch (const std::exception& ex) { return ex.what(); }
+					return "no error";
+				};
+				const std::string derived = refused("class Script : HostPoint { int w = 1; Script() : super() {} } array<int> xs = [1, 2]; parallel_for (auto& x : xs) { Script s; x = s.w; }");
+				check_true(derived.rfind("parallel_for: class 'Script' has a C++ base 'HostPoint' and cannot be constructed in a parallel body at 1:", 0) == 0,
+				           std::string("C++ base ") + (vm ? "vm" : "interp") + ": " + derived);
+				const std::string host = refused("array<int> xs = [1, 2]; parallel_for (auto& x : xs) { HostPoint p; x = p.v; }");
+				check_true(host.rfind("parallel_for: C++ class 'HostPoint' cannot be constructed in a parallel body at 1:", 0) == 0,
+				           std::string("C++ class ") + (vm ? "vm" : "interp") + ": " + host);
 			}
 		});
 

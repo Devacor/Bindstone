@@ -8879,6 +8879,12 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
                 push_value(field->is_reference() ? field->deref() : *field);
                 return {};
             }
+            // a barrier-admitted method on a receiver the call's fast entry does not take (a member chain): its pinned dispatcher
+            if (const detail::parallel_method_pin* pin = as_callee && parallel_method_pins_
+                    ? parallel_method_pins_->find(inst->get_class_definition(), expr->member_id) : nullptr) {
+                push_value(create_bound_method(objectValue, pin->method_value));
+                return {};
+            }
             return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
                 "only direct field access on class instances is allowed in a parallel body");
         }
@@ -10045,7 +10051,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
             std::string innerTypeName = inner_type->type_name;
 
             // Look up T's constructor
-            auto ctor_result = environment_->get(innerTypeName);
+            auto ctor_result = environment_->get(innerTypeName, *string_symbolizer_);
             if (!ctor_result || !ctor_result.value().is_function()) {
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
                     "No constructor found for class '{0}'", inner_type->id);
@@ -10082,7 +10088,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
             JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_new_shared, ai, args);
             args.push_back(std::move(pop_value()));
             if (auto taken = capture_call_argument(expr->arg_captures, ai, args.back(), [&] {
-                    auto ctor = environment_->get(innerTypeName);
+                    auto ctor = environment_->get(innerTypeName, *string_symbolizer_);
                     return ctor ? detail::callee_binding(ctor.value(), ai, false, expr->arguments.size()) : detail::arg_binding::opaque;
                 }, [&](script_value& out) { return mint_argument_place(expr->arguments[ai].get(), out); }); !taken) {
                 return taken.error_value();
@@ -10090,7 +10096,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
         }
 
         // Look up T's constructor
-        auto ctor_result = environment_->get(innerTypeName);
+        auto ctor_result = environment_->get(innerTypeName, *string_symbolizer_);
         if (!ctor_result || !ctor_result.value().is_function()) {
             return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
                 "No constructor found for class '{0}'", inner_type->id);
@@ -10121,7 +10127,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_new_class, ai, args);
         args.push_back(std::move(pop_value()));
         if (auto taken = capture_call_argument(expr->arg_captures, ai, args.back(), [&] {
-                auto ctor = environment_->get(className);
+                auto ctor = environment_->get(className, *string_symbolizer_);
                 return ctor ? detail::callee_binding(ctor.value(), ai, false, expr->arguments.size()) : detail::arg_binding::opaque;
             }, [&](script_value& out) { return mint_argument_place(expr->arguments[ai].get(), out); }); !taken) {
             return taken.error_value();
@@ -10130,7 +10136,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
 
     // Look for a constructor function registered with this class name
     // The class builder registers constructors as overloaded functions
-    auto ctor_result = environment_->get(className);
+    auto ctor_result = environment_->get(className, *string_symbolizer_);
     if (ctor_result && ctor_result.value().is_function()) {
         script_value constructorFunc = std::move(ctor_result.value());
         const script_function& func = constructorFunc.as_function();
@@ -13105,7 +13111,7 @@ struct interpreter::construction_lender final : detail::construction_host {
     std::shared_ptr<environment> entry_env;
 
     explicit construction_lender(interpreter& a_self) :
-        detail::construction_host(a_self.engine_, a_self.string_symbolizer_, a_self.current_call_depth_,
+        detail::construction_host(a_self.engine_, a_self.string_symbolizer_, a_self.env_symbolizer_, a_self.current_call_depth_,
                                   a_self.limits_->interpreter_call_depth_limit, a_self.is_unwinding_),
         self(a_self),
         entry_env(a_self.environment_) {
@@ -13140,6 +13146,9 @@ struct interpreter::construction_lender final : detail::construction_host {
     std::shared_ptr<environment> current_environment() override { return self.environment_; }
     std::shared_ptr<environment> global_environment() override { return self.get_global_environment(); }
     const class_definition* caller_access_context() override { return self.environment_->find_access_context(); }
+    std::shared_ptr<environment> parallel_sandbox() override {
+        return self.parallel_worker_ && self.parallel_method_pins_ ? self.parallel_method_pins_->definition_env : nullptr;
+    }
 };
 
 checked_result<script_value> interpreter::execute_callable(const script_callable& payload, const std::vector<script_value>& args) {
@@ -13214,7 +13223,7 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
             if (!script_cls) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Constructor payload without script class definition");
             }
-            const bool waived = engine_->take_construction_access_waiver();
+            const bool waived = !parallel_worker_ && engine_->take_construction_access_waiver();
             if (script_cls->get_constructor_asts().empty()) {
                 if (auto made = detail::construct_literal_default(script_cls, args, engine_, current_call_depth_, limits_->interpreter_call_depth_limit)) {
                     return std::move(*made);

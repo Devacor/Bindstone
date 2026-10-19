@@ -303,6 +303,7 @@ private:
 class LobbyServer {
 public:
 	LobbyServer(Managers& a_managers);
+	~LobbyServer();
 
 	void update(double dt);
 
@@ -314,7 +315,7 @@ public:
 		return db;
 	}
 
-	MV::ThreadPool& pool() {
+	jai::thread_pool& pool() {
 		return threadPool;
 	}
 
@@ -322,7 +323,7 @@ public:
 		return ourUserServer;
 	}
 
-	MV::ThreadPool& databasePool() {
+	jai::thread_pool& databasePool() {
 		return dbPool;
 	}
 
@@ -333,7 +334,7 @@ public:
 			MV::warning("Email disabled (no ServerConfig/smtp.config), skipped: ", a_title);
 			return;
 		}
-		auto emailer = MV::Email::make(emailPool.io_context(), smtpConfig[0], smtpConfig[1], { smtpConfig[2], smtpConfig[3] });
+		auto emailer = MV::Email::make(emailService, smtpConfig[0], smtpConfig[1], { smtpConfig[2], smtpConfig[3] });
 		emailer->send(a_addresses, a_title, a_message);
 	}
 
@@ -371,9 +372,11 @@ private:
 	std::shared_ptr<MV::Server> ourUserServer;
 	std::shared_ptr<MV::Server> ourGameServer;
 
-	MV::ThreadPool threadPool;
-	MV::AsioThreadPool emailPool;
-	MV::ThreadPool dbPool;
+	jai::thread_pool threadPool;
+	std::shared_ptr<asio::io_context> emailService = std::make_shared<asio::io_context>();
+	asio::executor_work_guard<asio::io_context::executor_type> emailServiceWork = asio::make_work_guard(*emailService);
+	jai::thread_pool emailPool;
+	jai::thread_pool dbPool;
 
 	MatchQueue rankedQueue;
 	MatchQueue normalQueue;

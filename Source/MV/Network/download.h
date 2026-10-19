@@ -13,7 +13,8 @@
 #include "MV/Network/url.h"
 #include <asio.hpp>
 #include <asio/ssl.hpp>
-#include "MV/Utility/threadPool.hpp"
+#include "MV/Utility/log.h"
+#include <jaiscript/detail/thread_pool.hpp>
 
 
 #include <asio/ssl/context.hpp>
@@ -407,14 +408,15 @@ namespace MV {
 		DownloadPool& operator=(const DownloadPool&) = delete;
 		
 		void initialize(){
-			for(size_t i = 0;i < pool.threads();++i){
-				pool.task([ioService=ioService](){
+			initializeThreadPool(pool);
+			for(size_t i = 0;i < pool.worker_count();++i){
+				pool.submit([ioService=ioService](){
 					ioService->run();
 				});
 			}
 		}
 		
-		ThreadPool pool;
+		jai::thread_pool pool;
 		std::shared_ptr<asio::io_context> ioService;
 		asio::io_service::work keepIoServiceRunning;
 		std::mutex activeRequestsMutex;

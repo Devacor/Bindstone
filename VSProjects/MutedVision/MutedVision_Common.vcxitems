@@ -50,7 +50,6 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\sharedTextures.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\texturePacker.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\textures.cpp" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\asioThreadPool.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\generalUtility.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\log.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\sha512.cpp" />
@@ -159,7 +158,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\textures.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Script\script.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Serialization\serialize.h" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\asioThreadPool.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\exactType.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\generalUtility.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\localization.hpp" />
@@ -175,7 +173,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\stringUtility.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\task.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\taskActions.hpp" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\threadPool.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\tinyutf8.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\tupleHelpers.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\typestring.hpp" />

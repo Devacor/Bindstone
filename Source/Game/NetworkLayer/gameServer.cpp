@@ -38,6 +38,7 @@ GameServer::GameServer(Managers &a_managers, unsigned short a_port) :
 			return std::make_unique<GameUserConnectionState>(a_connection, *this);
 		})) {
 
+	MV::initializeThreadPool(threadPool);
 	MV::Size<> worldSize(960, 640);
 	MV::Size<int> windowSize(960, 640);
 
@@ -88,7 +89,7 @@ void GameServer::update(double dt) {
 		}
 	}
 	ourUserServer->update(dt);
-	threadPool.run();
+	threadPool.run_posted();
 
 	if (ourInstance) {
 		ourInstance->update(dt);

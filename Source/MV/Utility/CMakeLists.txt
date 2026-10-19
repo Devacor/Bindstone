@@ -11,9 +11,6 @@ target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/sha512.h
   ${CMAKE_CURRENT_SOURCE_DIR}/stopwatch.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/stopwatch.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/threadPool.hpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/asioThreadPool.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/asioThreadPool.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tinyutf8.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tinyutf8.h
   ${CMAKE_CURRENT_SOURCE_DIR}/tupleHelpers.hpp

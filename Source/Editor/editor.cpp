@@ -66,7 +66,7 @@ bool Editor::update(double dt){
 	}
 	lastUpdateDelta = dt;
 	selectorPanel->update();
-	managers.pool.run();
+	managers.pool.run_posted();
 	if (done) {
 		done = false;
 		return false;

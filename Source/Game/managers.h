@@ -25,6 +25,7 @@ struct StandardMessages {
 
 struct Managers {
 	Managers(const DefaultLogin &a_login) : defaultLogin(a_login), textLibrary(renderer)/*, audio(*MV::AudioPlayer::instance())*/ {
+		MV::initializeThreadPool(pool);
 		services.connect(&timer);
 		services.connect(&pool);
 		services.connect(&renderer);
@@ -39,7 +40,7 @@ struct Managers {
 	}
 
 	MV::Stopwatch timer;
-	MV::ThreadPool pool;
+	jai::thread_pool pool;
 	MV::Draw2D renderer;
 	StandardMessages messages;
 	MV::TextLibrary textLibrary;

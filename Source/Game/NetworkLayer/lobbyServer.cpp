@@ -249,11 +249,20 @@ LobbyServer::LobbyServer(Managers& a_managers) :
 			return std::make_unique<LobbyGameConnectionState>(a_connection, *this);
 		})) {
 
+	MV::initializeThreadPool(threadPool);
+	MV::initializeThreadPool(emailPool);
+	MV::initializeThreadPool(dbPool);
+
 	MV::info("Initialize DB");
 	auto databaseConfig = MV::fileLines("ServerConfig/database.config");
 	auto connectionString = (!databaseConfig.empty() && !databaseConfig[0].empty()) ? databaseConfig[0] : "host=localhost port=5432 dbname=bindstone user=bindstone";
 	db = std::make_shared<pqxx::connection>(connectionString);
 	MV::info("DB Connected");
+	emailPool.submit([service = emailService] { service->run(); });
+}
+
+LobbyServer::~LobbyServer() {
+	emailService->stop();
 }
 
 void LobbyServer::savePlayer(const std::shared_ptr<ServerPlayer> &a_player) {
@@ -263,7 +272,7 @@ void LobbyServer::savePlayer(const std::shared_ptr<ServerPlayer> &a_player) {
 	auto id = a_player->client->id;
 	auto serverState = MV::toJsonInline(*a_player, manager.services);
 	auto clientState = MV::toJsonInline(static_cast<const IntermediateDbPlayer&>(*a_player->client), manager.services);
-	dbPool.task([this, id, serverState, clientState] {
+	dbPool.submit([this, id, serverState, clientState] {
 		try {
 			pqxx::work transaction(*db);
 			transaction.exec("UPDATE players SET state = " + transaction.quote(clientState) + ", serverstate = " + transaction.quote(serverState) + " WHERE id = " + std::to_string(id) + ";");
@@ -279,9 +288,8 @@ void LobbyServer::update(double dt) {
 	ourGameServer->update(dt);
 	rankedQueue.update(dt);
 	normalQueue.update(dt);
-	threadPool.run();
-	emailPool.run();
-	dbPool.run();
+	threadPool.run_posted();
+	dbPool.run_posted();
 
 	if (_kbhit()) {
 		switch (_getch()) {

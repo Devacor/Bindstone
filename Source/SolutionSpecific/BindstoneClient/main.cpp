@@ -1,7 +1,7 @@
 #include "Game/gameEditor.h"
 #include "Game/Instance/arenaInstance.h"
 #include "Game/NetworkLayer/synchronizeAction.h"
-#include "MV/Utility/threadPool.hpp"
+#include <jaiscript/detail/thread_pool.hpp>
 #include "MV/Utility/services.hpp"
 
 #include "MV/Serialization/serialize.h"
@@ -117,7 +117,7 @@ static void RunSceneLoadBenchmark(bool a_headless) {
 			// pool.run()). Drain them so the measured time is a full load — in the game the
 			// loop does one run() per frame, streaming the scene in over a few frames.
 			while (managers.textures.pendingTextureLoads() > 0) {
-				managers.pool.run();
+				managers.pool.run_posted();
 			}
 			auto t1 = std::chrono::steady_clock::now();
 			double ms = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / 1000.0;

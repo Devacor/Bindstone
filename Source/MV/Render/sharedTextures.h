@@ -15,8 +15,9 @@
 
 #include "MV/Serialization/serialize.h"
 
+namespace jai { class thread_pool; }
+
 namespace MV {
-	class ThreadPool;
 	class Draw2D;
 	namespace Render { class Device; }
 
@@ -88,12 +89,12 @@ namespace MV {
 			return a_filename + (a_repeat ? "1" : "0") + (a_pixel ? "1" : "");
 		}
 
-		void loadThreadPool(ThreadPool* a_pool) { ourLoadThreadPool = a_pool; }
-		ThreadPool* loadThreadPool() const { return ourLoadThreadPool; }
+		void loadThreadPool(jai::thread_pool* a_pool) { ourLoadThreadPool = a_pool; }
+		jai::thread_pool* loadThreadPool() const { return ourLoadThreadPool; }
 
 		// Decodes a file texture's image on the thread pool and uploads it to GL on the MAIN
 		// thread (delivered when the pool's main-thread completion callbacks run from the game
-		// loop, i.e. ThreadPool::run()). Until then the definition reports the magenta/black
+		// loop, i.e. thread_pool::run_posted()). Until then the definition reports the magenta/black
 		// "loading" checker placeholder. a_onLoaded (optional) fires on the main thread once the
 		// texture is live. a_blocking=true decodes + uploads inline instead.
 		void loadFile(const std::shared_ptr<FileTextureDefinition>& a_definition,
@@ -119,7 +120,7 @@ namespace MV {
 		std::map<std::string, std::shared_ptr<DynamicTextureDefinition>> dynamicDefinitions;
 		std::map<std::string, std::shared_ptr<SurfaceTextureDefinition>> surfaceDefinitions;
 
-		ThreadPool* ourLoadThreadPool = nullptr;
+		jai::thread_pool* ourLoadThreadPool = nullptr;
 		Draw2D* ourRenderer = nullptr;   // borrowed; supplies the active Render::Device for uploads.
 		std::atomic<int> ourPendingTextureLoads{ 0 };
 

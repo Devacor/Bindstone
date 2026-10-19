@@ -153,9 +153,6 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\text.cpp">
       <Filter>MV\Render\Scene</Filter>
     </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\asioThreadPool.cpp">
-      <Filter>MV\Utility</Filter>
-    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\generalUtility.cpp">
       <Filter>MV\Utility</Filter>
     </ClCompile>
@@ -318,9 +315,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\text.h">
       <Filter>MV\Render\Scene</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\asioThreadPool.h">
-      <Filter>MV\Utility</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\exactType.hpp">
       <Filter>MV\Utility</Filter>
     </ClInclude>
@@ -361,9 +355,6 @@
       <Filter>MV\Utility</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\taskActions.hpp">
-      <Filter>MV\Utility</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\threadPool.hpp">
       <Filter>MV\Utility</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\tinyutf8.h">

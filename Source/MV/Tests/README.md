@@ -45,12 +45,12 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
 - **MV Utility** — `angle2D`/`angle2DRad` overloads, `wrappingDistance` and `wrappingMix` (the
   short-way angle interpolation `Collider::interpolateDrawAngle` draws with), `startsWith`,
   `BoxAABB::centerPoint` and `BoxAABB::collides` with and without depth.
-- **MV ThreadPool** — `ThreadPool`/`AsioThreadPool`: a group job's finish callback and group
-  completion run once each after the job that queued them is gone; a group completes exactly once
-  (an empty group too); `run()` drains callbacks other threads schedule meanwhile, each once and in
-  order, survives a callback that pumps `run()` again and runs work scheduled during the pass in
-  the same pass; the destructor finishes an in-flight job, even one running past 5 s, before any
-  member dies (so the suite takes ~5 s).
+- **MV Thread Pool** — how MV drives `jai::thread_pool`: `MV::initializeThreadPool` parks at once and logs
+  what tasks and posted work throw (std and non-std); a decode on the pool continues on the main
+  thread at the next `run_posted()`, even when it throws (the texture streaming shape); the lobby's
+  one-worker database pool runs queries one at a time in order and drains each continuation once on
+  the lobby thread; `io_context` workers block in `run()` until the context stops and the pool then
+  joins. The pool's own contract is JaiScript's `thread_pool continuations` suite.
 
 ## Benchmarks (measurement, not assertions)
 

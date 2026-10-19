@@ -11,7 +11,6 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include "MV/Utility/services.hpp"
-#include "MV/Utility/threadPool.hpp"
 #include "MV/Render/sharedTextures.h"
 #include "text.h"
 #include "clickable.h"

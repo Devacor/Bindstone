@@ -1873,7 +1873,7 @@ void ChooseElementCreationType::createPathMap(const MV::BoxAABB<int> &a_selected
 void ChooseElementCreationType::createEmitter(const MV::BoxAABB<int> &a_selected) {
 	panel.selection().disable();
 
-	auto newEmitter = nodeToAttachTo->attach<MV::Scene::Emitter>(*panel.services().get<MV::ThreadPool>());
+	auto newEmitter = nodeToAttachTo->attach<MV::Scene::Emitter>(*panel.services().get<jai::thread_pool>());
 	newEmitter->id(MV::guid("emitter"))->shader(MV::DEFAULT_ID);
 	auto transformedSelection = nodeToAttachTo->localFromScreen(a_selected);
 	newEmitter->properties().minimumPosition = transformedSelection.minPoint;

@@ -127,7 +127,7 @@ namespace MV {
 			double maxParticlesPerFramePerThread = 500;
 
 			if (particlesToSpawn >= emitterThreads) {
-				std::vector<MV::ThreadPool::Job> spawnTasks;
+				std::vector<jai::thread_pool::task_type> spawnTasks;
 				spawnTasks.reserve(emitterThreads);
 				for (size_t currentThread = 0; currentThread < emitterThreads; ++currentThread) {
 					spawnTasks.emplace_back([this, currentThread, a_dt, particlesToSpawn, maxParticlesPerFramePerThread]() {
@@ -141,7 +141,7 @@ namespace MV {
 				timeSinceLastParticle = 0.0f;
 				nextSpawnDelta = randomNumber(spawnProperties->minimumSpawnRate, spawnProperties->maximumSpawnRate);
 
-				pool.tasks(spawnTasks, [this, a_dt]() {
+				pool.submit_batch(std::move(spawnTasks), [this, a_dt]() {
 					updateParticlesOnMultipleThreads(a_dt);
 				});
 			} else if (particlesToSpawn > 0) {
@@ -159,7 +159,7 @@ namespace MV {
 		}
 
 		void Emitter::updateParticlesOnMultipleThreads(double a_dt) {
-			std::vector<MV::ThreadPool::Job> spawnTasks;
+			std::vector<jai::thread_pool::task_type> spawnTasks;
 			spawnTasks.reserve(emitterThreads);
 			for (size_t currentThread = 0; currentThread < emitterThreads; ++currentThread) {
 				spawnTasks.emplace_back([this, currentThread, a_dt]() {
@@ -169,7 +169,7 @@ namespace MV {
 					loadParticlesToPoints(currentThread);
 				});
 			}
-			pool.tasks(spawnTasks, [this]() {
+			pool.submit_batch(std::move(spawnTasks), [this]() {
 				loadParticlePointsFromGroups();
 			});
 		}
@@ -228,7 +228,7 @@ namespace MV {
 
 			size_t pointOffset = 0;
 			size_t vertexOffset = 0;
-			std::vector<MV::ThreadPool::Job> copyTasks;
+			std::vector<jai::thread_pool::task_type> copyTasks;
 			copyTasks.reserve(emitterThreads);
 			for (int group = 0; group < emitterThreads; ++group) {
 				copyTasks.emplace_back([this, group, pointOffset, vertexOffset]() {
@@ -242,7 +242,7 @@ namespace MV {
 				pointOffset += threadData[group].points.size();
 				vertexOffset += threadData[group].vertexIndices.size();
 			}
-			pool.tasks(copyTasks, [this]() {
+			pool.submit_batch(std::move(copyTasks), [this]() {
 				loadPointsFromBufferAndAllowUpdate();
 			});
 		}
@@ -359,7 +359,7 @@ namespace MV {
 				for (auto&& data : threadData) {
 					data.particleOffset = particleOffset;
 				}
-				pool.task([this, dt]() {
+				pool.submit([this, dt]() {
 					if (nextSpawnDelta == 0.0) {
 						nextSpawnDelta = randomNumber(spawnProperties->minimumSpawnRate, spawnProperties->maximumSpawnRate);
 					}
@@ -379,10 +379,10 @@ namespace MV {
 			}
 		}
 
-		Emitter::Emitter(const std::weak_ptr<Node> &a_owner, ThreadPool &a_pool) :
+		Emitter::Emitter(const std::weak_ptr<Node> &a_owner, jai::thread_pool &a_pool) :
 			jai::property_owner<Emitter, Drawable>(a_owner),
 			pool(a_pool),
-			emitterThreads(a_pool.threads()),
+			emitterThreads(a_pool.worker_count()),
 			threadData(emitterThreads),
 			updateInProgress(false){
 

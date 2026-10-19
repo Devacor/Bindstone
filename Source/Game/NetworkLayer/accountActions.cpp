@@ -94,7 +94,7 @@ void CreatePlayer::execute(LobbyUserConnectionState* a_connection) {
 	auto saveState = makeSaveString();
 	auto serverSaveState = makeServerSaveString();
 	auto lookup = std::make_shared<AccountLookup>();
-	a_connection->server().databasePool().task(MV::ThreadPool::Job([self, lookup, salt, saveState, serverSaveState, database = a_connection->server().database()] {
+	a_connection->server().databasePool().submit([self, lookup, salt, saveState, serverSaveState, database = a_connection->server().database()] {
 		try {
 			pqxx::work transaction(*database);
 			auto result = self->selectUser(&transaction);
@@ -143,7 +143,7 @@ void CreatePlayer::execute(LobbyUserConnectionState* a_connection) {
 			default:
 			break;
 		}
-	}, MV::ThreadPool::Job::Continue::MAIN_THREAD));
+	}, jai::thread_pool::then_on::posted);
 }
 
 bool CreatePlayer::ensureAccount(pqxx::connection &a_db, const std::string &a_email, const std::string &a_handle, const std::string &a_password) {
@@ -196,7 +196,7 @@ void LoginRequest::execute(LobbyUserConnectionState* a_connection) {
 	auto self = std::static_pointer_cast<LoginRequest>(shared_from_this());
 	std::weak_ptr<MV::Connection> connectionLifespan = a_connection->connection();
 	auto lookup = std::make_shared<AccountLookup>();
-	a_connection->server().databasePool().task(MV::ThreadPool::Job([self, lookup, database = a_connection->server().database()] {
+	a_connection->server().databasePool().submit([self, lookup, database = a_connection->server().database()] {
 		try {
 			pqxx::work transaction(*database);
 			auto result = self->selectUser(&transaction);
@@ -246,7 +246,7 @@ void LoginRequest::execute(LobbyUserConnectionState* a_connection) {
 			default:
 			break;
 		}
-	}, MV::ThreadPool::Job::Continue::MAIN_THREAD));
+	}, jai::thread_pool::then_on::posted);
 }
 
 void FindMatchRequest::execute(LobbyUserConnectionState* a_connection) {

@@ -1,14 +1,19 @@
-// MV::ThreadPool and MV::AsioThreadPool regression tests, Foundry framework.
-// Built into mv_tests.exe (see build_tests.bat); auto-registers with the Foundry runner.
+// How MV drives jai::thread_pool: MV::initializeThreadPool, a decode on the pool whose upload continues on the main thread
+// (SharedTextures::loadFile), the lobby's one-worker database pool whose continuations its update() drains, and the
+// io_context pools (DownloadPool, the lobby's email pool) whose workers block in run(). Foundry, built into mv_tests.exe.
 
 #include <jaiscript/testing/foundry.hpp>
-#include "MV/Utility/threadPool.hpp"
-#include "MV/Utility/asioThreadPool.h"
+#include <jaiscript/detail/thread_pool.hpp>
+#include "MV/Utility/log.h"
+#include "MV/Utility/services.hpp"
+
+#include <asio.hpp>
 
 #include <atomic>
 #include <chrono>
 #include <mutex>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -34,205 +39,149 @@ namespace {
 	bool waitFor(Condition a_condition) {
 		return waitFor(a_condition, []() {});
 	}
+
+	class CapturedErrors {
+	public:
+		CapturedErrors() :
+			previous(MV::Logger::instance()),
+			logger(MV::Severity::Debug, false) {
+
+			logger.listen(MV::Severity::Error, [this](MV::Severity, const MV::LogData&, const std::string &a_message) {
+				std::lock_guard<std::mutex> guard(lock);
+				messages.push_back(a_message);
+			});
+			MV::Services::instance().connect(&logger);
+		}
+		~CapturedErrors() {
+			MV::Services::instance().connect(previous);
+		}
+
+		std::vector<std::string> all() {
+			std::lock_guard<std::mutex> guard(lock);
+			return messages;
+		}
+
+	private:
+		MV::Logger* previous;
+		MV::Logger logger;
+		std::mutex lock;
+		std::vector<std::string> messages;
+	};
 }
 
 class threadpool_suite : public suite {
 public:
-	threadpool_suite() : suite("MV ThreadPool") {}
+	threadpool_suite() : suite("MV Thread Pool") {}
 
 	void forge_tests() override {
-		test("a group job's finish callback and the group completion run once each, after the job that queued them is gone", [this]() {
-			for (auto continuation : {MV::ThreadPool::Job::Continue::POOL, MV::ThreadPool::Job::Continue::MAIN_THREAD}) {
-				MV::ThreadPool pool(1);
-				std::atomic<int> exceptions{0};
-				pool.exceptionHandler([&](std::exception&) { ++exceptions; });
-				std::atomic<int> finished{0};
-				std::atomic<int> groupFinished{0};
-				std::vector<MV::ThreadPool::Job> jobs;
-				jobs.emplace_back([]() {}, [&]() { ++finished; }, continuation);
-				pool.tasks(std::move(jobs), [&]() { ++groupFinished; }, continuation);
-				check(waitFor([&]() { return finished.load() == 1 && groupFinished.load() == 1; }, [&]() { pool.run(); }), "both callbacks must run");
-				std::this_thread::sleep_for(std::chrono::milliseconds(20));
-				pool.run();
-				check_eq(1, finished.load());
-				check_eq(1, groupFinished.load());
-				check_eq(0, exceptions.load(), "a callback must not see another job's (or a destroyed job's) members");
+		test("an initialized pool parks at once and logs what its tasks and posted work throw", [this]() {
+			CapturedErrors errors;
+			{
+				jai::thread_pool pool(2);
+				MV::initializeThreadPool(pool);
+				check(pool.spin_budget() == std::chrono::nanoseconds{0}, "MV's pools never spin between batches");
+				pool.submit([]() { throw std::runtime_error("decode failed"); });
+				pool.submit([]() { throw 7; });
+				pool.wait_idle();
+				pool.post([]() { throw std::runtime_error("upload failed"); });
+				pool.run_posted();
 			}
-		});
-
-		test("the group completion runs exactly once after every job of a large group", [this]() {
-			MV::ThreadPool pool(4);
-			for (int round = 0; round < 200; ++round) {
-				std::atomic<int> ran{0};
-				std::atomic<int> sawAll{0};
-				std::atomic<int> completions{0};
-				std::vector<MV::ThreadPool::Job> jobs;
-				for (int i = 0; i < 16; ++i) {
-					jobs.emplace_back([&]() { ++ran; });
+			auto messages = errors.all();
+			check_eq(size_t{3}, messages.size());
+			auto logged = [&](const std::string &a_text) {
+				for (auto&& message : messages) {
+					if (message.find(a_text) != std::string::npos) { return true; }
 				}
-				pool.tasks(std::move(jobs), [&]() {
-					if (ran.load() == 16) { ++sawAll; }
-					++completions;
-				});
-				check(waitFor([&]() { return completions.load() >= 1; }), "completion must run");
-				check_eq(16, ran.load());
-				check_eq(1, sawAll.load());
-				check_eq(1, completions.load());
+				return false;
+			};
+			check(logged("Uncaught Exception in Thread Pool: decode failed"));
+			check(logged("Uncaught Exception in Thread Pool: upload failed"));
+			check(logged("non-standard exception"));
+		});
+
+		test("a decode on the pool continues on the main thread at the next drain, even when the decode throws", [this]() {
+			jai::thread_pool pool;
+			MV::initializeThreadPool(pool);
+			CapturedErrors errors;
+			const auto mainThread = std::this_thread::get_id();
+			const int loads = 64;
+			std::vector<int> decoded(loads, 0);
+			std::atomic<int> uploadedOffMain{0};
+			int uploaded = 0;
+			for (int i = 0; i < loads; ++i) {
+				pool.submit([&, i]() {
+					if (i % 8 == 0) { throw std::runtime_error("bad image"); }
+					decoded[i] = i + 1;
+				}, [&, i]() {
+					if (std::this_thread::get_id() != mainThread) { ++uploadedOffMain; }
+					++uploaded;
+				}, jai::thread_pool::then_on::posted);
 			}
+			check(waitFor([&]() { return uploaded == loads; }, [&]() { pool.run_posted(); }), "every load reaches its main-thread continuation");
+			pool.wait_idle();
+			check_eq(0, uploadedOffMain.load());
+			for (int i = 0; i < loads; ++i) {
+				check_eq(i % 8 == 0 ? 0 : i + 1, decoded[i]);
+			}
+			check_eq(size_t{loads / 8}, errors.all().size());
 		});
 
-		test("an empty group still completes", [this]() {
-			MV::ThreadPool pool(1);
-			std::atomic<int> immediate{0};
-			std::atomic<int> onPool{0};
-			std::atomic<int> onMain{0};
-			pool.tasks(std::vector<MV::ThreadPool::Job>{}, [&]() { ++immediate; }, MV::ThreadPool::Job::Continue::IMMEDIATE);
-			pool.tasks(std::vector<MV::ThreadPool::Job>{}, [&]() { ++onPool; }, MV::ThreadPool::Job::Continue::POOL);
-			pool.tasks(std::vector<MV::ThreadPool::Job>{}, [&]() { ++onMain; }, MV::ThreadPool::Job::Continue::MAIN_THREAD);
-			check_eq(1, immediate.load());
-			check(waitFor([&]() { return onPool.load() == 1 && onMain.load() == 1; }, [&]() { pool.run(); }), "POOL and MAIN_THREAD completions must run");
+		test("the lobby's one-worker database pool runs queries in order and its update() drains each continuation once", [this]() {
+			jai::thread_pool dbPool(1);
+			MV::initializeThreadPool(dbPool);
+			const auto lobbyThread = std::this_thread::get_id();
+			std::vector<int> queries;
+			std::vector<int> continuations;
+			std::atomic<int> continuationsOffLobby{0};
+			std::atomic<int> concurrent{0};
+			std::atomic<int> maxConcurrent{0};
+			const int requests = 200;
+			for (int i = 0; i < requests; ++i) {
+				dbPool.submit([&, i]() {
+					int now = ++concurrent;
+					int seen = maxConcurrent.load();
+					while (now > seen && !maxConcurrent.compare_exchange_weak(seen, now)) {}
+					queries.push_back(i);
+					--concurrent;
+				}, [&, i]() {
+					if (std::this_thread::get_id() != lobbyThread) { ++continuationsOffLobby; }
+					continuations.push_back(i);
+				}, jai::thread_pool::then_on::posted);
+			}
+			check(waitFor([&]() { return continuations.size() == static_cast<size_t>(requests); }, [&]() { dbPool.run_posted(); }), "every continuation must run");
+			dbPool.run_posted();
+			check_eq(1, maxConcurrent.load(), "one connection, one query at a time");
+			check_eq(0, continuationsOffLobby.load());
+			bool inOrder = queries.size() == static_cast<size_t>(requests) && continuations.size() == static_cast<size_t>(requests);
+			for (int i = 0; inOrder && i < requests; ++i) {
+				inOrder = queries[i] == i && continuations[i] == i;
+			}
+			check(inOrder, "queries and their continuations keep submission order");
 		});
 
-		test("a scheduled callback that pumps run() again runs nothing twice", [this]() {
-			MV::ThreadPool pool(1);
-			std::vector<char> order;
-			pool.schedule([&]() {
-				order.push_back('a');
-				pool.run();
-			});
-			pool.schedule([&]() { order.push_back('b'); });
-			pool.run();
-			pool.run();
-			check_eq(size_t{2}, order.size());
-			check(order.size() == 2 && order[0] == 'a' && order[1] == 'b', "each callback runs once, in order");
-		});
-
-		test("a callback scheduled from inside run() runs in the same run()", [this]() {
-			MV::ThreadPool pool(1);
-			std::vector<int> order;
-			pool.schedule([&]() {
-				order.push_back(1);
-				pool.schedule([&]() { order.push_back(3); });
-			});
-			pool.schedule([&]() { order.push_back(2); });
-			pool.run();
-			check(order == std::vector<int>{1, 2, 3}, "FIFO, including work scheduled during the pass");
-		});
-
-		test("callbacks scheduled from other threads while run() drains each run once, in each thread's order", [this]() {
-			MV::ThreadPool pool(1);
-			const int producers = 4;
-			const int perProducer = 20000;
-			std::vector<std::vector<int>> seen(producers);
-			std::atomic<int> total{0};
-			std::atomic<bool> go{false};
-			std::vector<std::thread> threads;
-			for (int p = 0; p < producers; ++p) {
-				threads.emplace_back([&, p]() {
-					while (!go.load()) { std::this_thread::yield(); }
-					for (int i = 0; i < perProducer; ++i) {
-						pool.schedule([&, p, i]() {
-							seen[p].push_back(i);
-							++total;
+		test("io_context workers block in run() until the context stops, and the pool then joins", [this]() {
+			for (size_t workers : {size_t{1}, size_t{3}}) {
+				auto service = std::make_shared<asio::io_context>();
+				auto work = asio::make_work_guard(*service);
+				std::atomic<int> handled{0};
+				std::atomic<int> running{0};
+				{
+					jai::thread_pool pool(workers);
+					MV::initializeThreadPool(pool);
+					for (size_t i = 0; i < pool.worker_count(); ++i) {
+						pool.submit([service, &running]() {
+							++running;
+							service->run();
 						});
 					}
-				});
-			}
-			go = true;
-			bool drained = waitFor([&]() { return total.load() == producers * perProducer; }, [&]() { pool.run(); });
-			for (auto&& thread : threads) { thread.join(); }
-			pool.run();
-			check(drained, "every scheduled callback must run");
-			check_eq(producers * perProducer, total.load());
-			for (int p = 0; p < producers; ++p) {
-				bool inOrder = static_cast<int>(seen[p].size()) == perProducer;
-				for (int i = 0; inOrder && i < perProducer; ++i) {
-					inOrder = seen[p][i] == i;
+					for (int i = 0; i < 100; ++i) {
+						asio::post(*service, [&]() { ++handled; });
+					}
+					check(waitFor([&]() { return handled.load() == 100 && running.load() == static_cast<int>(workers); }), "every worker serves the context");
+					service->stop();
 				}
-				check(inOrder, "one producer's callbacks run once each in its order");
+				check_eq(100, handled.load());
 			}
-		});
-
-		test("pool jobs that schedule main-thread work and more pool work under load lose nothing", [this]() {
-			MV::ThreadPool pool(4);
-			const int jobs = 5000;
-			std::atomic<int> onMain{0};
-			std::atomic<int> chained{0};
-			for (int i = 0; i < jobs; ++i) {
-				pool.task(MV::ThreadPool::Job([&]() {
-					pool.task([&]() { ++chained; });
-				}, [&]() { ++onMain; }, MV::ThreadPool::Job::Continue::MAIN_THREAD));
-			}
-			check(waitFor([&]() { return onMain.load() == jobs && chained.load() == jobs; }, [&]() { pool.run(); }), "every continuation must run");
-		});
-
-		test("the destructor finishes an in-flight job while every pool member is still alive", [this]() {
-			// Runs past 5 s: a destructor that stops waiting on a timeout destroys the handler and queues under it.
-			std::atomic<int> handled{0};
-			std::atomic<bool> started{false};
-			{
-				MV::ThreadPool pool(1);
-				pool.exceptionHandler([&](std::exception&) { ++handled; });
-				pool.task([&]() {
-					started = true;
-					std::this_thread::sleep_for(std::chrono::milliseconds(5300));
-					pool.schedule([]() {});
-					pool.task([]() {});
-					throw std::runtime_error("late failure");
-				});
-				check(waitFor([&]() { return started.load(); }), "the job must start");
-			}
-			check_eq(1, handled.load(), "the in-flight job's exception must reach the live handler");
-		});
-
-		test("destruction drops queued jobs and joins with no work, idle work and a full queue", [this]() {
-			{
-				MV::ThreadPool idle(3);
-			}
-			std::atomic<int> ran{0};
-			{
-				MV::ThreadPool pool(2);
-				for (int i = 0; i < 1000; ++i) {
-					pool.task([&]() {
-						++ran;
-						std::this_thread::sleep_for(std::chrono::microseconds(50));
-					});
-				}
-			}
-			check(ran.load() <= 1000);
-			check_eq(size_t{3}, MV::ThreadPool(3).threads());
-		});
-
-		test("AsioThreadPool: a group job's finish callback and the group completion run once each", [this]() {
-			MV::AsioThreadPool pool(1);
-			std::atomic<int> exceptions{0};
-			pool.exceptionHandler([&](std::exception&) { ++exceptions; });
-			for (int round = 0; round < 20; ++round) {
-				std::atomic<int> finished{0};
-				std::atomic<int> groupFinished{0};
-				std::vector<MV::AsioThreadPool::Job> jobs;
-				jobs.emplace_back([]() {}, [&]() { ++finished; });
-				pool.tasks(jobs, [&]() { ++groupFinished; });
-				check(waitFor([&]() { return finished.load() == 1 && groupFinished.load() == 1; }), "both callbacks must run");
-				std::this_thread::sleep_for(std::chrono::milliseconds(2));
-				check_eq(1, finished.load());
-				check_eq(1, groupFinished.load());
-			}
-			check_eq(0, exceptions.load(), "a callback must not see another job's (or a destroyed job's) members");
-		});
-
-		test("AsioThreadPool: scheduled callbacks from other threads each run once while run() drains", [this]() {
-			MV::AsioThreadPool pool(1);
-			std::atomic<int> total{0};
-			std::thread producer([&]() {
-				for (int i = 0; i < 20000; ++i) {
-					pool.schedule([&]() { ++total; });
-				}
-			});
-			bool drained = waitFor([&]() { return total.load() == 20000; }, [&]() { pool.run(); });
-			producer.join();
-			check(drained, "every scheduled callback must run");
-			check_eq(20000, total.load());
 		});
 	}
 };

@@ -55,7 +55,9 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
   certificates refuses none, another CA's and a server certificate, never building a connection state or reading
   what they send, and exposes a valid one's identity (`PeerCertificate`); a plaintext peer of the old protocol and
   silent peers are closed (the latter at the handshake deadline) and a client gives up on a server that never
-  handshakes; a missing CA file fails each attempt with the reason until it exists.
+  handshakes; a missing CA file fails each attempt with the reason until it exists; the HTTPS download client
+  sends SNI and refuses wrong-host certificates without sending its request; the SMTP client verifies after
+  STARTTLS and sends no credentials to a wrong-host or wrong-CA server.
 - **Pathfinding** — `Map` budget, `NavigationAgent` paths/signals, footprint block counts
   across moves, clones and off-map placement.
 - **MV Utility** — `angle2D`/`angle2DRad` overloads, `wrappingDistance` and `wrappingMix` (the

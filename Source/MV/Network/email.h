@@ -5,6 +5,7 @@
 #include <string>
 #include <memory>
 #include "MV/Utility/stringUtility.h"
+#include "MV/Network/tls.h"
 #include <jaiscript/serialization/convenience.hpp>
 #include <asio.hpp>
 #include <asio/ssl.hpp>
@@ -107,6 +108,12 @@ namespace MV {
 			return result;
 		}
 
+		// Trust only this CA (PEM) for the server's certificate instead of the system's root certificates.
+		std::shared_ptr<Email> trustedCaFile(const std::string &a_caFile) {
+			ourTrustedCaFile = a_caFile;
+			return shared_from_this();
+		}
+
 		void send(const Addresses &a_addresses, const std::string &a_title, const std::string &a_message) {
 			addresses = a_addresses;
 			try {
@@ -156,8 +163,8 @@ namespace MV {
 			}
 
 			resolver = std::make_unique<asio::ip::tcp::resolver>(*ioService);
-			tlsContext = std::make_unique<asio::ssl::context>(asio::ssl::context::tlsv13_client);
-			socket = std::make_unique<asio::ssl::stream<asio::ip::tcp::socket>>(*ioService, *tlsContext);
+			tlsContext = makePublicTlsClientContext(ourTrustedCaFile);
+			socket = std::make_unique<TlsStream>(*ioService, *tlsContext);
 
 			return created;
 		}
@@ -221,9 +228,20 @@ namespace MV {
 			listenForMessageUnsecure({220}, [this, self] {
 				sendInternalUnsecure("EHLO " + domainFromEmail(addresses.from) + "\r\n", {250}, [this, self] {
 					sendInternalUnsecure("STARTTLS\r\n", { 220 }, [this, self] {
+						try {
+							verifyTlsPeerAs(*socket, host);
+						} catch (std::exception &e) {
+							activeResponse.message = e.what();
+							alertFailure();
+							return;
+						}
 						socket->async_handshake(asio::ssl::stream_base::client, [this, self](const asio::error_code& a_err) {
 							if (!a_err) {
 								secureLogin();
+							} else {
+								activeResponse.message = "TLS handshake with " + host + " failed: " + describeTlsFailure(a_err, *socket);
+								error("[email] ", activeResponse.message);
+								alertFailure();
 							}
 						});
 					});
@@ -346,8 +364,9 @@ namespace MV {
 		std::unique_ptr<asio::ip::tcp::resolver> resolver;
 		//asio::ip::tcp::socket socket;
 
-		std::unique_ptr<asio::ssl::context> tlsContext;
-		std::unique_ptr<asio::ssl::stream<asio::ip::tcp::socket>> socket;
+		std::shared_ptr<asio::ssl::context> tlsContext;
+		std::unique_ptr<TlsStream> socket;
+		std::string ourTrustedCaFile;
 
 		std::unique_ptr<std::istream> responseStream;
 

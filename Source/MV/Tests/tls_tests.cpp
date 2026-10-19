@@ -1,8 +1,10 @@
-// MV TLS: what every MV::Server / MV::Client link verifies, against loopback servers using certificates
-// made at test time (tls_test_pki.hpp).
+// MV TLS: what every MV::Server / MV::Client link verifies, and the HTTPS and SMTP clients' certificate
+// checks, against loopback servers using certificates made at test time (tls_test_pki.hpp).
 
 #include <jaiscript/testing/foundry.hpp>
 #include "MV/Network/network.h"
+#include "MV/Network/download.h"
+#include "MV/Network/email.h"
 #include "tls_test_pki.hpp"
 
 #include <openssl/crypto.h>
@@ -157,6 +159,144 @@ struct PlainPeer {
 	asio::io_context io;
 	asio::ip::tcp::socket socket {io};
 };
+
+// Accepts one connection on loopback and runs a_session on it from its own thread.
+struct OneShotServer {
+	explicit OneShotServer(std::function<void(asio::ip::tcp::socket&)> a_session) :
+		acceptor(io, asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), 0)),
+		port(acceptor.local_endpoint().port()) {
+
+		acceptor.async_accept(socket, [this, a_session](const asio::error_code& a_err) {
+			if (!a_err) {
+				socket.set_option(asio::detail::socket_option::integer<SOL_SOCKET, SO_RCVTIMEO>(5000));
+				a_session(socket);
+			}
+		});
+		thread = std::thread([this] { io.run_for(std::chrono::seconds(10)); });
+	}
+
+	~OneShotServer() {
+		finish();
+	}
+
+	void finish() {
+		if (thread.joinable()) {
+			thread.join();
+		}
+	}
+
+	asio::io_context io;
+	asio::ip::tcp::acceptor acceptor;
+	asio::ip::tcp::socket socket {io};
+	uint16_t port;
+	std::thread thread;
+};
+
+std::string readLine(asio::ip::tcp::socket& a_socket, std::string& a_buffer) {
+	asio::error_code error;
+	auto length = asio::read_until(a_socket, asio::dynamic_buffer(a_buffer), "\r\n", error);
+	if (error) {
+		return {};
+	}
+	auto result = a_buffer.substr(0, length);
+	a_buffer.erase(0, length);
+	return result;
+}
+
+std::string readLine(MV::TlsStream& a_stream, std::string& a_buffer, const std::string& a_delimiter = "\r\n") {
+	asio::error_code error;
+	auto length = asio::read_until(a_stream, asio::dynamic_buffer(a_buffer), a_delimiter, error);
+	if (error) {
+		return {};
+	}
+	auto result = a_buffer.substr(0, length);
+	a_buffer.erase(0, length);
+	return result;
+}
+
+struct SmtpLog {
+	std::mutex lock;
+	bool tlsEstablished = false;
+	std::vector<std::string> secureCommands;
+	std::string handshakeError;
+};
+
+// Plaintext greeting, EHLO and STARTTLS, then the TLS handshake with a_context and the rest of a send.
+std::function<void(asio::ip::tcp::socket&)> fakeSmtp(std::shared_ptr<asio::ssl::context> a_context, std::shared_ptr<SmtpLog> a_log) {
+	return [a_context, a_log](asio::ip::tcp::socket& a_socket) {
+		std::string buffer;
+		asio::error_code error;
+		asio::write(a_socket, asio::buffer(std::string("220 fake smtp\r\n")), error);
+		readLine(a_socket, buffer);
+		asio::write(a_socket, asio::buffer(std::string("250 hello\r\n")), error);
+		if (!contains(readLine(a_socket, buffer), "STARTTLS")) {
+			return;
+		}
+		asio::write(a_socket, asio::buffer(std::string("220 go ahead\r\n")), error);
+		MV::TlsStream stream(std::move(a_socket), *a_context);
+		stream.handshake(asio::ssl::stream_base::server, error);
+		if (error) {
+			std::lock_guard<std::mutex> guard(a_log->lock);
+			a_log->handshakeError = error.message();
+			return;
+		}
+		{
+			std::lock_guard<std::mutex> guard(a_log->lock);
+			a_log->tlsEstablished = true;
+		}
+		const std::vector<std::string> replies {"250 hello again\r\n", "334 VXNlcm5hbWU6\r\n", "334 UGFzc3dvcmQ6\r\n", "235 ok\r\n", "250 ok\r\n", "250 ok\r\n", "354 go\r\n"};
+		for (auto&& reply : replies) {
+			auto command = readLine(stream, buffer);
+			if (command.empty()) {
+				return;
+			}
+			{
+				std::lock_guard<std::mutex> guard(a_log->lock);
+				a_log->secureCommands.push_back(command);
+			}
+			asio::write(stream, asio::buffer(reply), error);
+		}
+		readLine(stream, buffer, "\r\n.\r\n");
+		asio::write(stream, asio::buffer(std::string("250 queued\r\n")), error);
+		readLine(stream, buffer);
+		asio::write(stream, asio::buffer(std::string("221 bye\r\n")), error);
+		stream.shutdown(error);
+	};
+}
+
+struct HttpsLog {
+	std::mutex lock;
+	std::string request;
+	std::string handshakeError;
+};
+
+std::function<void(asio::ip::tcp::socket&)> fakeHttps(std::shared_ptr<asio::ssl::context> a_context, std::shared_ptr<HttpsLog> a_log) {
+	return [a_context, a_log](asio::ip::tcp::socket& a_socket) {
+		MV::TlsStream stream(std::move(a_socket), *a_context);
+		asio::error_code error;
+		stream.handshake(asio::ssl::stream_base::server, error);
+		if (error) {
+			std::lock_guard<std::mutex> guard(a_log->lock);
+			a_log->handshakeError = error.message();
+			return;
+		}
+		std::string buffer;
+		auto request = readLine(stream, buffer, "\r\n\r\n");
+		{
+			std::lock_guard<std::mutex> guard(a_log->lock);
+			a_log->request = request;
+		}
+		asio::write(stream, asio::buffer(std::string("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello")), error);
+		stream.shutdown(error);
+	};
+}
+
+int recordServerName(SSL* a_ssl, int*, void* a_name) {
+	if (auto* name = SSL_get_servername(a_ssl, TLSEXT_NAMETYPE_host_name)) {
+		*static_cast<std::string*>(a_name) = name;
+	}
+	return SSL_TLSEXT_ERR_OK;
+}
 
 bool linkedOpenSslHasTls13() {
 	return OpenSSL_version_num() >= 0x10101000L;
@@ -340,6 +480,77 @@ public:
 			std::filesystem::copy_file(pki.caFile, pki.caFile + ".missing");
 			client->reconnect();
 			check_true(pumpUntil(pump, [&] { return client->connected(); }), "a later attempt loads the file and connects");
+		});
+
+		test("the HTTPS download client verifies the certificate names the host and sends SNI", [this]() {
+			TestPki pki;
+			auto good = MV::makeTlsServerContext(pki.serverConfig(pki.localServer()));
+			{
+				auto log = std::make_shared<HttpsLog>();
+				OneShotServer server(fakeHttps(good, log));
+				MV::HttpRequest request(MV::Url("https://localhost:" + std::to_string(server.port) + "/file.txt"));
+				request.trustedCaFile = pki.caFile;
+				auto download = MV::DownloadRequest::make(request);
+				check_true(download->success(), "a certificate for localhost downloads from localhost: " + download->response().errorMessage);
+				check_eq(std::string("hello"), download->response().body);
+			}
+			{
+				auto log = std::make_shared<HttpsLog>();
+				std::string serverName;
+				auto sni = MV::makeTlsServerContext(pki.serverConfig(pki.localServer()));
+				SSL_CTX_set_tlsext_servername_callback(sni->native_handle(), recordServerName);
+				SSL_CTX_set_tlsext_servername_arg(sni->native_handle(), &serverName);
+				OneShotServer server(fakeHttps(sni, log));
+				MV::HttpRequest request(MV::Url("https://localhost:" + std::to_string(server.port) + "/"));
+				request.trustedCaFile = pki.caFile;
+				MV::DownloadRequest::make(request);
+				server.finish();
+				check_eq(std::string("localhost"), serverName, "the client names the host it wants (SNI)");
+			}
+			for (auto&& [host, names] : std::vector<std::pair<std::string, std::string>> {{"localhost", "DNS:other.example"}, {"127.0.0.1", "DNS:localhost"}}) {
+				auto log = std::make_shared<HttpsLog>();
+				OneShotServer server(fakeHttps(MV::makeTlsServerContext(pki.serverConfig(pki.issue("wrong host", names))), log));
+				MV::HttpRequest request(MV::Url("https://" + host + ":" + std::to_string(server.port) + "/secret"));
+				request.trustedCaFile = pki.caFile;
+				auto download = MV::DownloadRequest::make(request);
+				check_true(!download->success(), host + " with a certificate for " + names + " fails");
+				check_true(contains(download->response().errorMessage, "mismatch"), "on the name: " + download->response().errorMessage);
+				server.finish();
+				std::lock_guard<std::mutex> guard(log->lock);
+				check_true(log->request.empty(), "and sends no request");
+			}
+		});
+
+		test("the SMTP client verifies the server's certificate after STARTTLS and sends credentials only to the right host", [this]() {
+			TestPki pki;
+			TestPki other("other");
+			MV::Email::Addresses addresses("noreply@bindstone.test", "player@bindstone.test");
+			{
+				auto log = std::make_shared<SmtpLog>();
+				OneShotServer server(fakeSmtp(MV::makeTlsServerContext(pki.serverConfig(pki.localServer())), log));
+				auto email = MV::Email::make("localhost", std::to_string(server.port), {"test-user", "test-password"});
+				email->trustedCaFile(pki.caFile)->send(addresses, "Welcome", "Hello.");
+				server.finish();
+				check_true(email->succeeded(), "a certificate for the SMTP host sends: " + email->lastResponse().message);
+				std::lock_guard<std::mutex> guard(log->lock);
+				check_true(log->tlsEstablished && log->secureCommands.size() == 7, "every command after STARTTLS went over TLS");
+				check_true(contains(log->secureCommands[1], "AUTH LOGIN"), "including the login");
+			}
+			std::vector<std::pair<std::string, std::shared_ptr<asio::ssl::context>>> impostors {
+				{"a certificate for another host", MV::makeTlsServerContext(pki.serverConfig(pki.issue("wrong host", "DNS:smtp.elsewhere.example")))},
+				{"a certificate from another CA", MV::makeTlsServerContext(other.serverConfig(other.localServer()))},
+			};
+			for (auto&& [what, context] : impostors) {
+				auto log = std::make_shared<SmtpLog>();
+				OneShotServer server(fakeSmtp(context, log));
+				auto email = MV::Email::make("localhost", std::to_string(server.port), {"test-user", "test-password"});
+				email->trustedCaFile(pki.caFile)->send(addresses, "Welcome", "Hello.");
+				server.finish();
+				check_true(email->failed(), what + ": the send fails");
+				check_true(contains(email->lastResponse().message, "certificate verify failed"), what + ": saying why: " + email->lastResponse().message);
+				std::lock_guard<std::mutex> guard(log->lock);
+				check_true(log->secureCommands.empty(), what + ": no credentials or mail reach it");
+			}
 		});
 
 		test("PeerCertificate::names matches DNS names case-insensitively and IP addresses by value", [this]() {

@@ -192,6 +192,10 @@ namespace MV {
 			auto closingSocket = sslSocket;
 			sslSocket.reset();
 			closingSocket->socket.lowest_layer().cancel(ec);
+			if (!SSL_is_init_finished(closingSocket->socket.native_handle())) {
+				closingSocket->socket.lowest_layer().close(ec);
+				return;
+			}
 			closingSocket->socket.async_shutdown([closingSocket](const asio::error_code &ec){
 				if (ec && ec != asio::error::eof){
 					MV::error("Error shutting down SSL socket: ", ec.message());
@@ -297,11 +301,22 @@ namespace MV {
 			// The connection was successful. Send the request.
 			if(sslSocket){
 				auto self = shared_from_this();
-				sslSocket->socket.async_handshake(asio::ssl::stream_base::client, [this, self](const asio::error_code &err){
+				try {
+					verifyTlsPeerAs(sslSocket->socket, currentUrl.host());
+				} catch (std::exception &e) {
+					handleDownloadFailure(e.what());
+					return;
+				}
+				auto handshaking = sslSocket;
+				handshaking->socket.async_handshake(asio::ssl::stream_base::client, [this, self, handshaking](const asio::error_code &err){
+					std::scoped_lock<std::recursive_mutex> lock(criticalPath);
+					if (handshaking != sslSocket || handleCancellation()) {
+						return;
+					}
 					if (!err) {
 						asio::async_write(sslSocket->socket, *request, std::bind(&DownloadRequest::handleWriteRequest, self, std::placeholders::_1));
 					}else{
-						handleDownloadFailure(err, "Download Connection Handshake Failure");
+						handleDownloadFailure("Download Connection Handshake Failure [" + currentUrl.host() + "]: " + describeTlsFailure(err, handshaking->socket));
 					}
 				});
 			}else{
@@ -347,7 +362,12 @@ namespace MV {
 			return;
 		}
 		currentUrl = a_url;
-		initializeSocket();
+		try {
+			initializeSocket();
+		} catch (std::exception &e) {
+			handleDownloadFailure(e.what());
+			return;
+		}
 		request = std::make_unique<asio::streambuf>();
 		intermediateResponse = std::make_unique<asio::streambuf>();
 		using asio::ip::tcp;
@@ -355,7 +375,7 @@ namespace MV {
 		std::ostream requestStream(&(*request));
 		target.writeRequest(requestStream, a_url);
 		
-		tcp::resolver::query query(a_url.host(), a_url.scheme());
+		tcp::resolver::query query(a_url.host(), std::to_string(a_url.port()));
 		resolver->async_resolve(query, std::bind(&DownloadRequest::handleResolve, shared_from_this(), std::placeholders::_1, std::placeholders::_2));
 	}
 
@@ -366,7 +386,7 @@ namespace MV {
 		
 		closeSockets();
 		if(currentUrl.scheme() == "https"){
-			sslSocket = std::make_shared<SSLSocket>(*ioService);
+			sslSocket = std::make_shared<SSLSocket>(*ioService, makePublicTlsClientContext(target.trustedCaFile));
 		}else{
 			socket = std::make_unique<asio::ip::tcp::socket>(*ioService);
 		}

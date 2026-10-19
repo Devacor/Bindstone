@@ -59,6 +59,14 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
   one-worker database pool runs queries one at a time in order and drains each continuation once on
   the lobby thread; `io_context` workers block in `run()` until the context stops and the pool then
   joins. The pool's own contract is JaiScript's `thread_pool continuations` suite.
+- **MV Emitter** — the particle pipeline (`simulateWhileHeadless` runs it under the headless test
+  renderer): particles spawn, age and die with four points and six in-range indices each, the
+  population respects `maximumParticles`, a headless renderer skips it unless asked; the
+  properties (`properties(const&)` and `properties()` writes) and the textures (swapped, cleared,
+  re-cornered) change every frame while the frame's stages run; replacing the properties while the
+  pipeline waits for a worker leaves the emitter updating and destructible (the old pipeline froze
+  and its destructor spun forever); the emitter dies at once with a pipeline in flight; a stage
+  that throws still finishes its pipeline and the next update starts a new one.
 
 ## Benchmarks (measurement, not assertions)
 

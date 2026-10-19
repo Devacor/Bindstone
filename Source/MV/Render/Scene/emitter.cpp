@@ -8,6 +8,11 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/Utility/services.hpp"
 
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <limits>
+
 static jai::registrar<MV::Scene::Emitter, MV::Services> _hookEmitter("Emitter",
 	[](jai::dynamic_binder<MV::Scene::Emitter>& builder, const MV::Services&) {
 	builder.base_class<MV::Scene::Drawable>();
@@ -31,233 +36,210 @@ namespace MV {
 
 		const double Emitter::MAX_TIME_STEP  = .25;
 
-		Point<> randomMix(const Point<>& a_rhs, const Point<>& a_lhs) {
-			return{
-				mix(a_rhs.x, a_lhs.x, randomNumber(0.0f, 1.0f)),
-				mix(a_rhs.y, a_lhs.y, randomNumber(0.0f, 1.0f)),
-				mix(a_rhs.z, a_lhs.z, randomNumber(0.0f, 1.0f))
+		namespace {
+			constexpr size_t MAX_SPAWNS_PER_SLOT_PER_FRAME = 500;
+
+			//xorshift64*: one per pipeline slot, eight bytes where an mt19937 per slot per emitter would be five kilobytes.
+			class ParticleRandom {
+			public:
+				explicit ParticleRandom(uint64_t a_seed) :
+					state(a_seed != 0 ? a_seed : 0x9E3779B97F4A7C15ull) {
+				}
+
+				float unit() {
+					state ^= state >> 12;
+					state ^= state << 25;
+					state ^= state >> 27;
+					return static_cast<float>((state * 0x2545F4914F6CDD1Dull) >> 40) / 16777215.0f;
+				}
+
+			private:
+				uint64_t state;
 			};
+
+			Point<> randomMix(const Point<> &a_from, const Point<> &a_to, ParticleRandom &a_random) {
+				return{
+					mix(a_from.x, a_to.x, a_random.unit()),
+					mix(a_from.y, a_to.y, a_random.unit()),
+					mix(a_from.z, a_to.z, a_random.unit())
+				};
+			}
+
+			Color randomMix(const Color &a_from, const Color &a_to, ParticleRandom &a_random) {
+				return{
+					mix(a_from.R, a_to.R, a_random.unit()),
+					mix(a_from.G, a_to.G, a_random.unit()),
+					mix(a_from.B, a_to.B, a_random.unit()),
+					mix(a_from.A, a_to.A, a_random.unit())
+				};
+			}
 		}
 
-		Color randomMix(const Color & a_rhs, const Color & a_lhs) {
-			return{
-				mix(a_rhs.R, a_lhs.R, randomNumber(0.0f, 1.0f)),
-				mix(a_rhs.G, a_lhs.G, randomNumber(0.0f, 1.0f)),
-				mix(a_rhs.B, a_lhs.B, randomNumber(0.0f, 1.0f)),
-				mix(a_rhs.A, a_lhs.A, randomNumber(0.0f, 1.0f))
+		struct EmitterSnapshot {
+			Point<> minimumPosition;
+			Point<> maximumPosition;
+			AxisAngles minimumDirection;
+			AxisAngles maximumDirection;
+			AxisAngles minimumRotation;
+			AxisAngles maximumRotation;
+			ParticleChangeValues minimum;
+			ParticleChangeValues maximum;
+			size_t textureCount = 0;
+			std::array<TexturePoint, 4> textureCorners;
+			double dt = 0.0;
+			Point<> particleOffset;
+			std::vector<size_t> spawns;
+			std::function<void(size_t)> probe;
+
+			Particle spawn(ParticleRandom &a_random) const {
+				Particle result;
+				result.textureCount = textureCount;
+				result.position = randomMix(minimumPosition, maximumPosition, a_random) - particleOffset;
+				result.rotation = randomMix(minimumRotation, maximumRotation, a_random);
+				result.change.rotationalChange = randomMix(minimum.rotationalChange, maximum.rotationalChange, a_random);
+				result.direction = randomMix(minimumDirection, maximumDirection, a_random);
+				result.change.rateOfChange = randomMix(minimum.rateOfChange, maximum.rateOfChange, a_random);
+				result.change.directionalChangeRad(randomMix(minimum.directionalChangeRad(), maximum.directionalChangeRad(), a_random));
+				result.change.beginSpeed = mix(minimum.beginSpeed, maximum.beginSpeed, a_random.unit());
+				result.change.endSpeed = mix(minimum.endSpeed, maximum.endSpeed, a_random.unit());
+				result.change.beginScale = mix(minimum.beginScale, maximum.beginScale, a_random.unit());
+				result.change.endScale = mix(minimum.endScale, maximum.endScale, a_random.unit());
+				result.change.beginColor = randomMix(minimum.beginColor, maximum.beginColor, a_random);
+				result.change.endColor = randomMix(minimum.endColor, maximum.endColor, a_random);
+				result.change.animationFramesPerSecond = mix(minimum.animationFramesPerSecond, maximum.animationFramesPerSecond, a_random.unit());
+				result.change.maxLifespan = mix(minimum.maxLifespan, maximum.maxLifespan, a_random.unit());
+				result.setGravity(
+					mix(minimum.gravityMagnitude, maximum.gravityMagnitude, a_random.unit()),
+					randomMix(minimum.gravityDirection, maximum.gravityDirection, a_random)
+				);
+				return result;
+			}
+		};
+
+		struct EmitterPipeline {
+			struct Slot {
+				explicit Slot(uint64_t a_seed) :
+					random(a_seed) {
+				}
+
+				std::vector<Particle> particles;
+				std::vector<DrawPoint> points;
+				std::vector<GLuint> vertexIndices;
+				ParticleRandom random;
 			};
-		}
 
-		void EmitterSpawnProperties::initializeCallbacks() {
-			if (!dirty) { return; }
-
-			if (minimumPosition == maximumPosition) {
-				getPosition = [this] {return *minimumPosition; };
-			} else {
-				getPosition = [this] { return randomMix(minimumPosition, maximumPosition); };
-			}
-
-			if (minimumRotation == maximumRotation) {
-				getRotation = [this] {return *minimumRotation; };
-			} else {
-				getRotation = [this] {return randomMix(minimumRotation, maximumRotation); };
-			}
-
-			if (minimumDirection == maximumDirection) {
-				getDirection = [this] {return *minimumDirection; };
-			} else {
-				getDirection = [this] {return randomMix(minimumDirection, maximumDirection); };
-			}
-
-			if (minimum->rotationalChange == maximum->rotationalChange) {
-				getRotationChange = [this] {return minimum->rotationalChange; };
-			} else {
-				getRotationChange = [this] {return randomMix(minimum->rotationalChange, maximum->rotationalChange); };
-			}
-
-			if (minimum->rateOfChange == maximum->rateOfChange) {
-				getRateOfChange = [this] {return minimum->rateOfChange; };
-			} else {
-				getRateOfChange = [this] {return randomMix(minimum->rateOfChange, maximum->rateOfChange); };
-			}
-
-			if (minimum->directionalChangeRad() == maximum->directionalChangeRad()) {
-				getDirectionChange = [this] {return minimum->directionalChangeRad(); };
-			} else {
-				getDirectionChange = [this] {return randomMix(minimum->directionalChangeRad(), maximum->directionalChangeRad()); };
-			}
-
-			if (MV::equals(minimum->beginSpeed, maximum->beginSpeed) && MV::equals(minimum->endSpeed, maximum->endSpeed)) {
-				setSpeed = [this](float& begin, float& end) { begin = minimum->beginSpeed; end = minimum->endSpeed; };
-			} else {
-				setSpeed = [this](float& begin, float& end) {
-					begin = mix(minimum->beginSpeed, maximum->beginSpeed, randomNumber(0.0f, 1.0f));
-					end = mix(minimum->endSpeed, maximum->endSpeed, randomNumber(0.0f, 1.0f));
-				};
-			}
-
-			if (minimum->beginScale == maximum->beginScale && minimum->endScale == maximum->endScale) {
-				setScale = [this](Scale& begin, Scale& end) { begin = minimum->beginScale; end = minimum->endScale; };
-			} else {
-				setScale = [this](Scale& begin, Scale& end) {
-					begin = mix(minimum->beginScale, maximum->beginScale, randomNumber(0.0f, 1.0f));
-					end = mix(minimum->endScale, maximum->endScale, randomNumber(0.0f, 1.0f));
-				};
-			}
-
-			if (minimum->beginColor == maximum->beginColor && minimum->endColor == maximum->endColor) {
-				setColor = [this](Color& begin, Color& end) { begin = minimum->beginColor; end = minimum->endColor; };
-			} else {
-				setColor = [this](Color& begin, Color& end) {
-					begin = randomMix(minimum->beginColor, maximum->beginColor);
-					end = randomMix(minimum->endColor, maximum->endColor);
-				};
-			}
-
-			dirty = false;
-		}
-
-		void Emitter::spawnParticlesOnMultipleThreads(double a_dt) {
-			timeSinceLastParticle.store(timeSinceLastParticle.load() + a_dt);
-			size_t particlesToSpawn = nextSpawnDelta <= 0 ? 0 : static_cast<size_t>(timeSinceLastParticle.load() / nextSpawnDelta);
-			size_t totalParticles = std::min(std::accumulate(threadData.begin(), threadData.end(), static_cast<size_t>(0), [](size_t a_total, ThreadData& a_group) {return a_group.particles.size() + a_total; }), static_cast<size_t>(*spawnProperties->maximumParticles));
-
-			particlesToSpawn = std::min(particlesToSpawn + totalParticles, static_cast<size_t>(*spawnProperties->maximumParticles)) - totalParticles;
-
-			double maxParticlesPerFramePerThread = 500;
-
-			if (particlesToSpawn >= emitterThreads) {
-				std::vector<jai::thread_pool::task_type> spawnTasks;
-				spawnTasks.reserve(emitterThreads);
-				for (size_t currentThread = 0; currentThread < emitterThreads; ++currentThread) {
-					spawnTasks.emplace_back([this, currentThread, a_dt, particlesToSpawn, maxParticlesPerFramePerThread]() {
-						size_t particlesToSpawnThisThread = std::min(particlesToSpawn / emitterThreads, static_cast<size_t>(maxParticlesPerFramePerThread));
-						threadData[currentThread].particles.reserve(particlesToSpawnThisThread);
-						for (size_t count = 0; count < particlesToSpawnThisThread; ++count) {
-							spawnParticle(currentThread);
-						}
-					});
-				}
-				timeSinceLastParticle = 0.0f;
-				nextSpawnDelta = randomNumber(spawnProperties->minimumSpawnRate, spawnProperties->maximumSpawnRate);
-
-				pool.submit_batch(std::move(spawnTasks), [this, a_dt]() {
-					updateParticlesOnMultipleThreads(a_dt);
-				});
-			} else if (particlesToSpawn > 0) {
-				auto randomOffset = randomInteger(0, emitterThreads - 1);   // inclusive upper bound; -1 to stay in [0, threads)
-				for (size_t count = 0; count < particlesToSpawn; ++count) {
-					spawnParticle((count + randomOffset) % emitterThreads);
-				}
-
-				timeSinceLastParticle = 0.0f;
-				nextSpawnDelta = randomNumber(spawnProperties->minimumSpawnRate, spawnProperties->maximumSpawnRate);
-				updateParticlesOnMultipleThreads(a_dt);
-			} else {
-				updateParticlesOnMultipleThreads(a_dt);
-			}
-		}
-
-		void Emitter::updateParticlesOnMultipleThreads(double a_dt) {
-			std::vector<jai::thread_pool::task_type> spawnTasks;
-			spawnTasks.reserve(emitterThreads);
-			for (size_t currentThread = 0; currentThread < emitterThreads; ++currentThread) {
-				spawnTasks.emplace_back([this, currentThread, a_dt]() {
-					threadData[currentThread].particles.erase(std::remove_if(threadData[currentThread].particles.begin(), threadData[currentThread].particles.end(), [&](Particle& a_particle) {
-						return a_particle.update(a_dt);
-					}), threadData[currentThread].particles.end());
-					loadParticlesToPoints(currentThread);
-				});
-			}
-			pool.submit_batch(std::move(spawnTasks), [this]() {
-				loadParticlePointsFromGroups();
-			});
-		}
-
-		void Emitter::loadParticlesToPoints(size_t a_groupIndex) {
-			threadData[a_groupIndex].points.clear();
-			threadData[a_groupIndex].vertexIndices.clear();
-
-			std::vector<TexturePoint> texturePoints;
-			texturePoints.reserve(4);
-			auto foundTexture = ourTextures->find(0);
-			if (foundTexture != ourTextures->end()) {
-				texturePoints.emplace_back( static_cast<float>((foundTexture->second)->rawPercent().minPoint.x), static_cast<float>((foundTexture->second)->rawPercent().minPoint.y) );
-				texturePoints.emplace_back( static_cast<float>((foundTexture->second)->rawPercent().minPoint.x), static_cast<float>((foundTexture->second)->rawPercent().maxPoint.y) );
-				texturePoints.emplace_back( static_cast<float>((foundTexture->second)->rawPercent().maxPoint.x), static_cast<float>((foundTexture->second)->rawPercent().maxPoint.y) );
-				texturePoints.emplace_back( static_cast<float>((foundTexture->second)->rawPercent().maxPoint.x), static_cast<float>((foundTexture->second)->rawPercent().minPoint.y) );
-			} else {
-				texturePoints.emplace_back( 0.0f, 0.0f );
-				texturePoints.emplace_back( 0.0f, 1.0f );
-				texturePoints.emplace_back( 1.0f, 1.0f );
-				texturePoints.emplace_back( 1.0f, 0.0f );
-			}
-
-			threadData[a_groupIndex].points.reserve(threadData[a_groupIndex].particles.size() * 4);
-			threadData[a_groupIndex].vertexIndices.reserve(threadData[a_groupIndex].particles.size() * 6);
-			for (auto &&particle : threadData[a_groupIndex].particles) {
-				BoxAABB<> bounds(MV::Point<>(particle.scale.x / -2.0f, particle.scale.y / -2.0f, 0.0f), MV::Point<>(particle.scale.x / 2.0f, particle.scale.y / 2.0f, 0.0f));
-				bounds.sanitize();
-
-				appendQuadVertexIndices(threadData[a_groupIndex].vertexIndices, static_cast<GLuint>(threadData[a_groupIndex].points.size()));
-
-				auto c = cos(particle.rotation.z);
-				auto s = sin(particle.rotation.z);
-				for (size_t i = 0; i < 4; ++i) {
-					auto corner = bounds[i];
-					rotatePoint2DRad(corner.x, corner.y, c, s);
-					corner += particle.position;
-					threadData[a_groupIndex].points.emplace_back(corner, particle.color, texturePoints[i]);
+			explicit EmitterPipeline(size_t a_slots) {
+				slots.reserve(a_slots);
+				for (size_t i = 0; i < a_slots; ++i) {
+					slots.emplace_back(static_cast<uint64_t>(randomInteger(0, std::numeric_limits<int64_t>::max())));
 				}
 			}
-		}
 
-		void Emitter::loadParticlePointsFromGroups() {
-			pointBuffer.clear();
-			vertexIndexBuffer.clear();
-
-			size_t pointCount = 0;
-			size_t vertexCount = 0;
-			for (int group = 0; group < emitterThreads; ++group) {
-				pointCount += threadData[group].points.size();
-				vertexCount += threadData[group].vertexIndices.size();
+			size_t particleCount() const {
+				size_t result = 0;
+				for (auto&& slot : slots) {
+					result += slot.particles.size();
+				}
+				return result;
 			}
 
-			pointBuffer.resize(pointCount);
-			vertexIndexBuffer.resize(vertexCount);
+			void simulate(const EmitterSnapshot &a_snapshot, size_t a_slot) {
+				if (a_snapshot.probe) { a_snapshot.probe(a_slot); }
+				auto& slot = slots[a_slot];
+				slot.particles.reserve(slot.particles.size() + a_snapshot.spawns[a_slot]);
+				for (size_t count = 0; count < a_snapshot.spawns[a_slot]; ++count) {
+					slot.particles.push_back(a_snapshot.spawn(slot.random));
+				}
+				slot.particles.erase(std::remove_if(slot.particles.begin(), slot.particles.end(), [&](Particle& a_particle) {
+					return a_particle.update(a_snapshot.dt);
+				}), slot.particles.end());
 
-			size_t pointOffset = 0;
-			size_t vertexOffset = 0;
-			std::vector<jai::thread_pool::task_type> copyTasks;
-			copyTasks.reserve(emitterThreads);
-			for (int group = 0; group < emitterThreads; ++group) {
-				copyTasks.emplace_back([this, group, pointOffset, vertexOffset]() {
-					size_t indexSize = threadData[group].vertexIndices.size();
-					moveCopy(pointBuffer, threadData[group].points, pointOffset);
-					moveCopy(vertexIndexBuffer, threadData[group].vertexIndices, vertexOffset);
-					for (size_t index = vertexOffset; index < vertexOffset + indexSize; ++index) {
-						vertexIndexBuffer[index] += static_cast<GLuint>(pointOffset);
+				slot.points.clear();
+				slot.vertexIndices.clear();
+				slot.points.reserve(slot.particles.size() * 4);
+				slot.vertexIndices.reserve(slot.particles.size() * 6);
+				for (auto&& particle : slot.particles) {
+					BoxAABB<> bounds(MV::Point<>(particle.scale.x / -2.0f, particle.scale.y / -2.0f, 0.0f), MV::Point<>(particle.scale.x / 2.0f, particle.scale.y / 2.0f, 0.0f));
+					bounds.sanitize();
+
+					appendQuadVertexIndices(slot.vertexIndices, static_cast<GLuint>(slot.points.size()));
+
+					auto c = cos(particle.rotation.z);
+					auto s = sin(particle.rotation.z);
+					for (size_t i = 0; i < 4; ++i) {
+						auto corner = bounds[i];
+						rotatePoint2DRad(corner.x, corner.y, c, s);
+						corner += particle.position;
+						slot.points.emplace_back(corner, particle.color, a_snapshot.textureCorners[i]);
 					}
-				});
-				pointOffset += threadData[group].points.size();
-				vertexOffset += threadData[group].vertexIndices.size();
+				}
 			}
-			pool.submit_batch(std::move(copyTasks), [this]() {
-				loadPointsFromBufferAndAllowUpdate();
-			});
-		}
 
-		void Emitter::loadPointsFromBufferAndAllowUpdate() {
-			{
-				std::lock_guard<std::recursive_mutex> guard(lock);
-				points->clear();
-				vertexIndices->clear();
-				std::swap(*points, pointBuffer);
-				std::swap(*vertexIndices, vertexIndexBuffer);
-				dirtyVertexBuffer = true;
-				dirtyIndexBuffer = true;
+			void copySlot(size_t a_slot, size_t a_pointOffset, size_t a_indexOffset) {
+				auto& slot = slots[a_slot];
+				std::copy(slot.points.begin(), slot.points.end(), points.begin() + a_pointOffset);
+				std::transform(slot.vertexIndices.begin(), slot.vertexIndices.end(), vertexIndices.begin() + a_indexOffset, [&](GLuint a_index) {
+					return a_index + static_cast<GLuint>(a_pointOffset);
+				});
 			}
-			updateInProgress.store(false);
+
+			std::vector<Slot> slots;
+			std::vector<DrawPoint> points;
+			std::vector<GLuint> vertexIndices;
+			double nextSpawnDelta = 0.0;
+			double timeSinceLastParticle = 0.0;
+			std::atomic<bool> failed{false};
+			bool finished = false;
+		};
+
+		namespace {
+			template<typename Stage>
+			void runReportingFailure(EmitterPipeline &a_pipeline, Stage &&a_stage) {
+				try {
+					a_stage();
+				} catch (...) {
+					a_pipeline.failed = true;
+					throw;
+				}
+			}
+
+			void finishPipeline(const std::shared_ptr<EmitterPipeline> &a_pipeline, jai::thread_pool &a_pool) {
+				a_pool.post([a_pipeline]() { a_pipeline->finished = true; });
+			}
+
+			void copySlotsIntoOnePointList(const std::shared_ptr<EmitterPipeline> &a_pipeline, jai::thread_pool &a_pool) {
+				if (a_pipeline->failed) {
+					finishPipeline(a_pipeline, a_pool);
+					return;
+				}
+				try {
+					size_t pointCount = 0;
+					size_t indexCount = 0;
+					for (auto&& slot : a_pipeline->slots) {
+						pointCount += slot.points.size();
+						indexCount += slot.vertexIndices.size();
+					}
+					a_pipeline->points.resize(pointCount);
+					a_pipeline->vertexIndices.resize(indexCount);
+
+					std::vector<jai::thread_pool::task_type> copies;
+					copies.reserve(a_pipeline->slots.size());
+					size_t pointOffset = 0;
+					size_t indexOffset = 0;
+					for (size_t slot = 0; slot < a_pipeline->slots.size(); ++slot) {
+						copies.emplace_back([a_pipeline, slot, pointOffset, indexOffset]() {
+							runReportingFailure(*a_pipeline, [&]() { a_pipeline->copySlot(slot, pointOffset, indexOffset); });
+						});
+						pointOffset += a_pipeline->slots[slot].points.size();
+						indexOffset += a_pipeline->slots[slot].vertexIndices.size();
+					}
+					a_pool.submit_batch(std::move(copies), [a_pipeline]() { a_pipeline->finished = true; }, jai::thread_pool::then_on::posted);
+				} catch (...) {
+					a_pipeline->failed = true;
+					finishPipeline(a_pipeline, a_pool);
+					throw;
+				}
+			}
 		}
 
 		std::weak_ptr<MV::Scene::Node> Emitter::relativeEmission() const {
@@ -301,8 +283,7 @@ namespace MV {
 
 		std::shared_ptr<Emitter> Emitter::properties(const EmitterSpawnProperties & a_emitterProperties) {
 			spawnProperties = a_emitterProperties;
-			nextSpawnDelta = randomNumber(spawnProperties->minimumSpawnRate, spawnProperties->maximumSpawnRate);
-			spawnProperties->dirty = true;
+			rerollSpawnDelta = true;
 			return std::static_pointer_cast<Emitter>(shared_from_this());
 		}
 
@@ -311,8 +292,7 @@ namespace MV {
 		}
 
 		EmitterSpawnProperties & Emitter::properties() {
-			nextSpawnDelta = 0.0f; //zero this out since we return a reference to the properties and may need to re-evaluate our nextSpawnDelta.
-			spawnProperties->dirty = true;
+			rerollSpawnDelta = true;
 			return *spawnProperties;
 		}
 
@@ -334,57 +314,126 @@ namespace MV {
 			return std::static_pointer_cast<Emitter>(shared_from_this());
 		}
 
-		void Emitter::updateImplementation(double a_dt) {
-			if (owner()->renderer().headless()) { return; }
-
-			bool falseValue = false;
-			accumulatedTimeDelta += a_dt;
-			if (updateInProgress.compare_exchange_strong(falseValue, true)) {
-				// We won the single-flight gate, so no worker pipeline is in flight: read + reset the
-				// accumulated dt HERE on the main thread and hand it to the worker by value. The worker
-				// used to read/reset accumulatedTimeDelta while the main thread kept doing '+= a_dt'
-				// every frame (even on frames where the gate was held) -> a data race on a plain double.
-				double dt = std::min(accumulatedTimeDelta, MAX_TIME_STEP);
-				accumulatedTimeDelta = 0.0;
-
-				if (relativeNodePosition->expired() && relativeParentCount >= 0) {
-					makeRelativeToParent(relativeParentCount);
-				}
-				spawnProperties->initializeCallbacks();
-
-				MV::Point<> particleOffset;
-				if (auto lockedRelativeNodePosition = relativeNodePosition->lock()) {
-					particleOffset = owner()->localFromWorld(lockedRelativeNodePosition->worldPosition());
-				}
-				for (auto&& data : threadData) {
-					data.particleOffset = particleOffset;
-				}
-				pool.submit([this, dt]() {
-					if (nextSpawnDelta == 0.0) {
-						nextSpawnDelta = randomNumber(spawnProperties->minimumSpawnRate, spawnProperties->maximumSpawnRate);
-					}
-					if (enabled()) {
-						spawnParticlesOnMultipleThreads(dt);
-					} else {
-						updateParticlesOnMultipleThreads(dt);
-					}
-				});
-			}
+		std::shared_ptr<Emitter> Emitter::simulateWhileHeadless(bool a_simulate) {
+			simulatesWhileHeadless = a_simulate;
+			return std::static_pointer_cast<Emitter>(shared_from_this());
 		}
 
-		Emitter::~Emitter() {
-			spawnParticles = false;
-			while (updateInProgress.load()) {
-				std::this_thread::sleep_for(std::chrono::microseconds(100));
+		std::shared_ptr<Emitter> Emitter::pipelineProbe(std::function<void(size_t)> a_probe) {
+			ourPipelineProbe = std::move(a_probe);
+			return std::static_pointer_cast<Emitter>(shared_from_this());
+		}
+
+		void Emitter::updateImplementation(double a_dt) {
+			if (owner()->renderer().headless() && !simulatesWhileHeadless) { return; }
+
+			accumulatedTimeDelta += a_dt;
+			if (pipelineRunning) {
+				if (!pipeline->finished) { return; }
+				takePipelineResult();
 			}
+			startPipeline();
+		}
+
+		void Emitter::takePipelineResult() {
+			pipelineRunning = false;
+			if (pipeline->failed) { return; }
+			points->swap(pipeline->points);
+			vertexIndices->swap(pipeline->vertexIndices);
+			dirtyVertexBuffer = true;
+			dirtyIndexBuffer = true;
+		}
+
+		void Emitter::startPipeline() {
+			auto snapshot = std::make_shared<EmitterSnapshot>();
+			snapshot->dt = std::min(accumulatedTimeDelta, MAX_TIME_STEP);
+			accumulatedTimeDelta = 0.0;
+
+			auto& state = *pipeline;
+			const size_t slots = state.slots.size();
+			snapshot->spawns.assign(slots, 0);
+			if (rerollSpawnDelta || state.nextSpawnDelta == 0.0) {
+				state.nextSpawnDelta = randomNumber(spawnProperties->minimumSpawnRate, spawnProperties->maximumSpawnRate);
+				rerollSpawnDelta = false;
+			}
+			const size_t alive = state.particleCount();
+			size_t spawning = 0;
+			if (spawnParticles) {
+				state.timeSinceLastParticle += snapshot->dt;
+				const size_t maximum = spawnProperties->maximumParticles;
+				const size_t room = alive < maximum ? maximum - alive : 0;
+				const double due = state.nextSpawnDelta <= 0.0 ? 0.0 : state.timeSinceLastParticle / state.nextSpawnDelta;
+				spawning = due >= static_cast<double>(room) ? room : static_cast<size_t>(due);
+				if (spawning > 0) {
+					const size_t first = static_cast<size_t>(randomInteger(0, static_cast<int64_t>(slots) - 1));
+					for (size_t i = 0; i < slots; ++i) {
+						const size_t extra = ((i + slots - first) % slots) < spawning % slots ? 1 : 0;
+						snapshot->spawns[i] = std::min(spawning / slots + extra, MAX_SPAWNS_PER_SLOT_PER_FRAME);
+					}
+					state.timeSinceLastParticle = 0.0;
+					state.nextSpawnDelta = randomNumber(spawnProperties->minimumSpawnRate, spawnProperties->maximumSpawnRate);
+				}
+			}
+
+			if (alive == 0 && spawning == 0) {
+				if (!points->empty() || !vertexIndices->empty()) {
+					points->clear();
+					vertexIndices->clear();
+					dirtyVertexBuffer = true;
+					dirtyIndexBuffer = true;
+				}
+				return;
+			}
+
+			if (relativeNodePosition->expired() && relativeParentCount >= 0) {
+				makeRelativeToParent(relativeParentCount);
+			}
+			if (auto lockedRelativeNodePosition = relativeNodePosition->lock()) {
+				snapshot->particleOffset = owner()->localFromWorld(lockedRelativeNodePosition->worldPosition());
+			}
+
+			snapshot->minimumPosition = spawnProperties->minimumPosition;
+			snapshot->maximumPosition = spawnProperties->maximumPosition;
+			snapshot->minimumDirection = spawnProperties->minimumDirection;
+			snapshot->maximumDirection = spawnProperties->maximumDirection;
+			snapshot->minimumRotation = spawnProperties->minimumRotation;
+			snapshot->maximumRotation = spawnProperties->maximumRotation;
+			snapshot->minimum = spawnProperties->minimum;
+			snapshot->maximum = spawnProperties->maximum;
+			snapshot->textureCount = ourTextures->size();
+			auto foundTexture = ourTextures->find(0);
+			if (foundTexture != ourTextures->end() && foundTexture->second) {
+				const auto& percent = foundTexture->second->rawPercent();
+				snapshot->textureCorners = {
+					TexturePoint(static_cast<float>(percent.minPoint.x), static_cast<float>(percent.minPoint.y)),
+					TexturePoint(static_cast<float>(percent.minPoint.x), static_cast<float>(percent.maxPoint.y)),
+					TexturePoint(static_cast<float>(percent.maxPoint.x), static_cast<float>(percent.maxPoint.y)),
+					TexturePoint(static_cast<float>(percent.maxPoint.x), static_cast<float>(percent.minPoint.y))
+				};
+			} else {
+				snapshot->textureCorners = { TexturePoint(0.0f, 0.0f), TexturePoint(0.0f, 1.0f), TexturePoint(1.0f, 1.0f), TexturePoint(1.0f, 0.0f) };
+			}
+			snapshot->probe = ourPipelineProbe;
+
+			state.failed = false;
+			state.finished = false;
+			pipelineRunning = true;
+			std::vector<jai::thread_pool::task_type> stages;
+			stages.reserve(slots);
+			for (size_t slot = 0; slot < slots; ++slot) {
+				stages.emplace_back([pipeline = pipeline, snapshot, slot]() {
+					runReportingFailure(*pipeline, [&]() { pipeline->simulate(*snapshot, slot); });
+				});
+			}
+			pool.submit_batch(std::move(stages), [pipeline = pipeline, pool = &pool]() {
+				copySlotsIntoOnePointList(pipeline, *pool);
+			});
 		}
 
 		Emitter::Emitter(const std::weak_ptr<Node> &a_owner, jai::thread_pool &a_pool) :
 			jai::property_owner<Emitter, Drawable>(a_owner),
 			pool(a_pool),
-			emitterThreads(a_pool.worker_count()),
-			threadData(emitterThreads),
-			updateInProgress(false){
+			pipeline(std::make_shared<EmitterPipeline>(a_pool.worker_count())) {
 
 			points->resize(4);
 			clearTexturePoints(*points);
@@ -403,7 +452,7 @@ namespace MV {
 		std::shared_ptr<Component> Emitter::cloneHelper(const std::shared_ptr<Component> &a_clone) {
 			Drawable::cloneHelper(a_clone);
 			auto emitterClone = std::static_pointer_cast<Emitter>(a_clone);
-			emitterClone->emitterThreads = emitterThreads;
+			emitterClone->simulatesWhileHeadless = simulatesWhileHeadless;
 			return a_clone;
 		}
 
@@ -437,7 +486,6 @@ namespace MV {
 		void Emitter::defaultDrawImplementation() {
 			auto ourOwner = owner();
 			auto& ourRenderer = ourOwner->renderer();
-			std::lock_guard<std::recursive_mutex> guard(lock); //important!
 			if (vertexIndices->empty()) { return; }
 			require<ResourceException>(shaderProgram, "No shader program for Drawable!");
 

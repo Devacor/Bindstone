@@ -64,6 +64,27 @@ public:
             check_eq(eng->execute("d.nb").as<int>(), 7);  // new inherited field added
         });
 
+        // A field a reload adds starts on each live object as its initializer makes it there, with 'this' bound, as construction does
+        test("a_reloaded_initializer_that_calls_a_method_runs_on_each_live_object", [&]() {
+            for (int variant = 0; variant < 2; ++variant) {
+                auto eng = make_engine();
+                if (variant == 1) {
+                    eng->type_proofs(false);
+                    eng->ir_passes(false);
+                }
+                eng->execute(R"(
+                    class W { int a = 1; int twice() { return a * 2; } }
+                    class V : W { int v = 0; }
+                    W w; w.a = 5;
+                    V v; v.a = 7;
+                )");
+                eng->execute("class W { int a = 1; int b = twice(); int twice() { return a * 2; } }");
+                check_eq((int64_t)10, eng->execute("w.b").as_int(), "the live W");
+                check_eq((int64_t)14, eng->execute("v.b").as_int(), "the live V");
+                check_eq((int64_t)2, eng->execute("W fresh; fresh.b").as_int(), "a new W");
+            }
+        });
+
         // RETYPE MIGRATION RULE: changing a field's declared type on reload
         // CONVERTS the live value wherever the assignment conversion table allows
         // (int -> string via to_string, float -> int truncation, int -> float widening);

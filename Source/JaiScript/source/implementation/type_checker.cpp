@@ -3470,9 +3470,45 @@ private:
         }
     }
 
+    // A constructor's initializer list against the class's bases (C++ [class.base.init]): each name a base, named once; an unnamed
+    // base default-constructs (the first one's implicit `: super()`)
+    void check_base_initializers(const function_decl* fn) {
+        const sclass* c = find_sclass(class_ctx_name_);
+        if (!c || !c->decl) { return; }
+        const auto& bases = c->decl->base_classes;
+        std::vector<int> named(bases.size(), 0);
+        bool delegates = false;
+        for (const auto& init : fn->initializers) {
+            if (init.target == "this") { delegates = true; continue; }
+            size_t index = init.target == "super" && !bases.empty() ? 0 : SIZE_MAX;
+            for (size_t i = 0; index == SIZE_MAX && i < bases.size(); ++i) {
+                if (detail::initializer_names(init.target, bases[i])) { index = i; }
+            }
+            if (index == SIZE_MAX) {
+                if (init.target != "super") { diag(diag_level::error, fn->location, format_error_message(detail::k_not_a_base, class_ctx_name_, init.target)); }
+                continue;
+            }
+            if (++named[index] == 2) { diag(diag_level::error, fn->location, format_error_message(detail::k_base_named_twice, class_ctx_name_, bases[index])); }
+        }
+        if (delegates || bases.empty()) { return; }
+        if (!named[0]) { report_base_without_default(class_ctx_name_, fn->location); }
+        for (size_t i = 1; i < bases.size(); ++i) {
+            if (!named[i] && !base_without_default(bases[i]).empty()) {
+                diag(diag_level::error, fn->location, format_error_message(detail::k_base_needs_naming, class_ctx_name_, bases[i]));
+            }
+        }
+    }
+
     void check_ctor_call(std::string_view cls_name, const sclass& c, const std::vector<ctype>& args,
                          const source_location& loc) {
-        if (c.ctors.empty() && args.empty()) { report_base_without_default(cls_name, loc); }
+        if (c.ctors.empty() && args.empty()) {
+            report_base_without_default(cls_name, loc);
+            for (size_t i = 1; c.decl && i < c.decl->base_classes.size(); ++i) {
+                if (!base_without_default(c.decl->base_classes[i]).empty()) {
+                    diag(diag_level::error, loc, format_error_message(detail::k_base_needs_naming, cls_name, c.decl->base_classes[i]));
+                }
+            }
+        }
         if (c.ctors.empty()) {
             // implicit default + implicit copy, else aggregate initialization (detail/aggregate_init.hpp)
             bool copy_ok = args.size() == 1 &&
@@ -5144,8 +5180,7 @@ private:
             for (const auto& arg : init.arguments) { infer(arg.get()); }
             if (is_ctor && init.target == "super" && init.arguments.empty()) { report_base_without_default(class_ctx_name_, fn->location); }
         }
-        // a constructor naming no initializer default-constructs its base (C++ implicit `: super()`)
-        if (is_ctor && fn->initializers.empty()) { report_base_without_default(class_ctx_name_, fn->location); }
+        if (is_ctor) { check_base_initializers(fn); }
         fn_stack_.back().in_ctor_initializers = false;
         if (fn->body) {
             mode_guard body(mode_stack_, leading_mode(fn->body->declarations), /*scoped=*/true);
@@ -5234,6 +5269,39 @@ private:
 			    engine_knows_name(std::string(base))) { continue; }
 			diag(diag_level::error, cd->location, "Base class '" + std::string(base) + "' not found");
 			return;
+		}
+		report_diamond(cd);
+	}
+
+	// The bases a class names, from this program's declaration or the engine's class
+	std::vector<std::string> bases_of(std::string_view name) {
+		std::vector<std::string> result;
+		if (const sclass* sc = find_sclass(name); sc && sc->decl) {
+			for (std::string_view base : sc->decl->base_classes) { result.emplace_back(base); }
+		} else if (auto def = eng_.get_class_registry().find_script_class(std::string(name))) {
+			for (const auto& parent : def->get_parent_classes()) { if (parent) { result.push_back(parent->get_name()); } }
+		}
+		return result;
+	}
+
+	void report_diamond(const class_decl* cd) {
+		if (cd->base_classes.size() < 2) { return; }
+		std::unordered_map<std::string, std::string> reached_through;
+		for (std::string_view base_view : cd->base_classes) {
+			const std::string base(base_view);
+			std::unordered_set<std::string> seen;
+			std::vector<std::string> pending{base};
+			while (!pending.empty()) {
+				std::string current = std::move(pending.back());
+				pending.pop_back();
+				if (!seen.insert(current).second) { continue; }
+				const auto [it, fresh] = reached_through.emplace(current, base);
+				if (!fresh && it->second != base) {
+					diag(diag_level::error, cd->location, detail::diamond_inheritance_text(cd->name, current, it->second, base));
+					return;
+				}
+				for (auto& parent : bases_of(current)) { pending.push_back(std::move(parent)); }
+			}
 		}
 	}
 

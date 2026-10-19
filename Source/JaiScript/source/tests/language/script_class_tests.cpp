@@ -612,8 +612,7 @@ public:
 
                 class C : A, B {
                     int z = 0;
-                    C(int a, int b, int c) : super(a) {
-                        this.y = b;
+                    C(int a, int b, int c) : super(a), B(b) {
                         this.z = c;
                     }
                 }

@@ -12646,7 +12646,13 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
 checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     return detail::declare_script_class(decl, detail::class_declaration_host{
         engine_, string_symbolizer_, environment_, class_definition_type_id_, class_lookup_callback_, current_unit(),
-        [this](const expression_ptr& e) -> checked_result<script_value> {
+        [this](const expression_ptr& e, const std::shared_ptr<environment>& env) -> checked_result<script_value> {
+            struct env_restore {
+                interpreter& self;
+                std::shared_ptr<environment> previous;
+                ~env_restore() { self.environment_ = std::move(previous); }
+            } restore{*this, environment_};
+            if (env) { environment_ = env; }
             auto evaluated = dispatch_expr(e.get());
             if (!evaluated) {
                 return evaluated.error_value();

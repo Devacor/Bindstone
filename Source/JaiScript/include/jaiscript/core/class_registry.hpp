@@ -30,7 +30,8 @@ namespace detail {
         uint64_t class_definition_type_id;
         const std::function<std::shared_ptr<class_definition>(const std::string&)>& class_lookup;
         unit_stamp unit;
-        std::function<checked_result<script_value>(const expression_ptr&)> eval;   // the backend's evaluation of an initializer
+        // the backend's evaluation of an initializer, in `env` when it is given (null: where the declaration runs)
+        std::function<checked_result<script_value>(const expression_ptr&, const std::shared_ptr<environment>& env)> eval;
         std::function<void()> discard_unwinding;   // a migrate hook's error belongs to the migration, not the declaration
     };
 

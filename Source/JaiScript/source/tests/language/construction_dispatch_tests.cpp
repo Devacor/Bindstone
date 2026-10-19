@@ -271,27 +271,14 @@ public:
         });
 
         test("a_second_base_initializes_and_destroys_with_its_own_overrides", [this]() {
-            for (bool vm_passes : {true, false}) {
-                auto eng = make_engine();
-                jai::stdlib::register_all(eng);
-                eng->static_checking(check_mode::off);   // the checker's override rule sees a second base, the declaration's does not
-                eng->type_proofs(vm_passes);
-                eng->ir_passes(vm_passes);
-                std::string got;
-                try {
-                    got = eng->execute(R"(
-                        string LOG = "";
-                        class A { int a = 1; }
-                        class C { int c = 2; string s = describe(); ~C() { LOG = LOG + describe() + to_string(c) + s; } string describe() { return "c"; } }
-                        class D : A, C { int d = 3; string describe() { return "d"; } }
-                        function f() -> void { D o; LOG = LOG + o.describe() + to_string(o.a) + to_string(o.c) + to_string(o.d) + o.s + "|"; }
-                        f(); LOG;
-                    )").as_string();
-                } catch (const std::exception& e) {
-                    got = std::string("threw: ") + e.what();
-                }
-                check_eq(std::string("d123c|c2c"), got, "C's layout is not a prefix of D's");
-            }
+            expect_log(R"(
+                string LOG = "";
+                class A { int a = 1; }
+                class C { int c = 2; string s = describe(); ~C() { LOG = LOG + describe() + to_string(c) + s; } string describe() { return "c"; } }
+                class D : A, C { int d = 3; string describe() override { return "d"; } }
+                function f() -> void { D o; LOG = LOG + o.describe() + to_string(o.a) + to_string(o.c) + to_string(o.d) + o.s + "|"; }
+                f(); LOG;
+            )", "d123c|c2c", "C's layout is not a prefix of D's");
         });
     }
 };

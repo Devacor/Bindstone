@@ -5464,8 +5464,21 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
                 }
                 JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after this arguments"));
                 func->initializers.emplace_back("this", std::move(args));
+            } else if (check(token_type::identifier)) {
+                // Parse Base(args): the base it names constructs with them (C++ [class.base.init])
+                std::string base_name(advance().lexeme);
+                JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after base class name"));
+                std::vector<expression_ptr> args;
+                if (!check(token_type::right_paren)) {
+                    do {
+                        JAISCRIPT_TRY_ASSIGN(auto arg, expression());
+                        args.push_back(bound_conditional(std::move(arg)));
+                    } while (match(token_type::comma));
+                }
+                JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after base constructor arguments"));
+                func->initializers.emplace_back(std::move(base_name), std::move(args));
             } else {
-                report_error("Expected 'super' or 'this' in constructor initializer list", peek());
+                report_error("Expected 'super', 'this' or a base class name in constructor initializer list", peek());
     return make_error_code(parse_error_code::unexpected_token);
             }
         } while (match(token_type::comma));

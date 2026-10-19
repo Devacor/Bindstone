@@ -819,38 +819,48 @@ inline const class_definition* class_definition::parent_ptr() const {
     return !parent_classes_.empty() ? parent_classes_[0].get() : cpp_base_class_.get();
 }
 
-inline bool class_definition::has_diamond_inheritance() const {
-    if (parent_classes_.size() <= 1) {
-        return false;
+inline const std::vector<const class_definition*>& class_definition::construction_order() const {
+    if (construction_order_epoch_ != method_epoch_) {
+        construction_order_.clear();
+        std::function<void(const class_definition&)> walk = [&](const class_definition& cd) {
+            for (const auto& parent : cd.parent_classes_) {
+                if (parent) { walk(*parent); }
+            }
+            construction_order_.push_back(&cd);
+        };
+        walk(*this);
+        construction_order_epoch_ = method_epoch_;
     }
+    return construction_order_;
+}
 
-    std::unordered_set<const class_definition*> visited;
-    std::vector<const class_definition*> to_visit;
+inline uint16_t class_definition::constructed_through(const class_definition* level) const {
+    const auto& order = construction_order();
+    const auto it = std::find(order.begin(), order.end(), level);
+    return static_cast<uint16_t>(it == order.end() ? order.size() : (it - order.begin()) + 1);
+}
 
-    for (const auto& parent : parent_classes_) {
-        if (parent) {
-            to_visit.push_back(parent.get());
-            visited.insert(parent.get());
-        }
-    }
-
-    size_t index = 0;
-    while (index < to_visit.size()) {
-        const class_definition* current = to_visit[index++];
-
-        for (const auto& parent : current->parent_classes_) {
-            if (parent) {
-                if (visited.count(parent.get()) > 0) {
-                    return true;
-                }
-                visited.insert(parent.get());
-                to_visit.push_back(parent.get());
+inline auto class_definition::find_diamond(const std::vector<std::shared_ptr<class_definition>>& parents) -> diamond {
+    std::unordered_map<const class_definition*, const class_definition*> reached_through;
+    for (const auto& base : parents) {
+        if (!base) { continue; }
+        std::unordered_set<const class_definition*> seen;
+        std::vector<const class_definition*> pending{base.get()};
+        while (!pending.empty()) {
+            const class_definition* current = pending.back();
+            pending.pop_back();
+            if (!seen.insert(current).second) { continue; }
+            const auto [it, fresh] = reached_through.emplace(current, base.get());
+            if (!fresh && it->second != base.get()) { return {current, it->second, base.get()}; }
+            for (const auto& parent : current->parent_classes_) {
+                if (parent) { pending.push_back(parent.get()); }
             }
         }
     }
-
-    return false;
+    return {};
 }
+
+inline bool class_definition::has_diamond_inheritance() const { return find_diamond(parent_classes_).shared != nullptr; }
 
 inline void class_definition::add_derived_class(std::weak_ptr<class_definition> derived) {
     derived_classes_.push_back(derived);
@@ -1140,15 +1150,15 @@ inline auto class_definition::find_method(std::string_view name) -> method_info 
     if (has_method(name_id)) {
         return { shared_from_this(), get_method_metadata_mutable(name) };
     }
+    return find_inherited_method(name_id, name);
+}
 
-    auto parent = get_parent();
-    while (parent) {
-        if (parent->has_method(name_id)) {
-            return { parent, parent->get_method_metadata_mutable(name) };
-        }
-        parent = parent->get_parent();
+inline auto class_definition::find_inherited_method(uint64_t name_id, std::string_view name) -> method_info {
+    for (const auto& parent : parent_classes_) {
+        if (!parent) { continue; }
+        if (parent->has_method(name_id)) { return { parent, parent->get_method_metadata_mutable(name) }; }
+        if (auto deeper = parent->find_inherited_method(name_id, name); deeper.owner_class) { return deeper; }
     }
-
     return { nullptr, nullptr };
 }
 

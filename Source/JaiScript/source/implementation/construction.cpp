@@ -112,8 +112,44 @@ namespace {
 		std::vector<script_value> args;
 	};
 
+	// The initializer of `initializers` that constructs base `index` of `level`: super(...) or the base's name for the first, the name
+	// for any other; null when none names it
+	const constructor_initializer* base_initializer(const std::vector<constructor_initializer>& initializers, const class_definition& level, size_t index) {
+		const auto& parents = level.get_parent_classes();
+		const class_definition* base = index < parents.size() ? parents[index].get() : (index == 0 ? level.parent_ptr() : nullptr);
+		for (const auto& init : initializers) {
+			if ((index == 0 && init.target == "super") || (base && initializer_names(init.target, base->get_name()))) { return &init; }   // a base-less super() raises where it runs
+		}
+		return nullptr;
+	}
+
+	// The first base runs code when it is default-constructed: a C++ base, or a script base with a constructor or such a base of its own
+	bool first_base_needs_construction(const script_class_definition& level) {
+		const class_definition* parent = level.parent_ptr();
+		if (!parent) { return false; }
+		if (!parent->is_script_class()) { return true; }
+		const auto& script_parent = static_cast<const script_class_definition&>(*parent);
+		return !script_parent.get_constructor_asts().empty() || script_parent.base_needs_construction();
+	}
+
+	checked_result<void> construct_further_bases(construction_host& host, const std::shared_ptr<script_class_definition>& cls,
+	                                             const script_class_definition& level, const function_decl* ctor, const std::shared_ptr<environment>& level_env,
+	                                             const std::shared_ptr<environment>& definition_env, class_instance& instance, const script_value& this_value,
+	                                             std::optional<call_depth_guard>& initializer_depth);
+
+	// A base without a constructor of its own whose bases run none: its field initializers, its bases' first (each in declaration order)
+	checked_result<void> initialize_plain_base(construction_host& host, const std::shared_ptr<script_class_definition>& base,
+	                                           const std::shared_ptr<environment>& definition_env, class_instance& instance, const script_value& this_value) {
+		if (base->chain_initializers_all_literal()) {
+			stamp_literal_field_initializers(instance, *base, false, host.eng);
+			return {};
+		}
+		auto env = construction_member_environment(host, definition_env, this_value, base.get());
+		return host.evaluate_field_initializers(instance.shared_from_this(), base, env, false, nullptr);
+	}
+
 	// A script base with a constructor: walk the super() chain up to a C++ base (constructed on the way), then run each level's
-	// field initializers and constructor body root to leaf
+	// further bases, field initializers and constructor body root to leaf
 	checked_result<void> construct_script_bases(construction_host& host, const std::shared_ptr<script_class_definition>& cls,
 	                                            const std::shared_ptr<environment>& definition_env, class_instance& instance,
 	                                            const script_value& this_value, std::vector<constructor_chain_entry>& chain,
@@ -121,14 +157,19 @@ namespace {
 		const bool fields_run_code = !cls->chain_initializers_all_literal();
 		for (size_t level = 0; level < chain.size(); ++level) {
 			auto& entry = chain[level];
-			for (const auto& init : entry.script_class->effective_initializers(*entry.ctor)) {
-				if (init.target != "super") { continue; }
+			const auto& initializers = entry.script_class->effective_initializers(*entry.ctor);
+			if (std::any_of(initializers.begin(), initializers.end(), [](const constructor_initializer& init) { return init.target == "this"; })) { continue; }
+			const constructor_initializer* init = base_initializer(initializers, *entry.script_class, 0);
+			if (!init && !first_base_needs_construction(*entry.script_class)) { continue; }
+			{
 				auto ancestor = entry.script_class->get_parent();
 				if (ancestor) {
-					auto level_env = construction_level_environment(host, definition_env, this_value, entry.script_class.get(), *entry.ctor, entry.args);
 					std::vector<script_value> ancestor_args;
-					auto evaluated = evaluate_initializer_arguments(host, init, level_env, fields_run_code, ancestor.get(), ancestor_args);
-					if (!evaluated || host.unwinding) { return evaluated; }
+					if (init) {
+						auto level_env = construction_level_environment(host, definition_env, this_value, entry.script_class.get(), *entry.ctor, entry.args);
+						auto evaluated = evaluate_initializer_arguments(host, *init, level_env, fields_run_code, ancestor.get(), ancestor_args);
+						if (!evaluated || host.unwinding) { return evaluated; }
+					}
 					if (auto ancestor_script = std::dynamic_pointer_cast<script_class_definition>(ancestor)) {
 						auto ancestor_ctor = select_base_constructor(*ancestor_script, ancestor_args, host.eng);
 						if (!ancestor_ctor) { return ancestor_ctor.error_value(); }
@@ -144,13 +185,15 @@ namespace {
 						if (!constructed || host.unwinding) { return constructed; }
 					}
 				}
-				break;
 			}
 		}
 		for (size_t below = chain.size(); below > 0; --below) {
 			auto* it = &chain[below - 1];
-			dispatch_level_scope level_dispatch(instance, it->script_class.get(), class_instance::cdtor_phase::construction);
 			auto level_env = construction_level_environment(host, definition_env, this_value, it->script_class.get(), *it->ctor, it->args);
+			auto further = construct_further_bases(host, cls, *it->script_class, it->ctor.get(), level_env, definition_env, instance, this_value, initializer_depth);
+			if (!further || host.unwinding) { return further; }
+			it = &chain[below - 1];
+			dispatch_level_scope level_dispatch(instance, it->script_class.get(), class_instance::cdtor_phase::construction);
 			for (const auto& [field_id, initializer_ast] : it->script_class->get_field_initializer_asts()) {
 				if (!initializer_ast) { continue; }
 				auto evaluated = host.evaluate(initializer_ast, level_env);
@@ -162,8 +205,44 @@ namespace {
 			auto body = host.run_constructor_body(it->ctor, definition_env, this_value, it->script_class.get(), it->args);
 			if (!body) { return body.error_value(); }
 			if (host.unwinding) { return {}; }
-			instance.constructed_below(static_cast<uint16_t>(below));
+			instance.constructed_levels(cls->constructed_through(it->script_class.get()));
 			initializer_depth.emplace(host.call_depth);
+		}
+		return {};
+	}
+
+	// The bases after the first, in declaration order, once the first is constructed and before the level's own members (C++): each
+	// with the arguments the level's initializer list names it with, else default-constructed
+	checked_result<void> construct_further_bases(construction_host& host, const std::shared_ptr<script_class_definition>& cls,
+	                                             const script_class_definition& level, const function_decl* ctor, const std::shared_ptr<environment>& level_env,
+	                                             const std::shared_ptr<environment>& definition_env, class_instance& instance, const script_value& this_value,
+	                                             std::optional<call_depth_guard>& initializer_depth) {
+		const auto& parents = level.get_parent_classes();
+		for (size_t i = 1; i < parents.size(); ++i) {
+			auto base = std::dynamic_pointer_cast<script_class_definition>(parents[i]);
+			if (!base) { continue; }
+			const constructor_initializer* init = ctor ? base_initializer(ctor->initializers, level, i) : nullptr;
+			std::vector<script_value> base_args;
+			if (init) {
+				auto evaluated = evaluate_initializer_arguments(host, *init, level_env, !cls->chain_initializers_all_literal(), base.get(), base_args);
+				if (!evaluated || host.unwinding) { return evaluated; }
+			}
+			auto base_ctor = select_base_constructor(*base, base_args, host.eng);
+			if (!base_ctor) { return base_ctor.error_value(); }
+			if (base_ctor.value()) {
+				std::vector<constructor_chain_entry> chain;
+				chain.push_back({base, std::move(base_ctor.value()), std::move(base_args)});
+				auto constructed = construct_script_bases(host, cls, definition_env, instance, this_value, chain, initializer_depth);
+				if (!constructed || host.unwinding) { return constructed; }
+			} else if (init && (!base->get_constructor_asts().empty() || !base_args.empty())) {
+				return overload_miss(make_error_code(runtime_error_code::no_constructor_found), base->get_type_id(), base_args.data(), base_args.size(), host.eng, true);
+			} else if (!base->get_constructor_asts().empty()) {
+				return checked_result<void>(make_error_code(runtime_error_code::no_constructor_found), k_base_needs_naming, level.get_type_id(), base->get_type_id());
+			} else {
+				auto initialized = initialize_plain_base(host, base, definition_env, instance, this_value);
+				if (!initialized || host.unwinding) { return initialized; }
+				instance.constructed_levels(cls->constructed_through(base.get()));
+			}
 		}
 		return {};
 	}
@@ -253,8 +332,16 @@ checked_result<script_value> initialize_members(construction_host& host, const s
 	bool handled_parent_init = false;
 	// C++ delegation: the target constructor constructs the members, so the delegating one re-runs no field initializer
 	bool delegated_to_this = false;
+	const constructor_initializer* first_base = base_initializer(initializers, *cls, 0);
+	const bool delegates = std::any_of(initializers.begin(), initializers.end(), [](const constructor_initializer& init) { return init.target == "this"; });
+	if (!first_base && !delegates && !initializers.empty() && first_base_needs_construction(*cls)) {
+		const constructor_initializer implicit_super{"super", {}};
+		auto constructed = construct_base(host, cls, implicit_super, definition_env, init_env, *instance, this_value, initializer_depth, handled_parent_init);
+		if (!constructed) { return constructed.error_value(); }
+		if (host.unwinding) { return this_value; }
+	}
 	for (const auto& initializer : initializers) {
-		if (initializer.target == "super") {
+		if (&initializer == first_base) {
 			auto constructed = construct_base(host, cls, initializer, definition_env, init_env, *instance, this_value, initializer_depth, handled_parent_init);
 			if (!constructed) { return constructed.error_value(); }
 			if (host.unwinding) { return this_value; }
@@ -281,13 +368,25 @@ checked_result<script_value> initialize_members(construction_host& host, const s
 			auto target_body = host.run_constructor_body(target, definition_env, this_value, cls.get(), init_args);
 			if (!target_body) { return target_body.error_value(); }
 			if (host.unwinding) { return this_value; }
-			instance->constructed_below(0);   // C++: the object is constructed once its target constructor finishes
+			instance->constructed_levels(static_cast<uint16_t>(cls->construction_order().size()));   // C++: the object is constructed once its target constructor finishes
 			initializer_depth.emplace(host.call_depth);
 		}
 	}
 
 	if (!delegated_to_this) {
-		if (cls->parent_ptr()) { instance->constructed_below(1); }
+		if (cls->get_parent_classes().size() > 1) {
+			if (!handled_parent_init) {
+				if (auto first = std::dynamic_pointer_cast<script_class_definition>(cls->get_parent_classes()[0])) {
+					auto initialized = initialize_plain_base(host, first, definition_env, *instance, this_value);
+					if (!initialized || host.unwinding) { return initialized.error_value(); }
+				}
+				handled_parent_init = true;
+			}
+			auto further = construct_further_bases(host, cls, *cls, ctor.get(), init_env, definition_env, *instance, this_value, initializer_depth);
+			if (!further) { return further.error_value(); }
+			if (host.unwinding) { return this_value; }
+		}
+		if (cls->parent_ptr()) { instance->constructed_levels(static_cast<uint16_t>(cls->construction_order().size() - 1)); }
 		if (!all_literal) {
 			auto initialized = host.evaluate_field_initializers(instance, cls, init_env, handled_parent_init, nullptr);
 			if (!initialized) { return initialized.error_value(); }

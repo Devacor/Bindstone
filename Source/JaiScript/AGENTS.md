@@ -105,6 +105,15 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
   A stored callable is one erased type over a static function (`detail::host_method_call`, registry
   `conversion_entry`), never a fresh lambda inside a `std::function`; a bound type's `std::vector`/`std::map` shapes
   register eagerly and compile only where a caller names them. Measure a change by object size per bound item.
+- Hosts never parse the runtime. `core/class_definition.hpp` declares the class runtime; `detail/class_runtime.hpp`
+  defines its member bodies and slot/assignment kernels inline for the library's own translation units (and tests), and
+  `jaiscript.hpp` is the core, the binders and the archives, never the parser or interpreter. A member a host-visible
+  template calls stays defined in `class_definition.hpp` (or out of line in the library); every other runtime member is
+  declared `inline` there and defined in `class_runtime.hpp`, so GCC and Clang report a host-side use as an inline
+  function used but never defined. Check a header change by compiling a host file (an example) with GCC.
+- No lambdas in a constructor template's member initializers or a class template's default member initializers: MSVC
+  numbers those per translation unit, so two units can give one lambda name different bodies and Release calls the wrong
+  one. Use named static functions (`archive_reader_thunks` / `reader_operations_of`).
 - `signals/signal_decl.hpp` does not include `signal_impl.hpp`; headers that only declare signal members include
   `signal_decl.hpp`, and every `.cpp` that emits includes `signal.hpp` (or `signal_impl.hpp`): an emit instantiates the
   script-receiver path, so `signal_decl.hpp` alone leaves it unresolved at link time.

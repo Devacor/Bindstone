@@ -1,5 +1,5 @@
 #include "Game/gameEditor.h"
-#include "MV/Utility/threadPool.hpp"
+#include <jaiscript/detail/thread_pool.hpp>
 
 #include "MV/Serialization/serialize.h"
 
@@ -36,7 +36,7 @@ int main(int, char *[]) {
 		std::cout << "LobbyServer listening: users on 22325, game servers on 22326\n";
 		bool done = false;
 		while (!done) {
-			managers.pool.run();
+			managers.pool.run_posted();
 			auto tick = managers.timer.delta("tick");
 			server->update(tick);
 			std::this_thread::sleep_for(std::chrono::milliseconds(1)); //don't busy-spin a core

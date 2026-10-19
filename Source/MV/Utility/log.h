@@ -10,6 +10,8 @@
 #include <any>
 #include "require.hpp"
 
+namespace jai { class thread_pool; }
+
 #ifdef __ANDROID__
 #include <android/log.h>
 #endif
@@ -268,5 +270,8 @@ namespace MV {
 	inline void error(LogData &&a_data, Args&&... a_args) {
 		Logger::instance()->error(std::move(a_data), std::forward<Args>(a_args)...);
 	}
+
+	//MV's pools park idle workers at once (they serve frames, not dense fork-join regions) and log what their tasks throw.
+	jai::thread_pool& initializeThreadPool(jai::thread_pool& a_pool);
 }
 #endif

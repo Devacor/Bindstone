@@ -32,7 +32,7 @@ private:
 		done = false;
 
 		while (!done) {
-			managers.pool.run();
+			managers.pool.run_posted();
 			handleInput();
 			limbo->renderer().clearScreen();
 			auto tick = managers.timer.delta("tick");

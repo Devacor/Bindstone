@@ -69,7 +69,7 @@ public:
 		return manager;
 	}
 
-	MV::ThreadPool& pool() {
+	jai::thread_pool& pool() {
 		return threadPool;
 	}
 
@@ -199,7 +199,7 @@ private:
 
 	MV::TapDevice nullMouse;
 
-	MV::ThreadPool threadPool;
+	jai::thread_pool threadPool;
 
 	Managers &manager;
 	bool done;

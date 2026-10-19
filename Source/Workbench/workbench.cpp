@@ -342,7 +342,7 @@ namespace Workbench {
 			}
 		}
 
-		managers.pool.run();
+		managers.pool.run_posted();
 		return !done;
 	}
 

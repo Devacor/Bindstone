@@ -3,7 +3,7 @@
 #define BINDSTONE_SERVER
 #endif
 #include "Game/gameEditor.h"
-#include "MV/Utility/threadPool.hpp"
+#include <jaiscript/detail/thread_pool.hpp>
 
 #include "MV/ArtificialIntelligence/pathfinding.h"
 #include "MV/Serialization/serialize.h"
@@ -282,7 +282,7 @@ int main(int, char *[]) {
 		return true;
 	}).recent()->localInterval(1.0);
 	while (!done) {
-		managers.pool.run();
+		managers.pool.run_posted();
 		auto tick = managers.timer.delta("tick");
 		server->update(tick);
 		statDisplay.update(tick);

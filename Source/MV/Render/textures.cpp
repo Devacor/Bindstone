@@ -8,7 +8,7 @@
 #include <cstring>
 #include <SDL_image.h>
 #include "MV/Utility/generalUtility.h"
-#include "MV/Utility/threadPool.hpp"
+#include <jaiscript/detail/thread_pool.hpp>
 #include "MV/Render/points.h"
 #include "sharedTextures.h"
 
@@ -225,7 +225,7 @@ namespace MV {
 
 		auto surface = std::make_shared<std::shared_ptr<OwnedSurface>>();
 		SharedTextures* self = this;
-		ourLoadThreadPool->task(ThreadPool::Job(
+		ourLoadThreadPool->submit(
 			[params, surface]() {
 				try { *surface = decodeTextureSurface(params); } catch (...) { *surface = nullptr; }
 			},
@@ -244,7 +244,7 @@ namespace MV {
 					if (waiter.onLoaded) { waiter.onLoaded(); }
 				}
 			},
-			ThreadPool::Job::Continue::MAIN_THREAD));
+			jai::thread_pool::then_on::posted);
 	}
 
 	GLuint LoadedTextureData::id() const {

@@ -288,8 +288,10 @@ latches terminal) — a livelocking or allocation-bombing body fails the loop, n
 JaiScript owns the pool: `include/jaiscript/detail/thread_pool.hpp` (shared queue + pinned
 `submit_to`) is the `parallel_for` substrate. Standard C++ only
 (`std::thread`/`std::mutex`/`std::condition_variable`), no OS APIs — JaiScript stays the base
-library. MV's `MV::ThreadPool` (`Source/MV/Utility/threadPool.hpp`) is a separate pool; it does
-not use this header.
+library. A host uses the same class for its own work: `submit(task, then, where)` and
+`submit_batch(tasks, then, where)` continue on a worker or posted, and `post` / `run_posted` is the
+queue the host's own thread drains (MV's pools are instances of it). The parallel regions use only
+`submit_to` / `submit_pinned_batch` and their own pool instance.
 
 ## 8. Kept invariants
 

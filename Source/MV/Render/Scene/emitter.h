@@ -2,7 +2,7 @@
 #define _MV_SCENE_EMITTER_H_
 
 #include "sprite.h"
-#include "MV/Utility/threadPool.hpp"
+#include <jaiscript/detail/thread_pool.hpp>
 #include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
 #include <atomic>
@@ -263,7 +263,7 @@ namespace MV {
 			~Emitter();
 
 		protected:
-			Emitter(const std::weak_ptr<Node> &a_owner, ThreadPool &a_pool);
+			Emitter(const std::weak_ptr<Node> &a_owner, jai::thread_pool &a_pool);
 
 			virtual void updateImplementation(double a_dt) override;
 
@@ -291,7 +291,7 @@ namespace MV {
 			template<typename Archive>
 			static void load_and_construct(Archive& ar, jai::serialization::construct<Emitter>& construct) {
 				auto* services = ar.template get_user_context<MV::Services>();
-				construct(std::shared_ptr<Node>(), *services->template get<MV::ThreadPool>());
+				construct(std::shared_ptr<Node>(), *services->template get<jai::thread_pool>());
 				construct->load(ar, 0);
 				construct->initialize();
 			}
@@ -376,7 +376,7 @@ namespace MV {
             std::atomic<double> timeSinceLastParticle = {0.0};
 			double nextSpawnDelta = 0.0;
 
-			ThreadPool& pool;
+			jai::thread_pool& pool;
 
 			std::atomic<bool> updateInProgress;
 

@@ -154,7 +154,7 @@ void Game::initializeWindow(){
 }
 
 bool Game::update(double dt) {
-	gameData.managers().pool.run();
+	gameData.managers().pool.run_posted();
 	task.update(dt);
 	if (ourLobbyClient) {
 		ourLobbyClient->update();

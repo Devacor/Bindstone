@@ -3,6 +3,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include "MV/Network/network.h"
+#include "MV/Network/tlsAsio.h"
 #include "tls_test_pki.hpp"
 
 #include <windows.h>
@@ -81,7 +82,7 @@ const TestPki::Issued& networkServerIdentity() {
 }
 
 std::shared_ptr<MV::Server> makeServer(std::shared_ptr<StateRecord> a_record, bool a_echo = false, const MV::MessageLimits& a_limits = {}) {
-	return std::make_shared<MV::Server>(asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), 0), networkPki().serverConfig(networkServerIdentity()), [a_record, a_echo](const std::shared_ptr<MV::Connection>& a_connection) {
+	return std::make_shared<MV::Server>("127.0.0.1", uint16_t{0}, networkPki().serverConfig(networkServerIdentity()), [a_record, a_echo](const std::shared_ptr<MV::Connection>& a_connection) {
 		return std::make_unique<RecordingState>(a_connection, a_record, a_echo);
 	}, a_limits);
 }
@@ -133,7 +134,7 @@ struct RawPeer {
 
 	asio::error_code send(const std::string& a_content) {
 		asio::error_code result;
-		asio::write(socket, MV::NetworkMessage::make(a_content)->wire(), result);
+		asio::write(socket, asio::buffer(MV::NetworkMessage::make(a_content)->wire()), result);
 		return result;
 	}
 

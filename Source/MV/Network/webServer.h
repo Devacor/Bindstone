@@ -12,37 +12,32 @@ class HelloWorldResponder : public MV::WebConnectionStateBase {
 public:
 	using WebConnectionStateBase::WebConnectionStateBase;
 
-	void processRequest(const MV::HttpRequest& a_recieve) override {
-		connection()->send(MV::HttpResponse::make200("<html><body>Hello World!</body></head>"));
+	std::optional<MV::HttpResponse> processRequest(const MV::HttpRequest& a_request) override {
+		return MV::HttpResponse::make200("<html><body>Hello World!</body></html>");
 	}
 };
 
 int main(){
-	auto webServer = std::make_shared<MV::WebServer>(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 80),
+	auto webServer = std::make_shared<MV::WebServer>("0.0.0.0", uint16_t{80},
 		[](const std::shared_ptr<MV::WebConnection>& a_connection) {
 			return std::make_unique<HelloWorldResponder>(a_connection);
 		});
 
-	while (true){} //loop forever to accept infinite connections while the program runs, or write an exit condition if you like.
+	std::this_thread::sleep_for(std::chrono::hours(24)); //serves on its own threads until it is destroyed
 }
 \*******************************************************************************************************************************/
 
-#include <cstdlib>
-#include <deque>
-#include <iostream>
-#include <list>
-#include <mutex>
-#include <memory>
-#include <set>
-#include <utility>
 #include <atomic>
-#include <string>
-#include <optional>
 #include <chrono>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <system_error>
+#include <thread>
+#include <vector>
 #include "MV/Network/url.h"
-#include "MV/Utility/generalUtility.h"
-#include <asio.hpp>
-#include <asio/steady_timer.hpp>
 #include "MV/Utility/log.h"
 #include "MV/Network/download.h"
 
@@ -57,16 +52,25 @@ namespace MV {
 			ourConnection(a_connection) {
 		}
 
-		//Get a shared_ptr handle keep the connection alive in long running requests even if disconnected.
-		std::shared_ptr<WebConnection> connection() { return ourConnection.lock(); }
+		virtual ~WebConnectionStateBase() = default;
 
-		//must either call "connection()->send(HttpResponse::make404())" or "connection()->close()" to gracefully exit.
-		//If performing asynchronous work, capture a copy of "connection()" to keep the socket alive.
-		inline virtual void processRequest(const HttpRequest& a_recieve);
+		// Holding the shared_ptr keeps the connection alive through long running work, even if the peer disconnects.
+		std::shared_ptr<WebConnection> connection() const { return ourConnection.lock(); }
+
+		// Returns the response to send now, or nullopt to answer later: then hold connection() and call its send() or
+		// close() when the work is done.
+		virtual std::optional<HttpResponse> processRequest(const HttpRequest& a_request) {
+			return HttpResponse::make404();
+		}
 
 		//override to supply a custom timeout.
 		virtual std::chrono::seconds timeout() const {
 			return std::chrono::seconds{ 10 };
+		}
+
+		// A request whose header or body is larger than this closes the connection unanswered.
+		virtual size_t maxRequestBytes() const {
+			return 8 * 1024 * 1024;
 		}
 
 	protected:
@@ -74,26 +78,17 @@ namespace MV {
 	};
 
 	//Handles a single HTTP Request and response. Closes the connection upon successfully sending, or upon an error or timeout.
+	//Every handler of one connection runs on its strand; send() and close() may be called from any thread.
 	class WebConnection : public std::enable_shared_from_this<WebConnection> {
 	public:
-		WebConnection(WebServer& a_server, const std::shared_ptr<asio::ip::tcp::socket> &a_socket, asio::io_context& a_ioService) :
-			server(a_server),
-			socket(a_socket),
-			ioService(a_ioService),
-			timeout(a_ioService){
-			MV::info("Opened Connection: ", ++ConnectionCount);
-		}
+		struct AsioWebSocket;
+
+		explicit WebConnection(std::unique_ptr<AsioWebSocket> a_asioSocket);
 
 		//can't happen in the constructor due to shared_from_this
-		void initialize(std::function<std::unique_ptr<WebConnectionStateBase>(const std::shared_ptr<WebConnection> &)> a_connectionStateFactory) {
-			ourState = a_connectionStateFactory(shared_from_this());
-			resetTimeout();
-		}
+		void initialize(std::function<std::unique_ptr<WebConnectionStateBase>(const std::shared_ptr<WebConnection> &)> a_connectionStateFactory);
 
-		~WebConnection() {
-			close();
-			MV::info("Closed Connection: ", --ConnectionCount);
-		}
+		~WebConnection();
 
 		void send(const HttpResponse& a_content);
 
@@ -106,81 +101,47 @@ namespace MV {
 		void close();
 
 	private:
-		struct WebActiveRequestState {
-			WebActiveRequestState() :
-				streamOutput(std::ofstream::out | std::ofstream::binary) {
-			}
-			void readHeaderFromBuffer();
-			bool readResponseToStream();
-			char getResponseChar();
+		struct WebActiveRequestState;
 
-			HttpRequest parsedRequest;
-
-			asio::streambuf buffer;
-			std::ostringstream streamOutput;
-		};
-
-		void handleReadContent(std::shared_ptr<WebActiveRequestState> a_message, const asio::error_code& err);
-		void initiateReadingMoreContent(std::shared_ptr<WebActiveRequestState> a_message, size_t minimumTransferAmount);
+		void handleReadContent(std::shared_ptr<WebActiveRequestState> a_message, const std::error_code& err);
 		void continueReadingContent(std::shared_ptr<WebActiveRequestState> a_message);
 
-		std::recursive_mutex lock;
-
-		void handleError(const asio::error_code &a_err, const std::string &a_section);
+		void handleError(const std::error_code &a_err, const std::string &a_section);
 
 		void resetTimeout();
+		void checkTimeout(const std::error_code& a_ec);
+		void closeNow();
 
-		WebServer& server;
-		asio::io_context& ioService;
+		std::unique_ptr<AsioWebSocket> asioSocket;
 
 		std::atomic<bool> completed = false;
 
-		std::shared_ptr<asio::ip::tcp::socket> socket;
-		std::vector<std::shared_ptr<WebActiveRequestState>> inbox;
-
 		std::unique_ptr<WebConnectionStateBase> ourState = nullptr;
 
-		asio::steady_timer timeout;
-
-		void checkTimeout(const asio::error_code& a_ec) {
-			if (!completed && a_ec != asio::error::operation_aborted) {
-				if (timeout.expiry() <= std::chrono::steady_clock::now()) {
-					MV::error("Connection Timed Out!");
-					close();
-				}
-			}
-		}
-
-		inline static int64_t ConnectionCount = 0;
-		static constexpr size_t ChunkSize = 256;
+		inline static std::atomic<int64_t> ConnectionCount = 0;
 	};
 
-
-	inline void WebConnectionStateBase::processRequest(const HttpRequest& a_recieve) {
-		connection()->send(HttpResponse::make404());
-	}
-
 	class WebServer {
-		friend WebConnection;
 	public:
-		WebServer(const asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<WebConnectionStateBase> (const std::shared_ptr<WebConnection> &)> a_connectionStateFactory, int a_totalThreads = 8);
+		// a_address is an IPv4 or IPv6 literal ("0.0.0.0" listens everywhere, "127.0.0.1" on this machine only); port 0 picks a free one.
+		WebServer(const std::string& a_address, uint16_t a_port, std::function<std::unique_ptr<WebConnectionStateBase> (const std::shared_ptr<WebConnection> &)> a_connectionStateFactory, int a_totalThreads = 8);
 		~WebServer();
 
-		uint16_t port() {
-			return acceptor.local_endpoint().port();
+		uint16_t port() const {
+			return ourPort;
 		}
 
 	private:
+		struct AsioWebAcceptor;
+
 		void acceptClients();
 
-		asio::io_context ioService;
- 		asio::ip::tcp::acceptor acceptor;
+		std::unique_ptr<AsioWebAcceptor> asioAcceptor;
+		uint16_t ourPort = 0;
 
 		std::vector<std::unique_ptr<std::thread>> workers;
-		std::unique_ptr<asio::io_context::work> work;
 
 		std::function<std::unique_ptr<WebConnectionStateBase> (const std::shared_ptr<WebConnection> &)> connectionStateFactory;
-		double accumulatedTime = 0.0;
 	};
 };
 

@@ -1,6 +1,6 @@
 // How MV drives jai::thread_pool: MV::initializeThreadPool, a decode on the pool whose upload continues on the main thread
 // (SharedTextures::loadFile), the lobby's one-worker database pool whose continuations its update() drains, and the
-// io_context pools (DownloadPool, the lobby's email pool) whose workers block in run(). Foundry, built into mv_tests.exe.
+// io_context pools (NetworkContext: DownloadPool, the lobby's email context) whose workers block in run(). Foundry, built into mv_tests.exe.
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/thread_pool.hpp>

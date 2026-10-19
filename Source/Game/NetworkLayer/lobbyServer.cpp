@@ -237,22 +237,20 @@ void MatchQueue::print() const {
 
 LobbyServer::LobbyServer(Managers& a_managers) :
 	manager(a_managers),
-	emailPool(1), //need to test values greater than 1 to make sure ssh does not break.
 	dbPool(1), //currently locked to 1 as pqxx requires one per thread. We can expand this later with more connections and a different query interface.
 	rankedQueue(*this, "ranked"),
 	normalQueue(*this, "normal"),
-	ourUserServer(std::make_shared<MV::Server>(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 22325), GameCertificates::lobby(false),
+	ourUserServer(std::make_shared<MV::Server>("0.0.0.0", uint16_t{22325}, GameCertificates::lobby(false),
 		[this](const std::shared_ptr<MV::Connection>& a_connection) {
 			return std::make_unique<LobbyUserConnectionState>(a_connection, *this);
 		})),
-	ourGameServer(std::make_shared<MV::Server>(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 22326), GameCertificates::lobby(true),
+	ourGameServer(std::make_shared<MV::Server>("0.0.0.0", uint16_t{22326}, GameCertificates::lobby(true),
 		[this](const std::shared_ptr<MV::Connection>& a_connection) {
 			return std::make_unique<LobbyGameConnectionState>(a_connection, *this);
 		})) {
 
 	MV::logOpenSslVersion();
 	MV::initializeThreadPool(threadPool);
-	MV::initializeThreadPool(emailPool);
 	MV::initializeThreadPool(dbPool);
 
 	MV::info("Initialize DB");
@@ -260,11 +258,9 @@ LobbyServer::LobbyServer(Managers& a_managers) :
 	auto connectionString = (!databaseConfig.empty() && !databaseConfig[0].empty()) ? databaseConfig[0] : "host=localhost port=5432 dbname=bindstone user=bindstone";
 	db = std::make_shared<pqxx::connection>(connectionString);
 	MV::info("DB Connected");
-	emailPool.submit([service = emailService] { service->run(); });
 }
 
 LobbyServer::~LobbyServer() {
-	emailService->stop();
 }
 
 void LobbyServer::savePlayer(const std::shared_ptr<ServerPlayer> &a_player) {

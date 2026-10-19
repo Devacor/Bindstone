@@ -970,6 +970,80 @@ public:
 		// Elements must be value-semantic: a class with an open (var) field is not a flat
 		// value class, and a shared_ptr element with a live alias would diverge from the
 		// serial loop (the barrier may not clone it apart) - both name the offending leaf
+		// parallel_reduce: chunks sized by the array's size alone fold in element order and combine in chunk order, so a float sum is
+		// bit-identical at every worker count; an object or container accumulator starts from init's copy in every chunk; step is
+		// admitted as a parallel_for body and its throws propagate; empty input yields init
+		test("parallel_reduce_is_the_same_at_every_worker_count", [this]() {
+			const std::string prelude = R"(
+				array<float> xs = [];
+				for (int i = 0; i < 10000; i++) { xs.push(1.0 / (i + 1) - 0.0001 * (i % 7)); }
+				float add(float a, float b) { return a + b; }
+				class Stats { int count = 0; float sum = 0.0; float hi = -1000.0; }
+				Stats fold(Stats s, float x) { s.count += 1; s.sum += x; if (x > s.hi) { s.hi = x; } return s; }
+				Stats merge(Stats a, Stats b) { a.count += b.count; a.sum += b.sum; if (b.hi > a.hi) { a.hi = b.hi; } return a; }
+				array<int> tally(array<int> acc, float x) { acc[x > 0.01 ? 1 : 0] += 1; return acc; }
+				array<int> both(array<int> a, array<int> b) { a[0] += b[0]; a[1] += b[1]; return a; }
+				void fold_in(Stats& s, float x) { s.count += 1; s.sum += x; if (x > s.hi) { s.hi = x; } }
+				Stats& grow(Stats& s, float x) { s.count += 1; s.sum += x; return s; }
+				float scaled() { float k = 2.0; return parallel_reduce(xs, 0.0, [k](float a, float x) { return a + x * k; }, add); }
+			)";
+			const std::string body = R"(
+				Stats s = parallel_reduce(xs, Stats(), fold, merge);
+				Stats t = parallel_reduce(xs, Stats(), fold_in, merge);
+				Stats u = parallel_reduce(xs, Stats(), grow, merge);
+				float lam = parallel_reduce(xs, 0.0, [](float a, float x) { return a + x; }, [](float a, float b) { return a + b; });
+				return format("{:.17f}", parallel_reduce(xs, 0.0, add, add)) + " " + s.count + " " + format("{:.17f}", s.sum) + " " +
+				       to_json(parallel_reduce(xs, [0, 0], tally, both)) + " " + parallel_reduce([], 7, add, add) + " " +
+				       format("{:.17f}", t.sum) + " " + format("{:.17f}", u.sum) + " " + format("{:.17f}", lam) + " " + format("{:.17f}", scaled());
+			)";
+			std::string first;
+			for (bool vm : {false, true}) {
+				for (size_t workers : {size_t(1), size_t(2), size_t(3), size_t(8)}) {
+					auto e = make_engine();
+					e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					jai::stdlib::register_all(e);
+					e->parallel_thread_count(workers);
+					const std::string got = e->execute(prelude + body).to_string();
+					if (first.empty()) { first = got; }
+					check_eq(first, got, std::string(vm ? "vm " : "interp ") + std::to_string(workers) + " workers");
+				}
+			}
+			check_true(first.find(" 10000 ") != std::string::npos && first.find("[9903,97] 7") != std::string::npos, first);
+
+			const std::vector<std::pair<std::string, std::string>> errors {
+				{"float total = 0.0; float bad(float a, float x) { total += x; return a; } try { parallel_reduce(xs, 0.0, bad, add); } catch (err) { return err; } return \"ran\";",
+				 "parallel_reduce: body writes enclosing state 'total'"},
+				{"float boom(float a, float x) { if (x < 0.001) { throw \"small\"; } return a + x; } try { parallel_reduce(xs, 0.0, boom, add); } catch (err) { return err; } return \"ran\";",
+				 "small"},
+				{"float one(float a) { return a; } try { parallel_reduce(xs, 0.0, one, add); } catch (err) { return err; } return \"ran\";",
+				 "parallel_reduce: step must take two parameters (acc, x)"},
+				{"float total2 = 0.0; try { parallel_reduce(xs, 0.0, [](float a, float x) { total2 += x; return a; }, add); } catch (err) { return err; } return \"ran\";",
+				 "parallel_reduce: body writes enclosing state 'total2'"},
+				{"try { return parallel_reduce(xs, 0.0, [](float a, float& x) { return a; }, add); } catch (err) { return err; } return \"ran\";",
+				 "parallel_reduce: step takes its element by value"},
+			};
+			for (const auto& [src, expected] : errors) {
+				for (bool vm : {false, true}) {
+					auto e = make_engine();
+					jai::stdlib::register_all(e);
+					e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					e->static_checking(check_mode::off);
+					e->parallel_thread_count(4);
+					const std::string got = e->execute(prelude + src).to_string();
+					check_true(got.rfind(expected, 0) == 0, std::string(vm ? "vm: " : "interp: ") + src + " -> " + got);
+				}
+			}
+			auto checked = make_engine();
+			jai::stdlib::register_all(checked);
+			auto has_error = [](const check_report& report, std::string_view text) {
+				for (const auto& d : report.diagnostics) { if (d.severity == check_diagnostic::level::error && d.message.find(text) != std::string::npos) { return true; } }
+				return false;
+			};
+			auto r = checked->check(prelude + "float one(float a) { return a; }\nvar v = parallel_reduce(xs, 0.0, one, add);\nvar w = parallel_reduce(xs, 0.0, add);");
+			check_true(has_error(r, "argument 3 of 'parallel_reduce': step 'one' must take two parameters (acc, x)"), r.format());
+			check_true(has_error(r, "'parallel_reduce' expects 4 argument(s), got 3"), r.format());
+		});
+
 		test("rejects_non_value_semantic_elements", [this]() {
 			auto e = make_engine();
 			auto r = e->execute(R"(

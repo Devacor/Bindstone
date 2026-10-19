@@ -532,7 +532,28 @@ parallel_for (int slot : order) {
 print("{}", to_json(placed));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[0,10,20,30]</code></pre></div>
 <p><strong>Handles as elements.</strong> An array of <code>shared_ptr&lt;T&gt;</code> or <code>weak_ptr&lt;T&gt;</code> elements runs when they name distinct objects. The statement checks, once when it is reached, that no object appears at two elements of the range and its zipped arrays, and raises <code>parallel_for: elements 0 and 3 hold the same object (an object a body reaches through a handle element belongs to one element)</code> otherwise. The check proves that one worker reaches each object. It proves nothing about what the object holds: its class must still be a flat value class (fields that are values, no handles), as for an element held by value. Another holder of the same object elsewhere in the program is fine, since nothing else runs during the loop.</p>
-<p><strong>Accumulating.</strong> There is no shared accumulator: a body that adds into a captured total raises the enclosing-state error. Write each element's contribution to a zipped output (or an index write) and fold it after the loop: <code>parallel_for (auto&amp; x, auto&amp; c : xs, contrib) { c = cost(x); }</code> then <code>int total = contrib.reduce((s, c) =&gt; s + c, 0);</code>.</p>
+<p><strong>Reductions.</strong> <code>parallel_reduce(xs, init, step, combine)</code> folds an array on every core: <code>xs</code> splits into chunks whose size depends on <code>xs.size()</code> alone, each chunk folds its elements in order with <code>step(acc, x)</code> starting from its own copy of <code>init</code>, and the chunk results combine left to right with <code>combine(a, b)</code>. The chunking never depends on the worker count, so a float sum is bit-identical on every machine. <code>init</code> should be <code>combine</code>'s identity (0 for a sum), since every chunk starts from it; an empty array returns it. The accumulator may be a container or an object, and <code>step</code> is admitted like a <code>parallel_for</code> body: it may not write enclosing state, and a throw from it fails the call as from <code>parallel_for</code>. <code>step</code> and <code>combine</code> may be lambdas, their captures provisioned as a <code>parallel_for</code> body's are. <code>step</code>'s body runs grafted into the chunk loop, so no call is paid per element; a <code>step</code> that takes its accumulator by reference (<code>void step(T&amp; acc, x)</code>, or <code>-&gt; T&amp;</code> returning <code>acc</code>) folds the chunk's accumulator in place with no copy in or out, the form for a container or object accumulator, while the by-value form <code>T step(T acc, x)</code> suits a scalar. The element <code>x</code> is taken by value.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;float&gt; prices = [4.5, 12.0, 7.25, 3.0, 9.5];
+float add(float a, float b) { return a + b; }
+class Span { float lo = 1000000.0; float hi = -1000000.0; }
+void widen(Span&amp; r, float x) { if (x &lt; r.lo) { r.lo = x; } if (x &gt; r.hi) { r.hi = x; } }   // folds in place
+Span join(Span a, Span b) { if (b.lo &lt; a.lo) { a.lo = b.lo; } if (b.hi &gt; a.hi) { a.hi = b.hi; } return a; }
+print(`total ${parallel_reduce(prices, 0.0, add, add):.2f}`);
+Span r = parallel_reduce(prices, Span(), widen, join);   // an object accumulator
+float big = parallel_reduce(prices, 0.0, [](float a, float x) { return x &gt; 5.0 ? a + x : a; }, add);
+print(`span ${r.lo:.2f}..${r.hi:.2f} big ${big:.2f}`);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">total 36.25
+span 3.00..12.00 big 28.75</code></pre></div>
+<p>The long form is the same loop written out: a zipped array of per-chunk accumulators and their chunk numbers, each chunk folding its slice in place, then a serial fold of the partial results. A body that adds into a captured total instead raises the enclosing-state error.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;float&gt; prices = [4.5, 12.0, 7.25, 3.0, 9.5];
+int size = 2;
+array&lt;float&gt; partial = [0.0, 0.0, 0.0];   // one accumulator per chunk of `size` elements
+array&lt;int&gt; chunk_ids = [0, 1, 2];
+parallel_for (auto&amp; p, int c : partial, chunk_ids) {
+    for (int i = c * size; i &lt; c * size + size &amp;&amp; i &lt; prices.size(); i++) { p += prices[i]; }
+}
+print(`total ${partial.reduce((s, p) =&gt; s + p, 0.0):.2f}`);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">total 36.25</code></pre></div>
 <p><strong>Where the output shape is not known up front</strong>, the pair idiom still serves: elements shaped <code>[input..., tag]</code> come back from <code>parallel_transform</code> as <code>[tag, outputs...]</code>, collected from the result in iteration order. Use captured reads for shared inputs, a zipped output array for per-element results, pairs only for variable-shaped ones.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/08-coroutines.html"><span>&larr; previous</span>Coroutines</a><a class="next" rel="next" href="../guide/10-modules.html"><span>next &rarr;</span>Modules: include vs import</a></nav></article>
 </main>
 </div>

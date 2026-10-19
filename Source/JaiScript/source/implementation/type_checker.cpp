@@ -3366,6 +3366,25 @@ private:
         }
     }
 
+    // parallel_reduce(xs, init, step, combine): a step or combine the program declares takes two parameters
+    void check_reduce_callbacks(const call_expr* c) {
+        static const char* const roles[] = {"step", "combine"};
+        static const char* const shapes[] = {"(acc, x)", "(a, b)"};
+        for (size_t k = 2; k < 4 && k < c->arguments.size(); ++k) {
+            const expression* a = c->arguments[k].get();
+            if (a->get_type() != node_type::identifier_expr) { continue; }
+            const std::string_view fname = static_cast<const identifier_expr*>(a)->name;
+            auto it = functions_.find(fname);
+            if (it == functions_.end() || it->second.empty()) { continue; }
+            bool takes_two = false;
+            for (const auto* fn : it->second) { takes_two = takes_two || fn->parameters.size() == 2; }
+            if (!takes_two) {
+                diag(diag_level::error, a->location, "argument " + std::to_string(k + 1) + " of 'parallel_reduce': " + roles[k - 2] + " '" +
+                     std::string(fname) + "' must take two parameters " + shapes[k - 2]);
+            }
+        }
+    }
+
     bool host_overload_viable(const engine::host_overload_signature& sig, const std::vector<ctype>& args) {
         if (sig.param_types.empty()) { return true; }   // untyped legacy binding
         if (sig.param_types.size() != args.size()) { return true; }   // defensive: don't guess
@@ -4169,6 +4188,7 @@ private:
 			if (eng_.has_function(name)) {
 				note_global_use(id->name);
 				check_host_call(name, args, c->location);
+				if (name == "parallel_reduce") { check_reduce_callbacks(c); }
 				// a stdlib math alias yields the builtin's float wherever its name binds the builtin: a proof every consumer guards at run time
 				if (args.size() == 1 && eng_.math_alias_fn(id->symbol_id) < engine::k_math_alias_rows) { return ctype::make(ctype::float_k); }
 				return host_result_type(name);

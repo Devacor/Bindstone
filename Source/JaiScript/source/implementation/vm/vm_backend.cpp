@@ -13905,7 +13905,8 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 			shared_parameters_for(proto.lambda.get()),
 			proto.lambda->return_type,
 			proto.body,
-			needs_capture_env ? final_closure_env : nullptr);
+			needs_capture_env ? final_closure_env : nullptr,
+			proto.lambda->local_count);   // the frame a body graft or a worker copy sizes from (the interpreter's mint parity)
 		lambdaFunc->unit = decl_unit;
 		if (!needs_capture_env) { proto.lambda->mint_cache = lambdaFunc; }
 	}

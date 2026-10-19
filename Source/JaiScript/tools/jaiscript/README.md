@@ -114,7 +114,7 @@ world per save); because of that, the DAP listener is off in watch mode.
 The full JaiScript stdlib is always registered (`jai::stdlib::register_all`): formatted
 `print` / `format` / `to_string` / `type_of`, math, `to_json` / `from_json`, container
 helpers. (The bare engine only ships concatenating `print`, `thread_count`,
-`parallel_transform` and the builtin container/string methods — the runner opts into
+`parallel_transform`, `parallel_reduce` and the builtin container/string methods — the runner opts into
 everything.) On top, the host binds file IO so scripts can actually save things:
 
 ```

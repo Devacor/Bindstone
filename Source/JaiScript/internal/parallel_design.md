@@ -129,24 +129,19 @@ string is never exclusive by construction. A worker's by-value parameter clone (
 elision needs a main-thread verdict) then copies handles no other thread touches.
 
 **The interner is frozen in every mode.** `string_symbolizer` is not thread-safe, so a region
-freezes it before the fork whether or not `allow_unsafe_parallel` is set: unsafe mode vouches
-for the script's sharing, never for the runtime's tables. Every name a worker can probe is
+freezes it before the fork. Every name a worker can probe is
 interned at admission, single-threaded: member, getter and setter ids of every chain the body
 names and of every method-call site (both backends probe the user-accessor id of a method name
 before dispatch). A miss on the frozen interner is Debug's assert, the tripwire.
 
-**Unsafe mode trusts the script's data, never the runtime's structures.** With
-`engine::allow_unsafe_parallel(true)` the admission walk still runs, warming every name and
-pinning every element method it can; only its script-semantic verdicts (captured-state writes,
-aliasing, mutating methods on captured state, member stores, lambdas, `new`) go lenient. The
-engine-seam rules stay walls in every mode: bare sibling-method calls, call targets the walk
-cannot resolve, `yield`, includes and declarations inside a body, `math::random`, every `time::`
-call (the engine-owned clock: a read would make the result differ from the serial run). The element
-proof still collects the element classes and detaches shared strings; its verdict goes lenient.
-The worker walls apply in every mode: an unpinned method call, operator dispatch on instances,
-bound-method and constructor thunks, accessor reads and stores all raise their verdict in a
-worker, because each of them copies a shared method value or touches an engine-owned cache. What
-unsafe buys is the skipped proof, not a way past those counts.
+**Handle elements and index writes.** There is one mode, and it proves. A top-level element that is a
+`shared_ptr` or a `weak_ptr` hands its object to the distinctness check (`repeated_handle_object`: one sort of
+(object, element) pairs over the range and the zipped arrays), so one worker reaches each object; the object's class
+is still walked as a flat value class. A nested handle still needs to be its object's only holder. `out[i] = v` with
+`out` captured and `i` a loop variable the body never writes is an index write (`parallel_admission::index_writes`):
+admission proves every touch of `out` is `out[i]`, the barrier proves the `i` values distinct, each worker writes a
+fresh private copy (`parallel_capture_kind::written`), and the join copies each element's slot back from the worker
+that ran it, in element order up to the first failing element.
 
 **Wake protocol.** A pool worker that finishes its chunk spins on its own flag for up to
 `engine::parallel_spin_wait_us` (default 1000) before parking on the condition variable, and

@@ -85,7 +85,7 @@ namespace jai::detail {
     //   snapshot - one per-worker detached deep copy at the barrier (everything else:
     //              non-primitive content or non-subscript uses such as iteration,
     //              read-only methods, whole-value reads)
-    enum class parallel_capture_kind : int { scalar = 0, string = 1, borrow = 2, snapshot = 3 };
+    enum class parallel_capture_kind : int { scalar = 0, string = 1, borrow = 2, snapshot = 3, written = 4 };   // written: a fresh private copy per worker, merged back at the join
 
     // Amortized admission verdict for one function body (keyed by body block pointer).
     // The graph snapshot records what the body needs provisioned per worker; entries are
@@ -116,6 +116,21 @@ namespace jai::detail {
             bool borrow_eligible = true;   // every touch was a subscript read root
         };
         std::vector<capture_entry> captures;
+        // parallel_for's disjoint index writes: `out[i] = v` (and op=, ++, --) where out is an enclosing array and i a loop
+        // variable the body never writes. Each worker writes a private copy of out; the join copies back slot out[i] of every
+        // element from the worker that ran it, in element order up to the first failing element. The barrier proves the i
+        // values distinct; admission proves out is touched as out[i] alone.
+        struct index_write {
+            uint64_t name_id = 0;
+            std::string_view name;
+            size_t index_param = 0;     // the loop variable's position: 0 the range's element, j the j-th zipped array's
+            const ast_node* site = nullptr;
+        };
+        std::vector<index_write> index_writes;
+        bool index_written(uint64_t name_id) const {
+            for (const auto& w : index_writes) { if (w.name_id == name_id) { return true; } }
+            return false;
+        }
 
         // Method names called on element/worker-local receivers. Admission only collects
         // (the receiver's class is a runtime fact); the barrier resolves each name against
@@ -190,7 +205,6 @@ namespace jai::detail {
         bool region_running = false;                       // reentrancy guard (v0: no nesting)
         bool pending_registration_retry = false;           // exceptional join: drain before cache mutation or class reload
         fault_injection faults;                            // host/test checkpoints; disabled by default
-        bool allow_unsafe = false;                         // engine::allow_unsafe_parallel(bool)
         size_t thread_count_override = 0;                  // engine::parallel_thread_count(n)
         size_t spin_wait_us = 1000;                        // engine::parallel_spin_wait_us(us): the pool's spin-before-park budget
         std::unordered_map<const void*, parallel_admission> admission_cache;
@@ -297,8 +311,7 @@ namespace jai::detail {
     // fail-closed walk in "in-place root" mode (the element may bind by reference; member
     // access/stores rooted at locals are admitted in both forms); the barrier proves every
     // element safe for exclusive in-place mutation (primitives, typed primitive
-    // containers, flat-value-class instances — engine::allow_unsafe_parallel skips the
-    // proof) and pre-mints the element references single-threaded. capture_env is the
+    // containers, flat-value-class instances, distinct handles to them) and pre-mints the element references single-threaded. capture_env is the
     // statement's enclosing environment: captured reads resolve through its chain, except
     // the enclosing frame's own locals (parallel_for_stmt::frame_captures), which frame_slot
     // reads from the executing frame (null when the slot is not live).

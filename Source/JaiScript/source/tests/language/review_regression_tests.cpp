@@ -4398,14 +4398,6 @@ public:
             check_not_null(pair_cls.get());
             check_false(pair_cls->flat_value_semantics());
         });
-        test("allow_unsafe_parallel_defaults_off", [this]() {
-            auto e = make_engine();
-            check_false(e->allow_unsafe_parallel());
-            e->allow_unsafe_parallel(true);
-            check_true(e->allow_unsafe_parallel());
-            e->allow_unsafe_parallel(false);
-            check_false(e->allow_unsafe_parallel());
-        });
     }
 };
 

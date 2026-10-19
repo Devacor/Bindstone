@@ -2156,8 +2156,7 @@ var probe = function(int n, int at) { int i = 0; while (i < n) { retag_at(i, at)
 			// at every landing) and a truth test on a cell runs inline; every way a typed global can change while the block runs is a
 			// call, so the landing after it rereads a same-kind value and misses on another kind or a binding it cannot hold: a host
 			// define of the same kind or another, a host reference, a script callback, a reload of the unit with the same type or
-			// another, a write to the float, and a parallel region (a write there is an error in safe mode; in unsafe mode it runs
-			// inside the call, before the landing)
+			// another, a write to the float, and a parallel region (a write there is an error)
 			const char* defs = R"JAI(
 int G = 3;
 float F = 0.5;
@@ -2197,7 +2196,6 @@ function probe(int n, int at, int how) -> string {
 					case 6: raw->execute_file_source(path, "float G = 4.5;"); break;
 					case 7: raw->add_global("F", script_value(script_float{0.125}, raw)); break;
 					case 8: raw->execute("array<int> xs = [6]; try { parallel_for (auto& x : xs) { G = x; } } catch (err) { }"); break;
-					case 9: raw->allow_unsafe_parallel(true); raw->execute("array<int> xs = [6]; parallel_for (auto& x : xs) { G = x; }"); raw->allow_unsafe_parallel(false); break;
 					default: break;
 					}
 				});
@@ -2210,7 +2208,7 @@ function probe(int n, int at, int how) -> string {
 			struct probe { int how; const char* expected; bool misses; };
 			const probe probes[] = {
 				{ 0, "4283 int 3 float", false }, { 1, "", false }, { 2, "", true }, { 3, "", true }, { 4, "", false },
-				{ 5, "", false }, { 6, "", true }, { 7, "", false }, { 8, "4283 int 3 float", false }, { 9, "", false },
+				{ 5, "", false }, { 6, "", true }, { 7, "", false }, { 8, "4283 int 3 float", false },
 			};
 			std::string seen, observed;
 			for (const probe& p : probes) {

@@ -4399,10 +4399,6 @@ void engine::parallel_thread_count(size_t workers) {
     parallel_state().thread_count_override = workers;
 }
 
-void engine::allow_unsafe_parallel(bool allowed) {
-    parallel_state().allow_unsafe = allowed;
-}
-
 void engine::parallel_spin_wait_us(size_t microseconds) {
     auto& state = parallel_state();
     state.spin_wait_us = microseconds;
@@ -4411,10 +4407,6 @@ void engine::parallel_spin_wait_us(size_t microseconds) {
 
 size_t engine::parallel_spin_wait_us() const {
     return impl->parallel_ ? impl->parallel_->spin_wait_us : size_t(1000);
-}
-
-bool engine::allow_unsafe_parallel() const {
-    return impl->parallel_ && impl->parallel_->allow_unsafe;
 }
 
 size_t engine::parallel_thread_count() const {

@@ -1367,8 +1367,7 @@ namespace jai {
 
         // True on worker-configured instances only: the script-class method dispatch
         // wall (methods aren't provisioned per worker - their shared body caches and
-        // arbitrary env reach are unsafe off-thread) checks this, gated by
-        // engine::allow_unsafe_parallel. Never set on the engine's own backend.
+        // arbitrary env reach are unsafe off-thread) checks this. Never set on the engine's own backend.
         bool parallel_worker_ = false;
         // The bound C++ members this interpreter reached in place, by node (a member expression, or a bare name in a method): its
         // own rows, so workers share nothing

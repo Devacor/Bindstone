@@ -12,7 +12,6 @@
 #include <jaiscript/core/jaibite.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <cstring>
-#include <tuple>
 #include <new>
 #include <thread>
 #include <atomic>
@@ -990,11 +989,12 @@ public:
 				var q = new Q();
 				var b = [1];
 				b.push(q);
+				b.push(q);
 				try { parallel_transform(b, g); } catch (e) { return e; }
 				return "no-error";
 			)");
 			auto msg2 = r2.as<std::string>();
-			check_true(msg2.find("parallel_transform: element 1: value is not value-semantic (shared_ptr)") != std::string::npos, msg2);
+			check_true(msg2.find("parallel_transform: elements 1 and 2 hold the same object") != std::string::npos, msg2);
 
 			auto r3 = e->execute(R"(
 				class R { var x = 1; }
@@ -1116,12 +1116,6 @@ public:
 				check_true(arrays_equal(pair[0], pair[1]));
 				check_eq((int64_t)(3 + 1 + 30 + 300 + 3000), pair[0].as_array()[7].as_int());
 			}
-			// The trusted path skips the element proof: the prewarm must still reach the nested classes
-			auto e = make_engine();
-			e->allow_unsafe_parallel(true);
-			e->parallel_thread_count(4);
-			auto r = e->execute(src);
-			check_true(arrays_equal(r.as_array()[0], r.as_array()[1]));
 		});
 
 		test("vec3_transform_returns_x_times_y_and_keeps_node_typed", [this]() {
@@ -1949,9 +1943,8 @@ public:
 			check_true(msg.find("cannot be proven exclusive") != std::string::npos);
 		});
 
-		// shared_ptr-tagged elements alias by script-visible design: a live alias makes the
-		// element non-exclusive (two chunks could hold one instance) and the barrier may not
-		// clone it apart; an unaliased handle is exactly the serial loop's in-place mutation
+		// shared_ptr-tagged elements alias by script-visible design: one object at two elements could be touched by two workers,
+		// and the barrier may not clone it apart; distinct objects are exactly the serial loop's in-place mutation
 		test("aliased_shared_ptr_elements_rejected_unaliased_mutate_in_place", [this]() {
 			auto e = make_engine();
 			e->parallel_thread_count(4);
@@ -1964,7 +1957,7 @@ public:
 				return "no-error";
 			)");
 			auto msg = r.as<std::string>();
-			check_true(msg.find("parallel_for: element 0 cannot be proven exclusive") != std::string::npos, msg);
+			check_true(msg.find("parallel_for: elements 0 and 1 hold the same object (an object a body reaches through a handle element belongs to one element)") != std::string::npos, msg);
 
 			auto r2 = e->execute(R"(
 				class Q2 { int x = 0; }
@@ -1976,6 +1969,81 @@ public:
 				return total;
 			)");
 			check_eq((int64_t)160, r2.as_int());
+		});
+
+		// The distinctness check: handle elements run when no object appears at two elements (range and zipped arrays alike), whatever
+		// else holds the objects; the same object at one element of several arrays is that element's worker alone. A handle nested
+		// inside an element must still be its object's only holder
+		test("handle_elements_run_when_their_objects_are_distinct", [this]() {
+			const std::string prelude = R"(
+				class C { int x = 0; }
+				array<shared_ptr<C>> registry = [];
+				array<shared_ptr<C>> hs = [];
+				array<weak_ptr<C>> ws = [];
+				for (int i = 0; i < 64; i++) { shared_ptr<C> h = new C(); registry.push(h); hs.push(h); ws.push(h); }
+				int total() { int t = 0; for (auto h : registry) { t += h.x; } return t; }
+			)";
+			const std::vector<std::pair<std::string, std::string>> cases {
+				{"parallel_for (auto& h : hs) { h.x = h.x + 1; } return total();", "64"},
+				{"parallel_for (var w : ws) { var l = w.lock(); l.x = l.x + 2; } return total();", "128"},
+				{"parallel_for (auto& h, auto& w : hs, ws) { h.x = h.x + 1; } return total();", "64"},
+				{"array<shared_ptr<C>> other = hs; other[3] = hs[1]; try { parallel_for (auto& h, auto& o : hs, other) { h.x = 1; } } catch (err) { return err; } return \"ran\";",
+				 "parallel_for: elements 1 and 3 hold the same object (an object a body reaches through a handle element belongs to one element)"},
+				{"var rows = []; for (int i = 0; i < 64; i++) { rows.push([registry[i]]); } try { parallel_for (auto& r : rows) { r[0].x = 1; } } catch (err) { return err; } return \"ran\";",
+				 "parallel_for: element 0 cannot be proven exclusive (only value-semantic shapes are: primitives, strings, value containers, flat value-class instances and distinct handles to them)"},
+				{"int bump(shared_ptr<C> h) { return h.x + 5; } var out = parallel_transform(hs, bump); return out[63];", "5"},
+			};
+			for (const auto& [body, expected] : cases) {
+				for (bool vm : {false, true}) {
+					auto e = make_engine();
+					e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					e->parallel_thread_count(4);
+					check_eq(expected, e->execute(prelude + body).to_string(), std::string(vm ? "vm: " : "interp: ") + body);
+				}
+			}
+		});
+
+		// out[i] with i a loop variable writes disjoint slots: each worker writes a private copy and the join copies every element's
+		// slot back in element order, up to the first failing element (the serial loop's stores); anything else writing or reading
+		// the written array elsewhere raises, and so do two elements carrying one index
+		test("index_writes_land_on_disjoint_slots", [this]() {
+			const std::string prelude = R"(
+				array<int> order = [];
+				for (int i = 0; i < 256; i++) { order.push((i * 37) % 256); }
+				array<int> out = [];
+				for (int i = 0; i < 256; i++) { out.push(0); }
+				int sum() { int s = 0; for (int i = 0; i < 256; i++) { s += out[i] * (i + 1); } return s; }
+			)";
+			const std::vector<std::pair<std::string, std::string>> cases {
+				{"parallel_for (int k : order) { out[k] = k * 2; } return sum();", "11184640"},
+				{"parallel_for (int k : order) { out[k] += k; out[k]++; } return sum();", "5625216"},
+				{"array<int> ks = order; parallel_for (auto& o, int k : order, ks) { out[k] = o + 1; } return sum();", "5625216"},
+				{"int run() { array<int> local = [0, 0, 0, 0]; parallel_for (int k : [3, 1, 0, 2]) { local[k] = k + 10; } return local[0] * 1000 + local[3]; } return run();", "10013"},
+				{"try { parallel_for (int k : order) { if (k == 100) { throw \"stop\"; } out[k] = 1; } } catch (err) { } int before = 0; for (int p = 0; p < 256; p++) { if (order[p] == 100) { break; } before += out[order[p]]; } int all = 0; for (int i = 0; i < 256; i++) { all += out[i]; } return before == all ? \"serial\" : \"diverged \" + before + \" \" + all;", "serial"},
+				{"array<int> dup = [0, 1, 1, 2]; try { parallel_for (int k : dup) { out[k] = 1; } } catch (err) { return err; } return \"ran\";",
+				 "parallel_for: elements 1 and 2 write 'out' at the same index 1"},
+				{"try { parallel_for (int k : order) { out[k] = out[0] + 1; } } catch (err) { return err; } return \"ran\";",
+				 "parallel_for: body touches 'out' beyond the slot it writes, out[k]"},
+				{"try { parallel_for (int k : order) { k = k + 1; out[k] = 1; } } catch (err) { return err; } return \"ran\";",
+				 "parallel_for: body writes enclosing state 'out' at an index the body changes"},
+				{"map<int, int> m = {0: 0}; try { parallel_for (int k : order) { m[k] = 1; } } catch (err) { return err; } return \"ran\";",
+				 "parallel_for: captured name 'm' is written at an index but is not an array"},
+				{"try { parallel_for (int k : order) { order[k] = 1; } } catch (err) { return err; } return \"ran\";",
+				 "parallel_for: captured name 'order' is the container being mutated"},
+				{"try { parallel_for (int k : order) { int j = k; out[j] = 1; } } catch (err) { return err; } return \"ran\";",
+				 "parallel_for: body writes enclosing state 'out'"},
+			};
+			for (const auto& [body, expected] : cases) {
+				for (bool vm : {false, true}) {
+					for (size_t workers : {size_t(1), size_t(4)}) {
+						auto e = make_engine();
+						e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+						e->parallel_thread_count(workers);
+						const std::string got = e->execute(prelude + body).to_string();
+						check_true(got.rfind(expected, 0) == 0, std::string(vm ? "vm " : "interp ") + std::to_string(workers) + ": " + body + " -> " + got);
+					}
+				}
+			}
 		});
 
 		test("admitted_self_method_call", [this]() {
@@ -2108,17 +2176,13 @@ public:
 			check_true(msg.find("an assignment that changes an object's class is not admitted in a parallel body") != std::string::npos, msg);
 		});
 
-		test("unsafe_mode_method_calls_fan_out_on_warm_names", [this]() {
-			// Unsafe mode bypasses the method pins (a trusted script may call anything), and a
-			// region of eight elements fans out to eight workers since the cost model took over
-			// the small-region cutoff; the method call's user-accessor probe then interned
-			// _get_<name> from every worker at once and tore the interner (0xC0000005 on both
-			// backends). The names are warm at admission and the interner is frozen in every
-			// mode, so Debug's frozen-miss assert is the detector; the results are the serial
-			// loop's
+		test("method_calls_fan_out_on_warm_names", [this]() {
+			// A region of eight elements fans out to eight workers since the cost model took over the small-region cutoff; the
+			// method call's user-accessor probe once interned _get_<name> from every worker at once and tore the interner
+			// (0xC0000005 on both backends). The names are warm at admission and the interner is frozen, so Debug's frozen-miss
+			// assert is the detector; the results are the serial loop's
 			for (int round = 0; round < 8; ++round) {
 				auto e = make_engine();
-				e->allow_unsafe_parallel(true);
 				e->parallel_thread_count(8);
 				auto r = e->execute(R"(
 					class Cell3 { int v = 0; int doubled() { return v * 2; } int plus(int k) { return v + k; } }
@@ -2193,14 +2257,11 @@ public:
 				run();
 			)";
 			for (bool vm : {false, true}) {
-				for (bool unsafe : {false, true}) {
-					auto e = make_engine();
-					e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-					e->allow_unsafe_parallel(unsafe);
-					e->parallel_thread_count(8);
-					e->execution_budget(0);
-					check_eq((int64_t)75, e->execute(src).as_int(), std::string(vm ? "vm" : "interp") + (unsafe ? " unsafe" : " safe"));
-				}
+				auto e = make_engine();
+				e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				e->parallel_thread_count(8);
+				e->execution_budget(0);
+				check_eq((int64_t)75, e->execute(src).as_int(), vm ? "vm" : "interp");
 			}
 		});
 
@@ -2230,14 +2291,10 @@ public:
 			}
 		});
 
-		test("unsafe_mode_keeps_the_runtime_walls", [this]() {
-			// Unsafe matrix: under allow_unsafe_parallel(true) at 8 workers a
-			// sibling call spelled this.inner(), a field's method leaf.read() and an accessor this.x
-			// asserted a getter-id miss on the frozen interner, and a bare sibling call died on a
-			// dead strong_ptr block: unsafe mode had skipped the element-class collection, which
-			// starved the barrier's method walk. Unsafe now keeps every runtime-owned protection
-			// (the walk warms and pins, the element proof detaches, the worker walls apply) and
-			// drops only the script-semantic verdicts. Each shape lands the same on both backends
+		test("method_bodies_keep_the_runtime_walls", [this]() {
+			// At 8 workers a sibling call spelled this.inner(), a field's method leaf.read() and an accessor this.x once asserted a
+			// getter-id miss on the frozen interner, and a bare sibling call died on a dead strong_ptr block. The walk warms and pins,
+			// the element proof detaches and the worker walls apply; each shape lands the same on both backends
 			struct shape { const char* name; const char* definition; };
 			const shape shapes[] = {
 				{ "own_method", "class Cell { int v = 0; Cell(int n) { v = n; } int calc() { return v + 1; } }" },
@@ -2247,12 +2304,7 @@ public:
 				{ "getter", "class Cell { int v = 0; Cell(int n) { v = n; } int _get_x() { return v; } int calc() { return this.x + 1; } }" },
 				{ "literal_string", "class Cell { int v = 0; Cell(int n) { v = n; } int calc() { string text = \"x\"; return v + text.size(); } }" },
 				{ "captured_string_table", "array<string> palette = [\"x\"]; class Cell { int v = 0; Cell(int n) { v = n; } int calc() { return v + palette[0].size(); } }" },
-				// iterating captured state is a lenient verdict in unsafe mode: the walk goes on into the
-				// loop body, twice() is pinned, and the shape runs (64 cells, 3 rounds of v -> 5v)
-				// on both backends
 				{ "skipped_subtree", "array<int> steps = [1, 2]; class Cell { int v = 0; Cell(int n) { v = n; } int twice() { return v * 2; } int calc() { int s = v; for (auto p : steps) { s = s + this.twice(); } return s; } }" },
-				// 'new' is a lenient verdict whose arguments the walk never reaches: the warm pass alone
-				// interns twice's accessor ids, so the unpinned call meets the wall, not the frozen interner
 				{ "new_argument", "class Box { int n = 0; Box(int k) { n = k; } } class Cell { int v = 0; Cell(int n) { v = n; } int twice() { return v * 2; } int calc() { Box b = new Box(this.twice()); return b.n; } }" },
 			};
 			const std::map<std::string, std::string> expected = {
@@ -2264,7 +2316,7 @@ public:
 				{ "literal_string", "value 2208" },
 				{ "captured_string_table", "value 2208" },
 				{ "skipped_subtree", "value 252000" },
-				{ "new_argument", "error method 'twice' was not admitted in this parallel body" },
+				{ "new_argument", "error parallel_for: 'new' is not allowed in a parallel body" },
 			};
 			const char* driver = " array<Cell> cells = []; for (int i = 0; i < 64; ++i) { cells.push(Cell(i)); }"
 			                     " for (int round = 0; round < 3; ++round) { parallel_for (auto& cell : cells) { cell.v = cell.calc(); } }"
@@ -2274,7 +2326,6 @@ public:
 				for (bool vm : {false, true}) {
 					auto e = make_engine();
 					e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-					e->allow_unsafe_parallel(true);
 					e->parallel_thread_count(8);
 					e->execution_budget(0);
 					std::string out;
@@ -2291,10 +2342,8 @@ public:
 			}
 		});
 
-		test("method_call_unsafe_override", [this]() {
-			// Trusted scripts keep the anything-goes path
+		test("own_class_method_call_mutates_its_element", [this]() {
 			auto e = make_engine();
-			e->allow_unsafe_parallel(true);
 			auto r2 = e->execute(R"(
 				class Cell2 { int v = 0; int doubled() { return v * 2; } }
 				var a2 = [];
@@ -2852,9 +2901,8 @@ public:
 		});
 
 		test("prewarm_reaches_nested_classes_without_the_element_proof", [this]() {
-			// The trusted path (allow_unsafe_parallel) and an untyped source never scan the slot
-			// tags for element classes: the classes the body reaches must come from the seed
-			// shapes and the members the body names
+			// An untyped source never scans the slot tags for element classes: the classes the body reaches must come from the
+			// seed shapes and the members the body names
 			const std::string typed = R"(
 				class Leaf { int v = 0; }
 				class Mid { array<Leaf> leaves = [Leaf()]; }
@@ -2874,16 +2922,13 @@ public:
 				return [nodes[0].extras[0].v, nodes[63].mids[0].leaves[0].v, nodes[31].groups["a"][0].v];
 			)";
 			for (const std::string* src : {&typed, &hetero}) {
-				for (bool unsafe : {false, true}) {
-					auto e = make_engine();
-					e->allow_unsafe_parallel(unsafe);
-					e->parallel_thread_count(4);
-					auto r = e->execute(*src);
-					const auto& vals = r.as_array();
-					check_eq((int64_t)1, vals[0].as_int());
-					check_eq((int64_t)2, vals[1].as_int());
-					check_eq((int64_t)3, vals[2].as_int());
-				}
+				auto e = make_engine();
+				e->parallel_thread_count(4);
+				auto r = e->execute(*src);
+				const auto& vals = r.as_array();
+				check_eq((int64_t)1, vals[0].as_int());
+				check_eq((int64_t)2, vals[1].as_int());
+				check_eq((int64_t)3, vals[2].as_int());
 			}
 		});
 
@@ -2903,16 +2948,15 @@ public:
 				for (auto h : hs) { total += h.x; }
 				return total;
 			)";
-			const std::vector<std::tuple<std::string, int64_t, bool>> bodies {
-				{"parallel_for (var p : hs) { var u = p; u.x = u.x + 1; }", 64, false},
-				{"parallel_for (auto p : hs) { var u = p; auto v = u; v.x = v.x + 2; }", 128, false},
-				{"parallel_for (var w : ws) { var l = w.lock(); int k = l.x; }", 0, true},   // a handle out of a weak element is unprovable
-				{"parallel_for (var r : grid) { var c = r; int n = c.size(); }", 0, false},
-				{"parallel_for (var m : ms) { var c = m; int n = c[\"a\"]; }", 0, false},
+			const std::vector<std::pair<std::string, int64_t>> bodies {
+				{"parallel_for (var p : hs) { var u = p; u.x = u.x + 1; }", 64},
+				{"parallel_for (auto p : hs) { var u = p; auto v = u; v.x = v.x + 2; }", 128},
+				{"parallel_for (var w : ws) { var l = w.lock(); l.x = l.x + 3; }", 192},   // distinct objects: each weak element's lock() is its own
+				{"parallel_for (var r : grid) { var c = r; int n = c.size(); }", 0},
+				{"parallel_for (var m : ms) { var c = m; int n = c[\"a\"]; }", 0},
 			};
-			for (const auto& [body, expected, unsafe] : bodies) {
+			for (const auto& [body, expected] : bodies) {
 				auto e = make_engine();
-				e->allow_unsafe_parallel(unsafe);
 				e->parallel_thread_count(4);
 				auto r = e->execute(prelude + body + tally);
 				check_eq(expected, r.as_int(), body);
@@ -3154,7 +3198,6 @@ public:
 			for (const auto& [first, second] : cases) {
 				auto eng = make_engine();
 				eng->parallel_thread_count(4);
-				eng->allow_unsafe_parallel(true);
 				eng->add_function("sign", [](script_int a_x, script_int a_first, script_int a_second) -> script_int {
 					if (a_x == a_first || a_x == a_second) { throw host_failure{a_x}; }
 					return 0;
@@ -3182,10 +3225,8 @@ public:
 				fixture.eng = make_engine();
 				fixture.eng->execution_budget(0);
 				fixture.eng->parallel_thread_count(4);
-				fixture.eng->allow_unsafe_parallel(true);
-				// Admission currently still requires a whitelisted host name even in
-				// unsafe mode. Use a zero-argument sign overload local to this engine;
-				// the registered callable is the only remaining owner of the token.
+				// Admission requires a whitelisted host name: a zero-argument sign overload local to this engine, the registered
+				// callable the only remaining owner of the token
 				fixture.eng->add_function("sign", [token]() -> script_int { return *token; });
 				token.reset();
 				check_false(lifetime_probe.expired(), "host callable did not retain its token");

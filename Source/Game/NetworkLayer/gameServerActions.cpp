@@ -61,13 +61,18 @@ void AssignPlayersToGame::execute(GameServer& a_server) {
 
 void GetInitialGameState::execute(GameUserConnectionState* a_connection, GameServer &a_game) {
 	auto player = a_game.userConnected(secret);
-	a_connection->authenticate(player, secret);
-	if (player) {
-		a_connection->connection()->authenticate();
+	if (!player) {
+		MV::warning("Refused [", a_connection->connection()->peerAddress(), "]: its secret matches no player of this match");
+		a_connection->connection()->disconnect();
+		return;
 	}
+	a_connection->authenticate(player, secret);
+	a_connection->connection()->authenticate();
 	if (a_game.allUsersConnected()) {
-		a_game.lobby()->send(makeNetworkString<GameServerStateChange>(GameServerStateChange::OCCUPIED));
-		a_game.server()->sendAll(makeNetworkString<SuppliedInitialGameState>(a_game.leftPlayer(), a_game.rightPlayer(), a_game.instance()->networkPool()));
+		if (a_game.lobby()) {
+			a_game.lobby()->send(makeNetworkString<GameServerStateChange>(GameServerStateChange::OCCUPIED));
+		}
+		a_game.sendToPlayers(makeNetworkString<SuppliedInitialGameState>(a_game.leftPlayer(), a_game.rightPlayer(), a_game.instance()->networkPool()));
 	}
 }
 

@@ -22,11 +22,17 @@ void GameUserConnectionState::connectImplementation() {
 }
 
 void GameUserConnectionState::disconnectImplementation() {
-	ourServer.userDisconnected(ourSecret);
+	if (ourPlayer) {
+		ourServer.userDisconnected(ourSecret);
+	}
 }
 
 void GameUserConnectionState::message(const std::string &a_message) {
 	auto action = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message, ourServer.managers().services);
+	if (!ourPlayer && !std::dynamic_pointer_cast<GetInitialGameState>(action)) {
+		MV::warning("Ignored a game action from [", connection()->peerAddress(), "]: it has not presented a player's secret");
+		return;
+	}
 	action->execute(this, ourServer);
 }
 

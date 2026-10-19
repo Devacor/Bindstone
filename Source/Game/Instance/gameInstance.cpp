@@ -345,7 +345,7 @@ ServerGameInstance::ServerGameInstance(GameServer& a_game) :
 void ServerGameInstance::updateImplementation(double /*a_dt*/) {
 	auto updated = makeSynchronizeNetworkString(networkPool());
 	if (!updated.empty()) {
-		gameServer.server()->sendAll(updated);
+		gameServer.sendToPlayers(updated);
 	}
 }
 #endif

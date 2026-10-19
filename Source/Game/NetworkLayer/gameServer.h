@@ -111,15 +111,19 @@ public:
 	}
 
 	bool allUsersConnected() {
-		for (auto&& connection : ourUserServer->connections()) {
-			GameUserConnectionState* state = static_cast<GameUserConnectionState*>(connection->state());
-			if (!state->player()) {
-				return false;
-			}
-		}
-		return true;
+		return left && right && playerConnected(left->player) && playerConnected(right->player);
 	}
 
+	// Only connections that proved a player's secret hear the match.
+	void sendToPlayers(const std::string &a_message) {
+		for (auto&& connection : ourUserServer->connections()) {
+			if (static_cast<GameUserConnectionState*>(connection->state())->player()) {
+				connection->send(a_message);
+			}
+		}
+	}
+
+	// Only an authenticated player's disconnect reaches here: it forfeits the match and frees the server.
 	void userDisconnected(int64_t a_secret) {
 		if (left && right && (left->secret == a_secret || right->secret == a_secret)) {
 			reportMatchResult(left->secret == a_secret ? TeamSide::RIGHT : TeamSide::LEFT); //forfeit: the remaining side wins
@@ -156,6 +160,15 @@ private:
 	GameServer(const GameServer &) = delete;
 
 	void handleInput();
+
+	bool playerConnected(const std::shared_ptr<InGamePlayer> &a_player) {
+		for (auto&& connection : ourUserServer->connections()) {
+			if (!connection->disconnected() && static_cast<GameUserConnectionState*>(connection->state())->player().get() == a_player.get()) {
+				return true;
+			}
+		}
+		return false;
+	}
 
 	void initializeClientToLobbyServer() {
 		auto lobbyAddressConfig = MV::fileLines("ServerConfig/lobbyGameServerAddress.config");

@@ -1,11 +1,15 @@
-// MV::Server / MV::Client threading regression tests, Foundry framework.
+// MV::Server / MV::Client threading and message-limit regression tests, Foundry framework.
 // Built into mv_tests.exe (see build_tests.bat); auto-registers with the Foundry runner.
 
 #include <jaiscript/testing/foundry.hpp>
 #include "MV/Network/network.h"
 
+#include <windows.h>
+#include <psapi.h>
+
 #include <chrono>
 #include <mutex>
+#include <numeric>
 #include <thread>
 
 using namespace jai::foundry;
@@ -65,11 +69,32 @@ private:
 	bool echo;
 };
 
-std::shared_ptr<MV::Server> makeServer(std::shared_ptr<StateRecord> a_record, bool a_echo = false) {
+std::shared_ptr<MV::Server> makeServer(std::shared_ptr<StateRecord> a_record, bool a_echo = false, const MV::MessageLimits& a_limits = {}) {
 	return std::make_shared<MV::Server>(asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), 0), [a_record, a_echo](const std::shared_ptr<MV::Connection>& a_connection) {
 		return std::make_unique<RecordingState>(a_connection, a_record, a_echo);
+	}, a_limits);
+}
+
+size_t peakCommittedBytes() {
+	PROCESS_MEMORY_COUNTERS counters {};
+	GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters));
+	return counters.PeakPagefileUsage;
+}
+
+size_t recordedBytes(StateRecord& a_record) {
+	std::lock_guard<std::mutex> guard(a_record.lock);
+	return std::accumulate(a_record.messages.begin(), a_record.messages.end(), size_t {0}, [](size_t a_total, const std::string& a_message) {
+		return a_total + a_message.size();
 	});
 }
+
+size_t recordedCount(StateRecord& a_record) {
+	std::lock_guard<std::mutex> guard(a_record.lock);
+	return a_record.messages.size();
+}
+
+const size_t KIB = 1024;
+const size_t MIB = 1024 * 1024;
 
 template<typename Condition>
 bool pumpUntil(const std::function<void()>& a_pump, Condition a_condition, double a_seconds = 5.0) {
@@ -89,9 +114,24 @@ struct RawPeer {
 		socket.connect(asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), a_port));
 	}
 
-	void send(const std::string& a_content) {
+	asio::error_code send(const std::string& a_content) {
+		asio::error_code result;
 		MV::NetworkMessage message(a_content);
-		asio::write(socket, asio::buffer(message.wire()));
+		asio::write(socket, message.wire(), result);
+		return result;
+	}
+
+	asio::error_code sendHeader(uint32_t a_contentSize) {
+		asio::error_code result;
+		std::array<uint8_t, 4> header {static_cast<uint8_t>(a_contentSize >> 24), static_cast<uint8_t>(a_contentSize >> 16), static_cast<uint8_t>(a_contentSize >> 8), static_cast<uint8_t>(a_contentSize)};
+		asio::write(socket, asio::buffer(header), result);
+		return result;
+	}
+
+	asio::error_code sendRaw(const std::string& a_bytes) {
+		asio::error_code result;
+		asio::write(socket, asio::buffer(a_bytes), result);
+		return result;
 	}
 
 	std::string receive(asio::error_code& a_error) {
@@ -100,7 +140,9 @@ struct RawPeer {
 		if (a_error) {
 			return {};
 		}
-		message.readHeaderFromBuffer();
+		auto header = message.headerValue();
+		protocolFrame = (header & MV::PROTOCOL_FRAME_BIT) != 0;
+		message.content.resize(header & ~MV::PROTOCOL_FRAME_BIT);
 		asio::read(socket, asio::buffer(message.content), a_error);
 		return a_error ? std::string() : message.content;
 	}
@@ -113,7 +155,28 @@ struct RawPeer {
 
 	asio::io_context io;
 	asio::ip::tcp::socket socket {io};
+	bool protocolFrame = false;
 };
+
+std::optional<MV::ProtocolFrame> receiveFrame(RawPeer& a_peer) {
+	asio::error_code error;
+	auto content = a_peer.receive(error);
+	if (error || !a_peer.protocolFrame) {
+		return std::nullopt;
+	}
+	return MV::ProtocolFrame::decode(content);
+}
+
+void expectRejection(RawPeer& a_peer, MV::ProtocolCode a_code, uint32_t a_value) {
+	auto frame = receiveFrame(a_peer);
+	check_true(frame.has_value(), "the peer is told why before the close");
+	check_eq(static_cast<int>(a_code), static_cast<int>(frame->code), "the rejection's reason code");
+	check_eq(a_value, frame->value, "the rejection's limit");
+	check_true(!frame->reason.empty(), "the rejection carries a reason");
+	asio::error_code error;
+	a_peer.receive(error);
+	check_true(error == asio::error::eof || error == asio::error::connection_reset || error == asio::error::connection_aborted, "then the server closes the socket");
+}
 
 struct ClientRecord {
 	std::vector<std::string> received;
@@ -124,7 +187,7 @@ struct ClientRecord {
 	int initialized = 0;
 };
 
-std::shared_ptr<MV::Client> makeClient(uint16_t a_port, std::shared_ptr<ClientRecord> a_record) {
+std::shared_ptr<MV::Client> makeClient(uint16_t a_port, std::shared_ptr<ClientRecord> a_record, const MV::MessageLimits& a_limits = {}) {
 	return MV::Client::make(MV::Url{"http://127.0.0.1:" + std::to_string(a_port)}, [a_record](const std::string& a_message) {
 		a_record->messagedOn = std::this_thread::get_id();
 		a_record->received.push_back(a_message);
@@ -134,8 +197,46 @@ std::shared_ptr<MV::Client> makeClient(uint16_t a_port, std::shared_ptr<ClientRe
 		a_record->failures.push_back(a_reason);
 	}, [a_record] {
 		++a_record->initialized;
-	});
+	}, a_limits);
 }
+
+// Floods from its own thread without blocking, so a failed check can stop it while the server is not reading.
+struct Flooder {
+	Flooder(RawPeer& a_peer, size_t a_messageSize, size_t a_count) {
+		a_peer.socket.non_blocking(true);
+		thread = std::thread([&a_peer, a_messageSize, a_count, this] {
+			for (size_t i = 0; i < a_count; ++i) {
+				std::string bytes {static_cast<char>(a_messageSize >> 24), static_cast<char>(a_messageSize >> 16), static_cast<char>(a_messageSize >> 8), static_cast<char>(a_messageSize)};
+				bytes.append(a_messageSize, static_cast<char>('a' + i % 26));
+				size_t written = 0;
+				while (written < bytes.size()) {
+					asio::error_code error;
+					written += a_peer.socket.write_some(asio::buffer(bytes.data() + written, bytes.size() - written), error);
+					if (error == asio::error::would_block) {
+						if (stopping) {
+							return;
+						}
+						std::this_thread::sleep_for(std::chrono::milliseconds(1));
+					} else if (error) {
+						failed = true;
+						return;
+					}
+				}
+				++sent;
+			}
+		});
+	}
+
+	~Flooder() {
+		stopping = true;
+		thread.join();
+	}
+
+	std::atomic<size_t> sent {0};
+	std::atomic<bool> failed {false};
+	std::atomic<bool> stopping {false};
+	std::thread thread;
+};
 
 }
 
@@ -313,6 +414,270 @@ public:
 			check_true(clientRecord->received == sent, "echoes arrive whole and in send order");
 			std::lock_guard<std::mutex> guard(record->lock);
 			check_true(record->messages == sent, "the server receives whole messages in send order");
+		});
+
+		test("a peer announcing a 4 GiB message is told MESSAGE_TOO_LARGE and dropped at its header, before anything near that size is allocated", [this]() {
+			auto record = std::make_shared<StateRecord>();
+			auto server = makeServer(record);
+			auto pump = [&] { server->update(0.01); };
+
+			RawPeer peer(server->port());
+			check_true(pumpUntil(pump, [&] { return server->connections().size() == 1; }), "the connection is adopted");
+			auto peakBefore = peakCommittedBytes();
+			peer.sendHeader(0xFFFFFFFF);
+			check_true(pumpUntil(pump, [&] { return server->connections().empty(); }, 2.0), "the connection is dropped at the header");
+			check_true(peakCommittedBytes() - peakBefore < 64 * MIB, "the announced size is never allocated");
+			{
+				std::lock_guard<std::mutex> guard(record->lock);
+				check_eq(1, record->disconnects);
+			}
+			expectRejection(peer, MV::ProtocolCode::MESSAGE_TOO_LARGE, static_cast<uint32_t>(32 * KIB));
+		});
+
+		test("before authentication a message at 32 KiB arrives and one over it is told MESSAGE_TOO_LARGE and dropped", [this]() {
+			auto record = std::make_shared<StateRecord>();
+			auto server = makeServer(record);
+			auto pump = [&] { server->update(0.01); };
+
+			RawPeer peer(server->port());
+			check_true(pumpUntil(pump, [&] { return server->connections().size() == 1; }), "the connection is adopted");
+			check_true(!server->connections()[0]->authenticated());
+			check_eq(static_cast<uint32_t>(32 * KIB), server->connections()[0]->maxMessageBytes());
+			peer.send(std::string(32 * KIB, 'a'));
+			check_true(pumpUntil(pump, [&] { return recordedCount(*record) == 1; }), "a message at the limit arrives");
+			peer.send(std::string(32 * KIB + 1, 'b'));
+			check_true(pumpUntil(pump, [&] { return server->connections().empty(); }, 2.0), "a message over the limit drops the connection");
+			check_eq(static_cast<size_t>(1), recordedCount(*record));
+			expectRejection(peer, MV::ProtocolCode::MESSAGE_TOO_LARGE, static_cast<uint32_t>(32 * KIB));
+		});
+
+		test("an authenticated connection announces its limit once, accepts a 1 MiB message and rejects one over 2 MiB", [this]() {
+			auto record = std::make_shared<StateRecord>();
+			auto server = makeServer(record);
+			auto pump = [&] { server->update(0.01); };
+
+			RawPeer peer(server->port());
+			check_true(pumpUntil(pump, [&] { return server->connections().size() == 1; }), "the connection is adopted");
+			auto connection = server->connections()[0];
+			connection->authenticate();
+			connection->authenticate();
+			check_true(connection->authenticated());
+			check_eq(static_cast<uint32_t>(2 * MIB), connection->maxMessageBytes());
+			connection.reset();
+			auto announcement = receiveFrame(peer);
+			check_true(announcement.has_value(), "the first thing the peer reads is a protocol frame");
+			check_true(announcement->code == MV::ProtocolCode::MESSAGE_LIMIT, "announcing the message limit");
+			check_eq(static_cast<uint32_t>(2 * MIB), announcement->value);
+
+			std::string oneMebibyte(MIB, 'm');
+			peer.send(oneMebibyte);
+			check_true(pumpUntil(pump, [&] { return recordedCount(*record) == 1; }), "a 1 MiB message arrives");
+			{
+				std::lock_guard<std::mutex> guard(record->lock);
+				check_true(record->messages[0] == oneMebibyte, "the 1 MiB message arrives whole");
+			}
+			peer.send(std::string(2 * MIB + 1, 'x'));
+			check_true(pumpUntil(pump, [&] { return server->connections().empty(); }, 2.0), "a message over 2 MiB drops the connection");
+			check_eq(static_cast<size_t>(1), recordedCount(*record));
+			expectRejection(peer, MV::ProtocolCode::MESSAGE_TOO_LARGE, static_cast<uint32_t>(2 * MIB));
+		});
+
+		test("an unauthenticated flood is not read past the 512 KiB unread cap until the inbox drains, then is read again, and the pause tells the peer nothing", [this]() {
+			MV::MessageLimits limits;
+			limits.unreadTimeout = std::chrono::seconds(10);
+			auto record = std::make_shared<StateRecord>();
+			auto server = makeServer(record, false, limits);
+			auto pump = [&] { server->update(0.01); };
+
+			RawPeer peer(server->port());
+			check_true(pumpUntil(pump, [&] { return server->connections().size() == 1; }), "the connection is adopted");
+			const size_t messageSize = 16 * KIB;
+			const size_t total = 512;
+			Flooder flood(peer, messageSize, total);
+			std::this_thread::sleep_for(std::chrono::milliseconds(500));
+			server->update(0.01);
+			auto firstDrain = recordedBytes(*record);
+			check_true(firstDrain <= limits.unauthenticatedMaxUnreadBytes + messageSize, "the inbox stops growing at the cap (held " + std::to_string(firstDrain) + " bytes)");
+			check_true(firstDrain >= limits.unauthenticatedMaxUnreadBytes / 2, "the inbox filled toward the cap (held " + std::to_string(firstDrain) + " bytes)");
+			std::this_thread::sleep_for(std::chrono::milliseconds(300));
+			server->update(0.01);
+			auto secondDrain = recordedBytes(*record) - firstDrain;
+			check_true(secondDrain <= limits.unauthenticatedMaxUnreadBytes + messageSize, "reading resumed after the drain and paused at the cap again (held " + std::to_string(secondDrain) + " bytes)");
+			check_true(secondDrain > 0, "reading resumed after the drain");
+			check_true(pumpUntil(pump, [&] { return recordedCount(*record) == total; }, 20.0), "every message arrives once the inbox keeps draining");
+			check_true(server->connections().size() == 1, "the paused connection was never dropped");
+			check_eq(static_cast<size_t>(0), peer.socket.available(), "backpressure sends the peer nothing");
+			std::lock_guard<std::mutex> guard(record->lock);
+			for (size_t i = 0; i < total; ++i) {
+				check_true(record->messages[i] == std::string(messageSize, static_cast<char>('a' + i % 26)), "messages arrive whole and in order");
+			}
+		});
+
+		test("an authenticated flood is not read past the 8 MiB unread cap", [this]() {
+			MV::MessageLimits limits;
+			limits.unreadTimeout = std::chrono::seconds(10);
+			auto record = std::make_shared<StateRecord>();
+			auto server = makeServer(record, false, limits);
+			auto pump = [&] { server->update(0.01); };
+
+			RawPeer peer(server->port());
+			check_true(pumpUntil(pump, [&] { return server->connections().size() == 1; }), "the connection is adopted");
+			server->connections()[0]->authenticate();
+			check_true(receiveFrame(peer).has_value(), "the limit is announced");
+			const size_t messageSize = 64 * KIB;
+			const size_t total = 384;
+			Flooder flood(peer, messageSize, total);
+			std::this_thread::sleep_for(std::chrono::milliseconds(800));
+			server->update(0.01);
+			auto firstDrain = recordedBytes(*record);
+			check_true(firstDrain <= limits.authenticatedMaxUnreadBytes + messageSize, "the inbox stops growing at the cap (held " + std::to_string(firstDrain) + " bytes)");
+			check_true(firstDrain > limits.unauthenticatedMaxUnreadBytes + messageSize, "authentication raised the cap (held " + std::to_string(firstDrain) + " bytes)");
+			check_true(pumpUntil(pump, [&] { return recordedCount(*record) == total; }, 20.0), "every message arrives once the inbox keeps draining");
+			check_eq(static_cast<size_t>(0), peer.socket.available(), "backpressure sends the peer nothing");
+		});
+
+		test("a message that trickles in slower than the unread timeout is told MESSAGE_TIMEOUT and dropped, while idle time between messages is not", [this]() {
+			MV::MessageLimits limits;
+			limits.unreadTimeout = std::chrono::milliseconds(200);
+			auto record = std::make_shared<StateRecord>();
+			auto server = makeServer(record, false, limits);
+			auto pump = [&] { server->update(0.01); };
+
+			RawPeer peer(server->port());
+			check_true(pumpUntil(pump, [&] { return server->connections().size() == 1; }), "the connection is adopted");
+			for (size_t i = 1; i <= 3; ++i) {
+				peer.send("ping");
+				check_true(pumpUntil(pump, [&] { return recordedCount(*record) == i; }), "a whole message arrives");
+				pumpUntil(pump, [] { return false; }, 0.3);
+			}
+			check_eq(static_cast<size_t>(1), server->connections().size());
+
+			peer.sendHeader(100);
+			auto start = std::chrono::steady_clock::now();
+			bool dropped = false;
+			for (int i = 0; i < 100 && !dropped; ++i) {
+				peer.sendRaw("x");
+				dropped = pumpUntil(pump, [&] { return server->connections().empty(); }, 0.05);
+			}
+			auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+			check_true(dropped, "the trickling message drops the connection");
+			check_true(elapsed < 1.5, "at its deadline (" + std::to_string(elapsed) + " s)");
+			check_eq(static_cast<size_t>(3), recordedCount(*record));
+			expectRejection(peer, MV::ProtocolCode::MESSAGE_TIMEOUT, 200);
+		});
+
+		test("a paused inbox that is not drained within the unread timeout is told INBOX_TIMEOUT and dropped", [this]() {
+			MV::MessageLimits limits;
+			limits.unreadTimeout = std::chrono::milliseconds(200);
+			auto record = std::make_shared<StateRecord>();
+			auto server = makeServer(record, false, limits);
+			auto pump = [&] { server->update(0.01); };
+
+			RawPeer peer(server->port());
+			check_true(pumpUntil(pump, [&] { return server->connections().size() == 1; }), "the connection is adopted");
+			{
+				Flooder flood(peer, 16 * KIB, 512);
+				std::this_thread::sleep_for(std::chrono::milliseconds(800));
+				check_true(pumpUntil(pump, [&] { return server->connections().empty(); }, 0.5), "the stalled connection is dropped");
+				check_true(recordedBytes(*record) <= limits.unauthenticatedMaxUnreadBytes + 16 * KIB, "nothing past the cap was read");
+			}
+			peer.socket.non_blocking(false);
+			expectRejection(peer, MV::ProtocolCode::INBOX_TIMEOUT, 200);
+		});
+
+		test("a client sends at most the server's announced limit, assuming the unauthenticated one until it hears it, and an oversized send throws", [this]() {
+			auto record = std::make_shared<StateRecord>();
+			auto server = makeServer(record, true);
+			auto clientRecord = std::make_shared<ClientRecord>();
+			auto client = makeClient(server->port(), clientRecord);
+			auto pump = [&] { server->update(0.01); client->update(); };
+			auto refused = [&](size_t a_size) {
+				try {
+					client->send(std::string(a_size, 'r'));
+				} catch (const MV::MessageTooLargeException& e) {
+					return e.size() == a_size && e.limit() == client->serverMaxMessageBytes();
+				}
+				return false;
+			};
+
+			check_true(pumpUntil(pump, [&] { return client->connected() && server->connections().size() == 1; }), "the client connects");
+			check_eq(static_cast<uint32_t>(32 * KIB), client->serverMaxMessageBytes());
+			check_true(refused(32 * KIB + 1), "a send over the assumed limit throws MessageTooLargeException");
+			client->send("small");
+			check_true(pumpUntil(pump, [&] { return clientRecord->received.size() == 1; }), "the small message is echoed");
+			check_eq(std::string("small"), clientRecord->received[0]);
+
+			server->connections()[0]->authenticate();
+			check_true(pumpUntil(pump, [&] { return client->serverMaxMessageBytes() == 2 * MIB; }), "the client applies the announced limit");
+			std::string oneMebibyte(MIB, 'm');
+			client->send(oneMebibyte);
+			check_true(refused(2 * MIB + 1), "a send over the announced limit throws MessageTooLargeException");
+			client->send("after");
+			check_true(pumpUntil(pump, [&] { return clientRecord->received.size() == 3; }), "the messages within the limit are echoed");
+			check_true(clientRecord->received[1] == oneMebibyte, "the 1 MiB message is echoed whole");
+			check_eq(std::string("after"), clientRecord->received[2]);
+			check_true(client->connected() && server->connections().size() == 1 && clientRecord->failures.empty(), "refusing a send keeps the connection");
+			{
+				std::lock_guard<std::mutex> guard(record->lock);
+				check_eq(static_cast<size_t>(3), record->messages.size());
+			}
+
+			client->disconnect();
+			client->update();
+			client->reconnect();
+			check_true(pumpUntil(pump, [&] { return client->connected(); }), "the client reconnects");
+			check_eq(static_cast<uint32_t>(32 * KIB), client->serverMaxMessageBytes());
+		});
+
+		test("a rejected client hears the reason code before its failure callback, which carries the reason", [this]() {
+			MV::MessageLimits limits;
+			limits.unreadTimeout = std::chrono::milliseconds(200);
+			auto record = std::make_shared<StateRecord>();
+			auto server = makeServer(record, false, limits);
+			for (auto expected : {MV::ProtocolCode::MESSAGE_TOO_LARGE, MV::ProtocolCode::INBOX_TIMEOUT}) {
+				auto clientRecord = std::make_shared<ClientRecord>();
+				auto client = makeClient(server->port(), clientRecord);
+				std::vector<std::string> events;
+				client->onRejected([&](const MV::ProtocolFrame& a_frame) {
+					events.push_back("rejected " + std::to_string(static_cast<int>(a_frame.code)) + " " + std::to_string(a_frame.value) + (clientRecord->failures.empty() ? "" : " after the failure"));
+				});
+				auto pump = [&] { server->update(0.01); client->update(); };
+
+				check_true(pumpUntil(pump, [&] { return client->connected() && server->connections().size() == 1; }), "the client connects");
+				if (expected == MV::ProtocolCode::MESSAGE_TOO_LARGE) {
+					client->serverMaxMessageBytes(static_cast<uint32_t>(MIB));
+					client->send(std::string(64 * KIB, 'x'));
+				} else {
+					for (int i = 0; i < 64; ++i) {
+						client->send(std::string(16 * KIB, 'f'));
+					}
+				}
+				check_true(pumpUntil([&] { client->update(); }, [&] { return !clientRecord->failures.empty(); }, 3.0), "the client fails while the server is not updated");
+				auto value = expected == MV::ProtocolCode::MESSAGE_TOO_LARGE ? static_cast<uint32_t>(32 * KIB) : 200u;
+				check_eq(static_cast<size_t>(1), events.size());
+				check_eq("rejected " + std::to_string(static_cast<int>(expected)) + " " + std::to_string(value), events[0]);
+				check_true(client->rejection().has_value() && client->rejection()->code == expected, "the rejection stays readable");
+				check_eq(client->rejection()->reason, clientRecord->failures[0]);
+				check_true(pumpUntil(pump, [&] { return server->connections().empty(); }), "the server drops the rejected connection");
+			}
+		});
+
+		test("a client fails its connection on a server message over its own receive limit", [this]() {
+			auto record = std::make_shared<StateRecord>();
+			auto server = makeServer(record);
+			MV::MessageLimits clientLimits;
+			clientLimits.authenticatedMaxMessageBytes = 64 * KIB;
+			auto clientRecord = std::make_shared<ClientRecord>();
+			auto client = makeClient(server->port(), clientRecord, clientLimits);
+			auto pump = [&] { server->update(0.01); client->update(); };
+
+			check_true(pumpUntil(pump, [&] { return client->connected() && server->connections().size() == 1; }), "the client connects");
+			server->connections()[0]->send(std::string(64 * KIB, 'a'));
+			check_true(pumpUntil(pump, [&] { return clientRecord->received.size() == 1; }), "a message at the limit arrives");
+			server->connections()[0]->send(std::string(64 * KIB + 1, 'b'));
+			check_true(pumpUntil(pump, [&] { return !clientRecord->failures.empty(); }, 2.0), "a message over the limit fails the connection");
+			check_true(clientRecord->failures[0].find("byte limit") != std::string::npos, "the failure says why: " + clientRecord->failures[0]);
+			check_eq(static_cast<size_t>(1), clientRecord->received.size());
 		});
 	}
 };

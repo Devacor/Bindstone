@@ -105,6 +105,8 @@ namespace MV {
 		if (ourConnectionState.compare_exchange_strong(expected, CONNECTING)) {
 			disconnectRequested = false;
 			connectionAnnounced = false;
+			ourServerMaxMessageBytes = ourLimits.unauthenticatedMaxMessageBytes;
+			ourRejection.reset();
 			{
 				std::lock_guard<std::mutex> guard(errorLock);
 				failMessage.clear();
@@ -159,7 +161,7 @@ namespace MV {
 	void Client::initiateRead() {
 		auto message = std::make_shared<NetworkMessage>();
 		auto reading = socket;
-		asio::async_read(*reading, asio::buffer(message->headerBuffer, 4), asio::transfer_exactly(4), [this, message, reading](const asio::error_code& a_err, size_t) {
+		asio::async_read(*reading, asio::buffer(message->headerBuffer), [this, message, reading](const asio::error_code& a_err, size_t) {
 			if (reading != socket) {
 				return;
 			}
@@ -167,15 +169,24 @@ namespace MV {
 				handleError(a_err, "header");
 				return;
 			}
-			message->readHeaderFromBuffer();
-			asio::async_read(*reading, message->buffer, asio::transfer_exactly(message->content.size()), [this, message, reading](const asio::error_code& a_err, size_t) {
+			auto header = message->headerValue();
+			message->protocol = (header & PROTOCOL_FRAME_BIT) != 0;
+			auto contentSize = header & ~PROTOCOL_FRAME_BIT;
+			auto maxMessageBytes = message->protocol ? MAX_PROTOCOL_FRAME_BYTES : ourLimits.authenticatedMaxMessageBytes;
+			if (contentSize > maxMessageBytes) {
+				auto reason = "Received a " + std::to_string(contentSize) + " byte " + (message->protocol ? "protocol frame" : "message") + ", over the " + std::to_string(maxMessageBytes) + " byte limit.";
+				error("[header] -> ", reason);
+				closeConnection(reason);
+				return;
+			}
+			message->content.resize(contentSize);
+			asio::async_read(*reading, asio::buffer(message->content), [this, message, reading](const asio::error_code& a_err, size_t) {
 				if (reading != socket) {
 					return;
 				}
 				if (a_err) {
 					handleError(a_err, "content");
 				} else if (ourConnectionState != DISCONNECTED) {
-					message->readContentFromBuffer();
 					{
 						std::lock_guard<std::mutex> guard(inboxLock);
 						inbox.push_back(message);
@@ -214,8 +225,10 @@ namespace MV {
 			received.swap(inbox);
 		}
 		tryInitializeCallback();
-		if (connectionAnnounced && !disconnectRequested) {
-			for (auto&& message : received) {
+		for (auto&& message : received) {
+			if (message->protocol) {
+				receiveProtocolFrame(message->content);
+			} else if (connectionAnnounced && !disconnectRequested) {
 				try {
 					onMessageGet(message->content);
 				} catch (std::exception &e) {
@@ -226,13 +239,38 @@ namespace MV {
 		if (!failure.empty()) {
 			connectionAnnounced = false;
 			if (onConnectionFail) {
-				onConnectionFail(failure);
+				onConnectionFail(ourRejection ? ourRejection->reason : failure);
+			}
+		}
+	}
+
+	void Client::receiveProtocolFrame(const std::string &a_payload) {
+		auto frame = ProtocolFrame::decode(a_payload);
+		if (!frame) {
+			error("Ignored a malformed protocol frame.");
+		} else if (!frame->rejection()) {
+			info("Server message limit: ", frame->value, " bytes");
+			ourServerMaxMessageBytes = frame->value;
+		} else {
+			error("Server rejected the connection: ", frame->reason);
+			ourRejection = frame;
+			if (onRejectedCallback) {
+				try {
+					onRejectedCallback(*frame);
+				} catch (std::exception &e) {
+					error("Exception caught in network rejection handler: ", e.what());
+				}
 			}
 		}
 	}
 
 	void Client::send(const std::string &a_content) {
 		require<DeviceException>(connected(), "Failed to send message due to lack of connection.");
+		if (a_content.size() > ourServerMaxMessageBytes) {
+			MessageTooLargeException exception(a_content.size(), ourServerMaxMessageBytes);
+			error(exception.what());
+			throw exception;
+		}
 		auto message = std::make_shared<NetworkMessage>(a_content);
 		asio::post(ioService, [this, message] {
 			if (socket) {
@@ -246,7 +284,7 @@ namespace MV {
 	void Client::writeNext() {
 		auto message = outbox.front();
 		auto writing = socket;
-		asio::async_write(*writing, asio::buffer(message->wire()), [this, message, writing](asio::error_code a_err, size_t) {
+		asio::async_write(*writing, message->wire(), [this, message, writing](asio::error_code a_err, size_t) {
 			if (writing != socket) {
 				return;
 			}
@@ -273,7 +311,8 @@ namespace MV {
 		}
 	}
 
-	Server::Server(const asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase>(const std::shared_ptr<Connection> &)> a_connectionStateFactory) :
+	Server::Server(const asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase>(const std::shared_ptr<Connection> &)> a_connectionStateFactory, const MessageLimits& a_limits) :
+		ourLimits(a_limits),
 		acceptor(ioService),
 		connectionStateFactory(a_connectionStateFactory),
 		work(std::make_unique<asio::io_context::work>(ioService)) {
@@ -323,7 +362,7 @@ namespace MV {
 		acceptor.async_accept(*socket, [this, socket](asio::error_code ec) {
 			if (!ec) {
 				//socket->set_option(asio::ip::tcp::no_delay(true));
-				auto connectionSocket = std::make_shared<ConnectionSocket>(socket, ioService);
+				auto connectionSocket = std::make_shared<ConnectionSocket>(socket, ioService, ourLimits);
 				connectionSocket->start();
 				std::lock_guard<std::mutex> guard(acceptedLock);
 				accepted.push_back(connectionSocket);
@@ -404,12 +443,20 @@ namespace MV {
 			auto endpoint = a_socket.remote_endpoint(error);
 			return !error && endpoint.address().is_loopback();
 		}
+
+		size_t unreadCost(const NetworkMessage& a_message) {
+			return sizeof(NetworkMessage) + a_message.content.size();
+		}
+
+		const size_t PROTOCOL_FRAME_FIXED_BYTES = 5;
 	}
 
-	ConnectionSocket::ConnectionSocket(const std::shared_ptr<asio::ip::tcp::socket> &a_socket, asio::io_context& a_ioService) :
+	ConnectionSocket::ConnectionSocket(const std::shared_ptr<asio::ip::tcp::socket> &a_socket, asio::io_context& a_ioService, const MessageLimits& a_limits) :
 		ioService(a_ioService),
 		socket(a_socket),
 		closeDeadline(a_ioService),
+		ourLimits(a_limits),
+		unreadDeadline(a_ioService),
 		ourLoopback(remoteIsLoopback(*a_socket)) {
 	}
 
@@ -418,28 +465,71 @@ namespace MV {
 	}
 
 	void ConnectionSocket::send(const std::string &a_content) {
-		auto message = std::make_shared<NetworkMessage>(a_content);
-		asio::post(ioService, [self = shared_from_this(), message] {
+		queue(std::make_shared<NetworkMessage>(a_content));
+	}
+
+	void ConnectionSocket::queue(const std::shared_ptr<NetworkMessage> &a_message) {
+		asio::post(ioService, [self = shared_from_this(), a_message] {
 			if (self->socket && !self->closing) {
-				self->outbox.push_back(message);
-				if (self->outbox.size() == 1) { self->writeNext(); }
+				self->push(a_message);
 			}
 		});
 	}
 
-	// Messages sent before the close still go out (a kick says why): the socket closes once the outbox
-	// drains, or at the deadline when the peer stops reading.
+	void ConnectionSocket::push(const std::shared_ptr<NetworkMessage> &a_message) {
+		outbox.push_back(a_message);
+		if (outbox.size() == 1) {
+			writeNext();
+		}
+	}
+
 	void ConnectionSocket::close() {
-		asio::post(ioService, [self = shared_from_this()] {
-			if (self->closing || !self->socket) {
+		asio::post(ioService, [self = shared_from_this()] { self->beginClose(); });
+	}
+
+	// Messages queued before the close still go out (a kick or a rejection says why), then the send side
+	// shuts and incoming bytes are discarded until the peer closes, so the peer reads the reason instead of a
+	// reset; the deadline bounds a peer that stops reading or keeps sending.
+	void ConnectionSocket::beginClose() {
+		if (closing || !socket) {
+			return;
+		}
+		closing = true;
+		unreadDeadline.cancel();
+		closeDeadline.expires_after(std::chrono::seconds(2));
+		closeDeadline.async_wait([self = shared_from_this()](const asio::error_code& a_err) {
+			if (!a_err) {
+				self->closeNow();
+			}
+		});
+		if (outbox.empty()) {
+			linger();
+		}
+	}
+
+	void ConnectionSocket::linger() {
+		if (lingering || !socket) {
+			return;
+		}
+		lingering = true;
+		asio::error_code ignored;
+		socket->shutdown(asio::ip::tcp::socket::shutdown_send, ignored);
+		discarded.resize(16 * 1024);
+		if (!reading) {
+			discardNext();
+		}
+	}
+
+	void ConnectionSocket::discardNext() {
+		auto discarding = socket;
+		discarding->async_read_some(asio::buffer(discarded), [self = shared_from_this(), discarding](const asio::error_code& a_err, size_t) {
+			if (discarding != self->socket) {
 				return;
 			}
-			self->closing = true;
-			if (self->outbox.empty()) {
+			if (a_err) {
 				self->closeNow();
 			} else {
-				self->closeDeadline.expires_after(std::chrono::seconds(2));
-				self->closeDeadline.async_wait([self](const asio::error_code&) { self->closeNow(); });
+				self->discardNext();
 			}
 		});
 	}
@@ -447,20 +537,46 @@ namespace MV {
 	void ConnectionSocket::closeNow() {
 		closeSocket(socket);
 		outbox.clear();
+		discarded = {};
 		closeDeadline.cancel();
+		unreadDeadline.cancel();
+	}
+
+	void ConnectionSocket::authenticate() {
+		if (!ourAuthenticated.exchange(true)) {
+			queue(NetworkMessage::make(ProtocolFrame {ProtocolCode::MESSAGE_LIMIT, ourLimits.authenticatedMaxMessageBytes, {}}));
+			resumeBelowCap();
+		}
 	}
 
 	std::vector<std::shared_ptr<NetworkMessage>> ConnectionSocket::takeInbox() {
 		std::vector<std::shared_ptr<NetworkMessage>> result;
-		std::lock_guard<std::mutex> guard(inboxLock);
-		result.swap(inbox);
+		{
+			std::lock_guard<std::mutex> guard(inboxLock);
+			result.swap(inbox);
+			unreadBytes = 0;
+		}
+		resumeBelowCap();
 		return result;
+	}
+
+	// The pause flag changes hands under the inbox lock, so a drain either lands before the network thread
+	// decides to pause or sees the pause and posts the resume.
+	void ConnectionSocket::resumeBelowCap() {
+		{
+			std::lock_guard<std::mutex> guard(inboxLock);
+			if (!readingPaused || unreadBytes >= ourLimits.maxUnreadBytes(ourAuthenticated)) {
+				return;
+			}
+			readingPaused = false;
+		}
+		asio::post(ioService, [self = shared_from_this()] { self->resumeReading(); });
 	}
 
 	void ConnectionSocket::writeNext() {
 		auto message = outbox.front();
 		auto writing = socket;
-		asio::async_write(*writing, asio::buffer(message->wire()), [self = shared_from_this(), message, writing](asio::error_code a_err, size_t) {
+		asio::async_write(*writing, message->wire(), [self = shared_from_this(), message, writing](asio::error_code a_err, size_t) {
 			if (writing != self->socket) {
 				return;
 			}
@@ -472,39 +588,126 @@ namespace MV {
 			if (!self->outbox.empty()) {
 				self->writeNext();
 			} else if (self->closing) {
-				self->closeNow();
+				self->linger();
 			}
 		});
 	}
 
 	void ConnectionSocket::initiateRead() {
+		reading = true;
 		auto message = std::make_shared<NetworkMessage>();
-		auto reading = socket;
-		asio::async_read(*reading, asio::buffer(message->headerBuffer), asio::transfer_exactly(4), [self = shared_from_this(), message, reading](const asio::error_code& a_err, size_t) {
-			if (reading != self->socket) {
+		auto readSocket = socket;
+		asio::async_read(*readSocket, asio::buffer(message->headerBuffer), [self = shared_from_this(), message, readSocket](const asio::error_code& a_err, size_t) {
+			if (readSocket != self->socket) {
+				return;
+			}
+			if (self->closing) {
+				self->stopReading();
 				return;
 			}
 			if (a_err) {
+				self->reading = false;
 				self->handleError(a_err, "header");
 				return;
 			}
-			message->readHeaderFromBuffer();
-			asio::async_read(*reading, message->buffer, asio::transfer_exactly(message->content.size()), [self, message, reading](const asio::error_code& a_err, size_t) {
-				if (reading != self->socket) {
+			auto contentSize = message->headerValue();
+			auto maxMessageBytes = self->ourLimits.maxMessageBytes(self->ourAuthenticated);
+			if (contentSize > maxMessageBytes) {
+				self->reading = false;
+				self->reject(ProtocolCode::MESSAGE_TOO_LARGE, maxMessageBytes, "A " + std::to_string(contentSize) + " byte message exceeds the " + std::to_string(maxMessageBytes) + " byte limit.");
+				return;
+			}
+			message->content.resize(contentSize);
+			self->awaitingContent = true;
+			self->armUnreadDeadline();
+			asio::async_read(*readSocket, asio::buffer(message->content), [self, message, readSocket](const asio::error_code& a_err, size_t) {
+				if (readSocket != self->socket) {
 					return;
 				}
+				self->awaitingContent = false;
+				if (self->closing) {
+					self->stopReading();
+					return;
+				}
+				self->disarmUnreadDeadline();
 				if (a_err) {
+					self->reading = false;
 					self->handleError(a_err, "content");
 					return;
 				}
-				message->readContentFromBuffer();
-				{
-					std::lock_guard<std::mutex> guard(self->inboxLock);
-					self->inbox.push_back(message);
-				}
-				self->initiateRead();
+				self->receive(message);
 			});
 		});
+	}
+
+	void ConnectionSocket::stopReading() {
+		reading = false;
+		if (lingering) {
+			discardNext();
+		}
+	}
+
+	void ConnectionSocket::receive(const std::shared_ptr<NetworkMessage> &a_message) {
+		bool paused = false;
+		{
+			std::lock_guard<std::mutex> guard(inboxLock);
+			inbox.push_back(a_message);
+			unreadBytes += unreadCost(*a_message);
+			readingPaused = unreadBytes >= ourLimits.maxUnreadBytes(ourAuthenticated);
+			paused = readingPaused;
+		}
+		if (paused) {
+			reading = false;
+			armUnreadDeadline();
+		} else {
+			initiateRead();
+		}
+	}
+
+	void ConnectionSocket::resumeReading() {
+		if (socket && !closing) {
+			disarmUnreadDeadline();
+			initiateRead();
+		}
+	}
+
+	void ConnectionSocket::armUnreadDeadline() {
+		unreadDeadline.expires_after(ourLimits.unreadTimeout);
+		unreadDeadline.async_wait([self = shared_from_this()](const asio::error_code& a_err) {
+			// A deadline that was moved after it fired is not the one that fired.
+			if (!a_err && self->socket && !self->closing && self->unreadDeadline.expiry() <= asio::steady_timer::clock_type::now()) {
+				self->unreadDeadlineReached();
+			}
+		});
+	}
+
+	void ConnectionSocket::disarmUnreadDeadline() {
+		unreadDeadline.expires_at(asio::steady_timer::time_point::max());
+	}
+
+	void ConnectionSocket::unreadDeadlineReached() {
+		auto timeout = static_cast<uint32_t>(ourLimits.unreadTimeout.count());
+		if (awaitingContent) {
+			reject(ProtocolCode::MESSAGE_TIMEOUT, timeout, "A message did not finish arriving within " + std::to_string(timeout) + " ms.");
+			return;
+		}
+		bool paused = false;
+		{
+			std::lock_guard<std::mutex> guard(inboxLock);
+			paused = readingPaused;
+		}
+		if (paused) {
+			reject(ProtocolCode::INBOX_TIMEOUT, timeout, "Messages arrived faster than the server processes them and stayed unread for " + std::to_string(timeout) + " ms.");
+		}
+	}
+
+	void ConnectionSocket::reject(ProtocolCode a_code, uint32_t a_value, const std::string &a_reason) {
+		error("[rejected] -> ", a_reason);
+		ourFailed = true;
+		if (socket && !closing) {
+			push(NetworkMessage::make(ProtocolFrame {a_code, a_value, a_reason}));
+			beginClose();
+		}
 	}
 
 	void ConnectionSocket::handleError(const asio::error_code &a_err, const std::string &a_section) {
@@ -512,55 +715,47 @@ namespace MV {
 		ourFailed = true;
 	}
 
-	uint32_t NetworkMessage::sizeFromHeaderBuffer() {
-		uint32_t headerSizeResult = 0;
-		memcpy(&headerSizeResult, &headerBuffer[0], 4);
-		return headerSizeResult;
+	std::string ProtocolFrame::encode() const {
+		std::string result {static_cast<char>(code), static_cast<char>(value >> 24), static_cast<char>(value >> 16), static_cast<char>(value >> 8), static_cast<char>(value)};
+		result.append(reason, 0, MAX_PROTOCOL_FRAME_BYTES - PROTOCOL_FRAME_FIXED_BYTES);
+		return result;
 	}
 
-	void NetworkMessage::readHeaderFromBuffer() {
-		swapBytesForNetwork<4>(&headerBuffer[0]);
-		content.resize(sizeFromHeaderBuffer());
-	}
-
-	void NetworkMessage::readContentFromBuffer() {
-		std::stringstream input;
-		input << &buffer;
-		content = input.str();
-	}
-
-	void NetworkMessage::pushSizeToHeaderBuffer() {
-		uint32_t contentSize = static_cast<uint32_t>(content.size());
-
-		uint8_t* headerChar = reinterpret_cast<uint8_t *>(&contentSize);
-		swapBytesForNetwork<4>(headerChar);
-		for (int i = 0; i < 4; ++i, ++headerChar) {
-			headerBuffer[i] = *headerChar;
+	std::optional<ProtocolFrame> ProtocolFrame::decode(const std::string &a_payload) {
+		if (a_payload.size() < PROTOCOL_FRAME_FIXED_BYTES || a_payload.size() > MAX_PROTOCOL_FRAME_BYTES) {
+			return std::nullopt;
 		}
+		auto code = static_cast<uint8_t>(a_payload[0]);
+		if (code < static_cast<uint8_t>(ProtocolCode::MESSAGE_LIMIT) || code > static_cast<uint8_t>(ProtocolCode::INBOX_TIMEOUT)) {
+			return std::nullopt;
+		}
+		ProtocolFrame result;
+		result.code = static_cast<ProtocolCode>(code);
+		for (size_t i = 1; i < PROTOCOL_FRAME_FIXED_BYTES; ++i) {
+			result.value = (result.value << 8) | static_cast<uint8_t>(a_payload[i]);
+		}
+		result.reason = a_payload.substr(PROTOCOL_FRAME_FIXED_BYTES);
+		return result;
 	}
 
-	std::string NetworkMessage::headerAndContent() const {
-		uint32_t contentSize = static_cast<uint32_t>(content.size());
+	std::shared_ptr<NetworkMessage> NetworkMessage::make(const ProtocolFrame &a_frame) {
+		auto result = std::make_shared<NetworkMessage>(a_frame.encode());
+		result->protocol = true;
+		return result;
+	}
 
-		uint8_t* headerChar = reinterpret_cast<uint8_t *>(&contentSize);
-		swapBytesForNetwork<4>(headerChar);
-		
-		std::stringstream result;
-		for (int i = 0; i < 4; ++i) {
-			result << *(headerChar++);
-		}
-		result << content;
-		return result.str();
+	uint32_t NetworkMessage::headerValue() const {
+		return (static_cast<uint32_t>(headerBuffer[0]) << 24) | (static_cast<uint32_t>(headerBuffer[1]) << 16) | (static_cast<uint32_t>(headerBuffer[2]) << 8) | static_cast<uint32_t>(headerBuffer[3]);
 	}
 
 	uint32_t NetworkMessage::headerAndContentSize() const {
 		return 4 + static_cast<uint32_t>(content.size());
 	}
 
-	// Owned by the message for the whole async_write: a temporary would be freed mid-send.
-	const std::string& NetworkMessage::wire() {
-		if (wireBytes.empty()) { wireBytes = headerAndContent(); }
-		return wireBytes;
+	std::array<asio::const_buffer, 2> NetworkMessage::wire() {
+		auto header = static_cast<uint32_t>(content.size()) | (protocol ? PROTOCOL_FRAME_BIT : 0);
+		headerBuffer = {static_cast<uint8_t>(header >> 24), static_cast<uint8_t>(header >> 16), static_cast<uint8_t>(header >> 8), static_cast<uint8_t>(header)};
+		return {asio::buffer(headerBuffer), asio::buffer(content)};
 	}
 
 }

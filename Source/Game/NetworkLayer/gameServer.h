@@ -100,9 +100,9 @@ public:
 	}
 
 	std::shared_ptr<InGamePlayer> userConnected(int64_t a_secret) {
-		if (left->secret == a_secret) {
+		if (left && left->secret == a_secret) {
 			return left->player;
-		} else if (right->secret == a_secret) {
+		} else if (right && right->secret == a_secret) {
 			return right->player;
 		}
 		return std::shared_ptr<InGamePlayer>();

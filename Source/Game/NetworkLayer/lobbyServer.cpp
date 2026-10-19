@@ -34,6 +34,7 @@ bool LobbyUserConnectionState::authenticate(int64_t a_id, const std::string& a_e
 			}
 		}
 		loggedIn = true;
+		lockedConnection->authenticate();
 		return true;
 	} catch (const std::exception& e) {
 		std::cerr << "Failed to authenticate user: " << e.what() << std::endl;

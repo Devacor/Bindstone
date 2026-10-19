@@ -40,6 +40,14 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
 - **MV Texture Handles** — 9-slice margins squeeze proportionally in a box smaller than the
   margins; flipX survives a pack-based `postLoadInitialize`; `logicalSize` scales by texture
   size, not content size.
+- **MV Network** — `Server`/`Connection`/`Client` on loopback: connection state lives and dies on
+  the updating thread, messages arrive whole and in order, a close flushes queued writes first; and
+  the message limits (`MessageLimits`): an oversized header (4 GiB, over 32 KiB before
+  `authenticate()`, over 2 MiB after) is rejected before allocating, the unread cap pauses reading
+  (512 KiB / 8 MiB) and resumes on drain without telling the peer, a trickling message and an
+  undrained paused inbox are rejected at the unread timeout, each rejection reaching the peer as a
+  `ProtocolFrame` reason code before the close; the client learns the server's limit from the
+  announcement and `send` throws `MessageTooLargeException` past it.
 - **Pathfinding** — `Map` budget, `NavigationAgent` paths/signals, footprint block counts
   across moves, clones and off-map placement.
 - **MV Utility** — `angle2D`/`angle2DRad` overloads, `wrappingDistance` and `wrappingMix` (the

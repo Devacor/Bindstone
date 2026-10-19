@@ -487,16 +487,13 @@ namespace MV {
 		}
 
 		static Random* global() {
-			if (!instance) {
-				instance = new Random();
-			}
-			return instance;
+			static Random* result = new Random();
+			return result;
 		}
 	private:
 		uint64_t generatorSeed;
 		std::mt19937 generator;
 
-		static Random* instance;
 		friend double randomNumber(double, double);
 		friend float randomNumber(float, float);
 		friend int64_t randomInteger(int64_t, int64_t);

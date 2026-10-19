@@ -5,14 +5,11 @@
 #include <jaiscript/detail/thread_pool.hpp>
 #include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
-#include <atomic>
+#include <functional>
 #include <cmath>
 
 namespace MV {
 	namespace Scene {
-
-		Point<> randomMix(const Point<> &a_rhs, const Point<> &a_lhs);
-		Color randomMix(const Color &a_rhs, const Color &a_lhs);
 
 		struct ParticleChangeValues {
 		private:
@@ -187,7 +184,6 @@ namespace MV {
 
 			JAI_PROPERTY((Point<>), minimumPosition);
 			JAI_PROPERTY((Point<>), maximumPosition);
-			std::function<Point<>()> getPosition;
 
 			inline void minimumDirectionDeg(AxisAngles a_min) { minimumDirection = toRadians(a_min); }
 			inline AxisAngles minimumDirectionDeg() { return toDegrees(*minimumDirection); }
@@ -197,7 +193,6 @@ namespace MV {
 
 			JAI_PROPERTY((AxisAngles), minimumDirection);
 			JAI_PROPERTY((AxisAngles), maximumDirection);
-			std::function<AxisAngles()> getDirection;
 
 			inline void minimumRotationDeg(AxisAngles a_min) { minimumRotation = toRadians(a_min); }
 			inline AxisAngles minimumRotationDeg() { return toDegrees(*minimumRotation); }
@@ -207,21 +202,9 @@ namespace MV {
 
 			JAI_PROPERTY((AxisAngles), minimumRotation);
 			JAI_PROPERTY((AxisAngles), maximumRotation);
-			std::function<AxisAngles()> getRotation;
 
 			JAI_PROPERTY((ParticleChangeValues), minimum);
 			JAI_PROPERTY((ParticleChangeValues), maximum);
-
-			std::function<AxisAngles()> getRotationChange;
-			std::function<AxisAngles()> getRateOfChange;
-			std::function<AxisAngles()> getDirectionChange;
-			std::function<void(float&, float&)> setSpeed;
-			std::function<void(Scale&, Scale&)> setScale;
-			std::function<void(Color&, Color&)> setColor;
-
-			void initializeCallbacks();
-
-			bool dirty = true;
 
 			template<class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
@@ -231,12 +214,14 @@ namespace MV {
 			template<class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
 				property_mgr.load(archive);
-				dirty = true;
 			}
 		};
 
 		void loadEmitterProperties(EmitterSpawnProperties& a_result, const std::string &a_file, MV::Services& a_services);
 
+		struct EmitterPipeline;
+
+		//Pool stages read only a snapshot taken on the main thread, never the Emitter, so it can change or die mid-flight.
 		class Emitter : public jai::property_owner<Emitter, Drawable> {
 			friend Node;
 			friend jai::access;
@@ -260,7 +245,12 @@ namespace MV {
 			std::shared_ptr<Emitter> enable();
 			std::shared_ptr<Emitter> disable();
 
-			~Emitter();
+			//A headless renderer skips the simulation unless asked (tests); only drawing needs a device.
+			std::shared_ptr<Emitter> simulateWhileHeadless(bool a_simulate);
+			bool simulateWhileHeadless() const { return simulatesWhileHeadless; }
+
+			//Runs on a worker at the start of each slot's stage, so tests can hold or fail a pipeline.
+			std::shared_ptr<Emitter> pipelineProbe(std::function<void(size_t)> a_probe);
 
 		protected:
 			Emitter(const std::weak_ptr<Node> &a_owner, jai::thread_pool &a_pool);
@@ -299,88 +289,32 @@ namespace MV {
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
 				return cloneHelper(a_parent->attach<Emitter>(pool).self());
 			}
-			
+
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
 		private:
 			virtual BoxAABB<> boundsImplementation() override;
 			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;
 
-			inline void spawnParticle(size_t a_groupIndex) {
-				Particle particle;
-
-				particle.textureCount = ourTextures->size();
-
-				particle.position = spawnProperties->getPosition() - threadData[a_groupIndex].particleOffset;
-				particle.rotation = spawnProperties->getRotation();
-				particle.change.rotationalChange = spawnProperties->getRotationChange();
-
-				particle.direction = spawnProperties->getDirection();
-				particle.change.rateOfChange = spawnProperties->getRateOfChange();
-				particle.change.directionalChangeRad(spawnProperties->getDirectionChange());
-
-				spawnProperties->setSpeed(particle.change.beginSpeed, particle.change.endSpeed);
-
-				spawnProperties->setScale(particle.change.beginScale, particle.change.endScale);
-
-				spawnProperties->setColor(particle.change.beginColor, particle.change.endColor);
-
-				particle.change.animationFramesPerSecond = mix(spawnProperties->minimum->animationFramesPerSecond, spawnProperties->maximum->animationFramesPerSecond, randomNumber(0.0f, 1.0f));
-
-				particle.change.maxLifespan = mix(spawnProperties->minimum->maxLifespan, spawnProperties->maximum->maxLifespan, randomNumber(0.0f, 1.0f));
-
-				particle.setGravity(
-					mix(spawnProperties->minimum->gravityMagnitude, spawnProperties->maximum->gravityMagnitude, randomNumber(0.0f, 1.0f)),
-					randomMix(spawnProperties->minimum->gravityDirection, spawnProperties->maximum->gravityDirection)
-				);
-
-				//particle.update(0.0f);
-
-				threadData[a_groupIndex].particles.emplace_back(std::move(particle));
-			}
-
-			void spawnParticlesOnMultipleThreads(double a_dt);
-
-			void updateParticlesOnMultipleThreads(double a_dt);
-
-			void loadParticlesToPoints(size_t a_groupIndex);
-
-			void loadParticlePointsFromGroups();
-
-			void loadPointsFromBufferAndAllowUpdate();
-
-
-			double accumulatedTimeDelta = 0.0f;
+			void takePipelineResult();
+			void startPipeline();
 
 			JAI_PROPERTY((EmitterSpawnProperties), spawnProperties);
-
-			size_t emitterThreads;
-
-			struct ThreadData {
-				std::vector<Particle> particles;
-				std::vector<DrawPoint> points;
-				std::vector<GLuint> vertexIndices;
-				MV::Point<> particleOffset;
-			};
-			std::vector<DrawPoint> pointBuffer;
-			std::vector<GLuint> vertexIndexBuffer;
-
-			std::vector<ThreadData> threadData;
 
 			JAI_PROPERTY((std::weak_ptr<MV::Scene::Node>), relativeNodePosition);
 			JAI_PROPERTY((int32_t), relativeParentCount, -1);
 			JAI_PROPERTY((bool), spawnParticles, true);
 
 			static const double MAX_TIME_STEP;
-			static const int MAX_PARTICLES_PER_FRAME = 2500;
-            std::atomic<double> timeSinceLastParticle = {0.0};
-			double nextSpawnDelta = 0.0;
+
+			double accumulatedTimeDelta = 0.0;
+			bool rerollSpawnDelta = true;
+			bool simulatesWhileHeadless = false;
+			std::function<void(size_t)> ourPipelineProbe;
 
 			jai::thread_pool& pool;
-
-			std::atomic<bool> updateInProgress;
-
-			std::recursive_mutex lock;
+			std::shared_ptr<EmitterPipeline> pipeline;
+			bool pipelineRunning = false;
 		};
 
 	}

@@ -266,8 +266,6 @@ namespace MV {
 #endif
 	}
 
-	Random* Random::instance = nullptr;
-
 	double randomNumber(double a_min, double a_max) {
 		return Random::global()->number(a_min, a_max);
 	}

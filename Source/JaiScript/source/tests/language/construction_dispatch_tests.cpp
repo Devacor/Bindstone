@@ -280,6 +280,24 @@ public:
                 f(); LOG;
             )", "d123c|c2c", "C's layout is not a prefix of D's");
         });
+
+        test("a_delegating_constructor_a_derived_class_reaches_runs_its_target", [this]() {
+            // C++ delegation holds at every level: Part(int) reached through super(k) first runs Part(int, string), its bases and
+            // members, then its own body (the target once never ran, leaving the members their initializers)
+            expect_log(R"(
+                string LOG = "";
+                class Root { Root() { LOG = LOG + "r"; } }
+                class Part : Root {
+                    string s = "init";
+                    Part(int k) : this(k, "two") { s = s + "+one"; LOG = LOG + "p1"; }
+                    Part(int k, string n) : super() { s = n + to_string(k); LOG = LOG + "p2"; }
+                }
+                class Unit : Part { string u = "u"; Unit(int k) : super(k) { u = u + s; LOG = LOG + "u"; } }
+                Unit one(1);
+                Part direct(2);
+                LOG + "|" + one.u + "|" + direct.s;
+            )", "rp2p1urp2p1|utwo1+one|two2+one", "the delegated-to constructor runs ahead of the delegating body");
+        });
     }
 };
 

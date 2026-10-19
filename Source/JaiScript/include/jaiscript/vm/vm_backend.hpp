@@ -409,8 +409,7 @@ namespace jai::vm {
 
         // True on worker-configured instances only: the script-class method dispatch
         // wall (methods aren't provisioned per worker - their shared body caches and
-        // arbitrary env reach are unsafe off-thread) checks this, gated by
-        // engine::allow_unsafe_parallel. Never set on the engine's own backend.
+        // arbitrary env reach are unsafe off-thread) checks this. Never set on the engine's own backend.
         bool parallel_worker_ = false;
         size_t structural_equality_depth_ = 0;   // memberwise ==/<=> levels nested natively (detail/structural_equality.hpp)
         // parallel_for chunk loop: the worker's element cursor (a reference value owned by the

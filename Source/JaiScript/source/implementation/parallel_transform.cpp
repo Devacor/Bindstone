@@ -998,13 +998,46 @@ namespace {
 		// touch is a subscript read; enforcement of no-writes is the write wall plus
 		// the statically-free rejections below). subscript_root keeps the name eligible
 		// for the borrow (raw-read) tier; any other read demotes it to snapshot.
-		void touch_capture(identifier_expr* n, bool subscript_root) {
+		void touch_capture(identifier_expr* n, bool subscript_root, const expression* index = nullptr) {
 			auto [it, inserted] = capture_index.try_emplace(n->symbol_id, adm.captures.size());
 			if (inserted) {
 				adm.captures.push_back({ n->symbol_id, n->name, subscript_root });   // name view = symbolizer storage (permanent)
 			} else if (!subscript_root) {
 				adm.captures[it->second].borrow_eligible = false;
 			}
+			capture_touches.push_back({ n->symbol_id, loop_variable_position(index), n });
+		}
+
+		// Every touch of a captured name, with the loop variable that indexes it (SIZE_MAX: not indexed by one): an index-written
+		// name may be touched as out[i] alone
+		struct capture_touch { uint64_t name_id; size_t index_param; const ast_node* site; };
+		std::vector<capture_touch> capture_touches;
+		std::vector<uint64_t> written_loop_variables;
+
+		// The position of the body-level loop variable an index expression names, SIZE_MAX for anything else
+		size_t loop_variable_position(const expression* index) const {
+			if (!index || index->get_type() != node_type::identifier_expr || !inplace_root || fn_depth != 1 || method_class) { return SIZE_MAX; }   // the body itself, not a callee or a method
+			const uint64_t id = static_cast<const identifier_expr*>(index)->symbol_id;
+			if (id == element_symbol) { return 0; }
+			for (size_t k = 0; k < element_symbols.size(); ++k) { if (element_symbols[k] == id) { return k + 1; } }
+			return SIZE_MAX;
+		}
+
+		// After the walk: an index-written name is touched as out[i] alone, with one loop variable the body never writes
+		bool check_index_writes() {
+			for (const auto& w : adm.index_writes) {
+				const uint64_t loop_id = w.index_param == 0 ? element_symbol : element_symbols[w.index_param - 1];
+				if (std::find(written_loop_variables.begin(), written_loop_variables.end(), loop_id) != written_loop_variables.end()) {
+					return fail(w.site, "body writes enclosing state '" + std::string(w.name) + "' at an index the body changes");
+				}
+				for (const auto& t : capture_touches) {
+					if (t.name_id == w.name_id && t.index_param != w.index_param) {
+						return fail(t.site, "body touches '" + std::string(w.name) + "' beyond the slot it writes, " + std::string(w.name) + "[" +
+						                    std::string(sym.get_string(loop_id)) + "]");
+					}
+				}
+			}
+			return true;
 		}
 
 		// Set while walking a script-class method body at the barrier: bare names that are
@@ -1121,91 +1154,7 @@ namespace {
 			return nullptr;
 		}
 
-		// Unsafe mode (engine::allow_unsafe_parallel): the script vouches for its data, so the
-		// script-semantic rules go lenient (the walk keeps warming names and pinning methods);
-		// the engine-seam rules stay walls through wall() and the region still raises them
-		bool lenient = false;
-		bool lenient_saw_failure = false;
-		// Lenient mode's safety net: a verdict that returned early skipped a subtree, so every
-		// name a worker could probe in an admitted body is interned here regardless (member,
-		// getter and setter ids; identifiers the parser left lazy). Additive over the walk,
-		// single-threaded, before the tables freeze.
-		void warm_expr(const expression_ptr& e) {
-			if (!e) { return; }
-			switch (e->get_type()) {
-			case node_type::identifier_expr: {
-				auto* n = static_cast<identifier_expr*>(e.get());
-				if (n->symbol_id == UINT64_MAX) { n->symbol_id = sym.intern(n->name); }
-				return;
-			}
-			case node_type::member_expr: {
-				auto* m = static_cast<member_expr*>(e.get());
-				if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }
-				m->getter_id = sym.get_getter_id_with_view(m->member_id).first;
-				(void)sym.get_setter_id_with_view(m->member_id);
-				warm_expr(m->object);
-				return;
-			}
-			case node_type::binary_expr: { auto* n = static_cast<binary_expr*>(e.get()); warm_expr(n->left); warm_expr(n->right); return; }
-			case node_type::unary_expr: warm_expr(static_cast<unary_expr*>(e.get())->operand); return;
-			case node_type::assignment_expr: { auto* n = static_cast<assignment_expr*>(e.get()); warm_expr(n->target); warm_expr(n->value); return; }
-			case node_type::call_expr: { auto* n = static_cast<call_expr*>(e.get()); warm_expr(n->callee); for (const auto& a : n->arguments) { warm_expr(a); } return; }
-			case node_type::lambda_expr: {
-				auto* n = static_cast<lambda_expr*>(e.get());
-				for (const auto& prm : n->parameters) { if (prm.symbol_id == UINT64_MAX) { prm.symbol_id = sym.intern(prm.name); } warm_expr(prm.default_value); }
-				for (const auto& cap : n->captures) { warm_expr(cap.initializer); }
-				warm_stmt(n->body);
-				return;
-			}
-			case node_type::new_expr: for (const auto& a : static_cast<new_expr*>(e.get())->arguments) { warm_expr(a); } return;
-			case node_type::ternary_expr: { auto* n = static_cast<ternary_expr*>(e.get()); warm_expr(n->condition); warm_expr(n->then_expression); warm_expr(n->else_expression); return; }
-			case node_type::array_literal_expr: for (const auto& x : static_cast<array_literal_expr*>(e.get())->elements) { warm_expr(x); } return;
-			case node_type::map_literal_expr: for (const auto& kv : static_cast<map_literal_expr*>(e.get())->entries) { warm_expr(kv.first); warm_expr(kv.second); } return;
-			case node_type::throw_expr: warm_expr(static_cast<throw_expr*>(e.get())->value); return;
-			case node_type::cast_expr: warm_expr(static_cast<cast_expr*>(e.get())->operand); return;
-			default: return;
-			}
-		}
-		void warm_stmt(const statement_ptr& s) {
-			if (!s) { return; }
-			switch (s->get_type()) {
-			case node_type::expression_stmt: warm_expr(static_cast<expression_stmt*>(s.get())->expression); return;
-			case node_type::expression_decl: warm_expr(static_cast<expression_decl*>(s.get())->expression); return;
-			case node_type::statement_decl: warm_stmt(static_cast<statement_decl*>(s.get())->statement); return;
-			case node_type::block_stmt: for (const auto& d : static_cast<block_stmt*>(s.get())->declarations) { warm_stmt(d); } return;
-			case node_type::if_stmt: { auto* n = static_cast<if_stmt*>(s.get()); warm_expr(n->condition); warm_stmt(n->then_statement); warm_stmt(n->else_statement); return; }
-			case node_type::while_stmt: { auto* n = static_cast<while_stmt*>(s.get()); warm_expr(n->condition); warm_stmt(n->body); return; }
-			case node_type::for_stmt: { auto* n = static_cast<for_stmt*>(s.get()); warm_stmt(n->initializer); warm_expr(n->condition); warm_expr(n->update); warm_stmt(n->body); return; }
-			case node_type::range_for_stmt: { auto* n = static_cast<range_for_stmt*>(s.get()); warm_expr(n->container); warm_stmt(n->body); return; }
-			case node_type::return_stmt: warm_expr(static_cast<return_stmt*>(s.get())->value); return;
-			case node_type::try_stmt: { auto* n = static_cast<try_stmt*>(s.get()); warm_stmt(n->try_block); warm_stmt(n->catch_block); return; }
-			case node_type::switch_stmt: {
-				auto* n = static_cast<switch_stmt*>(s.get());
-				warm_expr(n->condition);
-				for (const auto& c : n->cases) { warm_expr(c->value); for (const auto& st : c->body) { warm_stmt(st); } }
-				if (n->default_case) { for (const auto& st : n->default_case->body) { warm_stmt(st); } }
-				return;
-			}
-			case node_type::variable_decl: warm_expr(static_cast<variable_decl*>(s.get())->initializer); return;
-			case node_type::destructuring_decl: warm_expr(static_cast<destructuring_decl*>(s.get())->initializer); return;
-			case node_type::function_decl: {
-				auto* n = static_cast<function_decl*>(s.get());
-				for (const auto& prm : n->parameters) { if (prm.symbol_id == UINT64_MAX) { prm.symbol_id = sym.intern(prm.name); } warm_expr(prm.default_value); }
-				warm_stmt(n->body);
-				return;
-			}
-			default: return;
-			}
-		}
-		bool wall(const ast_node* node, std::string reason) {
-			const bool was = lenient;
-			lenient = false;
-			const bool r = fail(node, std::move(reason));
-			lenient = was;
-			return r;
-		}
 		bool fail(const ast_node* node, std::string reason) {
-			if (lenient) { lenient_saw_failure = true; return true; }
 			if (!failed) {
 				failed = true;
 				adm.admitted = false;
@@ -1249,14 +1198,14 @@ namespace {
 		bool admit_function(const std::shared_ptr<script_defined_function>& fn, uint64_t global_name_id,
 		                    root_param param_mode, const ast_node* call_node) {
 			if (!fn || !fn->body) {
-				return wall(call_node, "fn has no body known at admission time");
+				return fail(call_node, "fn has no body known at admission time");
 			}
 			if (param_mode != root_param::none) {
 				if (fn->parameters().empty() || (param_mode == root_param::unary_value && fn->parameters().size() != 1)) {
-					return wall(fn->body.get(), "fn must take exactly one parameter");
+					return fail(fn->body.get(), "fn must take exactly one parameter");
 				}
 				if (param_mode == root_param::unary_value && fn->parameters()[0].is_reference) {
-					return wall(fn->body.get(), "fn may not take its element by reference (elements are detached copies)");
+					return fail(fn->body.get(), "fn may not take its element by reference (elements are detached copies)");
 				}
 			}
 			// Collect the graph entry before the visited check so recursion still records it
@@ -1303,7 +1252,6 @@ namespace {
 			--fn_depth;
 			return_type = saved_return;
 			scopes.swap(saved);
-			if (lenient) { warm_stmt(fn->body); }
 			return ok;
 		}
 
@@ -1323,16 +1271,15 @@ namespace {
 		std::unordered_set<const function_decl*> visited_methods;
 
 		bool admit_class_method(const class_definition* cls, uint64_t name_id, std::string_view name, const ast_node* site) {
-			// A method the barrier cannot pin: the verdict in safe mode; skipped in lenient
-			// mode, where its unpinned calls meet the worker's wall instead of a shared count
-			auto unpinnable = [&](std::string reason) { return lenient ? false : fail(site, std::move(reason)); };
+			// A method the barrier cannot pin is a verdict
+			auto unpinnable = [&](std::string reason) { return fail(site, std::move(reason)); };
 			auto decl = cls->single_method_overload_ptr(name_id);
 			if (!decl) {
 				return unpinnable("method '" + std::string(name) + "' on class '" + cls->get_name() +
 				                  "' is not admitted in a parallel body (only single-overload methods defined on the element's own class)");
 			}
 			if (decl->is_coroutine) {
-				return wall(site, "coroutine method '" + std::string(name) + "' is not allowed in a parallel body");
+				return fail(site, "coroutine method '" + std::string(name) + "' is not allowed in a parallel body");
 			}
 			if (!decl->body) {
 				return unpinnable("method '" + std::string(name) + "' has no body known at admission time");
@@ -1379,7 +1326,6 @@ namespace {
 			}
 			scopes.swap(saved);
 			method_class = saved_class;
-			if (lenient) { warm_stmt(decl->body); }
 			return ok;
 		}
 
@@ -1394,7 +1340,6 @@ namespace {
 				for (const class_definition* cls : classes) {
 					if (!cls->defines_method(callrec.name_id)) { continue; }
 					if (!admit_class_method(cls, callrec.name_id, callrec.name, callrec.site)) {
-						if (lenient && !failed) { continue; }   // skipped, not walled: the next method still warms and pins
 						return false;
 					}
 				}
@@ -1545,16 +1490,16 @@ namespace {
 				return true;
 			}
 			case node_type::function_decl:
-				return wall(s.get(), "function declarations are not allowed in a parallel body");
+				return fail(s.get(), "function declarations are not allowed in a parallel body");
 			case node_type::class_decl:
-				return wall(s.get(), "class declarations are not allowed in a parallel body");
+				return fail(s.get(), "class declarations are not allowed in a parallel body");
 			case node_type::namespace_decl:
-				return wall(s.get(), "namespace declarations are not allowed in a parallel body");
+				return fail(s.get(), "namespace declarations are not allowed in a parallel body");
 			case node_type::enum_decl:
-				return wall(s.get(), "enum declarations are not allowed in a parallel body");
+				return fail(s.get(), "enum declarations are not allowed in a parallel body");
 			case node_type::include_decl:
 			case node_type::import_decl:
-				return wall(s.get(), "include/import is not allowed in a parallel body");
+				return fail(s.get(), "include/import is not allowed in a parallel body");
 			default:
 				return fail(s.get(), "statement is not allowed in a parallel body");
 			}
@@ -1593,7 +1538,7 @@ namespace {
 					if (n->left && n->left->get_type() == node_type::identifier_expr) {
 						auto* root = static_cast<identifier_expr*>(n->left.get());
 						if (!is_local(root->symbol_id)) {
-							touch_capture(root, true);
+							touch_capture(root, true, n->right.get());
 							return walk_expr(n->right);
 					}
 					}
@@ -1666,11 +1611,11 @@ namespace {
 				return walk_expr(n->operand);
 			}
 			case node_type::yield_expr:
-				return wall(e.get(), "yield is not allowed in a parallel body");
+				return fail(e.get(), "yield is not allowed in a parallel body");
 			case node_type::include_expr:
-				return wall(e.get(), "include is not allowed in a parallel body");
+				return fail(e.get(), "include is not allowed in a parallel body");
 			case node_type::import_expr:
-				return wall(e.get(), "import is not allowed in a parallel body");
+				return fail(e.get(), "import is not allowed in a parallel body");
 			default:
 				return fail(e.get(), "expression is not allowed in a parallel body");
 			}
@@ -1685,6 +1630,7 @@ namespace {
 			case node_type::identifier_expr: {
 				auto* n = static_cast<identifier_expr*>(t.get());
 				if (is_element_symbol(n->symbol_id)) { note_element_whole(); if (proof_mode && aliasing) { root_escaped = true; } }   // replaced: the old element releases every handle
+				if (is_element_symbol(n->symbol_id)) { written_loop_variables.push_back(n->symbol_id); }
 				if (is_local(n->symbol_id)) { return true; }
 				if (!aliasing && self_field(n->symbol_id)) { return true; }   // element field store (chunk-exclusive)
 				if (aliasing) {
@@ -1696,6 +1642,16 @@ namespace {
 			case node_type::binary_expr: {
 				auto* n = static_cast<binary_expr*>(t.get());
 				if (n->op.type == token_type::left_bracket) {
+					// out[i] with out an enclosing name and i a loop variable: a disjoint index write (adm.index_writes)
+					const size_t index_param = aliasing ? SIZE_MAX : loop_variable_position(n->right.get());
+					if (index_param != SIZE_MAX && n->left && n->left->get_type() == node_type::identifier_expr) {
+						auto* root = static_cast<identifier_expr*>(n->left.get());
+						if (!is_local(root->symbol_id) && !is_element_symbol(root->symbol_id) && !self_field(root->symbol_id)) {
+							touch_capture(root, false, n->right.get());
+							adm.index_writes.push_back({ root->symbol_id, root->name, index_param, t.get() });
+							return true;
+						}
+					}
 					if (proof_mode && chain_root_is_element(t)) { adm.element_mutated = true; }
 					return walk_target(n->left, what, aliasing) && walk_expr(n->right);
 				}
@@ -1728,7 +1684,7 @@ namespace {
 					const jai::detail::math_fn fn = jai::detail::math_intrinsic_for_call(m);
 					if (fn == jai::detail::math_fn::random_ || fn == jai::detail::math_fn::random_range ||
 					    fn == jai::detail::math_fn::random_seed) {
-						return wall(m, "math::random/random_seed are not allowed in a parallel body (engine-owned rng state)");
+						return fail(m, "math::random/random_seed are not allowed in a parallel body (engine-owned rng state)");
 					}
 					if (fn != jai::detail::math_fn::none) {
 						for (const auto& a : call->arguments) {
@@ -1739,7 +1695,7 @@ namespace {
 					}
 					if (m->object && m->object->get_type() == node_type::identifier_expr &&
 					    static_cast<identifier_expr*>(m->object.get())->name == "time") {
-						return wall(m, "time:: calls are not allowed in a parallel body (engine-owned clock)");
+						return fail(m, "time:: calls are not allowed in a parallel body (engine-owned clock)");
 					}
 					return fail(m, "static member calls are not allowed in a parallel body");
 				}
@@ -1799,18 +1755,18 @@ namespace {
 				return true;
 			}
 			if (!call->callee || call->callee->get_type() != node_type::identifier_expr) {
-				return wall(call, "call target is not statically resolvable in a parallel body");
+				return fail(call, "call target is not statically resolvable in a parallel body");
 			}
 			auto* callee = static_cast<identifier_expr*>(call->callee.get());
 			const std::string callee_name(callee->name);
 			if (is_local(callee->symbol_id)) {
-				return wall(callee, "call target '" + callee_name + "' is not statically resolvable in a parallel body");
+				return fail(callee, "call target '" + callee_name + "' is not statically resolvable in a parallel body");
 			}
 			// Bare sibling-method calls resolve through the env→bound-method seam at
 			// runtime (the engine-backend escape the pins exist to prevent); the
 			// 'this.' spelling routes through the pinned dispatch op instead
 			if (method_class && method_class->defines_method(callee->symbol_id)) {
-				return wall(callee, "method '" + callee_name + "' must be called as 'this." + callee_name +
+				return fail(callee, "method '" + callee_name + "' must be called as 'this." + callee_name +
 				               "()' in a parallel body (bare sibling calls are not admitted, v1)");
 			}
 			// Method bodies stay within the element: global-function graphs from methods
@@ -2082,7 +2038,6 @@ namespace {
 	parallel_admission build_admission(engine& eng, const std::shared_ptr<script_defined_function>& fn,
 	                                   bool inplace_root = false) {
 		admission_builder builder(eng);
-		builder.lenient = eng.allow_unsafe_parallel();
 		if (inplace_root) {
 			builder.inplace_root = true;
 			builder.adm.inplace_root = true;
@@ -2093,7 +2048,7 @@ namespace {
 		if (builder.admit_function(fn, UINT64_MAX,
 		                           inplace_root ? admission_builder::root_param::unary
 		                                        : admission_builder::root_param::unary_value,
-		                           nullptr)) {
+		                           nullptr) && builder.check_index_writes()) {
 			builder.adm.admitted = true;
 		}
 		return std::move(builder.adm);
@@ -2846,7 +2801,8 @@ namespace {
 	struct reach_filter;
 	element_proof prove_elements(engine& eng, const script_value& array_value, script_array& node,
 	                             std::vector<script_value>& elements, const reach_filter& reach,
-	                             const char* prefix, std::vector<type_info*>* types = nullptr);
+	                             const char* prefix, std::vector<type_info*>* types = nullptr,
+	                             std::vector<std::pair<const void*, size_t>>* handle_objects = nullptr);
 
 	// In-place element PROOF + NORMALIZATION (parallel_for):
 	// after this pass returns true, mutating the element under chunk exclusivity can
@@ -2941,8 +2897,31 @@ namespace {
 		return true;
 	}
 
-	// types: every visited node's shape (the transform's prewarm seed - its workers clone whole elements)
-	bool normalize_element_inplace(script_value& v, engine& eng, reach_filter reach = {}, bool unreferenced_array = false, const class_definition* string_free_class = nullptr, std::vector<type_info*>* types = nullptr) {
+	bool normalize_element_inplace(script_value& v, engine& eng, reach_filter reach = {}, bool unreferenced_array = false, const class_definition* string_free_class = nullptr, std::vector<type_info*>* types = nullptr, const void** shared_key = nullptr);
+
+	// The slots of an instance whose declared type can reach a refcount, and its runtime-added fields
+	bool normalize_instance_fields(class_instance* inst, const class_definition* cd, engine& eng, const reach_filter& reach, bool unreferenced_array, std::vector<type_info*>* types) {
+		for (const uint32_t slot : cd->handle_bearing_slots()) {
+			const uint64_t id = cd->slot_field(slot);
+			if (!reach.names(id)) { continue; }
+			if (script_value* field = inst->field_slot_value(slot)) {
+				if (!normalize_element_inplace(*field, eng, reach.below(id), unreferenced_array, nullptr, types)) { return false; }
+			}
+		}
+		if (inst->has_user_overflow_fields()) {   // runtime-added fields carry no declared type: walk them
+			bool ok = true;
+			inst->for_each_field([&](uint64_t id, script_value& field) {
+				if (ok && cd->field_slot(id) == class_definition::k_no_field_slot && !normalize_element_inplace(field, eng, reach, unreferenced_array, nullptr, types)) { ok = false; }
+			});
+			if (!ok) { return false; }
+		}
+		return true;
+	}
+
+	// types: every visited node's shape (the transform's prewarm seed - its workers clone whole elements). shared_key: asked for a
+	// top-level element only, which may be a handle (a shared_ptr or a weak_ptr's live object): it receives the object, the fork
+	// admits the handle when no other element names that object, and the object is walked in place, never cloned apart
+	bool normalize_element_inplace(script_value& v, engine& eng, reach_filter reach, bool unreferenced_array, const class_definition* string_free_class, std::vector<type_info*>* types, const void** shared_key) {
 		if (types && v.get_type_info().get()) { types->push_back(v.get_type_info().get()); }
 #ifdef JAISCRIPT_VM_PROFILE
 		++prof_norm_nodes_[v.raw_storage_index() < 16 ? v.raw_storage_index() : 15];
@@ -3039,10 +3018,14 @@ namespace {
 				return false;
 			}
 			JAI_OBJ_SEC(0);
-			// A shared_ptr-tagged instance aliases by script-visible design: a live alias (the count
-			// says so) defeats the value-semantics premise below and cannot be cloned apart without
-			// diverging from the serial loop
-			if (v.is_shared_ptr_type() && (handle.use_count() > 1 || handle->data.use_count() > 1)) { return false; }
+			// A shared_ptr-tagged instance aliases by script-visible design: a top-level element hands its object to the
+			// distinctness check; a nested one must be its object's only holder, since nothing proves its aliases apart
+			const bool shared = v.is_shared_ptr_type();
+			if (shared && shared_key) {
+				*shared_key = handle->data.get();
+			} else if (shared && (handle.use_count() > 1 || handle->data.use_count() > 1)) {
+				return false;
+			}
 			// Reference-free fast path: no live field reference pins this instance, and the caller
 			// proved no live element reference pins the array (unreferenced_array). Value semantics
 			// then make the instance and its object/container subtree exclusive by construction;
@@ -3059,7 +3042,7 @@ namespace {
 				}
 				return true;
 			}
-			if (handle.use_count() > 1 || handle->data.use_count() > 1) {
+			if (!shared && (handle.use_count() > 1 || handle->data.use_count() > 1)) {
 				v = v.clone();   // engine-internal aliasing: fresh exclusive instance
 				auto& fresh = v.unchecked_get_object_storage();
 				inst = static_cast<class_instance*>(fresh->data.get());
@@ -3070,22 +3053,21 @@ namespace {
 			JAI_OBJ_SEC(1);
 			// Only slots whose declared type can reach a refcount need the walk (strings detach,
 			// containers and nested objects alias-check); scalar slots are exclusive by type
-			for (const uint32_t slot : cd->handle_bearing_slots()) {
-				const uint64_t id = cd->slot_field(slot);
-				if (!reach.names(id)) { continue; }
-				if (script_value* field = inst->field_slot_value(slot)) {
-					if (!normalize_element_inplace(*field, eng, reach.below(id), unreferenced_array, nullptr, types)) { return false; }
-				}
-			}
+			const bool fields_ok = normalize_instance_fields(inst, cd, eng, reach, unreferenced_array, types);
 			JAI_OBJ_SEC(2);
-			if (inst->has_user_overflow_fields()) {   // runtime-added fields carry no declared type: walk them
-				bool ok = true;
-				inst->for_each_field([&](uint64_t id, script_value& field) {
-					if (ok && cd->field_slot(id) == class_definition::k_no_field_slot && !normalize_element_inplace(field, eng, reach, unreferenced_array, nullptr, types)) { ok = false; }
-				});
-				if (!ok) { return false; }
-			}
-			return true;
+			return fields_ok;
+		}
+		case script_value::TYPEID_WEAK_PTR: {
+			// a top-level weak handle's body reaches the live object through lock(): that object, like a shared element's
+			if (!shared_key) { return false; }
+			auto locked = v.get_weak_ptr().lock();
+			if (!locked) { return true; }   // expired: lock() yields null in the body
+			if (!locked->is_class_instance_wrapper || !locked->data) { return false; }
+			auto* inst = static_cast<class_instance*>(locked->data.get());
+			const class_definition* cd = inst->get_class_definition();
+			if (!cd || !cd->flat_value_semantics()) { return false; }
+			*shared_key = locked->data.get();
+			return normalize_instance_fields(inst, cd, eng, reach, false, types);
 		}
 		default:
 			return false;
@@ -3153,12 +3135,12 @@ namespace {
 	// (one scan of the 16-byte slot tags, no instance read; the declared type is
 	// a proven fact about every element) and walks per element only when it fails; every
 	// other source that is not statically all-primitive walks (normalize_element_inplace).
-	// engine::allow_unsafe_parallel keeps the classes and the detach and drops the verdict.
 	// elements: the boxed view walked for a non-object kind (the node's own vector, or the
 	// caller's materialized copy of a typed primitive/string buffer)
 	element_proof prove_elements(engine& eng, const script_value& array_value, script_array& node,
 	                             std::vector<script_value>& elements, const reach_filter& reach,
-	                             const char* prefix, std::vector<type_info*>* types) {
+	                             const char* prefix, std::vector<type_info*>* types,
+	                             std::vector<std::pair<const void*, size_t>>* handle_objects) {
 		element_proof proof;
 		proof.typed_obj = node.is_typed() && node.kind() == script_array::kind_t::obj;
 		auto& slots = node.objs();
@@ -3174,7 +3156,6 @@ namespace {
 				if (std::find(proof.tags.begin(), proof.tags.end(), tag) == proof.tags.end()) { proof.tags.push_back(tag); }
 			}
 		}
-		const bool lenient = eng.allow_unsafe_parallel();   // the script vouches: no verdict, but the classes still collect and shared strings still detach
 		if (proof.typed_obj && n > 0) {
 			declared_exclusive = node.live_elem_refs == 0;
 			std::vector<const class_definition*> visited;
@@ -3212,21 +3193,22 @@ namespace {
 		};
 		for (size_t i = 0; i < n; ++i) {
 			bool ok = false;
+			const void* object = nullptr;
+			const void** key = handle_objects ? &object : nullptr;   // handles are admitted at the top level only, for the distinctness check
 			try {
 				if (proof.typed_obj) {
 					slot_box box(slots[i], &eng);
-					ok = normalize_element_inplace(box.v, eng, reach, node.live_elem_refs == 0, string_free_class, types);
+					ok = normalize_element_inplace(box.v, eng, reach, node.live_elem_refs == 0, string_free_class, types, key);
 				} else {
-					ok = normalize_element_inplace(elements[i], eng, reach, node.live_elem_refs == 0, string_free_class, types);
+					ok = normalize_element_inplace(elements[i], eng, reach, node.live_elem_refs == 0, string_free_class, types, key);
 				}
+				if (object) { handle_objects->emplace_back(object, i); }
 			} catch (const std::exception& e) {
-				if (lenient) { continue; }
 				proof.failed = i;
 				proof.what = e.what();
 				return proof;
 			}
 			if (!ok) {
-				if (lenient) { continue; }
 				proof.failed = i;
 				return proof;
 			}
@@ -3242,6 +3224,23 @@ namespace {
 			}
 		}
 		return proof;
+	}
+
+	// Distinctness of the handle elements a fork admitted (range and zipped arrays, by element): one worker touches each object, so
+	// an object named at two elements fails; the repeat met first in element order is returned with the element it repeats. The
+	// same object at one element in several zipped arrays is that element's worker alone
+	std::pair<size_t, size_t> repeated_handle_object(std::vector<std::pair<const void*, size_t>>& handle_objects) {
+		std::pair<size_t, size_t> result{SIZE_MAX, SIZE_MAX};
+		if (handle_objects.size() < 2) { return result; }
+		std::sort(handle_objects.begin(), handle_objects.end());   // each object's elements in element order
+		for (size_t k = 1, group = 0; k < handle_objects.size(); ++k) {
+			if (handle_objects[k].first != handle_objects[group].first) { group = k; continue; }
+			const size_t original = handle_objects[group].second;
+			if (handle_objects[k].second != original && handle_objects[k].second < result.first) {
+				result = {handle_objects[k].second, original};
+			}
+		}
+		return result;
 	}
 
 	// Borrow admission (content half): TRUE when every element of the container is a plain
@@ -3582,7 +3581,21 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		cap.entry = &entry;
 		cap.method_scope = method_scope;
 		cap.source = global.value().deref();
-		switch (cap.source->raw_storage_index()) {
+		// an index-written array: every worker writes its own copy, merged back at the join
+		const size_t kind_index = !method_scope && adm->index_written(entry.name_id) ? size_t(-1) : cap.source->raw_storage_index();
+		if (kind_index == size_t(-1)) {
+			if (cap.source->raw_storage_index() != script_value::TYPEID_ARRAY) {
+				return usage("captured name '" + std::string(entry.name) + "' is written at an index but is not an array");
+			}
+			if (written_container(*cap.source)) {
+				return usage("captured name '" + std::string(entry.name) +
+				             "' is the container being mutated (reads through it would race the element writes)");
+			}
+			cap.kind = parallel_capture_kind::written;
+		}
+		switch (kind_index) {
+		case size_t(-1):
+			break;
 		case script_value::TYPEID_NULL:
 		case script_value::TYPEID_INT:
 		case script_value::TYPEID_FLOAT:
@@ -3663,7 +3676,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	// read-only by-value parameter) reaches only the members it names; a body that copies the
 	// element (a mutating by-value parameter clones every field) reaches it whole. The
 	// builtin's all-primitive input is exclusive by construction (typed proof, zero scans;
-	// untyped pay ONE content scan). engine::allow_unsafe_parallel keeps the walk and drops its verdict.
+	// untyped pay ONE content scan).
 	const bool binds_in_place = plan.inplace || (!adm->element_reach_all && !adm->element_mutated);
 	const reach_filter reach = binds_in_place
 		? reach_filter{ adm->element_reach_all ? nullptr : &adm->element_reached_members, &adm->element_reached_whole }
@@ -3672,11 +3685,12 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	const uint64_t prof_norm0 = __rdtsc();
 #endif
 	std::vector<type_info*> value_types;
+	std::vector<std::pair<const void*, size_t>> handle_objects;   // (object, element) of every handle element, range and zips
 	element_proof proof;
 	const bool skip_proof = !plan.inplace && (statically_all_scalar(array_value) || parallel_content_all_scalar(array_value));
 	if (!skip_proof) {
 		state.faults.checkpoint("region.element_proof");
-		proof = prove_elements(eng, array_value, node, source, reach, plan.prefix, plan.inplace ? nullptr : &value_types);
+		proof = prove_elements(eng, array_value, node, source, reach, plan.prefix, plan.inplace ? nullptr : &value_types, &handle_objects);
 		if (proof.failed != SIZE_MAX) {
 			if (!proof.what.empty()) {
 				return usage("element " + std::to_string(proof.failed) + ": " + proof.what);
@@ -3684,7 +3698,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			if (plan.inplace) {
 				return usage("element " + std::to_string(proof.failed) +
 				             " cannot be proven exclusive (only value-semantic shapes are: primitives, strings,"
-				             " value containers, flat value-class instances; engine::allow_unsafe_parallel(true) overrides)");
+				             " value containers, flat value-class instances and distinct handles to them)");
 			}
 			const script_value failed_element = typed_obj ? node.get(proof.failed, &eng) : source[proof.failed];
 			const char* what = non_value_semantic_what(failed_element);
@@ -3716,7 +3730,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 		if (znode->is_typed() && znode->kind() != script_array::kind_t::obj) { znode->demote_to_hetero(&eng); }
 		if (!plan.zip_arrays_fresh) {
-			element_proof zproof = prove_elements(eng, zv, *znode, znode->values(), reach_filter{}, plan.prefix);
+			element_proof zproof = prove_elements(eng, zv, *znode, znode->values(), reach_filter{}, plan.prefix, nullptr, &handle_objects);
 			if (zproof.failed != SIZE_MAX) {
 				return usage("zipped array " + std::to_string(j + 1) + " element " + std::to_string(zproof.failed) +
 				             (zproof.what.empty() ? std::string(" cannot be proven exclusive") : ": " + zproof.what));
@@ -3728,6 +3742,43 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 		zip_nodes.push_back(znode);
 	}
+	if (const auto [repeat, original] = repeated_handle_object(handle_objects); repeat != SIZE_MAX) {
+		return usage("elements " + std::to_string(original) + " and " + std::to_string(repeat) +
+		             " hold the same object (an object a body reaches through a handle element belongs to one element)");
+	}
+	// Disjoint index writes: the loop variable indexing an enclosing array takes distinct values, so no two elements write one slot
+	// (a value that is no int in range raises in its own iteration, as the serial loop's store does)
+	auto index_node_of = [&](size_t index_param) -> const script_array* {
+		if (index_param == 0) { return &node; }
+		return index_param - 1 < zip_nodes.size() ? zip_nodes[index_param - 1] : nullptr;
+	};
+	auto written_capture = [&](uint64_t name_id) -> const resolved_capture* {
+		for (const auto& cap : captures) {
+			if (cap.kind == parallel_capture_kind::written && cap.entry->name_id == name_id) { return &cap; }
+		}
+		return nullptr;
+	};
+	for (size_t w = 0; w < adm->index_writes.size(); ++w) {
+		const auto& iw = adm->index_writes[w];
+		bool repeated = false;
+		for (size_t v = 0; v < w; ++v) { repeated = repeated || adm->index_writes[v].name_id == iw.name_id; }
+		const script_array* index_node = index_node_of(iw.index_param);
+		const resolved_capture* target = written_capture(iw.name_id);
+		if (repeated || !index_node || !target) { continue; }
+		const size_t slot_count = target->source->unchecked_array_node()->size();
+		std::vector<size_t> writer(slot_count, SIZE_MAX);
+		for (size_t p = 0; p < n && p < index_node->size(); ++p) {
+			const script_value at = index_node->get(p, &eng);
+			const script_value& index = at.deref();
+			if (!index.is_int() || index.unchecked_as_int() < 0 || static_cast<size_t>(index.unchecked_as_int()) >= slot_count) { continue; }
+			const size_t slot = static_cast<size_t>(index.unchecked_as_int());
+			if (writer[slot] != SIZE_MAX) {
+				return usage("elements " + std::to_string(writer[slot]) + " and " + std::to_string(p) + " write '" + std::string(iw.name) +
+				             "' at the same index " + std::to_string(slot));
+			}
+			writer[slot] = p;
+		}
+	}
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_norm1 = __rdtsc();
 #endif
@@ -3738,7 +3789,6 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	// ELEMENT METHODS (in-place statement): admitted at the barrier against the element
 	// classes the proof found; their captures classify like the body's
 	admission_builder method_adm(eng);
-	method_adm.lenient = eng.allow_unsafe_parallel();
 	method_adm.inplace_root = true;
 	method_adm.prefix = plan.prefix;
 	state.faults.checkpoint("region.method_admission");
@@ -3999,6 +4049,10 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
 					provisioned = script_value::make_parallel_borrow(*cap.source, &eng);
 					break;
+				case parallel_capture_kind::written:   // a fresh copy each region: the join reads back what this worker wrote
+					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
+					provisioned = cap.source->parallel_detached_copy();
+					break;
 				}
 			} catch (const std::exception& e) {
 				return usage("captured name '" + std::string(cap.entry->name) + "': " + e.what());
@@ -4182,6 +4236,35 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	for (const auto& ctx : contexts) {
 		if (ctx->error && (!winner || ctx->error->iteration < winner->iteration)) {
 			winner = &*ctx->error;
+		}
+	}
+	// Index writes: each element's slot comes back from the worker that ran the element, in element order up to the first failing
+	// element (the serial loop's stores before it)
+	if (!adm->index_writes.empty()) {
+		auto owner = [&](size_t p) -> size_t {
+			if (chunk_block) { return (p / chunk_block) % chunk_stride; }
+			for (size_t k = 0; k < chunk_begin.size(); ++k) {
+				if (p >= chunk_begin[k] && p < chunk_begin[k] + chunk_count[k]) { return k; }
+			}
+			return 0;
+		};
+		const size_t limit = winner ? std::min(n, winner->iteration) : n;
+		for (const auto& iw : adm->index_writes) {
+			const script_array* index_node = index_node_of(iw.index_param);
+			const resolved_capture* target = written_capture(iw.name_id);
+			if (!index_node || !target) { continue; }
+			script_array* live = const_cast<script_array*>(target->source->unchecked_array_node());
+			for (size_t p = 0; p < limit && p < index_node->size(); ++p) {
+				const script_value at = index_node->get(p, &eng);
+				const script_value& index = at.deref();
+				if (!index.is_int() || index.unchecked_as_int() < 0 || static_cast<size_t>(index.unchecked_as_int()) >= live->size()) { continue; }
+				const size_t slot = static_cast<size_t>(index.unchecked_as_int());
+				const size_t k = owner(p);
+				if (k >= contexts.size()) { continue; }
+				const script_value* copy = contexts[k]->root_env->get_own_value_ptr(iw.name_id);
+				if (!copy || !copy->is_array() || slot >= copy->unchecked_array_node()->size()) { continue; }
+				live->set(slot, copy->unchecked_array_node()->get(slot, &eng));
+			}
 		}
 	}
 	if (winner) {

@@ -454,13 +454,6 @@ namespace jai {
         void parallel_thread_count(size_t workers);
         size_t parallel_thread_count() const;
 
-        // Trusted-script escape hatch: parallel-body shapes whose safety cannot be
-        // PROVEN statically (script-class method dispatch, non-whitelisted host calls)
-        // are admitted instead of rejected — the caller vouches for them. Default OFF:
-        // safe mode proves or errors, it never foot-guns.
-        void allow_unsafe_parallel(bool allowed);
-        bool allow_unsafe_parallel() const;
-
         // How long a pool worker (and the joining thread) spins for the next region before
         // parking on the kernel, when regions arrive at least that densely (a frame's worth of
         // fork-joins); sparse regions park at once. 0 = always park. Default 1000 us.

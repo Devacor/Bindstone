@@ -461,22 +461,19 @@ public:
 
         test("parallel_bodies_reject_time_calls", [this]() {
             for (bool use_vm : {false, true}) {
-                for (bool unsafe : {false, true}) {
-                    virtual_clock clk;
-                    auto e = make_timed(use_vm, clk);
-                    e->allow_unsafe_parallel(unsafe);
-                    const std::string what = std::string(use_vm ? "vm" : "interpreter") + (unsafe ? ", unsafe mode" : "");
-                    auto r = e->execute(R"(
-                        array<float> xs = [1.0, 2.0, 3.0];
-                        try { parallel_for (auto& x : xs) { x = time::now(); } } catch (e) { return e; }
-                        return "no-error";)").to_string();
-                    check_true(r.find("time:: calls are not allowed in a parallel body (engine-owned clock)") != std::string::npos, "parallel_for (" + what + "): " + r);
-                    auto t = e->execute(R"(
-                        float stamp(float x) { return x + time::unix_time(); }
-                        try { parallel_transform([1.0, 2.0], stamp); } catch (e) { return e; }
-                        return "no-error";)").to_string();
-                    check_true(t.find("time:: calls are not allowed in a parallel body (engine-owned clock)") != std::string::npos, "parallel_transform (" + what + "): " + t);
-                }
+                virtual_clock clk;
+                auto e = make_timed(use_vm, clk);
+                const std::string what = use_vm ? "vm" : "interpreter";
+                auto r = e->execute(R"(
+                    array<float> xs = [1.0, 2.0, 3.0];
+                    try { parallel_for (auto& x : xs) { x = time::now(); } } catch (e) { return e; }
+                    return "no-error";)").to_string();
+                check_true(r.find("time:: calls are not allowed in a parallel body (engine-owned clock)") != std::string::npos, "parallel_for (" + what + "): " + r);
+                auto t = e->execute(R"(
+                    float stamp(float x) { return x + time::unix_time(); }
+                    try { parallel_transform([1.0, 2.0], stamp); } catch (e) { return e; }
+                    return "no-error";)").to_string();
+                check_true(t.find("time:: calls are not allowed in a parallel body (engine-owned clock)") != std::string::npos, "parallel_transform (" + what + "): " + t);
             }
         });
 

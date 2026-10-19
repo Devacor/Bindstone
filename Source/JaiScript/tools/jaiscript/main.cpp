@@ -127,7 +127,6 @@ struct options {
 	bool watch = false;
 	bool time_runs = false;
 	bool debug = true;                     // DAP listener on by default (localhost, free until attach)
-	bool unsafe_parallel = false;
 	bool param_alias = true;               // engine::parameter_alias (--no-param-alias: every by-value parameter clones)
 	bool local_alias = true;               // engine::local_alias (--no-local-alias: every by-value local declaration clones)
 	bool type_proofs = true;               // engine::type_proofs (--no-proofs: no proofs, typed ops or cell blocks; the general form)
@@ -217,8 +216,6 @@ void print_usage() {
 		"  --no-param-alias      bind every by-value parameter with a clone (the read-only elision off)\n"
 		"  --no-local-alias      copy every by-value local declaration (the read-only local elision off)\n"
 		"  --no-proofs           run without type proofs, typed ops or cell blocks (the general form)\n"
-		"  --unsafe-parallel     admit parallel bodies the region cannot prove safe (engine::allow_unsafe_parallel);\n"
-		"                        a body that races gets racy results, the engine's own walls still raise\n"
 		"  --debug-port=N        first port the DAP listener tries (default 52477, probing +10)\n"
 		"  --pause / --no-pause  force / suppress the \"press Enter to close\" hold after a file\n"
 		"                        run (auto: pauses only when the console window is exclusively\n"
@@ -274,7 +271,6 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a == "--watch") { opt.watch = true; }
 		else if (a == "--time") { opt.time_runs = true; }
 		else if (a == "--no-debug") { opt.debug = false; }
-		else if (a == "--unsafe-parallel") { opt.unsafe_parallel = true; }
 		else if (a == "--no-param-alias") { opt.param_alias = false; }
 		else if (a == "--no-local-alias") { opt.local_alias = false; }
 		else if (a == "--no-proofs") { opt.type_proofs = false; }
@@ -1143,7 +1139,6 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 		if (!jai::engine::miss_injection_available()) { std::fprintf(stderr, "--miss-every: this build carries no miss injection (configure with -DJAISCRIPT_MISS_INJECTION=ON)\n"); std::exit(2); }
 		eng->cells_miss_every(opt.miss_every);
 	}
-	if (opt.unsafe_parallel) { eng->allow_unsafe_parallel(true); }
 	eng->static_checking(opt.check == "off" ? jai::check_mode::off : opt.check == "warn" ? jai::check_mode::warn : jai::check_mode::strict);
 	eng->execution_budget(opt.budget);
 	eng->parameter_alias(opt.param_alias);

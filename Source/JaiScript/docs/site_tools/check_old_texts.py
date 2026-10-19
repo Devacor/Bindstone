@@ -51,6 +51,9 @@ OLD_TEXTS = [
     r"Maximum serialization depth",
     r"Maximum deserialization depth",
     r"cannot be mutated in place",
+    r"allow_unsafe_parallel",
+    r"--unsafe-parallel",
+    r"[Uu]nsafe parallel mode",
     r"Cannot compare: the values nest deeper",
 ]
 

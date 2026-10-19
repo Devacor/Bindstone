@@ -8,7 +8,7 @@
 	#include "MV/Utility/generalUtility.h"
 	#include "MV/Utility/stopwatch.h"
 	#include "MV/Utility/taskActions.hpp"
-	#include <jaiscript/detail/thread_pool.hpp>
+	#include <jaiscript/thread_pool.hpp>
 	#include "MV/Utility/optionalCalls.hpp"
 	#include "MV/Utility/visitor.hpp"
 	#include "MV/Utility/sha512.h"

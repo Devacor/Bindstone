@@ -32,6 +32,7 @@
 #include "implementation/vm/vm_coverage.cpp"
 #include "implementation/coroutine.cpp"
 #include "implementation/parallel_transform.cpp"
+#include "implementation/thread_pool.cpp"
 #include "implementation/debug/controller.cpp"
 #include "implementation/stdlib/json.cpp"
 #include "implementation/stdlib/io.cpp"

@@ -14,7 +14,7 @@
 #include <asio.hpp>
 #include <asio/ssl.hpp>
 #include "MV/Utility/log.h"
-#include <jaiscript/detail/thread_pool.hpp>
+#include <jaiscript/thread_pool.hpp>
 
 
 #include <asio/ssl/context.hpp>

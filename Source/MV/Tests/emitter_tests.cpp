@@ -2,7 +2,7 @@
 // edits, texture swaps, a throwing stage and destruction mid-flight are all safe. Foundry, built into mv_tests.exe.
 
 #include <jaiscript/testing/foundry.hpp>
-#include <jaiscript/detail/thread_pool.hpp>
+#include <jaiscript/thread_pool.hpp>
 #include "MV/Render/render.h"
 #include "MV/Render/Scene/node.h"
 #include "MV/Render/Scene/emitter.h"

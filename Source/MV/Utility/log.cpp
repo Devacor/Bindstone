@@ -1,6 +1,6 @@
 #include "log.h"
 #include "services.hpp"
-#include <jaiscript/detail/thread_pool.hpp>
+#include <jaiscript/thread_pool.hpp>
 
 namespace MV {
 	Logger* Logger::instance() {
@@ -14,7 +14,7 @@ namespace MV {
 	}
 
 	jai::thread_pool& initializeThreadPool(jai::thread_pool& a_pool) {
-		a_pool.spin_budget(std::chrono::nanoseconds{0});
+		a_pool.spin_budget_ns(0);
 		a_pool.on_exception([](std::exception_ptr a_exception) {
 			try {
 				std::rethrow_exception(a_exception);

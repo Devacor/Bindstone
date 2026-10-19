@@ -17,10 +17,11 @@
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/fault_injection.hpp>
-#include <jaiscript/detail/thread_pool.hpp>
+#include <jaiscript/thread_pool.hpp>
 #include <map>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>

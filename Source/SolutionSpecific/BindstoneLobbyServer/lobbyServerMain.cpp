@@ -1,5 +1,5 @@
 #include "Game/gameEditor.h"
-#include <jaiscript/detail/thread_pool.hpp>
+#include <jaiscript/thread_pool.hpp>
 
 #include "MV/Serialization/serialize.h"
 

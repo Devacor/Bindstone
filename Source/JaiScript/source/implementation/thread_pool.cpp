@@ -1,65 +1,54 @@
-#pragma once
-
-#ifndef __JAISCRIPT_DETAIL_THREAD_POOL_HPP__
-#define __JAISCRIPT_DETAIL_THREAD_POOL_HPP__
-
-// Persistent worker pool (internal/parallel_design.md Q5: JaiScript owns the pool).
-// Standard C++ only (std::thread/mutex/condition_variable) — no OS APIs.
-//
-// Two submission modes, because the parallel design's pinned worker engines must
-// always run on their own thread (internal/parallel_design.md §1):
-//   submit(task)            — shared queue, any worker runs it.
-//   submit_to(worker, task) — that worker's dedicated queue; ONLY worker `worker`'s
-//                             thread ever runs it (stable std::this_thread::get_id()).
-// Continuations: submit(task, then, where) and submit_batch(tasks, then, where) run `then`
-// once after the task (every task of the batch) finished, threw or not, either on the worker
-// that finished last (then_on::pool) or posted (then_on::posted). post(task) queues work for
-// the host's own thread, which run_posted() drains; the posted queue has its own lock, so
-// posting never contends with the workers.
-// Zero static state: the pool is a plain object; every queue, lock, and handler
-// lives in the instance. Task exceptions are routed to on_exception (or swallowed),
-// never allowed to kill a worker. Destruction drops queued-but-unstarted tasks,
-// finishes in-flight ones, and joins every thread.
-//
-// Wake protocol: a worker that just finished a task spins on its own flag for up to
-// spin_budget before parking on the condition variable, and only when the pool's last two
-// batches arrived within that budget (dense fork-join regions, a frame's worth of them);
-// a pool whose regions come one per frame parks at once and burns nothing between them.
-// The submitter wakes the kernel only for parked targets, and a worker pings the joiners
-// only while one is parked; the flags and the parked-joiner count that decide this are read
-// under the mutex the waiter sets them under, so no wake is lost. Task order and placement
-// never change.
-
-#include <jaiscript/detail/fault_injection.hpp>
+#include "../../include/jaiscript/thread_pool.hpp"
+#include "../../include/jaiscript/detail/fault_injection.hpp"
+#include "../../include/jaiscript/detail/thread_pool_access.hpp"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <cstddef>
-#include <cstdint>
 #include <deque>
-#include <exception>
-#include <functional>
-#include <memory>
 #include <mutex>
 #include <thread>
 #include <utility>
-#include <vector>
 #if defined(_M_X64) || defined(__x86_64__) || defined(_M_IX86) || defined(__i386__)
 #include <immintrin.h>
 #endif
 
+// Standard C++ only (std::thread/mutex/condition_variable), no OS APIs, and zero static state: every
+// queue, lock and handler lives in the pool's state. Task exceptions go to on_exception (or are
+// swallowed), never allowed to kill a worker.
+//
+// Two submission modes, because the parallel design's pinned worker engines must always run on their
+// own thread (internal/parallel_design.md §1): submit (shared queue, any worker) and submit_to (that
+// worker's queue, only its thread). The posted queue has its own lock, so posting never contends with
+// the workers.
+//
+// Wake protocol: a worker that just finished a task spins on its own flag for up to spin_budget before
+// parking on the condition variable, and only when the pool's last two batches arrived within that
+// budget (dense fork-join regions, a frame's worth of them); a pool whose regions come one per frame
+// parks at once and burns nothing between them. The submitter wakes the kernel only for parked
+// targets, and a worker pings the joiners only while one is parked; the flags and the parked-joiner
+// count that decide this are read under the mutex the waiter sets them under, so no wake is lost.
+// Task order and placement never change.
+
 namespace jai {
 
-    class thread_pool {
-    public:
-        using task_type = std::function<void()>;
+    struct thread_pool::state {
+        struct worker {
+            std::thread thread;
+            std::thread::id id;
+            std::deque<task_type> pinned;
+            std::atomic<bool> has_work{false};   // pinned queue non-empty (a spinning worker reads it lock-free)
+            bool parked = false;                 // waiting on work_cv_; read and written under mutex_
+        };
 
-        static size_t default_worker_count() noexcept {
-            const unsigned hw = std::thread::hardware_concurrency();
-            return hw > 1 ? hw - 1 : 1;
-        }
+        struct batch_state {
+            batch_state(size_t count, task_type continuation, then_on continuation_place) :
+                remaining(count), then(std::move(continuation)), where(continuation_place) {}
+            std::atomic<size_t> remaining;
+            task_type then;
+            then_on where;
+        };
 
-        explicit thread_pool(size_t worker_count = 0, const detail::fault_injection* faults = nullptr) {
+        state(size_t worker_count, const detail::fault_injection* faults) {
             if (worker_count == 0) worker_count = default_worker_count();
             try {
                 if (faults) { faults->checkpoint("pool.worker_storage"); }
@@ -79,26 +68,13 @@ namespace jai {
             }
         }
 
-        thread_pool(const thread_pool&) = delete;
-        thread_pool& operator=(const thread_pool&) = delete;
+        state(const state&) = delete;
+        state& operator=(const state&) = delete;
 
-        ~thread_pool() {
+        ~state() {
             stop_and_join();
         }
 
-        size_t worker_count() const noexcept { return workers_.size(); }
-
-        // How long a worker (and the joiner) spins for the next batch before parking, when
-        // batches are arriving at least that densely. 0 parks immediately (the kernel wake
-        // on every batch).
-        void spin_budget(std::chrono::nanoseconds budget) noexcept { spin_budget_ns_.store(budget.count(), std::memory_order_relaxed); }
-        std::chrono::nanoseconds spin_budget() const noexcept { return std::chrono::nanoseconds(spin_budget_ns_.load(std::memory_order_relaxed)); }
-
-        // The std::thread::id of worker `worker` — every submit_to(worker, ...) task
-        // observes exactly this id from std::this_thread::get_id().
-        std::thread::id worker_thread_id(size_t worker) const { return workers_[worker]->id; }
-
-        // Shared queue: first free worker runs it.
         void submit(task_type task) {
             {
                 std::lock_guard<std::mutex> guard(mutex_);
@@ -127,13 +103,10 @@ namespace jai {
             work_cv_.notify_all();
         }
 
-        // A fork-join region's whole pinned task set in ONE lock + at most ONE wake: the
-        // per-task submit_to costs a W-worker region W lock round-trips and W
-        // notify_alls (W x W wake predicate evaluations). Order within a worker's
-        // queue matches the span's order. Spinning targets see their flag; the kernel
-        // is asked only when a target is parked.
-        void submit_pinned_batch(std::pair<size_t, task_type>* tasks, size_t count,
-                                 const detail::fault_injection* faults = nullptr) {
+        // The per-task submit_to costs a W-worker region W lock round-trips and W notify_alls (W x W wake
+        // predicate evaluations). Spinning targets see their flag; the kernel is asked only when a target
+        // is parked.
+        void submit_pinned_batch(std::pair<size_t, task_type>* tasks, size_t count, const detail::fault_injection* faults) {
             // Declare before the lock: exceptional unwinding unlocks FIRST, then wakes
             // the accepted prefix. Otherwise its owner can wait forever trying to join.
             struct notify_on_exit {
@@ -158,21 +131,14 @@ namespace jai {
             }
         }
 
-        // Where a continuation runs: on the pool worker that finished the work, or posted for
-        // the thread that calls run_posted().
-        enum class then_on { pool, posted };
-
-        // `then` runs once after `task` returns or throws (the exception goes to on_exception).
-        void submit(task_type task, task_type then, then_on where = then_on::pool) {
+        void submit(task_type task, task_type then, then_on where) {
             submit([this, task = std::move(task), then = std::move(then), where]() mutable {
                 run_reporting(task);
                 continue_with(std::move(then), where);
             });
         }
 
-        // The batch's tasks go on the shared queue under one lock; `then` runs exactly once,
-        // after the last of them returns or throws. An empty batch continues at once.
-        void submit_batch(std::vector<task_type> tasks, task_type then, then_on where = then_on::pool) {
+        void submit_batch(std::vector<task_type> tasks, task_type then, then_on where) {
             if (tasks.empty()) {
                 if (then && where == then_on::posted) {
                     post(std::move(then));
@@ -206,15 +172,11 @@ namespace jai {
             }
         }
 
-        // Queues `task` for the thread that drains run_posted(); any thread may post.
         void post(task_type task) {
             std::lock_guard<std::mutex> guard(posted_mutex_);
             posted_.push_back(std::move(task));
         }
 
-        // Runs every posted task in order, including tasks posted while it runs, and returns how
-        // many ran. A std::exception goes to on_exception; any other exception leaves with the
-        // tasks not yet run queued ahead of later posts. Safe to call from inside a posted task.
         size_t run_posted() {
             size_t result = 0;
             std::deque<task_type> pending;
@@ -241,13 +203,11 @@ namespace jai {
             }
         }
 
-        // Receives every exception a task lets escape (worker stays alive either way).
         void on_exception(std::function<void(std::exception_ptr)> handler) {
             std::lock_guard<std::mutex> guard(mutex_);
             exception_handler_ = std::move(handler);
         }
 
-        // Blocks until every submitted task (shared and pinned) has finished.
         void wait_idle() {
             if (spin_allowed()) {
                 const int64_t budget = spin_budget_ns_.load(std::memory_order_relaxed);
@@ -262,23 +222,6 @@ namespace jai {
             idle_cv_.wait(guard, [this] { return outstanding_.load(std::memory_order_relaxed) == 0; });
             --joiners_parked_;
         }
-
-    private:
-        struct worker {
-            std::thread thread;
-            std::thread::id id;
-            std::deque<task_type> pinned;
-            std::atomic<bool> has_work{false};   // pinned queue non-empty (a spinning worker reads it lock-free)
-            bool parked = false;                 // waiting on work_cv_; read and written under mutex_
-        };
-
-        struct batch_state {
-            batch_state(size_t count, task_type continuation, then_on continuation_place) :
-                remaining(count), then(std::move(continuation)), where(continuation_place) {}
-            std::atomic<size_t> remaining;
-            task_type then;
-            then_on where;
-        };
 
         void run_reporting(task_type& task) noexcept {
             try {
@@ -421,6 +364,47 @@ namespace jai {
         bool stop_ = false;
     };
 
-} // namespace jai
+    size_t thread_pool::default_worker_count() noexcept {
+        const unsigned hw = std::thread::hardware_concurrency();
+        return hw > 1 ? hw - 1 : 1;
+    }
 
-#endif // __JAISCRIPT_DETAIL_THREAD_POOL_HPP__
+    thread_pool::thread_pool(size_t worker_count) : thread_pool(worker_count, nullptr) {}
+
+    thread_pool::thread_pool(size_t worker_count, const detail::fault_injection* faults) :
+        state_(std::make_unique<state>(worker_count, faults)) {}
+
+    thread_pool::~thread_pool() = default;
+
+    size_t thread_pool::worker_count() const noexcept { return state_->workers_.size(); }
+
+    void thread_pool::spin_budget_ns(int64_t nanoseconds) noexcept { state_->spin_budget_ns_.store(nanoseconds, std::memory_order_relaxed); }
+    int64_t thread_pool::spin_budget_ns() const noexcept { return state_->spin_budget_ns_.load(std::memory_order_relaxed); }
+
+    void thread_pool::submit(task_type task) { state_->submit(std::move(task)); }
+    void thread_pool::submit(task_type task, task_type then, then_on where) { state_->submit(std::move(task), std::move(then), where); }
+    void thread_pool::submit_to(size_t worker, task_type task) { state_->submit_to(worker, std::move(task)); }
+    void thread_pool::submit_batch(std::vector<task_type> tasks, task_type then, then_on where) { state_->submit_batch(std::move(tasks), std::move(then), where); }
+    void thread_pool::post(task_type task) { state_->post(std::move(task)); }
+    size_t thread_pool::run_posted() { return state_->run_posted(); }
+    void thread_pool::on_exception(std::function<void(std::exception_ptr)> handler) { state_->on_exception(std::move(handler)); }
+    void thread_pool::wait_idle() { state_->wait_idle(); }
+
+    namespace detail {
+
+        std::unique_ptr<thread_pool> thread_pool_access::make(size_t worker_count, const fault_injection* faults) {
+            return std::unique_ptr<thread_pool>(new thread_pool(worker_count, faults));
+        }
+
+        void thread_pool_access::submit_pinned_batch(thread_pool& pool, std::pair<size_t, thread_pool::task_type>* tasks, size_t count,
+                                                     const fault_injection* faults) {
+            pool.state_->submit_pinned_batch(tasks, count, faults);
+        }
+
+        std::thread::id thread_pool_access::worker_thread_id(const thread_pool& pool, size_t worker) {
+            return pool.state_->workers_[worker]->id;
+        }
+
+    } // namespace detail
+
+} // namespace jai

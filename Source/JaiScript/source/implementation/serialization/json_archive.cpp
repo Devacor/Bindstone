@@ -1,8 +1,74 @@
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
+#include <jaiscript/detail/math_values.hpp>
+#include <charconv>     // std::to_chars for shortest round-trippable float output
+#include <cmath>
+#include <iomanip>
+#include <limits>
+#include <sstream>
+#if !(defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L)
+#include <jaiscript/detail/float_text.hpp>   // strtod fallback: libc++ ships integer-only std::from_chars
+#include <clocale>
+#include <cstdlib>
+#endif
 
 namespace jai::serialization {
+
+json_archive_writer::json_archive_writer(int indent) :
+    archive_writer_impl<json_archive_writer>(), indent_(indent), json_depth_(0), stream_(std::make_unique<std::ostringstream>()) {}
+
+json_archive_writer::json_archive_writer(int indent, engine* eng) :
+    archive_writer_impl<json_archive_writer>(eng), indent_(indent), json_depth_(0), stream_(std::make_unique<std::ostringstream>()) {}
+
+json_archive_writer::json_archive_writer(engine* eng) :
+    archive_writer_impl<json_archive_writer>(eng), indent_(2), json_depth_(0), stream_(std::make_unique<std::ostringstream>()) {}
+
+json_archive_writer::~json_archive_writer() = default;
+
+json_archive_reader::~json_archive_reader() = default;
+
+template<typename T>
+void json_archive_writer::write_json_value(T value) {
+    auto ctx = this->current_context();
+    bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
+
+    if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
+        (*stream_) << ',';
+        write_newline();
+        write_indent();
+    }
+
+    if constexpr (std::is_same_v<T, bool>) {
+        (*stream_) << (value ? "true" : "false");
+    } else if constexpr (std::is_floating_point_v<T>) {
+        // Handle special float values
+        if (std::isnan(value)) {
+            (*stream_) << "null";
+        } else if (std::isinf(value)) {
+            (*stream_) << (value > 0 ? "1e999" : "-1e999");
+        } else {
+            // Shortest representation that round-trips exactly (default ostream
+            // precision is only 6 significant digits, which silently loses bits).
+            char buf[64];
+            auto res = std::to_chars(buf, buf + sizeof(buf), value);
+            std::string_view sv(buf, static_cast<size_t>(res.ptr - buf));
+            (*stream_) << sv;
+            // Keep it a JSON "float" on round-trip (e.g. 3 -> 3.0, not int 3).
+            if (sv.find('.') == std::string_view::npos &&
+                sv.find('e') == std::string_view::npos &&
+                sv.find('E') == std::string_view::npos) {
+                (*stream_) << ".0";
+            }
+        }
+    } else {
+        (*stream_) << value;
+    }
+
+    if (in_container() && container_stack_.top() == ContainerType::Array) {
+        first_in_container_.top() = false;
+    }
+}
 
 void json_archive_writer::write_int8(int8_t value) { write_json_value(value); }
 
@@ -56,11 +122,11 @@ void json_archive_writer::begin_object() {
     bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
     if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-        oss_ << ',';
+        (*stream_) << ',';
     }
     write_newline();
     write_indent();
-    oss_ << '{';
+    (*stream_) << '{';
     json_depth_++;
     container_stack_.push(ContainerType::Object);
     first_in_container_.push(true);
@@ -73,11 +139,11 @@ void json_archive_writer::begin_object(const std::string& type_name, uint32_t ve
     bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
     if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-        oss_ << ',';
+        (*stream_) << ',';
     }
     write_newline();
     write_indent();
-    oss_ << '{';
+    (*stream_) << '{';
     json_depth_++;
     container_stack_.push(ContainerType::Object);
     first_in_container_.push(true);
@@ -98,7 +164,7 @@ void json_archive_writer::end_object() {
     first_in_container_.pop();
     write_newline();
     write_indent();
-    oss_ << '}';
+    (*stream_) << '}';
     if (in_container()) {
         first_in_container_.top() = false;
     }
@@ -109,11 +175,11 @@ void json_archive_writer::begin_array(size_t size) {
     bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
     if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-        oss_ << ',';
+        (*stream_) << ',';
     }
     write_newline();
     write_indent();
-    oss_ << '[';
+    (*stream_) << '[';
     json_depth_++;
     container_stack_.push(ContainerType::Array);
     first_in_container_.push(true);
@@ -125,7 +191,7 @@ void json_archive_writer::end_array() {
     first_in_container_.pop();
     write_newline();
     write_indent();
-    oss_ << ']';
+    (*stream_) << ']';
     if (in_container()) {
         first_in_container_.top() = false;
     }
@@ -133,11 +199,11 @@ void json_archive_writer::end_array() {
 
 void json_archive_writer::write_property_name(const std::string& name) {
     if (!first_in_container_.top()) {
-        oss_ << ',';
+        (*stream_) << ',';
     }
     write_newline();
     write_indent();
-    oss_ << '"' << escape_json_string_local(name) << "\": ";
+    (*stream_) << '"' << escape_json_string_local(name) << "\": ";
     first_in_container_.top() = false;
     // Context is managed by base class serialize() which pushes PropertyValue after this
 }
@@ -147,11 +213,11 @@ void json_archive_writer::begin_map(size_t size) {
     bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
     if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-        oss_ << ',';
+        (*stream_) << ',';
     }
     write_newline();
     write_indent();
-    oss_ << '{';
+    (*stream_) << '{';
     json_depth_++;
     container_stack_.push(ContainerType::Object);
     first_in_container_.push(true);
@@ -163,7 +229,7 @@ void json_archive_writer::end_map() {
     first_in_container_.pop();
     write_newline();
     write_indent();
-    oss_ << '}';
+    (*stream_) << '}';
     if (in_container()) {
         first_in_container_.top() = false;
     }
@@ -172,11 +238,11 @@ void json_archive_writer::end_map() {
 void json_archive_writer::write_map_key(const std::string& key) {
     // Same as write_property_name
     if (!first_in_container_.top()) {
-        oss_ << ',';
+        (*stream_) << ',';
     }
     write_newline();
     write_indent();
-    oss_ << '"' << escape_json_string_local(key) << "\": ";
+    (*stream_) << '"' << escape_json_string_local(key) << "\": ";
     first_in_container_.top() = false;
     // Context is managed by base class which pushes MapValue after this
 }
@@ -202,7 +268,7 @@ void json_archive_writer::write_value(const script_value& root) {
     }
 }
 
-std::string json_archive_writer::str() const { return oss_.str(); }
+std::string json_archive_writer::str() const { return stream_->str(); }
 
 void json_archive_writer::begin_value(const script_value& given, std::vector<write_frame>& frames) {
     const script_value& value = given.is_reference() ? given.deref() : given;
@@ -215,7 +281,7 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
                 open_value('{');
                 auto [id, is_new] = shared ? track_shared_ptr(shared.get()) : std::pair<uint32_t, bool>{0, false};
                 write_value_key("$weak_ptr_id", false);
-                oss_ << id;
+                (*stream_) << id;
                 if (is_new) {
                     write_value_key("$weak_ptr_data", true);
                     frames.emplace_back(write_shape::payload, weak_target_value(shared));
@@ -223,17 +289,17 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
                 }
                 close_value('}', false);
             } else if (!shared) {
-                oss_ << "{\"$weak_ptr_id\": 0}";
+                (*stream_) << "{\"$weak_ptr_id\": 0}";
             } else {
                 auto [id, is_new] = track_shared_ptr(shared.get());
-                oss_ << "{\"$weak_ptr_id\": " << id;
+                (*stream_) << "{\"$weak_ptr_id\": " << id;
                 if (is_new) {
-                    oss_ << ", \"$weak_ptr_data\": ";
+                    (*stream_) << ", \"$weak_ptr_data\": ";
                     write_frame& f = frames.emplace_back(write_shape::payload, weak_target_value(shared));
                     f.compact_weak = true;
                     return;
                 }
-                oss_ << "}";
+                (*stream_) << "}";
             }
             return;
         }
@@ -241,13 +307,13 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
         case script_value_type::jai_shared_ptr_type: {
             const auto holder = value.get_object_holder();
             if (!holder) {
-                oss_ << "null";
+                (*stream_) << "null";
                 return;
             }
             auto [id, is_new] = track_shared_ptr(holder.get());
             open_value('{');
             write_value_key("$shared_ptr_id", false);
-            oss_ << id;
+            (*stream_) << id;
             if (is_new) {
                 write_value_key("$shared_ptr_data", true);
                 frames.emplace_back(write_shape::payload, weak_target_value(holder));
@@ -288,7 +354,7 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
 
             auto eng = engine_ref_;
             if (!eng) {
-                oss_ << "null";
+                (*stream_) << "null";
                 return;
             }
 
@@ -308,7 +374,7 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
 
                 open_value('{');
                 write_value_key("_type_", false);
-                oss_ << '"' << escape_json_string_local(type_name) << '"';
+                (*stream_) << '"' << escape_json_string_local(type_name) << '"';
 
                 if (class_def) {
                     write_frame& f = frames.emplace_back(write_shape::instance, value);
@@ -326,12 +392,12 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
             }
 
             // Fallback for other object types
-            oss_ << to_json_impl_fallback(value);
+            (*stream_) << to_json_impl_fallback(value);
             return;
         }
 
         default:
-            oss_ << to_json_impl_fallback(value);
+            (*stream_) << to_json_impl_fallback(value);
             return;
     }
 }
@@ -400,7 +466,7 @@ const script_value* json_archive_writer::next_child(write_frame& f, script_value
 void json_archive_writer::end_frame(write_frame& f) {
     switch (f.shape) {
         case write_shape::payload:
-            if (f.compact_weak) { oss_ << "}"; } else { close_value('}', false); }
+            if (f.compact_weak) { (*stream_) << "}"; } else { close_value('}', false); }
             break;
         case write_shape::array:
             close_value(']', f.count == 0);
@@ -420,22 +486,22 @@ void json_archive_writer::end_frame(write_frame& f) {
 }
 
 void json_archive_writer::open_value(char bracket) {
-    oss_ << bracket;
+    (*stream_) << bracket;
     ++json_depth_;
 }
 
 void json_archive_writer::close_value(char bracket, bool empty) {
     --json_depth_;
     if (indent_ > 0 && !empty) {
-        oss_ << '\n' << indentation();
+        (*stream_) << '\n' << indentation();
     }
-    oss_ << bracket;
+    (*stream_) << bracket;
 }
 
 void json_archive_writer::write_value_separator(bool comma) {
-    if (comma) oss_ << ',';
+    if (comma) (*stream_) << ',';
     if (indent_ > 0) {
-        oss_ << '\n' << indentation();
+        (*stream_) << '\n' << indentation();
     }
 }
 
@@ -449,7 +515,7 @@ std::string json_archive_writer::indentation() {
 
 void json_archive_writer::write_value_key(std::string_view key, bool comma) {
     write_value_separator(comma);
-    oss_ << '"' << escape_json_string_local(key) << (indent_ > 0 ? "\": " : "\":");
+    (*stream_) << '"' << escape_json_string_local(key) << (indent_ > 0 ? "\": " : "\":");
 }
 
 std::string json_archive_writer::escape_json_string_local(std::string_view str) {
@@ -591,13 +657,13 @@ bool json_archive_writer::in_container() const { return !container_stack_.empty(
 
 void json_archive_writer::write_indent() {
     if (indent_ > 0) {
-        oss_ << indentation();
+        (*stream_) << indentation();
     }
 }
 
 void json_archive_writer::write_newline() {
     if (indent_ > 0) {
-        oss_ << '\n';
+        (*stream_) << '\n';
     }
 }
 json_archive_reader::json_archive_reader(const std::string& json_string, engine* eng) : archive_reader_impl<json_archive_reader>(eng) {

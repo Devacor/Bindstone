@@ -1,7 +1,16 @@
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
+#include <jaiscript/detail/math_values.hpp>
 
 namespace jai::serialization {
+
+binary_archive_writer::binary_archive_writer() : archive_writer_impl<binary_archive_writer>() {}
+
+binary_archive_writer::binary_archive_writer(engine* eng) : archive_writer_impl<binary_archive_writer>(eng) {}
+
+binary_archive_writer::~binary_archive_writer() = default;
+
+binary_archive_reader::~binary_archive_reader() = default;
 
 binary_archive_writer::binary_archive_writer(std::vector<uint8_t>& buffer) : archive_writer_impl<binary_archive_writer>(), buffer_(&buffer) {
     buffer_->clear();

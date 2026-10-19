@@ -105,6 +105,13 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
   A stored callable is one erased type over a static function (`detail::host_method_call`, registry
   `conversion_entry`), never a fresh lambda inside a `std::function`; a bound type's `std::vector`/`std::map` shapes
   register eagerly and compile only where a caller names them. Measure a change by object size per bound item.
+- What a host only calls into keeps its containers in the library: a template's state that does not depend on its
+  parameter lives in a non-template base defined in a `.cpp` (`archive_writer_core`, `archive_reader_core`), and the
+  process-wide registries (`type_registry`, `type_name_registry`, the registrar order) define their members out of line.
+  A header member body a host would compile once per file is a candidate to move; count it by the functions a host
+  object file defines (`dumpbin /symbols`), not by reading the header.
+- `<chrono>` reaches a host only through `core/engine_time.hpp`; iostreams and `<charconv>` stay in the library's `.cpp`
+  files. `stdlib/stdlib.hpp` declares the registrations and includes no module's internals.
 - Hosts never parse the runtime. `core/class_definition.hpp` declares the class runtime; `detail/class_runtime.hpp`
   defines its member bodies and slot/assignment kernels inline for the library's own translation units (and tests), and
   `jaiscript.hpp` is the core, the binders and the archives, never the parser or interpreter. A member a host-visible

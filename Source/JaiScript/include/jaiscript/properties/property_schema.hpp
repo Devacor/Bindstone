@@ -60,15 +60,10 @@ public:
 	type_property_schema() = default;
 
 	// Register a property with this schema (properties declared directly on this type)
-	void add(property_meta meta) {
-		name_to_index_[meta.name] = own_properties_.size();
-		own_properties_.push_back(std::move(meta));
-	}
+	void add(property_meta meta);
 
 	// Register base class types
-	void add_base(std::type_index base_type) {
-		base_types_.push_back(base_type);
-	}
+	void add_base(std::type_index base_type);
 
 	// Get properties declared directly on this type (not inherited)
 	const std::vector<property_meta>& own_properties() const { return own_properties_; }
@@ -77,20 +72,10 @@ public:
 	const std::vector<std::type_index>& base_types() const { return base_types_; }
 
 	// Find property by name (in own properties only)
-	const property_meta* find(const std::string& name) const {
-		auto it = name_to_index_.find(name);
-		return it != name_to_index_.end() ? &own_properties_[it->second] : nullptr;
-	}
+	const property_meta* find(const std::string& name) const;
 
 	// Get own property names
-	std::vector<std::string> property_names() const {
-		std::vector<std::string> names;
-		names.reserve(own_properties_.size());
-		for (const auto& prop : own_properties_) {
-			names.push_back(prop.name);
-		}
-		return names;
-	}
+	std::vector<std::string> property_names() const;
 
 	bool empty() const { return own_properties_.empty(); }
 	size_t size() const { return own_properties_.size(); }
@@ -111,29 +96,16 @@ private:
 
 class type_registry {
 public:
-	static type_registry& instance() {
-		static type_registry registry;
-		return registry;
-	}
+	static type_registry& instance();
 
 	// Get or create schema for a type
-	type_property_schema& for_type(std::type_index ti) {
-		std::scoped_lock guard(mutex_);
-		return schemas_[ti];
-	}
+	type_property_schema& for_type(std::type_index ti);
 
 	// Under the lock: a base chain walk (all_properties of a derived type) may read this schema from another thread
-	void add_base(std::type_index ti, std::type_index base_type) {
-		std::scoped_lock guard(mutex_);
-		schemas_[ti].add_base(base_type);
-	}
+	void add_base(std::type_index ti, std::type_index base_type);
 
 	// Get schema if it exists
-	const type_property_schema* try_get(std::type_index ti) const {
-		std::scoped_lock guard(mutex_);
-		auto it = schemas_.find(ti);
-		return it != schemas_.end() ? &it->second : nullptr;
-	}
+	const type_property_schema* try_get(std::type_index ti) const;
 
 	// Convenience template versions
 	template<typename T>
@@ -153,12 +125,7 @@ public:
 	}
 
 	// Get all properties including inherited (walks base class chain)
-	std::vector<const property_meta*> all_properties(std::type_index ti) const {
-		std::scoped_lock guard(mutex_);
-		std::vector<const property_meta*> result;
-		collect_properties_recursive(ti, result);
-		return result;
-	}
+	std::vector<const property_meta*> all_properties(std::type_index ti) const;
 
 	template<typename T>
 	std::vector<const property_meta*> all_properties() const {
@@ -166,15 +133,7 @@ public:
 	}
 
 	// Get all property names including inherited
-	std::vector<std::string> all_property_names(std::type_index ti) const {
-		std::vector<std::string> result;
-		auto props = all_properties(ti);
-		result.reserve(props.size());
-		for (const auto* p : props) {
-			result.push_back(p->name);
-		}
-		return result;
-	}
+	std::vector<std::string> all_property_names(std::type_index ti) const;
 
 	template<typename T>
 	std::vector<std::string> all_property_names() const {
@@ -182,14 +141,7 @@ public:
 	}
 
 	// Get direct base classes
-	std::vector<std::type_index> base_classes(std::type_index ti) const {
-		std::scoped_lock guard(mutex_);
-		auto it = schemas_.find(ti);
-		if (it != schemas_.end()) {
-			return it->second.base_types();
-		}
-		return {};
-	}
+	std::vector<std::type_index> base_classes(std::type_index ti) const;
 
 	template<typename T>
 	std::vector<std::type_index> base_classes() const {
@@ -197,10 +149,7 @@ public:
 	}
 
 	// Check if Derived inherits from Base (directly or indirectly)
-	bool inherits_from(std::type_index derived, std::type_index base) const {
-		std::scoped_lock guard(mutex_);
-		return inherits_from_locked(derived, base);
-	}
+	bool inherits_from(std::type_index derived, std::type_index base) const;
 
 	template<typename Derived, typename Base>
 	bool inherits_from() const {
@@ -210,34 +159,9 @@ public:
 private:
 	type_registry() = default;
 
-	bool inherits_from_locked(std::type_index derived, std::type_index base) const {
-		if (derived == base) return true;
+	bool inherits_from_locked(std::type_index derived, std::type_index base) const;
 
-		auto it = schemas_.find(derived);
-		if (it == schemas_.end()) return false;
-
-		for (const auto& direct_base : it->second.base_types()) {
-			if (inherits_from_locked(direct_base, base)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	void collect_properties_recursive(std::type_index ti, std::vector<const property_meta*>& result) const {
-		auto it = schemas_.find(ti);
-		if (it == schemas_.end()) return;
-
-		// First collect base class properties (so they come first in order)
-		for (const auto& base_ti : it->second.base_types()) {
-			collect_properties_recursive(base_ti, result);
-		}
-
-		// Then add own properties
-		for (const auto& prop : it->second.own_properties()) {
-			result.push_back(&prop);
-		}
-	}
+	void collect_properties_recursive(std::type_index ti, std::vector<const property_meta*>& result) const;
 
 	mutable std::mutex mutex_;
 	// Hashed on std::type_index: libstdc++'s type_info::before is not a strict weak order between internal-linkage and other types

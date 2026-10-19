@@ -1,5 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <chrono>
 #include <sstream>
@@ -36,7 +37,7 @@ namespace {
         });
         e->add_function("nested", [raw](const std::string& src) -> std::string { return raw->execute(src).to_string(); });
         if (install) {
-            e->time_source([&clk] { ++clk.mono_reads; return clk.mono; },
+            e->time().source([&clk] { ++clk.mono_reads; return clk.mono; },
                            [&clk] { ++clk.wall_reads; return clk.wall; },
                            [&clk](ns d) { clk.sleeps.push_back(d); clk.mono += d; clk.wall += d; });
         }
@@ -418,10 +419,10 @@ public:
                 }
                 check_eq(std::string("100.26"), e->execute("time::now();").to_string(), std::string("a sleep advances a host clock") + be);
                 check_near(100.26, e->engine_elapsed(), 1e-9);
-                check_eq((int64_t)std::chrono::nanoseconds(clk.mono).count(), (int64_t)e->monotonic_now().count(), std::string("monotonic_now") + be);
-                check_eq((int64_t)clk.wall.count(), (int64_t)e->wall_now().count(), std::string("wall_now") + be);
+                check_eq((int64_t)std::chrono::nanoseconds(clk.mono).count(), (int64_t)e->time().monotonic_now().count(), std::string("monotonic_now") + be);
+                check_eq((int64_t)clk.wall.count(), (int64_t)e->time().wall_now().count(), std::string("wall_now") + be);
                 const int reads = clk.mono_reads;
-                e->time_source({}, {}, {});
+                e->time().source({}, {}, {});
                 check_true(e->execute("var a = time::now(); a >= 0.0 && a < 3600.0;").as<bool>(), std::string("the system source is back") + be);
                 check_eq(reads, clk.mono_reads, std::string("the host clock is no longer read") + be);
                 auto errors = e->execute(R"(var out = ""; var s = "x"; try { time::sleep(s); } catch (e) { out += e; } out += " | "; try { reflect::call("time::sleep", 1, 2); } catch (e) { out += e; } out;)").to_string();
@@ -447,7 +448,7 @@ public:
                 eng->set_output_stream(out);
                 std::chrono::nanoseconds sim_now{0};
                 const auto epoch = std::chrono::nanoseconds(1700000000000000000LL);
-                eng->time_source(
+                eng->time().source(
                     [&] { return sim_now; },
                     [&] { return epoch + sim_now; },
                     [&](std::chrono::nanoseconds d) { sim_now += d; });

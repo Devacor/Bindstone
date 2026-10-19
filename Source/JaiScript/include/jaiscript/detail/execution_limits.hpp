@@ -38,7 +38,7 @@ namespace jai::detail {
 		size_t binary_scan_limit = size_t(1) << 20;
 		// The engine's clock sample: a real steady_clock reading (ticks) written where the engine reads that clock anyway -
 		// every host entry (the reading the budget deadline starts from), the budget check's periodic samples (every 1024
-		// ticks, budget or not) and a time:: read of the system clock; never by a host time_source. The import window reads
+		// ticks, budget or not) and a time:: read of the system clock; never by a host engine_time::source. The import window reads
 		// it instead of the clock; clock_samples counts the writes
 		int64_t sampled_now = 0;
 		uint64_t clock_samples = 0;

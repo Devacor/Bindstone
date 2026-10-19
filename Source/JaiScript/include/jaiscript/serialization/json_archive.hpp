@@ -2,28 +2,20 @@
 
 #include "archive_impl.hpp"
 #include <jaiscript/core/class_definition.hpp>
-#include <jaiscript/detail/math_values.hpp>
+#include <iosfwd>
+#include <memory>
 #include <stack>
-#include <sstream>
-#include <iomanip>
-#include <cmath>
-#include <charconv>     // std::to_chars for shortest round-trippable float output
 #include <string_view>
-#include <limits>
-#if !(defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L)
-#include <jaiscript/detail/float_text.hpp>   // strtod fallback: libc++ ships integer-only std::from_chars
-#include <clocale>
-#include <cstdlib>
-#endif
 
 namespace jai {
 namespace serialization {
 
 class json_archive_writer : public archive_writer_impl<json_archive_writer> {
 public:
-    json_archive_writer(int indent = 2) : archive_writer_impl<json_archive_writer>(), indent_(indent), json_depth_(0) {}
-    json_archive_writer(int indent, engine* eng) : archive_writer_impl<json_archive_writer>(eng), indent_(indent), json_depth_(0) {}
-    explicit json_archive_writer(engine* eng) : archive_writer_impl<json_archive_writer>(eng), indent_(2), json_depth_(0) {}
+    json_archive_writer(int indent = 2);
+    json_archive_writer(int indent, engine* eng);
+    explicit json_archive_writer(engine* eng);
+    ~json_archive_writer();
     // A script's to_json: indentation counts against the engine's memory cap
     void charge_indentation() { charges_indentation_ = true; }
 
@@ -131,7 +123,8 @@ private:
     bool charges_indentation_ = false;
     int json_depth_;  // JSON nesting depth (separate from serialization depth tracking in base)
     size_t open_records_ = 0;
-    std::ostringstream oss_;
+    // Behind a pointer so this header needs only <iosfwd>, not <sstream>
+    std::unique_ptr<std::ostringstream> stream_;
     std::stack<ContainerType> container_stack_;
     std::stack<bool> first_in_container_;
 
@@ -142,46 +135,7 @@ private:
     void write_newline();
     
     template<typename T>
-    void write_json_value(T value) {
-        auto ctx = this->current_context();
-        bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
-
-        if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-            oss_ << ',';
-            write_newline();
-            write_indent();
-        }
-
-        if constexpr (std::is_same_v<T, bool>) {
-            oss_ << (value ? "true" : "false");
-        } else if constexpr (std::is_floating_point_v<T>) {
-            // Handle special float values
-            if (std::isnan(value)) {
-                oss_ << "null";
-            } else if (std::isinf(value)) {
-                oss_ << (value > 0 ? "1e999" : "-1e999");
-            } else {
-                // Shortest representation that round-trips exactly (default ostream
-                // precision is only 6 significant digits, which silently loses bits).
-                char buf[64];
-                auto res = std::to_chars(buf, buf + sizeof(buf), value);
-                std::string_view sv(buf, static_cast<size_t>(res.ptr - buf));
-                oss_ << sv;
-                // Keep it a JSON "float" on round-trip (e.g. 3 -> 3.0, not int 3).
-                if (sv.find('.') == std::string_view::npos &&
-                    sv.find('e') == std::string_view::npos &&
-                    sv.find('E') == std::string_view::npos) {
-                    oss_ << ".0";
-                }
-            }
-        } else {
-            oss_ << value;
-        }
-
-        if (in_container() && container_stack_.top() == ContainerType::Array) {
-            first_in_container_.top() = false;
-        }
-    }
+    void write_json_value(T value);
 };
 
 class json_archive_reader : public archive_reader_impl<json_archive_reader> {
@@ -189,7 +143,7 @@ public:
     // Engine is REQUIRED for JSON reading since we need to create script_values
     json_archive_reader(const std::string& json_string, engine* eng);
 
-    ~json_archive_reader() = default;
+    ~json_archive_reader();
 
     static constexpr bool needs_property_keys = false;
     static constexpr bool is_text_format = true;

@@ -269,6 +269,26 @@ bool bind_schema_typed(engine& a_engine, class_definition& class_def, serializat
 
 } // namespace
 
+void bind_pending_math_properties(engine& a_engine, class_definition& class_def, serialization::class_metadata& metadata,
+	std::vector<pending_math_property>& pending) {
+	for (const pending_math_property& entry : pending) {
+		if (class_def.defines_method(a_engine.symbolize(entry.name))) continue;
+		bind_schema_math_property(a_engine, class_def, metadata, entry.name, entry.bridge, entry.access);
+	}
+	pending.clear();
+}
+
+void register_read_only_setter(engine& a_engine, class_definition& class_def, const std::string& name) {
+	const uint64_t field_id = a_engine.symbolize(name);   // interned here, never on the error path
+	const uint64_t setter_id = a_engine.symbolize("_set_" + name);
+	class_def.add_method("_set_" + name, [field_id](const std::vector<script_value>&) -> checked_result<script_value> {
+		return checked_result<script_value>(make_error_code(runtime_error_code::invalid_assignment_target),
+		                                    "Cannot assign to '{0}': it is read-only", field_id);
+	});
+	class_def.register_property_setter(field_id, setter_id);
+	class_def.register_property_read_only(field_id);
+}
+
 void bind_schema_math_property(engine& a_engine, class_definition& class_def, serialization::class_metadata& metadata,
 		const std::string& prop_name, const math_property_bridge& bridge, const schema_property_access& access) {
 	engine* eng = &a_engine;

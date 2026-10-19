@@ -10,6 +10,67 @@
 #include <set>
 #include <algorithm>
 
+#include <jaiscript/core/registrar.hpp>
+
+namespace jai {
+
+type_name_registry& type_name_registry::instance() {
+    static type_name_registry registry;
+    return registry;
+}
+
+void type_name_registry::register_type(std::type_index ti, std::string_view name) {
+    auto& stored = type_names_[ti] = std::string(name);
+    name_to_type_[stored] = ti;
+}
+
+std::optional<std::string_view> type_name_registry::get_name(std::type_index ti) const {
+    if (auto it = type_names_.find(ti); it != type_names_.end()) {
+        return it->second;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::type_index> type_name_registry::get_type(const std::string& name) const {
+    if (auto it = name_to_type_.find(name); it != name_to_type_.end()) {
+        return *it->second;
+    }
+    return std::nullopt;
+}
+
+bool type_name_registry::has_name(std::type_index ti) const {
+    return type_names_.contains(ti);
+}
+
+namespace detail {
+
+registration_order::registration_order() = default;
+
+registration_order::~registration_order() = default;
+
+void registration_order::add(std::type_index ti, const std::string& name, erased_fn fn) {
+    if (auto it = names_.find(ti); it != names_.end()) {
+        auto range = entries_.equal_range(it->second);
+        for (auto entry = range.first; entry != range.second; ++entry) {
+            if (entry->second.first == ti) { entries_.erase(entry); break; }
+        }
+    }
+    names_.insert_or_assign(ti, name);
+    entries_.emplace(name, std::pair<std::type_index, erased_fn>{ ti, std::move(fn) });
+}
+
+void registration_order::run_all(engine& eng, const void* context) {
+    for (auto& [name, entry] : entries_) { entry.second(eng, context); }
+}
+
+bool registration_order::has(std::type_index ti) const {
+    return names_.contains(ti);
+}
+
+} // namespace detail
+
+} // namespace jai
+
 namespace jai {
 
 // ===== flat_value_semantics (class_definition.hpp doc) =====

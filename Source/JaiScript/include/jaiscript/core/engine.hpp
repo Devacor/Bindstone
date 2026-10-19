@@ -28,7 +28,6 @@
 #include <unordered_set>
 #include <typeindex>
 #include <iosfwd>
-#include <chrono>
 
 namespace jai {
 
@@ -37,6 +36,7 @@ namespace jai {
     class class_instance;
     class class_registry;
     class execution_backend;
+    class engine_time;
     class string_symbolizer;
     struct import_site;
     namespace vm { class vm_backend; struct coverage_tables; }
@@ -395,9 +395,6 @@ namespace jai {
         // call entry, so straight-line C++ bindings are never interrupted mid-call.
         void execution_budget(double seconds);
         double execution_budget() const;
-        // Moves the running execute's deadline later by work done for the script that is not the script's own (the engine
-        // starting its worker pool; a host's slow service call); nothing when no budget is armed
-        void extend_execution_deadline(std::chrono::nanoseconds by);
         // A clock-free bound beside it for harnesses that must not depend on load: at most `checks` budget checks (each one
         // per 1024 loop back-edges and call entries) per host entry, then the same terminal budget error. Deterministic per
         // backend and program; zero (the default) disables it.
@@ -561,15 +558,6 @@ namespace jai {
         // The running executable, generic (forward-slash) spelling; empty when the platform cannot say
         static std::string executable_path();
 
-        // The clock every time:: call reads: monotonic is a steady reading, wall the time since the Unix epoch
-        // (UTC), sleep blocks the script thread. An empty provider selects the system one (steady_clock,
-        // system_clock, this_thread::sleep_for). A time:: call reads its provider once; otherwise the engine
-        // reads monotonic only at a host entry, and only after a loaded program names time::execute_elapsed.
-        // The execution budget and the import window run on the real steady clock whatever the provider; a time::
-        // read of the system monotonic clock, and a sleep's wake while monotonic is the system one, also refresh the
-        // engine's clock sample.
-        // engine_elapsed() counts from the system clock's reading at construction, or from zero on a host
-        // monotonic provider.
         // The (modification time, size) stamp that execute_file, include, import and their caches compare to see a file
         // change, and that a read is checked under (a stamp that moves during the read marks the text torn). An empty
         // source selects the file system's; a source answers nullopt for a file it cannot stamp.
@@ -580,12 +568,9 @@ namespace jai {
         using file_stamp_reading = std::function<std::optional<file_stamp>(const std::string& a_path)>;
         void file_stamp_source(file_stamp_reading a_source);
 
-        using clock_reading = std::function<std::chrono::nanoseconds()>;
-        using clock_sleep = std::function<void(std::chrono::nanoseconds)>;
-        void time_source(clock_reading monotonic, clock_reading wall, clock_sleep sleep = {});
-        std::chrono::nanoseconds monotonic_now();
-        std::chrono::nanoseconds wall_now();
-        void sleep_for(std::chrono::nanoseconds duration);
+        // The clock time:: reads and the running execute's deadline (<jaiscript/core/engine_time.hpp>, which brings <chrono>)
+        engine_time time();
+        // From the system clock's reading at construction, or from zero on a host monotonic provider
         double engine_elapsed();
         double execute_elapsed();
         void note_host_entry();
@@ -1265,7 +1250,7 @@ namespace jai {
         // already checked is reached again or when the outermost execute()/next() returns; between passes an import does
         // nothing. A frame therefore checks every import it reaches or none. The window runs on the engine's clock sample
         // (the real steady clock as read at the host entry, at the budget check's samples and by a time:: read of the system
-        // clock), so an import reads no clock itself; a host time_source never moves it.
+        // clock), so an import reads no clock itself; a host engine_time::source never moves it.
         void import_recheck_interval(double seconds);
         double import_recheck_interval() const;
         // Both backends' import step. import_skips: no pass is open, the window has not expired and the site has run its
@@ -1431,6 +1416,7 @@ namespace jai {
         friend class interpreter;
         // Allow the vm backend the same access (include/import call execute_source)
         friend class vm::vm_backend;
+        friend class engine_time;
         
         template<typename Func>
         std::vector<param_type_info> extract_parameter_types_with_info() {

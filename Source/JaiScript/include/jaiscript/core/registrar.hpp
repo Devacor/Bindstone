@@ -48,43 +48,25 @@ inline void register_polymorphic_bases(bases<Bs...>) {
 
 class type_name_registry {
 public:
-    [[nodiscard]] static type_name_registry& instance() {
-        static type_name_registry registry;
-        return registry;
-    }
+    [[nodiscard]] static type_name_registry& instance();
 
-    void register_type(std::type_index ti, std::string_view name) {
-        auto& stored = type_names_[ti] = std::string(name);
-        name_to_type_[stored] = ti;
-    }
+    void register_type(std::type_index ti, std::string_view name);
 
     template<typename T>
     void register_type(std::string_view name) {
         register_type(std::type_index(typeid(T)), name);
     }
 
-    [[nodiscard]] std::optional<std::string_view> get_name(std::type_index ti) const {
-        if (auto it = type_names_.find(ti); it != type_names_.end()) {
-            return it->second;
-        }
-        return std::nullopt;
-    }
+    [[nodiscard]] std::optional<std::string_view> get_name(std::type_index ti) const;
 
     template<typename T>
     [[nodiscard]] std::optional<std::string_view> get_name() const {
         return get_name(std::type_index(typeid(T)));
     }
 
-    [[nodiscard]] std::optional<std::type_index> get_type(const std::string& name) const {
-        if (auto it = name_to_type_.find(name); it != name_to_type_.end()) {
-            return *it->second;
-        }
-        return std::nullopt;
-    }
+    [[nodiscard]] std::optional<std::type_index> get_type(const std::string& name) const;
 
-    [[nodiscard]] bool has_name(std::type_index ti) const {
-        return type_names_.contains(ti);
-    }
+    [[nodiscard]] bool has_name(std::type_index ti) const;
 
     template<typename T>
     [[nodiscard]] bool has_name() const {
@@ -103,30 +85,21 @@ private:
 // ============================================================================
 
 namespace detail {
-	// Registrations apply in script-name order, the same on every compiler; a type registered again replaces its entry
-	template<typename Fn>
+	// Registrations apply in script-name order, the same on every compiler; a type registered again replaces its entry.
+	// One type for every context (the context travels as const void*), defined in the library (class_registry.cpp).
 	class registration_order {
 	public:
-		void add(std::type_index ti, const std::string& name, Fn fn) {
-			if (auto it = names_.find(ti); it != names_.end()) {
-				auto range = entries_.equal_range(it->second);
-				for (auto entry = range.first; entry != range.second; ++entry) {
-					if (entry->second.first == ti) { entries_.erase(entry); break; }
-				}
-			}
-			names_.insert_or_assign(ti, name);
-			entries_.emplace(name, std::pair<std::type_index, Fn>{ ti, std::move(fn) });
-		}
+		using erased_fn = std::function<void(engine&, const void* context)>;
 
-		template<typename Visit>
-		void for_each(Visit&& visit) {
-			for (auto& [name, entry] : entries_) { visit(entry.second); }
-		}
+		registration_order();
+		~registration_order();
 
-		[[nodiscard]] bool has(std::type_index ti) const { return names_.contains(ti); }
+		void add(std::type_index ti, const std::string& name, erased_fn fn);
+		void run_all(engine& eng, const void* context);
+		[[nodiscard]] bool has(std::type_index ti) const;
 
 	private:
-		std::multimap<std::string, std::pair<std::type_index, Fn>> entries_;
+		std::multimap<std::string, std::pair<std::type_index, erased_fn>> entries_;
 		std::unordered_map<std::type_index, std::string> names_;
 	};
 }
@@ -142,11 +115,11 @@ public:
     }
 
     void add(std::type_index ti, const std::string& name, registration_fn fn) {
-        ordered_.add(ti, name, std::move(fn));
+        ordered_.add(ti, name, [fn = std::move(fn)](engine& eng, const void* context) { fn(eng, *static_cast<const Context*>(context)); });
     }
 
     void register_all(engine& eng, const Context& ctx) {
-        ordered_.for_each([&](registration_fn& fn) { fn(eng, ctx); });
+        ordered_.run_all(eng, &ctx);
     }
 
     [[nodiscard]] bool has(std::type_index ti) const {
@@ -155,7 +128,7 @@ public:
 
 private:
     registrar_registry() = default;
-    detail::registration_order<registration_fn> ordered_;
+    detail::registration_order ordered_;
 };
 
 template<>
@@ -169,11 +142,11 @@ public:
     }
 
     void add(std::type_index ti, const std::string& name, registration_fn fn) {
-        ordered_.add(ti, name, std::move(fn));
+        ordered_.add(ti, name, [fn = std::move(fn)](engine& eng, const void*) { fn(eng); });
     }
 
     void register_all(engine& eng) {
-        ordered_.for_each([&](registration_fn& fn) { fn(eng); });
+        ordered_.run_all(eng, nullptr);
     }
 
     [[nodiscard]] bool has(std::type_index ti) const {
@@ -182,7 +155,7 @@ public:
 
 private:
     registrar_registry() = default;
-    detail::registration_order<registration_fn> ordered_;
+    detail::registration_order ordered_;
 };
 
 // ============================================================================

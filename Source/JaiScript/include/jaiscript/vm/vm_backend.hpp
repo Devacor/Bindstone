@@ -476,6 +476,9 @@ namespace jai::vm {
         // backend's chunk cache so the region never compiles (compilation copies AST
         // literal strong_ptrs — main-thread-only traffic).
         void precompile_parallel_method(const function_decl& decl);
+        // A construction's expression a worker evaluates outside any body (a field initializer, an initializer list's argument),
+        // compiled at the barrier and found by the expression alone (the unit it would run under is the caller's)
+        void precompile_parallel_expression(const expression_ptr& expr);
 
         void set_parallel_method_pins(const detail::parallel_method_pin_table* pins) override {
             parallel_method_pins_ = pins;
@@ -1114,6 +1117,7 @@ namespace jai::vm {
             expression_ptr pin;
         };
         std::unordered_map<node_unit_key, expr_chunk_cache_entry, node_unit_hash> expr_chunk_cache_;
+        std::unordered_map<const expression*, expr_chunk_cache_entry> parallel_expr_chunks_;   // a worker's precompiled construction expressions
         struct decl_chunk_cache_entry {   // a namespace's variable declaration as a one-declaration program
             std::shared_ptr<chunk> compiled;
             declaration_ptr pin;

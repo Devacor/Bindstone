@@ -13948,8 +13948,11 @@ checked_result<script_value> vm_backend::eval_expression(const expression_ptr& e
 	auto it = expr_chunk_cache_.find(key);
 	if (it != expr_chunk_cache_.end()) {
 		compiled = it->second.compiled;
+	} else if (auto precompiled = parallel_worker_ ? parallel_expr_chunks_.find(expr.get()) : parallel_expr_chunks_.end();
+	           precompiled != parallel_expr_chunks_.end()) {
+		compiled = precompiled->second.compiled;
 	} else {
-		std::unique_lock<std::mutex> region_compile_guard;   // a worker's field initializer: compiles copy AST literal strong_ptrs (chunk_for_body)
+		std::unique_lock<std::mutex> region_compile_guard;   // in-region compiles serialize engine-wide (chunk_for_body)
 		if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
 			region_compile_guard = std::unique_lock<std::mutex>(engine_->parallel_compile_mutex());
 		}
@@ -20668,6 +20671,14 @@ void vm_backend::release_deep_call_storage() {
 
 void vm_backend::precompile_parallel_method(const function_decl& decl) {
 	chunk_for_body(decl.name, decl.parameters, decl.body, decl.local_count, decl.unit);
+}
+
+void vm_backend::precompile_parallel_expression(const expression_ptr& expr) {
+	if (parallel_expr_chunks_.count(expr.get())) { return; }
+	arm_listing();
+	auto compiled = compiler_.compile_standalone_expression(expr);
+	note_compiled(*compiled);
+	parallel_expr_chunks_.emplace(expr.get(), expr_chunk_cache_entry{compiled, expr});
 }
 
 std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,

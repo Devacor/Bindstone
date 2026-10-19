@@ -1361,6 +1361,7 @@ namespace {
 		struct constructed_class { uint64_t name_id = 0; std::shared_ptr<class_definition> cls; };
 		std::vector<constructed_class> constructed_classes;
 		std::vector<std::shared_ptr<function_decl>> admitted_bodies;   // constructor and destructor bodies each worker precompiles
+		std::vector<expression_ptr> admitted_expressions;   // field initializers and initializer-list arguments each worker precompiles
 		std::vector<const class_definition*> destructor_levels;
 		std::unordered_set<const function_decl*> visited_constructors;
 		std::unordered_set<const class_definition*> visited_initializers;
@@ -1425,7 +1426,9 @@ namespace {
 			if (!visited_initializers.insert(cls.get()).second) { return true; }
 			return walk_as_member_of(cls.get(), " in a field initializer of '" + cls->get_name() + "'", [&] {
 				for (const auto& [field_id, initializer] : cls->get_field_initializer_asts()) {
-					if (initializer && !walk_expr(initializer)) { return false; }
+					if (!initializer) { continue; }
+					if (!walk_expr(initializer)) { return false; }
+					admitted_expressions.push_back(initializer);
 				}
 				return true;
 			});
@@ -1449,6 +1452,7 @@ namespace {
 				for (const auto& init : cls->effective_initializers(*ctor)) {
 					for (const auto& arg : init.arguments) {
 						if (!walk_expr(arg)) { return false; }
+						admitted_expressions.push_back(arg);
 					}
 					if (init.target == "this") {
 						if (!admit_construction(sym.intern(cls->get_name()), cls, init.arguments.size(), ctor.get())) { return false; }
@@ -2906,17 +2910,36 @@ namespace {
 
 	// ============================== BARRIER HELPERS ==============================
 
-	// A worker's copy of an index-written array. Values copy detached; slots that hold objects share the live slots' handles
-	// instead (an object has no detached copy): the body touches out[i] alone, so each handle's count moves on one thread, the
-	// slot's owner during the region and main at the join
-	script_value written_slot_copy(const script_value& source, engine& eng) {
-		const script_array* node = source.unchecked_array_node();
-		if (node->kind() != script_array::kind_t::obj) {
-			try {
-				return source.parallel_detached_copy();
-			} catch (const runtime_error&) {
+	// A value that holds an object somewhere (an object has no detached copy)
+	bool holds_objects(const script_value& v) {
+		const script_value& value = v.deref();
+		switch (value.raw_storage_index()) {
+		case script_value::TYPEID_ARRAY: {
+			const script_array* node = value.unchecked_array_node();
+			if (node->kind() == script_array::kind_t::obj) { return true; }
+			if (node->is_typed()) { return false; }
+			for (const auto& element : node->values()) {
+				if (holds_objects(element)) { return true; }
 			}
+			return false;
 		}
+		case script_value::TYPEID_MAP: {
+			bool found = false;
+			for (const auto& [key, element] : value.unchecked_as_map()) { found = found || holds_objects(key) || holds_objects(element); }
+			return found;
+		}
+		case script_value::TYPEID_NULL: case script_value::TYPEID_INT: case script_value::TYPEID_FLOAT: case script_value::TYPEID_CHAR:
+		case script_value::TYPEID_BOOL: case script_value::TYPEID_STRING:
+			return false;
+		default:
+			return true;
+		}
+	}
+
+	// A worker's copy of an index-written array of objects shares the live slots (proven exclusive at the barrier): the body touches
+	// out[i] alone, so each slot's objects are touched on one thread, the slot's owner during the region and main at the join
+	script_value shared_slot_copy(const script_value& source, engine& eng) {
+		const script_array* node = source.unchecked_array_node();
 		const type_info_ptr type = source.get_type_info();
 		script_value result = script_value::make_array(type ? type->element_type() : type_info_ptr(nullptr), &eng);
 		*result.unchecked_get_array_storage() = *node;
@@ -3585,6 +3608,7 @@ namespace {
 		std::optional<script_value> source;  // deref'd live value; for a borrow this handle
 		                                     // IS the region anchor (held until the join)
 		parallel_capture_kind kind = parallel_capture_kind::scalar;
+		bool shares_slots = false;           // written: its slots hold objects, so worker copies share them (written_slot_copy)
 	};
 
 	std::vector<size_t> partition_flat(size_t n, size_t chunks) {
@@ -3874,6 +3898,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 				             "' is the container being mutated (reads through it would race the element writes)");
 			}
 			cap.kind = parallel_capture_kind::written;
+			cap.shares_slots = holds_objects(*cap.source);
 		}
 		switch (kind_index) {
 		case size_t(-1):
@@ -4023,6 +4048,20 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			}
 		}
 		zip_nodes.push_back(znode);
+	}
+	// An index-written array of objects: its slots are proven exclusive like a zipped array's (their objects distinct, shared strings
+	// detached), since every worker's copy shares them
+	for (const auto& cap : captures) {
+		if (cap.kind != parallel_capture_kind::written || !cap.shares_slots) { continue; }
+		script_array* wnode = const_cast<script_array*>(cap.source->unchecked_array_node());
+		element_proof wproof = prove_elements(eng, *cap.source, *wnode, wnode->values(), reach_filter{}, plan.prefix, nullptr, &handle_objects);
+		if (wproof.failed != SIZE_MAX) {
+			return usage("captured name '" + std::string(cap.entry->name) + "' element " + std::to_string(wproof.failed) +
+			             (wproof.what.empty() ? std::string(" cannot be proven exclusive") : ": " + wproof.what));
+		}
+		for (const class_definition* cd : wproof.element_classes) {
+			if (std::find(element_classes.begin(), element_classes.end(), cd) == element_classes.end()) { element_classes.push_back(cd); }
+		}
 	}
 	if (const auto [repeat, original] = repeated_handle_object(handle_objects); repeat != SIZE_MAX) {
 		return usage("elements " + std::to_string(original) + " and " + std::to_string(repeat) +
@@ -4351,7 +4390,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 					break;
 				case parallel_capture_kind::written:   // a fresh copy each region: the join reads back what this worker wrote
 					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
-					provisioned = written_slot_copy(*cap.source, eng);
+					provisioned = cap.shares_slots ? shared_slot_copy(*cap.source, eng) : cap.source->parallel_detached_copy();
 					break;
 				}
 			} catch (const std::exception& e) {
@@ -4427,6 +4466,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 		if (slot->vm) {
 			for (const auto& body : method_adm.admitted_bodies) { slot->vm->precompile_parallel_method(*body); }
+			for (const auto& expr : method_adm.admitted_expressions) { slot->vm->precompile_parallel_expression(expr); }
 		}
 		slot->method_pins.definition_env = slot->method_env;
 		const bool pinned = !slot->method_pins.entries.empty() || !method_adm.constructed_classes.empty() || !method_adm.destructor_levels.empty();

@@ -11,6 +11,7 @@
 #include <set>
 #include <string>
 #include "MV/Network/url.h"
+#include "MV/Network/tls.h"
 #include <asio.hpp>
 #include <asio/ssl.hpp>
 #include "MV/Utility/log.h"
@@ -18,35 +19,6 @@
 
 
 #include <asio/ssl/context.hpp>
-
-#ifdef _WIN32
-#include <wincrypt.h>
-#include <tchar.h>
-
-inline void add_root_certs(asio::ssl::context& ctx) {
-	HCERTSTORE hStore = CertOpenSystemStore(0, _T("ROOT"));
-	if (!hStore) {
-		return;
-	}
-
-	X509_STORE* store = X509_STORE_new();
-	PCCERT_CONTEXT pContext = NULL;
-	while ((pContext = CertEnumCertificatesInStore(hStore, pContext)) != NULL) {
-		X509* x509 = d2i_X509(NULL, (const unsigned char**)&pContext->pbCertEncoded, pContext->cbCertEncoded);
-		if (x509) {
-			X509_STORE_add_cert(store, x509);
-			X509_free(x509);
-		}
-	}
-
-	CertFreeCertificateContext(pContext);
-	CertCloseStore(hStore, 0);
-
-	SSL_CTX_set_cert_store(ctx.native_handle(), store);
-}
-#else
-inline void add_root_certs(asio::ssl::context& ctx) {}
-#endif
 
 
 namespace MV {
@@ -164,6 +136,8 @@ namespace MV {
 		std::string version = "HTTP/1.1";
 		std::string postBody;
 		std::string postContentType;
+		// https only: trust just this CA (PEM) instead of the system's root certificates.
+		std::string trustedCaFile;
 
 		size_t expectedBodyLength = 0;
 		std::map<std::string, std::string> headerValues;
@@ -294,24 +268,13 @@ namespace MV {
 		std::unique_ptr<asio::ip::tcp::resolver> resolver;
 		std::unique_ptr<asio::ip::tcp::socket> socket;
 		struct SSLSocket {
-			SSLSocket(asio::io_context &ioService):
-				socket(ioService, context.context){
+			SSLSocket(asio::io_context &a_ioService, const std::shared_ptr<asio::ssl::context> &a_context) :
+				context(a_context),
+				socket(a_ioService, *a_context) {
 			}
 
-			struct SSLContextInitializer {
-				SSLContextInitializer() :
-					context(asio::ssl::context::sslv23) {
-
-					context.set_default_verify_paths();
-					context.set_options(asio::ssl::context::default_workarounds | asio::ssl::context::sslv23);
-					context.set_verify_mode(asio::ssl::verify_peer | asio::ssl::verify_fail_if_no_peer_cert);
-					add_root_certs(context);
-				}
-				asio::ssl::context context;
-			};
-
-			SSLContextInitializer context;
-			asio::ssl::stream<asio::ip::tcp::socket> socket;
+			std::shared_ptr<asio::ssl::context> context;
+			TlsStream socket;
 		};
 		std::shared_ptr<SSLSocket> sslSocket;
 		

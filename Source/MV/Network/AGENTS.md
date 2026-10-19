@@ -34,6 +34,9 @@ What each link checks:
 | Game server → lobby, port 22326 | lobby certificate | the game server's *client* certificate | both ways (mutual TLS); the lobby drops a peer without a valid client certificate before reading anything from it |
 | Player → game server | that game server's certificate | nothing (the match secret, later) | the client, as for the lobby, against the host the lobby sent it to |
 
+`download.h` (HTTPS) and `email.h` (SMTP STARTTLS) talk to public hosts: they trust the system's root certificates
+(the Windows ROOT store; OpenSSL's default paths elsewhere) and verify the host name the same way.
+
 ### The settings
 
 TLS 1.3 is preferred and TLS 1.2 is the minimum; SSL 3, TLS 1.0 and 1.1 are refused. TLS 1.2 uses only ECDHE key

@@ -98,3 +98,7 @@ game server advertises (the host the lobby will send players and their match sec
 (they verify that host against its server certificate); refusing at registration stops the lobby from handing out
 match secrets for a host the game server is not certified for, and puts the reason in the lobby's log. A
 registration logs `Game server [NAME] registered from [address] for url:port (TLS session, certificate ...)`.
+
+On a game server, only a connection that presented a valid match secret counts as a player: it alone hears the
+match, can act in it, and ends it (a forfeit) by disconnecting. Anything else that connects is ignored, and its
+disconnect changes nothing.

@@ -15,9 +15,10 @@ namespace jai::detail {
 	// initializers and its depth and unwinding state. The kernel's common paths call none of the hooks.
 	class construction_host {
 	public:
-		construction_host(engine* a_eng, string_symbolizer* a_symbols, int& a_callDepth, int a_depthGate, const bool& a_unwinding) :
+		construction_host(engine* a_eng, string_symbolizer* a_symbols, string_symbolizer* a_envSymbols, int& a_callDepth, int a_depthGate, const bool& a_unwinding) :
 			eng(a_eng),
 			symbols(a_symbols),
+			env_symbols(a_envSymbols),
 			call_depth(a_callDepth),
 			depth_gate(a_depthGate),
 			unwinding(a_unwinding) {
@@ -25,6 +26,7 @@ namespace jai::detail {
 
 		engine* const eng;
 		string_symbolizer* const symbols;
+		string_symbolizer* const env_symbols;   // the environments' epoch sink (a parallel worker's own); names go through symbols
 		int& call_depth;
 		const int depth_gate;   // a call depth at or past it asks pass_depth_gate
 		const bool& unwinding;
@@ -38,6 +40,9 @@ namespace jai::detail {
 		virtual std::shared_ptr<environment> current_environment() = 0;
 		virtual std::shared_ptr<environment> global_environment() = 0;
 		virtual const class_definition* caller_access_context() = 0;   // asked only for a private constructor
+		// a parallel worker's method sandbox, where a construction without a constructor of its own resolves names (null
+		// off the workers: the program's scope)
+		virtual std::shared_ptr<environment> parallel_sandbox() = 0;
 
 	protected:
 		~construction_host() = default;
@@ -97,6 +102,13 @@ namespace jai::detail {
 	// A class without a constructor: a copy, aggregate initialization, or the implicit default constructor
 	checked_result<script_value> construct_default_instance(construction_host& host, const std::shared_ptr<script_class_definition>& cls,
 	                                                        const std::vector<script_value>& args);
+
+	inline std::shared_ptr<environment> environment_chain_root(std::shared_ptr<environment> result) {
+		for (int hops = 0; result && result->get_parent() && hops < 65536; ++hops) {
+			result = result->get_parent();
+		}
+		return result;
+	}
 
 	// A literal-only chain's field initializers stamped without an environment: parents first, then the class's own
 	void stamp_literal_field_initializers(class_instance& instance, const script_class_definition& cls, bool skip_parent_recursion, engine* eng);

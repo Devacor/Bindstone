@@ -14,6 +14,20 @@
 
 namespace jai {
 
+namespace detail {
+// A region's copy of a class's shared default: a string or a container gets nodes of its own (a plain copy would touch the
+// shared node's count from several threads)
+inline script_value region_field_default(const script_value& value) {
+    switch (value.raw_storage_index()) {
+    case script_value::TYPEID_NULL: case script_value::TYPEID_INT: case script_value::TYPEID_FLOAT:
+    case script_value::TYPEID_BOOL: case script_value::TYPEID_CHAR:
+        return value;
+    default:
+        return value.parallel_detached_copy();
+    }
+}
+}
+
 inline size_t class_instance::trailing_bytes(uint32_t slots) noexcept { return slots * (sizeof(field_cell) + sizeof(script_value)); }
 
 inline class_instance::class_instance(interned_name_t, std::string_view interned, engine* eng, const trailing_cells& trailing) : class_instance(interned_name_t{}, interned, eng) {
@@ -633,6 +647,35 @@ inline const std::vector<std::pair<uint32_t, script_value>>& class_definition::i
     return instance_plan_;
 }
 
+inline void class_definition::prime_region_memos() {
+    (void)interned_name();
+    (void)field_slot_count();
+    (void)instance_plan();
+    for (const auto& parent : parent_classes_) {
+        if (parent) { parent->prime_region_memos(); }
+    }
+    (void)get_all_field_defaults();
+    (void)construction_order();
+    if (dtor_memo_epoch_ != method_epoch_) {
+        has_script_dtor_ = false;
+        if (auto eng = engine_) {
+            has_script_dtor_ = is_script_class() && chain_declares_destructor(*eng);
+        }
+        dtor_memo_epoch_ = method_epoch_;
+    }
+    if (auto eng = engine_) {
+        if (has_script_dtor_ && !eng->destructors_armed()) { eng->note_destructors_armed(); }
+        (void)destructor_id(*eng);
+        (void)destructor_body(*eng);
+    }
+    (void)value_tree_runs_destructor();
+    (void)nocopy();
+    (void)flat_value_semantics();
+    (void)handle_bearing_slots();
+    (void)string_reachable_slots();
+    (void)may_define_to_bool();
+}
+
 inline std::shared_ptr<class_instance> class_definition::allocate_instance() {
     std::shared_ptr<class_instance> instance;
     // Destructor probe memo: "~"+name_ alloc + symbolizer intern + has_method are
@@ -674,8 +717,10 @@ inline std::shared_ptr<class_instance> class_definition::create_instance() {
 
     register_live_instance(instance.get());
 
+    // a region's constructions (workers and main's chunk alike) copy no shared default node
+    const bool in_region = engine_ && engine_->parallel_region_active();
     if (const auto& plan = instance_plan(); !plan.empty()) {
-        instance->seed_fields_from_plan(plan, field_slot_count());
+        instance->seed_fields_from_plan(plan, field_slot_count(), in_region);
         return instance;
     }
     for (const auto& parent : parent_classes_) {
@@ -683,14 +728,14 @@ inline std::shared_ptr<class_instance> class_definition::create_instance() {
             const auto& parent_fields = parent->get_all_field_defaults();
             for (const auto& [field_id, default_value] : parent_fields) {
                 if (!instance->has_field(field_id)) {
-                    instance->set_field(field_id, default_value);
+                    instance->set_field(field_id, in_region ? detail::region_field_default(default_value) : default_value);
                 }
             }
         }
     }
 
     for (const auto& [field_id, default_value] : field_defaults_) {
-        instance->set_field(field_id, default_value);
+        instance->set_field(field_id, in_region ? detail::region_field_default(default_value) : default_value);
     }
 
     return instance;
@@ -1522,11 +1567,15 @@ inline script_value& class_instance::materialize_field(uint64_t id, script_value
     return overflow_fields_->insert_or_assign(id, std::move(v)).first->second;
 }
 
-inline void class_instance::seed_fields_from_plan(const std::vector<std::pair<uint32_t, script_value>>& plan, uint32_t slot_count) {
+inline void class_instance::seed_fields_from_plan(const std::vector<std::pair<uint32_t, script_value>>& plan, uint32_t slot_count, bool detach) {
     if (flat_fields_.size() < slot_count) { flat_fields_.resize(slot_count); }
     seeded_from_plan_ = true;
     for (const auto& [slot, value] : plan) {
         auto& cell = flat_fields_[slot];
+        if (detach) [[unlikely]] {
+            if (!cell) { cell = make_cell(detail::region_field_default(value)); } else { *cell = detail::region_field_default(value); }
+            continue;
+        }
         if (!cell) { cell = make_cell(script_value(value)); } else { *cell = value; }
     }
 }

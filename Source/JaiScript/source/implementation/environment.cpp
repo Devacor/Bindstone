@@ -229,6 +229,11 @@ checked_result<script_value> environment::get(const std::string& name) const {
     return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable), text, parked);
 }
 
+checked_result<script_value> environment::get(const std::string& name, const string_symbolizer& program_symbols) const {
+    if (const auto id = program_symbols.find(name)) { return get(*id); }
+    return get(name);
+}
+
 checked_result<script_value> environment::get(uint64_t id) const {
     JAI_CENSUS(env_get_id);
     // For method environments, handle 'this' specially

@@ -902,6 +902,11 @@ namespace jai {
         backend_type get_backend_type() const;
         std::string get_backend_name() const;
         execution_backend* get_execution_backend() const;
+        // The backend running script on the calling thread: a parallel region's chunk runs on its own
+        execution_backend* calling_backend() const {
+            return parallel_region_active_ ? region_chunk_backend() : get_execution_backend();
+        }
+        execution_backend* region_chunk_backend() const;
         bool backend_unwinding() const;
         std::string backend_exception_text() const;   // the text of the exception the backend is unwinding with
         // A value's text as string + value spells it (a class's own to_string() runs; its error is the result)

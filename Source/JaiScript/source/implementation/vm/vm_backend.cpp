@@ -13949,6 +13949,10 @@ checked_result<script_value> vm_backend::eval_expression(const expression_ptr& e
 	if (it != expr_chunk_cache_.end()) {
 		compiled = it->second.compiled;
 	} else {
+		std::unique_lock<std::mutex> region_compile_guard;   // a worker's field initializer: compiles copy AST literal strong_ptrs (chunk_for_body)
+		if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
+			region_compile_guard = std::unique_lock<std::mutex>(engine_->parallel_compile_mutex());
+		}
 		arm_listing();
 		compiled = compiler_.compile_standalone_expression(expr);
 		note_compiled(*compiled);
@@ -17048,7 +17052,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		}
 	}
 	std::string className = expr->type->type_name;
-	auto ctor_result = environment_->get(className);
+	auto ctor_result = environment_->get(className, *symbolizer_);
 	if (ctor_result && ctor_result.value().is_function()) {
 		script_value constructorFunc = std::move(ctor_result.value());
 		const script_function& func = constructorFunc.as_function();
@@ -17573,7 +17577,7 @@ struct vm_backend::construction_lender final : detail::construction_host {
 	const frame* caller;
 
 	explicit construction_lender(vm_backend& a_self, const frame* a_caller = nullptr) :
-		detail::construction_host(a_self.engine_, a_self.symbolizer_, a_self.current_call_depth_, a_self.limits_->vm_depth_gate, a_self.is_unwinding_),
+		detail::construction_host(a_self.engine_, a_self.symbolizer_, a_self.env_symbolizer_, a_self.current_call_depth_, a_self.limits_->vm_depth_gate, a_self.is_unwinding_),
 		self(a_self),
 		caller(a_caller) {
 	}
@@ -17584,7 +17588,7 @@ struct vm_backend::construction_lender final : detail::construction_host {
 
 	checked_result<script_value> run_constructor_body(const std::shared_ptr<function_decl>& ctor, const std::shared_ptr<environment>& definition_env,
 	                                                  const script_value& this_value, class_definition* access, const std::vector<script_value>& args) override {
-		auto method_env = std::make_shared<environment>(definition_env, self.symbolizer_, this_value);
+		auto method_env = std::make_shared<environment>(definition_env, self.env_symbolizer_, this_value);
 		method_env->set_access_context(access);
 		method_env->define(self.symbolizer_->get_this_id(), this_value);
 		return self.execute_method_ast(ctor, method_env, args);
@@ -17600,6 +17604,9 @@ struct vm_backend::construction_lender final : detail::construction_host {
 	std::shared_ptr<environment> current_environment() override { return self.environment_; }
 	std::shared_ptr<environment> global_environment() override { return self.engine_ ? self.engine_->get_global_environment() : self.environment_; }
 	const class_definition* caller_access_context() override { return caller ? self.frame_access_context(*caller) : self.current_access_context(); }
+	std::shared_ptr<environment> parallel_sandbox() override {
+		return self.parallel_worker_ && self.parallel_method_pins_ ? self.parallel_method_pins_->definition_env : nullptr;
+	}
 };
 
 checked_result<script_value> vm_backend::construct_instance_pre_body(const std::shared_ptr<script_class_definition>& class_def,
@@ -17635,7 +17642,7 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_c4 = __rdtsc();
 #endif
-	auto method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
+	auto method_env = std::make_shared<environment>(definition_env, env_symbolizer_, this_value);
 	method_env->set_access_context(class_def.get());
 	method_env->define(symbolizer_->get_this_id(), this_value);
 
@@ -17678,7 +17685,7 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 		return {};
 	}
 	if (matching_ctor->is_coroutine) [[unlikely]] {
-		auto method_env = std::make_shared<environment>(definition_env, symbolizer_, this_value);
+		auto method_env = std::make_shared<environment>(definition_env, env_symbolizer_, this_value);
 		method_env->set_access_context(class_def.get());
 		method_env->define(symbolizer_->get_this_id(), this_value);
 		auto result = execute_method_ast(matching_ctor, method_env, args);
@@ -20764,7 +20771,7 @@ checked_result<script_value> vm_backend::execute_callable_from(const script_call
 			if (!script_cls) {
 				return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Constructor payload without script class definition");
 			}
-			const bool waived = engine_->take_construction_access_waiver();
+			const bool waived = !parallel_worker_ && engine_->take_construction_access_waiver();
 			if (script_cls->get_constructor_asts().empty()) {
 				return construct_default_instance(script_cls, args);
 			}

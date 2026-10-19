@@ -156,7 +156,7 @@ never change, so results do not.
 **The element reference is a cursor.** A by-reference body binds its element to ONE reference
 holder per chunk, minted at the barrier (the array pin and the `live_elem_refs` count are
 main-thread facts) and re-pointed at the next index on the worker before each call; an admitted
-body cannot retain it past its iteration (no lambdas, no `new`, stores dereference, captured
+body cannot retain it past its iteration (no lambdas, stores dereference, captured
 state is read-only, the result is discarded), and a retained holder is an internal error rather
 than a silent re-point. The serial by-reference range-for does the same on both backends for
 frame-slot loops (`script_value::element_cursor_holder`: the previous holder moves to the next
@@ -196,8 +196,26 @@ still never touches the source. Instances a pool worker constructs or copies do 
 registry during the region: they park in the worker's pending list (`pending_instances`) and
 the join registers the survivors (a copy that died meanwhile just expires; hot reload migrates
 everything that lived). Cost: the transform is the inline zip plus the fresh output.
-Not admitted in safe mode: constructing objects inside a body (`T x;` raises `'new' is not
-allowed in a parallel body`, `T(...)` raises `call target 'T' is not a plain function`).
+
+**Construction in a body.** `T(args)`, `T x(args);`, `T x;` and `new T(args)` record the class by
+name at admission; the barrier resolves each against the live class (`admit_region_classes`) and
+walks, as members of the new object's class (its fields writable, everything else under the body's
+rules), every constructor the argument count admits, the base constructions each initializer list
+names (an unnamed base default-constructs), each level's field initializers, and the destructor of
+every class whose instance can die on a chunk: constructed classes, element classes, the classes an
+index-written array holds, their fields' classes (an untyped field: every class) and subclasses.
+Class code may call script functions and the whitelisted host functions; their worker copies live in
+the method sandbox. A class with a C++ base, or a C++ class, is refused (its host constructor and
+destructor run code no walk sees). Each worker gets a constructor value of its own for every
+constructed class, defined in its root env and method sandbox, whose definition environment is the
+sandbox; constructor and destructor bodies compile on each worker at the barrier; every memo
+construction fills (instance plan, defaults, destructor and construction-order memos, implicit
+default constructors, literal-chain verdicts) is filled at the barrier, and a region's construction
+copies a shared default detached (`region_field_default`). A destructor that runs on a chunk runs on
+that chunk's backend in its sandbox (the region table entry carries both), and so does any script a
+chunk enters through a host trampoline (`engine::calling_backend`). An index-written array that
+holds objects is copied per worker by sharing its slots' handles: each handle's count moves on one
+thread only, the slot's owner during the region and main at the join.
 
 **The zip form.** `parallel_for (auto& v, auto& o : vecs, outs) { o.x = v.x * v.y; }` walks
 further arrays of the same length in lockstep: a thread owns the same indices of every array, so

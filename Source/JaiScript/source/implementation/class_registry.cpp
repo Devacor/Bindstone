@@ -6,7 +6,9 @@
 #include "jaiscript/detail/namespace_scope.hpp"
 #include "jaiscript/detail/ast_serializer.hpp"
 #include "jaiscript/detail/builtin_methods.hpp"
+#include "jaiscript/detail/parallel_transform.hpp"
 #include <stdexcept>
+#include <thread>
 #include <set>
 #include <algorithm>
 
@@ -177,7 +179,37 @@ bool class_definition::value_tree_runs_destructor_impl(std::vector<const class_d
     return runs;
 }
 
+namespace {
+// A death on a parallel region's chunk: the destructor runs on the chunk's own backend in its method sandbox (the barrier admitted
+// it), and what a failing one reports waits for the join
+bool run_destructor_body_in_region(engine& eng, class_instance* instance, const class_definition* level, const script_value& body) {
+    const detail::parallel_region_table* region = eng.parallel_state().active_region;
+    const detail::parallel_region_table::entry* chunk = region ? region->find_entry(std::this_thread::get_id()) : nullptr;
+    if (!chunk || !chunk->backend || !chunk->definition_env || !level->is_script_class()) { return false; }
+    const auto* shared = body.is_function() ? body.as_function().target<script_method_dispatch>() : nullptr;
+    auto ast = static_cast<const script_class_definition*>(level)->get_destructor_ast();
+    if (!shared || !ast) { return false; }
+    script_method_dispatch dispatch;
+    dispatch.eng = shared->eng;
+    dispatch.cls = shared->cls;
+    dispatch.name_id = shared->name_id;
+    dispatch.definition_env = *chunk->definition_env;
+    std::shared_ptr<class_instance> self = instance->weak_from_this().lock();
+    if (!self) { self = std::shared_ptr<class_instance>(instance, [](class_instance*) {}); }
+    const std::vector<script_value> arguments{ script_value::make_class_object(*level, self, &eng) };
+    try {
+        auto ran = chunk->backend->execute_method_from(dispatch, ast, arguments[0], arguments, 1);
+        if (!ran && chunk->deferred_reports) { chunk->deferred_reports->emplace_back(ran.error(), format_error(ran, *eng.get_symbolizer())); }
+    } catch (...) {
+    }
+    return true;
+}
+}
+
 void class_definition::run_destructor_body(class_instance* instance, const class_definition* level, const script_value& body) const {
+    if (engine_->parallel_region_active()) [[unlikely]] {
+        if (run_destructor_body_in_region(*engine_, instance, level, body)) { return; }
+    }
     detail::release_machine* m = engine_->release_machine_here();
     std::vector<script_value> arguments;
     if (m && !m->spare_arguments.empty()) {

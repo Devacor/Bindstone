@@ -97,6 +97,8 @@ namespace jai::detail {
 		// Instances this worker constructed or copied during the region (pool workers only;
 		// registered by the join, expired entries skipped)
 		std::vector<std::weak_ptr<class_instance>> pending_instances;
+		// What destructors that failed on this chunk report, replayed by the join
+		std::vector<std::pair<std::error_code, std::string>> deferred_reports;
 		std::vector<script_value> cursors;   // [0] = the range's chunk cursor, then the zip's arrays
 		std::vector<script_value> call_args; // prepared at the barrier; no worker-entry allocation
 		// Live input vector ("safe AND free"): workers read the
@@ -1160,7 +1162,7 @@ namespace {
 				failed = true;
 				adm.admitted = false;
 				adm.code = make_error_code(runtime_error_code::unsupported_operation);
-				adm.message = std::string(prefix) + ": " + std::move(reason);
+				adm.message = std::string(prefix) + ": " + std::move(reason) + context;
 				if (node) {
 					adm.message += " at " + std::to_string(node->location.line) + ":" +
 					               std::to_string(node->location.column);
@@ -1221,10 +1223,12 @@ namespace {
 				return true;   // already walked (recursion / shared target)
 			}
 
-			// Fresh scope stack per function
+			// Fresh scope stack per function, no class's fields in scope
 			decltype(scopes) saved;
 			saved.swap(scopes);
 			scopes.emplace_back();
+			const class_definition* saved_class = method_class;
+			method_class = nullptr;
 			const type_info_ptr saved_return = return_type;
 			return_type = fn->return_type;
 			++fn_depth;
@@ -1252,6 +1256,7 @@ namespace {
 			}
 			--fn_depth;
 			return_type = saved_return;
+			method_class = saved_class;
 			scopes.swap(saved);
 			return ok;
 		}
@@ -1346,6 +1351,229 @@ namespace {
 				}
 			}
 			return true;
+		}
+
+		// ===== Barrier-time construction admission =====
+		// A construction runs the constructor the call reaches (every one its argument count admits), the base constructions its
+		// initializer list names (a base it does not name default-constructs), each level's field initializers and, when the
+		// object dies on the chunk, the destructors of its chain. Each body walks as a method of the new object's class: the
+		// object is the chunk's own, so its fields are writable, and everything else follows the body's rules.
+		struct constructed_class { uint64_t name_id = 0; std::shared_ptr<class_definition> cls; };
+		std::vector<constructed_class> constructed_classes;
+		std::vector<std::shared_ptr<function_decl>> admitted_bodies;   // constructor and destructor bodies each worker precompiles
+		std::vector<const class_definition*> destructor_levels;
+		std::unordered_set<const function_decl*> visited_constructors;
+		std::unordered_set<const class_definition*> visited_initializers;
+		std::unordered_set<const class_definition*> visited_destructor_classes;
+		std::string context;   // where construction code sits, appended to its verdict
+
+		// The class a name constructs: its constructor value in the program's scope
+		std::shared_ptr<class_definition> constructor_class(uint64_t name_id) {
+			auto global = eng.get_global_environment()->get(name_id);
+			if (!global || !global.value().is_function()) { return nullptr; }
+			const script_callable* payload = payload_from_function_value(global.value());
+			return payload && payload->kind == script_callable::kind_type::constructor ? payload->cls : nullptr;
+		}
+
+		template <typename Walk>
+		bool walk_as_member_of(const class_definition* cls, std::string where, Walk&& walk) {
+			const class_definition* saved_class = method_class;
+			std::string saved_context = std::move(context);
+			method_class = cls;
+			context = std::move(where);
+			decltype(scopes) saved;
+			saved.swap(scopes);
+			scopes.emplace_back();
+			const bool ok = walk();
+			scopes.swap(saved);
+			context = std::move(saved_context);
+			method_class = saved_class;
+			return ok;
+		}
+
+		void note_body(const std::shared_ptr<function_decl>& decl) {
+			if (!decl->shared_params_cache) { decl->shared_params_cache = std::make_shared<const std::vector<parameter>>(decl->parameters); }
+			admitted_bodies.push_back(decl);
+		}
+
+		bool admit_construction(uint64_t name_id, const std::shared_ptr<class_definition>& cls, size_t argc, const ast_node* site) {
+			if (!cls->is_script_class()) {
+				return fail(site, "C++ class '" + cls->get_name() + "' cannot be constructed in a parallel body");
+			}
+			if (auto host = cls->find_cpp_base_class()) {
+				return fail(site, "class '" + cls->get_name() + "' has a C++ base '" + host->get_name() + "' and cannot be constructed in a parallel body");
+			}
+			if (std::none_of(constructed_classes.begin(), constructed_classes.end(), [&](const constructed_class& c) { return c.cls == cls; })) {
+				constructed_classes.push_back({ name_id, cls });
+			}
+			auto script_cls = std::static_pointer_cast<script_class_definition>(cls);
+			const auto& ctors = script_cls->get_constructor_asts();
+			if (ctors.empty()) {
+				for (const auto& parent : script_cls->get_parent_classes()) {
+					if (parent && !admit_construction(sym.intern(parent->get_name()), parent, 0, site)) { return false; }
+				}
+				return admit_field_initializers(script_cls);
+			}
+			for (const auto& ctor : ctors) {
+				if (argc != SIZE_MAX && !arity_accepts(ctor->parameters, argc)) { continue; }
+				if (!admit_constructor(script_cls, ctor, site)) { return false; }
+			}
+			return true;
+		}
+
+		bool admit_field_initializers(const std::shared_ptr<script_class_definition>& cls) {
+			if (!visited_initializers.insert(cls.get()).second) { return true; }
+			return walk_as_member_of(cls.get(), " in a field initializer of '" + cls->get_name() + "'", [&] {
+				for (const auto& [field_id, initializer] : cls->get_field_initializer_asts()) {
+					if (initializer && !walk_expr(initializer)) { return false; }
+				}
+				return true;
+			});
+		}
+
+		bool admit_constructor(const std::shared_ptr<script_class_definition>& cls, const std::shared_ptr<function_decl>& ctor, const ast_node* site) {
+			if (!visited_constructors.insert(ctor.get()).second) { return true; }
+			if (ctor->is_coroutine) {
+				return fail(site, "coroutine constructor of class '" + cls->get_name() + "' is not allowed in a parallel body");
+			}
+			note_body(ctor);
+			const auto& parents = cls->get_parent_classes();
+			std::vector<bool> named(parents.size(), false);
+			const bool walked = walk_as_member_of(cls.get(), " in the constructor of '" + cls->get_name() + "'", [&] {
+				for (const auto& p : ctor->parameters) {
+					if (p.symbol_id == UINT64_MAX) { p.symbol_id = sym.intern(p.name); }
+					declare(p.symbol_id, typed_local(p.type));
+					collect_type(p.type);
+					if (p.default_value && !walk_expr(p.default_value)) { return false; }
+				}
+				for (const auto& init : cls->effective_initializers(*ctor)) {
+					for (const auto& arg : init.arguments) {
+						if (!walk_expr(arg)) { return false; }
+					}
+					if (init.target == "this") {
+						if (!admit_construction(sym.intern(cls->get_name()), cls, init.arguments.size(), ctor.get())) { return false; }
+						continue;
+					}
+					for (size_t i = 0; i < parents.size(); ++i) {
+						if (!parents[i] || (!(i == 0 && init.target == "super") && !initializer_names(init.target, parents[i]->get_name()))) { continue; }
+						named[i] = true;
+						if (!admit_construction(sym.intern(parents[i]->get_name()), parents[i], init.arguments.size(), ctor.get())) { return false; }
+						break;
+					}
+				}
+				for (const auto& d : ctor->body->declarations) {
+					if (!walk_stmt(d)) { return false; }
+				}
+				return true;
+			});
+			if (!walked) { return false; }
+			for (size_t i = 0; i < parents.size(); ++i) {
+				if (parents[i] && !named[i] && !admit_construction(sym.intern(parents[i]->get_name()), parents[i], 0, ctor.get())) { return false; }
+			}
+			return admit_field_initializers(cls);
+		}
+
+		// Every class whose instance can die on a chunk that reaches cls: its chain's destructors, the classes its fields can
+		// hold (a field of no declared type can hold any), and its subclasses (a slot of the class can hold one)
+		bool admit_destructors(const class_definition* cls) {
+			if (!cls || !visited_destructor_classes.insert(cls).second) { return true; }
+			for (const class_definition* level : cls->construction_order()) {
+				if (!level || !level->is_script_class()) { continue; }
+				auto ast = static_cast<const script_class_definition*>(level)->get_destructor_ast();
+				if (ast && std::find(destructor_levels.begin(), destructor_levels.end(), level) == destructor_levels.end()) {
+					destructor_levels.push_back(level);
+					note_body(ast);
+					const bool walked = walk_as_member_of(level, " in the destructor of '" + level->get_name() + "'", [&] {
+						for (const auto& d : ast->body->declarations) {
+							if (!walk_stmt(d)) { return false; }
+						}
+						return true;
+					});
+					if (!walked) { return false; }
+				}
+				const uint32_t slots = level->field_slot_count();
+				for (uint32_t slot = 0; slot < slots; ++slot) {
+					if (!admit_destructors_of_type(level->get_field_declared_type(level->slot_field(slot)))) { return false; }
+				}
+			}
+			for (const auto& entry : eng.get_class_registry().script_classes_) {
+				const class_definition* other = entry.second.get();
+				if (other && other != cls && other->derives_from(cls) && !admit_destructors(other)) { return false; }
+			}
+			return true;
+		}
+		bool admit_destructors_of_type(const type_info_ptr& t) {
+			if (!t || t->base_type == script_value_type::jai_any_type) {
+				for (const auto& entry : eng.get_class_registry().script_classes_) {
+					if (!admit_destructors(entry.second.get())) { return false; }
+				}
+				return true;
+			}
+			switch (t->base_type) {
+			case script_value_type::jai_array_type:
+			case script_value_type::jai_shared_ptr_type:
+			case script_value_type::jai_weak_ptr_type:
+				return admit_destructors_of_type(t->element_type());
+			case script_value_type::jai_map_type:
+				return admit_destructors_of_type(t->key_type()) && admit_destructors_of_type(t->value_type());
+			case script_value_type::jai_object_type: {
+				if (t->type_name.empty()) { return admit_destructors_of_type(nullptr); }
+				auto cls = eng.get_class_registry().find_script_class(std::string(t->type_name));
+				return !cls || admit_destructors(cls.get());
+			}
+			default:
+				return true;
+			}
+		}
+
+		// The barrier's fixed point: the body's constructions, the methods called on the chunk's objects (the element classes'
+		// for an in-place statement, every constructed class's) and the destructors of every class whose instance can die on a
+		// chunk, each of which can name more of the others
+		bool admit_region_classes(const std::vector<const class_definition*>& element_classes, bool element_methods,
+		                          const std::vector<type_info_ptr>& written_types, bool destructors) {
+			std::vector<const class_definition*> classes;
+			if (element_methods) { classes = element_classes; }
+			auto note_class = [&](const class_definition* cls) {
+				if (std::find(classes.begin(), classes.end(), cls) == classes.end()) { classes.push_back(cls); }
+			};
+			size_t levels_seen = 0;
+			auto note_destructor_classes = [&] {
+				for (; levels_seen < destructor_levels.size(); ++levels_seen) { note_class(destructor_levels[levels_seen]); }
+			};
+			if (destructors) {
+				for (const class_definition* cd : element_classes) {
+					if (!admit_destructors(cd)) { return false; }
+				}
+				for (const type_info_ptr& t : written_types) {
+					if (t && !admit_destructors_of_type(t)) { return false; }
+				}
+				note_destructor_classes();
+			}
+			size_t next = 0;
+			for (;;) {
+				for (; next < adm.constructions.size(); ++next) {
+					const auto rec = adm.constructions[next];   // copy: admission appends
+					auto cls = constructor_class(rec.name_id);
+					if (!cls) {
+						return fail(rec.site, "call target '" + std::string(rec.name) + "' is not a function known at admission time");
+					}
+					if (!admit_construction(rec.name_id, cls, rec.argc, rec.site)) { return false; }
+					if (destructors && !admit_destructors(cls.get())) { return false; }
+					note_class(cls.get());
+					note_destructor_classes();
+				}
+				if (!admit_element_methods(classes)) { return false; }
+				note_destructor_classes();
+				if (next == adm.constructions.size()) { break; }
+			}
+			return true;
+		}
+		bool any_program_destructor() {
+			for (const auto& entry : eng.get_class_registry().script_classes_) {
+				const class_definition* cls = entry.second.get();
+				if (cls && cls->has_method(cls->destructor_id(eng))) { return true; }
+			}
+			return false;
 		}
 
 		bool walk_stmt(const statement_ptr& s) {
@@ -1575,8 +1803,23 @@ namespace {
 				return walk_local_member_chain(static_cast<member_expr*>(e.get()), "member access");
 			case node_type::lambda_expr:
 				return fail(e.get(), "lambdas are not allowed in a parallel body");
-			case node_type::new_expr:
-				return fail(e.get(), "'new' is not allowed in a parallel body");
+			case node_type::new_expr: {
+				// Name n(args), Name n; and new Name(args): a script class's construction, walked at the barrier
+				auto* n = static_cast<new_expr*>(e.get());
+				const type_info_ptr named = n->type && n->type->base_type == script_value_type::jai_shared_ptr_type ? n->type->element_type() : n->type;
+				if (proof_mode || !class_type(named)) { return fail(e.get(), "'new' is not allowed in a parallel body"); }
+				const uint64_t name_id = sym.intern(named->type_name);
+				if (!constructor_class(name_id)) {
+					return fail(e.get(), "C++ class '" + std::string(named->type_name) + "' cannot be constructed in a parallel body");
+				}
+				collect_type(n->type);
+				collect_type(named);
+				adm.constructions.push_back({ name_id, sym.get_string(name_id), n->arguments.size(), e.get() });
+				for (const auto& a : n->arguments) {
+					if (!walk_expr(a)) { return false; }
+				}
+				return true;
+			}
 			case node_type::this_expr:
 				if (method_class) { return true; }   // self IS the chunk-exclusive element
 				return fail(e.get(), "'this'/'super' is not allowed in a parallel body");
@@ -1770,11 +2013,13 @@ namespace {
 				return fail(callee, "method '" + callee_name + "' must be called as 'this." + callee_name +
 				               "()' in a parallel body (bare sibling calls are not admitted, v1)");
 			}
-			// Method bodies stay within the element: global-function graphs from methods
-			// would mutate the cached admission per call — not admitted (v1)
-			if (method_class && !primitive_ctor_name(callee->name)) {
-				return fail(callee, "global function call '" + callee_name +
-				               "' from a parallel method body is not admitted");
+			// A script class's construction: the barrier walks what it runs (admit_construction)
+			if (!proof_mode && !primitive_ctor_name(callee->name) && constructor_class(callee->symbol_id)) {
+				adm.constructions.push_back({ callee->symbol_id, callee->name, call->arguments.size(), callee });
+				for (const auto& a : call->arguments) {
+					if (!walk_expr(a)) { return false; }
+				}
+				return true;
 			}
 			// Resolve the callee BEFORE walking arguments so the caller sees the most
 			// useful violation first (e.g. a nested parallel_transform names itself,
@@ -2135,6 +2380,7 @@ namespace {
 
 	void reset_worker_slot(engine& eng, parallel_worker_slot& slot, std::chrono::nanoseconds budget) {
 		slice_worker_limits(eng, slot);
+		slot.deferred_reports.clear();
 		if (slot.vm) {
 			slot.vm->configure_parallel_worker(slot.root_env, slot.env_epoch_sink.get(), &slot.limits, budget);
 		} else {
@@ -2659,6 +2905,36 @@ namespace {
 	}
 
 	// ============================== BARRIER HELPERS ==============================
+
+	// A worker's copy of an index-written array. Values copy detached; slots that hold objects share the live slots' handles
+	// instead (an object has no detached copy): the body touches out[i] alone, so each handle's count moves on one thread, the
+	// slot's owner during the region and main at the join
+	script_value written_slot_copy(const script_value& source, engine& eng) {
+		const script_array* node = source.unchecked_array_node();
+		if (node->kind() != script_array::kind_t::obj) {
+			try {
+				return source.parallel_detached_copy();
+			} catch (const runtime_error&) {
+			}
+		}
+		const type_info_ptr type = source.get_type_info();
+		script_value result = script_value::make_array(type ? type->element_type() : type_info_ptr(nullptr), &eng);
+		*result.unchecked_get_array_storage() = *node;
+		if (type) { result.set_type_info(type); }
+		return result;
+	}
+
+	// The memos a construction fills, filled before the region freezes: the class's own and each script level's literal-chain
+	// verdict and implicit default constructor
+	void prime_construction_memos(class_definition& cls) {
+		cls.prime_region_memos();
+		for (const class_definition* level : cls.construction_order()) {
+			if (!level || !level->is_script_class()) { continue; }
+			auto* script_level = static_cast<script_class_definition*>(const_cast<class_definition*>(level));
+			(void)script_level->chain_initializers_all_literal();
+			if (script_level->base_needs_construction()) { (void)script_level->implicit_default_constructor(); }
+		}
+	}
 
 	// Interns every shape a worker can mint from the seed before the tables freeze: each
 	// type's T& twin and container components, and - when a type names a registered script
@@ -3798,11 +4074,29 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	method_adm.inplace_root = true;
 	method_adm.prefix = plan.prefix;
 	state.faults.checkpoint("region.method_admission");
-	if (plan.inplace && !element_classes.empty()) {
+	const bool element_methods = plan.inplace && !element_classes.empty();
+	// a worker's copy of an index-written array holds objects that can die on it: the declared element type, or each held value's
+	std::vector<type_info_ptr> written_types;
+	const bool program_destructors = method_adm.any_program_destructor();
+	for (const auto& cap : captures) {
+		if (!program_destructors || cap.kind != parallel_capture_kind::written) { continue; }
+		const type_info_ptr declared = cap.source->get_type_info() ? cap.source->get_type_info()->element_type() : type_info_ptr(nullptr);
+		if (declared && declared->base_type != script_value_type::jai_any_type) {
+			written_types.push_back(declared);
+			continue;
+		}
+		const script_array* held = cap.source->unchecked_array_node();
+		for (size_t j = 0; j < held->size(); ++j) {
+			const type_info_ptr t = held->get(j, &eng).deref().get_type_info();
+			if (t && std::find(written_types.begin(), written_types.end(), t) == written_types.end()) { written_types.push_back(t); }
+		}
+	}
+	if (element_methods || !adm->constructions.empty() || !element_classes.empty() || !written_types.empty()) {
 		method_adm.adm.element_method_calls = adm->element_method_calls;
+		method_adm.adm.constructions = adm->constructions;
 		// the methods' captures are their own set: the same name is the body's capture in the
 		// region's enclosing scope and a method's in its class's scope
-		if (!method_adm.admit_element_methods(element_classes)) {
+		if (!method_adm.admit_region_classes(element_classes, element_methods, written_types, program_destructors)) {
 			state.error_text = method_adm.adm.message;
 			return checked_result<void>(method_adm.adm.code, std::string_view(state.error_text));
 		}
@@ -4057,7 +4351,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 					break;
 				case parallel_capture_kind::written:   // a fresh copy each region: the join reads back what this worker wrote
 					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
-					provisioned = cap.source->parallel_detached_copy();
+					provisioned = written_slot_copy(*cap.source, eng);
 					break;
 				}
 			} catch (const std::exception& e) {
@@ -4098,7 +4392,45 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			slot->method_pins.entries.push_back({ am.cls, am.name_id, std::move(pin) });
 			if (slot->vm) { slot->vm->precompile_parallel_method(*am.decl); }
 		}
-		slot->backend->set_parallel_method_pins(slot->method_pins.entries.empty() ? nullptr : &slot->method_pins);
+		// Constructions: the class's constructor value resolves to a worker-private one whose code reads the worker's method
+		// sandbox, its constructor and destructor bodies compiled here
+		for (const auto& made : method_adm.constructed_classes) {
+			state.faults.checkpoint("region.constructor_pin", k);
+			script_callable payload;
+			payload.kind = script_callable::kind_type::constructor;
+			payload.cls = made.cls;
+			if (!std::static_pointer_cast<script_class_definition>(made.cls)->get_constructor_asts().empty()) { payload.definition_env = slot->method_env; }
+			script_value ctor = script_value::make_function(script_callable_thunk{ &eng, std::move(payload) }, &eng);
+			slot->capture_name_ids.push_back(made.name_id);
+			slot->root_env->define(made.name_id, ctor);
+			slot->method_env->define(made.name_id, std::move(ctor));
+		}
+		// The functions and host functions class code calls, worker-private copies in the method sandbox
+		for (const auto& [name_id, source_fn] : method_adm.adm.script_functions) {
+			if (name_id == UINT64_MAX) { continue; }
+			state.faults.checkpoint("region.method_function", k);
+			auto copy = std::make_shared<script_defined_function>(source_fn->name, std::vector<parameter>(source_fn->parameters()), source_fn->return_type,
+			                                                      source_fn->body, slot->method_env, source_fn->local_count);
+			copy->unit = source_fn->unit;
+			if (slot->vm) { slot->vm->precompile_parallel_function(*copy); }
+			script_callable payload;
+			payload.kind = script_callable::kind_type::function;
+			payload.fn = std::move(copy);
+			slot->capture_name_ids.push_back(name_id);
+			slot->method_env->define(name_id, script_value::make_function(script_callable_thunk{ &eng, std::move(payload) }, &eng));
+		}
+		for (const auto& [name_id, name] : method_adm.adm.host_functions) {
+			script_value copy = eng.make_parallel_host_function_copy(name);
+			if (slot->vm) { slot->vm->adopt_math_alias(name_id, copy); }
+			slot->capture_name_ids.push_back(name_id);
+			slot->method_env->define(name_id, std::move(copy));
+		}
+		if (slot->vm) {
+			for (const auto& body : method_adm.admitted_bodies) { slot->vm->precompile_parallel_method(*body); }
+		}
+		slot->method_pins.definition_env = slot->method_env;
+		const bool pinned = !slot->method_pins.entries.empty() || !method_adm.constructed_classes.empty() || !method_adm.destructor_levels.empty();
+		slot->backend->set_parallel_method_pins(pinned ? &slot->method_pins : nullptr);
 		contexts.push_back(slot.get());
 #ifdef JAISCRIPT_VM_PROFILE
 		{ const uint64_t now = __rdtsc(); pf_pins += now - pf_a; pf_a = now; }
@@ -4114,6 +4446,14 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		seed.push_back(array_value.get_type_info().get());
 		seed.push_back(element_type.get());
 		for (const class_definition* cd : element_classes) { seed.push_back(cd->get_type_info().get()); }
+		std::vector<class_definition*> made;   // every class a chunk can construct, copy or destroy
+		for (const auto& c : method_adm.constructed_classes) { made.push_back(c.cls.get()); }
+		for (const class_definition* cd : method_adm.destructor_levels) { made.push_back(const_cast<class_definition*>(cd)); }
+		for (const class_definition* cd : element_classes) { made.push_back(const_cast<class_definition*>(cd)); }
+		for (class_definition* cd : made) {
+			prime_construction_memos(*cd);
+			seed.push_back(cd->get_type_info().get());
+		}
 		seed_classes_by_member(eng, adm->element_reached_members, seed);
 		seed_classes_by_member(eng, method_adm.adm.element_reached_members, seed);
 		prewarm_region_types(eng, seed);
@@ -4127,7 +4467,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	// is built once per engine at the engine's worker count (calibrated then).
 	auto& table = region_guard.table;
 	state.faults.checkpoint("region.table_entry", 0);
-	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits });
+	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits, nullptr, contexts[0]->backend.get(), &contexts[0]->method_env,
+	                          &contexts[0]->deferred_reports });
 	if (worker_count > 1) {
 		const size_t pool_workers_needed = worker_count - 1;
 		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
@@ -4147,7 +4488,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 		for (size_t k = 1; k < worker_count; ++k) {
 			state.faults.checkpoint("region.table_entry", k);
-			table.entries.push_back({ detail::thread_pool_access::worker_thread_id(*state.pool, k - 1), &contexts[k]->limits, &contexts[k]->pending_instances });
+			table.entries.push_back({ detail::thread_pool_access::worker_thread_id(*state.pool, k - 1), &contexts[k]->limits, &contexts[k]->pending_instances,
+			                          contexts[k]->backend.get(), &contexts[k]->method_env, &contexts[k]->deferred_reports });
 		}
 	}
 	region_guard.prepared = true;
@@ -4228,6 +4570,10 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	region_guard.restore();   // registration below can allocate or throw
 	for (auto* ctx : contexts) {   // worker-created instances join the class registries now, unlocked
 		drain_pending_instances(state, *ctx);
+	}
+	for (auto* ctx : contexts) {
+		for (const auto& [code, message] : ctx->deferred_reports) { eng.report_script_error(message, code); }
+		ctx->deferred_reports.clear();
 	}
 	state.pending_registration_retry = false;
 	// JOIN: memory roll-up, then ITERATION order picks the error a region reports

@@ -33,6 +33,7 @@ namespace jai {
     class ast_node;
     class engine;
     class environment;
+    class execution_backend;
     class function_decl;
     class identifier_expr;
     class statement;
@@ -59,12 +60,23 @@ namespace jai::detail {
             // or copies register HERE instead of in the class registry - no lock on the
             // worker; the join registers the survivors, a copy that died meanwhile just expires
             std::vector<std::weak_ptr<class_instance>>* pending_registrations = nullptr;
+            // A script destructor that runs on this thread runs on the chunk's own backend in its method sandbox (the barrier
+            // admitted every destructor the region can run); what a failing one reports waits for the join
+            execution_backend* backend = nullptr;
+            const std::shared_ptr<environment>* definition_env = nullptr;
+            std::vector<std::pair<std::error_code, std::string>>* deferred_reports = nullptr;
         };
         std::vector<entry> entries;
 
         execution_limits* find(std::thread::id tid) const noexcept {
             for (const auto& e : entries) {
                 if (e.id == tid) { return e.limits; }
+            }
+            return nullptr;
+        }
+        const entry* find_entry(std::thread::id tid) const noexcept {
+            for (const auto& e : entries) {
+                if (e.id == tid) { return &e; }
             }
             return nullptr;
         }
@@ -142,6 +154,16 @@ namespace jai::detail {
             const ast_node* site = nullptr;   // pinned transitively via script_functions
         };
         std::vector<element_method_call> element_method_calls;
+        // Script classes the bodies construct (Name(args), new Name(args), Name n(args)) with the argument count. Admission
+        // only collects; the barrier resolves each name against the live class and walks every constructor, base
+        // construction, field initializer and destructor the construction can run (admit_construction)
+        struct construction {
+            uint64_t name_id = 0;
+            std::string_view name;
+            size_t argc = 0;
+            const ast_node* site = nullptr;
+        };
+        std::vector<construction> constructions;
         // Member ids the body names on chains rooted at the element (its own fields and their
         // members, any depth), recorded for both forms. parallel_for's barrier normalization
         // descends an object only through fields the body can reach: a field no worker can
@@ -183,6 +205,8 @@ namespace jai::detail {
             parallel_method_pin pin;
         };
         std::vector<entry> entries;
+        // The worker's method sandbox: the root a construction without a constructor initializes its fields in
+        std::shared_ptr<environment> definition_env;
         const parallel_method_pin* find(const void* cls, uint64_t name_id) const noexcept {
             for (const auto& e : entries) {
                 if (e.cls == cls && e.name_id == name_id) { return &e.pin; }

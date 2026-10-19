@@ -318,7 +318,7 @@ inline checked_result<script_value> script_method_dispatch::invoke(const script_
         return resolved.error_value();
     }
 
-    execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
+    execution_backend* backend = eng ? eng->calling_backend() : nullptr;
     if (!backend) {
         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
     }

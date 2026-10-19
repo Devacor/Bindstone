@@ -134,7 +134,7 @@ public:
     inline void set_field_unchecked(uint64_t id, const script_value& value);
     // create_instance's plan landing: fresh instance, no references, no overflow - one
     // cell copy per planned slot (materialize_field's slot arm without the hash)
-    inline void seed_fields_from_plan(const std::vector<std::pair<uint32_t, script_value>>& plan, uint32_t slot_count);
+    inline void seed_fields_from_plan(const std::vector<std::pair<uint32_t, script_value>>& plan, uint32_t slot_count, bool detach = false);
     bool seeded_from_plan() const { return seeded_from_plan_; }
 
     // Records this instance as its C++ object's script layer when its native object lands on a
@@ -711,6 +711,9 @@ public:
     // An instance of this class, armed with the chain's script destructor when it declares one: every instance runs it,
     // a minted one and every copy alike (C++)
     inline std::shared_ptr<class_instance> allocate_instance();
+    // Every memo a construction, copy or death of an instance fills, filled ahead of a parallel region whose chunks make or
+    // destroy instances (they only read them)
+    inline void prime_region_memos();
 
     inline std::shared_ptr<class_instance> create_instance();
 

@@ -11,6 +11,11 @@
 //   submit(task)            — shared queue, any worker runs it.
 //   submit_to(worker, task) — that worker's dedicated queue; ONLY worker `worker`'s
 //                             thread ever runs it (stable std::this_thread::get_id()).
+// Continuations: submit(task, then, where) and submit_batch(tasks, then, where) run `then`
+// once after the task (every task of the batch) finished, threw or not, either on the worker
+// that finished last (then_on::pool) or posted (then_on::posted). post(task) queues work for
+// the host's own thread, which run_posted() drains; the posted queue has its own lock, so
+// posting never contends with the workers.
 // Zero static state: the pool is a plain object; every queue, lock, and handler
 // lives in the instance. Task exceptions are routed to on_exception (or swallowed),
 // never allowed to kill a worker. Destruction drops queued-but-unstarted tasks,
@@ -153,6 +158,89 @@ namespace jai {
             }
         }
 
+        // Where a continuation runs: on the pool worker that finished the work, or posted for
+        // the thread that calls run_posted().
+        enum class then_on { pool, posted };
+
+        // `then` runs once after `task` returns or throws (the exception goes to on_exception).
+        void submit(task_type task, task_type then, then_on where = then_on::pool) {
+            submit([this, task = std::move(task), then = std::move(then), where]() mutable {
+                run_reporting(task);
+                continue_with(std::move(then), where);
+            });
+        }
+
+        // The batch's tasks go on the shared queue under one lock; `then` runs exactly once,
+        // after the last of them returns or throws. An empty batch continues at once.
+        void submit_batch(std::vector<task_type> tasks, task_type then, then_on where = then_on::pool) {
+            if (tasks.empty()) {
+                if (then && where == then_on::posted) {
+                    post(std::move(then));
+                } else if (then) {
+                    submit(std::move(then));
+                }
+                return;
+            }
+            auto batch = std::make_shared<batch_state>(tasks.size(), std::move(then), where);
+            const size_t count = tasks.size();
+            {
+                std::lock_guard<std::mutex> guard(mutex_);
+                if (stop_) return;
+                for (auto& task : tasks) {
+                    shared_.push_back([this, batch, task = std::move(task)]() mutable {
+                        run_reporting(task);
+                        task = nullptr;
+                        if (batch->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                            continue_with(std::move(batch->then), batch->where);
+                        }
+                    });
+                    outstanding_.fetch_add(1, std::memory_order_relaxed);
+                }
+                shared_pending_.store(true, std::memory_order_release);
+                note_batch();
+            }
+            if (count >= workers_.size()) {
+                work_cv_.notify_all();
+            } else {
+                for (size_t i = 0; i < count; ++i) { work_cv_.notify_one(); }
+            }
+        }
+
+        // Queues `task` for the thread that drains run_posted(); any thread may post.
+        void post(task_type task) {
+            std::lock_guard<std::mutex> guard(posted_mutex_);
+            posted_.push_back(std::move(task));
+        }
+
+        // Runs every posted task in order, including tasks posted while it runs, and returns how
+        // many ran. A std::exception goes to on_exception; any other exception leaves with the
+        // tasks not yet run queued ahead of later posts. Safe to call from inside a posted task.
+        size_t run_posted() {
+            size_t result = 0;
+            std::deque<task_type> pending;
+            for (;;) {
+                {
+                    std::lock_guard<std::mutex> guard(posted_mutex_);
+                    if (posted_.empty()) { return result; }
+                    pending.swap(posted_);
+                }
+                while (!pending.empty()) {
+                    task_type task = std::move(pending.front());
+                    pending.pop_front();
+                    ++result;
+                    try {
+                        task();
+                    } catch (const std::exception&) {
+                        dispatch_exception(std::current_exception());
+                    } catch (...) {
+                        std::lock_guard<std::mutex> guard(posted_mutex_);
+                        posted_.insert(posted_.begin(), std::make_move_iterator(pending.begin()), std::make_move_iterator(pending.end()));
+                        throw;
+                    }
+                }
+            }
+        }
+
         // Receives every exception a task lets escape (worker stays alive either way).
         void on_exception(std::function<void(std::exception_ptr)> handler) {
             std::lock_guard<std::mutex> guard(mutex_);
@@ -183,6 +271,32 @@ namespace jai {
             std::atomic<bool> has_work{false};   // pinned queue non-empty (a spinning worker reads it lock-free)
             bool parked = false;                 // waiting on work_cv_; read and written under mutex_
         };
+
+        struct batch_state {
+            batch_state(size_t count, task_type continuation, then_on continuation_place) :
+                remaining(count), then(std::move(continuation)), where(continuation_place) {}
+            std::atomic<size_t> remaining;
+            task_type then;
+            then_on where;
+        };
+
+        void run_reporting(task_type& task) noexcept {
+            try {
+                task();
+            } catch (...) {
+                dispatch_exception(std::current_exception());
+            }
+        }
+
+        // Called on the worker that finished the work: a pool continuation runs right there.
+        void continue_with(task_type then, then_on where) {
+            if (!then) { return; }
+            if (where == then_on::posted) {
+                post(std::move(then));
+            } else {
+                run_reporting(then);
+            }
+        }
 
         static void cpu_relax() noexcept {
 #if defined(_M_X64) || defined(__x86_64__) || defined(_M_IX86) || defined(__i386__)
@@ -295,6 +409,8 @@ namespace jai {
         std::vector<std::unique_ptr<worker>> workers_;
         std::deque<task_type> shared_;
         std::function<void(std::exception_ptr)> exception_handler_;
+        std::mutex posted_mutex_;
+        std::deque<task_type> posted_;
         std::atomic<size_t> outstanding_{0};       // written under mutex_; the joiner's spin reads it
         std::atomic<bool> shared_pending_{false};
         std::atomic<bool> stop_flag_{false};

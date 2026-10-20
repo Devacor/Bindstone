@@ -1591,14 +1591,20 @@ public:
 				return parallel_transform(a, f, w);
 			)";
 			auto flat = e->execute(flat_src);
-			auto flat_bounds = e->last_parallel_chunk_bounds();
+			auto flat_bounds = e->last_parallel_chunk_bounds();   // what each thread took: follows timing
 			auto weighted = e->execute(weighted_src);
 			auto weighted_bounds = e->last_parallel_chunk_bounds();
 			check_true(arrays_equal(flat, weighted));       // observable output identical
-			check_eq(flat_bounds.size(), weighted_bounds.size());
-			check_true(flat_bounds != weighted_bounds);     // heavy prefix pulled boundaries left
-			// Cumulative-weight split: the first boundary lands inside the heavy prefix
-			check_lt(weighted_bounds[1], flat_bounds[1]);
+			check_eq((size_t)5, flat_bounds.size());
+			check_eq((size_t)64, flat_bounds.back());
+			check_eq((size_t)5, weighted_bounds.size());
+			check_eq((size_t)64, weighted_bounds.back());
+			// Cumulative-weight split: the first boundary lands inside the heavy prefix, left of an even split's n / W
+			check_lt(weighted_bounds[1], (size_t)16);
+			check_true(weighted_bounds[1] <= 8);
+			// the hint fixes the chunks: the same region chooses the same bounds again
+			e->execute(weighted_src);
+			check_true(weighted_bounds == e->last_parallel_chunk_bounds());
 		});
 
 		// A worker remembers which function each of its call sites validated (vm_backend::worker_callee_memo_): rows hold raw node

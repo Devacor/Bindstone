@@ -443,9 +443,23 @@ namespace jai::vm {
             std::vector<script_value> string_constants;
             std::vector<uint64_t> site_epochs;   // per inline site: the definition epoch this worker last validated its globals and callees at
             std::vector<chunk::entry_memo_row> entry_rows;   // the worker's block-entry rows for this chunk (chunk::entry_memos' rule)
+            std::vector<chunk::member_ic_entry> member_ic;   // the worker's member IC rows for this chunk (chunk::member_ic's rule)
         };
         std::vector<worker_chunk_env_cache> worker_env_caches_;
         worker_chunk_env_cache* worker_chunk_record(const chunk* code);
+        // the member IC rows a site reads and fills: the chunk's on the main engine, a worker's own in its record of the chunk (the chunk is
+        // shared); null: no rows, the probe answers each read
+        std::vector<chunk::member_ic_entry>* member_ic_rows(const chunk& code) {
+            if (!parallel_worker_) { return cached_global_env_ ? &code.member_ic : nullptr; }
+            worker_chunk_env_cache* rec = worker_chunk_record(&code);
+            return rec ? &rec->member_ic : nullptr;
+        }
+        chunk::member_ic_entry* member_ic_row(const chunk& code, size_t ip) {
+            std::vector<chunk::member_ic_entry>* rows = member_ic_rows(code);
+            if (!rows) { return nullptr; }
+            if (rows->size() < code.code.size()) { rows->resize(code.code.size()); }
+            return &(*rows)[ip];
+        }
         // A worker's own copies of the borrowed table cells it reads, keyed by (array node,
         // index) and validated against the live bytes on every hit (a recycled node address
         // or a rebuilt table can only refresh the copy, never return stale text): the row

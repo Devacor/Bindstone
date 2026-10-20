@@ -111,6 +111,43 @@ var kept = [];
 			     "true true true true true true true", 40, "rewritten tables");
 		});
 
+		test("a_workers_member_caches_follow_a_class_reload_between_regions", [this]() {
+			// each worker keeps its own field caches per chunk across regions; a reload that reorders and adds fields moves the slots,
+			// and the next region reads and writes the fields by name, as the serial loop does
+			const std::string path = "D:/virtual/parallel_cells/members.jai";
+			const char* first = R"JAI(
+class P { int a = 1; int b = 2; }
+function weigh(var& p) -> void { int s = 0; for (int k = 0; k < 20; ++k) { s = s + p.a * 10 + p.b; } p.b = s % 97; }
+array<P> ps = []; for (int i = 0; i < 400; ++i) { P p = P(); p.a = i % 7; p.b = i % 5; ps.push(p); }
+function total() -> int { int t = 0; for (auto& p : ps) { t = t + p.a * 1000 + p.b; } return t; }
+)JAI";
+			const char* second = R"JAI(
+class P { int b = 2; int c = 5; int a = 1; }
+function weigh(var& p) -> void { int s = 0; for (int k = 0; k < 20; ++k) { s = s + p.a * 10 + p.b + p.c; } p.b = s % 89; }
+array<P> ps = []; for (int i = 0; i < 400; ++i) { P p = P(); p.a = i % 7; p.b = i % 5; ps.push(p); }
+function total() -> int { int t = 0; for (auto& p : ps) { t = t + p.a * 1000 + p.b + p.c * 7; } return t; }
+)JAI";
+			std::string results[2];
+			for (bool vm : { false, true }) {
+				auto e = engine::make();
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+				stdlib::register_all(*e);
+				e->parallel_thread_count(4);
+				std::string out;
+				try {
+					e->execute_file_source(path, first);
+					for (int r = 0; r < 3; ++r) { e->execute("parallel_for (auto& p : ps) { weigh(p); }"); }
+					out = e->execute("to_string(total());").to_string();
+					e->execute_file_source(path, second);
+					for (int r = 0; r < 3; ++r) { e->execute("parallel_for (auto& p : ps) { weigh(p); }"); }
+					out += " " + e->execute("to_string(total());").to_string();
+				} catch (const std::exception& ex) { out = std::string("throw:") + ex.what(); }
+				results[vm ? 1 : 0] = out;
+			}
+			check_eq(results[0], results[1], "both backends through the reload");
+			check(results[1].find("throw") == std::string::npos, "runs: " + results[1]);
+		});
+
 		test("a_builtin_callbacks_loop_runs_as_a_block", [this]() {
 			const char* defs = R"JAI(
 function weigh(int v) -> int { int s = 0; for (int i = 0; i < 40; ++i) { s = s + (v * i) % 7; } return s; }

@@ -20,6 +20,9 @@
 
 static jai::registrar<MV::Scene::Node, MV::Services> _hookNode("Node",
 	[](jai::dynamic_binder<MV::Scene::Node>& builder, const MV::Services&) {
+	builder.serial_method("make").serial_method("makeOrGet").serial_method("removeFromParent").serial_method("clear").serial_method("id")
+		.serial_method("depth").serial_method("position").serial_method("visible").serial_method("show").serial_method("hide")
+		.serial_method("bounds").serial_method("worldBounds").serial_method("screenBounds").serial_method("clone");
 	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)()>(&MV::Scene::Node::make));
 	builder.method("make", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Node::*)(const std::string&)>(&MV::Scene::Node::make));
 	builder.method("makeOrGet", &MV::Scene::Node::makeOrGet);

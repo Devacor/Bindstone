@@ -27,6 +27,7 @@ void Game::jai_auto_bind(jai::dynamic_binder<Game>& builder) {
 
 static jai::registrar<Game, MV::Services> _hookGame("Game",
 	[](jai::dynamic_binder<Game>& builder, const MV::Services&) {
+	builder.serial_method("killGame");
 	builder.method("gui", &Game::gui);
 	builder.method("instance", [](Game& a_self) {
 		return std::shared_ptr<GameInstance>(a_self.instance(), [](GameInstance*) {});
@@ -56,6 +57,7 @@ Game::Game(Managers& a_managers) :
 	jaiEngine_->add_function("eval_file", [eng = jaiEngine_.get()](const std::string& a_path) {
 		eng->execute(MV::fileContents("Interface/" + a_path, true));
 	});
+	jaiEngine_->serial_function("eval_file");   // reads a file and runs it on the shared engine
 
 	returnFromBackground();
 

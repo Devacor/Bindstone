@@ -6,6 +6,7 @@
 
 static jai::registrar<Team, MV::Services> _hookTeam("Team",
 	[](jai::dynamic_binder<Team>& builder, const MV::Services&) {
+	builder.serial_method("damage");
 	builder.method("ourWell", &Team::ourWell);
 	builder.method("enemyWell", &Team::enemyWell);
 	builder.method("health", &Team::health);

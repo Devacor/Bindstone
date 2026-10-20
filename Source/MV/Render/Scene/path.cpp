@@ -7,6 +7,8 @@
 
 static jai::registrar<MV::Scene::PathMap, MV::Services> _hookPathMap("PathMap",
 	[](jai::dynamic_binder<MV::Scene::PathMap>& builder, const MV::Services&) {
+	builder.serial_method("resizeGrid").serial_method("cellSize").serial_method("searchBudget").serial_method("searchLimit")
+		.serial_method("fieldsPerTick").serial_method("maxFlowFields");
 	builder.base_class<MV::Scene::Drawable>();
 	builder.auto_bind();
 
@@ -37,6 +39,9 @@ static jai::registrar<MV::Scene::PathMap, MV::Services> _hookPathMap("PathMap",
 
 static jai::registrar<MV::Scene::PathAgent, MV::Services> _hookPathAgent("PathAgent",
 	[](jai::dynamic_binder<MV::Scene::PathAgent>& builder, const MV::Services&) {
+	builder.serial_method("gridPosition").serial_method("localPosition").serial_method("gridGoal").serial_method("localGoal")
+		.serial_method("pathMode").serial_method("gridSpeed").serial_method("localSpeed").serial_method("stop").serial_method("path")
+		.serial_method("disableFootprint").serial_method("enableFootprint");
 	builder.base_class<MV::Scene::Component>();
 	builder.auto_bind();
 

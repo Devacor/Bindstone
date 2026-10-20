@@ -7,6 +7,7 @@
 
 static jai::registrar<MV::Scene::Palette, MV::Services> _hookPalette("Palette",
 	[](jai::dynamic_binder<MV::Scene::Palette>& builder, const MV::Services&) {
+	builder.serial_method("color").serial_method("colorAlphaSelector");
 	builder.base_class<MV::Scene::Drawable>();
 	builder.auto_bind();
 

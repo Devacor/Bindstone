@@ -39,6 +39,7 @@ static jai::registrar<StandardScriptMethods<Creature>, MV::Services> _hookCreatu
 
 static jai::registrar<TargetPolicy, MV::Services> _hookTargetPolicy("TargetPolicy",
 	[](jai::dynamic_binder<TargetPolicy>& builder, const MV::Services&) {
+	builder.serial_method("target");
 	builder.method("target", [](TargetPolicy& a_self, int64_t a_target, double a_range, jai::script_value a_succeed) {
 		a_self.target(a_target, static_cast<float>(a_range), jai::convert_script_function<void(TargetPolicy&)>(a_succeed));
 	});
@@ -78,6 +79,7 @@ void Creature::jai_auto_bind(jai::dynamic_binder<Creature>& builder) {
 
 static jai::registrar<Creature, MV::Services, jai::bases<MV::Scene::Component>> _hookCreature("Creature",
 	[](jai::dynamic_binder<Creature>& builder, const MV::Services&) {
+	builder.serial_method("changeHealth");
 	builder.base_class<MV::Scene::Component>();
 	auto& eng = builder.bound_engine();
 	jai::bind_signal_type<Creature::CallbackSignature>(eng, "SignalCreature");
@@ -120,6 +122,8 @@ void ServerCreature::jai_auto_bind(jai::dynamic_binder<ServerCreature>& builder)
 
 static jai::registrar<ServerCreature, MV::Services> _hookServerCreature("ServerCreature",
 	[](jai::dynamic_binder<ServerCreature>& builder, const MV::Services&) {
+	builder.serial_method("heal").serial_method("stun").serial_method("root").serial_method("damage").serial_method("tickDamage")
+		.serial_method("absorbFor").serial_method("spawnCreature").serial_method("fall");
 	builder.base_class<Creature>();
 	builder.method("agent", &ServerCreature::agent);
 	builder.method("fall", &ServerCreature::fall);

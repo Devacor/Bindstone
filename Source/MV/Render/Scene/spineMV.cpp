@@ -34,6 +34,7 @@ static jai::registrar<MV::Scene::AnimationTrack, MV::Services> _hookAnimationTra
 
 static jai::registrar<MV::Scene::Spine, MV::Services> _hookSpine("Spine",
 	[](jai::dynamic_binder<MV::Scene::Spine>& builder, const MV::Services&) {
+	builder.serial_method("animate").serial_method("queueAnimation").serial_method("load").serial_method("unload");
 	builder.base_class<MV::Scene::Drawable>();
 
 	auto& eng = builder.bound_engine();

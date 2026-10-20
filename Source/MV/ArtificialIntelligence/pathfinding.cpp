@@ -18,6 +18,8 @@ static jai::registrar<MV::PathNode, MV::Services> _hookPathNode("PathNode",
 
 static jai::registrar<MV::NavigationAgent, MV::Services> _hookNavigationAgent("NavigationAgent",
 	[](jai::dynamic_binder<MV::NavigationAgent>& builder, const MV::Services&) {
+	builder.serial_method("path").serial_method("stop").serial_method("position").serial_method("goal").serial_method("speed")
+		.serial_method("disableFootprint").serial_method("enableFootprint");
 	builder.auto_bind();
 	builder.serial_only_constructor();   // the destructor releases its flow field's user count and vacates the map it blocks
 

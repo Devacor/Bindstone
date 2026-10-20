@@ -11,6 +11,8 @@
 
 static jai::registrar<MV::Scene::Drawable, MV::Services> _hookDrawable("Drawable",
 	[](jai::dynamic_binder<MV::Scene::Drawable>& builder, const MV::Services&) {
+	builder.serial_method("show").serial_method("hide").serial_method("shader").serial_method("texture").serial_method("clearTexture")
+		.serial_method("clearTextures");
 	builder.base_class<MV::Scene::Component>();
 
 	builder.method("visible", &MV::Scene::Drawable::visible);

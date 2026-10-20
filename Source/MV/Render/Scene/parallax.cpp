@@ -9,6 +9,7 @@
 
 static jai::registrar<MV::Scene::Parallax, MV::Services> _hookParallax("Parallax",
 	[](jai::dynamic_binder<MV::Scene::Parallax>& builder, const MV::Services&) {
+	builder.serial_method("enabled").serial_method("disable");
 	builder.base_class<MV::Scene::Component>();
 
 	builder.method("translateRatio", static_cast<MV::Point<>(MV::Scene::Parallax::*)() const>(&MV::Scene::Parallax::translateRatio));

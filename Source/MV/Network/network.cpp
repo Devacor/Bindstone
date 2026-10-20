@@ -48,6 +48,7 @@ static jai::registrar<MV::DynamicVariable, MV::Services> _hookDynamicVariable("D
 
 static jai::registrar<MV::Client, MV::Services> _hookClient("Client",
 	[](jai::dynamic_binder<MV::Client>& builder, const MV::Services&) {
+	builder.serial_method("send").serial_method("disconnect").serial_method("reconnect");
 	builder.auto_bind();
 
 	builder.method("send", &MV::Client::send);

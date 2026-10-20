@@ -7,6 +7,10 @@
 
 static jai::registrar<MV::Scene::Text, MV::Services> _hookText("Text",
 	[](jai::dynamic_binder<MV::Scene::Text>& builder, const MV::Services&) {
+	builder.serial_method("text").serial_method("number").serial_method("justification").serial_method("wrapping")
+		.serial_method("wrappingWidth").serial_method("append").serial_method("insertAtCursor").serial_method("backspace")
+		.serial_method("minimumLineHeight").serial_method("passwordField").serial_method("useBoundsForLineHeight").serial_method("enableCursor")
+		.serial_method("disableCursor");
 	builder.base_class<MV::Scene::Drawable>();
 
 	jai::bind_signal_type<MV::Scene::Text::TextSignalSignature>(builder.bound_engine(), "SignalText");

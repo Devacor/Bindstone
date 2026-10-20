@@ -8,6 +8,7 @@
 
 static jai::registrar<MV::Scene::Slider, MV::Services> _hookSlider("Slider",
 	[](jai::dynamic_binder<MV::Scene::Slider>& builder, const MV::Services&) {
+	builder.serial_method("percent").serial_method("handle");
 	builder.base_class<MV::Scene::Clickable>();
 
 	jai::bind_signal_type<MV::Scene::Slider::SliderSignalSignature>(builder.bound_engine(), "SignalSlider");

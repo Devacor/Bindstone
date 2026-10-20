@@ -9,6 +9,7 @@
 
 static jai::registrar<MV::Scene::Clipped, MV::Services> _hookClipped("Clipped",
 	[](jai::dynamic_binder<MV::Scene::Clipped>& builder, const MV::Services&) {
+	builder.serial_method("refreshTexture");
 	builder.base_class<MV::Scene::Sprite>();
 
 	builder.method("refreshTexture", &MV::Scene::Clipped::refreshTexture);

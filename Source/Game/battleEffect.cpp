@@ -14,6 +14,7 @@ static jai::registrar<BattleEffectNetworkState, MV::Services> _hookBattleEffectN
 	eng.add_global("TargetType_CREATURE", eng.make_value(static_cast<int64_t>(TargetType::CREATURE)));
 	eng.add_global("TargetType_GROUND", eng.make_value(static_cast<int64_t>(TargetType::GROUND)));
 	builder.constructor<GameInstance&, const std::string&, int64_t>();
+	builder.serial_only_constructor();   // reads the owner creature from the GameInstance and its node's scene-graph position
 	builder.property("dying", &BattleEffectNetworkState::dying);
 	builder.property("buildingSlot", &BattleEffectNetworkState::buildingSlot);
 	builder.property("creatureOwnerId", &BattleEffectNetworkState::creatureOwnerId);

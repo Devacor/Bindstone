@@ -19,6 +19,7 @@ static jai::registrar<MV::PathNode, MV::Services> _hookPathNode("PathNode",
 static jai::registrar<MV::NavigationAgent, MV::Services> _hookNavigationAgent("NavigationAgent",
 	[](jai::dynamic_binder<MV::NavigationAgent>& builder, const MV::Services&) {
 	builder.auto_bind();
+	builder.serial_only_constructor();   // the destructor releases its flow field's user count and vacates the map it blocks
 
 	builder.method("pathfinding", &MV::NavigationAgent::pathfinding);
 	builder.method("stop", &MV::NavigationAgent::stop);

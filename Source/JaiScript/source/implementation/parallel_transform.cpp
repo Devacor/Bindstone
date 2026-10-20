@@ -4534,7 +4534,15 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 		seed_classes_by_member(eng, adm->element_reached_members, seed);
 		seed_classes_by_member(eng, method_adm.adm.element_reached_members, seed);
-		prewarm_region_types(eng, seed);
+		// the same seed over the same interner, symbols and classes interns nothing new: the last region's prewarm stands
+		const size_t types = eng.interned_type_count(), symbols = eng.get_symbolizer()->size(), classes = eng.get_class_registry().script_classes_.size();
+		if (seed != pool->prewarm_seed || types != pool->prewarm_types || symbols != pool->prewarm_symbols || classes != pool->prewarm_classes) {
+			prewarm_region_types(eng, seed);
+			pool->prewarm_seed = std::move(seed);
+			pool->prewarm_types = eng.interned_type_count();
+			pool->prewarm_symbols = eng.get_symbolizer()->size();
+			pool->prewarm_classes = eng.get_class_registry().script_classes_.size();
+		}
 	}
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t pf_prewarm1 = __rdtsc();

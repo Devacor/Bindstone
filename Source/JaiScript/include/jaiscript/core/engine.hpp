@@ -496,6 +496,7 @@ namespace jai {
         // shares no refcounts with the engine's stored values).
         detail::parallel_engine_state& parallel_state();
         script_value make_parallel_host_function_copy(const std::string& name);
+        size_t interned_type_count() const;   // internal: the type interner's size (a region's prewarm repeats nothing while it holds)
 
         // Stdlib math builtins the VM evaluates through the math:: kernel while the name still binds the function registered
         // here (compared per call; any rebinding or re-registration takes the real call). The name must hold exactly one

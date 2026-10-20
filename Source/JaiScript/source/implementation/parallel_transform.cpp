@@ -96,12 +96,13 @@ namespace jai::detail {
 		script_callable chunk_payload;
 		// Instances this worker constructed or copied during the region (pool workers only;
 		// registered by the join, expired entries skipped)
-		std::vector<std::weak_ptr<class_instance>> pending_instances;
+		std::vector<pending_registration> pending_instances;
 		// What destructors that failed on this chunk report, replayed by the join
-		std::vector<std::pair<std::error_code, std::string>> deferred_reports;
+		std::vector<deferred_report> deferred_reports;
 		std::vector<std::pair<const void*, std::weak_ptr<class_instance>>> pending_script_layers;   // recorded by the join
 		std::vector<deferred_release> deferred_releases;   // released by the join
 		cell_counters cells_folded{};   // this worker's block counters already folded into the engine's
+		parallel_schedule_cursor sched;   // this worker's place in the region's shared blocks (schedule null: the static partition)
 		std::vector<script_value> cursors;   // [0] = the range's chunk cursor, then the zip's arrays
 		std::vector<script_value> call_args; // prepared at the barrier; no worker-entry allocation
 		// Live input vector ("safe AND free"): workers read the
@@ -223,25 +224,37 @@ namespace jai::detail {
 
 namespace {
 
-	// One drain for the normal join and exceptional-exit retry. Erasing only the
-	// consumed prefix prevents duplicate registration while preserving live objects
+	// The next entry in element order over the chunks' lists, each already in element order (a chunk runs its elements in
+	// increasing order); SIZE_MAX: every list is consumed
+	template <typename List>
+	size_t next_in_element_order(const std::vector<List*>& lists, const std::vector<size_t>& at) {
+		size_t best = SIZE_MAX, best_element = SIZE_MAX;
+		for (size_t i = 0; i < lists.size(); ++i) {
+			if (at[i] < lists[i]->size() && (best == SIZE_MAX || (*lists[i])[at[i]].element < best_element)) { best = i; best_element = (*lists[i])[at[i]].element; }
+		}
+		return best;
+	}
+	// One drain for the normal join and exceptional-exit retry, in element order (the serial loop's registration order) whichever
+	// chunk ran the element. Erasing only the consumed prefixes prevents duplicate registration while preserving live objects
 	// that escaped through in-place stores. weak_ptr movement/erase does not allocate.
-	void drain_pending_instances(parallel_engine_state& state, parallel_worker_slot& slot) {
-		auto& pending = slot.pending_instances;
-		size_t consumed = 0;
+	void drain_pending_instances(parallel_engine_state& state, const std::vector<parallel_worker_slot*>& slots) {
+		std::vector<std::vector<pending_registration>*> lists;
+		for (auto* slot : slots) { lists.push_back(&slot->pending_instances); }
+		std::vector<size_t> at(lists.size(), 0);
 		try {
-			for (; consumed < pending.size(); ++consumed) {
-				auto& weak = pending[consumed];
+			for (size_t i = next_in_element_order(lists, at); i != SIZE_MAX; i = next_in_element_order(lists, at)) {
+				auto& weak = (*lists[i])[at[i]].instance;
 				if (auto live = weak.lock()) {
 					state.faults.checkpoint("region.instance_register");
 					live->get_class_definition()->register_instance_after_region(weak, &state.faults, live.get());
 				}
+				++at[i];
 			}
 		} catch (...) {
-			if (consumed) { pending.erase(pending.begin(), pending.begin() + consumed); }
+			for (size_t i = 0; i < lists.size(); ++i) { lists[i]->erase(lists[i]->begin(), lists[i]->begin() + at[i]); }
 			throw;
 		}
-		pending.clear();
+		for (auto* list : lists) { list->clear(); }
 	}
 
 	constexpr size_t k_parallel_small_n = 2;   // one element has nothing to split; from two on, the measured-cost cap below decides
@@ -2975,7 +2988,12 @@ namespace {
 			// The interpreter calls these natives; the vm compiles the names to opcodes
 			ctx->root_env->define(eng.symbolize("__jai_parallel_advance"),
 				script_value::make_function([slot, eng_ptr = &eng](const std::vector<script_value>& args) -> checked_result<script_value> {
-					for (auto& cursor : slot->cursors) { cursor.element_cursor_advance(slot->block, slot->stride_blocks); }
+					if (slot->sched.schedule) {
+						if (!slot->sched.advance()) { return script_value(static_cast<script_int>(slot->sched.schedule->n), eng_ptr); }
+						for (auto& cursor : slot->cursors) { cursor.element_cursor_set(slot->sched.index); }
+					} else {
+						for (auto& cursor : slot->cursors) { cursor.element_cursor_advance(slot->block, slot->stride_blocks); }
+					}
 					const script_int k = args.empty() ? 0 : args[0].deref().as_int();
 					return script_value(k + 1, eng_ptr);
 				}, &eng));
@@ -3008,7 +3026,7 @@ namespace {
 		// failing element, when any, is the cursor's index (the advance runs after a body call).
 		ctx.cursors = std::move(ctx.element_refs);   // [0] = the range, then the zip's arrays
 		ctx.element_refs.clear();
-		if (ctx.vm) { ctx.vm->set_parallel_cursors(&ctx.cursors, ctx.block, ctx.stride_blocks); }
+		if (ctx.vm) { ctx.vm->set_parallel_cursors(&ctx.cursors, ctx.block, ctx.stride_blocks, ctx.sched.schedule ? &ctx.sched : nullptr); }
 		struct cursor_reset {
 			parallel_worker_slot& c;
 			~cursor_reset() {
@@ -4032,9 +4050,9 @@ void recover_pending_registrations(parallel_engine_state& state) {
 	// Recover every retained pool before eviction, slot replacement or a class
 	// reload could discard pending copies or omit them from a migration snapshot.
 	for (auto& pool : state.region_pools) {
-		for (auto& slot : pool.worker_slots) {
-			if (slot) { drain_pending_instances(state, *slot); }
-		}
+		std::vector<parallel_worker_slot*> slots;
+		for (auto& slot : pool.worker_slots) { if (slot) { slots.push_back(slot.get()); } }
+		drain_pending_instances(state, slots);
 	}
 	state.pending_registration_retry = false;
 }
@@ -4423,33 +4441,31 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	state.faults.checkpoint("region.pool_storage");
 	parallel_engine_state::parallel_region_pool* pool = &acquire_region_pool(state, static_cast<const void*>(plan.root_fn->body.get()), use_vm);
 	worker_count = cap_workers_by_cost(worker_count, n, state, *pool);
-	// THE PARTITION (static, so results never depend on it): without a weight hint the
-	// elements go to the workers block-cyclically, blocks of max(1, n / 4W) consecutive elements
-	// dealt round-robin, so a cost that varies along the range (a wall-heavy band of screen rows)
-	// spreads over every worker instead of landing on one; small n means expensive elements (the
-	// cost cap keeps cheap small ranges on one thread), large n means blocks of hundreds, so no
-	// two workers write neighbouring scalars. A weight hint keeps its contiguous cumulative split.
-	// `bounds` publishes the cumulative element counts per chunk either way.
+	// THE PARTITION (results never depend on it): without a weight hint the elements go out in blocks of max(1, n / 8W)
+	// consecutive elements, each worker's first block its own and every later block to whichever worker finishes first, so a
+	// cost that varies along the range (a wall-heavy band of screen rows) or a busy core spreads over every worker instead of
+	// holding the region on one; large n means blocks of hundreds, so no two workers write neighbouring scalars. A weight hint
+	// keeps its contiguous cumulative split. `bounds` publishes the cumulative element counts per chunk (the elements each
+	// worker ran, read at the join)
 	std::vector<size_t> bounds;
 	std::vector<size_t> chunk_begin, chunk_count;
 	size_t chunk_block = 0, chunk_stride = 1;
+	parallel_block_schedule schedule;
 	state.faults.checkpoint("region.bounds");
 	if (!plan.bounds.empty() && plan.bounds.size() >= 2 && worker_count > 1) {
 		bounds = plan.bounds;                       // the caller's weighted partition
 		worker_count = bounds.size() - 1;
 		for (size_t k = 0; k < worker_count; ++k) { chunk_begin.push_back(bounds[k]); chunk_count.push_back(bounds[k + 1] - bounds[k]); }
 	} else if (worker_count > 1) {
-		chunk_block = std::max<size_t>(1, n / (4 * worker_count));
-		chunk_stride = worker_count;
+		schedule.block = std::max<size_t>(1, n / (8 * worker_count));
+		schedule.n = n;
+		schedule.blocks = (n + schedule.block - 1) / schedule.block;
+		schedule.owner.assign(schedule.blocks, 0);
+		schedule.next.store(worker_count, std::memory_order_relaxed);
 		bounds.assign(worker_count + 1, 0);
 		for (size_t k = 0; k < worker_count; ++k) {
-			size_t count = 0;
-			for (size_t first = k * chunk_block; first < n; first += chunk_stride * chunk_block) {
-				count += std::min(chunk_block, n - first);
-			}
-			chunk_begin.push_back(std::min(k * chunk_block, n));
-			chunk_count.push_back(count);
-			bounds[k + 1] = bounds[k] + count;
+			chunk_begin.push_back(std::min(k * schedule.block, n));
+			chunk_count.push_back(k < schedule.blocks ? n : 0);   // the chunk loop's bound: the schedule ends it
 		}
 	} else {
 		bounds = partition_flat(n, worker_count);
@@ -4588,6 +4604,12 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		slot->count = chunk_count[k];
 		slot->block = chunk_block;
 		slot->stride_blocks = chunk_stride;
+		slot->sched = parallel_schedule_cursor{};
+		if (schedule.blocks) {
+			slot->sched.schedule = &schedule;
+			slot->sched.worker = static_cast<uint32_t>(k);
+			slot->sched.take(k);   // its own first block (no worker runs yet)
+		}
 		slot->element_refs.clear();
 		slot->raw_input = nullptr;
 		slot->typed_input = nullptr;
@@ -4823,7 +4845,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	// is built once per engine at the engine's worker count (calibrated then).
 	auto& table = region_guard.table;
 	state.faults.checkpoint("region.table_entry", 0);
-	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits, nullptr, contexts[0]->backend.get(), &contexts[0]->method_env,
+	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits, &contexts[0]->pending_instances, contexts[0]->backend.get(), &contexts[0]->method_env,
 	                          &contexts[0]->deferred_reports, &contexts[0]->pending_script_layers, &contexts[0]->deferred_releases, &contexts[0]->cursors });
 	if (worker_count > 1) {
 		const size_t pool_workers_needed = worker_count - 1;
@@ -4883,11 +4905,15 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 #endif
 	const auto main_chunk_t0 = std::chrono::steady_clock::now();
 	run_worker_chunk(*contexts[0], eng);
-	note_region_cost(*pool, main_chunk_t0, bounds[1] - bounds[0]);
+	note_region_cost(*pool, main_chunk_t0, schedule.blocks ? contexts[0]->sched.ran : bounds[1] - bounds[0]);
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t3 = __rdtsc();
 #endif
 	region_guard.join();
+	if (schedule.blocks) {
+		for (size_t k = 0; k < worker_count; ++k) { bounds[k + 1] = bounds[k] + (k < contexts.size() ? contexts[k]->sched.ran : 0); }
+		state.last_chunk_bounds = bounds;
+	}
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t4 = __rdtsc();
 	if (plan.prof) {
@@ -4925,9 +4951,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	}
 #endif
 	region_guard.restore();   // registration below can allocate or throw
-	for (auto* ctx : contexts) {   // worker-created instances join the class registries now, unlocked
-		drain_pending_instances(state, *ctx);
-	}
+	drain_pending_instances(state, contexts);   // chunk-created instances join the class registries now, unlocked, in element order
 	{
 		std::vector<std::vector<deferred_release>*> deferred;
 		for (auto* ctx : contexts) { deferred.push_back(&ctx->deferred_releases); }
@@ -4946,9 +4970,15 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		state.worker_cells.row_entries += now.row_entries - ctx->cells_folded.row_entries;
 		ctx->cells_folded = now;
 	}
-	for (auto* ctx : contexts) {
-		for (const auto& [code, message] : ctx->deferred_reports) { eng.report_script_error(message, code); }
-		ctx->deferred_reports.clear();
+	{
+		std::vector<std::vector<deferred_report>*> reports;
+		for (auto* ctx : contexts) { reports.push_back(&ctx->deferred_reports); }
+		std::vector<size_t> at(reports.size(), 0);
+		for (size_t i = next_in_element_order(reports, at); i != SIZE_MAX; i = next_in_element_order(reports, at)) {
+			const deferred_report& r = (*reports[i])[at[i]++];
+			eng.report_script_error(r.message, r.code);
+		}
+		for (auto* list : reports) { list->clear(); }
 	}
 	state.pending_registration_retry = false;
 	// JOIN: memory roll-up, then ITERATION order picks the error a region reports
@@ -4969,6 +4999,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	// element (the serial loop's stores before it)
 	if (!adm->index_writes.empty()) {
 		auto owner = [&](size_t p) -> size_t {
+			if (schedule.blocks) { return schedule.owner[p / schedule.block]; }
 			if (chunk_block) { return (p / chunk_block) % chunk_stride; }
 			for (size_t k = 0; k < chunk_begin.size(); ++k) {
 				if (p >= chunk_begin[k] && p < chunk_begin[k] + chunk_count[k]) { return k; }

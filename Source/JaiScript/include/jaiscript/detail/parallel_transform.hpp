@@ -61,6 +61,17 @@ namespace jai::detail {
     };
     // The join's release of every chunk's deferred objects on the calling thread: element order, then the order they died in
     void release_deferred_in_order(const std::vector<std::vector<deferred_release>*>& lists);
+    // An instance a chunk constructed or copied, and what a failing destructor on a chunk reported: the join registers and reports
+    // them in element order (the serial loop's), whichever worker ran the element
+    struct pending_registration {
+        size_t element = SIZE_MAX;
+        std::weak_ptr<class_instance> instance;
+    };
+    struct deferred_report {
+        size_t element = SIZE_MAX;
+        std::error_code code;
+        std::string message;
+    };
 
     // A library builtin a parallel body may call: pure math and to_string (everything else the library registers is serial)
     bool parallel_pure_function(std::string_view name);
@@ -69,20 +80,20 @@ namespace jai::detail {
         struct entry {
             std::thread::id id;
             execution_limits* limits = nullptr;
-            // Pool workers only (null for main's own chunk): instances this worker constructs
-            // or copies register HERE instead of in the class registry - no lock on the
-            // worker; the join registers the survivors, a copy that died meanwhile just expires
-            std::vector<std::weak_ptr<class_instance>>* pending_registrations = nullptr;
+            // Instances this chunk constructs or copies register HERE instead of in the class registry - no lock on the worker;
+            // the join registers the survivors in element order, a copy that died meanwhile just expires
+            std::vector<pending_registration>* pending_registrations = nullptr;
             // A script destructor that runs on this thread runs on the chunk's own backend in its method sandbox (the barrier
             // admitted every destructor the region can run); what a failing one reports waits for the join
             execution_backend* backend = nullptr;
             const std::shared_ptr<environment>* definition_env = nullptr;
-            std::vector<std::pair<std::error_code, std::string>>* deferred_reports = nullptr;
+            std::vector<deferred_report>* deferred_reports = nullptr;
             // The script layers this chunk's hybrids adopt their host objects into, recorded by the join (the engine's map is shared)
             std::vector<std::pair<const void*, std::weak_ptr<class_instance>>>* pending_script_layers = nullptr;
             // The C++ objects of serial-only classes that die on this chunk, released by the join; cursors name the element running
             std::vector<deferred_release>* deferred_releases = nullptr;
             const std::vector<script_value>* cursors = nullptr;
+            size_t element() const noexcept { return cursors && !cursors->empty() ? cursors->front().element_cursor_index() : SIZE_MAX; }
         };
         std::vector<entry> entries;
 
@@ -98,12 +109,7 @@ namespace jai::detail {
             }
             return nullptr;
         }
-        std::vector<std::weak_ptr<class_instance>>* find_pending(std::thread::id tid) const noexcept {
-            for (const auto& e : entries) {
-                if (e.id == tid) { return e.pending_registrations; }
-            }
-            return nullptr;
-        }
+
     };
 
     // How a captured enclosing name is provisioned into the workers, decided at the

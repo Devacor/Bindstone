@@ -19981,8 +19981,14 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 						std::string_view("__jai_parallel_advance is only valid inside a parallel_for chunk")));
 					break;
 				}
-				for (auto& cursor : *parallel_cursors_) { cursor.element_cursor_advance(parallel_block_, parallel_stride_blocks_); }   // the zip's arrays step together
 				script_value& counter = stack_.back();
+				if (parallel_schedule_) {
+					// the next element of this worker's block, else the next block left; none: the chunk loop's bound ends it
+					if (!parallel_schedule_->advance()) { counter = script_value(static_cast<script_int>(parallel_schedule_->schedule->n), engine_); break; }
+					for (auto& cursor : *parallel_cursors_) { cursor.element_cursor_set(parallel_schedule_->index); }
+				} else {
+					for (auto& cursor : *parallel_cursors_) { cursor.element_cursor_advance(parallel_block_, parallel_stride_blocks_); }   // the zip's arrays step together
+				}
 				counter = script_value(counter.deref().as_int() + 1, engine_);
 				break;
 			}

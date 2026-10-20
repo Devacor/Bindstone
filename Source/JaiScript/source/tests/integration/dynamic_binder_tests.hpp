@@ -7,7 +7,40 @@
 #include <jaiscript/properties/macros.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <map>
 #include <memory>
+#include <string>
+#include <vector>
+
+// A self-referential host type whose implicit copy assignment would copy a vector of unique_ptrs (std::is_copy_assignable says
+// yes and the assignment fails to compile), a type holding one by value, and a copy-assignable type that declares it
+namespace jai::foundry::tests {
+struct SelfTree {
+    std::string id = "root";
+    std::vector<std::unique_ptr<SelfTree>> branches;
+    SelfTree() = default;
+    SelfTree(const SelfTree& other) : id(other.id) {
+        for (const auto& branch : other.branches) { branches.emplace_back(std::make_unique<SelfTree>(*branch)); }
+    }
+    SelfTree& self() { return *this; }
+};
+struct TreeHolder {
+    std::string name = "holder";
+    SelfTree tree;
+    TreeHolder& self() { return *this; }
+};
+struct NamedThing {
+    std::string name = "named";
+    NamedThing& self() { return *this; }
+};
+}
+template<> struct jai::copy_assignment<jai::foundry::tests::NamedThing> : std::true_type {};
+static_assert(!jai::copy_assignment<jai::foundry::tests::SelfTree>::value && !jai::copy_assignment<jai::foundry::tests::TreeHolder>::value,
+              "a class's assignment is unknowable from outside it");
+static_assert(!jai::copy_assignment<std::vector<std::unique_ptr<int>>>::value && !jai::copy_assignment<std::map<int, std::unique_ptr<int>>>::value,
+              "a container of a move-only type has none");
+static_assert(jai::copy_assignment<std::vector<std::string>>::value && jai::copy_assignment<std::map<std::string, std::vector<int>>>::value,
+              "strings and containers of them have one");
 
 namespace jai::foundry::tests {
 
@@ -865,6 +898,25 @@ public:
             check_eq(std::string("3,16,1,1"), out);
         });
 
+        // A self-referential host type with no usable copy assignment, and a type holding one, bind (the binder never instantiates
+        // their assignments); a reference to either refuses an assignment at run time, and a class that declares one assigns
+        test("a_reference_to_a_type_without_copy_assignment_refuses_one", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            dynamic_binder<SelfTree>(*eng, "SelfTree").constructor<>().property("id", &SelfTree::id).method("self", &SelfTree::self).build();
+            dynamic_binder<TreeHolder>(*eng, "TreeHolder").constructor<>().property("name", &TreeHolder::name).method("self", &TreeHolder::self).build();
+            dynamic_binder<NamedThing>(*eng, "NamedThing").constructor<>().property("name", &NamedThing::name).method("self", &NamedThing::self).build();
+            for (const char* cls : {"SelfTree", "TreeHolder"}) {
+                std::string message;
+                try { eng->execute(std::string("var t = ") + cls + "(); var& r = t.self(); r = " + cls + "();"); } catch (const std::exception& error) { message = error.what(); }
+                check_eq(std::string("Cannot assign to a reference to '") + cls + "': it has no copy assignment script can use", message);
+            }
+            check_eq(std::string("renamed"), eng->execute("var s = SelfTree(); var& sr = s.self(); sr.id = \"renamed\"; s.id;").as_string(),
+                     "member writes through the reference still land");
+            check_eq(std::string("other"), eng->execute("var n = NamedThing(); var& nr = n.self(); var m = NamedThing(); m.name = \"other\"; nr = m; n.name;").as_string(),
+                     "a declared copy assignment assigns");
+        });
+
         // A host method's T& result binds a var& or auto& as C++ binds a reference: member writes and assignments land in
         // the object, the receiver's object stays alive through the reference, and a class with no copy assignment refuses one
         test("a_reference_to_a_host_reference_result_binds_like_cpp", [this]() {
@@ -890,7 +942,7 @@ public:
                 s;
             )").as_string();
             check_eq(std::string("9,8,8,13,21"), out);
-            check_eq(std::string("Cannot assign to a reference to 'RefFixed': it is not copy-assignable"), [&]() {
+            check_eq(std::string("Cannot assign to a reference to 'RefFixed': it has no copy assignment script can use"), [&]() {
                 try { eng->execute("var f = RefOwner(); var& fc = f.fixed_child(); fc = RefFixed();"); } catch (const std::exception& error) { return std::string(error.what()); }
                 return std::string("no error");
             }());

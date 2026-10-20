@@ -1183,7 +1183,7 @@ void script_value::reference_holder::store_referent(const script_value& value, e
     const class_definition* def = binding.referent_class;
     const auto assign = def ? def->object_assign_function() : nullptr;
     if (!assign || !def->cpp_type()) {
-        throw runtime_error("Cannot assign to a reference to '" + (def ? def->get_name() : std::string("object")) + "': it is not copy-assignable");
+        throw runtime_error("Cannot assign to a reference to '" + (def ? def->get_name() : std::string("object")) + "': it has no copy assignment script can use");
     }
     const script_value& v = value.is_reference() ? value.deref() : value;
     auto source = detail::checked_native_reference(v, *def->cpp_type(), def->get_type_id());

@@ -435,10 +435,13 @@ dot 11.0</code></pre></div>
 The idiom is safe by construction, not by luck. And <code>!=</code> worked without being registered: when only
 <code>==</code> exists, script <code>!=</code> is its negation.</p>
 <p>A <code>T&amp;</code> result binds a reference as C++ binds one: after <code>var&amp; c = owner.child();</code>, member writes
-through <code>c</code> land in the object, <code>c = other;</code> copy-assigns into it (a class without a copy assignment
-refuses with <code>Cannot assign to a reference to 'C': it is not copy-assignable</code>), and <code>c</code> keeps the
-owner's object alive like the chain above. A plain <code>var c = owner.child();</code> is a handle to the same object, since bound
-objects are reference types at the boundary.</p>
+through <code>c</code> land in the object, and <code>c</code> keeps the owner's object alive like the chain above. <code>c = other;</code>
+copy-assigns into the object when the binder can use the class's copy assignment: a trivially assignable class, a string and a
+standard container of such answer on their own, and any other copy-assignable class declares
+<code>template&lt;&gt; struct jai::copy_assignment&lt;C&gt; : std::true_type {};</code>, because C++ cannot tell from outside a class whether
+its implicit assignment compiles (one that copies a container of a move-only type reports assignable and fails once used).
+Without it the assignment raises <code>Cannot assign to a reference to 'C': it has no copy assignment script can use</code>. A plain
+<code>var c = owner.child();</code> is a handle to the same object, since bound objects are reference types at the boundary.</p>
 <p>The verbs:</p>
 <ul>
 <li><code>.constructor&lt;Args...&gt;()</code>: typed constructor overload; script calls

@@ -13,6 +13,7 @@
 #include <jaiscript/core/jaibite.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <cstring>
+#include <sstream>
 #include <new>
 #include <thread>
 #include <atomic>
@@ -22,6 +23,10 @@ using namespace jai;
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+
+// Host objects the hybrid test makes and destroys, from any worker
+inline std::atomic<int64_t> parallel_hosts_made{0};
+inline std::atomic<int64_t> parallel_hosts_died{0};
 
 class parallel_transform_tests : public suite {
 public:
@@ -2622,23 +2627,107 @@ public:
 					check_true(got.rfind(r.text, 0) == 0, std::string(r.name) + (vm ? " vm" : " interp") + ": expected '" + r.text + "', got '" + got + "'");
 				}
 			}
-			struct host_point { int64_t v = 0; };
+			struct host_registry { int64_t v = 0; };
 			for (bool vm : {false, true}) {
 				auto e = make_engine();
 				jai::stdlib::register_all(*e);
 				e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				dynamic_binder<host_point>(*e, "HostPoint").constructor<>().property("v", &host_point::v).build();
+				dynamic_binder<host_registry>(*e, "HostRegistry").constructor<>().serial_only_constructor().property("v", &host_registry::v).build();
 				e->parallel_thread_count(8);
 				auto refused = [&](const char* src) -> std::string {
 					try { e->execute(src); } catch (const std::exception& ex) { return ex.what(); }
 					return "no error";
 				};
-				const std::string derived = refused("class Script : HostPoint { int w = 1; Script() : super() {} } array<int> xs = [1, 2]; parallel_for (auto& x : xs) { Script s; x = s.w; }");
-				check_true(derived.rfind("parallel_for: class 'Script' has a C++ base 'HostPoint' and cannot be constructed in a parallel body at 1:", 0) == 0,
-				           std::string("C++ base ") + (vm ? "vm" : "interp") + ": " + derived);
-				const std::string host = refused("array<int> xs = [1, 2]; parallel_for (auto& x : xs) { HostPoint p; x = p.v; }");
-				check_true(host.rfind("parallel_for: C++ class 'HostPoint' cannot be constructed in a parallel body at 1:", 0) == 0,
-				           std::string("C++ class ") + (vm ? "vm" : "interp") + ": " + host);
+				const std::string derived = refused("class Script : HostRegistry { int w = 1; Script() : super() {} } array<int> xs = [1, 2]; parallel_for (auto& x : xs) { Script s; x = s.w; }");
+				check_true(derived.rfind("parallel_for: class 'Script' has a C++ base 'HostRegistry' marked serial_only_constructor() and cannot be constructed in a parallel body at 1:", 0) == 0,
+				           std::string("serial-only base ") + (vm ? "vm" : "interp") + ": " + derived);
+				const std::string host = refused("array<int> xs = [1, 2]; parallel_for (auto& x : xs) { HostRegistry r; x = 1; }");
+				check_true(host.rfind("parallel_for: C++ class 'HostRegistry' is marked serial_only_constructor() and cannot be constructed in a parallel body at 1:", 0) == 0,
+				           std::string("serial-only class ") + (vm ? "vm" : "interp") + ": " + host);
+			}
+		});
+
+		test("hybrids_and_host_classes_construct_and_die_on_workers", [this]() {
+			// Host construction is safe on any thread unless the binder says otherwise: a script class over a host class, and the
+			// host class itself, construct on every worker; each C++ object dies there too, and the script level's destructor runs
+			// on the worker's backend
+			struct counted_host {
+				int64_t v = 7;
+				counted_host() { ++parallel_hosts_made; }
+				counted_host(const counted_host& other) : v(other.v) { ++parallel_hosts_made; }
+				~counted_host() { ++parallel_hosts_died; }
+			};
+			const char* src = R"(
+				class Hyb : CountedHost {
+					int w = 1;
+					string tag = "h";
+					Hyb(int k) : super() { w = k; tag = tag + to_string(k); }
+					~Hyb() { w = 0; tag = ""; }
+				}
+				array<int> xs;
+				for (int i = 0; i < 400; ++i) { xs.push(i); }
+				array<int> out;
+				for (int i = 0; i < 400; ++i) { out.push(0); }
+				parallel_for (int x : xs) {
+					Hyb h(x);
+					CountedHost bare;
+					Hyb second = Hyb(x + 1);
+					out[x] = h.w + h.tag.size() + second.w;
+				}
+				int total = 0;
+				for (int v : out) { total += v; }
+				total;
+			)";
+			int64_t expected = 0;
+			for (int64_t x = 0; x < 400; ++x) { expected += x + 1 + static_cast<int64_t>(std::to_string(x).size()) + x + 1; }
+			for (bool vm : {false, true}) {
+				for (size_t workers : {size_t(1), size_t(8)}) {
+					parallel_hosts_made = 0;
+					parallel_hosts_died = 0;
+					{
+						auto e = make_engine();
+						jai::stdlib::register_all(*e);
+						e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+						dynamic_binder<counted_host>(*e, "CountedHost").constructor<>().property("v", &counted_host::v).build();
+						e->parallel_thread_count(workers);
+						e->execution_budget(0);
+						std::string got;
+						try { got = std::to_string(e->execute(src).as_int()); } catch (const std::exception& ex) { got = std::string("error ") + ex.what(); }
+						check_eq(std::to_string(expected), got, std::string("hybrid total ") + (vm ? "vm " : "interp ") + std::to_string(workers));
+					}
+					check_true(parallel_hosts_made.load() >= 1200, "every host object was made");
+					check_eq(parallel_hosts_made.load(), parallel_hosts_died.load(), std::string("every host object died ") + (vm ? "vm" : "interp"));
+				}
+			}
+		});
+
+		test("the_binder_guide_s_serial_only_sample_prints_what_the_page_shows", [this]() {
+			// docs/site/embedding/02-dynamic-binder.html#serial-only-constructors: the host sample the site runner skips
+			struct doc_sprite {
+				static std::vector<doc_sprite*>& registry() { static std::vector<doc_sprite*> all; return all; }
+				double alpha = 1.0;
+				doc_sprite() { registry().push_back(this); }
+				~doc_sprite() { std::erase(registry(), this); }
+			};
+			const char* src = "class Glowing : Sprite { float glow = 0.5; Glowing() : super() {} }\n"
+			                  "array<int> lights = [1, 2, 3];\n"
+			                  "try { parallel_for (auto& n : lights) { Sprite s; n = 0; } } catch (e) { print(e); }\n"
+			                  "try { parallel_for (auto& n : lights) { Glowing g; n = 0; } } catch (e) { print(e); }\n"
+			                  "Glowing one;                              // a serial construction is unaffected\n"
+			                  "print(\"{} {}\", one.alpha, one.glow);\n";
+			const std::string expected =
+				"parallel_for: C++ class 'Sprite' is marked serial_only_constructor() and cannot be constructed in a parallel body at 3:48\n"
+				"parallel_for: class 'Glowing' has a C++ base 'Sprite' marked serial_only_constructor() and cannot be constructed in a parallel body at 4:49\n"
+				"1.0 0.5\n";
+			for (bool vm : {false, true}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(*e);
+				e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				auto out = std::make_shared<std::ostringstream>();
+				e->set_output_stream(out);
+				jai::dynamic_binder<doc_sprite>(*e, "Sprite").constructor<>().serial_only_constructor().property("alpha", &doc_sprite::alpha).build();
+				try { e->execute(src); } catch (const std::exception& ex) { *out << "threw: " << ex.what(); }
+				check_eq(expected, out->str(), vm ? "vm" : "interp");
 			}
 		});
 

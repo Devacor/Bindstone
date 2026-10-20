@@ -205,8 +205,11 @@ names (an unnamed base default-constructs), each level's field initializers, and
 every class whose instance can die on a chunk: constructed classes, element classes, the classes an
 index-written array holds, their fields' classes (an untyped field: every class) and subclasses.
 Class code may call script functions and the whitelisted host functions; their worker copies live in
-the method sandbox. A class with a C++ base, or a C++ class, is refused (its host constructor and
-destructor run code no walk sees). Each worker gets a constructor value of its own for every
+the method sandbox. A host constructor and destructor run code no walk sees, so the binder vouches
+for them: safe on any thread by default, refused with every script class over the host class when it
+is bound `.serial_only_constructor()`. A worker gets a copy of each host constructor a construction
+reaches (`make_parallel_host_function_copy`), and a hybrid's script layer joins the engine's
+script-layer map at the join (`pending_script_layers`). Each worker gets a constructor value of its own for every
 constructed class, defined in its root env and method sandbox, whose definition environment is the
 sandbox; constructor and destructor bodies compile on each worker at the barrier; every memo
 construction fills (instance plan, defaults, destructor and construction-order memos, implicit

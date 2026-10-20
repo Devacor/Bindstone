@@ -1039,6 +1039,11 @@ public:
     inline void nocopy(bool value);
     inline bool nocopy() const;
 
+    // A host class whose constructor or destructor touches state other objects share (a registry, a cache, a service): a
+    // parallel body may not construct it, nor any script class over it (dynamic_binder::serial_only_constructor)
+    void serial_only_construction(bool value) { serial_only_construction_ = value; }
+    bool serial_only_construction() const { return serial_only_construction_; }
+
     inline std::shared_ptr<void> copy_object(const void* src) const;
 
     struct method_metadata {
@@ -1227,6 +1232,7 @@ private:
 
     copy_function copy_function_;
     bool nocopy_ = false;
+    bool serial_only_construction_ = false;
     mutable bool nocopy_memo_ = false;
     mutable uint64_t nocopy_memo_epoch_ = 0;
 

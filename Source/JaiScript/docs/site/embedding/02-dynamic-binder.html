@@ -434,6 +434,11 @@ dot 11.0</code></pre></div>
 <code>T&amp;</code> into its receiver stays valid because the bound receiver is kept alive across the chain.
 The idiom is safe by construction, not by luck. And <code>!=</code> worked without being registered: when only
 <code>==</code> exists, script <code>!=</code> is its negation.</p>
+<p>A <code>T&amp;</code> result binds a reference as C++ binds one: after <code>var&amp; c = owner.child();</code>, member writes
+through <code>c</code> land in the object, <code>c = other;</code> copy-assigns into it (a class without a copy assignment
+refuses with <code>Cannot assign to a reference to 'C': it is not copy-assignable</code>), and <code>c</code> keeps the
+owner's object alive like the chain above. A plain <code>var c = owner.child();</code> is a handle to the same object, since bound
+objects are reference types at the boundary.</p>
 <p>The verbs:</p>
 <ul>
 <li><code>.constructor&lt;Args...&gt;()</code>: typed constructor overload; script calls

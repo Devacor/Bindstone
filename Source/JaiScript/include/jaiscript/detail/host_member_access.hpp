@@ -123,8 +123,26 @@ inline void* host_member_address(const class_instance* inst, const host_member_h
 	return object ? const_cast<char*>(object) + hit.delta : nullptr;
 }
 
-// A bound method's direct lane for this receiver: the receiver class's own (a bound C++ class's wrapper), or for a layer
-// whose script chain defines no method of the name, its C++ base's, reached at the base's offset in the stored object
+// The class whose binding of the name get_method answers with (its own table, then its parents in order, then its C++
+// base) and that binding's direct lane; null when the answering binding has none (a guarded or overloaded one)
+inline const class_definition* host_native_owner(const class_definition* cls, uint64_t method_id,
+                                                 const class_definition::native_entry*& entry, bool& answered, int depth = 0) {
+	if (!cls || answered || depth > 64) { return nullptr; }
+	if (cls->has_method(method_id)) {
+		answered = true;
+		entry = cls->find_native_method(method_id);
+		return entry ? cls : nullptr;
+	}
+	for (const auto& parent : cls->get_parent_classes()) {
+		if (const class_definition* owner = host_native_owner(parent.get(), method_id, entry, answered, depth + 1)) { return owner; }
+		if (answered) { return nullptr; }
+	}
+	if (auto base = cls->get_cpp_base_class()) { return host_native_owner(base.get(), method_id, entry, answered, depth + 1); }
+	return nullptr;
+}
+
+// A bound method's direct lane for this receiver: the binding its class answers with (its own or an inherited one), or for
+// a layer whose script chain defines no method of the name, its C++ base's; reached at that class's offset in the object
 inline bool host_method_fill(class_definition* cd, const class_instance* inst, uint64_t method_id, engine* eng,
                              host_method_hit& out) {
 	out = host_method_hit{};
@@ -138,8 +156,10 @@ inline bool host_method_fill(class_definition* cd, const class_instance* inst, u
 	} else if (!cd->is_cpp_class()) {
 		return false;
 	}
-	const class_definition::native_entry* entry = owner->find_native_method(method_id);
-	if (!entry) { return false; }
+	const class_definition::native_entry* entry = nullptr;
+	bool answered = false;
+	owner = host_native_owner(owner, method_id, entry, answered);
+	if (!owner || !entry) { return false; }
 	const void* stored = nullptr;
 	host_receiver_layout layout;
 	if (!host_receiver_measure(cd, inst, owner, eng, stored, out.delta, layout)) { return false; }

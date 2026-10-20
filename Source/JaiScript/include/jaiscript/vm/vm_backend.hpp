@@ -1842,6 +1842,9 @@ namespace jai::vm {
         // The object the site's lane runs on for this receiver (site.nat_hit.entry), else null: the call goes on
         void* native_site_self(const call_site& site, class_definition& cd, class_instance& inst, uint64_t id);
         void native_site_refill(const call_site& site, class_definition& cd, class_instance& inst, uint64_t id, uint64_t stamp);
+        // the instance a host-method call's receiver holds when the site's ordinary-path memo answers it, else null
+        class_instance* ordinary_site_instance(const call_site& site, const script_value& receiver) const;
+        void ordinary_site_arm(const call_site& site, const script_value& receiver, uint64_t member_id);
         // A bare name read in a method that names a C++ member of the receiver: the value through the lane the slot holds for
         // the receiver's class (never fills), and the fill once the member probe answered cpp_property
         bool bare_host_read(frame& f, size_t cache_slot, script_value& out);

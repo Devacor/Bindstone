@@ -96,6 +96,36 @@ struct LaneMembers {
     int64_t other = 70;
 };
 
+struct RefInner { int64_t v = 4; };
+struct RefFixed { int64_t v = 1; const int64_t k = 2; };
+struct RefOwner {
+    RefInner inner;
+    RefFixed fixed;
+    RefInner& child() { return inner; }
+    RefFixed& fixed_child() { return fixed; }
+    RefOwner& self_ref() { return *this; }
+};
+// Method lanes: a base's binding reached through a derived binding (single and at a nonzero offset), object parameters of
+// every handing, and an overload set
+struct LaneBase { int64_t b = 5; virtual ~LaneBase() = default; int64_t base_value() const { return b; } };
+struct LaneDerived : LaneBase { int64_t own = 6; };
+struct LaneRebound : LaneBase { int64_t rebound_value() const { return 600; } };
+struct LanePad { int64_t pad[3] = {1, 2, 3}; };
+struct LaneLate : LanePad, LaneBase { };
+struct LaneUser {
+    int64_t by_ref(const RefInner& a) const { return a.v; }
+    int64_t by_mut(RefInner& a) const { a.v += 1; return a.v; }
+    int64_t by_value(RefInner a) const { a.v += 100; return a.v; }
+    int64_t by_handle(std::shared_ptr<RefInner> a) const { return a ? a->v : -1; }
+    std::string ov(int64_t) const { return "int"; }
+    std::string ov(double) const { return "float"; }
+    std::string ov(const std::string&) const { return "string"; }
+    std::string ov(bool) const { return "bool"; }
+    std::string wide(int64_t) const { return "int64"; }
+    std::string wide(int32_t) const { return "int32"; }
+    void add_to(int64_t& target, int64_t by) const { target += by; }
+    int64_t version() const { return 1; }
+};
 struct LaneFirstBase { int64_t first = 11; virtual ~LaneFirstBase() = default; };
 struct LaneSecondBase { int64_t second = 22; double scale = 2.5; };
 struct LaneJoined : LaneFirstBase, LaneSecondBase { int64_t own = 33; };
@@ -230,6 +260,41 @@ public:
             keep->push_back(std::make_shared<LaneSchemaShadow>());
             return raw->make_object(keep->back());
         });
+        return eng;
+    }
+
+    static std::shared_ptr<engine> method_lane_engine() {
+        auto eng = make_engine();
+        jai::stdlib::register_all(*eng);
+        dynamic_binder<RefInner>(*eng, "RefInner").constructor<>().property("v", &RefInner::v).build();
+        dynamic_binder<RefFixed>(*eng, "RefFixed").constructor<>().property("v", &RefFixed::v).build();
+        dynamic_binder<RefOwner>(*eng, "RefOwner")
+            .constructor<>()
+            .property("inner", &RefOwner::inner)
+            .method("child", &RefOwner::child)
+            .method("fixed_child", &RefOwner::fixed_child)
+            .method("self_ref", &RefOwner::self_ref)
+            .build();
+        dynamic_binder<LaneBase>(*eng, "LaneBase").constructor<>().method("base_value", &LaneBase::base_value).build();
+        dynamic_binder<LaneDerived>(*eng, "LaneDerived").constructor<>().base_class<LaneBase>().property("own", &LaneDerived::own).build();
+        dynamic_binder<LaneRebound>(*eng, "LaneRebound").constructor<>().base_class<LaneBase>()
+            .method("base_value", &LaneRebound::rebound_value).build();
+        dynamic_binder<LaneLate>(*eng, "LaneLate").constructor<>().base_class<LaneBase>().build();
+        dynamic_binder<LaneUser>(*eng, "LaneUser")
+            .constructor<>()
+            .method("by_ref", &LaneUser::by_ref)
+            .method("by_mut", &LaneUser::by_mut)
+            .method("by_value", &LaneUser::by_value)
+            .method("by_handle", &LaneUser::by_handle)
+            .method("ov", static_cast<std::string (LaneUser::*)(int64_t) const>(&LaneUser::ov))
+            .method("ov", static_cast<std::string (LaneUser::*)(double) const>(&LaneUser::ov))
+            .method("ov", static_cast<std::string (LaneUser::*)(const std::string&) const>(&LaneUser::ov))
+            .method("ov", static_cast<std::string (LaneUser::*)(bool) const>(&LaneUser::ov))
+            .method("wide", static_cast<std::string (LaneUser::*)(int64_t) const>(&LaneUser::wide))
+            .method("wide", static_cast<std::string (LaneUser::*)(int32_t) const>(&LaneUser::wide))
+            .method("add_to", &LaneUser::add_to)
+            .method("version", &LaneUser::version, jai::filesystem)
+            .build();
         return eng;
     }
 
@@ -727,6 +792,115 @@ public:
                 to_string(r1) + "," + to_string(r2) + "," + to_string(call(a)) + "," + to_string(call(a));
             )").as_string();
             check_eq(std::string("3,3,1000,1000"), out);
+        });
+
+        // A base's binding answers a derived receiver at warm sites: a derived binding that inherits it, one at a nonzero
+        // offset, and one that rebinds the name (its own answer wins)
+        test("method_lanes_reach_inherited_bindings", [this]() {
+            auto eng = method_lane_engine();
+            auto out = eng->execute(R"(
+                var d = LaneDerived();
+                var late = LaneLate();
+                var rebound = LaneRebound();
+                var base = LaneBase();
+                function call(var& x) -> int { return x.base_value(); }
+                string s = "";
+                for (int i = 0; i < 3; ++i) { s += to_string(call(d)) + "," + to_string(call(late)) + "," + to_string(call(rebound)) + "," + to_string(call(base)) + ";"; }
+                s;
+            )").as_string();
+            check_eq(std::string("5,5,600,5;5,5,600,5;5,5,600,5;"), out);
+        });
+
+        // Object parameters in every handing take the same object the ordinary call would: by reference (writes land), by
+        // value (a copy), a shared_ptr (null an empty one); an argument the call would refuse reports the ordinary call's text
+        test("method_lanes_take_object_parameters", [this]() {
+            auto eng = method_lane_engine();
+            auto out = eng->execute(R"(
+                var u = LaneUser();
+                var a = RefInner();
+                shared_ptr<RefInner> h = new RefInner();
+                string s = "";
+                for (int i = 0; i < 3; ++i) {
+                    s += to_string(u.by_ref(a)) + "," + to_string(u.by_mut(a)) + "," + to_string(u.by_value(a)) + "," + to_string(a.v) + "," +
+                         to_string(u.by_handle(h)) + "," + to_string(u.by_handle(null)) + ";";
+                }
+                s;
+            )").as_string();
+            check_eq(std::string("4,5,105,5,4,-1;5,6,106,6,4,-1;6,7,107,7,4,-1;"), out);
+            std::string message;
+            try { eng->execute("var wrong = LaneBase(); u.by_ref(wrong);"); } catch (const std::exception& error) { message = error.what(); }
+            check_true(!message.empty(), "a refused argument raises");
+            std::string again;
+            try { eng->execute("var wrong2 = LaneBase(); for (int i = 0; i < 2; ++i) { u.by_ref(a); } u.by_ref(wrong2);"); } catch (const std::exception& error) { again = error.what(); }
+            check_eq(message, again, "the same text at a warm site");
+        });
+
+        // An overloaded method picks by argument kinds as the ordinary call scores them; an int matching two integral
+        // overloads takes the ordinary call's choice
+        test("method_lanes_pick_overloads_like_the_ordinary_call", [this]() {
+            auto eng = method_lane_engine();
+            auto out = eng->execute(R"(
+                var u = LaneUser();
+                string s = "";
+                for (int i = 0; i < 3; ++i) { s += u.ov(1) + "," + u.ov(1.5) + "," + u.ov("x") + "," + u.ov(true) + "," + u.wide(7) + ";"; }
+                s;
+            )").as_string();
+            const std::string first = out.substr(0, out.find(';') + 1);
+            check_eq(first + first + first, out, "every pass answers alike");
+            check_eq(std::string("int,float,string,bool,"), first.substr(0, std::string("int,float,string,bool,").size()), "kinds pick their overloads");
+        });
+
+        // A host method no lane takes (a reference-writing parameter, a guarded method) keeps its ordinary call's answers at a
+        // warm site
+        test("ordinary_host_calls_keep_their_answers_at_warm_sites", [this]() {
+            auto eng = method_lane_engine();
+            auto out = eng->execute(R"(
+                var u = LaneUser();
+                int a = 0;
+                int b = 10;
+                for (int i = 0; i < 3; ++i) { u.add_to(a, 1); u.add_to(b, 2); }
+                function v(var& x) -> int { return x.version(); }
+                to_string(a) + "," + to_string(b) + "," + to_string(v(u)) + "," + to_string(v(u));
+            )").as_string();
+            check_eq(std::string("3,16,1,1"), out);
+        });
+
+        // A host method's T& result binds a var& or auto& as C++ binds a reference: member writes and assignments land in
+        // the object, the receiver's object stays alive through the reference, and a class with no copy assignment refuses one
+        test("a_reference_to_a_host_reference_result_binds_like_cpp", [this]() {
+            auto eng = method_lane_engine();
+            auto out = eng->execute(R"(
+                var o = RefOwner();
+                var& c = o.child();
+                c.v = 9;
+                string s = to_string(o.inner.v) + ",";
+                var n = RefInner();
+                n.v = 8;
+                c = n;
+                n.v = 1;
+                s += to_string(o.inner.v) + "," + to_string(c.v) + ",";
+                auto& d = o.child();
+                d.v = 3;
+                RefInner& t = o.child();
+                t.v = t.v + 10;
+                s += to_string(o.inner.v) + ",";
+                var& me = o.self_ref();
+                me.inner.v = 21;
+                s += to_string(o.inner.v);
+                s;
+            )").as_string();
+            check_eq(std::string("9,8,8,13,21"), out);
+            check_eq(std::string("Cannot assign to a reference to 'RefFixed': it is not copy-assignable"), [&]() {
+                try { eng->execute("var f = RefOwner(); var& fc = f.fixed_child(); fc = RefFixed();"); } catch (const std::exception& error) { return std::string(error.what()); }
+                return std::string("no error");
+            }());
+            check_eq(std::string("5"), eng->execute("var holder = RefOwner(); var& kept = holder.child(); holder = null; kept.v = 5; to_string(kept.v);").as_string(),
+                     "the reference keeps its owner's object alive");
+            auto host_owner = std::make_shared<RefOwner>();
+            eng->add_global("host_owner", eng->make_object(host_owner));
+            eng->execute("var& hosted = host_owner.child(); host_owner = null;");
+            host_owner.reset();
+            check_eq(std::string("12"), eng->execute("hosted.v = 12; to_string(hosted.v);").as_string(), "a host-owned owner dropped everywhere else lives on");
         });
 
         test("host_member_lane_follows_a_rebinding", [this]() {

@@ -7187,6 +7187,9 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                     }
                     JAISCRIPT_TRY(define_variable(std::move(part.value())));
                 }
+            } else if (result.is_non_owning_object()) {
+                // a bound object a host returned by reference (KEEP BYTE-PARALLEL with the vm's exec_decl_ref_value)
+                JAISCRIPT_TRY(define_variable(script_value::make_referent_reference(result, engine_)));
             } else {
                 // KEEP BYTE-PARALLEL with the vm's exec_decl_ref_value
                 auto part = declared_component_reference(decl);

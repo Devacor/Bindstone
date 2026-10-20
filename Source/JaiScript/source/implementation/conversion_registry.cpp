@@ -70,6 +70,33 @@ checked_result<void*> checked_native_reference(const script_value& value, const 
 		holder->data ? holder->data.get() : holder->bound_ptr);
 }
 
+void* lane_object_pointer(const script_value& value, const std::type_info& target) {
+	auto pointer = checked_native_reference(value, target);
+	return pointer ? pointer.value() : nullptr;
+}
+
+bool lane_object_handle(const script_value& value, const std::type_info& target, std::shared_ptr<void>& out) {
+	if (value.raw_storage_index() == script_value::TYPEID_NULL) {
+		out.reset();
+		return true;
+	}
+	const auto* holder = value.peek_object_holder();
+	if (!holder) { return false; }
+	auto object = checked_native_object(value.get_engine(), *holder, target);
+	if (!object) { return false; }
+	out = std::move(object.value());
+	return true;
+}
+
+void anchor_to_receiver(script_value& result, const script_value& receiver) {
+	if (!result.is_non_owning_object() || !receiver.is_object()) { return; }
+	auto result_holder = result.get_object_holder();
+	auto receiver_holder = receiver.get_object_holder();
+	if (result_holder && receiver_holder) {
+		result_holder->keep_alive = receiver_holder->data ? receiver_holder->data : receiver_holder->keep_alive;
+	}
+}
+
 checked_result<std::shared_ptr<void>> checked_native_object(engine* eng, const script_value::object_holder& holder,
 	const std::type_info& target, uint64_t target_id) {
 	if (holder.is_class_instance_wrapper) {

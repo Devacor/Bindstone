@@ -3198,7 +3198,8 @@ inline class_instance::~class_instance() {
             class_def_->destroy_levels(this, class_def_, nullptr, constructed);
         }
     }
-    if (extras_ && extras_->native && engine_ && engine_->parallel_region_active()) [[unlikely]] { defer_serial_native(); }
+    // an instance the engine's teardown orphaned (class_def_ cleared) outlives its engine: no region can be running
+    if (extras_ && extras_->native && class_def_ && engine_ && engine_->parallel_region_active()) [[unlikely]] { defer_serial_native(); }
     if (class_def_) {
         class_def_->unregister_instance(this);
         if (fields_cascade()) { release_fields(); }

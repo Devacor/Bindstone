@@ -53,6 +53,12 @@ namespace jai {
     
 	namespace detail {
 		checked_result<void*> checked_native_reference(const script_value& value, const std::type_info& target, uint64_t target_id = UINT64_MAX);
+		// A method lane's bound object argument (conversion_registry.cpp): the object as `target`, else null; the handle a
+		// shared_ptr parameter takes (empty for null), false when the ordinary call's extraction would refuse it
+		void* lane_object_pointer(const script_value& value, const std::type_info& target);
+		bool lane_object_handle(const script_value& value, const std::type_info& target, std::shared_ptr<void>& out);
+		// a handle into an object a host method returned by reference keeps the receiver's object alive
+		void anchor_to_receiver(script_value& result, const script_value& receiver);
 	}
 
     // Forward declaration for friend access
@@ -369,6 +375,9 @@ namespace detail {
         // CPP-MEMBER reference (a binder member-pointer property the cpp_bound box can decode):
         // the referent IS the C++ member at `address`; object_pin keeps the object alive,
         // `receiver` is the handle the property was bound on (internal/reference_model.md).
+        // A reference to the bound object a non-owning handle reaches (a host method's T& result): reads see the object, an
+        // assignment copy-assigns into it, and the handle's anchor keeps its owner alive
+        static script_value make_referent_reference(const script_value& handle, engine* eng);
         static script_value make_cpp_member_reference(const script_value& receiver, std::shared_ptr<void> object_pin,
                                                       void* address, uint8_t size_and_sign, uint8_t semantic_index,
                                                       uint64_t field_id, engine* eng);
@@ -2050,6 +2059,10 @@ namespace detail {
             uint64_t field_id = 0;
             bool live_member = false;   // CPP-MEMBER: inline storage holds the bound box
             bool has_scratch = false;   // PROPERTY: inline storage holds the last getter result
+            // REFERENT (live_member): inline storage holds the handle to a bound object a host returned by reference; an
+            // assignment copy-assigns into the object
+            void* referent = nullptr;
+            const class_definition* referent_class = nullptr;
         };
         struct reference_holder {
             type_info_ptr container_element_type = nullptr;  // For subscript/field refs: the element/field type constraint
@@ -2125,6 +2138,7 @@ namespace detail {
             const script_value& materialize_property(engine* eng);                       // throws on a failed getter
             checked_result<script_value> read_property(engine* eng, bool bind_point) const;   // checked twin
             void store_property(const script_value& value, engine* eng);                // setter; no setter = no-op
+            void store_referent(const script_value& value, engine* eng);                // copy assignment into the referent
             // STRING-ELEMENT mode: string_base pins the string's storage (another holder),
             // container_index names the byte / utf8 character; deref() materializes it
             // into the inline scratch, stores replace it through detail/string_element.hpp.

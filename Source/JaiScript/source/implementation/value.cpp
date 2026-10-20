@@ -1154,6 +1154,45 @@ type_info_ptr script_value::cpp_bound_type_info(engine* eng, uint8_t semantic_in
     }
 }
 
+script_value script_value::make_referent_reference(const script_value& handle, engine* eng) {
+    if (!eng) {
+        throw runtime_error("Cannot create reference: null engine pointer");
+    }
+    auto holder = handle.get_object_holder();
+    if (!holder || !holder->bound_ptr) {
+        throw runtime_error("Cannot create reference to null");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = eng->get_type_info_reference(handle.type_info_);
+    auto ref = acquire_reference_holder(eng);
+    ref->property = std::make_unique<property_binding>();
+    ref->property->receiver = holder;
+    ref->property->receiver_tag = handle.get_type_info();
+    ref->property->object_pin = holder->keep_alive;
+    ref->property->live_member = true;
+    ref->property->referent = holder->bound_ptr;
+    ref->property->referent_class = holder->type_id != UINT64_MAX ? eng->get_class_definition(holder->type_id).get() : nullptr;
+    new (ref->cell_storage) script_value(handle);
+    v.storage_ = ref;
+    return v;
+}
+
+// an assignment through a reference to a bound object: copy-assigns the value's object of that class into it
+void script_value::reference_holder::store_referent(const script_value& value, engine* eng) {
+    const property_binding& binding = *property;
+    const class_definition* def = binding.referent_class;
+    const auto assign = def ? def->object_assign_function() : nullptr;
+    if (!assign || !def->cpp_type()) {
+        throw runtime_error("Cannot assign to a reference to '" + (def ? def->get_name() : std::string("object")) + "': it is not copy-assignable");
+    }
+    const script_value& v = value.is_reference() ? value.deref() : value;
+    auto source = detail::checked_native_reference(v, *def->cpp_type(), def->get_type_id());
+    if (!source) {
+        throw runtime_error(format_error(source, *eng->get_symbolizer()));
+    }
+    if (source.value() != binding.referent) { assign(binding.referent, source.value()); }
+}
+
 script_value script_value::make_cpp_member_reference(const script_value& receiver, std::shared_ptr<void> object_pin,
                                                      void* address, uint8_t size_and_sign, uint8_t semantic_index,
                                                      uint64_t field_id, engine* eng) {
@@ -2164,7 +2203,9 @@ void script_value::assign_through(const script_value& value) {
         if (refHolder->property) {
             // CPP-MEMBER: the box's typed memory write (never a memberwise replace, which
             // would detach the box); PROPERTY: the setter
-            if (refHolder->property->live_member) {
+            if (refHolder->property->referent) {
+                refHolder->store_referent(value, engine_);
+            } else if (refHolder->property->live_member) {
                 refHolder->cell()->assign_through(value);
             } else {
                 refHolder->store_property(value, engine_);
@@ -2275,7 +2316,9 @@ void script_value::assign_through(script_value&& value) {
             return;
         }
         if (refHolder->property) {
-            if (refHolder->property->live_member) {
+            if (refHolder->property->referent) {
+                refHolder->store_referent(value, engine_);
+            } else if (refHolder->property->live_member) {
                 refHolder->cell()->assign_through(value);
             } else {
                 refHolder->store_property(value, engine_);

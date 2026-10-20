@@ -936,8 +936,19 @@ public:
         }
     };
     inline void add_native_method(uint64_t id, native_method fn);
-    // a second binding of the name (an overload) withdraws the derived lane: resolution among overloads stays the ordinary call's
-    void add_native_lane(uint64_t id, native_lane fn, std::shared_ptr<const void> state);
+    // An overload's claim on a call: every argument is exactly its parameter's kind (an int for an integral parameter in range,
+    // a float for a floating one, a bool, a string). A call exactly one overload claims is the one the ordinary call's scorer
+    // picks with cost 0; a call no overload or several claim takes the ordinary call.
+    using native_exact = bool (*)(const script_value* args, size_t argc);
+    struct native_overload {
+        native_lane lane = nullptr;
+        std::shared_ptr<const void> state;
+        native_exact exact = nullptr;
+    };
+    using native_overload_set = std::vector<native_overload>;
+    // Every binding of the name with a lane joins its set; one binding without a lane (a guarded method, another parameter
+    // kind) withdraws the name's lane for good
+    void add_native_lane(uint64_t id, native_lane fn, std::shared_ptr<const void> state, native_exact exact = nullptr);
     void withdraw_native_lane(uint64_t id);
     inline bool has_native_methods() const noexcept;
     inline const native_entry* find_native_method(uint64_t id) const;
@@ -1041,6 +1052,12 @@ public:
     bool has_copy_function() const {
         return copy_function_ != nullptr;
     }
+
+    // A bound class's copy assignment (*dst = *src), when the C++ type has one: what an assignment through a reference to an
+    // object of the class runs
+    using assign_function = void (*)(void* dst, const void* src);
+    void set_assign_function(assign_function assign) { assign_function_ = assign; }
+    assign_function object_assign_function() const { return assign_function_; }
 
     // 'nocopy class': instances refuse by-value copies, like a deleted C++ copy constructor.
     // Inherited: a class derived from a nocopy class is nocopy, and so is a script class over
@@ -1148,7 +1165,8 @@ private:
     bool cpp_backed_ = false;
     bool strict_signatures_ = false;
     std::unordered_map<uint64_t, native_entry> native_methods_;
-    std::unordered_set<uint64_t> native_lane_names_;   // every name the binder bound (a second binding is an overload)
+    std::unordered_set<uint64_t> native_lane_names_;   // names a binding without a lane withdrew
+    std::unordered_map<uint64_t, std::shared_ptr<native_overload_set>> native_overload_sets_;
     uint64_t native_stamp_ = 0;
     uint64_t reflection_generation_ = 0;
     std::vector<uint64_t> field_order_;
@@ -1266,6 +1284,7 @@ private:
     std::function<script_value(script_value&, engine*)> unwrap_function_;
 
     copy_function copy_function_;
+    assign_function assign_function_ = nullptr;
     bool nocopy_ = false;
     bool serial_only_construction_ = false;
     std::unordered_map<uint64_t, serial_overloads> serial_methods_;

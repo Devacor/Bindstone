@@ -18,9 +18,10 @@
 //   and workers then read the source LIVE — the by-value binding makes each private
 //   copy. Type shapes are pre-warmed and the symbolizer/type tables freeze.
 //
-//   REGION: static contiguous chunks (n/thread_count(), boundary-shifted by the optional
-//   weight hint evaluated at the barrier), pinned pool workers + the calling thread,
-//   disjoint writes into the pre-sized result. engine::execution_limits() resolves to
+//   REGION: blocks of consecutive elements claimed in order by whichever thread is free
+//   (detail/parallel_schedule.hpp), or contiguous chunks split by the optional weight hint
+//   evaluated at the barrier; pinned pool workers + the calling thread, disjoint writes
+//   into the pre-sized result. engine::execution_limits() resolves to
 //   the calling worker's accounting through the installed region table. First error in
 //   ITERATION order wins at the join; a terminal worker failure (budget) latches the
 //   engine's terminal rail.

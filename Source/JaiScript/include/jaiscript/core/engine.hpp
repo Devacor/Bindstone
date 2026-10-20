@@ -501,8 +501,10 @@ namespace jai {
         // unique_ptr: the engine is movable, a mutex is not.
         std::mutex& parallel_compile_mutex() { return *parallel_compile_mutex_; }
 
-        // Chunk boundaries chosen by the most recent parallel_transform (n+1 bounds for n
-        // chunks). Instrumentation for tests/benchmarks — never observable from script.
+        // The most recent parallel region's cumulative element counts per thread (W+1 entries for W
+        // threads). A weight-hinted region's are the contiguous chunks the hint chose, fixed by the
+        // weights; a hint-less region's count what each thread took from the shared blocks, which
+        // follows timing. Instrumentation for tests/benchmarks — never observable from script.
         const std::vector<size_t>& last_parallel_chunk_bounds() const;
 
         // How the most recent parallel_transform provisioned each captured enclosing

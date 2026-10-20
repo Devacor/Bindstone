@@ -25,9 +25,12 @@
 // parking on the condition variable, and only when the pool's last two batches arrived within that
 // budget (dense fork-join regions, a frame's worth of them); a pool whose regions come one per frame
 // parks at once and burns nothing between them. The submitter wakes the kernel only for parked
-// targets, and a worker pings the joiners only while one is parked; the flags and the parked-joiner
-// count that decide this are read under the mutex the waiter sets them under, so no wake is lost.
-// Task order and placement never change.
+// targets (the parked flags are read under the mutex the worker parks under), so no wake is lost.
+// A worker takes its pinned tasks under its own queue's lock and counts a finished task down without
+// the pool's mutex, so a region's workers never queue behind one another on it; a finished task pings
+// the joiners only when one is parked (the count and the outstanding tasks are sequentially consistent:
+// a parking joiner sees the count reach zero, or the worker sees the joiner and takes the mutex before
+// notifying). Task order and placement never change.
 
 namespace jai {
 
@@ -35,8 +38,9 @@ namespace jai {
         struct worker {
             std::thread thread;
             std::thread::id id;
+            std::mutex pinned_mutex;             // guards pinned; a submitter holding mutex_ takes it inside
             std::deque<task_type> pinned;
-            std::atomic<bool> has_work{false};   // pinned queue non-empty (a spinning worker reads it lock-free)
+            std::atomic<bool> has_work{false};   // pinned queue non-empty: set under both locks, cleared under pinned_mutex
             bool parked = false;                 // waiting on work_cv_; read and written under mutex_
         };
 
@@ -93,8 +97,7 @@ namespace jai {
             {
                 std::lock_guard<std::mutex> guard(mutex_);
                 if (stop_) return;
-                workers_[worker]->pinned.push_back(std::move(task));
-                workers_[worker]->has_work.store(true, std::memory_order_release);
+                push_pinned(*workers_[worker], std::move(task));
                 outstanding_.fetch_add(1, std::memory_order_relaxed);
                 note_batch();
             }
@@ -121,8 +124,7 @@ namespace jai {
                 for (size_t i = 0; i < count; ++i) {
                     if (faults) { faults->checkpoint("pool.batch_enqueue", i); }
                     worker& w = *workers_[tasks[i].first];
-                    w.pinned.push_back(std::move(tasks[i].second));
-                    w.has_work.store(true, std::memory_order_release);
+                    push_pinned(w, std::move(tasks[i].second));
                     any_parked = any_parked || w.parked;
                     outstanding_.fetch_add(1, std::memory_order_relaxed);
                 }
@@ -217,10 +219,26 @@ namespace jai {
                     cpu_relax();
                 }
             }
+            if (outstanding_.load(std::memory_order_acquire) == 0) { return; }
             std::unique_lock<std::mutex> guard(mutex_);
-            ++joiners_parked_;
-            idle_cv_.wait(guard, [this] { return outstanding_.load(std::memory_order_relaxed) == 0; });
-            --joiners_parked_;
+            joiners_parked_.fetch_add(1);
+            idle_cv_.wait(guard, [this] { return outstanding_.load() == 0; });
+            joiners_parked_.fetch_sub(1);
+        }
+
+        // Under mutex_ (the parked flag the caller reads next stays consistent with has_work)
+        static void push_pinned(worker& w, task_type&& task) {
+            std::lock_guard<std::mutex> guard(w.pinned_mutex);
+            w.pinned.push_back(std::move(task));
+            w.has_work.store(true, std::memory_order_release);
+        }
+        bool pop_pinned(worker& me, task_type& task) {
+            std::lock_guard<std::mutex> guard(me.pinned_mutex);
+            if (me.pinned.empty() || stop_flag_.load(std::memory_order_acquire)) { return false; }
+            task = std::move(me.pinned.front());
+            me.pinned.pop_front();
+            if (me.pinned.empty()) { me.has_work.store(false, std::memory_order_relaxed); }
+            return true;
         }
 
         void run_reporting(task_type& task) noexcept {
@@ -275,6 +293,7 @@ namespace jai {
                 outstanding_.fetch_sub(shared_.size(), std::memory_order_relaxed);
                 shared_.clear();
                 for (auto& w : workers_) {
+                    std::lock_guard<std::mutex> pinned_guard(w->pinned_mutex);
                     outstanding_.fetch_sub(w->pinned.size(), std::memory_order_relaxed);
                     w->pinned.clear();
                 }
@@ -290,9 +309,9 @@ namespace jai {
             worker& me = *workers_[index];
             for (;;) {
                 task_type task;
-                {
+                if (!me.has_work.load(std::memory_order_acquire) || !pop_pinned(me, task)) {
                     std::unique_lock<std::mutex> guard(mutex_);
-                    if (!stop_ && me.pinned.empty() && shared_.empty() && spin_allowed()) {
+                    if (!stop_ && !me.has_work.load(std::memory_order_relaxed) && shared_.empty() && spin_allowed()) {
                         guard.unlock();
                         const int64_t budget = spin_budget_ns_.load(std::memory_order_relaxed);
                         const auto t0 = std::chrono::steady_clock::now();
@@ -302,36 +321,31 @@ namespace jai {
                             if (elapsed_ns(t0) > budget) { break; }
                             cpu_relax();
                         }
+                        if (me.has_work.load(std::memory_order_acquire)) { continue; }
                         guard.lock();
                     }
-                    while (!stop_ && me.pinned.empty() && shared_.empty()) {
+                    while (!stop_ && !me.has_work.load(std::memory_order_relaxed) && shared_.empty()) {
                         me.parked = true;
                         work_cv_.wait(guard);
                         me.parked = false;
                     }
                     if (stop_) return;
-                    if (!me.pinned.empty()) {
-                        task = std::move(me.pinned.front());
-                        me.pinned.pop_front();
-                        if (me.pinned.empty()) { me.has_work.store(false, std::memory_order_relaxed); }
-                    } else {
-                        task = std::move(shared_.front());
-                        shared_.pop_front();
-                        if (shared_.empty()) { shared_pending_.store(false, std::memory_order_relaxed); }
-                    }
+                    if (me.has_work.load(std::memory_order_relaxed)) { continue; }   // its own queue, under its own lock
+                    task = std::move(shared_.front());
+                    shared_.pop_front();
+                    if (shared_.empty()) { shared_pending_.store(false, std::memory_order_relaxed); }
                 }
                 try {
                     task();
                 } catch (...) {
                     dispatch_exception(std::current_exception());
                 }
-                bool ping_joiner;
-                {
-                    std::lock_guard<std::mutex> guard(mutex_);
-                    outstanding_.fetch_sub(1, std::memory_order_release);
-                    ping_joiner = joiners_parked_ != 0;
+                task = nullptr;   // the task's captures die before it counts as finished
+                outstanding_.fetch_sub(1);
+                if (joiners_parked_.load() != 0) {
+                    { std::lock_guard<std::mutex> guard(mutex_); }
+                    idle_cv_.notify_all();
                 }
-                if (ping_joiner) { idle_cv_.notify_all(); }
             }
         }
 
@@ -354,13 +368,13 @@ namespace jai {
         std::function<void(std::exception_ptr)> exception_handler_;
         std::mutex posted_mutex_;
         std::deque<task_type> posted_;
-        std::atomic<size_t> outstanding_{0};       // written under mutex_; the joiner's spin reads it
+        std::atomic<size_t> outstanding_{0};       // raised under mutex_, counted down by the worker that finished
         std::atomic<bool> shared_pending_{false};
         std::atomic<bool> stop_flag_{false};
         std::atomic<int64_t> spin_budget_ns_{1000000};   // 1 ms
         std::atomic<int64_t> last_gap_ns_{INT64_MAX};
         std::chrono::steady_clock::time_point last_batch_{};
-        size_t joiners_parked_ = 0;                // under mutex_; a count: a waiter that returns never hides one still parked
+        std::atomic<size_t> joiners_parked_{0};    // changed under mutex_; a count: a waiter that returns never hides one still parked
         bool stop_ = false;
     };
 

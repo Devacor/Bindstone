@@ -197,6 +197,9 @@ namespace jai::detail {
 				p.wake_samples ? (double)p.worker_span_sum / p.wake_samples : 0.0);
 			fprintf(stderr, "  worker span per region: slowest avg %.0f | fastest avg %.0f | main chunk avg %.0f cyc\n",
 				(double)p.region_span_max_sum / p.regions, (double)p.region_span_min_sum / p.regions, (double)p.main_chunk_cyc / p.regions);
+			fprintf(stderr, "  block claims %llu (%.1f/region), avg %.0f max %llu cyc per claim | join latency (last chunk end -> joined) avg %.0f cyc\n",
+				(unsigned long long)p.claims, (double)p.claims / p.regions, p.claims ? (double)p.claim_cyc / p.claims : 0.0,
+				(unsigned long long)p.claim_cyc_max, (double)p.join_lat_sum / p.regions);
 			fprintf(stderr, "  slots split per region: reset %.0f | restamp %.0f | cursors %.0f cyc; admit split: pool %.0f | guard %.0f cyc\n",
 				(double)p.slot_reset_cyc / p.regions, (double)p.slot_restamp_cyc / p.regions, (double)p.slot_cursor_cyc / p.regions,
 				(double)p.admit_pool_cyc / p.regions, (double)p.admit_guard_cyc / p.regions);
@@ -4948,6 +4951,14 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			++p.wake_samples;
 		}
 		if (span_max) { p.region_span_max_sum += span_max; p.region_span_min_sum += span_min; }
+		uint64_t last_end = prof_t3;
+		for (size_t k = 1; k < worker_count; ++k) { last_end = std::max(last_end, contexts[k]->prof_end_tsc); }
+		p.join_lat_sum += prof_t4 > last_end ? prof_t4 - last_end : 0;
+		for (size_t k = 0; k < worker_count && schedule.blocks; ++k) {
+			p.claims += contexts[k]->sched.claims;
+			p.claim_cyc += contexts[k]->sched.claim_cyc;
+			p.claim_cyc_max = std::max(p.claim_cyc_max, contexts[k]->sched.claim_cyc_max);
+		}
 	}
 #endif
 	region_guard.restore();   // registration below can allocate or throw

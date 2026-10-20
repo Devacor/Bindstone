@@ -5,6 +5,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#ifdef JAISCRIPT_VM_PROFILE
+#include <intrin.h>
+#endif
 
 namespace jai::detail {
 
@@ -27,6 +30,11 @@ struct parallel_schedule_cursor {
 	size_t index = 0;
 	size_t block_end = 0;
 	size_t ran = 0;   // elements this worker took (the region's cost model)
+#ifdef JAISCRIPT_VM_PROFILE
+	uint64_t claims = 0;
+	uint64_t claim_cyc = 0;
+	uint64_t claim_cyc_max = 0;
+#endif
 
 	bool take(size_t b) noexcept {
 		if (b >= schedule->blocks) { return false; }
@@ -39,7 +47,15 @@ struct parallel_schedule_cursor {
 	// false: no block is left
 	bool advance() noexcept {
 		if (++index < block_end) { return true; }
+#ifdef JAISCRIPT_VM_PROFILE
+		const uint64_t t0 = __rdtsc();
+		const size_t b = schedule->next.fetch_add(1, std::memory_order_relaxed);
+		const uint64_t cyc = __rdtsc() - t0;
+		++claims; claim_cyc += cyc; claim_cyc_max = cyc > claim_cyc_max ? cyc : claim_cyc_max;
+		return take(b);
+#else
 		return take(schedule->next.fetch_add(1, std::memory_order_relaxed));
+#endif
 	}
 };
 

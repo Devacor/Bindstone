@@ -496,7 +496,9 @@ class bind its own private members. Modes: <code>all</code>, <code>properties</c
 <li><code>.serial_only_constructor()</code>: the class&#x27;s constructor or destructor touches state other objects
 share, so a <code>parallel_for</code> body may not construct it (next section).</li>
 <li><code>.serial_method(name)</code> / <code>.serial_static_method(name)</code>: the method touches state other objects
-share, so a <code>parallel_for</code> body may not call it (<a href="#parallel-calls">calls from parallel bodies</a>).</li>
+share, so a <code>parallel_for</code> body may not call it (<a href="#parallel-calls">calls from parallel bodies</a>). A
+method's mark covers its non-const overloads; <code>.serial_method(name, jai::serial_overloads::every)</code> covers its const
+ones too.</li>
 <li><code>.build()</code>: finalizes registration. The destructor calls it if you forget; the binder is
 movable, non-copyable.</li>
 </ul>
@@ -535,14 +537,18 @@ parallel_for: class 'Glowing' has a C++ base 'Sprite' marked serial_only_constru
 <p>A <code>parallel_for</code> body, and the class code it reaches, calls bound C++ on its worker thread: free functions,
 static methods and methods are all parallel unless registered serial. Mark a call serial when it touches state other
 objects share (an audio or texture manager, a registry, a service lookup, the scene graph beyond the object itself, a
-network connection, a log): <code>.serial_method("name")</code> on the binder for every overload of a method,
+network connection, a log): <code>.serial_method("name")</code> on the binder for a method&#x27;s non-const overloads (a const
+getter of the same name stays parallel; <code>.serial_method("name", jai::serial_overloads::every)</code> takes the const ones
+too, for a const overload that still touches shared state),
 <code>.serial_static_method("name")</code> for a static method, and <code>engine::serial_function("name")</code> after
 registering a free function. A body that names a serial free function or static method is refused when the statement
 is reached; a serial method is refused when it is called, since the receiver&#x27;s class is known only then. The
 library&#x27;s own builtins are serial (<code>print</code>, I/O, JSON, reflection, the clock) apart from pure math and
 <code>to_string</code>.</p>
 <p>The receiver follows the signature. A non-const member function (a <code>T&amp;</code> self in a lambda, a property
-store) runs only on an object the calling worker made: one it constructed, or a copy it took. A const member function
+store) runs only on an object the calling worker owns: the element it is running (a range or zipped element, or a
+<code>parallel_reduce</code> accumulator, which the statement proves the only element of its object), or one it constructed
+or copied. A const member function
 also runs on an object the worker did not make, such as one a C++ function hands back, because C++ constness says it does
 not change the object. A non-const call on such an object is refused when it runs. Arguments follow the rules a script
 call follows: a non-const <code>T&amp;</code> parameter, which writes back into its argument, cannot take enclosing
@@ -559,7 +565,7 @@ jai::dynamic_binder&lt;Meter&gt;(*eng, "Meter")
     .method("add", &amp;Meter::add)
     .method("reading", &amp;Meter::reading)
     .method("publish", &amp;Meter::publish)
-    .serial_method("publish")
+    .serial_method("publish", jai::serial_overloads::every)   // const, but it reaches a shared manager
     .build();
 eng-&gt;add_function("master", []() { return master_meter; });        // the program's one Meter (level 100)
 eng-&gt;add_function("log_line", [](const std::string&amp; line) { logger().write(line); });

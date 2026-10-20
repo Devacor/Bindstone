@@ -49,8 +49,8 @@ for (auto pad : thread_storage) { sum += pad.total; }
 During the region the script may **READ anything in scope** and may **WRITE ONLY its own
 state**: the body's locals, `thread_storage` once built (inside the body it would name the
 executing thread's own pad), and — when iterating by reference (`parallel_for (auto& x : arr)`) —
-the thread's **own loop element**, mutable in place (§11 Q4: under the static partition + the
-barrier element proof the element is the thread's exclusive property). Any other store — global, outer local, shared
+the thread's **own loop element**, mutable in place (§11 Q4: one thread runs each element (§3) and the
+barrier element proof makes the element that thread's exclusive property). Any other store — global, outer local, shared
 object field, and transitively through called functions — is an error ("parallel_for: body
 writes enclosing state 'g' at line:col"). One rule buys transitive
 purity: a callee that mutates a global or a captured map hits the same wall, so there is no
@@ -90,20 +90,26 @@ sequential execution.
   worker's accounting through the installed region table, so one worker's allocation bomb
   raises on that worker (§6).
 
-## 3. Scheduling is a static partition (determinism)
+## 3. Scheduling: shared blocks, results keyed by element (determinism)
 
-Iterations are pre-partitioned before the fork into a fixed per-thread set: without a weight
-hint, blocks of `max(1, n / 4W)` consecutive elements dealt round-robin over the W threads
-(block-cyclic: a cost that varies along the range spreads over every thread; small n means
-expensive elements, large n means blocks of hundreds so no two threads write neighbouring
-scalars); with the optional weight hint (§11 Q1), contiguous chunks split by cumulative
-weight. `engine::last_parallel_chunk_bounds()` publishes the cumulative element counts per chunk.
-Same input + seed ⇒ byte-identical results at every worker count — replayable, smoke-hashable;
-determinism is the testable guarantee (§8 Testing).
+Without a weight hint the range is cut into blocks of `max(1, n / 8W)` consecutive elements
+(`detail/parallel_schedule.hpp`). Each of the W threads starts on its own first block, then
+claims the next unclaimed one with a single atomic `fetch_add` on the region's block counter, so
+blocks go out in increasing order to whichever thread finishes first and a slow or busy core
+takes fewer. The claim takes no lock; a claim costs one cache-line transfer (about 150 cycles,
+flat from 2 to 6 workers: the counter does not contend at this grain), so per-worker
+work-stealing deques would buy nothing for a flat index range. With the optional weight hint
+(§11 Q1), contiguous chunks split by cumulative weight, assigned statically.
+`engine::last_parallel_chunk_bounds()` publishes the cumulative element counts each thread ran.
 
-Rejected: dynamic work-stealing. It balances load better but makes per-thread results depend
-on the race (which thread got iteration i), destroying determinism. Revisit only with a design
-that keeps the iteration→thread assignment fixed.
+Results are keyed by element, never by thread: each element's result and in-place writes land in
+its own slot; chunk-created instances register, failing destructors report and index writes come
+back in element order whichever thread ran the element; a failing region reports its
+lowest-index failing element (§6). Same input + seed ⇒ byte-identical results at every worker
+count — replayable, smoke-hashable; determinism is the testable guarantee (§8 Testing). What is
+not deterministic is which thread ran an element and, when a region fails, which elements past
+the failing one had already run (their in-place writes stay) — and so whether a region near
+`engine::memory_cap` trips, and at which element (§6).
 
 **Thread count and the pool.** `engine::parallel_thread_count()` is the total context count
 (main runs chunk 0): the override when set, else `min(hardware_concurrency - 1, 6)`.
@@ -257,7 +263,7 @@ loop selects call mode for that body.
 
 Three mechanisms, one per hazard class:
 
-- **(a) The iterated container** — a static partition + the barrier element proof
+- **(a) The iterated container** — one thread per element (§3) + the barrier element proof
   (`prove_elements`, §14). At the fork (a single-threaded moment) the proof establishes that each
   element's reachable strong_ptr control blocks belong to that element alone ⇒ each thread's
   share is its **exclusive reachable set** ⇒ zero-copy element reads, no atomics — the
@@ -290,7 +296,7 @@ binder has no thread-safety notion — every level is a host promise):
   per-object locking, is what makes the reads safe.
 - **`write_world`** — NOT executed inline. The call and its arguments (captured by clone at
   enqueue) go into an **ordered command buffer**, applied serially in **ITERATION order** after
-  the join. World effects stay deterministic under static chunks, and the world never mutates
+  the join. World effects stay deterministic whichever thread ran each element, and the world never mutates
   under a reader.
 
 So the frame shape is: **parallel phase** = read world + write own pad/self + enqueue;
@@ -304,11 +310,18 @@ across MV/Bindstone) — mechanical but real, and each annotation is a reviewed 
 
 Any iteration's throw fails the whole `parallel_for`: workers finish or abandon their chunks,
 the command buffer is discarded, and the join re-raises the **FIRST error in ITERATION order** —
-deterministic under static chunks (thread T's first error has a known iteration index; the join
-takes the minimum). The terminal rails apply per worker: `engine::execution_budget` and
+deterministic at every worker count: a thread stops at its first error, blocks are claimed in
+increasing order, so every element below the least failing one ran to its end, and the join takes
+the minimum over the threads. The terminal rails apply per worker: `engine::execution_budget` and
 `engine::memory_cap` with the terminal-error latch (`execution_limits::terminal_error` in
 `detail/execution_limits.hpp`; memory-cap exhaustion allows one script catch per execute, then
 latches terminal) — a livelocking or allocation-bombing body fails the loop, not the process.
+Each worker may spend the whole allowance left at the fork and the join charges their sum, so a
+worker trips on what its own elements allocated: whether a region close to the cap fails, and at
+which element, follows which elements each thread ran. Charging in element order would not make
+it exact: the vm charges frame storage to whichever element first grows a worker's stack, and a
+body may catch a cap error and go on, so the serial loop's failing element is not recoverable
+from per-element totals without recording every charge site.
 (A command buffer, were it built, would be discarded.)
 
 ## 7. Threads are `jai::thread_pool`
@@ -347,7 +360,6 @@ queue the host's own thread drains (MV's pools are instances of it). The paralle
   also poison the pooled call records, env-lookup caches, and
   interned-symbol machinery that assume single-threaded mutation. The payoff is a programming
   model (locks, ordering, torn invariants) game scripts can't debug.
-- **Dynamic work-stealing** (§3): nondeterministic per-thread results.
 - **Multiple engines as the `parallel_for` substrate**: mirror maintenance on every
   hot reload, jaibite re-provisioning, engine-scoped class definitions forcing clones of every
   instance, and N engines' worth of memory — all to get isolation the write wall + barrier
@@ -361,9 +373,9 @@ queue the host's own thread drains (MV's pools are instances of it). The paralle
   for deep object graphs.
 - **Captured state is provisioned per worker at the barrier** (§13b); no lock is taken during
   the region. A snapshot costs one deep copy per worker, memory_cap-charged.
-- **A static partition can load-imbalance** (one expensive share gates the join) — the price of
-  determinism, softened by the block-cyclic default and the optional weight hint (§11 Q1),
-  which itself costs an O(n) single-threaded evaluation at the barrier when present.
+- **A weight-hinted region is a static partition and can load-imbalance** (one expensive share
+  gates the join); the hint costs an O(n) single-threaded evaluation at the barrier. Hint-less
+  regions balance through the shared blocks (§3).
 - **Registrar annotation sweep** (~76 sites, §5), if annotations are built.
 - **Applicability, honestly**: in Bindstone's actual frame profile, script update is not the
   hot path — pathfinding, spine, and particles are, and those parallelize in C++ behind
@@ -375,13 +387,13 @@ queue the host's own thread drains (MV's pools are instances of it). The paralle
 
 The one open sub-item is a weight-hint spelling for the `parallel_for` statement.
 
-### Q1 — chunk grain: a static block-cyclic partition + optional per-index weight hint
+### Q1 — chunk grain: shared blocks + optional per-index weight hint
 
 > Question: exactly `n / thread_count()`, or a finer fixed grain (still statically assigned) to
 > soften imbalance? Language default with an optional hint, or explicit in the syntax?
 
-Default: blocks of `max(1, n / 4W)` consecutive elements dealt round-robin over the W threads
-(§3), no tuning knob. The imbalance answer beyond that is an **optional per-index weight hint**
+Default: blocks of `max(1, n / 8W)` consecutive elements claimed in order by whichever thread is
+free (§3), no tuning knob. The imbalance answer beyond that is an **optional per-index weight hint**
 — for example, parsing an array of JSON strings, weight by text length so chunks balance by
 **effort**, not element count. Semantics when the hint is supplied:
 

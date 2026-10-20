@@ -980,8 +980,8 @@ string healthLevel = health > 75 ? "healthy" :
     an array in place (`continue`/`return` = next element, a loop-level `break` is rejected),
     and the zip form `parallel_for (auto& x, auto& o : xs, outs)` walks further arrays of the
     same length in lockstep - the pre-allocated output written in place
-    (internal/parallel_design.md). Without a weight hint the iterations are dealt to the
-    workers in blocks of consecutive elements, round-robin; a weight hint splits the range
+    (internal/parallel_design.md). Without a weight hint the workers claim blocks of
+    consecutive elements in order as each finishes its last; a weight hint splits the range
     into contiguous spans of equal cumulative weight. `fn` must be a script-defined
     function of one value parameter whose body passes the parallel admission walk
     (no unwhitelisted host calls, no lambdas, object construction or yield). Elements and

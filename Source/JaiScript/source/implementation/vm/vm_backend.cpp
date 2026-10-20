@@ -7520,11 +7520,9 @@ const script_value* vm_backend::cells_member_container(frame& f, const fused_ope
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) return nullptr;
 	uint32_t slot;
-	if (cached_global_env_) {
+	if (chunk::member_ic_entry* row = member_ic_row(*f.code, site)) {
 		// the site's own member_ic row (a copy ip is never a GET_MEMBER ip): the probe once per class and method epoch, as the field-read IC has it
-		chunk& code = *f.code;
-		if (code.member_ic.size() < code.code.size()) { code.member_ic.resize(code.code.size()); }
-		chunk::member_ic_entry& entry = code.member_ic[site];
+		chunk::member_ic_entry& entry = *row;
 		if (entry.cd == cd && entry.epoch == cd->method_epoch()) { slot = entry.slot; }
 		else { slot = member_read_slot_probe(cd, expr); entry.cd = cd; entry.epoch = cd->method_epoch(); entry.slot = slot; }
 	} else {
@@ -7570,11 +7568,9 @@ const script_value* vm_backend::cells_member_field(frame& f, class_instance* ins
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) return nullptr;
 	uint32_t slot;
-	if (cached_global_env_) {
+	if (chunk::member_ic_entry* row = member_ic_row(*f.code, site)) {
 		// the site's own member_ic row, per class and method epoch (the field-read IC's guard), so a rebind per iteration probes once per class
-		chunk& code = *f.code;
-		if (code.member_ic.size() < code.code.size()) { code.member_ic.resize(code.code.size()); }
-		chunk::member_ic_entry& entry = code.member_ic[site];
+		chunk::member_ic_entry& entry = *row;
 		if (entry.cd == cd && entry.epoch == cd->method_epoch()) { slot = entry.slot; }
 		else { slot = member_read_slot_probe(cd, expr); entry.cd = cd; entry.epoch = cd->method_epoch(); entry.slot = slot; }
 		if (slot == UINT32_MAX) return nullptr;
@@ -14841,18 +14837,15 @@ op_status vm_backend::fused_member_container(frame& f, size_t site, const script
                                              uint32_t member_node, std::optional<script_value>& scratch,
                                              const script_value*& out) {
 	auto* expr = static_cast<member_expr*>(f.code->nodes[member_node].get());
-	if (cached_global_env_) {
+	if (std::vector<chunk::member_ic_entry>* rows = member_ic_rows(*f.code)) {
 		const script_value& objd = base.deref();
 		if (objd.raw_storage_index() == script_value::TYPEID_OBJECT) {
 			auto& holder = const_cast<script_value&>(objd).unchecked_get_object_storage();
 			if (holder && holder->is_class_instance_wrapper && holder->data) {
 				auto* inst = static_cast<class_instance*>(holder->data.get());
 				if (class_definition* cd = inst->get_class_definition()) {
-					auto& code = *f.code;
-					if (code.member_ic.empty()) {
-						code.member_ic.resize(code.code.size());
-					}
-					auto& entry = code.member_ic[site];
+					if (rows->size() < f.code->code.size()) { rows->resize(f.code->code.size()); }
+					auto& entry = (*rows)[site];
 					if (entry.cd == cd && entry.epoch == cd->method_epoch()) {
 						if (entry.slot != UINT32_MAX) {
 							if (script_value* v = inst->field_slot_value(entry.slot)) {
@@ -14925,25 +14918,22 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 	// the ladder for chain-default materialization and errors.
 	// V-M1 proven field read: node-borne class + shape-epoch guard, present cell (== the
 	// member_ic hit's raw cell copy); a miss falls to the IC / ladder below
-	if (expr->proven_class && cached_global_env_) {
+	if (expr->proven_class && (cached_global_env_ || parallel_worker_)) {
 		if (script_value* cell = detail::proven_field_cell(*receiver, expr->proven_class, expr->proven_epoch,
 		                                                   expr->proven_slot, nullptr)) {
 			stack_.push_back(*cell);
 			return {};
 		}
 	}
-	if (cached_global_env_) {
+	if (std::vector<chunk::member_ic_entry>* rows = member_ic_rows(*f.code)) {
 		const script_value& objd = receiver->deref();
 		if (objd.raw_storage_index() == script_value::TYPEID_OBJECT) {
 			const auto& holder = objd.unchecked_object_handle();
 			if (holder && holder->is_class_instance_wrapper && holder->data) {
 				auto* inst = static_cast<class_instance*>(holder->data.get());
 				if (class_definition* cd = inst->get_class_definition()) {
-					auto& code = *f.code;
-					if (code.member_ic.empty()) {
-						code.member_ic.resize(code.code.size());
-					}
-					auto& entry = code.member_ic[static_cast<size_t>(&ins - code.code.data())];
+					if (rows->size() < f.code->code.size()) { rows->resize(f.code->code.size()); }
+					auto& entry = (*rows)[static_cast<size_t>(&ins - f.code->code.data())];
 					if (entry.cd == cd && entry.epoch == cd->method_epoch()) {
 						if (entry.slot != UINT32_MAX) {
 							if (script_value* v = inst->field_slot_value(entry.slot)) {
@@ -15034,7 +15024,8 @@ op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
 	const script_value* base = frame_slot(f, ins.c);
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	// exec_get_member's proven and cached field reads over the slot itself: the cell lands in the temp with no receiver copy
-	if (base && cached_global_env_ && !(member->object && member->object->get_type() == node_type::member_expr)) {
+	std::vector<chunk::member_ic_entry>* temp_rows = member_ic_rows(*f.code);
+	if (base && (cached_global_env_ || parallel_worker_) && !(member->object && member->object->get_type() == node_type::member_expr)) {
 		const script_value& objd = base->deref();
 		if (member->proven_class) {
 			if (script_value* cell = detail::proven_field_cell(objd, member->proven_class, member->proven_epoch, member->proven_slot, nullptr)) {
@@ -15042,11 +15033,11 @@ op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
 				return {};
 			}
 		}
-		if (objd.raw_storage_index() == script_value::TYPEID_OBJECT && !f.code->member_ic.empty()) {
+		if (objd.raw_storage_index() == script_value::TYPEID_OBJECT && temp_rows && temp_rows->size() >= f.code->code.size()) {
 			const auto& holder = objd.unchecked_object_handle();
 			if (holder && holder->is_class_instance_wrapper && holder->data) {
 				auto* inst = static_cast<class_instance*>(holder->data.get());
-				const auto& entry = f.code->member_ic[static_cast<size_t>(&ins - f.code->code.data())];
+				const auto& entry = (*temp_rows)[static_cast<size_t>(&ins - f.code->code.data())];
 				if (class_definition* cd = inst->get_class_definition(); cd && entry.cd == cd && entry.epoch == cd->method_epoch()) {
 					if (entry.slot != UINT32_MAX) {
 						if (script_value* v = inst->field_slot_value(entry.slot)) {
@@ -15322,7 +15313,8 @@ op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, ui
 op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins) {
 	const member_store_proto& p = f.code->member_store_protos[ins.a];
 	// the field-store cache's scalar and var rows over the slot itself: no receiver or value copy before the write
-	if (p.value.const_index == k_invalid_u32 && cached_global_env_ && !f.code->member_ic.empty()) {
+	std::vector<chunk::member_ic_entry>* store_rows = p.value.const_index == k_invalid_u32 ? member_ic_rows(*f.code) : nullptr;
+	if (store_rows && store_rows->size() >= f.code->code.size()) {
 		const auto* member = static_cast<const member_expr*>(f.code->nodes[p.node].get());
 		const script_value* base = member->object && member->object->get_type() == node_type::member_expr ? nullptr : frame_slot(f, p.base);
 		if (base && base->raw_storage_index() == script_value::TYPEID_REFERENCE && !lane_deref_silent(*base)) { base = nullptr; }
@@ -15333,7 +15325,7 @@ op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins)
 				const auto& holder = objd.unchecked_object_handle();
 				if (holder && holder->is_class_instance_wrapper && holder->data) {
 					auto* inst = static_cast<class_instance*>(holder->data.get());
-					const auto& entry = f.code->member_ic[static_cast<size_t>(&ins - f.code->code.data())];
+					const auto& entry = (*store_rows)[static_cast<size_t>(&ins - f.code->code.data())];
 					class_definition* cd = inst->get_class_definition();
 					if (cd && entry.cd == cd && entry.epoch == cd->method_epoch() && entry.slot != UINT32_MAX) {
 						const size_t vi = vp->raw_storage_index();
@@ -15516,7 +15508,7 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
                                                              const script_value& dereferenced, const script_value& value) {
 	// V-M2 proven field write: == the member_ic hit with the conversion gated by the
 	// proof (KEEP BYTE-PARALLEL with interpreter I-M2)
-	if (member->proven_class && member->proven_field_write && cached_global_env_ && !detail::by_value_class_type(member->proven_field_type)) {
+	if (member->proven_class && member->proven_field_write && (cached_global_env_ || parallel_worker_) && !detail::by_value_class_type(member->proven_field_type)) {
 		if (class_instance* inst = detail::proven_field_instance(dereferenced, member->proven_class, member->proven_epoch)) {
 			script_value incoming = clone_for_assignment(value);
 			if (proof == proof_same_type && member->proven_field_type &&
@@ -15540,17 +15532,14 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 	// the auto-setter body IS enforce_field_write + set_field_unchecked, replayed
 	// here verbatim through the slot. A user _get_/_set_ in the chain keeps the site negative;
 	// declared-but-absent cells materialize exactly like set_field_unchecked.
-	if (cached_global_env_ &&
-	    dereferenced.raw_storage_index() == script_value::TYPEID_OBJECT) {
+	std::vector<chunk::member_ic_entry>* set_rows = dereferenced.raw_storage_index() == script_value::TYPEID_OBJECT ? member_ic_rows(*f.code) : nullptr;
+	if (set_rows) {
 		auto& holder = const_cast<script_value&>(dereferenced).unchecked_get_object_storage();
 		if (holder && holder->is_class_instance_wrapper && holder->data) {
 			auto* inst = static_cast<class_instance*>(holder->data.get());
 			if (class_definition* cd = inst->get_class_definition()) {
-				auto& code = *f.code;
-				if (code.member_ic.empty()) {
-					code.member_ic.resize(code.code.size());
-				}
-				auto& entry = code.member_ic[ins_index];
+				if (set_rows->size() < f.code->code.size()) { set_rows->resize(f.code->code.size()); }
+				auto& entry = (*set_rows)[ins_index];
 				if (entry.cd == cd && entry.epoch == cd->method_epoch()) {
 					if (entry.slot != UINT32_MAX) {
 						if (entry.scalar_type && value.raw_storage_index() == entry.scalar_kind) {

@@ -228,3 +228,25 @@ BIN=build/bin bash tools/ci/gates.sh tests-vm gloom
 ```
 
 CI is a safety net, not a substitute for the checklist above.
+
+### Local tiers
+
+Two local tiers wrap the gates. Both read `JAI_DEBUG_DIR` and `JAI_RELEASE_DIR` (default `build-debug` and `build`),
+build what they run with `--build`, and end on a one-line verdict.
+
+- **Targeted, for every change.** `tools/ci/targeted.sh <rev-range>` picks the checks from the paths the range touches
+  and prints each choice and why; `--plan` stops there. A documentation-site change runs `verify_site`; a test runs the
+  Debug suites; the VM, its compiler, the interpreter or a kernel both backends share runs the Debug suites on both
+  backends, the example hash gates and the fuzzer; an example runs its own gate; prose and design notes run nothing. A
+  change to the property system or the archives also prints a note for hosts, whose asset round-trips exercise them.
+- **Battery, at milestones.** `tools/ci/battery.sh` runs everything at depth: the Debug suites on both backends, then on
+  the Release build the suites, a 3000-program fuzz run, every example's hashes (GLOOM also with workers and at 600 ticks,
+  and JaiDOOM's timedemo where the checkout has it), the embedding quickstart, the language server and the one-file
+  build's include list. Run it before a release and after a large batch of changes, not per change.
+
+A measurement takes the machine-wide timing lock, so builds and suites elsewhere cannot skew it; nothing else needs it:
+
+```bash
+bash tools/ci/timing_lock.sh run "me: GLOOM A/B" -- ./my_benchmark.sh
+bash tools/ci/timing_lock.sh status
+```

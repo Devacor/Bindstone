@@ -12015,6 +12015,10 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 	if (part.value().is_reference()) {
 		return declared_ref_landed(f, ins, decl, define_ref_decl_value(f, ins, decl, std::move(part.value())));
 	}
+	// a bound object a host returned by reference (KEEP BYTE-PARALLEL with the interpreter's ref-decl branch)
+	if (result.is_non_owning_object()) {
+		return declared_ref_landed(f, ins, decl, define_ref_decl_value(f, ins, decl, script_value::make_referent_reference(result, engine_)));
+	}
 	// KEEP BYTE-PARALLEL with the interpreter's ref-decl branch
 	return raise_(make_error_code(runtime_error_code::invalid_reference),
 		"Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
@@ -14774,6 +14778,39 @@ JAI_NOINLINE bool vm_backend::bare_host_fill_read(frame& f, size_t cache_slot, u
 	return true;
 }
 
+class_instance* vm_backend::ordinary_site_instance(const call_site& site, const script_value& receiver) const {
+	if (!site.ord_cd || parallel_worker_) { return nullptr; }
+	const script_value& objv = receiver.deref();
+	if (objv.raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
+	const auto& holder = objv.unchecked_object_handle();
+	if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return nullptr; }
+	auto* inst = static_cast<class_instance*>(holder->data.get());
+	const class_definition* cd = inst->get_class_definition();
+	if (cd != site.ord_cd || cd->method_epoch() != site.ord_epoch || inst->has_user_overflow_fields() || cd->wrapped_object_has_layer(*inst)) {
+		return nullptr;
+	}
+	return inst;
+}
+
+JAI_NOINLINE void vm_backend::ordinary_site_arm(const call_site& site, const script_value& receiver, uint64_t member_id) {
+	site.ord_cd = nullptr;
+	if (!cached_global_env_ || parallel_worker_ || member_id == UINT64_MAX || member_id == same_as_id_) { return; }
+	const script_value& objv = receiver.deref();
+	if (objv.raw_storage_index() != script_value::TYPEID_OBJECT) { return; }
+	const auto& holder = objv.unchecked_object_handle();
+	if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return; }
+	auto* inst = static_cast<class_instance*>(holder->data.get());
+	class_definition* cd = inst->get_class_definition();
+	if (!cd || cd->chain_has_nonpublic() || inst->has_user_overflow_fields() || cd->wrapped_object_has_layer(*inst)) { return; }
+	if (cd->chain_declares_field(member_id) || cd->field_slot(member_id) != class_definition::k_no_field_slot) { return; }
+	if (cd->has_property_getters() && cd->user_accessor(symbolizer_->get_getter_id_with_view(member_id).first)) { return; }
+	script_value method = cd->get_method(member_id, false);
+	if (method.raw_storage_index() != script_value::TYPEID_FUNCTION || !method.unchecked_as_function().target<class_definition::cpp_method_dispatch>()) { return; }
+	site.ord_cd = cd;
+	site.ord_epoch = cd->method_epoch();
+	site.ord_method = std::move(method);
+}
+
 JAI_NOINLINE void vm_backend::native_site_refill(const call_site& site, class_definition& cd, class_instance& inst, uint64_t id, uint64_t stamp) {
 	site.nat_cd = &cd;
 	site.nat_stamp = stamp;
@@ -16379,7 +16416,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					class_definition* cd = inst->get_class_definition();
 					// A host class's direct lane (class_definition::native_method): the bound method's body on the
 					// C++ object, the receiver and arguments read in place; a declined shape takes the ordinary call
-					if (!parallel_worker_ && cd && cd->has_native_methods()) {
+					if (!parallel_worker_ && cd && (cd->has_native_methods() || (cd->is_cpp_class() && !cd->get_parent_classes().empty()))) {
 						if (void* self = native_site_self(site, *cd, *inst, member->member_id)) {
 							script_value out = make_null();
 							bool taken = false;
@@ -16823,10 +16860,15 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	}
 
 	script_value callee = make_null();
-	VM_TRY(member_access_value(f, object, member, callee, true));
-	if (is_unwinding_) {
-		stack_.push_back(make_null());
-		return {};
+	if (ordinary_site_instance(site, object)) {
+		callee = make_bound_method(object.deref(), site.ord_method);
+	} else {
+		VM_TRY(member_access_value(f, object, member, callee, true));
+		if (is_unwinding_) {
+			stack_.push_back(make_null());
+			return {};
+		}
+		if (callee.is_function()) { ordinary_site_arm(site, object, member->member_id); }
 	}
 	if (callee.is_null() && member->null_safe) {
 		stack_.push_back(make_null());
@@ -20523,6 +20565,8 @@ void vm_backend::release_site_pins() noexcept {
 			site.ctor_cls.reset();
 			site.ctor_cls_key = nullptr;
 			site.mic_method = script_value(std::monostate{}, nullptr);
+			site.ord_method = script_value(std::monostate{}, nullptr);
+			site.ord_cd = nullptr;
 			site.mic_resolved.reset();
 			site.mic_dispatch = nullptr;
 			site.mic_cd = nullptr;

@@ -1340,21 +1340,45 @@ bool class_definition::has_live_instances() const {
     return false;
 }
 
-void class_definition::add_native_lane(uint64_t id, native_lane fn, std::shared_ptr<const void> state) {
+// an overloaded name's lane: the one overload whose parameters the arguments match exactly, else the ordinary call
+static bool dispatch_native_overloads(const void* state, void* self, const script_value& receiver, script_value* args, size_t argc,
+                                      script_value& out) {
+    const auto& overloads = *static_cast<const class_definition::native_overload_set*>(state);
+    const class_definition::native_overload* pick = nullptr;
+    for (const auto& overload : overloads) {
+        if (overload.exact(args, argc)) {
+            if (pick) { return false; }
+            pick = &overload;
+        }
+    }
+    return pick && pick->lane(pick->state.get(), self, receiver, args, argc, out);
+}
+
+void class_definition::add_native_lane(uint64_t id, native_lane fn, std::shared_ptr<const void> state, native_exact exact) {
     restamp_native_methods();
-    if (!native_lane_names_.insert(id).second) {
-        auto it = native_methods_.find(id);
-        if (it != native_methods_.end() && !it->second.plain) { native_methods_.erase(it); }
+    if (native_lane_names_.count(id)) { return; }
+    auto [it, fresh] = native_methods_.try_emplace(id);
+    if (!fresh && it->second.plain) { return; }
+    auto& overloads = native_overload_sets_[id];
+    if (!overloads) { overloads = std::make_shared<native_overload_set>(); }
+    overloads->push_back(native_overload{ fn, state, exact });
+    if (overloads->size() == 1) {
+        it->second.lane = fn;
+        it->second.state = std::move(state);
         return;
     }
-    auto [it, fresh] = native_methods_.try_emplace(id);
-    if (!fresh && it->second.plain) return;
-    it->second.lane = fn; it->second.state = std::move(state);
+    if (std::any_of(overloads->begin(), overloads->end(), [](const native_overload& o) { return o.exact == nullptr; })) {
+        withdraw_native_lane(id);
+        return;
+    }
+    it->second.lane = &dispatch_native_overloads;
+    it->second.state = overloads;
 }
 
 void class_definition::withdraw_native_lane(uint64_t id) {
     restamp_native_methods();
     native_lane_names_.insert(id);
+    native_overload_sets_.erase(id);
     auto it = native_methods_.find(id);
     if (it != native_methods_.end() && !it->second.plain) { native_methods_.erase(it); }
 }

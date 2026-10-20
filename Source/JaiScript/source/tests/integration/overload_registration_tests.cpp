@@ -196,7 +196,7 @@ public:
             check_true(oracle.rfind("throw:", 0) != 0 && oracle.find("boom 5") != std::string::npos, "the interpreter's answer: " + oracle);
             std::string lanes;
             check_eq(oracle, run(true, src, &lanes), "the vm's answer is the interpreter's");
-            check_eq(std::string("add scaled narrow reset get_total boom label tagged "), lanes, "the lanes: every single unguarded binding of value parameters");
+            check_eq(std::string("add bump scaled narrow reset get_total boom label tagged pick "), lanes, "the lanes: every unguarded binding, a reference result and an overload set included");
         });
 
         // A bare call of a sibling method inside a method (`step(n - 1)`) parks the class's method on the frame's receiver without minting a

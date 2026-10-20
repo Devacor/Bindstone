@@ -169,6 +169,11 @@ namespace jai::vm {
         mutable uint64_t nat_stamp = 0;   // a host class's native_stamp; a script layer's method_epoch
         mutable uint64_t nat_shape = 0;
         mutable detail::host_method_hit nat_hit;   // the entry (null: no lane) and the receiver layout it was measured under
+        // The member ladder's answer for a host method no lane takes: the class's method value at (class identity, method
+        // epoch), where no access check, user getter, field or builtin handle method of the name sits in front of it
+        mutable const class_definition* ord_cd = nullptr;
+        mutable uint64_t ord_epoch = 0;
+        mutable script_value ord_method{std::monostate{}, nullptr};
         mutable bool nat_field_free = false;
         std::vector<uint32_t> staged_argument_slots;   // immutable owned temps released if this call is abandoned before invocation
         // op_new: the class name's symbol, interned when the site compiles

@@ -652,6 +652,9 @@ private:
     static std::shared_ptr<void> copy_native_object(const void* src) {
         return std::make_shared<T>(*static_cast<const T*>(src));
     }
+    static void assign_native_object(void* dst, const void* src) {
+        *static_cast<T*>(dst) = *static_cast<const T*>(src);
+    }
 
 public:
     
@@ -703,30 +706,52 @@ public:
     }
 
     // The direct lane a bound method's C++ signature allows (class_definition::native_lane): the vm calls the method it bound with the
-    // ordinary call's conversions, reading the receiver and the arguments in place, for arguments whose conversion cannot fail (a bool,
-    // an int in the parameter's range, a number for a floating parameter, a string, any value for a script_value parameter); any other
-    // argument declines to the ordinary call. A signature with another parameter kind, a guarded method or an overload has no lane.
+    // ordinary call's conversions, reading the receiver and the arguments in place: a bool, an int in the parameter's range, a number
+    // for a floating parameter, a string, any value for a script_value parameter, and a bound object (T&, const T&, T, shared_ptr<T>)
+    // the ordinary call's extraction takes; any other argument declines to the ordinary call. An overload set dispatches on exact
+    // argument kinds (class_definition::native_exact). A pointer result, a reference-writing parameter or a guarded method has no lane.
+    // a bound object parameter: T&, const T&, T or shared_ptr<T> (by value or const&) of a class the boundary hands by identity
+    template<typename P>
+    static constexpr bool lane_object_param() {
+        using D = std::remove_cvref_t<P>;
+        if constexpr (is_specialization_v<D, std::shared_ptr>) {
+            return std::is_class_v<typename D::element_type> && !(std::is_lvalue_reference_v<P> && !std::is_const_v<std::remove_reference_t<P>>);
+        } else if constexpr (std::is_class_v<D>) {
+            return !std::is_same_v<D, std::string> && !std::is_same_v<D, script_value> && !math_adapted<D> &&
+                   !dynamic_binder_validation::is_std_container<D>::value && !dynamic_binder_validation::is_std_function<D>::value &&
+                   !is_specialization_v<D, std::weak_ptr> && !is_specialization_v<D, std::unique_ptr> &&
+                   (std::is_reference_v<P> || std::is_copy_constructible_v<D>);
+        } else {
+            return false;
+        }
+    }
     template<typename P>
     static constexpr bool lane_param() {
         using D = std::remove_cvref_t<P>;
-        if constexpr (std::is_reference_v<P> && !std::is_const_v<std::remove_reference_t<P>>) { return false; }
+        if constexpr (lane_object_param<P>()) { return true; }
+        else if constexpr (std::is_reference_v<P> && !std::is_const_v<std::remove_reference_t<P>>) { return false; }
         else if constexpr (std::is_same_v<D, bool> || std::is_same_v<D, std::string> || std::is_same_v<D, script_value> || std::is_floating_point_v<D>) { return true; }
         else if constexpr (std::is_integral_v<D>) {
             return !std::is_same_v<D, char> && !std::is_same_v<D, signed char> && !std::is_same_v<D, unsigned char> && !std::is_same_v<D, wchar_t> &&
                    !std::is_same_v<D, char8_t> && !std::is_same_v<D, char16_t> && !std::is_same_v<D, char32_t>;
         } else { return false; }
     }
-    // a result the ordinary call anchors to its receiver (a reference or a pointer into an object) keeps the ordinary call
+    // a reference result is anchored to its receiver as the ordinary call anchors it; a pointer result keeps the ordinary call
     template<typename R>
     static constexpr bool lane_result() {
-        using D = std::remove_cvref_t<R>;
-        return !(std::is_reference_v<R> && std::is_class_v<D>) && !std::is_pointer_v<D>;
+        return !std::is_pointer_v<std::remove_cvref_t<R>>;
     }
     template<typename P>
     static bool lane_arg(const script_value& a) {
         using D = std::remove_cvref_t<P>;
         const size_t k = a.raw_storage_index();
-        if constexpr (std::is_same_v<D, script_value>) { return true; }
+        if constexpr (lane_object_param<P>()) {
+            if constexpr (is_specialization_v<D, std::shared_ptr>) {
+                if (k == script_value::TYPEID_NULL) { return true; }
+            }
+            return k == script_value::TYPEID_OBJECT || k == script_value::TYPEID_SHARED_PTR;
+        }
+        else if constexpr (std::is_same_v<D, script_value>) { return true; }
         else if constexpr (std::is_same_v<D, bool>) { return k == script_value::TYPEID_BOOL; }
         else if constexpr (std::is_integral_v<D>) { return k == script_value::TYPEID_INT && std::in_range<D>(a.unchecked_as_int()); }
         else if constexpr (std::is_floating_point_v<D>) { return k == script_value::TYPEID_INT || k == script_value::TYPEID_FLOAT; }
@@ -734,6 +759,30 @@ public:
     }
     template<typename... Args, size_t... Is>
     static bool lane_args(const script_value* args, std::index_sequence<Is...>) { return (lane_arg<Args>(args[Is]) && ...); }
+    // an overload's exact claim (class_definition::native_exact): each argument exactly its parameter's kind
+    template<typename P>
+    static bool lane_exact_arg(const script_value& a) {
+        using D = std::remove_cvref_t<P>;
+        const size_t k = a.raw_storage_index();
+        if constexpr (lane_object_param<P>() || std::is_same_v<D, script_value>) { return false; }
+        else if constexpr (std::is_same_v<D, bool>) { return k == script_value::TYPEID_BOOL; }
+        else if constexpr (std::is_integral_v<D>) { return k == script_value::TYPEID_INT && std::in_range<D>(a.unchecked_as_int()); }
+        else if constexpr (std::is_floating_point_v<D>) { return k == script_value::TYPEID_FLOAT; }
+        else { return k == script_value::TYPEID_STRING; }
+    }
+    template<typename... Args>
+    static bool lane_exact(const script_value* args, size_t argc) {
+        if (argc != sizeof...(Args)) { return false; }
+        return [&]<size_t... Is>(std::index_sequence<Is...>) { return (lane_exact_arg<Args>(args[Is]) && ...); }(std::index_sequence_for<Args...>{});
+    }
+    template<typename ArgsTuple, size_t... Is>
+    static bool self_lane_exact_impl(const script_value* args, std::index_sequence<Is...>) {
+        return (lane_exact_arg<std::tuple_element_t<Is + 1, ArgsTuple>>(args[Is]) && ...);
+    }
+    template<typename ArgsTuple, size_t N>
+    static bool self_lane_exact(const script_value* args, size_t argc) {
+        return argc == N && self_lane_exact_impl<ArgsTuple>(args, std::make_index_sequence<N>{});
+    }
     template<typename Requirements>
     static bool lane_unguarded(const Requirements& required) {
         if constexpr (std::is_same_v<std::decay_t<Requirements>, privilege>) { return required == privilege::none; }
@@ -754,32 +803,71 @@ public:
     struct lane_held {
         script_value& slot;
         explicit lane_held(script_value& s) : slot(s) {}
+        bool prepare() { return true; }
         decltype(auto) get(engine* eng) { return detail::value_converter<P>::from(slot, eng); }
     };
     template<typename P> requires std::is_same_v<P, const script_value&>
     struct lane_held<P> {
         script_value owned;
         explicit lane_held(script_value& slot) : owned(std::move(slot)) {}
+        bool prepare() { return true; }
         const script_value& get(engine*) const { return owned; }
     };
+    // a bound object argument: the ordinary call's own extraction (detail::checked_native_reference / checked_native_object),
+    // made before the call; an argument it would refuse declines the lane, so the ordinary call reports it
+    template<typename P> requires (lane_object_param<P>() && !is_specialization_v<std::remove_cvref_t<P>, std::shared_ptr>)
+    struct lane_held<P> {
+        using D = std::remove_cvref_t<P>;
+        script_value& slot;
+        void* object = nullptr;
+        explicit lane_held(script_value& s) : slot(s) {}
+        bool prepare() { return (object = detail::lane_object_pointer(slot, typeid(D))) != nullptr; }
+        D& get(engine*) const { return *static_cast<D*>(object); }
+    };
+    template<typename P> requires (lane_object_param<P>() && is_specialization_v<std::remove_cvref_t<P>, std::shared_ptr>)
+    struct lane_held<P> {
+        using E = typename std::remove_cvref_t<P>::element_type;
+        script_value& slot;
+        std::shared_ptr<E> handle;
+        explicit lane_held(script_value& s) : slot(s) {}
+        bool prepare() {
+            std::shared_ptr<void> owner;
+            if (!detail::lane_object_handle(slot, typeid(E), owner)) { return false; }
+            handle = std::static_pointer_cast<E>(std::move(owner));
+            return true;
+        }
+        const std::shared_ptr<E>& get(engine*) const { return handle; }
+    };
+    // a reference result as the ordinary call hands it: converted, and a handle into an object anchored to the receiver
+    template<typename R>
+    static void lane_result_out(R&& result, const script_value& receiver, engine* eng, script_value& out) {
+        out = detail::value_converter<R>::to(std::forward<R>(result), eng);
+        if constexpr (std::is_lvalue_reference_v<R>) { detail::anchor_to_receiver(out, receiver); }
+    }
     template<typename Self, typename R, typename Method, typename... Args, size_t... Is>
-    static void lane_call(Self* obj, const lane_state<Method>& st, script_value* args, script_value& out, std::index_sequence<Is...>) {
+    static bool lane_call(Self* obj, const lane_state<Method>& st, const script_value& receiver, script_value* args, script_value& out,
+                          std::index_sequence<Is...>) {
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(st.eng, &storage);
         std::tuple<lane_held<Args>...> held{ lane_held<Args>(args[Is])... };
+        if (!(std::get<Is>(held).prepare() && ...)) { return false; }
         if constexpr (std::is_void_v<R>) {
             (obj->*std::bit_cast<Method>(st.method))(std::get<Is>(held).get(st.eng)...);
             out = script_value(std::monostate{}, st.eng);
+        } else if constexpr (std::is_lvalue_reference_v<R>) {
+            R result = (obj->*std::bit_cast<Method>(st.method))(std::get<Is>(held).get(st.eng)...);
+            lane_result_out<R>(result, receiver, st.eng, out);
         } else {
             R result = (obj->*std::bit_cast<Method>(st.method))(std::get<Is>(held).get(st.eng)...);
             out = detail::value_converter<R>::to(result, st.eng);
         }
+        return true;
     }
     template<typename Self, typename R, typename Method, typename... Args>
-    static bool member_lane(const void* state, void* self, const script_value&, script_value* args, size_t argc, script_value& out) {
+    static bool member_lane(const void* state, void* self, const script_value& receiver, script_value* args, size_t argc, script_value& out) {
         if (argc != sizeof...(Args) || !lane_args<Args...>(args, std::index_sequence_for<Args...>{})) { return false; }
-        lane_call<Self, R, Method, Args...>(static_cast<Self*>(self), *static_cast<const lane_state<Method>*>(state), args, out, std::index_sequence_for<Args...>{});
-        return true;
+        return lane_call<Self, R, Method, Args...>(static_cast<Self*>(self), *static_cast<const lane_state<Method>*>(state), receiver, args, out,
+                                                   std::index_sequence_for<Args...>{});
     }
     // a callable method's lane calls the callable the ordinary call holds (one object: a stateful functor's state is shared)
     template<typename R, typename ArgsTuple, typename Callable, size_t... Is>
@@ -788,12 +876,13 @@ public:
         detail::parameter_storage::scope_guard guard(eng, &storage);
         T& obj = *static_cast<T*>(self);
         std::tuple<lane_held<std::tuple_element_t<Is + 1, ArgsTuple>>...> held{ lane_held<std::tuple_element_t<Is + 1, ArgsTuple>>(args[Is])... };
+        if (!(std::get<Is>(held).prepare() && ...)) { return false; }
         if constexpr (std::is_void_v<R>) {
             callable(obj, std::get<Is>(held).get(eng)...);
             out = script_value(std::monostate{}, eng);
-        } else if constexpr (std::is_reference_v<R> && std::is_same_v<std::remove_reference_t<R>, T>) {
-            out = receiver;   // before the call: the receiver is the caller's slot, which a callback may move
-            callable(obj, std::get<Is>(held).get(eng)...);
+        } else if constexpr (std::is_lvalue_reference_v<R>) {
+            R result = callable(obj, std::get<Is>(held).get(eng)...);
+            lane_result_out<R>(result, receiver, eng, out);
         } else {
             R result = callable(obj, std::get<Is>(held).get(eng)...);
             out = detail::value_converter<R>::to(result, eng);
@@ -867,7 +956,8 @@ public:
             std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... }, result_info<R>());
         if constexpr (lane_result<R>() && (lane_param<Args>() && ...)) {
             if (unguarded) {
-                class_def_->add_native_lane(engine_.symbolize(name), &member_lane<std::conditional_t<IsConst, const T, T>, R, Method, Args...>, std::move(state));
+                class_def_->add_native_lane(engine_.symbolize(name), &member_lane<std::conditional_t<IsConst, const T, T>, R, Method, Args...>, std::move(state),
+                                            &lane_exact<Args...>);
                 return *this;
             }
         }
@@ -930,7 +1020,8 @@ public:
                 param_sig_from_tuple<args_tuple, 1, script_arity>(), result_info<R>());
             if constexpr (lane_shaped) {
                 if (lane) {
-                    class_def_->add_native_lane(engine_.symbolize(name), &self_lane<R, args_tuple, CallableType, script_arity>, std::move(state));
+                    class_def_->add_native_lane(engine_.symbolize(name), &self_lane<R, args_tuple, CallableType, script_arity>, std::move(state),
+                                                &self_lane_exact<args_tuple, script_arity>);
                     return *this;
                 }
             }
@@ -1708,6 +1799,9 @@ public:
         // Register automatic copy function for copyable types
         if constexpr (std::is_copy_constructible_v<T>) {
             class_def_->set_copy_function(&copy_native_object);
+        }
+        if constexpr (std::is_copy_assignable_v<T>) {
+            class_def_->set_assign_function(&assign_native_object);
         }
         
         class_def_->set_cpp_backed(true);   // reflect::is_cpp_bound's class-form answer

@@ -99,6 +99,7 @@ namespace jai::detail {
 		std::vector<std::weak_ptr<class_instance>> pending_instances;
 		// What destructors that failed on this chunk report, replayed by the join
 		std::vector<std::pair<std::error_code, std::string>> deferred_reports;
+		std::vector<std::pair<const void*, std::weak_ptr<class_instance>>> pending_script_layers;   // recorded by the join
 		std::vector<script_value> cursors;   // [0] = the range's chunk cursor, then the zip's arrays
 		std::vector<script_value> call_args; // prepared at the barrier; no worker-entry allocation
 		// Live input vector ("safe AND free"): workers read the
@@ -1368,12 +1369,25 @@ namespace {
 		std::unordered_set<const class_definition*> visited_destructor_classes;
 		std::string context;   // where construction code sits, appended to its verdict
 
-		// The class a name constructs: its constructor value in the program's scope
+		// The class a name constructs: a script class's constructor value in the program's scope, or a host class's constructor
 		std::shared_ptr<class_definition> constructor_class(uint64_t name_id) {
 			auto global = eng.get_global_environment()->get(name_id);
 			if (!global || !global.value().is_function()) { return nullptr; }
-			const script_callable* payload = payload_from_function_value(global.value());
-			return payload && payload->kind == script_callable::kind_type::constructor ? payload->cls : nullptr;
+			if (const script_callable* payload = payload_from_function_value(global.value())) {
+				return payload->kind == script_callable::kind_type::constructor ? payload->cls : nullptr;
+			}
+			const auto& host_classes = eng.get_class_registry().cpp_classes_;
+			const auto found = host_classes.find(std::string(sym.get_string(name_id)));
+			return found != host_classes.end() ? found->second : nullptr;
+		}
+		// The first host class in cls's chain marked serial_only_constructor()
+		static const class_definition* serial_only_base(const class_definition* cls) {
+			if (!cls) { return nullptr; }
+			if (!cls->is_script_class() && cls->serial_only_construction()) { return cls; }
+			for (const auto& parent : cls->get_parent_classes()) {
+				if (const class_definition* found = serial_only_base(parent.get())) { return found; }
+			}
+			return nullptr;
 		}
 
 		template <typename Walk>
@@ -1398,15 +1412,17 @@ namespace {
 		}
 
 		bool admit_construction(uint64_t name_id, const std::shared_ptr<class_definition>& cls, size_t argc, const ast_node* site) {
-			if (!cls->is_script_class()) {
-				return fail(site, "C++ class '" + cls->get_name() + "' cannot be constructed in a parallel body");
-			}
-			if (auto host = cls->find_cpp_base_class()) {
-				return fail(site, "class '" + cls->get_name() + "' has a C++ base '" + host->get_name() + "' and cannot be constructed in a parallel body");
+			if (const class_definition* serial = serial_only_base(cls.get())) {
+				if (serial == cls.get()) {
+					return fail(site, "C++ class '" + cls->get_name() + "' is marked serial_only_constructor() and cannot be constructed in a parallel body");
+				}
+				return fail(site, "class '" + cls->get_name() + "' has a C++ base '" + serial->get_name() +
+				                  "' marked serial_only_constructor() and cannot be constructed in a parallel body");
 			}
 			if (std::none_of(constructed_classes.begin(), constructed_classes.end(), [&](const constructed_class& c) { return c.cls == cls; })) {
 				constructed_classes.push_back({ name_id, cls });
 			}
+			if (!cls->is_script_class()) { return true; }   // a host constructor runs no script, and is taken to be safe on any thread
 			auto script_cls = std::static_pointer_cast<script_class_definition>(cls);
 			const auto& ctors = script_cls->get_constructor_asts();
 			if (ctors.empty()) {
@@ -1813,9 +1829,7 @@ namespace {
 				const type_info_ptr named = n->type && n->type->base_type == script_value_type::jai_shared_ptr_type ? n->type->element_type() : n->type;
 				if (proof_mode || !class_type(named)) { return fail(e.get(), "'new' is not allowed in a parallel body"); }
 				const uint64_t name_id = sym.intern(named->type_name);
-				if (!constructor_class(name_id)) {
-					return fail(e.get(), "C++ class '" + std::string(named->type_name) + "' cannot be constructed in a parallel body");
-				}
+				if (!constructor_class(name_id)) { return fail(e.get(), "'new' is not allowed in a parallel body"); }
 				collect_type(n->type);
 				collect_type(named);
 				adm.constructions.push_back({ name_id, sym.get_string(name_id), n->arguments.size(), e.get() });
@@ -2385,6 +2399,7 @@ namespace {
 	void reset_worker_slot(engine& eng, parallel_worker_slot& slot, std::chrono::nanoseconds budget) {
 		slice_worker_limits(eng, slot);
 		slot.deferred_reports.clear();
+		slot.pending_script_layers.clear();
 		if (slot.vm) {
 			slot.vm->configure_parallel_worker(slot.root_env, slot.env_epoch_sink.get(), &slot.limits, budget);
 		} else {
@@ -4435,6 +4450,13 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		// sandbox, its constructor and destructor bodies compiled here
 		for (const auto& made : method_adm.constructed_classes) {
 			state.faults.checkpoint("region.constructor_pin", k);
+			if (!made.cls->is_script_class()) {   // a host class's constructor (a hybrid's base, or the class itself): a worker copy
+				script_value host_ctor = eng.make_parallel_host_function_copy(made.cls->get_name());
+				slot->capture_name_ids.push_back(made.name_id);
+				slot->root_env->define(made.name_id, host_ctor);
+				slot->method_env->define(made.name_id, std::move(host_ctor));
+				continue;
+			}
 			script_callable payload;
 			payload.kind = script_callable::kind_type::constructor;
 			payload.cls = made.cls;
@@ -4508,7 +4530,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	auto& table = region_guard.table;
 	state.faults.checkpoint("region.table_entry", 0);
 	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits, nullptr, contexts[0]->backend.get(), &contexts[0]->method_env,
-	                          &contexts[0]->deferred_reports });
+	                          &contexts[0]->deferred_reports, &contexts[0]->pending_script_layers });
 	if (worker_count > 1) {
 		const size_t pool_workers_needed = worker_count - 1;
 		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
@@ -4529,7 +4551,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		for (size_t k = 1; k < worker_count; ++k) {
 			state.faults.checkpoint("region.table_entry", k);
 			table.entries.push_back({ detail::thread_pool_access::worker_thread_id(*state.pool, k - 1), &contexts[k]->limits, &contexts[k]->pending_instances,
-			                          contexts[k]->backend.get(), &contexts[k]->method_env, &contexts[k]->deferred_reports });
+			                          contexts[k]->backend.get(), &contexts[k]->method_env, &contexts[k]->deferred_reports,
+			                          &contexts[k]->pending_script_layers });
 		}
 	}
 	region_guard.prepared = true;
@@ -4612,6 +4635,10 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		drain_pending_instances(state, *ctx);
 	}
 	for (auto* ctx : contexts) {
+		for (const auto& [object, owner] : ctx->pending_script_layers) {
+			if (!owner.expired()) { eng.note_script_layer(object, owner); }
+		}
+		ctx->pending_script_layers.clear();
 		for (const auto& [code, message] : ctx->deferred_reports) { eng.report_script_error(message, code); }
 		ctx->deferred_reports.clear();
 	}

@@ -88,7 +88,7 @@ namespace {
 	checked_result<void> construct_host_base(construction_host& host, class_instance& instance, const class_definition& base,
 	                                         const std::vector<script_value>& args, bool a_ancestor) {
 		const std::string& name = base.get_name();
-		auto ctor = host.current_environment()->get(name);
+		auto ctor = host.current_environment()->get(name, *host.symbols);
 		if (args.empty() && (!ctor || !ctor.value().is_function() || host_lacks_default_constructor(host.eng, name))) {
 			return no_default_constructor(base.get_type_id());
 		}

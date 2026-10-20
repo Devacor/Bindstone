@@ -5550,6 +5550,12 @@ script_value engine::execute_import(const std::string& resolved_path) {
 
 void engine::note_script_layer(const void* cpp_object, const std::weak_ptr<class_instance>& owner) {
     if (!cpp_object) { return; }
+    if (parallel_region_active_ && impl->parallel_ && impl->parallel_->active_region) [[unlikely]] {   // a region's chunk: the join records it
+        if (const auto* chunk = impl->parallel_->active_region->find_entry(std::this_thread::get_id()); chunk && chunk->pending_script_layers) {
+            chunk->pending_script_layers->emplace_back(cpp_object, owner);
+            return;
+        }
+    }
     auto& layers = impl->script_layers_;
     if (layers.size() >= impl->script_layer_sweep_watermark_) {
         for (auto it = layers.begin(); it != layers.end();) {

@@ -493,9 +493,41 @@ class bind its own private members. Modes: <code>all</code>, <code>properties</c
 <code>hierarchy</code>.</li>
 <li><code>.bound_engine()</code>: the engine this binder targets; configure lambdas use it for
 <code>bind_signal_type</code> and globals.</li>
+<li><code>.serial_only_constructor()</code>: the class&#x27;s constructor or destructor touches state other objects
+share, so a <code>parallel_for</code> body may not construct it (next section).</li>
 <li><code>.build()</code>: finalizes registration. The destructor calls it if you forget; the binder is
 movable, non-copyable.</li>
 </ul>
+<h3 id="serial-only-constructors">Serial-only constructors<a class="hlink" href="#serial-only-constructors" aria-label="link">&#8203;</a></h3>
+<p>A <code>parallel_for</code> body may construct bound classes, and script classes over them (see
+<a href="../guide/09-containers-strings.html#parallel-transform">parallel loops</a>). The constructor and the
+destructor then run on a worker thread, and the binder takes them to be safe there: a constructor that only builds
+its own members is. One that touches state other objects share is not: it adds the object to a registry, takes a
+handle from a cache, looks up a service, connects to a signal hub, or attaches itself to another object. Mark such a
+class with <code>.serial_only_constructor()</code>, and a body that constructs it, or a script class over it, is
+refused when the statement is reached, before any element runs. One mark covers the constructor and the destructor
+alike: the object a worker makes is the one that dies there. Construction outside a parallel body is unaffected.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Sprite {
+    static std::vector&lt;Sprite*&gt;&amp; registry() { static std::vector&lt;Sprite*&gt; all; return all; }
+    double alpha = 1.0;
+    Sprite() { registry().push_back(this); }        // every sprite joins the renderer's list
+    ~Sprite() { std::erase(registry(), this); }
+};
+
+jai::dynamic_binder&lt;Sprite&gt;(*eng, "Sprite")
+    .constructor&lt;&gt;()
+    .serial_only_constructor()
+    .property("alpha", &amp;Sprite::alpha)
+    .build();</code></pre></div>
+<div class="codeblock cb-jai" data-host="Sprite serial-only binder"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class Glowing : Sprite { float glow = 0.5; Glowing() : super() {} }
+array&lt;int&gt; lights = [1, 2, 3];
+try { parallel_for (auto&amp; n : lights) { Sprite s; n = 0; } } catch (e) { print(e); }
+try { parallel_for (auto&amp; n : lights) { Glowing g; n = 0; } } catch (e) { print(e); }
+Glowing one;                              // a serial construction is unaffected
+print("{} {}", one.alpha, one.glow);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">parallel_for: C++ class 'Sprite' is marked serial_only_constructor() and cannot be constructed in a parallel body at 3:48
+parallel_for: class 'Glowing' has a C++ base 'Sprite' marked serial_only_constructor() and cannot be constructed in a parallel body at 4:49
+1.0 0.5</code></pre></div>
 
 <h2 id="signals-one-view-every-signature">Signals: one view, every signature<a class="hlink" href="#signals-one-view-every-signature" aria-label="link">&#8203;</a></h2>
 <p>Signal members reach script with no per-signature ceremony. A <code>JAI_SIGNAL_PROPERTY</code> on a

@@ -675,6 +675,14 @@ public:
         }
     }
 
+    // The class's constructor or destructor touches state other objects share (a registry, a cache, a service lookup): a
+    // parallel body refuses to construct it, and any script class over it, before any element runs. Host construction is
+    // otherwise taken to be safe on any thread.
+    dynamic_binder& serial_only_constructor() {
+        class_def_->serial_only_construction(true);
+        return *this;
+    }
+
     // Hold every bound method of this class to its C++ signature in the strict checker
     dynamic_binder& strict_signatures() {
         class_def_->set_strict_signatures(true);

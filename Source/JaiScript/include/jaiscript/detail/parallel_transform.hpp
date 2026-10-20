@@ -65,6 +65,8 @@ namespace jai::detail {
             execution_backend* backend = nullptr;
             const std::shared_ptr<environment>* definition_env = nullptr;
             std::vector<std::pair<std::error_code, std::string>>* deferred_reports = nullptr;
+            // The script layers this chunk's hybrids adopt their host objects into, recorded by the join (the engine's map is shared)
+            std::vector<std::pair<const void*, std::weak_ptr<class_instance>>>* pending_script_layers = nullptr;
         };
         std::vector<entry> entries;
 

@@ -27,6 +27,8 @@ namespace jai::foundry::tests {
 // Host objects the hybrid test makes and destroys, from any worker
 inline std::atomic<int64_t> parallel_hosts_made{0};
 inline std::atomic<int64_t> parallel_hosts_died{0};
+// C++ objects of the deferral test, in the order they die (one thread)
+inline std::vector<int64_t> parallel_serial_deaths;
 
 class parallel_transform_tests : public suite {
 public:
@@ -2728,6 +2730,65 @@ public:
 				jai::dynamic_binder<doc_sprite>(*e, "Sprite").constructor<>().serial_only_constructor().property("alpha", &doc_sprite::alpha).build();
 				try { e->execute(src); } catch (const std::exception& ex) { *out << "threw: " << ex.what(); }
 				check_eq(expected, out->str(), vm ? "vm" : "interp");
+			}
+		});
+
+		test("a_serial_only_object_dying_on_a_chunk_is_released_by_the_join", [this]() {
+			// No admitted body reaches such an object (construction is refused, and elements and captures hold no host object), so
+			// the region is stood up by hand: on a chunk thread the C++ object waits for the join, which releases every chunk's
+			// deferred objects on the calling thread in element order, then in the order they died
+			struct serial_host {
+				int64_t id = 0;
+				~serial_host() { if (id) { parallel_serial_deaths.push_back(id); } }
+			};
+			struct plain_host {
+				int64_t id = 0;
+				~plain_host() { if (id) { parallel_serial_deaths.push_back(id); } }
+			};
+			for (bool vm : {false, true}) {
+				parallel_serial_deaths.clear();
+				auto e = make_engine();
+				e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				dynamic_binder<serial_host>(*e, "SerialHost").constructor<>().serial_only_constructor().property("id", &serial_host::id).build();
+				dynamic_binder<plain_host>(*e, "PlainHost").constructor<>().property("id", &plain_host::id).build();
+				e->execute("class Glow : SerialHost { int glow = 1; Glow() : super() {} }\n"
+				           "SerialHost serial(int k) { SerialHost s; s.id = k; return s; }\n"
+				           "Glow glowing(int k) { Glow g; g.id = k; return g; }\n"
+				           "PlainHost plain(int k) { PlainHost p; p.id = k; return p; }");
+				auto made = [&](const char* src) { return e->execute(src); };
+				script_value first = made("serial(1);");
+				script_value hybrid = made("glowing(2);");
+				script_value later = made("serial(3);");
+				script_value earlier = made("serial(4);");
+				script_value plain = made("plain(5);");
+				parallel_serial_deaths.clear();   // the temporaries the copies came from
+
+				detail::execution_limits limits;
+				std::vector<detail::deferred_release> deferred;
+				detail::parallel_region_table table;
+				table.entries.push_back({ std::this_thread::get_id(), &limits });
+				table.entries.back().deferred_releases = &deferred;
+				e->parallel_state().active_region = &table;
+				e->note_parallel_region(true);
+				first = script_value(std::monostate{}, e.get());
+				hybrid = script_value(std::monostate{}, e.get());
+				plain = script_value(std::monostate{}, e.get());
+				deferred.push_back({ 7, std::move(later) });
+				deferred.push_back({ 3, std::move(earlier) });
+				const std::vector<int64_t> during = parallel_serial_deaths;
+				e->note_parallel_region(false);
+				e->parallel_state().active_region = nullptr;
+				detail::release_deferred_in_order({ &deferred });
+
+				auto spelled = [](const std::vector<int64_t>& ids) {
+					std::string result;
+					for (int64_t id : ids) { result += std::to_string(id) + " "; }
+					return result;
+				};
+				check_eq(std::string("5 "), spelled(during), std::string("only the plain host object died on the chunk ") + (vm ? "vm" : "interp"));
+				check_eq(std::string("5 4 3 1 2 "), spelled(parallel_serial_deaths),
+				         std::string("the join released by element, then in death order ") + (vm ? "vm" : "interp"));
+				check_true(deferred.empty(), "the join empties the list");
 			}
 		});
 

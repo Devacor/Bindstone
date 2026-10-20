@@ -100,6 +100,7 @@ namespace jai::detail {
 		// What destructors that failed on this chunk report, replayed by the join
 		std::vector<std::pair<std::error_code, std::string>> deferred_reports;
 		std::vector<std::pair<const void*, std::weak_ptr<class_instance>>> pending_script_layers;   // recorded by the join
+		std::vector<deferred_release> deferred_releases;   // released by the join
 		std::vector<script_value> cursors;   // [0] = the range's chunk cursor, then the zip's arrays
 		std::vector<script_value> call_args; // prepared at the barrier; no worker-entry allocation
 		// Live input vector ("safe AND free"): workers read the
@@ -2400,6 +2401,7 @@ namespace {
 		slice_worker_limits(eng, slot);
 		slot.deferred_reports.clear();
 		slot.pending_script_layers.clear();
+		slot.deferred_releases.clear();
 		if (slot.vm) {
 			slot.vm->configure_parallel_worker(slot.root_env, slot.env_epoch_sink.get(), &slot.limits, budget);
 		} else {
@@ -3804,6 +3806,19 @@ namespace {
 } // namespace
 
 // ============================== THE REGION (one fork for both forms) ==============================
+void release_deferred_in_order(const std::vector<std::vector<deferred_release>*>& lists) {
+	std::vector<deferred_release> ordered;
+	for (auto* list : lists) {
+		for (auto& released : *list) { ordered.push_back(std::move(released)); }
+		list->clear();
+	}
+	std::stable_sort(ordered.begin(), ordered.end(), [](const deferred_release& a, const deferred_release& b) { return a.element < b.element; });
+	for (auto& released : ordered) {
+		engine* eng = released.value.get_engine();
+		released.value = script_value(std::monostate{}, eng);
+	}
+}
+
 void recover_pending_registrations(parallel_engine_state& state) {
 	if (!state.pending_registration_retry || state.active_region) { return; }
 	// Recover every retained pool before eviction, slot replacement or a class
@@ -4530,7 +4545,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	auto& table = region_guard.table;
 	state.faults.checkpoint("region.table_entry", 0);
 	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits, nullptr, contexts[0]->backend.get(), &contexts[0]->method_env,
-	                          &contexts[0]->deferred_reports, &contexts[0]->pending_script_layers });
+	                          &contexts[0]->deferred_reports, &contexts[0]->pending_script_layers, &contexts[0]->deferred_releases, &contexts[0]->cursors });
 	if (worker_count > 1) {
 		const size_t pool_workers_needed = worker_count - 1;
 		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
@@ -4552,7 +4567,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			state.faults.checkpoint("region.table_entry", k);
 			table.entries.push_back({ detail::thread_pool_access::worker_thread_id(*state.pool, k - 1), &contexts[k]->limits, &contexts[k]->pending_instances,
 			                          contexts[k]->backend.get(), &contexts[k]->method_env, &contexts[k]->deferred_reports,
-			                          &contexts[k]->pending_script_layers });
+			                          &contexts[k]->pending_script_layers, &contexts[k]->deferred_releases, &contexts[k]->cursors });
 		}
 	}
 	region_guard.prepared = true;
@@ -4633,6 +4648,11 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	region_guard.restore();   // registration below can allocate or throw
 	for (auto* ctx : contexts) {   // worker-created instances join the class registries now, unlocked
 		drain_pending_instances(state, *ctx);
+	}
+	{
+		std::vector<std::vector<deferred_release>*> deferred;
+		for (auto* ctx : contexts) { deferred.push_back(&ctx->deferred_releases); }
+		release_deferred_in_order(deferred);
 	}
 	for (auto* ctx : contexts) {
 		for (const auto& [object, owner] : ctx->pending_script_layers) {

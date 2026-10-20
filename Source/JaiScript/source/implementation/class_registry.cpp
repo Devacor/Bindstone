@@ -284,6 +284,19 @@ void class_definition::destroy_levels(class_instance* instance, const class_defi
     if (m && m->spare_actions.size() < 8) { m->spare_actions.push_back(std::move(actions)); }
 }
 
+void class_instance::defer_serial_native() noexcept {
+    if (!class_def_ || !class_def_->serial_only_chain()) { return; }
+    const detail::parallel_region_table* region = engine_->parallel_state().active_region;
+    const detail::parallel_region_table::entry* chunk = region ? region->find_entry(std::this_thread::get_id()) : nullptr;
+    if (!chunk || !chunk->deferred_releases) { return; }
+    const size_t element = chunk->cursors && !chunk->cursors->empty() ? chunk->cursors->front().element_cursor_index() : SIZE_MAX;
+    try {
+        chunk->deferred_releases->push_back({ element, std::move(*extras_->native) });
+        extras_->native.reset();
+    } catch (...) {
+    }
+}
+
 void class_instance::release_fields() noexcept {
     engine* eng = class_def_->get_engine();
     detail::release_machine* m = eng ? eng->release_machine_here() : nullptr;

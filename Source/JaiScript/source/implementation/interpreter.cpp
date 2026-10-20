@@ -4621,12 +4621,18 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
         auto& holder = const_cast<script_value&>(objectValue).unchecked_get_object_storage();
         if (holder && holder->is_class_instance_wrapper && holder->data) {
             auto* inst = static_cast<class_instance*>(holder->data.get());
-            if (memberExpr->member_id != UINT64_MAX && inst->find_field_value(memberExpr->member_id)) {
+            if (memberExpr->member_id != UINT64_MAX && detail::parallel_script_field(*inst, memberExpr->member_id)) {
                 auto enforced = inst->field_store(memberExpr->member_id, value, [&] { return clone_for_assignment(value); });
                 if (!enforced) {
                     return enforced.error_value();
                 }
                 inst->set_field_unchecked(memberExpr->member_id, std::move(enforced).value());
+                return {};
+            }
+            if (const detail::parallel_method_pin* setter = memberExpr->member_id != UINT64_MAX && parallel_method_pins_
+                    ? parallel_method_pins_->find(inst->get_class_definition(), string_symbolizer_->get_setter_id_with_view(memberExpr->member_id).first) : nullptr) {
+                auto stored = detail::call_parallel_host_pin(*setter, objectValue, memberExpr->member_id, { value }, engine_, true);
+                if (!stored) { return stored.error_value(); }
                 return {};
             }
             return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
@@ -7951,6 +7957,29 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                             "public methods on the element's own class touching only element, local, or "
                             "captured-read state)", member->member_id);
                     }
+                    if (worker_pin && !worker_pin->resolved) [[unlikely]] {
+                        std::vector<script_value> arguments;
+                        arguments.reserve(expr->arguments.size());
+                        if constexpr (Replaying) { if (rs) arguments = rs->partial; }
+                        for (size_t ai = arguments.size(); ai < expr->arguments.size(); ++ai) {
+                            const auto& argExpr = expr->arguments[ai];
+                            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(argExpr.get(), rs, ai), expr, rp_call_direct, ai, arguments);
+                            arguments.emplace_back(std::move(pop_value()));
+                            if (is_unwinding_) {
+                                push_value(make_value());
+                                return {};
+                            }
+                            if (auto taken = capture_call_argument(expr->arg_captures, ai, arguments.back(), [&] {
+                                    return detail::method_binding(cls_raw, member_id, ai, expr->arguments.size());
+                                }, [&](script_value& out) { return mint_argument_place(argExpr.get(), out); }); !taken) {
+                                return taken.error_value();
+                            }
+                        }
+                        auto called = detail::call_parallel_host_pin(*worker_pin, objectValue, member_id, std::move(arguments), engine_);
+                        if (!called) { return called.error_value(); }
+                        push_value(std::move(called.value()));
+                        return {};
+                    }
                     if (worker_pin) [[unlikely]] {
                         const detail::parallel_method_pin* pin = worker_pin;
                         dispatch = pin->method_value.as_function().target<script_method_dispatch>();
@@ -8365,6 +8394,12 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
             // Simple case: just an identifier
             name = ident_expr->name;
             name_id = ident_expr->symbol_id;
+            if (parallel_worker_ && parallel_method_pins_ && name_id != UINT64_MAX) [[unlikely]] {
+                if (const script_value* pinned = parallel_method_pins_->find_static(name_id, expr->member_id)) {
+                    push_value(*pinned);
+                    return {};
+                }
+            }
 
             // Cache symbol ID if not already done
             if (name_id == UINT64_MAX) {
@@ -8875,14 +8910,21 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         auto& holder = objectValue.unchecked_get_object_storage();
         if (holder && holder->is_class_instance_wrapper && holder->data) {
             auto* inst = static_cast<class_instance*>(holder->data.get());
-            if (script_value* field = inst->find_field_value(expr->member_id)) {
+            const class_definition* cls = inst->get_class_definition();
+            if (script_value* field = detail::parallel_script_field(*inst, expr->member_id)) {
                 push_value(field->is_reference() ? field->deref() : *field);
                 return {};
             }
             // a barrier-admitted method on a receiver the call's fast entry does not take (a member chain): its pinned dispatcher
-            if (const detail::parallel_method_pin* pin = as_callee && parallel_method_pins_
-                    ? parallel_method_pins_->find(inst->get_class_definition(), expr->member_id) : nullptr) {
-                push_value(create_bound_method(objectValue, pin->method_value));
+            if (const detail::parallel_method_pin* pin = as_callee && parallel_method_pins_ ? parallel_method_pins_->find(cls, expr->member_id) : nullptr) {
+                push_value(pin->resolved ? create_bound_method(objectValue, pin->method_value) : detail::parallel_bound_pin(*pin, objectValue, expr->member_id, engine_));
+                return {};
+            }
+            if (const detail::parallel_method_pin* getter = !as_callee && parallel_method_pins_
+                    ? parallel_method_pins_->find(cls, string_symbolizer_->get_getter_id_with_view(expr->member_id).first) : nullptr) {
+                auto read = detail::call_parallel_host_pin(*getter, objectValue, expr->member_id, {}, engine_, true);
+                if (!read) { return read.error_value(); }
+                push_value(std::move(read.value()));
                 return {};
             }
             return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),

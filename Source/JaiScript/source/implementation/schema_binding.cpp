@@ -341,6 +341,15 @@ std::shared_ptr<class_instance> make_native_instance(class_definition& def, std:
 	return instance;
 }
 
+void note_region_made(const script_value& value, engine* eng) {
+	const script_value& self = value.deref();
+	if (self.raw_storage_index() != script_value::TYPEID_OBJECT && self.raw_storage_index() != script_value::TYPEID_SHARED_PTR) { return; }
+	const auto holder = self.get_object_holder();
+	if (holder && holder->is_class_instance_wrapper && holder->data) {
+		static_cast<class_instance*>(holder->data.get())->region_tag(eng->parallel_region_serial());
+	}
+}
+
 script_value bound_class_conversion::wrap(std::shared_ptr<void> object, engine* eng) const {
 	if (!object) {
 		return script_value(std::monostate{}, eng);
@@ -379,6 +388,7 @@ void ensure_signal_view_type_registered(engine& a_engine) {
 	builder.method("connected", [](signal_script_ops& self, const std::string& id) {
 		return self.connected_fn != nullptr && self.connected_fn(self.source, id);
 	});
+	builder.serial_method("connect").serial_method("disconnect");   // a receiver list other objects' code reads and fires
 	builder.build();
 }
 

@@ -1055,11 +1055,22 @@ namespace {
 			return method_class && method_class->find_field_declaring_class(id) != nullptr;
 		}
 
-		void collect_element_method(const member_expr* m) {
-			for (const auto& rec : adm.element_method_calls) {
-				if (rec.name_id == m->member_id) { return; }
+		void collect_element_method(const member_expr* m, const call_expr* call) {
+			uint64_t enclosing = 0;
+			const ast_node* enclosing_site = nullptr;
+			for (size_t i = 0; i < call->arguments.size() && i < 64; ++i) {
+				if (identifier_expr* root = enclosing_root(call->arguments[i])) {
+					enclosing |= uint64_t(1) << i;
+					if (!enclosing_site) { enclosing_site = root; }
+				}
 			}
-			adm.element_method_calls.push_back({ m->member_id, m->member, m });
+			for (auto& rec : adm.element_method_calls) {
+				if (rec.name_id != m->member_id) { continue; }
+				if (!rec.enclosing_site) { rec.enclosing_site = enclosing_site; }
+				rec.enclosing_arguments |= enclosing;
+				return;
+			}
+			adm.element_method_calls.push_back({ m->member_id, m->member, m, enclosing, enclosing_site });
 		}
 
 		// In-place mode member access (read or store position): admitted iff the chain
@@ -1347,13 +1358,80 @@ namespace {
 			for (size_t i = 0; i < adm.element_method_calls.size(); ++i) {
 				const auto callrec = adm.element_method_calls[i];   // copy: push_back may reallocate
 				for (const class_definition* cls : classes) {
-					if (!cls->defines_method(callrec.name_id)) { continue; }
+					if (!cls->defines_method(callrec.name_id) || !cls->is_script_class()) { continue; }
 					if (!admit_class_method(cls, callrec.name_id, callrec.name, callrec.site)) {
 						return false;
 					}
 				}
+				if (!admit_host_methods(callrec.name_id, callrec)) { return false; }
 			}
 			return true;
+		}
+
+		// ===== Host methods =====
+		// A bound C++ method runs on any thread unless it is marked serial_method(); a non-const one only over an object the
+		// calling chunk made (call_parallel_host_pin). The receiver's class is a runtime fact, so every class whose chain binds
+		// the name in C++ gets a pin; a serial method's pin raises its refusal when it is called.
+		struct host_pin { const class_definition* cls; uint64_t name_id; const class_definition* owner; };
+		std::vector<host_pin> host_pins;
+		std::unordered_set<uint64_t> pinned_host_names;
+
+		// The C++ level of cls's chain that binds name_id, unless a script level answers it first
+		static const class_definition* host_method_owner(const class_definition* cls, uint64_t name_id) {
+			if (!cls) { return nullptr; }
+			if (cls->defines_method(name_id)) { return cls->is_script_class() ? nullptr : cls; }
+			for (const auto& parent : cls->get_parent_classes()) {
+				if (const class_definition* found = host_method_owner(parent.get(), name_id)) { return found; }
+			}
+			return nullptr;
+		}
+		// Every registered class with a C++ level: a host class, or a script class over one
+		std::vector<const class_definition*> host_chain_classes;
+		bool host_chain_classes_listed = false;
+		template <typename Each>
+		void for_each_registered_class(Each&& each) {
+			if (!host_chain_classes_listed) {
+				host_chain_classes_listed = true;
+				for (const auto& entry : eng.get_class_registry().cpp_classes_) { if (entry.second) { host_chain_classes.push_back(entry.second.get()); } }
+				for (const auto& entry : eng.get_class_registry().script_classes_) {
+					if (entry.second && entry.second->find_cpp_base_class()) { host_chain_classes.push_back(entry.second.get()); }
+				}
+			}
+			for (const class_definition* cls : host_chain_classes) { each(cls); }
+		}
+		const std::unordered_set<uint64_t>* host_names = nullptr;   // every name a C++ level binds (parallel_engine_state)
+		bool admit_host_methods(uint64_t name_id, const parallel_admission::element_method_call& callrec) {
+			if (host_names && !host_names->count(name_id)) { return true; }
+			if (!pinned_host_names.insert(name_id).second) { return true; }
+			bool ok = true;
+			for_each_registered_class([&](const class_definition* cls) {
+				const class_definition* owner = ok ? host_method_owner(cls, name_id) : nullptr;
+				if (!owner) { return; }
+				if (callrec.enclosing_arguments) {
+					const script_value method = owner->get_method(name_id, false);
+					const auto* writes = method.is_function() ? method.as_function().target<host_writeback_function>() : nullptr;
+					if (writes && (writes->mask & callrec.enclosing_arguments)) {
+						const auto* root = static_cast<const identifier_expr*>(callrec.enclosing_site);
+						ok = fail(callrec.enclosing_site, "argument passes enclosing state '" + std::string(root->name) +
+						                                  "' by reference (captured reads are read-only)");
+						return;
+					}
+				}
+				host_pins.push_back({ cls, name_id, owner });
+			});
+			return ok;
+		}
+		// The accessors behind the members the bodies name, for every class whose chain binds them in C++
+		void admit_host_accessors(const std::vector<uint64_t>& member_ids) {
+			for (uint64_t member_id : member_ids) {
+				for (uint64_t accessor : { sym.get_getter_id_with_view(member_id).first, sym.get_setter_id_with_view(member_id).first }) {
+					if (host_names && !host_names->count(accessor)) { continue; }
+					if (!pinned_host_names.insert(accessor).second) { continue; }
+					for_each_registered_class([&](const class_definition* cls) {
+						if (const class_definition* owner = host_method_owner(cls, accessor)) { host_pins.push_back({ cls, accessor, owner }); }
+					});
+				}
+			}
 		}
 
 		// ===== Barrier-time construction admission =====
@@ -1961,6 +2039,34 @@ namespace {
 					    static_cast<identifier_expr*>(m->object.get())->name == "time") {
 						return fail(m, "time:: calls are not allowed in a parallel body (engine-owned clock)");
 					}
+					if (!proof_mode && m->object && m->object->get_type() == node_type::identifier_expr) {
+						// A host class's static method runs on any thread unless it is marked serial
+						auto* class_name = static_cast<identifier_expr*>(m->object.get());
+						const auto& host_classes = eng.get_class_registry().cpp_classes_;
+						const auto host = host_classes.find(std::string(class_name->name));
+						if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }
+						if (host != host_classes.end() && host->second->static_method_in_chain(m->member_id).is_function()) {
+							if (host->second->serial_static_method(m->member_id)) {
+								return fail(m, "C++ static method '" + std::string(class_name->name) + "::" + std::string(m->member) +
+								               "' is marked serial_static_method() and cannot be called in a parallel body");
+							}
+							const script_value method = host->second->static_method_in_chain(m->member_id);
+							const auto* writes = method.as_function().target<host_writeback_function>();
+							for (size_t i = 0; i < call->arguments.size() && i < 64; ++i) {
+								if (!writes || !((writes->mask >> i) & 1)) { continue; }
+								if (identifier_expr* root = enclosing_root(call->arguments[i])) {
+									return fail(root, "argument passes enclosing state '" + std::string(root->name) +
+									                  "' by reference (captured reads are read-only)");
+								}
+							}
+							if (class_name->symbol_id == UINT64_MAX) { class_name->symbol_id = sym.intern(class_name->name); }
+							adm.static_calls.push_back({ class_name->symbol_id, m->member_id });
+							for (const auto& a : call->arguments) {
+								if (!walk_expr(a)) { return false; }
+							}
+							return true;
+						}
+					}
 					return fail(m, "static member calls are not allowed in a parallel body");
 				}
 				if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }   // warm
@@ -1993,7 +2099,7 @@ namespace {
 					// Element / worker-local receiver: record the name for the barrier's
 					// class-method admission (the receiver's class is a runtime fact; names
 					// no element class defines are builtins and simply never match)
-					collect_element_method(m);
+					collect_element_method(m, call);
 					if (chain_root_is_element(m->object) && !parallel_readonly_method(m->member)) { adm.element_mutated = true; }
 					if (proof_mode && !chain_root_is_element(m->object) && (!parallel_readonly_method(m->member) || builtin_runs_script(m->member, proof_chain_type(m->object.get())))) {
 						if (global_rooted(m->object.get())) { return fail(m, "method '" + std::string(m->member) + "' may mutate program state"); }
@@ -2080,15 +2186,26 @@ namespace {
 						}
 					}
 					callee_ok = true;
-				} else if (parallel_host_whitelisted(callee->name)) {
-					// Host binding (typed dispatcher / variadic): whitelist or reject
+				} else if (proof_mode ? parallel_host_whitelisted(callee->name) : eng.host_function_registered(callee_name) && !eng.host_function_serial(callee_name)) {
+					// A host function runs on any thread unless it is marked serial; a non-const T& parameter writes
+					// back into its argument, which enclosing state cannot take
+					const uint64_t writeback = eng.host_function_writeback(callee_name);
+					for (size_t i = 0; i < call->arguments.size() && i < 64; ++i) {
+						if (!((writeback >> i) & 1)) { continue; }
+						if (identifier_expr* root = enclosing_root(call->arguments[i])) {
+							return fail(root, "argument passes enclosing state '" + std::string(root->name) +
+							                  "' by reference (captured reads are read-only)");
+						}
+					}
 					if (collected_host_ids.insert(callee->symbol_id).second) {
 						adm.host_functions.emplace_back(callee->symbol_id, callee_name);
 					}
 					callee_ok = true;
 					converts_like_host = true;
-				} else {
+				} else if (proof_mode || !eng.host_function_registered(callee_name)) {
 					return fail(callee, "host function '" + callee_name + "' is not callable in a parallel body");
+				} else {
+					return fail(callee, "host function '" + callee_name + "' is marked serial_function() and cannot be called in a parallel body");
 				}
 			}
 			for (const auto& a : call->arguments) {
@@ -3807,6 +3924,50 @@ namespace {
 } // namespace
 
 // ============================== THE REGION (one fork for both forms) ==============================
+bool parallel_pure_function(std::string_view name) { return parallel_host_whitelisted(name); }
+
+script_value parallel_bound_pin(const parallel_method_pin& pin, const script_value& receiver, uint64_t name_id, engine* eng) {
+	return script_value::make_function([pin_ptr = &pin, receiver, name_id, eng](const std::vector<script_value>& args) {
+		return call_parallel_host_pin(*pin_ptr, receiver, name_id, args, eng);
+	}, eng);
+}
+
+script_value* parallel_script_field(class_instance& inst, uint64_t member_id) {
+	if (const class_definition* cls = inst.get_class_definition()) {
+		const class_definition* owner = cls->find_field_declaring_class(member_id);
+		if (owner && !owner->is_script_class()) { return nullptr; }
+	}
+	return inst.find_field_value(member_id);
+}
+
+checked_result<script_value> call_parallel_host_pin(const parallel_method_pin& pin, const script_value& receiver, uint64_t name_id,
+                                                    std::vector<script_value> args, engine* eng, bool property) {
+	const script_value& self = receiver.deref();
+	const class_definition* cls = nullptr;
+	const class_instance* inst = nullptr;
+	if (self.raw_storage_index() == script_value::TYPEID_OBJECT || self.raw_storage_index() == script_value::TYPEID_SHARED_PTR) {
+		const auto holder = self.get_object_holder();
+		if (holder && holder->is_class_instance_wrapper && holder->data) {
+			inst = static_cast<const class_instance*>(holder->data.get());
+			cls = inst->get_class_definition();
+		}
+	}
+	const uint64_t type_id = cls ? cls->get_type_id() : 0;
+	if (pin.serial) {
+		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+			"C++ method '{0}' of '{1}' is marked serial_method() and cannot be called in a parallel body", name_id, type_id);
+	}
+	if (pin.mutating && !(inst && inst->region_tag() != 0 && inst->region_tag() == eng->parallel_region_serial())) {
+		if (property) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+				"C++ property '{0}' of '{1}' is stored on an object this parallel body did not make (only an object it made takes stores)", name_id, type_id);
+		}
+		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+			"C++ method '{0}' of '{1}' changes an object this parallel body did not make (only its const methods may run on it)", name_id, type_id);
+	}
+	args.insert(args.begin(), receiver);
+	return pin.method_value.as_function()(args);
+}
 void release_deferred_in_order(const std::vector<std::vector<deferred_release>*>& lists) {
 	std::vector<deferred_release> ordered;
 	for (auto* list : lists) {
@@ -4143,6 +4304,26 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	admission_builder method_adm(eng);
 	method_adm.inplace_root = true;
 	method_adm.prefix = plan.prefix;
+	{
+		auto& registry = eng.get_class_registry();
+		const uint64_t key = eng.class_definition_epoch() * 1000003u + registry.cpp_classes_.size() * 131u + registry.script_classes_.size();
+		if (state.host_method_names_key != key) {
+			state.host_method_names.clear();
+			state.host_method_names_key = key;
+			method_adm.for_each_registered_class([&](const class_definition* cls) {
+				std::vector<const class_definition*> chain{ cls };
+				while (!chain.empty()) {
+					const class_definition* level = chain.back();
+					chain.pop_back();
+					if (!level->is_script_class()) {
+						for (const auto& [id, value] : level->method_values()) { state.host_method_names.insert(id); }
+					}
+					for (const auto& parent : level->get_parent_classes()) { if (parent) { chain.push_back(parent.get()); } }
+				}
+			});
+		}
+		method_adm.host_names = &state.host_method_names;
+	}
 	state.faults.checkpoint("region.method_admission");
 	const bool element_methods = plan.inplace && !element_classes.empty();
 	// a worker's copy of an index-written array holds objects that can die on it: the declared element type, or each held value's
@@ -4161,7 +4342,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			if (t && std::find(written_types.begin(), written_types.end(), t) == written_types.end()) { written_types.push_back(t); }
 		}
 	}
-	if (element_methods || !adm->constructions.empty() || !element_classes.empty() || !written_types.empty()) {
+	if (element_methods || !adm->constructions.empty() || !element_classes.empty() || !written_types.empty() ||
+	    !adm->element_method_calls.empty() || !adm->element_reached_members.empty()) {
 		method_adm.adm.element_method_calls = adm->element_method_calls;
 		method_adm.adm.constructions = adm->constructions;
 		// the methods' captures are their own set: the same name is the body's capture in the
@@ -4170,6 +4352,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			state.error_text = method_adm.adm.message;
 			return checked_result<void>(method_adm.adm.code, std::string_view(state.error_text));
 		}
+		method_adm.admit_host_accessors(adm->element_reached_members);
+		method_adm.admit_host_accessors(method_adm.adm.element_reached_members);
 		for (const auto& entry : method_adm.adm.captures) {
 			auto classified = classify_and_add(entry, /*method_scope*/ true);
 			if (!classified) { return classified; }
@@ -4312,6 +4496,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 				slot->typed_input = nullptr;
 				slot->backend->set_parallel_method_pins(nullptr);
 				slot->method_pins.entries.clear();
+				slot->method_pins.statics.clear();
 			}
 		}
 	} region_guard{ eng, state, pool->worker_slots, worker_count };
@@ -4462,6 +4647,30 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			slot->method_pins.entries.push_back({ am.cls, am.name_id, std::move(pin) });
 			if (slot->vm) { slot->vm->precompile_parallel_method(*am.decl); }
 		}
+		// Host methods and accessors: worker copies of the bound method values (a copy shares only the binding's own state)
+		for (const auto& host : method_adm.host_pins) {
+			state.faults.checkpoint("region.host_method_pin", k);
+			const script_value shared_method = host.cls->get_method(host.name_id, false);
+			if (!shared_method.is_function()) { continue; }
+			detail::parallel_method_pin pin;
+			pin.method_value = script_value::make_function(script_function(shared_method.as_function()), &eng);
+			const std::string_view name = eng.get_symbolizer()->get_string(host.name_id);
+			pin.mutating = host.owner->mutating_method(host.name_id) || name.starts_with("_set_");
+			pin.serial = host.owner->serial_method(host.name_id);
+			slot->method_pins.entries.push_back({ host.cls, host.name_id, std::move(pin) });
+		}
+		slot->method_pins.statics.clear();
+		for (const parallel_admission* source : std::initializer_list<const parallel_admission*>{ adm, &method_adm.adm }) {
+			for (const auto& call : source->static_calls) {
+				const auto& host_classes = eng.get_class_registry().cpp_classes_;
+				const auto host = host_classes.find(std::string(eng.get_symbolizer()->get_string(call.class_name_id)));
+				if (host == host_classes.end()) { continue; }
+				const script_value shared_method = host->second->static_method_in_chain(call.name_id);
+				if (!shared_method.is_function() || slot->method_pins.find_static(call.class_name_id, call.name_id)) { continue; }
+				slot->method_pins.statics.push_back({ call.class_name_id, call.name_id,
+				                                      script_value::make_function(script_function(shared_method.as_function()), &eng) });
+			}
+		}
 		// Constructions: the class's constructor value resolves to a worker-private one whose code reads the worker's method
 		// sandbox, its constructor and destructor bodies compiled here
 		for (const auto& made : method_adm.constructed_classes) {
@@ -4507,7 +4716,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			for (const auto& expr : method_adm.admitted_expressions) { slot->vm->precompile_parallel_expression(expr); }
 		}
 		slot->method_pins.definition_env = slot->method_env;
-		const bool pinned = !slot->method_pins.entries.empty() || !method_adm.constructed_classes.empty() || !method_adm.destructor_levels.empty();
+		const bool pinned = !slot->method_pins.entries.empty() || !slot->method_pins.statics.empty() || !method_adm.constructed_classes.empty() ||
+		                    !method_adm.destructor_levels.empty();
 		slot->backend->set_parallel_method_pins(pinned ? &slot->method_pins : nullptr);
 		contexts.push_back(slot.get());
 #ifdef JAISCRIPT_VM_PROFILE
@@ -4528,6 +4738,11 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		for (const auto& c : method_adm.constructed_classes) { made.push_back(c.cls.get()); }
 		for (const class_definition* cd : method_adm.destructor_levels) { made.push_back(const_cast<class_definition*>(cd)); }
 		for (const class_definition* cd : element_classes) { made.push_back(const_cast<class_definition*>(cd)); }
+		// a C++ call can hand a chunk an object of any bound class (a result, a method's receiver)
+		if (!adm->host_functions.empty() || !method_adm.adm.host_functions.empty() || !method_adm.host_pins.empty() ||
+		    !adm->static_calls.empty() || !method_adm.adm.static_calls.empty()) {
+			method_adm.for_each_registered_class([&](const class_definition* cd) { made.push_back(const_cast<class_definition*>(cd)); });
+		}
 		for (class_definition* cd : made) {
 			prime_construction_memos(*cd);
 			seed.push_back(cd->get_type_info().get());
@@ -4582,6 +4797,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	region_guard.prepared = true;
 	// The interner freezes in every mode: it is not thread-safe, and unsafe mode vouches for
 	// the script's sharing, not for the runtime's tables (a miss asserts in Debug, the tripwire)
+	if (++state.region_serial == 0) { state.region_serial = 1; }
 	region_guard.activate(true);
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t1 = __rdtsc();

@@ -46,6 +46,7 @@ namespace jai {
 			builder.method("connected", [](signal<Sig, Sync>& a_self, const std::string& a_id) {
 				return a_self.connected(a_id);
 			});
+			builder.serial_method("connect").serial_method("disconnect");   // a receiver list other objects' code reads and fires
 			builder.build();
 		}
 		const std::string emitter_name = a_name + "Emitter";
@@ -65,6 +66,7 @@ namespace jai {
 				return a_self.connected(a_id);
 			});
 			signal_emit_binder<Sig, Sync>::add_emit(builder);
+			builder.serial_method("connect").serial_method("disconnect").serial_method("emit");   // emit runs other objects' receivers
 			builder.build();
 		}
 	}

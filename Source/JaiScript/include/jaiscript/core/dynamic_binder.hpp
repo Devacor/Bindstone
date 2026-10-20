@@ -1800,7 +1800,7 @@ public:
         if constexpr (std::is_copy_constructible_v<T>) {
             class_def_->set_copy_function(&copy_native_object);
         }
-        if constexpr (std::is_copy_assignable_v<T>) {
+        if constexpr (copy_assignment<T>::value) {
             class_def_->set_assign_function(&assign_native_object);
         }
         

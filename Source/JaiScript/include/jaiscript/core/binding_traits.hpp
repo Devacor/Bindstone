@@ -3,6 +3,7 @@
 #include <type_traits>
 #include <vector>
 #include <map>
+#include <memory>
 #include <tuple>
 
 namespace jai {
@@ -116,4 +117,41 @@ inline void check_binding_validity(const std::string& name) {
 #endif
 
 } // namespace binding_traits
+
+namespace detail {
+    template<typename T> struct held_by_unique_ptr : std::false_type {};
+    template<typename E, typename D> struct held_by_unique_ptr<std::unique_ptr<E, D>> : std::true_type {};
+
+    // A copy assignment the binder can instantiate without risk: a trivial one, a string's, or a standard container's whose
+    // elements have one. Any other class's is unknowable from outside it (an implicitly declared assignment that copies a
+    // container of a move-only type, anywhere among its members, reports assignable and fails to compile once used).
+    template<typename T>
+    consteval bool copy_assignment_proven() {
+        if constexpr (held_by_unique_ptr<T>::value) {
+            return false;
+        } else if constexpr (std::is_trivially_copy_assignable_v<T>) {
+            return true;
+        } else if constexpr (requires { typename T::traits_type; typename T::value_type; typename T::allocator_type; }) {
+            return std::is_trivially_copy_assignable_v<typename T::value_type>;
+        } else if constexpr (requires { typename T::key_type; typename T::mapped_type; typename T::allocator_type; }) {
+            return copy_assignment_proven<typename T::key_type>() && copy_assignment_proven<typename T::mapped_type>();
+        } else if constexpr (requires { typename T::key_type; typename T::allocator_type; }) {
+            return copy_assignment_proven<typename T::key_type>();
+        } else if constexpr (requires { typename T::value_type; typename T::allocator_type; }) {
+            return copy_assignment_proven<typename T::value_type>();
+        } else if constexpr (requires { typename T::value_type; std::tuple_size<T>::value; }) {
+            return copy_assignment_proven<typename T::value_type>();
+        } else {
+            return false;
+        }
+    }
+}
+
+// Whether an assignment through a reference to a bound object of class T copy-assigns it; otherwise it raises Cannot assign to
+// a reference to 'T': it has no copy assignment script can use. Trivially assignable classes, strings and standard containers
+// of such answer on their own. Any other copy-assignable class says so, because C++ cannot tell from outside a class whether its
+// assignment compiles: template<> struct jai::copy_assignment<Monster> : std::true_type {};
+template<typename T>
+struct copy_assignment : std::bool_constant<detail::copy_assignment_proven<T>()> {};
+
 } // namespace jai

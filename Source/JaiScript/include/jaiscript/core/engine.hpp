@@ -1158,10 +1158,9 @@ namespace jai {
         // class-definition instance registry they register into is engine-shared, so its
         // mutations serialize on this lock while a region runs (unlocked otherwise).
         std::unique_lock<std::mutex> parallel_instance_registry_lock();
-        // The calling pool worker's deferred-registration list while a region runs (null on
-        // the main thread and outside regions): class_definition::register_instance parks
-        // worker-created instances there, the join registers the survivors.
-        std::vector<std::weak_ptr<class_instance>>* parallel_pending_registrations();
+        // While a region runs, a chunk's thread parks an instance it constructed or copied with the element it is running (false
+        // outside a region's chunk): class_definition::register_instance parks there, the join registers the survivors.
+        bool park_parallel_registration(std::weak_ptr<class_instance>& instance);
         // Cold class-reload boundary: recover surviving worker copies after a failed join.
         void recover_parallel_registrations();
 

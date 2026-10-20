@@ -1412,13 +1412,8 @@ inline JAI_NOINLINE void class_definition::register_live_instance_in_region(clas
 
 inline void class_definition::register_instance(std::weak_ptr<class_instance> instance, class_instance* live) {
     if (engine_ && engine_->parallel_region_active()) {
-        // A pool worker parks the registration (no lock; the join registers survivors);
-        // main's own chunk registers under the lock a worker's rare registered-instance
-        // death also takes
-        if (auto* pending = engine_->parallel_pending_registrations()) {
-            pending->push_back(std::move(instance));
-            return;
-        }
+        // A chunk parks the registration (no lock; the join registers survivors in element order)
+        if (engine_->park_parallel_registration(instance)) { return; }
     }
     auto lock = registry_lock();
     register_instance_after_region(std::move(instance), nullptr, live);

@@ -1955,9 +1955,12 @@ std::unique_lock<std::mutex> engine::parallel_instance_registry_lock() {
     return std::unique_lock<std::mutex>(parallel_state().instance_registry_mutex);
 }
 
-std::vector<std::weak_ptr<class_instance>>* engine::parallel_pending_registrations() {
-    if (!impl->parallel_ || !impl->parallel_->active_region) { return nullptr; }
-    return impl->parallel_->active_region->find_pending(std::this_thread::get_id());
+bool engine::park_parallel_registration(std::weak_ptr<class_instance>& instance) {
+    if (!impl->parallel_ || !impl->parallel_->active_region) { return false; }
+    const auto* chunk = impl->parallel_->active_region->find_entry(std::this_thread::get_id());
+    if (!chunk || !chunk->pending_registrations) { return false; }
+    chunk->pending_registrations->push_back(detail::pending_registration{ chunk->element(), std::move(instance) });
+    return true;
 }
 
 uint32_t engine::parallel_region_serial() const {

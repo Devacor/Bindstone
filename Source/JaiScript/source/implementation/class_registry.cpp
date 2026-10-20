@@ -199,7 +199,7 @@ bool run_destructor_body_in_region(engine& eng, class_instance* instance, const 
     const std::vector<script_value> arguments{ script_value::make_class_object(*level, self, &eng) };
     try {
         auto ran = chunk->backend->execute_method_from(dispatch, ast, arguments[0], arguments, 1);
-        if (!ran && chunk->deferred_reports) { chunk->deferred_reports->emplace_back(ran.error(), format_error(ran, *eng.get_symbolizer())); }
+        if (!ran && chunk->deferred_reports) { chunk->deferred_reports->push_back(detail::deferred_report{ chunk->element(), ran.error(), format_error(ran, *eng.get_symbolizer()) }); }
     } catch (...) {
     }
     return true;

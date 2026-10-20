@@ -13,6 +13,7 @@
 #include <jaiscript/detail/member_scope.hpp>
 #include <jaiscript/detail/type_proofs.hpp>
 #include <jaiscript/detail/return_conv.hpp>
+#include <jaiscript/detail/parallel_schedule.hpp>
 #include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <jaiscript/detail/arity_diagnostic.hpp>
 #include <jaiscript/detail/slot_site.hpp>
@@ -416,11 +417,13 @@ namespace jai::vm {
         // parallel_for chunk loop: the worker's element cursor (a reference value owned by the
         // worker slot) that op_parallel_advance re-points and op_parallel_element pushes
         std::vector<script_value>* parallel_cursors_ = nullptr;   // [0] = the range, then the zip's arrays
-        void set_parallel_cursors(std::vector<script_value>* cursors, size_t block = 0, size_t stride_blocks = 1) noexcept {
+        void set_parallel_cursors(std::vector<script_value>* cursors, size_t block = 0, size_t stride_blocks = 1, detail::parallel_schedule_cursor* schedule = nullptr) noexcept {
             parallel_cursors_ = cursors;
             parallel_block_ = block;
             parallel_stride_blocks_ = stride_blocks;
+            parallel_schedule_ = schedule;
         }
+        detail::parallel_schedule_cursor* parallel_schedule_ = nullptr;   // the region's shared blocks (null: the static partition)
         size_t parallel_block_ = 0;           // the chunk's block-cyclic step (0 = contiguous)
         size_t parallel_stride_blocks_ = 1;
         // Barrier-provisioned method pins for the active region (worker instances only)

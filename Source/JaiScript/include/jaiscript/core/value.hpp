@@ -2667,6 +2667,13 @@ namespace detail {
             holder->container_index = next;
             return true;
         }
+        bool element_cursor_set(size_t index) noexcept {
+            if (raw_storage_index() != TYPEID_REFERENCE) { return false; }
+            auto& holder = *storage_.get_if<TYPEID_REFERENCE>();
+            if (!holder || !holder->container || holder->has_map_key) { return false; }
+            holder->container_index = index;
+            return true;
+        }
         size_t element_cursor_index() const noexcept {
             if (raw_storage_index() != TYPEID_REFERENCE) { return SIZE_MAX; }
             auto& holder = *storage_.get_if<TYPEID_REFERENCE>();

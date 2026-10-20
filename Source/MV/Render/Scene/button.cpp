@@ -10,6 +10,7 @@
 
 static jai::registrar<MV::Scene::Button, MV::Services> _hookButton("Button",
 	[](jai::dynamic_binder<MV::Scene::Button>& builder, const MV::Services&) {
+	builder.serial_method("activeNode").serial_method("idleNode").serial_method("disabledNode").serial_method("text");
 	builder.base_class<MV::Scene::Clickable>();
 
 	builder.method("activeNode", static_cast<std::shared_ptr<MV::Scene::Node>(MV::Scene::Button::*)() const>(&MV::Scene::Button::activeNode));

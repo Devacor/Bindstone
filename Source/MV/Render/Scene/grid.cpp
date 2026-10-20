@@ -10,6 +10,7 @@
 
 static jai::registrar<MV::Scene::Grid, MV::Services> _hookGrid("Grid",
 	[](jai::dynamic_binder<MV::Scene::Grid>& builder, const MV::Services&) {
+	builder.serial_method("layoutCells").serial_method("nodeFromGrid").serial_method("nodeFromLocal");
 	builder.base_class<MV::Scene::Drawable>();
 
 	builder.method("padding", static_cast<std::pair<MV::Point<>, MV::Point<>>(MV::Scene::Grid::*)() const>(&MV::Scene::Grid::padding));

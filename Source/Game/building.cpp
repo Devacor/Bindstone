@@ -54,6 +54,7 @@ void Building::jai_auto_bind(jai::dynamic_binder<Building>& builder) {
 
 static jai::registrar<Building, MV::Services, jai::bases<MV::Scene::Component>> _hookBuilding("Building",
 	[](jai::dynamic_binder<Building>& builder, const MV::Services&) {
+	builder.serial_method("spawnCreature").serial_method("upgrade");
 	builder.base_class<MV::Scene::Component>();
 	jai::bind_signal_type<void(std::shared_ptr<Building>)>(builder.bound_engine(), "SignalBuilding");
 	builder.method("current", [](Building& a_self) -> const BuildTree& { return *a_self.current(); });

@@ -10,6 +10,8 @@
 
 static jai::registrar<MV::Scene::Clickable, MV::Services> _hookClickable("Clickable",
 	[](jai::dynamic_binder<MV::Scene::Clickable>& builder, const MV::Services&) {
+	builder.serial_method("clickDetectionType").serial_method("disable").serial_method("cancelPress").serial_method("press")
+		.serial_method("mouseInBounds");
 	builder.base_class<MV::Scene::Sprite>();
 
 	builder.method("clickDetectionType", static_cast<MV::Scene::Clickable::BoundsType(MV::Scene::Clickable::*)() const>(&MV::Scene::Clickable::clickDetectionType));

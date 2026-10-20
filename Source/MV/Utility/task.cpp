@@ -5,6 +5,7 @@
 #include "services.hpp"
 
 static jai::registrar<MV::Task, MV::Services> _hookTask("Task", [](jai::dynamic_binder<MV::Task>& builder, const MV::Services&) {
+	builder.serial_method("cancel").serial_method("now").serial_method("before");
 	builder.auto_bind();
 
 	builder.constructor<const std::string&>();

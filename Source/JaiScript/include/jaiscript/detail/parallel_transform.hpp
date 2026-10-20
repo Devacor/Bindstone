@@ -290,6 +290,7 @@ namespace jai::detail {
         // fixed ns a pool worker costs to submit, wake and join on THIS machine. 0 = not yet.
         double worker_overhead_ns = 0.0;
         uint64_t region_use_counter = 0;
+        cell_counters worker_cells{};   // what the workers' blocks counted, folded in at each join (engine::cells_counters adds it)
 
 #ifdef JAISCRIPT_VM_PROFILE
         // Fork-join phase decomposition (profiling builds; dumped by the dtor): where

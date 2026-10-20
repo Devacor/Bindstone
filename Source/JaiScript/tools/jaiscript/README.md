@@ -99,6 +99,8 @@ world per save); because of that, the DAP listener is off in watch mode.
                       JAISCRIPT_VM_COVERAGE)
 --miss-every=<n>      the VM misses at every nth plain cell instruction (a build with
                       JAISCRIPT_MISS_INJECTION)
+--workers=<n>         the worker count of parallel_for, parallel_transform and parallel_reduce
+                      (default: the engine's own)
 --no-param-alias      bind every by-value parameter with a clone (the read-only elision off)
 --no-local-alias      copy every by-value local declaration (the read-only local elision off)
 --no-proofs           run without type proofs, typed ops or cell blocks (the general form)

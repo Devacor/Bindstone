@@ -381,6 +381,7 @@ namespace jai::vm {
             frames_.clear();
             top_frame_mark_ = SIZE_MAX;
             call_records_top_ = 0;
+            entry_areas_top_ = 0;
             try_records_.clear();
             iter_states_.clear();
             cfor_states_.clear();
@@ -454,6 +455,7 @@ namespace jai::vm {
         struct ctor_dispatch_entry { std::optional<script_value> method; const class_definition* cls = nullptr; const environment* env = nullptr; };
         std::unordered_map<const function_decl*, ctor_dispatch_entry> ctor_dispatch_;   // a constructor's method-door dispatcher (its body chunk cached on it)
         script_value worker_borrowed_string(const script_value& borrow, const script_value& index, const script_string& source);
+        script_value worker_owned_string(const script_array* node, uint64_t index, const script_string& source);   // the cache by node and index
         // A worker-minted string node can be published into the parent's output by the region
         // that minted it; from then on the main thread copies it, so the worker must hold no
         // handle to it in a later region (the counts are not atomic). Called at the end of the
@@ -461,7 +463,21 @@ namespace jai::vm {
         void release_region_strings() noexcept {
             worker_borrowed_strings_.clear();
             for (auto& rec : worker_env_caches_) { rec.string_constants.clear(); }
+            worker_block_constants_.clear();
+            worker_block_constants_code_ = nullptr;
+            worker_block_constants_mru_ = nullptr;
         }
+        // a block's constants on a worker: the chunk's, each string its own copy (a block borrows a string constant's node into its
+        // cells and pushes, and the main engine and the other workers hold the chunk's node; the counts are not atomic)
+        std::unordered_map<const chunk*, std::vector<script_value>> worker_block_constants_;
+        const chunk* worker_block_constants_code_ = nullptr;
+        const script_value* worker_block_constants_mru_ = nullptr;
+        const script_value* block_constants(const chunk& code) {
+            if (!parallel_worker_) { return code.constants.data(); }
+            if (worker_block_constants_code_ == &code) { return worker_block_constants_mru_; }
+            return worker_block_constants_for(code);
+        }
+        const script_value* worker_block_constants_for(const chunk& code);
         size_t worker_env_mru_ = 0;
         environment* worker_root_env_ = nullptr;   // slot root env (identity stable per slot)
 
@@ -2327,6 +2343,7 @@ namespace jai::vm {
             std::shared_ptr<chunk> body;
             call_frame locals;
             frame f;
+            cell_state cells;   // the session frame's raw area: its loops run as blocks, as a record frame's do
             size_t window_slots = 0;
             bool lazy = false;
             std::shared_ptr<environment> closure_env;   // a lazy closure's env, swapped with the caller's around each call
@@ -2530,6 +2547,10 @@ namespace jai::vm {
         std::vector<strong_ptr<script_function>> retired_callees_;   // site callees replaced while a borrowed call of theirs was live
         std::vector<std::unique_ptr<callback_session>> callback_sessions_;   // by nesting depth: frames_ holds &f while a call runs
         size_t callback_depth_ = 0;
+        // the native-entry frames' raw areas, by nesting depth (a parallel region's chunk body, an opaque call's frame): their loops run as
+        // blocks, as a record frame's do
+        std::vector<std::unique_ptr<cell_state>> entry_areas_;
+        size_t entry_areas_top_ = 0;
     };
 
 } // namespace jai::vm

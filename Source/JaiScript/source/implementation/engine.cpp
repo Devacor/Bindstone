@@ -2937,7 +2937,13 @@ bool engine::miss_injection_available() {
 }
 
 cell_counters engine::cells_counters() const {
-    return impl && impl->backend ? impl->backend->cells_counters() : cell_counters{};
+    cell_counters result = impl && impl->backend ? impl->backend->cells_counters() : cell_counters{};
+    if (impl && impl->parallel_) {
+        const cell_counters& w = impl->parallel_->worker_cells;
+        result.entries += w.entries; result.boundaries += w.boundaries; result.resumes += w.resumes;
+        result.misses += w.misses; result.row_entries += w.row_entries;
+    }
+    return result;
 }
 
 void engine::disassembly_sink(disassembly_sink_fn sink) {

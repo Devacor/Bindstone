@@ -120,6 +120,7 @@ struct options {
 	std::string script;                    // empty = REPL
 	std::string backend = "vm";
 	uint32_t miss_every = 0;               // --miss-every=<n>: the miss injection lever (a build with JAISCRIPT_MISS_INJECTION)
+	size_t workers = 0;                    // --workers=<n>: the parallel regions' worker count (0: the engine's own)
 	std::string check = "strict";          // static checker mode (the engine default); warn = load anyway, report
 	double budget = 0.0;                   // seconds per execute; 0 = unlimited (runner default —
 	                                       // the ENGINE default is 5.0s, deliberately overridden:
@@ -200,6 +201,7 @@ void print_usage() {
 		"options:\n"
 		"  --backend=vm|interp   execution backend (default vm; interp = tree-walking interpreter)\n"
 		"  --miss-every=<n>      the vm misses at every nth plain cell instruction (a build with JAISCRIPT_MISS_INJECTION; the flush at every position)\n"
+		"  --workers=<n>         the worker count of parallel_for, parallel_transform and parallel_reduce (default: the engine's own)\n"
 		"  --check=strict|warn|off\n"
 		"                        static checker mode (default strict: typed mistakes and undeclared\n"
 		"                        names fail the load; warn loads anyway and prints them; off skips)\n"
@@ -279,6 +281,7 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a == "--selftest") { opt.selftest = true; }
 		else if (a.rfind("--benchmark-main", 0) == 0) { opt.benchmark_main = std::stoi(value_of("--benchmark-main")); }
 		else if (a.rfind("--backend", 0) == 0) { opt.backend = value_of("--backend"); }
+		else if (a.rfind("--workers", 0) == 0) { opt.workers = static_cast<size_t>(std::stoul(value_of("--workers"))); }
 		else if (a.rfind("--miss-every", 0) == 0) { opt.miss_every = static_cast<uint32_t>(std::stoul(value_of("--miss-every"))); }
 		else if (a.rfind("--check", 0) == 0) { opt.check = value_of("--check"); }
 		else if (a.rfind("--disasm", 0) == 0) { opt.disasm = value_of("--disasm"); }
@@ -1135,6 +1138,7 @@ bool spill_file(const std::string& path, const std::string& content) {
 std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream* engine_out) {
 	auto eng = jai::engine::make();
 	eng->set_backend(opt.backend == "interp" ? jai::backend_type::interpreter : jai::backend_type::vm);
+	if (opt.workers) { eng->parallel_thread_count(opt.workers); }
 	if (opt.miss_every) {
 		if (!jai::engine::miss_injection_available()) { std::fprintf(stderr, "--miss-every: this build carries no miss injection (configure with -DJAISCRIPT_MISS_INJECTION=ON)\n"); std::exit(2); }
 		eng->cells_miss_every(opt.miss_every);

@@ -460,9 +460,20 @@ namespace jai::vm {
         // that minted it; from then on the main thread copies it, so the worker must hold no
         // handle to it in a later region (the counts are not atomic). Called at the end of the
         // worker's chunk, on the worker thread, before the join.
+        // A node only this worker's cache still holds was never published (or its holders died in the region): it stays for the next
+        // region, whose hits compare the live bytes again
+        static bool worker_string_private(const script_value& v) noexcept {
+            return v.raw_storage_index() == script_value::TYPEID_STRING && v.unchecked_string_handle().unique();
+        }
         void release_region_strings() noexcept {
-            worker_borrowed_strings_.clear();
-            for (auto& rec : worker_env_caches_) { rec.string_constants.clear(); }
+            for (auto it = worker_borrowed_strings_.begin(); it != worker_borrowed_strings_.end();) {
+                if (worker_string_private(it->second)) { ++it; } else { it = worker_borrowed_strings_.erase(it); }
+            }
+            for (auto& rec : worker_env_caches_) {
+                for (script_value& own : rec.string_constants) {
+                    if (own.raw_storage_index() == script_value::TYPEID_STRING && !worker_string_private(own)) { own = script_value(std::monostate{}, engine_); }
+                }
+            }
             worker_block_constants_.clear();
             worker_block_constants_code_ = nullptr;
             worker_block_constants_mru_ = nullptr;

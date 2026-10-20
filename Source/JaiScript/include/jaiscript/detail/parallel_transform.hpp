@@ -283,6 +283,9 @@ namespace jai::detail {
             // Chunking never changes results, so this is a pure cost knob.
             double ns_per_element = 0.0;
             std::vector<std::unique_ptr<parallel_worker_slot>> worker_slots;
+            // the last prewarm's seed and the interner, symbol and class counts after it: a region that matches all four skips its prewarm
+            std::vector<type_info*> prewarm_seed;
+            size_t prewarm_types = 0, prewarm_symbols = 0, prewarm_classes = 0;
         };
         static constexpr size_t max_region_pools = 8;
         std::vector<parallel_region_pool> region_pools;

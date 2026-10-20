@@ -82,6 +82,35 @@ for (int y = 0; y < 64; ++y) { serial.push(row(y)); }
 			           "parallel_for (auto& y, auto& out : ys, rows) { out = row(y); } string::join(rows, \"/\") == string::join(serial, \"/\");", "true", 64, "string rows");
 		});
 
+		test("a_borrowed_table_changed_between_regions_is_pushed_as_it_now_reads", [this]() {
+			// a worker keeps its copies of a borrowed table's strings across regions while nothing else holds them: each region's pushes
+			// read the table's current bytes, a rewritten cell and a replaced table included, and the rows a region publishes stay the
+			// main thread's
+			const char* defs = R"JAI(
+array<string> PAL = ["<a>", "<b>", "<c>", "<d>"];
+function row(int y) -> string {
+	array<string> parts = [];
+	for (int x = 0; x < 24; ++x) { parts.push(PAL[(x + y) % 4]); }
+	string text = "";
+	for (int i = 0; i < parts.size(); ++i) { text = text + parts[i]; }
+	return text;
+}
+function frame(int count) -> string {
+	array<string> rows = []; array<int> ys = [];
+	for (int y = 0; y < count; ++y) { rows.push(""); ys.push(y); }
+	parallel_for (auto& y, auto& out : ys, rows) { out = row(y); }
+	string all = "";
+	for (int i = 0; i < rows.size(); ++i) { all = all + rows[i] + "/"; }
+	return all;
+}
+function serial(int count) -> string { string all = ""; for (int y = 0; y < count; ++y) { all = all + row(y) + "/"; } return all; }
+var kept = [];
+)JAI";
+			both(defs, "string out = \"\"; for (int r = 0; r < 6; ++r) { string f = frame(40); kept.push(f); out = out + to_string(f == serial(40)) + \" \"; "
+			           "if (r == 2) { PAL[1] = \"<B>\"; } if (r == 4) { PAL = [\"<w>\", \"<x>\", \"<y>\", \"<z>\"]; } } out + to_string(kept[0] != kept[5]);",
+			     "true true true true true true true", 40, "rewritten tables");
+		});
+
 		test("a_builtin_callbacks_loop_runs_as_a_block", [this]() {
 			const char* defs = R"JAI(
 function weigh(int v) -> int { int s = 0; for (int i = 0; i < 40; ++i) { s = s + (v * i) % 7; } return s; }

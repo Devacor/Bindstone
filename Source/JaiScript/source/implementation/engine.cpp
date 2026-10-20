@@ -3685,6 +3685,10 @@ type_info* engine::get_type_info_any() {
     return impl->type_info_any_;
 }
 
+size_t engine::interned_type_count() const {
+    return impl->type_infos_.size();
+}
+
 type_info* engine::get_type_info_array(type_info* element_type) {
     // Use composite key for fast lookup - no string construction needed on cache hit
     implementation::type_key key{script_value_type::jai_array_type, element_type ? element_type->id : 0, 0};

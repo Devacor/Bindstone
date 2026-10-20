@@ -2021,9 +2021,26 @@ script_value* vm_backend::env_arm_fast_head(env_lookup_cache_entry* fast_entry, 
 	return ptr;
 }
 
+const script_value* vm_backend::worker_block_constants_for(const chunk& code) {
+	auto [it, made] = worker_block_constants_.try_emplace(&code);
+	if (made) {
+		it->second.reserve(code.constants.size());
+		for (const script_value& c : code.constants) {
+			it->second.push_back(c.raw_storage_index() == script_value::TYPEID_STRING ? script_value(*c.unchecked_string_handle(), engine_) : c);
+		}
+	}
+	worker_block_constants_code_ = &code;
+	worker_block_constants_mru_ = it->second.data();
+	return worker_block_constants_mru_;
+}
+
 script_value vm_backend::worker_borrowed_string(const script_value& borrow, const script_value& index, const script_string& source) {
-	const uint64_t node_bits = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(borrow.parallel_borrow_array()));
-	const uint64_t key = (node_bits * 0x9E3779B97F4A7C15ull) ^ static_cast<uint64_t>(index.deref().unchecked_as_int());
+	return worker_owned_string(borrow.parallel_borrow_array(), static_cast<uint64_t>(index.deref().unchecked_as_int()), source);
+}
+
+script_value vm_backend::worker_owned_string(const script_array* node, uint64_t index, const script_string& source) {
+	const uint64_t node_bits = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(node));
+	const uint64_t key = (node_bits * 0x9E3779B97F4A7C15ull) ^ index;
 	if (worker_borrowed_strings_.size() > 8192) [[unlikely]] { worker_borrowed_strings_.clear(); }
 	auto it = worker_borrowed_strings_.find(key);
 	if (it != worker_borrowed_strings_.end() && it->second.unchecked_as_string() == source) {
@@ -7719,7 +7736,8 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 				if (sp && sp->raw_storage_index() == script_value::TYPEID_REFERENCE) { sp = lane_deref_silent(*sp) ? &sp->deref() : nullptr; }
 				bool borrowed = false;
 				const script_array* sn = sp ? lane_element_source(*sp, borrowed) : nullptr;
-				if (!sn || borrowed) return refuse_site(ip, "a push source that is not a plain node");
+				// a worker's borrowed view of the program's table: its push copies a string element, never sharing the handle
+				if (!sn || (borrowed && !parallel_worker_)) return refuse_site(ip, "a push source that is not a plain node");
 				cs.site_node2[ip - loop.copy_head] = sn;
 			}
 		} else if (ci.op == opcode::op_c_index_store) {
@@ -8270,7 +8288,7 @@ next_frame:
 	frame& f = *fp;
 	const chunk::cell_loop& loop = *lp;
 	cell_state& cs = *f.cells;
-	const cell_regs regs{cs.payload.data(), cs.kind.data(), &cs.dirty, f.code->constants.data(), f.code->code.data(), &loop};   // the run's registers: the vectors never move during a run (the entry sized them)
+	const cell_regs regs{cs.payload.data(), cs.kind.data(), &cs.dirty, block_constants(*f.code), f.code->code.data(), &loop};   // the run's registers: the vectors never move during a run (the entry sized them)
 	const cell_regs hot = regs;   // the inline cases' copy: regs goes by reference to the out-of-line executors, this one stays in registers
 #ifdef JAISCRIPT_VM_PROFILE
 	size_t prof_prev_cell = 256;
@@ -9515,6 +9533,13 @@ JAI_NOINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction& i
 			if (pv->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*pv)) return miss();   // a property or element reference observes on dereference: the general push runs its getter
 			break;
 		default: return miss();
+		}
+		// a worker pushes its own copy of a string element (the source may be the program's table, borrowed): the counts are not atomic
+		if (parallel_worker_) [[unlikely]] {
+			const script_string* text = form == src_form::raw_str ? (*raw_str ? raw_str->get() : nullptr)
+				: pv && pv->deref().raw_storage_index() == script_value::TYPEID_STRING ? &pv->deref().unchecked_as_string() : nullptr;
+			if (form == src_form::raw_str && !text) return miss();
+			if (text) { boxed.emplace(worker_owned_string(src, at, *text)); pv = &*boxed; form = src_form::value; }
 		}
 	} else {
 		const uint32_t k = p.value.slot;
@@ -19718,8 +19743,7 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[10], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
 			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_miss_step_[4], (unsigned long long)profile_cells_[11], (unsigned long long)profile_cells_[12], (unsigned long long)profile_cells_[13], (unsigned long long)profile_cells_[7],
 			(unsigned long long)profile_cells_[8], (unsigned long long)profile_cells_[9], (unsigned long long)profile_cells_records_, (unsigned long long)profile_cells_area_bytes_max_);
-		fprintf(stderr, "[vm-profile] cell counters: entries %llu | boundaries %llu | resumes %llu | misses %llu | row entries %llu\n", cells_counters_.entries, cells_counters_.boundaries, cells_counters_.resumes, cells_counters_.misses, cells_counters_.row_entries);
-		fprintf(stderr, "[vm-profile] cell pushes: direct int %llu | direct float %llu | direct string %llu | value %llu\n",
+		fprintf(stderr, "[vm-profile] cell counters: entries %llu | boundaries %llu | resumes %llu | misses %llu | row entries %llu\n", cells_counters_.entries, cells_counters_.boundaries, cells_counters_.resumes, cells_counters_.misses, cells_counters_.row_entries);		fprintf(stderr, "[vm-profile] cell pushes: direct int %llu | direct float %llu | direct string %llu | value %llu\n",
 			(unsigned long long)profile_cells_push_[0], (unsigned long long)profile_cells_push_[1], (unsigned long long)profile_cells_push_[2], (unsigned long long)profile_cells_push_[3]);
 		{
 			// inclusive: a block run holds its entry, its body, its flushes and misses; a miss holds its flush; a landing may hold a miss
@@ -22795,6 +22819,17 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	f.top_level = false;
 	f.return_type = function.return_type;
 	f.return_conv_class = static_cast<uint8_t>(detail::return_conv_of(function));
+	struct entry_area_lease {
+		vm_backend* vm; bool held;
+		~entry_area_lease() { if (held) { --vm->entry_areas_top_; } }
+	} area_lease{this, false};
+	if (!f.code->cell_loops.empty()) {
+		if (entry_areas_top_ == entry_areas_.size()) { entry_areas_.push_back(std::make_unique<cell_state>()); }
+		cell_state& area = *entry_areas_[entry_areas_top_++];
+		area_lease.held = true;
+		area.reset_call(f.code->max_cells);
+		f.cells = &area;
+	}
 
 	const unit_stamp caller_unit = current_unit();   // the native caller's frame, or the ambient
 	f.unit = function.unit;
@@ -23000,6 +23035,7 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 	detail::call_depth_guard depth_guard(current_call_depth_);
 
 	frame& f = s.f;
+	if (!f.code->cell_loops.empty()) { s.cells.reset_call(f.code->max_cells); f.cells = &s.cells; }
 	call_frame& locals = s.locals;
 	locals.reset_member_scope();
 	locals.scope_static = s.scope_static;

@@ -101,6 +101,7 @@ namespace jai::detail {
 		std::vector<std::pair<std::error_code, std::string>> deferred_reports;
 		std::vector<std::pair<const void*, std::weak_ptr<class_instance>>> pending_script_layers;   // recorded by the join
 		std::vector<deferred_release> deferred_releases;   // released by the join
+		cell_counters cells_folded{};   // this worker's block counters already folded into the engine's
 		std::vector<script_value> cursors;   // [0] = the range's chunk cursor, then the zip's arrays
 		std::vector<script_value> call_args; // prepared at the barrier; no worker-entry allocation
 		// Live input vector ("safe AND free"): workers read the
@@ -4659,6 +4660,15 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			if (!owner.expired()) { eng.note_script_layer(object, owner); }
 		}
 		ctx->pending_script_layers.clear();
+		const cell_counters now = ctx->backend->cells_counters();
+		state.worker_cells.entries += now.entries - ctx->cells_folded.entries;
+		state.worker_cells.boundaries += now.boundaries - ctx->cells_folded.boundaries;
+		state.worker_cells.resumes += now.resumes - ctx->cells_folded.resumes;
+		state.worker_cells.misses += now.misses - ctx->cells_folded.misses;
+		state.worker_cells.row_entries += now.row_entries - ctx->cells_folded.row_entries;
+		ctx->cells_folded = now;
+	}
+	for (auto* ctx : contexts) {
 		for (const auto& [code, message] : ctx->deferred_reports) { eng.report_script_error(message, code); }
 		ctx->deferred_reports.clear();
 	}

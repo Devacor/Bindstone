@@ -374,6 +374,10 @@ namespace jai::detail {
             uint64_t slot_cursor_cyc = 0;    // slots slice: cursor mint + call_args
             uint64_t admit_pool_cyc = 0;     // admit slice: thread count, pool acquire, cost cap, partition
             uint64_t admit_guard_cyc = 0;    // admit slice: region guard, type metadata
+            uint64_t claims = 0;           // block claims (one fetch_add each) over every worker
+            uint64_t claim_cyc = 0;        // cycles inside those fetch_adds (the counter's contention)
+            uint64_t claim_cyc_max = 0;    // the slowest single claim
+            uint64_t join_lat_sum = 0;     // per region: the last chunk's end (main's or a worker's) -> main past the join
             uint64_t cache_hits = 0;       // snapshot cache: content-matched reuses
             uint64_t cache_stores = 0;     // snapshot cache: records (re)stored
             uint64_t cache_misses = 0;     // snapshot cache: validate failed or no record

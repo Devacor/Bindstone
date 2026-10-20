@@ -3202,6 +3202,7 @@ inline class_instance::~class_instance() {
             class_def_->destroy_levels(this, class_def_, nullptr, constructed);
         }
     }
+    if (extras_ && extras_->native && engine_ && engine_->parallel_region_active()) [[unlikely]] { defer_serial_native(); }
     if (class_def_) {
         class_def_->unregister_instance(this);
         if (fields_cascade()) { release_fields(); }

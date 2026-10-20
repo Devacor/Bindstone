@@ -506,7 +506,7 @@ its own members is. One that touches state other objects share is not: it adds t
 handle from a cache, looks up a service, connects to a signal hub, or attaches itself to another object. Mark such a
 class with <code>.serial_only_constructor()</code>, and a body that constructs it, or a script class over it, is
 refused when the statement is reached, before any element runs. One mark covers the constructor and the destructor
-alike: the object a worker makes is the one that dies there. Construction outside a parallel body is unaffected.</p>
+alike: the object a worker makes is the one that dies there. An object of a marked class that loses its last reference on a worker anyway is not destroyed there: the statement releases it when its workers are done, on the calling thread, in the order of the elements that dropped it, then the order they dropped. Construction outside a parallel body is unaffected.</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Sprite {
     static std::vector&lt;Sprite*&gt;&amp; registry() { static std::vector&lt;Sprite*&gt; all; return all; }
     double alpha = 1.0;

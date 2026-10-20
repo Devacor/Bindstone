@@ -401,6 +401,8 @@ private:
     inline bool fields_cascade() const noexcept;
     // The dying instance's members past the native depth go to the release stack (class_registry.cpp)
     void release_fields() noexcept;
+    // A region chunk's dying instance of a serial-only chain hands its C++ object to the join (class_registry.cpp)
+    void defer_serial_native() noexcept;
     // An orphaned instance (its definition detached: engine teardown, a definition that died first) has no release stack;
     // its members and the orphans they alone hold die on a local work list, no destructor can run for them
     void release_orphan_fields() noexcept;
@@ -1043,6 +1045,13 @@ public:
     // parallel body may not construct it, nor any script class over it (dynamic_binder::serial_only_constructor)
     void serial_only_construction(bool value) { serial_only_construction_ = value; }
     bool serial_only_construction() const { return serial_only_construction_; }
+    bool serial_only_chain() const {
+        if (serial_only_construction_) { return true; }
+        for (const auto& parent : parent_classes_) {
+            if (parent && parent->serial_only_chain()) { return true; }
+        }
+        return false;
+    }
 
     inline std::shared_ptr<void> copy_object(const void* src) const;
 

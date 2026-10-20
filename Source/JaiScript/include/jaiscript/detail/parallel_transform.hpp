@@ -52,6 +52,15 @@ namespace jai::detail {
     // engine::execution_limits() consults it so EVERY charge site — backends, shared
     // builtin methods, value clone/cell factories, environment growth — redirects to the
     // calling worker's own accounting without any per-site changes.
+    // The C++ object of a serial-only class's instance that died on a region chunk, released by the join: element is the
+    // element the chunk was running (SIZE_MAX outside one)
+    struct deferred_release {
+        size_t element = SIZE_MAX;
+        script_value value;
+    };
+    // The join's release of every chunk's deferred objects on the calling thread: element order, then the order they died in
+    void release_deferred_in_order(const std::vector<std::vector<deferred_release>*>& lists);
+
     struct parallel_region_table {
         struct entry {
             std::thread::id id;
@@ -67,6 +76,9 @@ namespace jai::detail {
             std::vector<std::pair<std::error_code, std::string>>* deferred_reports = nullptr;
             // The script layers this chunk's hybrids adopt their host objects into, recorded by the join (the engine's map is shared)
             std::vector<std::pair<const void*, std::weak_ptr<class_instance>>>* pending_script_layers = nullptr;
+            // The C++ objects of serial-only classes that die on this chunk, released by the join; cursors name the element running
+            std::vector<deferred_release>* deferred_releases = nullptr;
+            const std::vector<script_value>* cursors = nullptr;
         };
         std::vector<entry> entries;
 

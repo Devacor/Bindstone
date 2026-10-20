@@ -209,7 +209,9 @@ the method sandbox. A host constructor and destructor run code no walk sees, so 
 for them: safe on any thread by default, refused with every script class over the host class when it
 is bound `.serial_only_constructor()`. A worker gets a copy of each host constructor a construction
 reaches (`make_parallel_host_function_copy`), and a hybrid's script layer joins the engine's
-script-layer map at the join (`pending_script_layers`). Each worker gets a constructor value of its own for every
+script-layer map at the join (`pending_script_layers`). A serial-only chain's C++ object that dies on a chunk anyway
+(`class_instance::defer_serial_native`) waits in the chunk's `deferred_releases`; the join releases them on the calling
+thread by element, then in death order (`release_deferred_in_order`). Each worker gets a constructor value of its own for every
 constructed class, defined in its root env and method sandbox, whose definition environment is the
 sandbox; constructor and destructor bodies compile on each worker at the barrier; every memo
 construction fills (instance plan, defaults, destructor and construction-order memos, implicit

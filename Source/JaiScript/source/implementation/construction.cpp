@@ -82,6 +82,7 @@ namespace {
 		if (const script_value* native = host_instance->native()) {
 			instance.set_native(*native);
 		}
+		instance.region_tag(host_instance->region_tag());
 	}
 
 	// A C++ base's constructor makes the object the instance adopts; a_ancestor marks a base above the direct one

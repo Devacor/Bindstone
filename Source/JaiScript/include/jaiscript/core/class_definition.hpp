@@ -285,6 +285,10 @@ public:
     const script_value* native() const { return extras_ && extras_->native ? &*extras_->native : nullptr; }
     inline const script_value& native_or_throw() const;
     inline void set_native(const script_value& value);
+    // The parallel region whose chunk made this instance's C++ object (0: none): a non-const C++ method runs on a parallel
+    // chunk only over an object that chunk made
+    void region_tag(uint32_t tag) { region_tag_ = tag; }
+    uint32_t region_tag() const { return region_tag_; }
     inline bool native_lookup_enabled() const;
 
 private:
@@ -380,6 +384,7 @@ private:
     bool late_destructor_ = false;   // armed by a re-class, not by the allocation: ~class_instance runs the chain
     std::atomic<bool> registered_{false};   // in the class's registry list (read unlocked by its own dying owner)
     uint16_t constructed_levels_ = k_nothing_constructed;
+    uint32_t region_tag_ = 0;
     uint32_t live_field_refs_ = 0;
     cdtor_phase dispatch_phase_ = cdtor_phase::none;
     // What few instances hold, boxed so the rest pay one pointer: the C++ object (released after the fields, as a C++ base
@@ -1043,6 +1048,15 @@ public:
 
     // A host class whose constructor or destructor touches state other objects share (a registry, a cache, a service): a
     // parallel body may not construct it, nor any script class over it (dynamic_binder::serial_only_constructor)
+    // A host method or static method that touches state other objects share (dynamic_binder::serial_method,
+    // serial_static_method): a parallel body may not call it
+    void mark_serial_method(uint64_t name_id) { serial_methods_.insert(name_id); }
+    bool serial_method(uint64_t name_id) const { return serial_methods_.count(name_id) != 0; }
+    void mark_serial_static_method(uint64_t name_id) { serial_static_methods_.insert(name_id); }
+    bool serial_static_method(uint64_t name_id) const { return serial_static_methods_.count(name_id) != 0; }
+    // A host method with an overload over a non-const receiver (a non-const member function, a T& self, a property setter)
+    void note_mutating_method(uint64_t name_id) { mutating_methods_.insert(name_id); }
+    bool mutating_method(uint64_t name_id) const { return mutating_methods_.count(name_id) != 0; }
     void serial_only_construction(bool value) { serial_only_construction_ = value; }
     bool serial_only_construction() const { return serial_only_construction_; }
     bool serial_only_chain() const {
@@ -1242,6 +1256,9 @@ private:
     copy_function copy_function_;
     bool nocopy_ = false;
     bool serial_only_construction_ = false;
+    std::unordered_set<uint64_t> serial_methods_;
+    std::unordered_set<uint64_t> serial_static_methods_;
+    std::unordered_set<uint64_t> mutating_methods_;
     mutable bool nocopy_memo_ = false;
     mutable uint64_t nocopy_memo_epoch_ = 0;
 

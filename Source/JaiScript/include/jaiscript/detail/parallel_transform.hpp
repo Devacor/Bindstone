@@ -26,6 +26,7 @@
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace jai {
@@ -60,6 +61,9 @@ namespace jai::detail {
     };
     // The join's release of every chunk's deferred objects on the calling thread: element order, then the order they died in
     void release_deferred_in_order(const std::vector<std::vector<deferred_release>*>& lists);
+
+    // A library builtin a parallel body may call: pure math and to_string (everything else the library registers is serial)
+    bool parallel_pure_function(std::string_view name);
 
     struct parallel_region_table {
         struct entry {
@@ -166,7 +170,15 @@ namespace jai::detail {
             uint64_t name_id = 0;
             std::string_view name;
             const ast_node* site = nullptr;   // pinned transitively via script_functions
+            uint64_t enclosing_arguments = 0;   // the argument positions any call of the name passes enclosing state at
+            const ast_node* enclosing_site = nullptr;
         };
+        // Host static methods the bodies call, by the class name as written (Name::method(...)): pinned per worker
+        struct static_call {
+            uint64_t class_name_id = 0;
+            uint64_t name_id = 0;
+        };
+        std::vector<static_call> static_calls;
         std::vector<element_method_call> element_method_calls;
         // Script classes the bodies construct (Name(args), new Name(args), Name n(args)) with the argument count. Admission
         // only collects; the barrier resolves each name against the live class and walks every constructor, base
@@ -205,7 +217,9 @@ namespace jai::detail {
     // is precompiled on the worker's own backend at the barrier (no in-region compiles).
     struct parallel_method_pin {
         script_value method_value{std::monostate{}, nullptr};
-        std::shared_ptr<function_decl> resolved;
+        std::shared_ptr<function_decl> resolved;   // null: a host method (or accessor), called with its receiver first
+        bool mutating = false;                     // a host method over a non-const receiver: only an object the chunk made
+        bool serial = false;                       // marked serial_method(): its call raises the refusal
     };
 
     // (class_definition*, method name id) -> pin. Consulted by both backends' worker
@@ -219,6 +233,13 @@ namespace jai::detail {
             parallel_method_pin pin;
         };
         std::vector<entry> entries;
+        // Host static methods a body calls, by the class name as written: worker copies of the static method values
+        struct static_entry {
+            uint64_t class_name_id = 0;
+            uint64_t name_id = 0;
+            script_value value{std::monostate{}, nullptr};
+        };
+        std::vector<static_entry> statics;
         // The worker's method sandbox: the root a construction without a constructor initializes its fields in
         std::shared_ptr<environment> definition_env;
         const parallel_method_pin* find(const void* cls, uint64_t name_id) const noexcept {
@@ -227,7 +248,21 @@ namespace jai::detail {
             }
             return nullptr;
         }
+        const script_value* find_static(uint64_t class_name_id, uint64_t name_id) const noexcept {
+            for (const auto& e : statics) {
+                if (e.class_name_id == class_name_id && e.name_id == name_id) { return &e.value; }
+            }
+            return nullptr;
+        }
     };
+
+    // A pinned host method's call on a chunk: a mutating one refuses a receiver the chunk did not make
+    checked_result<script_value> call_parallel_host_pin(const parallel_method_pin& pin, const script_value& receiver, uint64_t name_id,
+                                                        std::vector<script_value> args, engine* eng, bool property = false);
+    // A pinned host method as the value a member read names: its call goes through call_parallel_host_pin
+    script_value parallel_bound_pin(const parallel_method_pin& pin, const script_value& receiver, uint64_t name_id, engine* eng);
+    // An instance's script field a worker reads and stores in place (a C++ property goes through its pinned accessor)
+    script_value* parallel_script_field(class_instance& inst, uint64_t member_id);
 
     // A reusable worker execution context (definition private to parallel_transform.cpp:
     // backend instance, root env, epoch sink, limits, provisioned callables).
@@ -241,6 +276,11 @@ namespace jai::detail {
         parallel_region_table* active_region = nullptr;   // non-null only while workers run
         std::mutex instance_registry_mutex;                // class_definition instance registry, region-time only
         bool region_running = false;                       // reentrancy guard (v0: no nesting)
+        uint32_t region_serial = 0;                        // the running region's number, bumped as each one starts
+        // Every name a C++ level of a registered class binds (methods and accessors), refreshed when the classes change: a
+        // region pins only the names it calls that are among them
+        std::unordered_set<uint64_t> host_method_names;
+        uint64_t host_method_names_key = UINT64_MAX;
         bool pending_registration_retry = false;           // exceptional join: drain before cache mutation or class reload
         fault_injection faults;                            // host/test checkpoints; disabled by default
         size_t thread_count_override = 0;                  // engine::parallel_thread_count(n)

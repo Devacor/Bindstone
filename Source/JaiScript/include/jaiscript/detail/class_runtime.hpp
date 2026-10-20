@@ -3027,6 +3027,7 @@ inline void class_instance::finish_deep_copy_level(class_instance& copy, bool ov
                 }
                 copy.set_native(script_value::make_cpp_object(get_class_name(), class_def_->get_type_id(), new_cpp_obj, value.get_engine()));
                 copied = true;
+                if (engine_ && engine_->parallel_region_active()) [[unlikely]] { copy.region_tag(engine_->parallel_region_serial()); }
             }
         }
         if (!copied) { copy.set_native(value.clone_element()); }

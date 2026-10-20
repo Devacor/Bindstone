@@ -436,6 +436,7 @@ inline void collect_methods_of(engine* eng, const class_definition* def,
 } // namespace reflect_detail
 
 void register_reflection_functions(engine& eng_ref) {
+    engine::library_registration library(eng_ref);
     engine* eng = &eng_ref;
     auto& ns = eng_ref.script_namespaces()[eng_ref.get_symbolizer()->intern("reflect")];
     if (!ns) { ns = std::make_shared<script_namespace_data>(); }

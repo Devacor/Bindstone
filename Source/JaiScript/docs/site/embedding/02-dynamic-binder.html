@@ -495,6 +495,8 @@ class bind its own private members. Modes: <code>all</code>, <code>properties</c
 <code>bind_signal_type</code> and globals.</li>
 <li><code>.serial_only_constructor()</code>: the class&#x27;s constructor or destructor touches state other objects
 share, so a <code>parallel_for</code> body may not construct it (next section).</li>
+<li><code>.serial_method(name)</code> / <code>.serial_static_method(name)</code>: the method touches state other objects
+share, so a <code>parallel_for</code> body may not call it (<a href="#parallel-calls">calls from parallel bodies</a>).</li>
 <li><code>.build()</code>: finalizes registration. The destructor calls it if you forget; the binder is
 movable, non-copyable.</li>
 </ul>
@@ -528,6 +530,54 @@ print("{} {}", one.alpha, one.glow);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">parallel_for: C++ class 'Sprite' is marked serial_only_constructor() and cannot be constructed in a parallel body at 3:48
 parallel_for: class 'Glowing' has a C++ base 'Sprite' marked serial_only_constructor() and cannot be constructed in a parallel body at 4:49
 1.0 0.5</code></pre></div>
+
+<h3 id="parallel-calls">Calls from parallel bodies<a class="hlink" href="#parallel-calls" aria-label="link">&#8203;</a></h3>
+<p>A <code>parallel_for</code> body, and the class code it reaches, calls bound C++ on its worker thread: free functions,
+static methods and methods are all parallel unless registered serial. Mark a call serial when it touches state other
+objects share (an audio or texture manager, a registry, a service lookup, the scene graph beyond the object itself, a
+network connection, a log): <code>.serial_method("name")</code> on the binder for every overload of a method,
+<code>.serial_static_method("name")</code> for a static method, and <code>engine::serial_function("name")</code> after
+registering a free function. A body that names a serial free function or static method is refused when the statement
+is reached; a serial method is refused when it is called, since the receiver&#x27;s class is known only then. The
+library&#x27;s own builtins are serial (<code>print</code>, I/O, JSON, reflection, the clock) apart from pure math and
+<code>to_string</code>.</p>
+<p>The receiver follows the signature. A non-const member function (a <code>T&amp;</code> self in a lambda, a property
+store) runs only on an object the calling worker made: one it constructed, or a copy it took. A const member function
+also runs on an object the worker did not make, such as one a C++ function hands back, because C++ constness says it does
+not change the object. A non-const call on such an object is refused when it runs. Arguments follow the rules a script
+call follows: a non-const <code>T&amp;</code> parameter, which writes back into its argument, cannot take enclosing
+state.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Meter {
+    double level = 0.0;
+    void add(double amount) { level += amount; }      // non-const: only an object the worker made
+    double reading() const { return level; }          // const: any object
+    void publish() const { audio().play("tick"); }    // the audio manager: serial
+};
+
+jai::dynamic_binder&lt;Meter&gt;(*eng, "Meter")
+    .constructor&lt;&gt;()
+    .method("add", &amp;Meter::add)
+    .method("reading", &amp;Meter::reading)
+    .method("publish", &amp;Meter::publish)
+    .serial_method("publish")
+    .build();
+eng-&gt;add_function("master", []() { return master_meter; });        // the program's one Meter (level 100)
+eng-&gt;add_function("log_line", [](const std::string&amp; line) { logger().write(line); });
+eng-&gt;serial_function("log_line");</code></pre></div>
+<div class="codeblock cb-jai" data-host="Meter parallel binder"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">array&lt;float&gt; xs = [1.0, 2.0, 3.0];
+parallel_for (auto&amp; x : xs) {
+    Meter m;
+    m.add(x * 10.0);                       // the worker's own object
+    x = m.reading() + master().reading();  // a const method on the shared one
+}
+print("{}", to_json(xs));
+try { parallel_for (auto&amp; x : xs) { var shared = master(); shared.add(1.0); } } catch (e) { print(e); }
+try { parallel_for (auto&amp; x : xs) { Meter m; m.publish(); } } catch (e) { print(e); }
+try { parallel_for (auto&amp; x : xs) { log_line("x"); } } catch (e) { print(e); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[110.0,120.0,130.0]
+C++ method 'add' of 'Meter' changes an object this parallel body did not make (only its const methods may run on it)
+C++ method 'publish' of 'Meter' is marked serial_method() and cannot be called in a parallel body
+parallel_for: host function 'log_line' is marked serial_function() and cannot be called in a parallel body at 10:37</code></pre></div>
 
 <h2 id="signals-one-view-every-signature">Signals: one view, every signature<a class="hlink" href="#signals-one-view-every-signature" aria-label="link">&#8203;</a></h2>
 <p>Signal members reach script with no per-signature ceremony. A <code>JAI_SIGNAL_PROPERTY</code> on a

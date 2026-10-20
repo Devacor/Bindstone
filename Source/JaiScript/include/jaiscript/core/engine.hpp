@@ -346,6 +346,26 @@ namespace jai {
             std::vector<param_type_info> param_types;
         };
         bool host_function_signatures(const std::string& name, std::vector<host_overload_signature>& out) const;
+        // A free host function that touches state other objects share: a parallel body may not call it. Every other
+        // registered host function is taken to be safe on any thread; the library's own builtins are serial unless pure.
+        void serial_function(const std::string& name);
+        bool host_function_serial(const std::string& name) const;
+        // A free function the host (or the library) registered by name, as opposed to a function value script made
+        bool host_function_registered(const std::string& name) const;
+        // The argument positions any registration of `name` writes back through (non-const T& parameters), a bit each
+        uint64_t host_function_writeback(const std::string& name) const;
+        // While one lives, what registers is the library's own: serial unless it is pure (detail::parallel_pure_function)
+        class library_registration {
+        public:
+            explicit library_registration(engine& a_engine);
+            ~library_registration();
+            library_registration(const library_registration&) = delete;
+            library_registration& operator=(const library_registration&) = delete;
+        private:
+            engine& eng;
+        };
+        // The running parallel region's number (0 outside one): what a chunk makes carries it (class_instance::region_tag)
+        uint32_t parallel_region_serial() const;
         // The scalar result every registration of `name` declares by its C++ return type (int, float, bool, char,
         // string); false when a registration returns anything else or registrations disagree
         bool host_function_result(const std::string& name, script_value_type& out) const;

@@ -186,6 +186,7 @@ namespace stdlib {
     }
 
     void register_io_functions(engine& eng_ref) {
+        engine::library_registration library(eng_ref);
         engine* eng = &eng_ref;
         dynamic_binder<skip_newline_t>(eng_ref, "skip_newline_t").build();
         dynamic_binder<skip_flush_t>(eng_ref, "skip_flush_t").build();

@@ -97,6 +97,8 @@ namespace detail {
     // Out of line (schema_binding.cpp) so a binding TU does not instantiate the class and instance machinery
     std::shared_ptr<class_definition> make_class_definition(std::string_view name, uint64_t type_id, engine* eng);
     std::shared_ptr<class_instance> make_native_instance(class_definition& def, std::string_view name, std::shared_ptr<void> object, engine* eng);
+    // A C++ object the call just made (a constructor's, a copy's): on a parallel chunk the chunk owns it (class_instance::region_tag)
+    void note_region_made(const script_value& value, engine* eng);
 }
 
     namespace detail {

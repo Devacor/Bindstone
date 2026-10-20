@@ -933,7 +933,7 @@ public:
 				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
 				return "no-error";
 			)");
-			check_true(r.as<std::string>().find("host function 'print' is not callable in a parallel body") != std::string::npos);
+			check_true(r.as<std::string>().find("host function 'print' is marked serial_function() and cannot be called in a parallel body") != std::string::npos);
 		});
 
 		test("rejects_yield_and_lambda", [this]() {
@@ -1099,7 +1099,7 @@ public:
 				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
 				return "no-error";
 			)");
-			check_true(r.as<std::string>().find("host function 'parallel_transform' is not callable in a parallel body") != std::string::npos);
+			check_true(r.as<std::string>().find("host function 'parallel_transform' is marked serial_function() and cannot be called in a parallel body") != std::string::npos);
 		});
 
 		// Member chains root at the element (the worker's private by-value copy) or a local;
@@ -2619,7 +2619,7 @@ public:
 				{ "written array destructor", "int deaths = 0; class Res { int v = 0; ~Res() { deaths++; } } array<int> xs = [0, 1]; var loose = [Res(), Res()]; parallel_for (int x : xs) { loose[x] = 5; }",
 				  "parallel_for: body writes enclosing state 'deaths' in the destructor of 'Res' at 1:" },
 				{ "unprovable call", "class T { int v = 0; T(int a) { print(a); v = a; } } array<int> xs = [1, 2]; parallel_for (auto& x : xs) { T t(x); x = t.v; }",
-				  "parallel_for: host function 'print' is not callable in a parallel body in the constructor of 'T' at 1:" },
+				  "parallel_for: host function 'print' is marked serial_function() and cannot be called in a parallel body in the constructor of 'T' at 1:" },
 				{ "reduce step", "int calls = 0; class Acc { int n = 0; Acc() {} Acc(int a) { calls++; n = a; } } array<int> xs = [1, 2]; parallel_reduce(xs, Acc(), [](Acc a, int x) -> Acc { return Acc(a.n + x); }, [](Acc a, Acc b) -> Acc { return a; });",
 				  "parallel_reduce: body writes enclosing state 'calls' in the constructor of 'Acc' at 1:" },
 			};
@@ -2790,6 +2790,137 @@ public:
 				         std::string("the join released by element, then in death order ") + (vm ? "vm" : "interp"));
 				check_true(deferred.empty(), "the join empties the list");
 			}
+		});
+
+		test("host_calls_run_in_parallel_unless_marked_serial", [this]() {
+			// C++ calls are parallel unless registered serial: free functions, static methods and methods; a non-const method (or a
+			// property store) only over an object the chunk made, a const one over any object
+			struct host_counter {
+				int64_t v = 0;
+				void bump() { ++v; }
+				int64_t value() const { return v; }
+				void reset() { v = 0; }
+				static int64_t twice(int64_t k) { return k * 2; }
+				static int64_t halve(int64_t k) { return k / 2; }
+			};
+			auto shared = std::make_shared<host_counter>();
+			shared->v = 5;
+			auto bind = [&](jai::engine& e) {
+				dynamic_binder<host_counter>(e, "Counter").constructor<>()
+					.method("bump", &host_counter::bump).method("value", &host_counter::value).method("reset", &host_counter::reset)
+					.serial_method("reset")
+					.static_method("twice", &host_counter::twice).static_method("halve", &host_counter::halve).serial_static_method("halve")
+					.property("v", &host_counter::v).build();
+				e.add_function("scale", [](int64_t x) { return x * 3; });
+				e.add_function("log_it", [](int64_t) {});
+				e.serial_function("log_it");
+				e.add_function("fill", [](int64_t& out) { out = 7; });
+				e.add_function("shared_counter", [shared]() { return shared; });
+			};
+			const std::string program = R"(
+				array<int> xs;
+				for (int i = 0; i < 200; ++i) { xs.push(i); }
+				array<int> out;
+				for (int i = 0; i < 200; ++i) { out.push(0); }
+				parallel_for (int x : xs) {
+					Counter c;
+					c.bump();
+					c.bump();
+					c.v = c.v + x;
+					out[x] = c.value() + scale(x) + Counter::twice(x) + shared_counter().value();
+				}
+				int total = 0;
+				for (int v : out) { total += v; }
+				total;
+			)";
+			int64_t expected = 0;
+			for (int64_t x = 0; x < 200; ++x) { expected += (2 + x) + x * 3 + x * 2 + 5; }
+			for (bool vm : {false, true}) {
+				for (size_t workers : {size_t(1), size_t(8)}) {
+					auto e = make_engine();
+					jai::stdlib::register_all(*e);
+					e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					bind(*e);
+					e->parallel_thread_count(workers);
+					e->execution_budget(0);
+					std::string got;
+					try { got = std::to_string(e->execute(program).as_int()); } catch (const std::exception& ex) { got = std::string("error ") + ex.what(); }
+					check_eq(std::to_string(expected), got, std::string("host calls ") + (vm ? "vm " : "interp ") + std::to_string(workers));
+				}
+			}
+			struct refusal { const char* name; const char* source; const char* text; };
+			const refusal refusals[] = {
+				{ "serial function", "array<int> xs = [1, 2]; parallel_for (int x : xs) { log_it(x); }",
+				  "parallel_for: host function 'log_it' is marked serial_function() and cannot be called in a parallel body at 1:" },
+				{ "library builtin", "array<int> xs = [1, 2]; parallel_for (int x : xs) { print(x); }",
+				  "parallel_for: host function 'print' is marked serial_function() and cannot be called in a parallel body at 1:" },
+				{ "serial static method", "array<int> xs = [1, 2]; parallel_for (auto& x : xs) { x = Counter::halve(x); }",
+				  "parallel_for: C++ static method 'Counter::halve' is marked serial_static_method() and cannot be called in a parallel body at 1:" },
+				{ "writeback argument", "int g = 0; array<int> xs = [1, 2]; parallel_for (int x : xs) { fill(g); }",
+				  "parallel_for: argument passes enclosing state 'g' by reference (captured reads are read-only) at 1:" },
+				{ "serial method", "array<int> xs = [1, 2]; parallel_for (int x : xs) { Counter c; c.reset(); }",
+				  "C++ method 'reset' of 'Counter' is marked serial_method() and cannot be called in a parallel body" },
+				{ "non-const method on a shared object", "array<int> xs = [1, 2]; parallel_for (int x : xs) { var s = shared_counter(); s.bump(); }",
+				  "C++ method 'bump' of 'Counter' changes an object this parallel body did not make (only its const methods may run on it)" },
+				{ "property store on a shared object", "array<int> xs = [1, 2]; parallel_for (int x : xs) { var s = shared_counter(); s.v = x; }",
+				  "C++ property 'v' of 'Counter' is stored on an object this parallel body did not make (only an object it made takes stores)" },
+			};
+			for (const refusal& r : refusals) {
+				for (bool vm : {false, true}) {
+					auto e = make_engine();
+					jai::stdlib::register_all(*e);
+					e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					bind(*e);
+					e->parallel_thread_count(8);
+					std::string got = "no error";
+					try { e->execute(r.source); } catch (const std::exception& ex) { got = ex.what(); }
+					check_true(got.rfind(r.text, 0) == 0, std::string(r.name) + (vm ? " vm" : " interp") + ": expected '" + r.text + "', got '" + got + "'");
+				}
+			}
+			check_eq((int64_t)5, shared->v, "the shared object was never written");
+		});
+
+		test("the_binder_guide_s_parallel_call_sample_prints_what_the_page_shows", [this]() {
+			// docs/site/embedding/02-dynamic-binder.html#parallel-calls: the host sample the site runner skips
+			struct doc_meter {
+				double level = 0.0;
+				void add(double amount) { level += amount; }
+				double reading() const { return level; }
+				void publish() const {}
+			};
+			auto master = std::make_shared<doc_meter>();
+			master->level = 100.0;
+			const char* src = "array<float> xs = [1.0, 2.0, 3.0];\n"
+			                  "parallel_for (auto& x : xs) {\n"
+			                  "    Meter m;\n"
+			                  "    m.add(x * 10.0);                       // the worker's own object\n"
+			                  "    x = m.reading() + master().reading();  // a const method on the shared one\n"
+			                  "}\n"
+			                  "print(\"{}\", to_json(xs));\n"
+			                  "try { parallel_for (auto& x : xs) { var shared = master(); shared.add(1.0); } } catch (e) { print(e); }\n"
+			                  "try { parallel_for (auto& x : xs) { Meter m; m.publish(); } } catch (e) { print(e); }\n"
+			                  "try { parallel_for (auto& x : xs) { log_line(\"x\"); } } catch (e) { print(e); }\n";
+			const std::string expected =
+				"[110.0,120.0,130.0]\n"
+				"C++ method 'add' of 'Meter' changes an object this parallel body did not make (only its const methods may run on it)\n"
+				"C++ method 'publish' of 'Meter' is marked serial_method() and cannot be called in a parallel body\n"
+				"parallel_for: host function 'log_line' is marked serial_function() and cannot be called in a parallel body at 10:37\n";
+			for (bool vm : {false, true}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(*e);
+				e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				auto out = std::make_shared<std::ostringstream>();
+				e->set_output_stream(out);
+				jai::dynamic_binder<doc_meter>(*e, "Meter").constructor<>().method("add", &doc_meter::add).method("reading", &doc_meter::reading)
+					.method("publish", &doc_meter::publish).serial_method("publish").build();
+				e->add_function("master", [master]() { return master; });
+				e->add_function("log_line", [](const std::string&) {});
+				e->serial_function("log_line");
+				e->parallel_thread_count(8);
+				try { e->execute(src); } catch (const std::exception& ex) { *out << "threw: " << ex.what(); }
+				check_eq(expected, out->str(), vm ? "vm" : "interp");
+			}
+			check_eq(100.0, master->level, "the shared meter was never written");
 		});
 
 		test("own_class_method_call_mutates_its_element", [this]() {

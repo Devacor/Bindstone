@@ -461,6 +461,9 @@ struct engine::implementation {
     // Script layers of objects whose type carries no script_extensible slot, keyed by the
     // pointer stored in _cpp_object (internal/script_extensible.md D3).
     std::unordered_map<const void*, std::weak_ptr<class_instance>> script_layers_;
+    std::unordered_set<std::string> serial_functions_;
+    std::unordered_set<std::string> host_function_names_;
+    int library_registration_depth_ = 0;
     size_t script_layer_sweep_watermark_ = 64;
     // Layers of slotless objects extended through this engine: nothing else can own them,
     // so the engine does until script_layer_detach (the layer keeps its object alive).
@@ -1957,6 +1960,10 @@ std::vector<std::weak_ptr<class_instance>>* engine::parallel_pending_registratio
     return impl->parallel_->active_region->find_pending(std::this_thread::get_id());
 }
 
+uint32_t engine::parallel_region_serial() const {
+    return impl->parallel_ && impl->parallel_->active_region ? impl->parallel_->region_serial : 0;
+}
+
 execution_backend* engine::region_chunk_backend() const {
     if (impl->parallel_ && impl->parallel_->active_region) {
         if (const auto* chunk = impl->parallel_->active_region->find_entry(std::this_thread::get_id()); chunk && chunk->backend) {
@@ -2241,6 +2248,7 @@ int engine::select_cpp_overload(const std::vector<script_value>& args,
 }
 
 void engine::initialize_engine_reference() {
+    library_registration library(*this);
     // Pass the engine reference to the conversion registry
     impl->conversions->set_engine(this);
 
@@ -3190,6 +3198,8 @@ void engine::add_global(const std::string& name, script_value value, bool is_ser
     ++impl->check_surface_epoch_;   // the static checker can see globals
     // Intern the name and get a stable string_view for tracking
     uint64_t id = impl->string_symbolizer_.intern(name);
+    if (value.is_function()) { impl->host_function_names_.insert(name); }
+    if (impl->library_registration_depth_ > 0 && value.is_function() && !detail::parallel_pure_function(name)) { impl->serial_functions_.insert(name); }
     impl->global_environment_->define(id, std::move(value));
     ++impl->definition_epoch_;
     impl->refresh_operator_entry(name);
@@ -3260,8 +3270,35 @@ bool engine::host_function_result(const std::string& name, script_value_type& ou
     return true;
 }
 
+void engine::serial_function(const std::string& name) { impl->serial_functions_.insert(name); }
+
+bool engine::host_function_serial(const std::string& name) const { return impl->serial_functions_.count(name) != 0; }
+
+bool engine::host_function_registered(const std::string& name) const { return impl->host_function_names_.count(name) != 0; }
+
+uint64_t engine::host_function_writeback(const std::string& name) const {
+    uint64_t result = 0;
+    auto mask_of = [](const script_value& fn) -> uint64_t {
+        if (!fn.is_function()) { return 0; }
+        const auto* w = fn.as_function().target<host_writeback_function>();
+        return w ? w->mask : 0;
+    };
+    if (auto it = impl->overloadedFunctions.find(name); it != impl->overloadedFunctions.end()) {
+        for (const auto& o : it->second.overloads) { result |= mask_of(o.function); }
+        return result;
+    }
+    if (auto global = impl->global_environment_->get(name); global) { result |= mask_of(global.value()); }
+    return result;
+}
+
+engine::library_registration::library_registration(engine& a_engine) : eng(a_engine) { ++eng.impl->library_registration_depth_; }
+
+engine::library_registration::~library_registration() { --eng.impl->library_registration_depth_; }
+
 void engine::register_overload_impl(const std::string& name, size_t arity, script_function func,
                                     const std::vector<param_type_info>& paramTypes, bool createSetOnFirst) {
+    impl->host_function_names_.insert(name);
+    if (impl->library_registration_depth_ > 0 && !detail::parallel_pure_function(name)) { impl->serial_functions_.insert(name); }
     ++impl->check_surface_epoch_;   // the static checker can see registered functions
     const script_value_type result = impl->staged_host_result_;
     impl->staged_host_result_ = script_value_type::jai_null_type;

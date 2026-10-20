@@ -186,7 +186,7 @@ JaiScript/
 ├── tools/
 │   ├── jaiscript/          The runner / REPL
 │   ├── lsp/                The language server
-│   ├── ci/                 The CI gates (gates.sh)
+│   ├── ci/                 The CI gates (gates.sh), the targeted and battery tiers, the timing lock
 │   └── vscode-jaiscript/   The VS Code extension (syntax, debugging)
 ├── examples/               GLOOM and its idiomatic rewrite, GRUBWELL, the demoreel, Gator Quest, JaiDoom, embed_quickstart
 └── docs/                   This directory, and the documentation site under docs/site/

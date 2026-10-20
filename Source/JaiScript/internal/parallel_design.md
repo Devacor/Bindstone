@@ -214,8 +214,11 @@ script-layer map at the join (`pending_script_layers`). C++ calls are parallel u
 under `engine::library_registration` unless `parallel_pure_function`). A free function or static method
 refuses at admission; a method's class is a runtime fact, so every class whose chain binds a called name
 in C++ gets a worker pin (a copy of the bound value), and a serial one's pin raises when called. Receiver
-safety follows constness: a non-const method or property store runs only on an instance whose
-`region_tag` is this region's (a constructor's or copy's object made on this chunk), a const one on any.
+safety follows constness, per overload by arity (`class_definition::host_overloads`): a non-const one or a property
+store runs only on an instance whose `region_tag` is this region's (a range or zipped element, or a reduce accumulator,
+the element proof found backed by a C++ object it proved the only element of; or a constructor's or copy's object made on
+this chunk), a const one on any. A method's serial mark covers its non-const overloads unless it says
+`serial_overloads::every`.
 A serial-only chain's C++ object that dies on a chunk anyway
 (`class_instance::defer_serial_native`) waits in the chunk's `deferred_releases`; the join releases them on the calling
 thread by element, then in death order (`release_deferred_in_order`). Each worker gets a constructor value of its own for every

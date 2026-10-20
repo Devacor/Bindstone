@@ -2912,7 +2912,7 @@ public:
 				auto out = std::make_shared<std::ostringstream>();
 				e->set_output_stream(out);
 				jai::dynamic_binder<doc_meter>(*e, "Meter").constructor<>().method("add", &doc_meter::add).method("reading", &doc_meter::reading)
-					.method("publish", &doc_meter::publish).serial_method("publish").build();
+					.method("publish", &doc_meter::publish).serial_method("publish", serial_overloads::every).build();
 				e->add_function("master", [master]() { return master; });
 				e->add_function("log_line", [](const std::string&) {});
 				e->serial_function("log_line");
@@ -2921,6 +2921,81 @@ public:
 				check_eq(expected, out->str(), vm ? "vm" : "interp");
 			}
 			check_eq(100.0, master->level, "the shared meter was never written");
+		});
+
+		test("elements_are_their_chunks_own_receivers_and_marks_cover_non_const_overloads", [this]() {
+			// A parallel_for element (and a zipped one, and a parallel_reduce accumulator) the distinctness check proved the only one
+			// of its C++ object takes non-const methods and property stores; a serial mark covers a name's non-const overloads unless
+			// it says every one
+			struct host_unit {
+				int64_t hp = 10;
+				void update(int64_t by) { hp += by; }
+				int64_t level() const { return hp; }
+				void level(int64_t value) { hp = value; }
+				int64_t label() const { return 1; }
+			};
+			auto bind = [](jai::engine& e) {
+				dynamic_binder<host_unit>(e, "Unit").constructor<>()
+					.method("update", &host_unit::update)
+					.method("level", static_cast<int64_t(host_unit::*)() const>(&host_unit::level))
+					.method("level", static_cast<void(host_unit::*)(int64_t)>(&host_unit::level))
+					.method("label", &host_unit::label)
+					.serial_method("level").serial_method("label", serial_overloads::every)
+					.property("hp", &host_unit::hp).build();
+			};
+			const std::string program = R"(
+				array<shared_ptr<Unit>> handles;
+				array<Unit> units;
+				array<int> ids;
+				for (int i = 0; i < 300; ++i) { shared_ptr<Unit> u = new Unit(); handles.push(u); units.push(Unit()); ids.push(i); }
+				parallel_for (auto& h, auto& u, int i : handles, units, ids) {
+					h.update(i);
+					u.hp = u.hp + h.level() + i;
+				}
+				Unit summed = parallel_reduce(ids, Unit(), [](Unit& acc, int i) { acc.update(i); }, [](Unit a, Unit b) -> Unit { a.hp = a.hp + b.hp; return a; });
+				int total = summed.hp;
+				for (auto& h : handles) { total += h.hp; }
+				for (auto& u : units) { total += u.hp; }
+				total;
+			)";
+			int64_t expected = 0;
+			const int64_t chunks = (300 + 15) / 16;   // the reduce's chunk count at 300 elements: one init per chunk
+			expected += 10 * chunks + 299 * 300 / 2;
+			for (int64_t i = 0; i < 300; ++i) { expected += (10 + i) + (10 + (10 + i) + i); }
+			for (bool vm : {false, true}) {
+				for (size_t workers : {size_t(1), size_t(8)}) {
+					auto e = make_engine();
+					jai::stdlib::register_all(*e);
+					e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					bind(*e);
+					e->parallel_thread_count(workers);
+					e->execution_budget(0);
+					std::string got;
+					try { got = std::to_string(e->execute(program).as_int()); } catch (const std::exception& ex) { got = std::string("error ") + ex.what(); }
+					check_eq(std::to_string(expected), got, std::string("element receivers ") + (vm ? "vm " : "interp ") + std::to_string(workers));
+				}
+			}
+			struct refusal { const char* name; const char* source; const char* text; };
+			const refusal refusals[] = {
+				{ "the non-const overload of a marked name", "array<Unit> us = [Unit(), Unit()]; parallel_for (auto& u : us) { u.level(3); }",
+				  "C++ method 'level' of 'Unit' is marked serial_method() and cannot be called in a parallel body" },
+				{ "a const overload marked every", "array<Unit> us = [Unit(), Unit()]; array<int> out = [0, 0]; parallel_for (auto& u, auto& o : us, out) { o = u.label(); }",
+				  "C++ method 'label' of 'Unit' is marked serial_method() and cannot be called in a parallel body" },
+				{ "one object at two elements", "shared_ptr<Unit> u = new Unit(); array<shared_ptr<Unit>> us = [u, u]; parallel_for (auto& x : us) { x.update(1); }",
+				  "parallel_for: elements 0 and 1 hold the same object" },
+			};
+			for (const refusal& r : refusals) {
+				for (bool vm : {false, true}) {
+					auto e = make_engine();
+					jai::stdlib::register_all(*e);
+					e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					bind(*e);
+					e->parallel_thread_count(8);
+					std::string got = "no error";
+					try { e->execute(r.source); } catch (const std::exception& ex) { got = ex.what(); }
+					check_true(got.rfind(r.text, 0) == 0, std::string(r.name) + (vm ? " vm" : " interp") + ": expected '" + r.text + "', got '" + got + "'");
+				}
+			}
 		});
 
 		test("own_class_method_call_mutates_its_element", [this]() {

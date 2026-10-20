@@ -17,6 +17,10 @@
 
 namespace jai {
 
+// Which overloads of a method dynamic_binder::serial_method marks: the non-const ones (a const getter of the same name stays
+// parallel), or every one (a const overload that still touches shared state)
+enum class serial_overloads : uint8_t { non_const, every };
+
 namespace detail {
 struct fault_injection;
 struct host_member_lane;
@@ -1049,14 +1053,22 @@ public:
     // A host class whose constructor or destructor touches state other objects share (a registry, a cache, a service): a
     // parallel body may not construct it, nor any script class over it (dynamic_binder::serial_only_constructor)
     // A host method or static method that touches state other objects share (dynamic_binder::serial_method,
-    // serial_static_method): a parallel body may not call it
-    void mark_serial_method(uint64_t name_id) { serial_methods_.insert(name_id); }
-    bool serial_method(uint64_t name_id) const { return serial_methods_.count(name_id) != 0; }
+    // serial_static_method): a parallel body may not call it. A method's mark covers its non-const overloads, or every one
+    void mark_serial_method(uint64_t name_id, serial_overloads which) { serial_methods_[name_id] = which; }
+    const serial_overloads* serial_method(uint64_t name_id) const {
+        const auto found = serial_methods_.find(name_id);
+        return found != serial_methods_.end() ? &found->second : nullptr;
+    }
     void mark_serial_static_method(uint64_t name_id) { serial_static_methods_.insert(name_id); }
     bool serial_static_method(uint64_t name_id) const { return serial_static_methods_.count(name_id) != 0; }
-    // A host method with an overload over a non-const receiver (a non-const member function, a T& self, a property setter)
-    void note_mutating_method(uint64_t name_id) { mutating_methods_.insert(name_id); }
-    bool mutating_method(uint64_t name_id) const { return mutating_methods_.count(name_id) != 0; }
+    // A bound host method's overloads by script arity, and whether each takes a const receiver (a const member function, a
+    // const T& self): a parallel chunk runs a non-const one only over an object it owns
+    struct host_overload { size_t arity = 0; bool is_const = false; };
+    void note_host_overload(uint64_t name_id, size_t arity, bool is_const) { host_overloads_[name_id].push_back({ arity, is_const }); }
+    const std::vector<host_overload>* host_overloads(uint64_t name_id) const {
+        const auto found = host_overloads_.find(name_id);
+        return found != host_overloads_.end() ? &found->second : nullptr;
+    }
     void serial_only_construction(bool value) { serial_only_construction_ = value; }
     bool serial_only_construction() const { return serial_only_construction_; }
     bool serial_only_chain() const {
@@ -1256,9 +1268,9 @@ private:
     copy_function copy_function_;
     bool nocopy_ = false;
     bool serial_only_construction_ = false;
-    std::unordered_set<uint64_t> serial_methods_;
+    std::unordered_map<uint64_t, serial_overloads> serial_methods_;
     std::unordered_set<uint64_t> serial_static_methods_;
-    std::unordered_set<uint64_t> mutating_methods_;
+    std::unordered_map<uint64_t, std::vector<host_overload>> host_overloads_;
     mutable bool nocopy_memo_ = false;
     mutable uint64_t nocopy_memo_epoch_ = 0;
 

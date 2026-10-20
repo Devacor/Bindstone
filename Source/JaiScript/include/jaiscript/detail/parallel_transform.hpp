@@ -218,8 +218,10 @@ namespace jai::detail {
     struct parallel_method_pin {
         script_value method_value{std::monostate{}, nullptr};
         std::shared_ptr<function_decl> resolved;   // null: a host method (or accessor), called with its receiver first
-        bool mutating = false;                     // a host method over a non-const receiver: only an object the chunk made
-        bool serial = false;                       // marked serial_method(): its call raises the refusal
+        // By argument count (a bit each, the last for 63 and more): the overloads over a non-const receiver, which run only on
+        // an object the chunk owns, and those marked serial_method(), whose call raises the refusal
+        uint64_t mutating_arities = 0;
+        uint64_t serial_arities = 0;
     };
 
     // (class_definition*, method name id) -> pin. Consulted by both backends' worker

@@ -3339,6 +3339,41 @@ namespace {
 
 	bool normalize_element_inplace(script_value& v, engine& eng, reach_filter reach = {}, bool unreferenced_array = false, const class_definition* string_free_class = nullptr, std::vector<type_info*>* types = nullptr, const void** shared_key = nullptr);
 
+	// An element backed by a C++ object (a bound class's instance, or a script class over one) whose script fields hold values
+	// only: the distinctness check proves it the only element of its C++ object, which makes it the running chunk's own
+	bool host_backed_element(const class_instance& inst, const class_definition& cd) {
+		if (cd.is_script_class() && !cd.find_cpp_base_class()) { return false; }
+		if (!inst.native()) { return false; }
+		std::vector<const class_definition*> levels{ &cd };
+		while (!levels.empty()) {
+			const class_definition* level = levels.back();
+			levels.pop_back();
+			if (level->is_script_class()) {
+				for (const uint32_t slot : level->handle_bearing_slots()) {
+					const type_info_ptr t = level->get_field_declared_type(level->slot_field(slot));
+					if (!t) { return false; }
+					switch (t->base_type) {
+					case script_value_type::jai_string_type: case script_value_type::jai_array_type: case script_value_type::jai_map_type:
+						break;
+					default:
+						if (!level->slot_is_cpp_property(slot)) { return false; }
+					}
+				}
+			}
+			for (const auto& parent : level->get_parent_classes()) { if (parent) { levels.push_back(parent.get()); } }
+		}
+		return true;
+	}
+	// The identity two elements of one C++ object share: the object itself
+	const void* element_object_key(const class_instance& inst) {
+		const script_value* native = inst.native();
+		if (native) {
+			const auto holder = native->get_object_holder();
+			if (holder) { return holder->data ? holder->data.get() : holder->bound_ptr; }
+		}
+		return &inst;
+	}
+
 	// The slots of an instance whose declared type can reach a refcount, and its runtime-added fields
 	bool normalize_instance_fields(class_instance* inst, const class_definition* cd, engine& eng, const reach_filter& reach, bool unreferenced_array, std::vector<type_info*>* types) {
 		for (const uint32_t slot : cd->handle_bearing_slots()) {
@@ -3454,6 +3489,11 @@ namespace {
 			}
 			auto* inst = static_cast<class_instance*>(handle->data.get());
 			const class_definition* cd = inst->get_class_definition();
+			if (cd && shared_key && host_backed_element(*inst, *cd)) {
+				*shared_key = element_object_key(*inst);
+				inst->region_tag(eng.parallel_state().region_serial);
+				return normalize_instance_fields(inst, cd, eng, reach, false, types);
+			}
 			if (!cd || !cd->flat_value_semantics()) {
 				return false;
 			}
@@ -3505,6 +3545,11 @@ namespace {
 			if (!locked->is_class_instance_wrapper || !locked->data) { return false; }
 			auto* inst = static_cast<class_instance*>(locked->data.get());
 			const class_definition* cd = inst->get_class_definition();
+			if (cd && host_backed_element(*inst, *cd)) {
+				*shared_key = element_object_key(*inst);
+				inst->region_tag(eng.parallel_state().region_serial);
+				return normalize_instance_fields(inst, cd, eng, reach, false, types);
+			}
 			if (!cd || !cd->flat_value_semantics()) { return false; }
 			*shared_key = locked->data.get();
 			return normalize_instance_fields(inst, cd, eng, reach, false, types);
@@ -3953,11 +3998,12 @@ checked_result<script_value> call_parallel_host_pin(const parallel_method_pin& p
 		}
 	}
 	const uint64_t type_id = cls ? cls->get_type_id() : 0;
-	if (pin.serial) {
+	const uint64_t arity_bit = uint64_t(1) << std::min<size_t>(args.size(), 63);
+	if (pin.serial_arities & arity_bit) {
 		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
 			"C++ method '{0}' of '{1}' is marked serial_method() and cannot be called in a parallel body", name_id, type_id);
 	}
-	if (pin.mutating && !(inst && inst->region_tag() != 0 && inst->region_tag() == eng->parallel_region_serial())) {
+	if ((pin.mutating_arities & arity_bit) && !(inst && inst->region_tag() != 0 && inst->region_tag() == eng->parallel_region_serial())) {
 		if (property) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
 				"C++ property '{0}' of '{1}' is stored on an object this parallel body did not make (only an object it made takes stores)", name_id, type_id);
@@ -4026,6 +4072,7 @@ struct region_plan {
 checked_result<void> run_region(engine& eng, region_plan& plan) {
 	parallel_engine_state& state = eng.parallel_state();
 	recover_pending_registrations(state);
+	if (++state.region_serial == 0) { state.region_serial = 1; }   // what this region's elements and chunks own carries it
 	const std::string_view prefix = plan.prefix;
 	auto raise = [&state](std::error_code code, std::string message) {
 		state.error_text = std::move(message);
@@ -4655,8 +4702,16 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			detail::parallel_method_pin pin;
 			pin.method_value = script_value::make_function(script_function(shared_method.as_function()), &eng);
 			const std::string_view name = eng.get_symbolizer()->get_string(host.name_id);
-			pin.mutating = host.owner->mutating_method(host.name_id) || name.starts_with("_set_");
-			pin.serial = host.owner->serial_method(host.name_id);
+			if (const auto* overloads = host.owner->host_overloads(host.name_id)) {
+				for (const auto& overload : *overloads) {
+					if (!overload.is_const) { pin.mutating_arities |= uint64_t(1) << std::min<size_t>(overload.arity, 63); }
+				}
+			} else if (name.starts_with("_set_")) {
+				pin.mutating_arities = ~uint64_t(0);
+			}
+			if (const serial_overloads* marked = host.owner->serial_method(host.name_id)) {
+				pin.serial_arities = *marked == serial_overloads::every || !host.owner->host_overloads(host.name_id) ? ~uint64_t(0) : pin.mutating_arities;
+			}
 			slot->method_pins.entries.push_back({ host.cls, host.name_id, std::move(pin) });
 		}
 		slot->method_pins.statics.clear();
@@ -4797,7 +4852,6 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	region_guard.prepared = true;
 	// The interner freezes in every mode: it is not thread-safe, and unsafe mode vouches for
 	// the script's sharing, not for the runtime's tables (a miss asserts in Debug, the tripwire)
-	if (++state.region_serial == 0) { state.region_serial = 1; }
 	region_guard.activate(true);
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t1 = __rdtsc();

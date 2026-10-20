@@ -686,8 +686,8 @@ public:
     }
     // The method (every overload of the name) touches state other objects share: a parallel body may not call it. Every other
     // bound method is taken to be safe on any thread, a non-const one only over an object the calling chunk made.
-    dynamic_binder& serial_method(const std::string& name) {
-        class_def_->mark_serial_method(engine_.symbolize(name));
+    dynamic_binder& serial_method(const std::string& name, serial_overloads which = serial_overloads::non_const) {
+        class_def_->mark_serial_method(engine_.symbolize(name), which);
         return *this;
     }
     // The static method touches state other objects share: a parallel body may not call it
@@ -862,7 +862,7 @@ public:
         // parameter signature so same-arity overloads (e.g. set(float...) vs set(int...)) resolve
         // by argument type instead of the last registration silently winning.
         const bool unguarded = lane_unguarded(required);
-        if constexpr (!IsConst) { class_def_->note_mutating_method(engine_.symbolize(name)); }
+        class_def_->note_host_overload(engine_.symbolize(name), sizeof...(Args), IsConst);
         class_def_->add_method(name, writeback_tagged<writeback>(engine_.guard_function(detail::host_method_call{ &member_method_call<IsConst, R, Method, Args...>, state }, std::move(required))), sizeof...(Args),
             std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... }, result_info<R>());
         if constexpr (lane_result<R>() && (lane_param<Args>() && ...)) {
@@ -923,7 +923,7 @@ public:
                     detail::callable_call_state<CallableType>{ std::forward<Callable>(callable), &engine_, class_def_->get_type_id() });
             }
             const bool lane = lane_shaped && lane_unguarded(required);
-            if constexpr (std::is_same_v<std::tuple_element_t<0, args_tuple>, T&>) { class_def_->note_mutating_method(engine_.symbolize(name)); }
+            class_def_->note_host_overload(engine_.symbolize(name), script_arity, !std::is_same_v<std::tuple_element_t<0, args_tuple>, T&>);
 
             // the C++ parameter signature after the self parameter, so same-arity lambda overloads resolve by argument type
             class_def_->add_method(name, writeback_tagged<writeback>(engine_.guard_function(detail::host_method_call{ &callable_method_call<R, args_tuple, CallableType>, state }, std::move(required))), script_arity,

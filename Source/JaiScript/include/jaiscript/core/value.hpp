@@ -306,7 +306,10 @@ namespace detail {
         // region. Borrows are region-internal: the store kernel (clone_for_assignment)
         // and the region's result path materialize them via the silent deep clone, so no
         // borrow survives the join. `source` must be a (deref'd) array or map.
-        static script_value make_parallel_borrow(const script_value& source, engine* eng);
+        // A sliced borrow (an array only) hands out its elements' own handles: the region proved every element exclusive and
+        // reads each one from a single worker (parallel_reduce's input, read chunk by chunk)
+        static script_value make_parallel_borrow(const script_value& source, engine* eng, bool sliced = false);
+        bool is_sliced_parallel_borrow() const noexcept;
         // Viewed container accessors (nullptr when the borrow is of the other kind).
         // Arrays hand back the NODE (its address is the identity; callers dispatch on its kind).
         const script_array* parallel_borrow_array() const noexcept;
@@ -2180,13 +2183,15 @@ namespace detail {
         // Parallel captured-read borrow payload (variant alternative 15): ONE tagged raw
         // pointer to an engine-owned container that a parallel region proved read-only.
         // Trivially copyable ON PURPOSE - copying a borrow must never touch a refcount
-        // (see make_parallel_borrow). Low bit = kind (0 array, 1 map); container
-        // allocations are 8+ aligned so the bit is free.
+        // (see make_parallel_borrow). Low bit = kind (0 array, 1 map), the next = sliced; container
+        // allocations are 8+ aligned so the bits are free.
         struct parallel_borrow_tag {
             uintptr_t bits = 0;
             static constexpr uintptr_t k_map_bit = 1;
-            const void* pointer() const noexcept { return reinterpret_cast<const void*>(bits & ~k_map_bit); }
+            static constexpr uintptr_t k_sliced_bit = 2;
+            const void* pointer() const noexcept { return reinterpret_cast<const void*>(bits & ~(k_map_bit | k_sliced_bit)); }
             bool is_map_kind() const noexcept { return (bits & k_map_bit) != 0; }
+            bool is_sliced() const noexcept { return (bits & k_sliced_bit) != 0; }
         };
 
         // Variant indices for ultra-fast unchecked access

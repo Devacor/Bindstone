@@ -200,6 +200,30 @@ function par(int n) -> string { array<Body> bs = fill(n); parallel_for (auto& b 
 0;)JAI", "par(300) == serial(300);", "par(300) == serial(300);" },
 				"0|true|true|", "field stores");
 		});
+
+		test("parallel_reduce_folds_class_instances_through_the_element_proof", [this]() {
+			same_everywhere({ R"JAI(
+class V2 {
+	float x = 0.0; float y = 0.0;
+	V2 operator+(V2 o) { V2 r; r.x = x + o.x; r.y = y + o.y; return r; }
+}
+class Body {
+	V2 p; int mass = 1; string tag = "";
+	function weight() -> int { return mass * 2 + tag.size(); }
+}
+function fill(int n) -> array<Body> { array<Body> bs = []; for (int i = 0; i < n; ++i) { Body b = Body(); b.p.x = i % 7; b.p.y = i % 3; b.mass = i % 11; b.tag = "t" + (i % 5); bs.push(b); } return bs; }
+function step_w(int acc, Body b) -> int { return acc + b.weight() + b.mass; }
+function add(int a, int b) -> int { return a + b; }
+function step_v(V2 acc, Body b) -> V2 { return acc + b.p; }
+function join(V2 a, V2 b) -> V2 { return a + b; }
+function serial(int n) -> string { array<Body> bs = fill(n); int w = 0; V2 v; for (auto& b : bs) { w = step_w(w, b); v = step_v(v, b); } return to_string(w) + " " + to_string(v.x) + " " + to_string(v.y); }
+function par(int n) -> string { array<Body> bs = fill(n); V2 zero; V2 v = parallel_reduce(bs, zero, step_v, join); return to_string(parallel_reduce(bs, 0, step_w, add)) + " " + to_string(v.x) + " " + to_string(v.y); }
+function untyped(int n) -> int { var bs = []; for (int i = 0; i < n; ++i) { Body b = Body(); b.mass = i; bs.push(b); } return parallel_reduce(bs, 0, [](int acc, var b) -> int { return acc + b.mass; }, add); }
+function aliased() -> string { var hs = []; shared_ptr<Body> h = new Body(); for (int i = 0; i < 40; ++i) { hs.push(h); } try { parallel_reduce(hs, 0, [](int acc, var b) -> int { return acc + 1; }, add); } catch (err) { return err; } return "ran"; }
+0;)JAI", "par(900) == serial(900);", "untyped(500);", "aliased();" },
+				"0|true|124750|parallel_reduce: input elements 0 and 1 hold the same object (an object the step reaches through a handle element belongs to one element)|",
+				"reduce over objects");
+		});
 	}
 };
 

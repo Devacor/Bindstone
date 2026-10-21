@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parallel Loops &mdash; JaiScript Guide</title>
+<meta name="description" content="parallel_for, parallel_transform and parallel_reduce: what a parallel body may and may not do, the zip form, captured reads, index writes, constructing objects, C++ calls, and reductions that are bit-identical at every worker count.">
+<meta name="theme-color" content="#0b0d13" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JaiScript docs">
+<meta property="og:title" content="Parallel Loops &mdash; JaiScript Guide">
+<meta property="og:description" content="parallel_for, parallel_transform and parallel_reduce: what a parallel body may and may not do, the zip form, captured reads, index writes, constructing objects, C++ calls, and reductions that are bit-identical at every worker count.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&amp;family=Chakra+Petch:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">{*}</span>JaiScript<span class="brand-sub">docs</span></a>
+<nav class="site-nav" aria-label="Sections"><a href="../tour/index.html">Tour</a><a href="../bridges/index.html">Bridges</a><a href="../guide/index.html" class="active" aria-current="page">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
+<div class="header-tools">
+<div class="search" role="search"><input id="search-box" type="search" placeholder="Search docs&hellip;" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
+<button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Guide</summary><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li><li><a href="../guide/13-strict-checking.html">Types That Fail Early: strict checking</a></li><li><a href="../guide/14-time.html">Time: Clocks, Stopwatches &amp; Dates</a></li><li><a href="../guide/15-math.html">Math: Vectors &amp; Colors</a></li><li class="current"><a href="../guide/16-parallel.html" aria-current="page">Parallel Loops</a><ol class="page-toc" data-page-toc></ol></li></ol></details></aside>
+<main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Guide</a><span class="sep" aria-hidden="true">/</span>16</nav>
+<article class="chapter"><h1 id="parallel-loops">Parallel Loops<a class="hlink" href="#parallel-loops" aria-label="link">&#8203;</a></h1>
+<p><code>parallel_for</code>, <code>parallel_transform</code> and <code>parallel_reduce</code> run a loop over an array on every core with <strong>deterministic results</strong>: the same output at every thread count, byte-identical to the serial loop. The engine checks the body when the statement is reached, before any element runs, and a body it cannot prove safe is refused with a catchable error that names the construct; it is never run serially in silence. The table below is that contract, and the rest of the chapter walks through each form.</p>
+<h2 id="what-a-body-may-do">What a parallel body may do<a class="hlink" href="#what-a-body-may-do" aria-label="link">&#8203;</a></h2>
+<p>A text that starts with <code>parallel_for:</code> is raised when the statement is reached, before any element runs; most of them end with the position of the construct, <code>at LINE:COL</code>, left off here. <code>parallel_transform</code> and <code>parallel_reduce</code> raise the same texts under their own names. A text without the prefix is raised when the body runs the construct, because only then is the receiver known. The rules cover everything a body reaches: the functions it calls, the methods it runs and the constructors and destructors of the objects it makes.</p>
+<div class="tablewrap"><table><thead><tr><th>In a body</th><th>Rule</th><th>Refused with</th></tr></thead><tbody>
+<tr><td>Element writes</td><td>Allowed through the loop variables: <code>auto&amp;</code> changes the element in place, a by-value loop variable is the body&#x27;s own copy. Each element must be provably owned by one iteration: a primitive, a string, a value container, an instance of a flat value class (typed fields holding values, no handles) or a handle to an object no other element names.</td><td><code>parallel_for: element 0 cannot be proven exclusive (only value-semantic shapes are: primitives, strings, value containers, flat value-class instances and distinct handles to them)</code> · <code>parallel_for: zipped array 2 element 0 cannot be proven exclusive</code> · <code>parallel_transform: element 0: value is not value-semantic (object)</code></td></tr>
+<tr><td>Handle elements</td><td>An array of <code>shared_ptr</code> or <code>weak_ptr</code> elements runs when no object appears at two elements of the range and its zipped arrays (<a href="#handles-as-elements">below</a>).</td><td><code>parallel_for: elements 0 and 3 hold the same object (an object a body reaches through a handle element belongs to one element)</code></td></tr>
+<tr><td>The range and zipped arrays</td><td>The range is an array, and every zipped array is a separate array with the range&#x27;s length (<a href="#the-zip-form">below</a>).</td><td><code>parallel_for: zipped array 2 has 1 elements, the range has 3 (zipped arrays must have the same length)</code> · <code>parallel_for: zipped array 2 is the range itself</code> · <code>parallel_for: zipped array 2 is not an array</code> · <code>parallel_for: can only iterate an array</code></td></tr>
+<tr><td>Index writes</td><td><code>out[i] = v</code> (and <code>op=</code>, <code>++</code>, <code>--</code>) into an enclosing array, where <code>i</code> is a loop variable the body never writes and every element carries a different index. The body touches <code>out</code> only as <code>out[i]</code> (<a href="#index-writes">below</a>).</td><td><code>parallel_for: elements 2 and 5 write 'out' at the same index 4</code> · <code>parallel_for: body touches 'out' beyond the slot it writes, out[i]</code> · <code>parallel_for: body writes enclosing state 'out' at an index the body changes</code> · <code>parallel_for: captured name 'out' is written at an index but is not an array</code></td></tr>
+<tr><td>Reductions</td><td><code>parallel_reduce(xs, init, step, combine)</code> folds each chunk into its own accumulator. <code>step</code> follows the body rules, takes its element by value and may take its accumulator by reference; <code>step</code> and <code>combine</code> are script functions or lambdas of two parameters (<a href="#reductions">below</a>).</td><td><code>parallel_reduce: step must take two parameters (acc, x)</code> (<code>combine must take two parameters (a, b)</code> alike) · <code>parallel_reduce: step must be a script function or lambda</code> · <code>parallel_reduce: step takes its element by value (the elements are the input's, never written)</code></td></tr>
+<tr><td><code>parallel_transform</code>&#x27;s functions</td><td><code>fn</code> is a script function or lambda that takes its element by value; the optional <code>weight_fn</code> takes one parameter by value and returns a finite, non-negative number.</td><td><code>parallel_transform: fn must be a script-defined function</code> · <code>parallel_transform: fn may not take its element by reference (elements are detached copies)</code> · <code>parallel_transform: weight_fn must take exactly one parameter by value</code> · <code>parallel_transform: weight_fn must return a finite non-negative number (element 0)</code></td></tr>
+<tr><td>Captured reads</td><td>Allowed: the body reads enclosing scalars, strings, arrays and maps as they were when the statement was reached, the same at every worker count (<a href="#captured-reads">below</a>). The read-only builtins run on them: <code>size</code>, <code>empty</code>, <code>front</code>, <code>back</code>, <code>index_of</code>, <code>has</code>, <code>contains</code>, <code>first</code>, <code>last</code>, <code>length</code>, <code>slice</code>, <code>join</code>, <code>keys</code>, <code>values</code>, <code>get</code>, <code>to_array</code>, <code>at</code>, <code>substr</code> and the <code>find</code> family. A subscript read of the range&#x27;s own array would race the element writes.</td><td><code>parallel_for: method 'push' may mutate captured state 'g'</code> · <code>parallel_for: captured name 'xs' is the container being mutated (reads through it would race the element writes)</code></td></tr>
+<tr><td>Writes to enclosing state</td><td>Refused in every shape other than the index write: assignment, compound assignment, <code>++</code>/<code>--</code>, a mutating method, a reference that aliases it, a by-reference argument and a by-reference loop over it.</td><td><code>parallel_for: body writes enclosing state 'total'</code> · <code>parallel_for: reference declaration would alias enclosing state 'g' (captured reads are read-only)</code> · <code>parallel_for: argument passes enclosing state 'g' by reference (captured reads are read-only)</code> · <code>parallel_for: cannot iterate captured state 'g' by reference in a parallel body (captured reads are read-only)</code></td></tr>
+<tr><td>Objects</td><td>A body cannot capture an object, a handle or a bound host object. An object reaches a body as its element, or the body makes it. <code>this</code> exists only inside a method the body runs.</td><td><code>parallel_for: member access reaches captured state 'cfg' (captured reads are read-only, and objects cannot be captured)</code> (<code>member store</code> alike) · <code>parallel_for: captured name 'cfg' is not value-semantic (object/shared_ptr/weak_ptr)</code> · <code>parallel_for: captured name 'cfg' is not value-semantic (bound host object)</code> · <code>parallel_for: 'this' is not allowed in a parallel body</code></td></tr>
+<tr><td>Constructing script classes</td><td>Allowed in every spelling: <code>Hit(r, d)</code>, <code>Hit h(r, d);</code>, <code>Hit h;</code>, <code>new Hit(r, d)</code>. The new object belongs to the worker that made it; every constructor, base constructor, field initializer and destructor the construction can run follows the body rules (<a href="#constructing-objects">below</a>).</td><td><code>parallel_for: body writes enclosing state 'next_id' in the constructor of 'Tick'</code> (<code>in a field initializer of 'Tag'</code> and <code>in the destructor of 'Res'</code> alike)</td></tr>
+<tr><td>Constructing C++ classes</td><td>Allowed, a script class over one included, unless the host bound it with <code>serial_only_constructor()</code> (<a href="#cpp-classes-and-hybrids">below</a>).</td><td><code>parallel_for: C++ class 'Sprite' is marked serial_only_constructor() and cannot be constructed in a parallel body</code> · <code>parallel_for: class 'Glowing' has a C++ base 'Sprite' marked serial_only_constructor() and cannot be constructed in a parallel body</code></td></tr>
+<tr><td>Script class methods</td><td>A method runs when it is the only overload of its name, defined on the element&#x27;s own class, the class has no private members and the method body follows the body rules. Inside it a sibling method is called as <code>this.name()</code>. A method of an object reached through a field is not admitted.</td><td><code>parallel_for: method 'bump' on class 'W' is not admitted in a parallel body (only single-overload methods defined on the element's own class)</code> · <code>parallel_for: class 'Pv' has non-public members — its methods are not admitted in a parallel body</code> · <code>parallel_for: method 'inner' must be called as 'this.inner()' in a parallel body (bare sibling calls are not admitted, v1)</code> · <code>method 'read' was not admitted in this parallel body (admitted: single-overload public methods on the element's own class touching only element, local, or captured-read state)</code></td></tr>
+<tr><td>Accessors, operators, class changes</td><td>A user getter or setter, a class&#x27;s own operator, and an assignment that changes an object&#x27;s class are refused when they run.</td><td><code>only direct field access on class instances is allowed in a parallel body</code> · <code>only direct field stores on class instances are allowed in a parallel body</code> · <code>custom operator dispatch on class instances is not admitted in a parallel body</code> · <code>an assignment that changes an object's class is not admitted in a parallel body</code></td></tr>
+<tr><td>Script function calls</td><td>Allowed: a direct call to a named function, recursion included, and the builtin container and string methods on the body&#x27;s own values. A function used as a value, or called through a local, is refused.</td><td><code>parallel_for: captured name 'fv' is a function value (only direct calls to statically-known functions are allowed in a parallel body)</code> · <code>parallel_for: call target 'h' is not statically resolvable in a parallel body</code></td></tr>
+<tr><td>Host calls</td><td>Bound C++ functions, static methods and methods run on the worker unless the host registered them serial: <code>serial_function</code>, <code>serial_static_method</code>, <code>serial_method</code> on the binder (<a href="../embedding/02-dynamic-binder.html#parallel-calls">the binder</a>). A serial function or static method refuses the statement before any element runs; a serial method is refused when it is called, since its receiver&#x27;s class is known only then. A non-const method or a property store runs only on an object the body owns. The library&#x27;s builtins are serial apart from pure math and <code>to_string</code>. A static method of a script class, and a namespaced call other than <code>math::</code> (<code>reflect::</code> and the like), are refused (<a href="#cpp-calls">below</a>).</td><td><code>parallel_for: host function 'print' is marked serial_function() and cannot be called in a parallel body</code> · <code>parallel_for: C++ static method 'Sound::play' is marked serial_static_method() and cannot be called in a parallel body</code> · <code>C++ method 'publish' of 'Meter' is marked serial_method() and cannot be called in a parallel body</code> · <code>C++ method 'add' of 'Meter' changes an object this parallel body did not make (only its const methods may run on it)</code> · <code>C++ property 'level' of 'Meter' is stored on an object this parallel body did not make (only an object it made takes stores)</code> · <code>parallel_for: static member calls are not allowed in a parallel body</code></td></tr>
+<tr><td>Receivers</td><td>A signal&#x27;s receiver list is state other objects&#x27; code reads and fires, so <code>connect</code> and <code>disconnect</code> on a <code>Signal</code> are serial methods. A C++ call that fires a signal runs its receivers on the worker that made the call, so a host marks such a method <code>serial_method</code> when its receivers reach shared state (<a href="../embedding/10-signals-properties.html">Signals</a>).</td><td><code>C++ method 'connect' of 'Signal' is marked serial_method() and cannot be called in a parallel body</code></td></tr>
+<tr><td>Lambdas</td><td>A body writes no lambda. <code>parallel_transform</code>&#x27;s <code>fn</code> and <code>parallel_reduce</code>&#x27;s <code>step</code> and <code>combine</code> may themselves be lambdas, their captures provisioned like captured reads.</td><td><code>parallel_for: lambdas are not allowed in a parallel body</code></td></tr>
+<tr><td><code>yield</code></td><td>Iterations do not suspend: a body neither yields nor calls a coroutine method.</td><td><code>parallel_for: yield is not allowed in a parallel body</code> · <code>parallel_for: coroutine method 'g' is not allowed in a parallel body</code></td></tr>
+<tr><td><code>time::</code> and random numbers</td><td>The clock and the random stream are engine-owned, and a read would depend on scheduling (<a href="14-time.html#time-and-parallel-loops">Time and parallel loops</a>).</td><td><code>parallel_for: time:: calls are not allowed in a parallel body (engine-owned clock)</code> · <code>parallel_for: math::random/random_seed are not allowed in a parallel body (engine-owned rng state)</code></td></tr>
+<tr><td>Nested parallelism</td><td>A body, and every function it calls, runs no parallel loop of its own.</td><td><code>parallel_for: statement is not allowed in a parallel body</code> (a <code>parallel_for</code>) · <code>parallel_for: host function 'parallel_transform' is marked serial_function() and cannot be called in a parallel body</code> (<code>parallel_reduce</code> alike)</td></tr>
+<tr><td>Declarations and modules</td><td>A body declares no function, class, namespace or enum, and includes or imports nothing.</td><td><code>parallel_for: function declarations are not allowed in a parallel body</code> (namespace and enum declarations alike) · <code>parallel_for: include/import is not allowed in a parallel body</code></td></tr>
+<tr><td>Control flow</td><td><code>continue</code>, and a <code>return</code> at the body&#x27;s top level, move to the next element; <code>try</code>/<code>catch</code> works inside the body. A loop-level <code>break</code> is refused (<a href="#control-flow">below</a>).</td><td><code>parallel_for: 'break' is not allowed in a parallel body (iterations are independent; use 'continue' for the next element)</code></td></tr>
+<tr><td>Reference casts</td><td><code>cast&lt;T&amp;&gt;</code> would bind a reference the proof cannot follow.</td><td><code>parallel_for: cast&lt;T&amp;&gt; is not allowed in a parallel body</code></td></tr>
+<tr><td>Errors and limits</td><td>A throwing element fails the whole call with the first error in iteration order. The execution budget and the memory cap hold inside a body (<a href="../embedding/05-safety-rails.html">Safety Rails</a>): a budget overrun is terminal as anywhere, and copies made for the workers count toward the memory cap.</td><td>the element&#x27;s own error</td></tr>
+</tbody></table></div>
+<h2 id="parallel-for"><code>parallel_for</code> and <code>parallel_transform</code><a class="hlink" href="#parallel-for" aria-label="link">&#8203;</a></h2>
+<p><code>parallel_for</code> runs a loop body over the elements of an array on every core. The loop variable is the element, so <code>auto&amp;</code> mutates it in place. <code>parallel_transform(arr, fn)</code> returns a <strong>new</strong> array with <code>out[i] = fn(arr[i])</code>; it is the same loop in a different spelling, as <a href="#parallel-transform">below</a> shows. <code>thread_count()</code> reports the worker count.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var nums = [1, 2, 3, 4, 5, 6, 7, 8];
+parallel_for (auto&amp; x : nums) {
+    x = x * x;                    // each element mutated in place, across workers
+}
+print("squares: {}", to_json(nums));
+
+int inc(int v) { return v + 1; }
+print("mapped:  {}", to_json(parallel_transform(nums, inc)));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">squares: [1,4,9,16,25,36,49,64]
+mapped:  [2,5,10,17,26,37,50,65]</code></pre></div>
+<h2 id="the-zip-form">The zip form<a class="hlink" href="#the-zip-form" aria-label="link">&#8203;</a></h2>
+<p>The zip form walks several arrays of the same length in lockstep, one loop variable per array. Worker <em>n</em> owns segment <em>n</em> of every array, so a pre-allocated array of output structs is written in place: no construction per element, no result marshalling. This is the emitter shape, one input array and one output array of the same length, and the preferred way to produce several values per element.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Body { float x = 0.0; float vx = 0.0; Body() {} Body(float px, float v) { x = px; vx = v; } }
+class Sample { float pos = 0.0; bool moving = false; }
+array&lt;Body&gt; bodies = [];
+array&lt;Sample&gt; samples = [];
+for (int i = 0; i &lt; 6; i++) { bodies.push(Body(i * 10.0, i % 3 - 1.0)); samples.push(Sample()); }
+
+parallel_for (auto&amp; b, auto&amp; s : bodies, samples) {   // one loop variable per array, walked in lockstep
+    b.x += b.vx * 0.5;                                 // the input mutated in place
+    s.pos = b.x;                                       // the pre-allocated output written in place
+    s.moving = b.vx != 0.0;
+}
+for (auto&amp; s : samples) { print(`${s.pos:.1f} ${s.moving}`); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">-0.5 true
+10.0 false
+20.5 true
+29.5 true
+40.0 false
+50.5 true</code></pre></div>
+<p>Arrays of different length, the range itself as a zipped array, or a non-array raise a catchable error when the statement is reached, before any element runs: <code>parallel_for: zipped array 2 has 1 elements, the range has 3 (zipped arrays must have the same length)</code>, <code>parallel_for: zipped array 2 is the range itself</code>, <code>parallel_for: zipped array 2 is not an array</code>.</p>
+<h2 id="parallel-transform"><code>parallel_transform</code> is that zip<a class="hlink" href="#parallel-transform" aria-label="link">&#8203;</a></h2>
+<p><code>parallel_transform(xs, fn)</code> is <code>parallel_for (auto&amp; x, auto&amp; o : xs, out) { o = fn(x); }</code> over a fresh output of <code>xs.size()</code> slots, and it costs exactly that loop plus the output. When <code>fn</code> only reads its parameter, its body runs inlined in the loop with the parameter bound to the element in place, so there is no call and no copy per element. A <code>fn</code> that mutates its parameter works on a private copy, so the source array is never touched either way. Any result type works, objects included: the returned array holds copies that alias nothing.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Body { float x = 0.0; float vx = 0.0; Body() {} Body(float px, float v) { x = px; vx = v; } }
+array&lt;Body&gt; bodies = [];
+for (int i = 0; i &lt; 4; i++) { bodies.push(Body(i * 10.0, 1.0)); }
+
+float next_x(Body b) { return b.x + b.vx; }              // reads its parameter: the body runs inlined in the loop
+Body stepped(Body b) { b.x += b.vx; return b; }         // mutates its copy: the source is untouched
+
+var xs = parallel_transform(bodies, next_x);
+var moved = parallel_transform(bodies, stepped);
+print(`${to_json(xs)} moved ${moved[3].x:.1f} source ${bodies[3].x:.1f}`);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[1.0,11.0,21.0,31.0] moved 31.0 source 30.0</code></pre></div>
+<p>An optional third argument, <code>parallel_transform(arr, fn, weight_fn)</code>, balances chunks by per-element effort (e.g. weigh strings by length):</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var texts = ["7", "42", "1999", "3", "250"];
+int parse_one(string s) {                            // digits -&gt; int, no host calls
+    var n = 0;
+    for (var i = 0; i &lt; s.size(); i++) { n = n * 10 + (s[i] - '0'); }
+    return n;
+}
+float w(string s) { return s.size(); }               // heavier strings, fatter chunks
+var parsed = parallel_transform(texts, parse_one, w);
+print("parsed: {}", to_json(parsed));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">parsed: [7,42,1999,3,250]</code></pre></div>
+<h2 id="control-flow">Control flow in the body<a class="hlink" href="#control-flow" aria-label="link">&#8203;</a></h2>
+<p>The body is the loop&#x27;s body: <code>continue</code> moves to the next element, and so does a <code>return</code> written at the body&#x27;s top level (iterations are independent, there is nothing to return to). A loop-level <code>break</code> is rejected when the statement is reached, before any element runs, with <code>parallel_for: 'break' is not allowed in a parallel body (iterations are independent; use 'continue' for the next element)</code>. Inside a nested loop or <code>switch</code>, <code>break</code> and <code>continue</code> keep their usual meaning.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var words = ["keep", "", "skip", "keep", "", "keep"];
+array&lt;int&gt; kept = [0, 0, 0, 0, 0, 0];
+parallel_for (auto&amp; w, auto&amp; k : words, kept) {
+    if (w == "") { continue; }        // next element
+    if (w == "skip") { return; }      // also the next element: the body is the loop's body
+    k = w.size();
+}
+print("{}", to_json(kept));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[4,0,0,4,0,4]</code></pre></div>
+<p>A throwing element fails the whole call with the <strong>first error in iteration order</strong>, so failures are as deterministic as results.</p>
+<h2 id="captured-reads">Captured reads<a class="hlink" href="#captured-reads" aria-label="link">&#8203;</a></h2>
+<p>The body may <em>read</em> enclosing globals: scalars, strings, and value-semantic containers. Every worker sees the content as of the call (the &quot;barrier&quot;), identical at every worker count. Provisioning is automatic and tiered: a container of primitives or strings touched only by subscript reads is a zero-copy <em>borrow</em> (workers read the shared storage in place; a string read copies its bytes into a worker-owned string); anything else (nested containers, iterated or whole-value reads) is copied once per worker at the barrier and charged to <code>memory_cap</code>. This is what makes the &quot;shared read-only grid&quot; and &quot;shared palette&quot; renderer shapes cheap:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var gw = 4;
+var grid = [];                       // the shared input: three rows of gw cells
+for (var i = 0; i &lt; gw * 3; i++) { grid.push(i); }
+int row_sum(int row) {
+    var total = 0;
+    for (var x = 0; x &lt; gw; x++) { total += grid[row * gw + x]; }   // captured reads
+    return total;
+}
+var row_indices = [0, 1, 2];
+var sums = parallel_transform(row_indices, row_sum);   // grid rides along for free
+print("row sums: {}", to_json(sums));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">row sums: [6,22,38]</code></pre></div>
+<h2 id="enclosing-writes">Writes to enclosing state<a class="hlink" href="#enclosing-writes" aria-label="link">&#8203;</a></h2>
+<p><strong>Writes to enclosing state are errors</strong>, with one proven exception, the index write below. The elements behind the loop variables are what a body mutates. Assigning to captured state in any other shape (<code>g = ...</code>, <code>g[j] = ...</code> with an index that is not a loop variable, compound stores, <code>g.push(...)</code> (any mutating or unrecognized method on a captured value), <code>var&amp; r = g</code> aliases, passing captured state to a by-reference parameter, or <code>for (auto&amp; v : g)</code>) raises an error like <code>parallel_for: body writes enclosing state 'total' at 3:33</code>. Objects cannot be captured at all (<code>parallel_for: member access reaches captured state 'cfg' (captured reads are read-only, and objects cannot be captured) at 4:45</code>); pass per-element object state through the arrays instead. Calls to other script functions (including recursion) and builtin container/string methods are fine.</p>
+<h3 id="index-writes">Index writes<a class="hlink" href="#index-writes" aria-label="link">&#8203;</a></h3>
+<p><code>out[i] = v</code> (and <code>op=</code>, <code>++</code>, <code>--</code>) is legal when <code>out</code> is an enclosing array and <code>i</code> a loop variable the body never writes. The loop variable&#x27;s values must name distinct slots, which the statement checks when it is reached: two elements carrying one index raise <code>parallel_for: elements 2 and 5 write 'out' at the same index 4</code>. The body may touch <code>out</code> only as <code>out[i]</code>, since reading another slot would race the writes (<code>parallel_for: body touches 'out' beyond the slot it writes, out[i] at 4:20</code>). Each worker writes a private copy of <code>out</code>, and the statement copies every element&#x27;s slot back in element order, up to the first failing element: exactly the stores the serial loop makes.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; order = [3, 0, 2, 1];
+array&lt;int&gt; placed = [0, 0, 0, 0];
+parallel_for (int slot : order) {
+    placed[slot] = slot * 10;          // each element writes the slot its value names
+}
+print("{}", to_json(placed));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[0,10,20,30]</code></pre></div>
+<h2 id="constructing-objects">Constructing objects<a class="hlink" href="#constructing-objects" aria-label="link">&#8203;</a></h2>
+<p>A body constructs objects in every spelling: <code>Hit(r, d)</code>, <code>Hit h(r, d);</code>, <code>Hit h;</code> and <code>new Hit(r, d)</code>. The new object belongs to the worker that made it, so its constructor writes its fields freely; everything else that construction runs follows the body&#x27;s rules. When the statement is reached, before any element runs, it checks the constructor each call can reach (every one its argument count admits), the base constructors its initializer list names (a base it does not name is default-constructed), each level&#x27;s field initializers, and the destructor of every class whose instance can die in the body: an object the body makes, an element it replaces, and whatever their fields hold. Class code may call script functions, methods on the object, and the same pure host functions a body may.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string PREFIX = "hit-";
+class Vec { float x = 0.0; float y = 0.0; Vec() {} Vec(float a, float b) { x = a; y = b; } }
+class Hit {
+    int ray = -1;
+    Vec at;
+    string tag = PREFIX;
+    Hit() {}
+    Hit(int r, float d) { ray = r; at = Vec(d, d * 2.0); tag = tag + to_string(r); }
+}
+array&lt;int&gt; rays = [0, 1, 2, 3];
+array&lt;Hit&gt; hits = [Hit(), Hit(), Hit(), Hit()];
+parallel_for (int r : rays) {
+    hits[r] = Hit(r, r * 0.5);         // each worker constructs the hit its ray owns
+}
+print("{} {} {}", hits[3].tag, hits[3].at.y, hits[0].ray);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hit-3 3.0 0</code></pre></div>
+<p>Construction code that writes state the body does not own refuses the statement, and the error names where that code sits: a constructor, a field initializer or a destructor.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int next_id = 0;
+int deaths = 0;
+class Tick { int id = 0; Tick() { id = next_id; next_id++; } }
+class Tag { int id = next_id++; }
+class Res { int v = 0; ~Res() { deaths++; } }
+array&lt;int&gt; xs = [1, 2, 3];
+try { parallel_for (auto&amp; x : xs) { Tick t; x = t.id; } } catch (e) { print(e); }
+try { parallel_for (auto&amp; x : xs) { Tag t; x = t.id; } } catch (e) { print(e); }
+try { parallel_for (auto&amp; x : xs) { Res r; x = r.v; } } catch (e) { print(e); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">parallel_for: body writes enclosing state 'next_id' in the constructor of 'Tick' at 3:49
+parallel_for: body writes enclosing state 'next_id' in a field initializer of 'Tag' at 4:22
+parallel_for: body writes enclosing state 'deaths' in the destructor of 'Res' at 5:33</code></pre></div>
+<h3 id="cpp-classes-and-hybrids">C++ classes and hybrids<a class="hlink" href="#cpp-classes-and-hybrids" aria-label="link">&#8203;</a></h3>
+<p>A class the host binds, and a script class over one, construct in a body too: the host&#x27;s constructor and destructor are taken to be safe on any thread, while the script levels follow the rules above. A host class whose constructor or destructor touches state other objects share (a registry, a cache, a service) is bound with <code>.serial_only_constructor()</code> (see <a href="../embedding/02-dynamic-binder.html#serial-only-constructors">the binder</a>); a body that constructs it, or a script class over it, is refused before any element runs, with <code>parallel_for: C++ class 'Sprite' is marked serial_only_constructor() and cannot be constructed in a parallel body at 3:48</code> or <code>parallel_for: class 'Glowing' has a C++ base 'Sprite' marked serial_only_constructor() and cannot be constructed in a parallel body at 4:49</code>. An object of such a class that dies on a worker anyway is released when the statement&#x27;s workers are done, on the calling thread, in element order.</p>
+<h2 id="cpp-calls">C++ calls<a class="hlink" href="#cpp-calls" aria-label="link">&#8203;</a></h2>
+<p>Bound C++ functions, static methods and methods are parallel unless the host registered them serial (<a href="../embedding/02-dynamic-binder.html#parallel-calls">the binder</a>). The library&#x27;s own builtins are serial apart from pure math and <code>to_string</code>, so <code>print</code> in a body is refused before any element runs: <code>parallel_for: host function 'print' is marked serial_function() and cannot be called in a parallel body at 3:5</code>, and a serial static method reads <code>parallel_for: C++ static method 'Sound::play' is marked serial_static_method() and cannot be called in a parallel body at 3:5</code>. A method&#x27;s mark covers its non-const overloads, so a const getter of the same name stays parallel. A method&#x27;s receiver class is known only when it is called, so a serial method is refused then: <code>C++ method 'publish' of 'Meter' is marked serial_method() and cannot be called in a parallel body</code>. A non-const C++ method, or a store to a C++ property, runs only on an object the body owns: its element (a range or zipped element, which the statement proves the only element of its object, or a <code>parallel_reduce</code> accumulator) or one it made. On any other object, such as one a C++ function returns, only const methods run, and anything else is refused with <code>C++ method 'add' of 'Meter' changes an object this parallel body did not make (only its const methods may run on it)</code> or <code>C++ property 'level' of 'Meter' is stored on an object this parallel body did not make (only an object it made takes stores)</code>.</p>
+<h2 id="handles-as-elements">Handles as elements<a class="hlink" href="#handles-as-elements" aria-label="link">&#8203;</a></h2>
+<p>An array of <code>shared_ptr&lt;T&gt;</code> or <code>weak_ptr&lt;T&gt;</code> elements runs when they name distinct objects. The statement checks, once when it is reached, that no object appears at two elements of the range and its zipped arrays, and raises <code>parallel_for: elements 0 and 3 hold the same object (an object a body reaches through a handle element belongs to one element)</code> otherwise. The check proves that one worker reaches each object. It proves nothing about what the object holds: its class must still be a flat value class (fields that are values, no handles), as for an element held by value. Another holder of the same object elsewhere in the program is fine, since nothing else runs during the loop.</p>
+<h2 id="reductions">Reductions: <code>parallel_reduce</code><a class="hlink" href="#reductions" aria-label="link">&#8203;</a></h2>
+<p><code>parallel_reduce(xs, init, step, combine)</code> folds an array on every core: <code>xs</code> splits into chunks whose size depends on <code>xs.size()</code> alone, each chunk folds its elements in order with <code>step(acc, x)</code> starting from its own copy of <code>init</code>, and the chunk results combine left to right with <code>combine(a, b)</code>. The chunking never depends on the worker count, so a float sum is bit-identical on every machine. <code>init</code> should be <code>combine</code>&#x27;s identity (0 for a sum), since every chunk starts from it; an empty array returns it. The accumulator may be a container or an object, and <code>step</code> is admitted like a <code>parallel_for</code> body: it may not write enclosing state, and a throw from it fails the call as from <code>parallel_for</code>. <code>step</code> and <code>combine</code> may be lambdas, their captures provisioned as a <code>parallel_for</code> body&#x27;s are. <code>step</code>&#x27;s body runs grafted into the chunk loop, so no call is paid per element; a <code>step</code> that takes its accumulator by reference (<code>void step(T&amp; acc, x)</code>, or <code>-&gt; T&amp;</code> returning <code>acc</code>) folds the chunk&#x27;s accumulator in place with no copy in or out, the form for a container or object accumulator, while the by-value form <code>T step(T acc, x)</code> suits a scalar. The element <code>x</code> is taken by value.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;float&gt; prices = [4.5, 12.0, 7.25, 3.0, 9.5];
+float add(float a, float b) { return a + b; }
+class Span { float lo = 1000000.0; float hi = -1000000.0; }
+void widen(Span&amp; r, float x) { if (x &lt; r.lo) { r.lo = x; } if (x &gt; r.hi) { r.hi = x; } }   // folds in place
+Span join(Span a, Span b) { if (b.lo &lt; a.lo) { a.lo = b.lo; } if (b.hi &gt; a.hi) { a.hi = b.hi; } return a; }
+print(`total ${parallel_reduce(prices, 0.0, add, add):.2f}`);
+Span r = parallel_reduce(prices, Span(), widen, join);   // an object accumulator
+float big = parallel_reduce(prices, 0.0, [](float a, float x) { return x &gt; 5.0 ? a + x : a; }, add);
+print(`span ${r.lo:.2f}..${r.hi:.2f} big ${big:.2f}`);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">total 36.25
+span 3.00..12.00 big 28.75</code></pre></div>
+<p>The long form is the same loop written out: a zipped array of per-chunk accumulators and their chunk numbers, each chunk folding its slice in place, then a serial fold of the partial results. A body that adds into a captured total instead raises the enclosing-state error.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;float&gt; prices = [4.5, 12.0, 7.25, 3.0, 9.5];
+int size = 2;
+array&lt;float&gt; partial = [0.0, 0.0, 0.0];   // one accumulator per chunk of `size` elements
+array&lt;int&gt; chunk_ids = [0, 1, 2];
+parallel_for (auto&amp; p, int c : partial, chunk_ids) {
+    for (int i = c * size; i &lt; c * size + size &amp;&amp; i &lt; prices.size(); i++) { p += prices[i]; }
+}
+print(`total ${partial.reduce((s, p) =&gt; s + p, 0.0):.2f}`);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">total 36.25</code></pre></div>
+<h2 id="choosing-a-shape">Choosing a shape<a class="hlink" href="#choosing-a-shape" aria-label="link">&#8203;</a></h2>
+<p>Use captured reads for shared inputs, a zipped output array for per-element results, and <code>parallel_reduce</code> for a total. <strong>Where the output shape is not known up front</strong>, the pair idiom serves: elements shaped <code>[input..., tag]</code> come back from <code>parallel_transform</code> as <code>[tag, outputs...]</code>, collected from the result in iteration order.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/15-math.html"><span>&larr; previous</span>Math: Vectors &amp; Colors</a><a class="next" rel="next" href="../embedding/01-embedding-quickstart.html"><span>next &middot; embedding &rarr;</span>Embedding Quickstart</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">
+<p>JaiScript 0.5 beta &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
+<p class="foot-note">every standalone script sample on this site runs on both backends, and the output shown is what they print</p>
+</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

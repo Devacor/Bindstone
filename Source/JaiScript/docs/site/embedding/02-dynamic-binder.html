@@ -32,7 +32,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Embedding</summary><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li class="current"><a href="../embedding/02-dynamic-binder.html" aria-current="page">dynamic_binder: Binding C++ Classes</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li><li><a href="../embedding/14-language-server.html">Editor Support: the Language Server</a></li><li><a href="../embedding/15-math-adapters.html">Math Adapters: Host Vector Types</a></li><li><a href="../embedding/16-thread-pool.html">Thread Pool for Host Work</a></li></ol></details></aside>
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Embedding</summary><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li class="current"><a href="../embedding/02-dynamic-binder.html" aria-current="page">dynamic_binder: Binding C++ Classes</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li><li><a href="../embedding/14-language-server.html">Editor Support: the Language Server</a></li><li><a href="../embedding/15-math-adapters.html">Math Adapters: Host Vector Types</a></li><li><a href="../embedding/16-thread-pool.html">Thread Pool for Host Work</a></li><li><a href="../embedding/17-host-api.html">Host API in Depth</a></li><li><a href="../embedding/18-build-integration.html">Building JaiScript into a Host</a></li></ol></details></aside>
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Embedding</a><span class="sep" aria-hidden="true">/</span>02</nav>
 <article class="chapter"><h1 id="dynamic-binder-binding-c-classes"><code>dynamic_binder</code>: Binding C++ Classes<a class="hlink" href="#dynamic-binder-binding-c-classes" aria-label="link">&#8203;</a></h1>
 <p><strong>One declaration, three jobs.</strong> Declare a field once with <code>JAI_PROPERTY</code> and it is
@@ -45,7 +45,7 @@ library and run on <strong>both backends</strong>, with byte-identical output.</
 
 <h2 id="step-by-step">Step by step: bind a plain C++ class<a class="hlink" href="#step-by-step" aria-label="link">&#8203;</a></h2>
 <p>A class you already have needs no macros. Name the constructors, members and methods scripts may use, then use the type from either side:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;
+<div class="codeblock cb-cpp" data-sample="binder-turret"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;
 #include &lt;jaiscript/core/dynamic_binder.hpp&gt;
 #include &lt;jaiscript/stdlib/stdlib.hpp&gt;
 #include &lt;iostream&gt;
@@ -91,17 +91,18 @@ int main() {
     auto west = eng-&gt;get_variable(&quot;west&quot;).as&lt;std::shared_ptr&lt;Turret&gt;&gt;();   // 6. and take one back
     west-&gt;ammo = 99;
     eng-&gt;execute(&quot;print(west.ammo);&quot;);
+    return 0;
 }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">north ammo=0 fired=false range=12.5
 C++ sees east.ammo = 14
 17
 99</code></pre></div>
-<ul><li><strong>Constructors</strong> are listed by parameter types; scripts pick one by argument count and types. <code>Turret(...)</code> in script makes a value, <code>new Turret(...)</code> a <code>shared_ptr</code> handle.</li>
+<ul><li><strong>Constructors</strong> are listed by parameter types; scripts pick one by argument count and types. <code>Turret(...)</code> in script makes a value, and <code>new Turret(...)</code> makes a <code>shared_ptr</code> handle. A value copies like a script class&#x27;s, through the C++ copy constructor; copies of a handle share one object (<a href="#copies-and-handles">copies and handles</a>, below).</li>
 <li><strong>Properties</strong> read and write the C++ member directly; a getter-only property (<code>nullptr</code> setter) rejects stores with <code>Cannot assign to 'x': it is read-only</code>.</li>
 <li><strong>Objects cross by identity.</strong> <code>make_object(shared_ptr)</code> wraps the pointer without a copy, so script writes land in C++ (<code>east.ammo</code> is 14) and <code>as&lt;std::shared_ptr&lt;T&gt;&gt;()</code> returns the script's object to C++ shared, not copied.</li>
 <li><strong>Lifetime</strong> follows the <code>shared_ptr</code>: the object lives while either side holds it. <code>add_global_ref</code> instead binds a C++ object or variable you keep alive yourself.</li>
 <li><strong>Handles and null.</strong> A <code>std::shared_ptr&lt;T&gt;</code> or <code>std::weak_ptr&lt;T&gt;</code> parameter (by value or <code>const&amp;</code>) takes a script <code>null</code> as an empty handle, as C++ takes <code>nullptr</code>, so <code>pick(null)</code> resolves to the handle overload of an overload set. A <code>weak_ptr&lt;T&gt;</code> parameter also takes a handle or a script <code>weak_ptr&lt;T&gt;</code>, watching the same object; an expired one arrives empty. Returning a <code>std::weak_ptr&lt;T&gt;</code> to script is not supported (a script <code>weak_ptr</code> watches a script handle, and a host one has none): return <code>shared_ptr&lt;T&gt;</code>, and script takes its own <code>weak_ptr&lt;T&gt;</code> of it.</li>
-<li><strong>Errors.</strong> A C++ exception thrown by a bound method reaches the script as a catchable error carrying its <code>what()</code> text (<code>throw std::runtime_error("jammed")</code> is caught as <code>jammed</code>); <a href="01-embedding-quickstart.html#error-surfaces">Error surfaces</a> lists how each call reports failures.</li></ul>
+<li><strong>Errors.</strong> A C++ exception thrown by a bound method reaches the script as a catchable error carrying its <code>what()</code> text (<code>throw std::runtime_error("jammed")</code> is caught as <code>jammed</code>); <a href="17-host-api.html#error-surfaces">Error surfaces</a> lists how each call reports failures.</li></ul>
 <p>The rest of this chapter covers what a plain binding leaves out: reflection, save files, signals and inheritance from one declaration (<code>JAI_PROPERTY</code>), and every verb of <a href="#the-fluent-chain-verb-by-verb">the fluent chain</a>.</p>
 <h2 id="three-systems-that-drift">Three systems that drift<a class="hlink" href="#three-systems-that-drift" aria-label="link">&#8203;</a></h2>
 <p>Every engine eventually grows the same three subsystems, usually years apart, usually by different people:</p>
@@ -123,7 +124,7 @@ keep in sync because there is only one thing.</p>
 <p>A spawner building for a tower-defense game: three plain properties, one observable property, one signal,
 and two ordinary methods. This is the entire integration surface. Everything in the rest of this chapter
 falls out of these 25 lines:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/registrar.hpp&gt;
+<div class="codeblock cb-cpp" data-sample="binder-spawner-class"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/registrar.hpp&gt;
 #include &lt;jaiscript/properties/macros.hpp&gt;
 #include &lt;jaiscript/properties/property_serialization.hpp&gt;
 #include &lt;jaiscript/signals/signal_property.hpp&gt;
@@ -172,7 +173,7 @@ automatically (<code>registrar</code> calls <code>auto_bind()</code> for you).</
 </ul>
 <p>Host setup is three lines; <code>bind_registrar</code> replays every registrar in the binary into the
 engine you hand it:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto eng = jai::engine::make();
+<div class="codeblock cb-cpp" data-sample="binder-spawner-engine"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto eng = jai::engine::make();
 jai::stdlib::register_all(*eng);   // formatted print, containers, math, json
 jai::bind_registrar(*eng);         // every jai::registrar in the binary, one call</code></pre></div>
 <p>A host whose bindings need its own services passes a context type as the second type argument
@@ -196,28 +197,37 @@ the in-class pin when declared, else the bare class name, always matching the se
 <code>$type</code>. Registration is the reachability boundary: <code>engine::make()</code> binds nothing
 on its own, which is exactly what makes an empty engine a sandbox
 (<a href="05-safety-rails.html">Safety Rails</a>).</p>
-<p><strong>Timing.</strong> One term first: a derived registration <em>auto-materializes</em> its
-<code>property_owner</code> base, registering it under its own name without you asking; a later explicit
-registration of that base <em>adopts</em> the same definition and renames it. The static phase (declarations,
-schema entries, serialization identity, the registrar queue) completes at program start, touches no engine,
-and its cross-file order is irrelevant.
-The runtime phase is host-sequenced: <code>make()</code> → <code>register_all</code> →
-<code>bind_registrar</code> (once per engine) → any explicit binders → run scripts. Inside that
-registration window, order never matters: registrars replay in arbitrary order, derived-before-base is
-fine, and explicit registrations adopt what auto-materialization created. Registering more types
-<em>after</em> scripts have run is supported and intentional (new types appear; re-registering an
-explicitly-bound type replaces its binding for future constructions, while existing instances keep the
-shape they were built with). One contract is enforced, not assumed: <strong>an explicit registration
-cannot adopt an auto-materialized base while script instances of it are alive</strong>. That would
-change their type identity, so the binder throws at the registration site. In practice: finish
-registering before constructing, and treat bare auto-names as internal plumbing. Give anything scripts
-construct directly a fixed script name (<code>JAI_PROPERTY_OWNER</code>).</p>
+<p><strong>Timing.</strong> Registration happens in two phases.</p>
+<p>The static phase runs at program start. Declarations, schema entries, serialization identities and the
+registrar queue all set themselves up there. It touches no engine, and the order in which files run their
+statics does not matter.</p>
+<p>The runtime phase runs in the order the host calls things:</p>
+<ol>
+<li><code>engine::make()</code></li>
+<li><code>jai::stdlib::register_all</code></li>
+<li><code>jai::bind_registrar</code>, once per engine</li>
+<li>any explicit <code>dynamic_binder</code> chains</li>
+<li>scripts</li>
+</ol>
+<p>Within steps 3 and 4 the order of registrations does not matter. Registrars replay in any order, and a
+derived class may be registered before its base. When it is, the derived registration
+<em>auto-materializes</em> the base: it registers the base&#x27;s <code>property_owner</code> definition under
+the base&#x27;s own name, without being asked. A later explicit registration of that base <em>adopts</em> the
+same definition and gives it the explicit name.</p>
+<p>Registering more types after scripts have run is supported. New types appear. Re-registering a type that
+was bound explicitly replaces its binding for objects constructed from then on; objects that already exist
+keep the shape they were built with.</p>
+<p>One rule is enforced: <strong>an explicit registration cannot adopt an auto-materialized base while script
+instances of it are alive</strong>. Adopting it would change their type identity, so the binder throws at
+the registration instead. In practice, finish registering before scripts construct objects, and treat the
+automatic names as internal. Give any class scripts construct directly a fixed script name with
+<code>JAI_PROPERTY_OWNER</code>.</p>
 
 <h2 id="scripted">Scripted<a class="hlink" href="#scripted" aria-label="link">&#8203;</a></h2>
 <p>Job one: scripted. No glue was written for <code>id</code>, <code>level</code>, <code>interval</code>, or
 <code>onWave</code>, yet property access, method calls, and signal connection all read like the class was
 written in script:</p>
-<div class="codeblock cb-jai" data-host="Spawner registration"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">auto s = Spawner();
+<div class="codeblock cb-jai" data-host="Spawner registration" data-sample="binder-spawner"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">auto s = Spawner();
 s.level = 3;
 s.onWave.connect("hud", [=](int wave) -&gt; void {
     print("wave {} incoming", wave);
@@ -235,10 +245,10 @@ they live as long as the object and can be replaced or removed by name
 (<code>disconnect("hud")</code>).</p>
 
 <h2 id="live-objects-both-directions">Live objects, both directions<a class="hlink" href="#live-objects-both-directions" aria-label="link">&#8203;</a></h2>
-<p>Objects are reference types at the boundary. <code>make_object(shared_ptr)</code> wraps <em>your</em>
+<p>Crossing the boundary never copies an object. <code>make_object(shared_ptr)</code> wraps <em>your</em>
 pointer (no copy, shared identity), so script writes land in the C++ member and C++ emits reach script
 receivers:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto gate = std::make_shared&lt;Spawner&gt;();
+<div class="codeblock cb-cpp" data-sample="binder-gate"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto gate = std::make_shared&lt;Spawner&gt;();
 eng-&gt;add_global("gate", eng-&gt;make_object(gate));
 eng-&gt;execute("gate.id = \"east-gate\"; gate.level = 7;");
 // gate-&gt;id.get() == "east-gate", gate-&gt;level.get() == 7
@@ -252,10 +262,10 @@ gate-&gt;spawn_wave();   // C++ emit -&gt; the script receiver runs</code></pre>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">gate wave 1</code></pre></div>
 <p>The observable property completes the loop in the other direction: script observes, C++ mutates, and the
 change notification crosses the boundary. Assignments from either side fire it; unchanged writes don't:</p>
-<div class="codeblock cb-jai" data-host="Spawner registration + gate global"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">gate.threat.on_change([=](int old_value, int new_value) -&gt; void {
+<div class="codeblock cb-jai" data-host="Spawner registration + gate global" data-sample="binder-threat-receiver"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">gate.threat.on_change([=](int old_value, int new_value) -&gt; void {
     print("threat {} -&gt; {}", old_value, new_value);
 });</code></pre></div>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">gate-&gt;threat = 5;                                    // C++ write
+<div class="codeblock cb-cpp" data-sample="binder-threat"><span class="cb-label">C++</span><pre><code class="lang-cpp">gate-&gt;threat = 5;                                    // C++ write
 eng-&gt;execute("gate.threat = gate.threat + 2;");      // script write; reads unwrap in expressions</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">threat 0 -&gt; 5
 threat 5 -&gt; 7</code></pre></div>
@@ -263,6 +273,24 @@ threat 5 -&gt; 7</code></pre></div>
 <code>add_global_ref</code> on a class instance wraps a <strong>non-owning</strong> alias (you guarantee the
 object outlives the engine). One engine serves one thread at a time. Two engines on two threads need no
 locks, because nothing is global.</p>
+<h3 id="copies-and-handles">When a bound object is copied, and when it is shared<a class="hlink" href="#copies-and-handles" aria-label="link">&#8203;</a></h3>
+<p>The boundary hands script the C++ object itself: <code>make_object</code>, a <code>T&amp;</code> or
+<code>std::shared_ptr&lt;T&gt;</code> result, and a member whose type is a registered class all arrive without a
+copy. Once the object is in script, it follows the language&#x27;s value rules, exactly as a script class
+instance does:</p>
+<ul>
+<li>A copy from a variable, a field or an element (<code>Turret b = a;</code>, <code>var g = gate;</code>) and a
+by-value parameter make a separate C++ object through the class&#x27;s copy constructor. Writes to the copy do not
+reach the original.</li>
+<li>A variable initialized from a call takes the result as it is, so <code>var c = owner.child();</code> is the
+object <code>child()</code> refers to, and writes through <code>c</code> land in it.</li>
+<li>A reference (<code>var&amp; g = gate;</code>, a <code>&amp;</code> parameter) names the same object.</li>
+<li>A script handle (<code>new Turret(...)</code>, a <code>shared_ptr&lt;Turret&gt;</code> variable) shares the
+object with every copy of the handle.</li>
+</ul>
+<p>So to keep working on the host&#x27;s object, use the global itself, a reference or a <code>&amp;</code> parameter.
+The guide&#x27;s <a href="../guide/03-value-semantics.html#bound-cpp-objects">Bound C++ objects</a> walks through
+each case with one class.</p>
 <p>Passing a bound property by reference follows the spelling: <code>gate.level</code> or, inside a method of
 a script class that derives <code>Spawner</code>, <code>this.level</code> handed to a <code>&amp;</code>
 parameter binds the property itself, so the callee's writes land in the C++ member. Inside such a method a
@@ -274,7 +302,7 @@ bare <code>level</code> is the same property: it reads and stores through the ac
 <p>Job two: reflected. The same declaration is a runtime reflection surface. This is what editor inspectors and
 debug panels are built on. Walk every property by name, read typed values, and write through the property so
 observable change signals still fire:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">gate-&gt;visit_reflected_properties([](const std::string&amp; name, jai::property_base* p) {
+<div class="codeblock cb-cpp" data-sample="binder-reflection"><span class="cb-label">C++</span><pre><code class="lang-cpp">gate-&gt;visit_reflected_properties([](const std::string&amp; name, jai::property_base* p) {
     std::cout &lt;&lt; "prop: " &lt;&lt; name &lt;&lt; "\n";
 });
 if (auto* lvl = gate-&gt;property_value&lt;int64_t&gt;("level")) {
@@ -299,10 +327,11 @@ other two jobs use. And notice what's inside the payload: the signal's named scr
 <em>with the object</em>. The outer two levels are the archive's root record: an empty <code>_type_</code>
 (every archived object opens with one; the root record has no name) and a <code>value0</code> slot holding
 the pointer you passed, with its <code>$id</code>; your object is the <code>$val</code>.</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(R"JAI(
-    gate.onWave.connect("logger", "print(\"wave logged\");");   // named script-text receiver
-)JAI");
-auto json = jai::to_json(*eng, gate);</code></pre></div>
+<div class="codeblock cb-cpp" data-sample="binder-to-json"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(R&quot;JAI(
+    gate.onWave.connect(&quot;logger&quot;, &quot;print(\&quot;wave logged\&quot;);&quot;);   // named script-text receiver
+)JAI&quot;);
+auto json = jai::to_json(*eng, gate);
+std::cout &lt;&lt; json &lt;&lt; &quot;\n&quot;;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{
   "_type_": "",
   "value0":
@@ -338,15 +367,16 @@ auto json = jai::to_json(*eng, gate);</code></pre></div>
 }</code></pre></div>
 <p>Loading reconstructs the object <em>and re-arms the receiver</em>. Pass the engine as the load context so
 persisted script receivers attach to it and execute on the next emit:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto loaded = jai::from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*eng, json, *eng);
+<div class="codeblock cb-cpp" data-sample="binder-from-json"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto loaded = jai::from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*eng, json, *eng);
 // loaded-&gt;id.get() == "east-gate", level 7, threat 9
 loaded-&gt;spawn_wave();   // the receiver came back from the save file</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave logged</code></pre></div>
 <p>Binary is the same declaration through a different archive. No second format to maintain, and this
 object's payload is 374 bytes instead of 492 characters of JSON:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto bytes  = jai::to_binary(*eng, gate);                                   // std::vector&lt;uint8_t&gt;
+<div class="codeblock cb-cpp" data-sample="binder-to-binary"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto bytes  = jai::to_binary(*eng, gate);                                   // std::vector&lt;uint8_t&gt;
 auto again  = jai::from_binary&lt;std::shared_ptr&lt;Spawner&gt;&gt;(*eng, bytes, *eng);
-again-&gt;spawn_wave();   // "wave logged" — receivers persist in binary too</code></pre></div>
+again-&gt;spawn_wave();   // receivers persist in binary too</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave logged</code></pre></div>
 <p>Ship saves in binary, debug them in JSON, diff them in code review. One declaration serves all of it. The
 receiver rule is deliberate: <strong>named script-text receivers persist; function-object receivers (script
 lambdas and C++ callbacks) are runtime-only</strong> and are skipped, never errored on. Serialization depth
@@ -357,7 +387,7 @@ lambdas and C++ callbacks) are runtime-only</strong> and are skipped, never erro
 <p>Script classes can extend bound C++ classes. Because the C++ half of such an object is the
 <em>same live object</em> across reloads, iterating on the script half never resets engine state. Redefine the
 class with a new field mid-session:</p>
-<div class="codeblock cb-jai" data-host="Spawner registration"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class SmartSpawner : Spawner {
+<div class="codeblock cb-jai" data-host="Spawner registration" data-sample="binder-smart"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class SmartSpawner : Spawner {
     int aggression = 1;
     SmartSpawner() : super() {}
 }
@@ -367,7 +397,7 @@ smart.aggression = 2;
 smart.spawn_wave();</code></pre></div>
 <p>Later, same session: a fresh <code>execute()</code> redefines the class with a new field, while
 <code>smart</code> is alive:</p>
-<div class="codeblock cb-jai" data-host="Spawner registration, same session as the block above"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class SmartSpawner : Spawner {
+<div class="codeblock cb-jai" data-host="Spawner registration, same session as the block above" data-sample="binder-smart-reload"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class SmartSpawner : Spawner {
     int aggression = 1;
     int burst = 4;                  // new field takes its initializer
     SmartSpawner() : super() {}
@@ -386,7 +416,7 @@ rules, the <code>migrate</code> hook, and the it-always-succeeds contract are in
 <p>Under the registrar sits <code>jai::dynamic_binder&lt;T&gt;</code>
 (<code>include/jaiscript/core/dynamic_binder.hpp</code>), the fluent builder you can also drive directly for
 types that aren't <code>property_owner</code>s. The classic value-type example:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Vec2 {
+<div class="codeblock cb-cpp" data-sample="binder-vec2-host"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Vec2 {
     double x = 0, y = 0;
     Vec2() = default;
     Vec2(double x, double y) : x(x), y(y) {}
@@ -410,7 +440,7 @@ jai::dynamic_binder&lt;Vec2&gt;(*eng, "Vec2")
     .property("x", &amp;Vec2::x)
     .property("y", &amp;Vec2::y)
     .build();</code></pre></div>
-<div class="codeblock cb-jai" data-host="Vec2 binder chain"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">var v = Vec2(3.0, 4.0);
+<div class="codeblock cb-jai" data-host="Vec2 binder chain" data-sample="binder-vec2"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">var v = Vec2(3.0, 4.0);
 print("length {}", v.length());
 var a = Vec2(1.0, 2.0) + Vec2(3.0, 4.0);
 print("sum ({}, {})", a.x, a.y);
@@ -434,14 +464,25 @@ dot 11.0</code></pre></div>
 <code>T&amp;</code> into its receiver stays valid because the bound receiver is kept alive across the chain.
 The idiom is safe by construction, not by luck. And <code>!=</code> worked without being registered: when only
 <code>==</code> exists, script <code>!=</code> is its negation.</p>
-<p>A <code>T&amp;</code> result binds a reference as C++ binds one: after <code>var&amp; c = owner.child();</code>, member writes
-through <code>c</code> land in the object, and <code>c</code> keeps the owner's object alive like the chain above. <code>c = other;</code>
-runs the class's bound operator=: <code>.method("=", &amp;C::operator=)</code>, or a lambda taking <code>(C&amp;, const C&amp;)</code>, and
-further <code>"="</code> overloads from other types resolve like any overload set. A class that binds no <code>"="</code> refuses with
-<code>Cannot assign to a reference to 'C': its binding has no operator=</code>, as C++ refuses a class without one; binding it on a class
-whose assignment cannot compile (one copying a container of a move-only type) fails at the binding, as C++ does.
-<code>auto_bind</code> binds <code>"="</code> for a trivially copy-assignable class. A plain
-<code>var c = owner.child();</code> is a handle to the same object, since bound objects are reference types at the boundary.</p>
+<p>A method that returns <code>T&amp;</code> hands script the object it refers to, without a copy, and the
+declaration decides what script does with it:</p>
+<ul>
+<li><code>var c = owner.child();</code> holds that object, as <a href="#copies-and-handles">copies and handles</a>
+describes. Member writes through <code>c</code> land in it, and <code>c</code> keeps the owner&#x27;s object alive, like
+the chain above.</li>
+<li><code>var&amp; c = owner.child();</code> (or <code>auto&amp;</code>, or <code>C&amp; c</code>) binds a reference, as C++ binds
+one. Member writes land in the object the same way, and <code>c = other;</code> runs the class&#x27;s bound
+operator=.</li>
+</ul>
+<p>The bound operator= is the <code>"="</code> method: <code>.method("=", &amp;C::operator=)</code>, or a lambda
+taking <code>(C&amp;, const C&amp;)</code>. Further <code>"="</code> overloads from other types resolve like any
+overload set. <code>auto_bind</code> binds <code>"="</code> for a trivially copy-assignable class. A class that binds
+no <code>"="</code> refuses the assignment with <code>Cannot assign to a reference to 'C': its binding has no
+operator=</code>, as C++ refuses a class without one. Binding <code>"="</code> on a class whose assignment cannot
+compile (one copying a container of a move-only type) fails at the binding, as C++ does.</p>
+<p>Only a reference to an object the host returned runs operator=. After <code>var&amp; r = a;</code> over a script
+variable, <code>r = other;</code> stores into the variable as <code>a = other;</code> does: <code>a</code> takes a copy
+of <code>other</code> made by the copy constructor.</p>
 <p>The verbs:</p>
 <ul>
 <li><code>.constructor&lt;Args...&gt;()</code>: typed constructor overload; script calls
@@ -458,7 +499,7 @@ clobbering it. Passing a member <em>data</em> pointer here is a compile error th
 stateful functor keeps one state.</li>
 <li>A non-const <code>T&amp;</code> parameter of a method, a static method or a constructor writes the callee&#x27;s
 final value back into the script argument, exactly as for <code>add_function</code> (see
-<a href="01-embedding-quickstart.html#the-exact-width-as-aliasing-rules">the quickstart</a>): <code>gate.add(total, 5)</code>
+<a href="17-host-api.html#the-exact-width-as-aliasing-rules">the quickstart</a>): <code>gate.add(total, 5)</code>
 with <code>void add(int64_t&amp; target, int64_t by)</code> leaves the sum in <code>total</code>.</li>
 <li><code>.method("+", ...)</code>: operator overloading by token, the same set a script class declares:
 <code>+ - * / % &amp; | ^ &lt;&lt; &gt;&gt; == != &lt; &lt;= &gt; &gt;= &lt;=&gt;</code>, unary <code>- + ~</code> (a lambda
@@ -493,8 +534,16 @@ lambda form reads through the getter and stores through the setter, which takes 
 <li><code>.base_class&lt;Base&gt;()</code>: inheritance edge. Methods and properties of the base become
 callable on the derived, virtual dispatch preserved, and the polymorphic-load type check learns that a
 <code>Base</code> slot may hold this type. <code>static_assert</code>-guarded; diamond inheritance throws.</li>
-<li><code>.version(n)</code> + <code>.post_load_hook(fn)</code>: serialization version stamp and a
-post-load migration hook, <code>[](T&amp; self)</code> or <code>[](T&amp; self, int version)</code>.</li>
+<li><code>.post_load_hook(fn)</code>: the class&#x27;s <code>post_load</code> method, <code>[](T&amp; self)</code> or
+<code>[](T&amp; self, int version)</code>, which a script-side load (<code>from_json</code>, <code>from_binary</code>,
+<code>from_base64</code>) runs after it has written the object&#x27;s fields.</li>
+<li><code>.version(n)</code>: the number (1 by default) the engine&#x27;s serialization registry keeps for the class.
+Only the binary writer of script values reads it: <code>to_binary</code> / <code>to_base64</code> write it beside each
+bound object a script value holds, and <code>from_binary</code> / <code>from_base64</code> pass it to the post-load hook
+when the class also has a <code>.deserialization_factory</code> (otherwise the hook receives 1). <code>from_json</code>
+passes the payload&#x27;s <code>"_version_"</code> key, or 1. The C++ archives never read it, and
+<a href="08-serialization.html#versions-and-missing-fields">Serialization</a> recommends a format property
+instead.</li>
 <li><code>.deserialization_factory(fn)</code>: construct non-default-constructible types on load;
 archive-only, context-only, and context+archive signatures are auto-detected.</li>
 <li><code>.transparent_wrapper(unwrap)</code>: operations not found on the wrapper retry on the unwrapped
@@ -520,14 +569,14 @@ movable, non-copyable.</li>
 </ul>
 <h3 id="serial-only-constructors">Serial-only constructors<a class="hlink" href="#serial-only-constructors" aria-label="link">&#8203;</a></h3>
 <p>A <code>parallel_for</code> body may construct bound classes, and script classes over them (see
-<a href="../guide/09-containers-strings.html#parallel-transform">parallel loops</a>). The constructor and the
+<a href="../guide/16-parallel.html#constructing-objects">parallel loops</a>). The constructor and the
 destructor then run on a worker thread, and the binder takes them to be safe there: a constructor that only builds
 its own members is. One that touches state other objects share is not: it adds the object to a registry, takes a
 handle from a cache, looks up a service, connects to a signal hub, or attaches itself to another object. Mark such a
 class with <code>.serial_only_constructor()</code>, and a body that constructs it, or a script class over it, is
 refused when the statement is reached, before any element runs. One mark covers the constructor and the destructor
 alike: the object a worker makes is the one that dies there. An object of a marked class that loses its last reference on a worker anyway is not destroyed there: the statement releases it when its workers are done, on the calling thread, in the order of the elements that dropped it, then the order they dropped. Construction outside a parallel body is unaffected.</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Sprite {
+<div class="codeblock cb-cpp" data-sample="binder-sprite-host"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Sprite {
     static std::vector&lt;Sprite*&gt;&amp; registry() { static std::vector&lt;Sprite*&gt; all; return all; }
     double alpha = 1.0;
     Sprite() { registry().push_back(this); }        // every sprite joins the renderer's list
@@ -539,7 +588,7 @@ jai::dynamic_binder&lt;Sprite&gt;(*eng, "Sprite")
     .serial_only_constructor()
     .property("alpha", &amp;Sprite::alpha)
     .build();</code></pre></div>
-<div class="codeblock cb-jai" data-host="Sprite serial-only binder"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class Glowing : Sprite { float glow = 0.5; Glowing() : super() {} }
+<div class="codeblock cb-jai" data-host="Sprite serial-only binder" data-sample="binder-sprite"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">class Glowing : Sprite { float glow = 0.5; Glowing() : super() {} }
 array&lt;int&gt; lights = [1, 2, 3];
 try { parallel_for (auto&amp; n : lights) { Sprite s; n = 0; } } catch (e) { print(e); }
 try { parallel_for (auto&amp; n : lights) { Glowing g; n = 0; } } catch (e) { print(e); }
@@ -569,7 +618,7 @@ also runs on an object the worker did not make, such as one a C++ function hands
 not change the object. A non-const call on such an object is refused when it runs. Arguments follow the rules a script
 call follows: a non-const <code>T&amp;</code> parameter, which writes back into its argument, cannot take enclosing
 state.</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Meter {
+<div class="codeblock cb-cpp" data-sample="binder-meter-host"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Meter {
     double level = 0.0;
     void add(double amount) { level += amount; }      // non-const: only an object the worker made
     double reading() const { return level; }          // const: any object
@@ -586,7 +635,7 @@ jai::dynamic_binder&lt;Meter&gt;(*eng, "Meter")
 eng-&gt;add_function("master", []() { return master_meter; });        // the program's one Meter (level 100)
 eng-&gt;add_function("log_line", [](const std::string&amp; line) { logger().write(line); });
 eng-&gt;serial_function("log_line");</code></pre></div>
-<div class="codeblock cb-jai" data-host="Meter parallel binder"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">array&lt;float&gt; xs = [1.0, 2.0, 3.0];
+<div class="codeblock cb-jai" data-host="Meter parallel binder" data-sample="binder-meter"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">array&lt;float&gt; xs = [1.0, 2.0, 3.0];
 parallel_for (auto&amp; x : xs) {
     Meter m;
     m.add(x * 10.0);                       // the worker's own object
@@ -606,7 +655,7 @@ parallel_for: host function 'log_line' is marked serial_function() and cannot be
 <code>property_owner</code> is exposed by <code>auto_bind</code>; a plain <code>jai::signal&lt;Sig&gt;</code>
 or <code>signal_emitter&lt;Sig&gt;</code> member is exposed by one <code>.property("name",
 &amp;T::member)</code> line. Either way, script sees the same three-verb surface:</p>
-<div class="codeblock cb-jai" data-host="Spawner registration"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">s.onWave.connect("hud", [=](int wave) -&gt; void { print("wave {}", wave); });   // named function receiver
+<div class="codeblock cb-jai" data-host="Spawner registration" data-sample="binder-connect"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">s.onWave.connect("hud", [=](int wave) -&gt; void { print("wave {}", wave); });   // named function receiver
 s.onWave.connect("logger", "print(\"wave logged\");");     // named script-text receiver
 s.onWave.connected("hud");                                 // true
 s.onWave.disconnect("hud");</code></pre></div>
@@ -648,7 +697,7 @@ properties) is <a href="10-signals-properties.html">Signals &amp; Observable Pro
 <h2 id="inheritance-and-polymorphism">Inheritance and polymorphism<a class="hlink" href="#inheritance-and-polymorphism" aria-label="link">&#8203;</a></h2>
 <p>Declare the C++ inheritance once (<code>property_owner&lt;Derived, Base&gt;</code>), and the same edge
 serves script dispatch, C++ upcasts, and polymorphic saves:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">class Pickup : public jai::property_owner&lt;Pickup&gt; {
+<div class="codeblock cb-cpp" data-sample="binder-pickup-host"><span class="cb-label">C++</span><pre><code class="lang-cpp">class Pickup : public jai::property_owner&lt;Pickup&gt; {
 public:
     JAI_PROPERTY((std::string), name, "pickup");
 };
@@ -673,11 +722,12 @@ declaration. Classes that don't use <code>property_owner</code> declare the same
 <p>Polymorphic serialization needs no extra registration at all. <code>property_owner</code> already recorded
 the <code>$type</code> identity and the derived→base edge. Save through the base pointer, load through the base
 pointer, get the derived object back:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">std::shared_ptr&lt;Pickup&gt; loot = std::make_shared&lt;HealthPickup&gt;();
-loot-&gt;name = std::string("elixir");
+<div class="codeblock cb-cpp" data-sample="binder-pickup-json"><span class="cb-label">C++</span><pre><code class="lang-cpp">std::shared_ptr&lt;Pickup&gt; loot = std::make_shared&lt;HealthPickup&gt;();
+loot-&gt;name = std::string(&quot;elixir&quot;);
 std::static_pointer_cast&lt;HealthPickup&gt;(loot)-&gt;healing = 40;
 
 auto lootJson = jai::to_json(*eng, loot);          // saved through the BASE pointer
+std::cout &lt;&lt; lootJson &lt;&lt; &quot;\n&quot;;
 auto back = jai::from_json&lt;std::shared_ptr&lt;Pickup&gt;&gt;(*eng, lootJson);
 auto* hp = dynamic_cast&lt;HealthPickup*&gt;(back.get());   // != nullptr, healing == 40</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{
@@ -697,8 +747,8 @@ auto* hp = dynamic_cast&lt;HealthPickup*&gt;(back.get());   // != nullptr, heali
 map, no slicing. On the script side, the same edge gives upcasts and inherited dispatch: a C++ function taking
 <code>shared_ptr&lt;Pickup&gt;</code> accepts a script-made <code>HealthPickup</code>, and base methods are
 callable on derived instances:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_function("describe", [](std::shared_ptr&lt;Pickup&gt; p) { return p-&gt;name.get(); });</code></pre></div>
-<div class="codeblock cb-jai" data-host="Pickup / HealthPickup registration + describe"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">var h = HealthPickup();
+<div class="codeblock cb-cpp" data-sample="binder-describe-host"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_function("describe", [](std::shared_ptr&lt;Pickup&gt; p) { return p-&gt;name.get(); });</code></pre></div>
+<div class="codeblock cb-jai" data-host="Pickup / HealthPickup registration + describe" data-sample="binder-pickup"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">var h = HealthPickup();
 h.name = "elixir";
 h.healing = 40;
 print("upcast: {} heals {}", describe(h), h.healing);

@@ -32,7 +32,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Guide</summary><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li class="current"><a href="../guide/03-value-semantics.html" aria-current="page">Value Semantics &amp; References</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li><li><a href="../guide/13-strict-checking.html">Types That Fail Early: strict checking</a></li><li><a href="../guide/14-time.html">Time: Clocks, Stopwatches &amp; Dates</a></li><li><a href="../guide/15-math.html">Math: Vectors &amp; Colors</a></li></ol></details></aside>
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Guide</summary><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li class="current"><a href="../guide/03-value-semantics.html" aria-current="page">Value Semantics &amp; References</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li><li><a href="../guide/13-strict-checking.html">Types That Fail Early: strict checking</a></li><li><a href="../guide/14-time.html">Time: Clocks, Stopwatches &amp; Dates</a></li><li><a href="../guide/15-math.html">Math: Vectors &amp; Colors</a></li><li><a href="../guide/16-parallel.html">Parallel Loops</a></li></ol></details></aside>
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Guide</a><span class="sep" aria-hidden="true">/</span>03</nav>
 <article class="chapter"><h1 id="value-semantics-references">Value Semantics &amp; References<a class="hlink" href="#value-semantics-references" aria-label="link">&#8203;</a></h1>
 <p><strong>If you read only one chapter of this guide, read this one.</strong> The single most common ambush for a newcomer lives here: <em>JaiScript copies by default, everywhere.</em> Assignment copies. Function arguments copy. Even <strong>class instances copy</strong>. If you mutate a copy, the original never hears about it, and nothing warns you.</p>
@@ -129,7 +129,27 @@ auto scores = [4, 5];
 print("total(scores) = {}", total(scores));          // the variable binds, no copy</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">total([1, 2, 3]) = 6
 total(scores) = 9</code></pre></div>
-<p>A write is an assignment, a compound assignment or <code>++</code>/<code>--</code> on the parameter or anything inside it (also through a reference alias such as <code>auto&amp; r = xs;</code> or <code>for (auto&amp; x : xs)</code>), a method call on it (on an array, map or string, the library&#x27;s reading methods such as <code>size</code>, <code>find</code> and <code>keys</code> are reads), passing it on to an <code>&amp;</code> parameter that writes (followed through the calls), to a <code>shared_ptr</code> parameter, a constructor or a function the checker cannot see (a lambda, a host function, a method; <code>print</code>, <code>to_string</code>, <code>math::</code>, <code>string::</code> and the container methods take copies), or returning it by reference. For a method, every override in a class derived from the receiver&#x27;s counts. A parameter that is written keeps needing a variable, and a literal argument fails the load with the write&#x27;s line, <code>'inc' writes through parameter 'value' (line 12); pass a variable</code>; at run time a temporary raises <code>Cannot pass non-lvalue to reference parameter</code>. A lambda called through a variable keeps needing a variable too. A host function is the other way round: its non-const <code>T&amp;</code> parameter takes a literal or a temporary as a copy, and writes its final value back only into an lvalue argument (<a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a>).</p>
+<p>The checker counts each of these as a write to the parameter:</p>
+<ul>
+<li>An assignment, a compound assignment (<code>+=</code> and the rest), <code>++</code> or <code>--</code> on the parameter or on anything inside it, such as an element or a field.</li>
+<li>The same through a reference alias of it, such as <code>auto&amp; r = xs;</code> or <code>for (auto&amp; x : xs)</code>.</li>
+<li>A method call on it. On an array, map or string, the library&#x27;s reading methods (<code>size</code>, <code>find</code>, <code>keys</code> and the like) are reads, not writes.</li>
+<li>Passing it on to an <code>&amp;</code> parameter that writes. The checker follows the call to find out.</li>
+<li>Passing it to a <code>shared_ptr</code> parameter, to a constructor, or to a function the checker cannot see into: a lambda, a host function or a method. <code>print</code>, <code>to_string</code>, <code>math::</code>, <code>string::</code> and the container methods take copies, so passing to them is a read.</li>
+<li>Returning it by reference.</li>
+</ul>
+<p>For a method, a write in any override in a class derived from the receiver&#x27;s class counts too.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int first(array&lt;int&gt;&amp; xs) { return xs[0]; }   // only reads xs
+void grow(array&lt;int&gt;&amp; xs) { xs.push(0); }      // push writes xs
+print(first([7, 8]));                          // a literal binds a temporary
+array&lt;int&gt; held = [1];
+grow(held);                                    // a writer needs a variable
+print(held.size());
+// grow([1]);                                  // load error: 'grow' writes through parameter 'xs' (line 2); pass a variable</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">7
+2</code></pre></div>
+<p>A parameter that is written keeps needing a variable. A literal argument fails the load, and the error names the line of the write, as the commented line shows. A temporary the checker cannot see at load raises <code>Cannot pass non-lvalue to reference parameter</code> when the call runs. A reference parameter of a lambda called through a variable keeps needing a variable too.</p>
+<p>A host function is the other way round. Its non-const <code>T&amp;</code> parameter takes a literal or a temporary as a copy, and writes its final value back only into an lvalue argument (<a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a>).</p>
 <p>The body becomes part of the interface: adding a write to a function that callers pass literals to breaks those calls loudly, at the next load or hot reload (which checks them again), instead of letting the write vanish into a temporary. A <code>string&amp;</code> is the exception, because a string temporary is written on purpose: a function that edits a name in place serves a variable and a literal alike.</p>
 <h2 id="escape-hatch-2-field-and-element-lvalues-as-ref-arguments">Escape hatch 2: field and element lvalues as ref arguments<a class="hlink" href="#escape-hatch-2-field-and-element-lvalues-as-ref-arguments" aria-label="link">&#8203;</a></h2>
 <p>You can pass <code>obj.field</code> or <code>arr[i]</code> straight into a <code>&amp;</code> parameter. Element references re-resolve <strong>through the container</strong>, so they stay correct even if the array reallocates its storage:</p>
@@ -281,7 +301,13 @@ print("original:     ", cast&lt;Derived&amp;&gt;(h).t, "  copy: ", copy.t);</cod
 after write:  5
 via handle:   77
 original:     77  copy: 0</code></pre></div>
-<p>The reference form is itself an lvalue, as in C++: <code>cast&lt;Derived&amp;&gt;(h) = d</code> assigns the object <code>h</code> holds (when <code>h</code> is a <code>shared_ptr</code>, the object it shares, so every alias sees the new members, as <code>*h = d</code> would; the handle itself is not rebound), a member of it binds by reference (<code>auto&amp; t = cast&lt;Derived&amp;&gt;(h).t</code>), and <code>cast&lt;int&amp;&gt;(n) += 2.5</code> or <code>cast&lt;int&amp;&gt;(n)++</code> stores an int into <code>n</code>, as <code>int&amp; r = n; r += 2.5;</code> would, even when <code>n</code> is a <code>var</code>. Every C++ lvalue is assignable the same way: a function or method returning <code>T&amp;</code> (<code>first() = 5</code>), a conditional whose arms are lvalues (<code>(useA ? a : b) = 5</code>), <code>(a = b) = c</code> and <code>++x = v</code>, and so is an element or member of any of them: <code>getref()[&quot;a&quot;] = 5</code> through a function returning <code>map&lt;string, int&gt;&amp;</code>, <code>(useA ? xs : ys)[0] = 1</code>.</p>
+<p>The reference form is itself an lvalue, as in C++, so you can assign to it and bind through it:</p>
+<ul>
+<li><code>cast&lt;Derived&amp;&gt;(h) = d</code> assigns the object <code>h</code> holds. When <code>h</code> is a <code>shared_ptr</code>, that is the object it shares, so every alias sees the new members, as <code>*h = d</code> would; the handle itself is not rebound.</li>
+<li>A member of it binds by reference: <code>auto&amp; t = cast&lt;Derived&amp;&gt;(h).t</code>.</li>
+<li><code>cast&lt;int&amp;&gt;(n) += 2.5</code> and <code>cast&lt;int&amp;&gt;(n)++</code> store an int into <code>n</code>, as <code>int&amp; r = n; r += 2.5;</code> would, even when <code>n</code> is a <code>var</code>.</li>
+</ul>
+<p>Every C++ lvalue is assignable the same way: a function or method returning <code>T&amp;</code> (<code>first() = 5</code>), a conditional whose arms are lvalues (<code>(useA ? a : b) = 5</code>), <code>(a = b) = c</code> and <code>++x = v</code>. So is an element or member of any of them: <code>getref()[&quot;a&quot;] = 5</code> through a function returning <code>map&lt;string, int&gt;&amp;</code>, or <code>(useA ? xs : ys)[0] = 1</code>.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; slots = [1, 2, 3];
 int&amp; first() { return slots[0]; }
 int a = 1;
@@ -301,6 +327,56 @@ caught: Cannot assign to a call result: &#x27;f&#x27; returns by value</code></p
 <p>A conditional whose arms both name storage is that lvalue wherever a reference binds it, as in C++: <code>f(use_a ? a : b)</code> passes the chosen variable to a <code>T&amp;</code> parameter, <code>auto&amp; r = use_a ? a : b;</code> aliases it, and a <code>-&gt; T&amp;</code> return, a <code>T&amp;</code> default and <code>cast&lt;T&amp;&gt;(use_a ? a : b)</code> name it too. A store, return or yield of it by value still copies the picked value. Arms of two types make a converted temporary, which a non-const reference cannot bind: the checker reports <code>cannot bind a reference to a conditional of 'int' and 'float': its arms must have one type</code>, and an arm that names no storage (<code>use_a ? a : 5</code>) keeps the whole conditional a temporary.</p>
 <p>Anything else names no storage, and the error says what was written: <code>Cannot assign to a literal</code>, <code>Cannot assign to x++: it yields the old value</code>, <code>Cannot assign to the result of '+': it is a temporary value</code>, <code>Cannot assign to the result of cast&lt;int&gt;(x): it is a temporary value (cast&lt;int&amp;&gt;(x) names the variable)</code>, <code>Cannot assign to a conditional: its arm '5' names no storage</code>. A member of a class value no storage holds is a temporary too, as in C++: <code>make().x = 1</code>, <code>Point().x = 1</code> and <code>(a + b).x = 1</code> raise <code>Cannot assign to a member of a temporary</code> when they run (a handle result names its object, so <code>makeShared().x = 1</code> stores). The checker reports the same text at load (with a lowercase first letter) wherever it can see the target, a call to a function it knows or a subscript through a by-value <code>operator[]</code> included (<code>cannot assign to a call result: 'count' returns by value</code>). A call it cannot see through, like <code>f()</code> above, is judged when it runs: the right side and the call run first and a by-value result raises after them.</p>
 <p>Two things to keep in mind. The value form applied to a handle or a reference still copies, and because that is almost never what you meant, the checker warns about it (<code>cast&lt;C&gt;(h) copies the instance - use cast&lt;C&amp;&gt;(h) to alias it or cast&lt;shared_ptr&lt;C&gt;&gt;(h) to share it</code>). And a cast to an unrelated class raises the catchable <code>Cannot cast 'X' to 'T'</code> at run time; the checker never second-guesses the operand, since saying <code>cast</code> is how you tell it you know better. The primitive forms, the char rules and the full contract are in <a href="02-type-ladder.html#cast-the-explicit-boundary">the Type Ladder</a>.</p>
+<h2 id="bound-cpp-objects">Bound C++ objects<a class="hlink" href="#bound-cpp-objects" aria-label="link">&#8203;</a></h2>
+<p>A C++ class the host binds (<a href="../embedding/02-dynamic-binder.html">dynamic_binder</a>) follows the same rules as a script class. Take a host that binds a <code>Turret</code>, and a <code>Tower</code> that owns one and hands it out by reference:</p>
+<div class="codeblock cb-cpp" data-sample="values-turret-host"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Turret {
+    std::string name = "turret";
+    int64_t ammo = 0;
+};
+struct Tower {
+    Turret turret;
+    Turret&amp; child() { return turret; }
+};
+
+jai::dynamic_binder&lt;Turret&gt;(*eng, "Turret")
+    .property("name", &amp;Turret::name)
+    .property("ammo", &amp;Turret::ammo)
+    .method("=", [](Turret&amp; self, const Turret&amp; other) -&gt; Turret&amp; { return self = other; })
+    .build();
+jai::dynamic_binder&lt;Tower&gt;(*eng, "Tower")
+    .method("child", &amp;Tower::child)
+    .build();</code></pre></div>
+<div class="codeblock cb-jai" data-host="Turret and Tower bindings" data-sample="values-turret"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">Turret a = Turret();
+a.ammo = 5;
+Turret b = a;              // a copy, made by Turret's copy constructor
+b.ammo = 9;
+print(a.ammo, " ", b.ammo);
+
+var&amp; r = a;                // r names a itself
+r.ammo = 6;
+print(a.ammo);
+
+Tower tower = Tower();
+var c = tower.child();     // a handle to the Turret inside tower
+c.ammo = 40;
+print(tower.child().ammo);
+
+var&amp; t = tower.child();    // a reference to that same Turret
+t = b;                     // runs Turret's bound operator=
+print(tower.child().ammo);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">5 9
+6
+40
+9</code></pre></div>
+<p>Line by line:</p>
+<ul>
+<li><code>Turret b = a;</code> copies, as it would for a script class. The copy is a separate C++ object, built by the class&#x27;s copy constructor. A by-value parameter copies the same way.</li>
+<li><code>var&amp; r = a;</code> is a reference to the variable <code>a</code>. Nothing is copied, and writes through <code>r</code> land in <code>a</code>.</li>
+<li><code>var c = tower.child();</code> keeps what the call returned. <code>child()</code> returns a <code>Turret&amp;</code>, so script receives the Turret inside the Tower, not a copy, and a variable initialized from a call takes the result as it is. Writes through <code>c</code> land in the Tower&#x27;s Turret, and <code>c</code> keeps <code>tower</code>&#x27;s object alive. Copying <code>c</code> into another variable copies the Turret, as copying <code>a</code> does.</li>
+<li><code>var&amp; t = tower.child();</code> binds a reference to the Tower&#x27;s Turret, as <code>Turret&amp; t = tower.child();</code> does in C++. <code>t = b;</code> then runs the class&#x27;s bound <code>operator=</code> (the <code>"="</code> method) on that Turret. A class that binds no <code>"="</code> refuses with <code>Cannot assign to a reference to 'Turret': its binding has no operator=</code>.</li>
+</ul>
+<p>An assignment through a reference to a script variable is a store into that variable. After <code>var&amp; r = a;</code>, the line <code>r = b;</code> does what <code>a = b;</code> does: <code>a</code> takes a copy of <code>b</code>, made by the copy constructor, and the bound <code>operator=</code> does not run. Only a reference to an object the host owns, like <code>t</code> above, assigns through <code>operator=</code>.</p>
+<p>To share one bound object between script variables, use a handle: <code>new Turret()</code> makes a <code>shared_ptr&lt;Turret&gt;</code>, and its copies share the object, as <a href="#escape-hatch-5-shared-ptr-opt-in-reference-semantics">escape hatch 5</a> shows.</p>
 <h2 id="const-set-once-then-only-read"><code>const</code>: set once, then only read<a class="hlink" href="#const-set-once-then-only-read" aria-label="link">&#8203;</a></h2>
 <p><code>const</code> marks a declaration that its initializer sets and nothing writes afterwards: a variable (<code>const int LIMIT = 10;</code>, or <code>const limit = 10;</code>, which is <code>const auto</code>), a parameter (<code>const T&amp; p</code>, <code>const T p</code>), a loop variable (<code>for (const auto&amp; x : xs)</code>) or a class constant. The rules are C++&#x27;s. A const value is read-only all the way down: its elements, its fields, and the methods that write their receiver are off limits through it. A const <em>handle</em> only stops the handle from rebinding, and the object it points at stays writable. Copies are ordinary values, so <code>auto copy = LIMIT_TABLE;</code> can change freely.</p>
 <p>A <code>const</code> in a class body is a class constant: one value for every instance, read as <code>Hero::MAX_HP</code> or as a bare <code>MAX_HP</code> in the class&#x27;s methods. A <code>const T&amp;</code> parameter binds literals and temporaries as well as variables, and <code>const</code> is never part of a signature, so <code>f(const T&amp;)</code> and <code>f(T&amp;)</code> are one function.</p>
@@ -324,7 +400,14 @@ caught: Cannot assign to &#x27;table[0]&#x27;: it is read-only (&#x27;table&#x27
 <p>Strict checking reports every write it can see at load: <code>h.heal();</code> above is <code>cannot call &#x27;heal&#x27; on &#x27;h&#x27;: &#x27;h&#x27; is const and &#x27;heal&#x27; writes its receiver (line 4)</code>, naming the line of the write, and <code>Hero::MAX_HP = 1;</code> is <code>cannot assign to const &#x27;Hero::MAX_HP&#x27;</code>. A path through a <code>var</code> is checked when it runs, as the last line shows.</p>
 <h2 id="what-each-strategy-costs">Choosing a strategy<a class="hlink" href="#what-each-strategy-costs" aria-label="link">&#8203;</a></h2>
 <p>The short version: passing by value pays for a deep copy that grows with the payload; <code>&amp;</code> and <code>shared_ptr</code> alias the same object at essentially the same cost. All three strategies are quantified side by side in <a href="../embedding/11-performance.html#value-strategy-costs">Performance</a>.</p>
-<p><strong>The copy is elided when it cannot be observed.</strong> A by-value class, array or map parameter that the callee only <em>reads</em> binds the argument itself, with no copy at all, when the engine can prove the copy would make no difference: the body never stores through the parameter or calls a mutating method on it, never compares it, aliases it, returns it, passes it on whole or in a nested loop, and only reads members and elements whose declared type is a primitive or a string; and the callee, with everything it calls, writes nothing but its own locals (the same purity the parallel bodies are held to). Anything outside that shape keeps the clone, so the semantics never change, only the cost: a read-only helper taking a struct by value runs at reference speed. Objects of a <code>nocopy</code> class still raise when passed by value, whatever the callee does. The proof is per function, computed on the first call and redone whenever definitions change; <code>engine::parameter_alias(false)</code> turns the elision off for a differential check.</p>
+<p><strong>The copy is elided when it cannot be observed.</strong> A by-value class, array or map parameter that the callee only <em>reads</em> binds the argument itself, with no copy at all, when the engine can prove the copy would make no difference. The proof needs all of these:</p>
+<ul>
+<li>The body never stores through the parameter and never calls a mutating method on it.</li>
+<li>The body never compares it, aliases it, returns it, or passes it on whole or in a nested loop.</li>
+<li>The body reads only members and elements whose declared type is a primitive or a string.</li>
+<li>The callee, with everything it calls, writes nothing but its own locals (the same purity the parallel bodies are held to).</li>
+</ul>
+<p>Anything outside that shape keeps the clone. The semantics never change, only the cost: a read-only helper taking a struct by value runs at reference speed. Objects of a <code>nocopy</code> class still raise when passed by value, whatever the callee does. The proof is per function. It is computed on the first call and redone whenever definitions change, and <code>engine::parameter_alias(false)</code> turns the elision off for a differential check.</p>
 <p>A by-value local initialized from an lvalue (<code>Big copy = registry[i];</code>) is elided the same way: when the statements after the declaration, and everything they call, only read the local&#x27;s members and elements, never use it whole and never write the source, the local reads the source&#x27;s object directly instead of a copy. Again only the cost changes; <code>engine::local_alias(false)</code> turns this elision off.</p>
 <p><strong>Decision guide:</strong></p>
 <ul>

@@ -163,7 +163,7 @@ std::string out = result.value().as_string();</code></pre></div>
 
 <h2 id="classes-in-full">Classes in full<a class="hlink" href="#classes-in-full" aria-label="link">&#8203;</a></h2>
 <p>A class with two constructors, an overloaded method, a getter and setter pair, an operator and a base class. The C++ side is ordinary:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Entity {
+<div class="codeblock cb-cpp" data-sample="chai-monster-types"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Entity {
     virtual ~Entity() = default;
     std::string name = "entity";
     virtual std::string describe() const { return "entity " + name; }
@@ -195,7 +195,7 @@ chai.add(chaiscript::fun(&amp;Monster::alive), "alive");
 chai.add(chaiscript::fun(&amp;Monster::health), "health");
 chai.add(chaiscript::fun(&amp;Monster::setHealth), "set_health");
 chai.add(chaiscript::fun(&amp;Monster::operator==), "==");</code></pre></div>
-<div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript)</span><pre><code class="lang-cpp">jai::dynamic_binder&lt;Entity&gt;(*eng, "Entity")
+<div class="codeblock cb-cpp" data-sample="chai-monster-binding"><span class="cb-label">C++ (JaiScript)</span><pre><code class="lang-cpp">jai::dynamic_binder&lt;Entity&gt;(*eng, "Entity")
     .property("name", &amp;Entity::name)
     .method("describe", &amp;Entity::describe)
     .build();
@@ -214,7 +214,7 @@ jai::dynamic_binder&lt;Monster&gt;(*eng, "Monster")
 
 eng-&gt;add_function("describe", [](std::shared_ptr&lt;Entity&gt; e) { return e-&gt;describe(); });</code></pre></div>
 <p>Script reads the pair as one property, and a value made in script passes to a function that takes the base:</p>
-<div class="codeblock cb-jai" data-host="Entity / Monster registration"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">var m = Monster("ogre", 30);
+<div class="codeblock cb-jai" data-host="Entity / Monster registration" data-sample="chai-monster"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">var m = Monster("ogre", 30);
 m.damage(5);
 m.damage(10, 1.5);
 m.hp -= 100;                                // through setHealth, which clamps at 0

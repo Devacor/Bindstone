@@ -213,6 +213,12 @@ namespace jai::detail {
 			fprintf(stderr, "  setup split per region: admit %.0f | slots %.0f | captures %.0f | pins %.0f | prewarm %.0f | rest %.0f cyc\n",
 				(double)p.setup_admit_cyc / p.regions, (double)p.setup_slots_cyc / p.regions, (double)p.setup_caps_cyc / p.regions,
 				(double)p.setup_pins_cyc / p.regions, (double)p.setup_prewarm_cyc / p.regions, (double)p.setup_rest_cyc / p.regions);
+			if (p.steady_regions) {
+				const double r = (double)p.steady_regions;
+				fprintf(stderr, "  steady per region (%llu regions built no slot): admit %.0f | slots %.0f | pins %.0f | prewarm %.0f | rest %.0f | submit %.0f cyc\n",
+					(unsigned long long)p.steady_regions, p.steady_admit_cyc / r, p.steady_slots_cyc / r, p.steady_pins_cyc / r, p.steady_prewarm_cyc / r,
+					p.steady_rest_cyc / r, p.steady_submit_cyc / r);
+			}
 			if (p.cache_hits + p.cache_misses + p.cache_unprovable) {
 				fprintf(stderr, "  snapshot cache: hits %llu | misses %llu | stores %llu | unprovable %llu\n",
 					(unsigned long long)p.cache_hits, (unsigned long long)p.cache_misses,
@@ -2627,6 +2633,7 @@ namespace {
 		}
 		auto [pos, inserted] = state.admission_cache.insert_or_assign(key, build_admission(eng, fn, inplace_root, prefix));
 		(void)inserted;
+		pos->second.generation = ++state.admission_generation;
 		return &pos->second;
 	}
 
@@ -4263,6 +4270,96 @@ struct region_plan {
 };
 
 // The zip's arrays and the range: an array, the range's length, distinct from the range
+	// One region shape's method admission: the key it was admitted under and the builder holding what it pinned
+	struct method_admission_record {
+		uint64_t generation = 0;
+		const char* prefix = nullptr;
+		std::vector<const class_definition*> element_classes;
+		std::vector<type_info*> written_types;
+		bool element_methods = false, destructors = false, inplace = false;
+		uint64_t registry_key = 0, definition_epoch = 0;
+		bool ok = true;
+		std::error_code code;
+		std::string message;
+		std::unique_ptr<admission_builder> builder;
+	};
+	struct method_admission_cache {
+		static constexpr size_t k_records = 16;   // region shapes a program cycles through; the oldest leaves first
+		std::vector<std::unique_ptr<method_admission_record>> records;
+		std::unique_ptr<method_admission_record> uncached;   // an admission admit_cached never stamped: admitted afresh each region
+		method_admission_record* find(uint64_t generation, const char* prefix, const std::vector<const class_definition*>& classes, const std::vector<type_info*>& written,
+		                              bool element_methods, bool destructors, bool inplace, uint64_t registry_key, uint64_t definition_epoch) {
+			if (generation == 0) { return nullptr; }
+			for (auto& r : records) {
+				if (r->generation == generation && r->prefix == prefix && r->element_methods == element_methods && r->destructors == destructors && r->inplace == inplace &&
+				    r->registry_key == registry_key && r->definition_epoch == definition_epoch && r->element_classes == classes && r->written_types == written) {
+					return r.get();
+				}
+			}
+			return nullptr;
+		}
+		method_admission_record& make(uint64_t generation, const char* prefix, const std::vector<const class_definition*>& classes, const std::vector<type_info*>& written,
+		                              bool element_methods, bool destructors, bool inplace, uint64_t registry_key, uint64_t definition_epoch, engine& eng) {
+			auto r = std::make_unique<method_admission_record>();
+			r->generation = generation;
+			r->prefix = prefix;
+			r->element_classes = classes;
+			r->written_types = written;
+			r->element_methods = element_methods;
+			r->destructors = destructors;
+			r->inplace = inplace;
+			r->registry_key = registry_key;
+			r->definition_epoch = definition_epoch;
+			r->builder = std::make_unique<admission_builder>(eng);
+			if (generation == 0) {
+				uncached = std::move(r);
+				return *uncached;
+			}
+			if (records.size() >= k_records) { records.erase(records.begin()); }
+			records.push_back(std::move(r));
+			return *records.back();
+		}
+	};
+
+	// The accessors, and the operators of every class the region's objects can belong to: a script operator's walk is a trial,
+	// rolled back whole when it refuses (the operator stays unpinned)
+	void admit_region_extras(admission_builder& method_adm, const parallel_admission& body, const std::vector<const class_definition*>& element_classes,
+	                         bool element_methods, const std::vector<type_info_ptr>& written_types, bool program_destructors) {
+		method_adm.admit_host_accessors(body.element_reached_members);
+		method_adm.admit_host_accessors(method_adm.adm.element_reached_members);
+		const bool host_calls = !body.host_functions.empty() || !method_adm.adm.host_functions.empty() || !method_adm.host_pins.empty() ||
+		                        !body.static_calls.empty() || !method_adm.adm.static_calls.empty();
+		const std::vector<uint64_t> names = method_adm.operator_names();
+		std::vector<std::pair<const class_definition*, uint64_t>> tried;
+		// a fixed point: an operator body can construct objects of more classes, whose operators are candidates in turn
+		for (bool grew = true; grew;) {
+			grew = false;
+			for (const class_definition* cls : method_adm.operator_classes(element_classes, host_calls)) {
+				for (const uint64_t id : names) {
+					if (std::find(tried.begin(), tried.end(), std::make_pair(cls, id)) != tried.end()) { continue; }
+					tried.emplace_back(cls, id);
+					const script_value* bound = cls->method_ptr(id);
+					if (!bound || !bound->is_function()) { continue; }
+					if (const auto* dispatch = bound->as_function().target<script_method_dispatch>()) {
+						if (!dispatch->cls) { continue; }
+						// the operator's overloads, the constructions and methods they reach: all admitted, or none
+						admission_builder saved(method_adm);
+						if (!method_adm.admit_script_operator(dispatch->cls.get(), id) ||
+						    !method_adm.admit_region_classes(element_classes, element_methods, written_types, program_destructors)) {
+							method_adm.~admission_builder();
+							new (&method_adm) admission_builder(std::move(saved));
+							continue;
+						}
+						method_adm.operator_pins.push_back({ cls, id, dispatch->cls.get(), true });
+						grew = true;
+					} else {
+						method_adm.operator_pins.push_back({ cls, id, admission_builder::host_method_owner(cls, id), false });
+					}
+				}
+			}
+		}
+	}
+
 checked_result<void> run_region(engine& eng, region_plan& plan) {
 	parallel_engine_state& state = eng.parallel_state();
 	recover_pending_registrations(state);
@@ -4421,9 +4518,6 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	const reach_filter reach = binds_in_place
 		? reach_filter{ adm->element_reach_all ? nullptr : &adm->element_reached_members, &adm->element_reached_whole }
 		: reach_filter{};
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_norm0 = __rdtsc();
-#endif
 	std::vector<type_info*> value_types;
 	std::vector<std::pair<const void*, size_t>> handle_objects;   // (object, element) of every handle element, range and zips
 	element_proof proof;
@@ -4542,16 +4636,14 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 
 	// ELEMENT METHODS (in-place statement): admitted at the barrier against the element
 	// classes the proof found; their captures classify like the body's
-	admission_builder method_adm(eng);
-	method_adm.inplace_root = true;
-	method_adm.prefix = plan.prefix;
+	auto& registry = eng.get_class_registry();
+	const uint64_t registry_key = eng.class_definition_epoch() * 1000003u + registry.cpp_classes_.size() * 131u + registry.script_classes_.size();
 	{
-		auto& registry = eng.get_class_registry();
-		const uint64_t key = eng.class_definition_epoch() * 1000003u + registry.cpp_classes_.size() * 131u + registry.script_classes_.size();
-		if (state.host_method_names_key != key) {
+		if (state.host_method_names_key != registry_key) {
+			admission_builder lister(eng);
 			state.host_method_names.clear();
-			state.host_method_names_key = key;
-			method_adm.for_each_registered_class([&](const class_definition* cls) {
+			state.host_method_names_key = registry_key;
+			lister.for_each_registered_class([&](const class_definition* cls) {
 				std::vector<const class_definition*> chain{ cls };
 				while (!chain.empty()) {
 					const class_definition* level = chain.back();
@@ -4563,13 +4655,16 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 				}
 			});
 		}
-		method_adm.host_names = &state.host_method_names;
 	}
 	state.faults.checkpoint("region.method_admission");
 	const bool element_methods = plan.inplace && !element_classes.empty();
 	// a worker's copy of an index-written array holds objects that can die on it: the declared element type, or each held value's
 	std::vector<type_info_ptr> written_types;
-	const bool program_destructors = method_adm.any_program_destructor();
+	if (state.program_destructors_key != registry_key) {
+		state.program_destructors = admission_builder(eng).any_program_destructor();
+		state.program_destructors_key = registry_key;
+	}
+	const bool program_destructors = state.program_destructors;
 	for (const auto& cap : captures) {
 		if (!program_destructors || cap.kind != parallel_capture_kind::written) { continue; }
 		const type_info_ptr declared = cap.source->get_type_info() ? cap.source->get_type_info()->element_type() : type_info_ptr(nullptr);
@@ -4583,51 +4678,50 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			if (t && std::find(written_types.begin(), written_types.end(), t) == written_types.end()) { written_types.push_back(t); }
 		}
 	}
+	// the method admission of this region shape, kept while nothing it read changed: the body's admission, the element classes, the
+	// written types, the class registry and the program's definitions
+	auto* admissions = static_cast<method_admission_cache*>(state.method_admissions.get());
+	if (!admissions) {
+		auto made = std::make_shared<method_admission_cache>();
+		admissions = made.get();
+		state.method_admissions = std::move(made);
+	}
+	std::vector<type_info*> written_raw;
+	for (const auto& t : written_types) { written_raw.push_back(t.get()); }
+	method_admission_record* record = admissions->find(adm->generation, plan.prefix, element_classes, written_raw, element_methods, program_destructors, plan.inplace,
+	                                                   registry_key, eng.definition_epoch());
+	if (record && !admission_graph_current(eng, record->builder->adm)) {
+		admissions->records.erase(std::find_if(admissions->records.begin(), admissions->records.end(), [record](const auto& r) { return r.get() == record; }));
+		record = nullptr;
+	}
+	const bool admitted_before = record != nullptr;
+	if (!record) {
+		record = &admissions->make(adm->generation, plan.prefix, element_classes, written_raw, element_methods, program_destructors, plan.inplace, registry_key, eng.definition_epoch(), eng);
+		record->builder->inplace_root = true;
+		record->builder->prefix = plan.prefix;
+		record->builder->host_names = &state.host_method_names;
+	}
+	admission_builder& method_adm = *record->builder;
+	if (admitted_before && !record->ok) {
+		state.error_text = record->message;
+		return checked_result<void>(record->code, std::string_view(state.error_text));
+	}
 	if (element_methods || !adm->constructions.empty() || !element_classes.empty() || !written_types.empty() ||
 	    !adm->element_method_calls.empty() || !adm->element_reached_members.empty()) {
-		method_adm.adm.element_method_calls = adm->element_method_calls;
-		method_adm.adm.constructions = adm->constructions;
-		// the methods' captures are their own set: the same name is the body's capture in the
-		// region's enclosing scope and a method's in its class's scope
-		if (!method_adm.admit_region_classes(element_classes, element_methods, written_types, program_destructors)) {
-			state.error_text = method_adm.adm.message;
-			return checked_result<void>(method_adm.adm.code, std::string_view(state.error_text));
-		}
-		method_adm.admit_host_accessors(adm->element_reached_members);
-		method_adm.admit_host_accessors(method_adm.adm.element_reached_members);
-		// operators: a script operator's walk is a trial, rolled back whole when it refuses (the operator stays unpinned)
-		{
-			const bool host_calls = !adm->host_functions.empty() || !method_adm.adm.host_functions.empty() || !method_adm.host_pins.empty() ||
-			                        !adm->static_calls.empty() || !method_adm.adm.static_calls.empty();
-			const std::vector<uint64_t> names = method_adm.operator_names();
-			std::vector<std::pair<const class_definition*, uint64_t>> tried;
-			// a fixed point: an operator body can construct objects of more classes, whose operators are candidates in turn
-			for (bool grew = true; grew;) {
-				grew = false;
-				for (const class_definition* cls : method_adm.operator_classes(element_classes, host_calls)) {
-					for (const uint64_t id : names) {
-						if (std::find(tried.begin(), tried.end(), std::make_pair(cls, id)) != tried.end()) { continue; }
-						tried.emplace_back(cls, id);
-						const script_value* bound = cls->method_ptr(id);
-						if (!bound || !bound->is_function()) { continue; }
-						if (const auto* dispatch = bound->as_function().target<script_method_dispatch>()) {
-							if (!dispatch->cls) { continue; }
-							// the operator's overloads, the constructions and methods they reach: all admitted, or none
-							admission_builder saved(method_adm);
-							if (!method_adm.admit_script_operator(dispatch->cls.get(), id) ||
-							    !method_adm.admit_region_classes(element_classes, element_methods, written_types, program_destructors)) {
-								method_adm.~admission_builder();
-								new (&method_adm) admission_builder(std::move(saved));
-								continue;
-							}
-							method_adm.operator_pins.push_back({ cls, id, dispatch->cls.get(), true });
-							grew = true;
-						} else {
-							method_adm.operator_pins.push_back({ cls, id, admission_builder::host_method_owner(cls, id), false });
-						}
-					}
-				}
+		if (!admitted_before) {
+			method_adm.adm.element_method_calls = adm->element_method_calls;
+			method_adm.adm.constructions = adm->constructions;
+			// the methods' captures are their own set: the same name is the body's capture in the
+			// region's enclosing scope and a method's in its class's scope
+			if (!method_adm.admit_region_classes(element_classes, element_methods, written_types, program_destructors)) {
+				record->ok = false;
+				record->code = method_adm.adm.code;
+				record->message = method_adm.adm.message;
+				state.error_text = method_adm.adm.message;
+				return checked_result<void>(method_adm.adm.code, std::string_view(state.error_text));
 			}
+			admit_region_extras(method_adm, *adm, element_classes, element_methods, written_types, program_destructors);
+			record->ok = true;
 		}
 		for (const auto& entry : method_adm.adm.captures) {
 			auto classified = classify_and_add(entry, /*method_scope*/ true);
@@ -4682,7 +4776,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		chunk_begin.push_back(0); chunk_count.push_back(n);
 	}
 #ifdef JAISCRIPT_VM_PROFILE
-	fprintf(stderr, "[region-profile] %s n=%zu workers=%zu ns/elem=%.0f overhead/worker=%.0f\n", plan.prefix, n, worker_count, pool->ns_per_element, state.worker_overhead_ns);
+	const uint64_t pf_provisions0 = plan.prof ? plan.prof->slot_provisions : 0;
 #endif
 	state.faults.checkpoint("region.bounds_metadata");
 	state.last_chunk_bounds = bounds;
@@ -5129,9 +5223,9 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	region_guard.activate(true);
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t1 = __rdtsc();
-	fprintf(stderr, "[region-profile] %s setup split: normalize %llu | provision+rest %llu cyc\n", plan.prefix, (unsigned long long)(prof_norm1 - prof_norm0), (unsigned long long)(prof_t1 - prof_norm1));
 #endif
-	std::vector<std::pair<size_t, jai::thread_pool::task_type>> region_tasks;
+	auto& region_tasks = state.region_tasks;
+	region_tasks.clear();
 	state.faults.checkpoint("region.tasks_reserve");
 	region_tasks.reserve(worker_count > 1 ? worker_count - 1 : 0);
 	for (size_t k = 1; k < worker_count; ++k) {
@@ -5184,6 +5278,15 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		p.admit_pool_cyc += pf_adm2 - pf_adm1;
 		p.admit_guard_cyc += pf_loop0 - pf_adm2;
 		p.submit_cyc += prof_t2 - prof_t1;
+		if (p.slot_provisions == pf_provisions0) {
+			++p.steady_regions;
+			p.steady_admit_cyc += pf_loop0 - prof_norm1;
+			p.steady_slots_cyc += pf_slots;
+			p.steady_pins_cyc += pf_pins;
+			p.steady_prewarm_cyc += pf_prewarm1 - pf_a;
+			p.steady_rest_cyc += prof_t1 - pf_prewarm1;
+			p.steady_submit_cyc += prof_t2 - prof_t1;
+		}
 		p.main_chunk_cyc += prof_t3 - prof_t2;
 		p.wait_cyc += prof_t4 - prof_t3;
 		uint64_t span_max = 0, span_min = UINT64_MAX;

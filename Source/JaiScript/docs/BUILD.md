@@ -196,7 +196,9 @@ JaiScript/
 
 The library target is `jaiscript`, also spelled `JaiScript::jaiscript`; link that name and the
 include path, the C++20 requirement and the platform libraries (`ws2_32` on Windows, for the
-debugger transport) come with it. There are two routes.
+debugger transport) come with it. There are two CMake routes, below. Visual Studio (MSBuild) and Xcode projects compile
+the sources directly; [Building JaiScript into a Host](site/embedding/18-build-integration.html) gives the sources, include
+path, flags and defines for each, with a property sheet for MSBuild and the Xcode build settings by name.
 
 **From source, as a subproject.** Nothing but the library builds by default:
 

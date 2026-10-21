@@ -233,7 +233,7 @@ try {
 } catch (const jai::script_exception&amp; e) {
     std::cerr &lt;&lt; e.what();                                       // from script
 }</code></pre></div>
-<p>A frame loop that should not throw calls through <code>as_function()</code> and tests the <code>jai::checked_result</code> it returns; the engine is ready for the next call after a failed one (<a href="../embedding/01-embedding-quickstart.html#error-surfaces">Error surfaces</a>).</p>
+<p>A frame loop that should not throw calls through <code>as_function()</code> and tests the <code>jai::checked_result</code> it returns; the engine is ready for the next call after a failed one (<a href="../embedding/17-host-api.html#error-surfaces">Error surfaces</a>).</p>
 
 <h2 id="python-habits">Python habits that get a different answer<a class="hlink" href="#python-habits" aria-label="link">&#8203;</a></h2>
 <p>JaiScript's semantics are C++'s. A dynamic-language habit that changes is usually covered in <a href="01-from-javascript.html">From JavaScript</a>, and <a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a> is the chapter to read first. The spellings:</p>

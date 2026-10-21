@@ -193,6 +193,13 @@ jaiscript --check=strict --backend=interp sample.jai
 
 Where a page shows output, paste the real output.
 
+A C++ sample that shows output, and a script sample that needs a host (`data-host`), is checked too. The page marks the
+block `data-sample="id"`; the "Doc Samples" suite (`source/tests/integration/doc_samples_tests.cpp`) holds the C++ code
+between `// [sample id]` and `// [/sample]` markers, requires the page's text to equal it, runs it and compares what it
+prints with the output block after it on the page. A script sample's code is read from the page and run on the host the
+test registers. `verify_site.py` runs the suite; with `JAI_DOC_SAMPLES_DUMP=<dir>` set, each run writes its output to
+`<dir>/<id>.txt` for pasting.
+
 ## Commits and pull requests
 
 One-line commit messages — a title, no body.

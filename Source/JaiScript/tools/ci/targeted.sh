@@ -103,7 +103,8 @@ if [ "$BUILD" = 1 ]; then
 			gloom) release_targets="$release_targets jai_gloom" ;;
 			demoreel) release_targets="$release_targets jai_demoreel" ;;
 			crawler) release_targets="$release_targets jai_crawler" ;;
-			gatorquest | timedemo | verify-site) release_targets="$release_targets jaiscript_runner" ;;
+			gatorquest | timedemo) release_targets="$release_targets jaiscript_runner" ;;
+			verify-site) release_targets="$release_targets jaiscript_runner jaiscript_tests" ;;
 			lsp) release_targets="$release_targets jaiscript_lsp" ;;
 			embed-quickstart) release_targets="$release_targets embed_quickstart" ;;
 		esac

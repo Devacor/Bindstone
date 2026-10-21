@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Embedding Quickstart — JaiScript Embedding</title>
-<meta name="description" content="Two lines to a running engine, then the pieces you add: the standard library, globals, host functions, and where results come back.">
+<meta name="description" content="From nothing to a scripted, hot-reloading game loop in six steps: add JaiScript to the build, run a script, bind a class, call a script function, reload an edit while the loop runs, and handle errors.">
 <meta name="theme-color" content="#0b0d13" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="JaiScript docs">
 <meta property="og:title" content="Embedding Quickstart — JaiScript Embedding">
-<meta property="og:description" content="Two lines to a running engine, then the pieces you add: the standard library, globals, host functions, and where results come back.">
+<meta property="og:description" content="From nothing to a scripted, hot-reloading game loop in six steps: add JaiScript to the build, run a script, bind a class, call a script function, reload an edit while the loop runs, and handle errors.">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -32,273 +32,144 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Embedding</summary><ol class="chapter-list"><li class="current"><a href="../embedding/01-embedding-quickstart.html" aria-current="page">Embedding Quickstart</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li><li><a href="../embedding/14-language-server.html">Editor Support: the Language Server</a></li><li><a href="../embedding/15-math-adapters.html">Math Adapters: Host Vector Types</a></li><li><a href="../embedding/16-thread-pool.html">Thread Pool for Host Work</a></li></ol></details></aside>
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Embedding</summary><ol class="chapter-list"><li class="current"><a href="../embedding/01-embedding-quickstart.html" aria-current="page">Embedding Quickstart</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li><li><a href="../embedding/14-language-server.html">Editor Support: the Language Server</a></li><li><a href="../embedding/15-math-adapters.html">Math Adapters: Host Vector Types</a></li><li><a href="../embedding/16-thread-pool.html">Thread Pool for Host Work</a></li><li><a href="../embedding/17-host-api.html">Host API in Depth</a></li><li><a href="../embedding/18-build-integration.html">Building JaiScript into a Host</a></li></ol></details></aside>
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Embedding</a><span class="sep" aria-hidden="true">/</span>01</nav>
 <article class="chapter"><h1 id="embedding-quickstart">Embedding Quickstart<a class="hlink" href="#embedding-quickstart" aria-label="link">&#8203;</a></h1>
-<p>JaiScript&#x27;s whole integration pitch fits in two lines. It compiles into your project as a static lib plus headers, and an engine is just an object:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto e = jai::engine::make();
-e-&gt;execute(&quot;print(\&quot;hello\&quot;);&quot;);   // a bare engine ships a basic print</code></pre></div>
-<p>There is no global interpreter state anywhere: every <code>script_value</code> carries its engine, so two engines are fully isolated (separate globals, separate classes, separate budgets) and two engines on two threads need no locks. <code>engine::make()</code> always returns a <code>std::shared_ptr&lt;engine&gt;</code>. The private constructor makes it impossible to create one any other way (<code>include/jaiscript/core/engine.hpp</code>, <code>engine::make</code>).</p>
-<h2 id="build-it-into-your-project">Build it into your project<a class="hlink" href="#build-it-into-your-project" aria-label="link">&#8203;</a></h2>
-<p>JaiScript has no dependencies. You need a C++20 compiler (MSVC 19.51 / Visual Studio 18, Clang 20 and GCC 16 are the verified ones) and CMake 3.20 or newer; Ninja is optional. The library is one CMake target, <code>JaiScript::jaiscript</code>. Linking it brings the include path, the C++20 requirement, <code>/bigobj</code> on MSVC and <code>ws2_32</code> on Windows. There are two routes to it.</p>
-<p><strong>From source, as a subproject.</strong> Put the JaiScript folder (the one holding its top-level <code>CMakeLists.txt</code>) inside your project; a copy elsewhere takes a binary directory as well, <code>add_subdirectory(path/to/JaiScript jaiscript)</code>. As a subproject only the library builds (the runner, tests, examples and language server stay off) and its MSVC runtime follows yours. A complete host:</p>
+<p>This page takes a C++ program from nothing to a scripted, hot-reloading game loop in six short steps: add JaiScript to the build, run a script, bind a class, call a script function, reload an edit while the loop runs, and handle errors. Every sample on it is compiled and run against the library, and the output under each one is what it prints.</p>
+<p>JaiScript compiles into your program as plain C++ with no dependencies, and an engine is an ordinary object. There is no global interpreter state: two engines are fully isolated, so two threads can each run their own without locks.</p>
+<h2 id="add-jaiscript-to-your-build">1. Add JaiScript to your build<a class="hlink" href="#add-jaiscript-to-your-build" aria-label="link">&#8203;</a></h2>
+<p>Every route needs the same three things: JaiScript&#x27;s sources compiled into your program, its <code>include</code> folder on the include path, and C++20. Pick the route that matches your project; <a href="18-build-integration.html">Building JaiScript into a host</a> has each one in full, with Debug and Release notes and an installed-package route.</p>
+<p><strong>CMake.</strong> Add the JaiScript folder as a subdirectory (or fetch it with <code>FetchContent</code>) and link the target. It carries the include path, the standard and the flags:</p>
 <div class="codeblock cb-plain"><span class="cb-label">CMakeLists.txt</span><pre><code class="lang-plain">cmake_minimum_required(VERSION 3.20)
 project(my_game CXX)
 add_subdirectory(JaiScript)
 add_executable(my_game main.cpp)
 target_link_libraries(my_game PRIVATE JaiScript::jaiscript)</code></pre></div>
-<div class="codeblock cb-cpp"><span class="cb-label">C++ &mdash; main.cpp</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;
+<p><strong>Visual Studio (MSBuild).</strong> Add <code>JaiScript\source\jaiscript.cpp</code> to the project; it is the whole library in one file. In the project properties, under C/C++: add <code>JaiScript\include</code> to Additional Include Directories, set C++ Language Standard to ISO C++20, and add <code>/bigobj</code> to Additional Options. The defaults for exceptions (<code>/EHsc</code>) and run-time type information stay as they are.</p>
+<p><strong>Xcode.</strong> Add <code>JaiScript/source/jaiscript.cpp</code> to your target. In Build Settings: Header Search Paths gets <code>$(SRCROOT)/JaiScript/include</code>, C++ Language Dialect is C++20, and Other C++ Flags gets <code>-ffp-contract=off</code>, which keeps floating-point results identical across platforms.</p>
+<h2 id="run-a-script">2. Run a script and read the result<a class="hlink" href="#run-a-script" aria-label="link">&#8203;</a></h2>
+<p><code>jai::engine::make()</code> returns a <code>std::shared_ptr&lt;jai::engine&gt;</code>. <code>execute()</code> runs source text and returns the value of its last expression as a <code>jai::script_value</code>, which <code>as_int()</code>, <code>as_float()</code>, <code>as_string()</code>, <code>as_bool()</code> or <code>as&lt;T&gt;()</code> converts:</p>
+<div class="codeblock cb-cpp" data-sample="quickstart-run"><span class="cb-label">C++ &mdash; main.cpp</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;
 #include &lt;jaiscript/stdlib/stdlib.hpp&gt;
+#include &lt;iostream&gt;
 
 int main() {
-    auto eng = jai::engine::make();
-    jai::stdlib::register_all(eng);
-    eng-&gt;execute(&quot;print(\&quot;hello from {}\&quot;, \&quot;JaiScript\&quot;);&quot;);
+    auto eng = jai::engine::make();                    // an engine is an object: make as many as you like
+    jai::stdlib::register_all(eng);                    // formatted print, to_string, math, containers, JSON
+
+    eng-&gt;execute(R&quot;(print(&quot;hello from {}&quot;, &quot;JaiScript&quot;);)&quot;);
+
+    jai::script_value r = eng-&gt;execute(&quot;6 * 7&quot;);       // the value of the last expression
+    std::cout &lt;&lt; &quot;6 * 7 = &quot; &lt;&lt; r.as_int() &lt;&lt; &quot;\n&quot;;
+    std::cout &lt;&lt; eng-&gt;execute(R&quot;(&quot;jai&quot; + &quot;script&quot;)&quot;).as&lt;std::string&gt;() &lt;&lt; &quot;\n&quot;;
+    std::cout &lt;&lt; std::boolalpha &lt;&lt; eng-&gt;execute(&quot;2.5 * 2 &gt; 4&quot;).as&lt;bool&gt;() &lt;&lt; &quot;\n&quot;;
     return 0;
 }</code></pre></div>
-<div class="codeblock cb-plain"><span class="cb-label">shell</span><pre><code class="lang-plain">cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-build/my_game                 # hello from JaiScript</code></pre></div>
-<p><code>FetchContent</code> works the same way. Options set before the <code>add_subdirectory</code> (or with <code>-D</code>) turn the tools back on: <code>JAISCRIPT_BUILD_RUNNER</code>, <code>JAISCRIPT_BUILD_TESTS</code>, <code>JAISCRIPT_BUILD_EXAMPLES</code>, <code>JAISCRIPT_BUILD_LSP</code>. <code>JAISCRIPT_ENABLE_DEBUGGER=OFF</code> compiles the debugger's socket code out.</p>
-<p><strong>Installed, through <code>find_package</code>.</strong> Build and install the library once per configuration (Debug and Release share a prefix; the Debug library is <code>jaiscriptd</code>). <code>JAISCRIPT_LTCG=OFF</code> keeps MSVC whole-program optimization out of the library, so your Release edits link in seconds instead of a minute:</p>
-<div class="codeblock cb-plain"><span class="cb-label">shell</span><pre><code class="lang-plain">cmake -S JaiScript -B build-jai -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=C:/libs/jaiscript -DJAISCRIPT_LTCG=OFF -DJAISCRIPT_BUILD_TESTS=OFF -DJAISCRIPT_BUILD_EXAMPLES=OFF -DJAISCRIPT_BUILD_LSP=OFF
-cmake --build build-jai
-cmake --install build-jai</code></pre></div>
-<div class="codeblock cb-plain"><span class="cb-label">CMakeLists.txt</span><pre><code class="lang-plain">cmake_minimum_required(VERSION 3.20)
-project(my_game CXX)
-find_package(JaiScript 0.5 CONFIG REQUIRED)        # configure with -DCMAKE_PREFIX_PATH=C:/libs/jaiscript
-add_executable(my_game main.cpp)
-target_link_libraries(my_game PRIVATE JaiScript::jaiscript)
-set_property(TARGET my_game PROPERTY MSVC_RUNTIME_LIBRARY &quot;${JaiScript_MSVC_RUNTIME_LIBRARY}&quot;)</code></pre></div>
-<p>The last line matters on MSVC. A standalone JaiScript build uses the static runtime (<code>/MT</code>, <code>/MTd</code>) unless you pass <code>CMAKE_MSVC_RUNTIME_LIBRARY</code>, while a CMake project defaults to the DLL runtime; the package records the runtime its library was built with in <code>JaiScript_MSVC_RUNTIME_LIBRARY</code>, and without the line the link fails with <code>LNK2038: mismatch detected for 'RuntimeLibrary'</code>.</p>
-<p>Building without CMake, compile your files with the definitions the library was built with: its runtime (<code>/MT</code> for a standalone build), <code>NDEBUG</code> for a Release library, and <code>JAISCRIPT_ENABLE_DEBUGGER</code> unless it was configured off. The target passes them for you; a mismatch changes class layouts between your code and the library and fails at run time, typically as an assertion in <code>strong_ptr.hpp</code>.</p>
-<p><strong>The runner, for trying scripts.</strong> A standalone build of JaiScript builds the command-line runner as the target <code>jaiscript_runner</code>; its binary is <code>jaiscript</code>:</p>
-<div class="codeblock cb-plain"><span class="cb-label">shell</span><pre><code class="lang-plain">cmake -S JaiScript -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target jaiscript_runner
-build/bin/jaiscript hello.jai                   # run a file; no argument starts a REPL
-build/bin/jaiscript --backend=interp --check=warn hello.jai</code></pre></div>
-<p>The runner registers the whole standard library plus file and console functions, runs on the VM like every engine (the interpreter is one <a href="03-backends.html">call</a> away), and lifts the execution budget (<code>--budget=N</code> puts one back). <code>examples/embed_quickstart/</code> in the repository is a complete host (a bound class, a signal, saves, hot reload, rails, the debugger) that builds either way. The headers a host usually includes:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;              // engine, script_value, the error types
-#include &lt;jaiscript/core/dynamic_binder.hpp&gt;      // dynamic_binder, convert_script_function
-#include &lt;jaiscript/stdlib/stdlib.hpp&gt;            // jai::stdlib::register_all
-#include &lt;jaiscript/serialization/convenience.hpp&gt; // jai::to_json / from_json / to_binary / from_binary
-#include &lt;jaiscript/debug/connector.hpp&gt;          // jai::debug::listen (VS Code attach)</code></pre></div>
-<p><code>&lt;jaiscript/jaiscript.hpp&gt;</code> pulls the core, the binder and the archives in one include (not the standard library).</p>
-<h2 id="execute-and-read-results-as">Execute and read results: <code>as&lt;T&gt;</code><a class="hlink" href="#execute-and-read-results-as" aria-label="link">&#8203;</a></h2>
-<p><code>execute()</code> returns a <code>jai::script_value</code>; convert it with <code>as&lt;T&gt;()</code> or the direct accessors <code>as_int()</code>, <code>as_float()</code>, <code>as_string()</code>, <code>as_bool()</code>.</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// compiled and run against the library
-auto eng = jai::engine::make();               // always a shared_ptr&lt;engine&gt;
-jai::stdlib::register_all(eng);               // formatted print, to_string, to_json, math, ...
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hello from JaiScript
+6 * 7 = 42
+jaiscript
+true</code></pre></div>
+<p>The standard library is opt-in. A bare engine has a basic <code>print</code> and template-string formatting (<code>${hp:.1f}</code>), nothing else; <code>jai::stdlib::register_all</code> adds formatted printing, <code>to_string</code>, math, the container and string libraries and JSON. Output goes to <code>std::cout</code> unless you hand the engine another stream with <code>set_output_stream</code>.</p>
+<h2 id="bind-a-class">3. Bind a class and a function<a class="hlink" href="#bind-a-class" aria-label="link">&#8203;</a></h2>
+<p>A C++ class needs no macros. <code>jai::dynamic_binder</code> names the constructors, members and methods scripts may use, and <code>add_function</code> registers any C++ callable. The samples from here on run inside <code>main</code> after the engine is made:</p>
+<div class="codeblock cb-cpp" data-sample="quickstart-bind"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Player {
+    std::string name;
+    int64_t hp = 100;
+    explicit Player(std::string a_name) : name(std::move(a_name)) {}
+    void hit(int64_t damage) { hp -= damage; }
+};
 
-jai::script_value r = eng-&gt;execute(&quot;2 + 2&quot;);
-r.as&lt;int&gt;();                                        // 4
-eng-&gt;execute(&quot;6 * 7&quot;).as_int();                     // 42
-eng-&gt;execute(&quot;\&quot;jai\&quot; + \&quot;script\&quot;&quot;).as&lt;std::string&gt;();  // &quot;jaiscript&quot;
-eng-&gt;execute(&quot;1.5 * 2&quot;).as&lt;double&gt;();               // 3.0
-eng-&gt;execute(&quot;3 &gt; 2&quot;).as&lt;bool&gt;();                   // true</code></pre></div>
-<p>Output:</p>
-<div class="codeblock cb-plain"><pre><code class="lang-plain">as&lt;int&gt;: 4
-as_int(): 42
-as&lt;std::string&gt;: jaiscript
-as&lt;double&gt;: 3
-as&lt;bool&gt;: 1</code></pre></div>
-<p>(<code>3</code> and <code>1</code> are how <code>std::cout</code> prints <code>3.0</code> and <code>true</code> without <code>showpoint</code> / <code>boolalpha</code>.)</p>
-<p>Note the stdlib is opt-in. A bare engine ships two conveniences: a basic <code>print</code>
-(concatenates its arguments to the host-controlled output stream; no <code>{}</code> formatting) and
-<code>format_value</code> (so template-string specs like <code>${hp:.1f}</code> work on every engine).
-Nothing else: no <code>to_string</code>, no containers library, no JSON.
-<code>jai::stdlib::register_all(eng)</code> brings the standard library and upgrades <code>print</code>
-in place to the formatted <code>{}</code> version (same name, one registration: the upgrade replaces,
-it never stacks). Neither print grants any authority: output goes only to the stream the host installed
-via <code>set_output_stream</code>: a log file, a capture buffer, or a discarding sink. The opt-in
-surface is part of the sandbox story (see Safety Rails).</p>
-<h2 id="registering-c-functions">Registering C++ functions<a class="hlink" href="#registering-c-functions" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// Typed: signature drives conversion and overload resolution
-eng-&gt;add_function(&quot;square&quot;, [](jai::script_int n) { return n * n; });
-eng-&gt;execute(&quot;square(12)&quot;).as_int();      // 144
+// in main, after the engine is made:
+jai::dynamic_binder&lt;Player&gt;(*eng, &quot;Player&quot;)
+    .constructor&lt;std::string&gt;()
+    .property(&quot;name&quot;, &amp;Player::name)
+    .property(&quot;hp&quot;, &amp;Player::hp)
+    .method(&quot;hit&quot;, &amp;Player::hit)
+    .build();
+eng-&gt;add_function(&quot;roll&quot;, [](int64_t sides) { return sides / 2 + 1; });   // any C++ callable
 
-// Variadic: you receive the raw argument vector
-eng-&gt;add_variadic_function(&quot;sum_all&quot;, [&amp;eng](const std::vector&lt;jai::script_value&gt;&amp; args) {
-    jai::script_int total = 0;
-    for (auto&amp; a : args) total += a.as_int();
-    return jai::script_value(total, eng.get());
-});
-eng-&gt;execute(&quot;sum_all(1, 2, 3, 4)&quot;).as_int();   // 10</code></pre></div>
-<p>Registering the same name twice with different signatures creates an <strong>overload set</strong> resolved by argument types at the call site. Use <code>add_variadic_function</code> for <code>print</code>-shaped functions and optional parameters.</p>
-<h3 id="host-direct-entries">A direct entry for a hot host function<a class="hlink" href="#host-direct-entries" aria-label="link">&#8203;</a></h3>
-<p>A typed <code>add_function</code> binding over plain values already has a fast call path. A variadic function goes through its <code>std::function</code> with an argument vector on every call. For one that scripts call in tight loops, give the engine an entry over the arguments where they are: <code>add_host_direct(name, arity, invoke, target)</code>. A VM call site whose callee is the function the name binds then calls <code>invoke(target, args, arity)</code> for a call of exactly <code>arity</code> arguments, none of them a reference. Every other call (another argument count, a reference argument, the interpreter, a name the host registers again or a script rebinds) calls the function, so <code>invoke</code> must return what the function returns for those arguments. Sharing one body between the two keeps them equal:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// one body for both: the function and its direct entry
-static jai::checked_result&lt;jai::script_value&gt; label_of(const void* target, const jai::script_value* args, size_t count) {
-    auto* eng = static_cast&lt;jai::engine*&gt;(const_cast&lt;void*&gt;(target));
-    if (count != 1) return jai::script_value(std::string(&quot;?&quot;), eng);
-    return jai::script_value(std::string(args[0].is_int() ? &quot;int&quot; : args[0].is_float() ? &quot;float&quot; : &quot;other&quot;), eng);
-}
+auto hero = std::make_shared&lt;Player&gt;(&quot;Ada&quot;);     // a live C++ object the script shares
+eng-&gt;add_global(&quot;hero&quot;, eng-&gt;make_object(hero));
+eng-&gt;execute(R&quot;(
+    hero.hit(roll(20));
+    Player rat = Player(&quot;rat&quot;);                   // scripts construct the class too
+    rat.hit(30);
+    print(hero.name, &quot; &quot;, hero.hp, &quot;, &quot;, rat.name, &quot; &quot;, rat.hp);
+)&quot;);
+std::cout &lt;&lt; &quot;C++ sees hp &quot; &lt;&lt; hero-&gt;hp &lt;&lt; &quot;\n&quot;;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Ada 89, rat 70
+C++ sees hp 89</code></pre></div>
+<p><code>make_object</code> hands the script a handle to your live object, so its writes land in C++. A script that constructs the class (<code>Player("rat")</code>) gets its own object. <a href="02-dynamic-binder.html">dynamic_binder</a> covers properties with getters and setters, overloads, inheritance and the rest.</p>
+<h2 id="call-a-script-function">4. Call a script function<a class="hlink" href="#call-a-script-function" aria-label="link">&#8203;</a></h2>
+<p>A script function is a value. Look it up with <code>get_variable</code> and call it with a vector of arguments. The call returns a <code>checked_result</code>: test it, then read <code>value()</code>. <code>convert_script_function</code> wraps the same function in a typed <code>std::function</code> instead:</p>
+<div class="codeblock cb-cpp" data-sample="quickstart-call"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(&quot;int damage_for(int level) { return level * 3; }&quot;);
 
-eng-&gt;add_variadic_function(&quot;label&quot;, [e = eng.get()](const std::vector&lt;jai::script_value&gt;&amp; args) {
-    return label_of(e, args.data(), args.size());
-});
-eng-&gt;add_host_direct(&quot;label&quot;, 1, &amp;label_of, eng.get());   // after the function: it keys on the function &quot;label&quot; binds now
-eng-&gt;execute(&quot;label(2.5)&quot;).as_string();                  // &quot;float&quot;</code></pre></div>
-<p>Every <code>script_value</code> you construct yourself needs the engine pointer: <code>jai::script_value(3.14159, eng.get())</code>, or use the convenience factories <code>eng-&gt;make_value(v)</code> / <code>eng-&gt;make_null()</code> / <code>eng-&gt;make_array()</code> / <code>eng-&gt;make_map()</code>.</p>
-<h2 id="globals-copies-vs-live-bindings">Globals: copies vs live bindings<a class="hlink" href="#globals-copies-vs-live-bindings" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_global(&quot;PI&quot;, jai::script_value(3.14159, eng.get()));   // copied in
-
-int hp = 100;
-eng-&gt;add_global_ref(&quot;hp&quot;, hp);      // LIVE binding (cpp_bound) — no copy
-eng-&gt;execute(&quot;hp = hp - 25;&quot;);      // hp is now 75 in C++
-hp = 1;                              // and C++ writes are visible to the script
-eng-&gt;execute(&quot;hp&quot;).as_int();        // 1</code></pre></div>
-<p>Output:</p>
-<div class="codeblock cb-plain"><pre><code class="lang-plain">hp after script damage: 75
-script sees: 1</code></pre></div>
-<p><code>add_global_ref</code> on a primitive (<code>int8..64</code>, unsigned variants, <code>float</code>, <code>double</code>, <code>bool</code>, <code>char</code>, <code>std::string</code>) creates a <strong>cpp_bound</strong> value: a typed pointer box that reads the live C++ variable and writes through to it. For non-primitive types it falls back to a non-owning aliasing <code>shared_ptr</code>. The caller must guarantee the object outlives the engine (documented in the header, <code>engine.hpp</code> <code>add_global_ref</code>).</p>
-<h3 id="what-write-through-covers">What write-through covers<a class="hlink" href="#what-write-through-covers" aria-label="link">&#8203;</a></h3>
-<p>The write-through matrix holds on both backends (the interpreter and the VM, <a href="03-backends.html">chapter 3</a>); the test suite holds them to it:</p>
-<ul><li><strong>Name-level assignment and compound assignment write through</strong>: <code>hp = hp + 50;</code>, <code>hp += 7;</code>, <code>++hp</code>, <code>hp--</code> all mutate the C++ variable, at every width: int8 through uint64, float/double, and <code>std::string</code> <code>+=</code>.</li><li><strong>A reference to the name aliases the C++ variable</strong>: after <code>auto&amp; r = hp;</code> (or <code>int&amp; r = hp;</code>), <code>r = 5</code>, <code>r += 1</code>, <code>++r</code>, and a script function taking <code>int&amp;</code> that writes (<code>bump(hp)</code>) all store into C++ through the bound type&#x27;s conversion, and the name stays bound, so later writes from either side are seen by the other. A field of a bound object (<code>auto&amp; h = player.hp;</code>) aliases the C++ member the same way.</li><li><strong>Reads are always live</strong>: change the C++ variable between executes and the script sees the new value.</li><li><strong>Mixed conversions keep the binding</strong>: <code>boundInt += 2.5</code> converts (truncates) and still writes through.</li><li>A bound <code>char</code> is a width-1 bound <strong>int</strong>. It reads as its code point.</li></ul>
-<h3 id="where-the-binding-deliberately-drops-detach-rules">Where the binding deliberately drops (detach rules)<a class="hlink" href="#where-the-binding-deliberately-drops-detach-rules" aria-label="link">&#8203;</a></h3>
-<ul><li><code>clone()</code> of a bound primitive <strong>detaches</strong>. It snapshots the value. A plain copy of the <code>script_value</code> stays bound.</li><li><strong>Every store detaches.</strong> Storing a bound value into an <strong>array element, map slot, or object member</strong>, whether by literal construction (<code>[hp]</code>, <code>{"k": hp}</code>), assignment, <code>push</code>, or an implicit-this member store, snapshots the value at store time. Write-through belongs to the registered <em>name</em> (and references/captures/by-ref params bound to it), never to stored copies.</li></ul>
-<h2 id="the-exact-width-as-aliasing-rules">The exact-width <code>as&lt;T&amp;&gt;</code> aliasing rules<a class="hlink" href="#the-exact-width-as-aliasing-rules" aria-label="link">&#8203;</a></h2>
-<p>A non-const <code>as&lt;T&amp;&gt;</code> on a bound value gives you a <strong>live reference into the C++ variable</strong> (zero-copy, reads and writes are real), but only when the binding&#x27;s width and signedness exactly match the script-side type:</p>
-<div class="tablewrap"><table><thead><tr><th><code>as&lt;T&amp;&gt;</code> request</th><th>aliases live when the bound C++ type is</th></tr></thead><tbody><tr><td><code>as&lt;jai::script_int&amp;&gt;</code></td><td>exactly <code>int64_t</code> (or <code>script_int</code>)</td></tr><tr><td><code>as&lt;jai::script_float&amp;&gt;</code></td><td>exactly <code>double</code></td></tr><tr><td><code>as&lt;std::string&amp;&gt;</code></td><td><code>std::string</code></td></tr><tr><td><code>as&lt;jai::script_bool&amp;&gt;</code></td><td><code>bool</code></td></tr></tbody></table></div>
-<p>Anything else (an <code>int32_t</code> behind <code>as&lt;script_int&amp;&gt;</code>, a <code>float</code> behind <code>as&lt;script_float&amp;&gt;</code>) throws a <strong>catchable <code>jai::runtime_error</code></strong>, never <code>std::bad_variant_access</code>, and never silently reads the wrong bytes.</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// compiled and run against the library
-jai::script_int gold = 10;
-eng-&gt;add_global_ref(&quot;gold&quot;, gold);
-auto v = eng-&gt;execute(&quot;gold&quot;);            // a bound alias, not a snapshot
-v.as&lt;jai::script_int&amp;&gt;() += 5;            // gold is now 15 in C++
-
-int32_t narrow = 5;
-eng-&gt;add_global_ref(&quot;narrow&quot;, narrow);
-eng-&gt;execute(&quot;narrow&quot;).as&lt;jai::script_int&amp;&gt;();   // throws jai::runtime_error
-// &quot;cannot bind a non-const script reference to a C++-bound variable of a different width&quot;
-eng-&gt;execute(&quot;narrow += 7;&quot;);             // by NAME any width works (decoded reads/writes)</code></pre></div>
-<p>Output:</p>
-<div class="codeblock cb-plain"><pre><code class="lang-plain">gold after as&lt;script_int&amp;&gt; += 5: 15
-int32 as&lt;script_int&amp;&gt;: cannot bind a non-const script reference to a C++-bound variable of a different width
-narrow after script += 7: 12</code></pre></div>
-<p>The same rules apply to <strong>non-const <code>T&amp;</code> parameters</strong> of <code>add_function</code> bindings: a bound argument of exactly-matching width aliases the live variable (the callee&#x27;s writes land in C++). A <em>plain</em> script argument works as in C++: the callee gets a copy of the value the argument names, and when it returns (or throws) its final value is stored back into that argument with the store a script <code>=</code> makes, so the variable&#x27;s declared type converts or rejects it with the usual text.</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_function(&quot;heal&quot;, [](int64_t&amp; hp, int64_t amount) { hp = std::min&lt;int64_t&gt;(hp + amount, 100); });
-eng-&gt;add_function(&quot;tag&quot;, [](std::string&amp; name) { name += &quot; (healed)&quot;; });</code></pre></div>
-<div class="codeblock cb-jai" data-host="heal / tag registration"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">int hp = 40;
-heal(hp, 25);             // hp is 65
-var party = [10, 20];
-heal(party[1], 90);       // party[1] is 100
-tag(player.name);         // a field, a map value, a C++ property (through its setter), v.x of a vector
-heal(hp + 1, 5);          // a temporary: the callee works on a copy, nothing is stored back</code></pre></div>
-<p>Every value kind writes back the same way: integers, floats, <code>bool</code>, <code>std::string</code>, <code>std::vector</code>, <code>std::map</code>, <code>jai::script_value</code>, <code>std::shared_ptr&lt;T&gt;</code>, enums and the host types a math adapter binds. A registered class taken as <code>T&amp;</code> is the live object itself and needs no store. Any lvalue a script <code>T&amp;</code> parameter binds is written back (a variable, a field, an element, a map value, a static, a reference, a C++ property) and so is a math component (<code>v.x</code>); a literal or a temporary is passed as a copy and nothing is stored. A <code>const T&amp;</code> parameter is a read and costs nothing extra, and a binding with no non-const <code>T&amp;</code> parameter has no write-back step: the choice is made when the function is bound.</p>
-<h2 id="running-a-script-file">Running a script file<a class="hlink" href="#running-a-script-file" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_include_path(&quot;scripts&quot;);           // where import/include look after the file&#x27;s own folder
-eng-&gt;execute_file(&quot;scripts/game.jai&quot;);      // parse (or load the .jaibite sibling), check, run</code></pre></div>
-<p><code>execute_file</code> attributes every node to the file&#x27;s canonical path, whatever spelling you pass: check listings, stack traces and debugger breakpoints all name it. It keeps a parsed copy beside the source (<code>game.jai</code> gets <code>game.jaibite</code>); add <code>*.jaibite</code> to your <code>.gitignore</code>, or turn the cache off with <code>eng-&gt;jaibite_cache(false)</code>. Functions, classes and globals the file declares stay in the engine for later calls.</p>
-<h2 id="per-execution-variables">Per-execution variables<a class="hlink" href="#per-execution-variables" aria-label="link">&#8203;</a></h2>
-<p><code>execute(source, instance_variables)</code> and <code>execute_file(path, instance_variables)</code> run one execution with extra names in scope. <code>jai::instance_variables</code> is a <code>std::unordered_map&lt;std::string, jai::script_value&gt;</code>; a non-empty map becomes a scope over the globals for that one execution and is discarded when it returns.</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(&quot;var counter = 0;&quot;);                        // no overlay: a global
-
-jai::instance_variables locals{{&quot;increment&quot;, eng-&gt;make_value(int64_t{5})}};
-eng-&gt;execute(&quot;counter = counter + increment;&quot;, locals);  // reads the overlay, writes the global
-eng-&gt;execute(&quot;var temp = 1;&quot;, locals);                   // temp is declared in the overlay
-
-eng-&gt;execute(&quot;counter&quot;).as_int();                        // 5
-eng-&gt;execute(&quot;increment&quot;);                               // raises: the overlay is gone
-eng-&gt;execute(&quot;temp&quot;);                                    // raises: temp died with the overlay</code></pre></div>
-<ul>
-<li><strong>It lasts one execute.</strong> The script reads the supplied names; one shadows a global of the same name for that execution only. Assigning to an existing global still writes the global.</li>
-<li><strong>Declarations land in the overlay.</strong> With a non-empty map, a top-level <code>var x = 10;</code> is declared in the overlay and disappears with it; nothing is copied back to the globals. An empty map is the plain <code>execute(source)</code>, whose top-level declarations are globals. The checker treats the supplied names as declared.</li>
-<li><strong>It is not dynamic scope.</strong> A function resolves its free names through the scope it was created in, never its caller's. A function defined by an earlier execute does not see a later execute's overlay; only code from the same execute does.</li>
-<li><strong>Signal receivers use it.</strong> A script-text receiver on a <code>jai::signal</code> runs this way on every emit: the emit's arguments become an overlay named by the signal's <code>parameter_names</code>, so they never leak into the globals (<a href="10-signals-properties.html#script-facing-integration">Connecting from script</a>).</li>
-</ul>
-<h2 id="calling-script-from-c">Calling script from C++<a class="hlink" href="#calling-script-from-c" aria-label="link">&#8203;</a></h2>
-<p>A script function is a value. Look it up by name and call it with a vector of arguments; the result is a <code>checked_result</code>, not an exception:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int damage_for(int level) { return level * 3; }</code></pre></div>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// examples/embed_quickstart makes these calls
 jai::script_value fn = eng-&gt;get_variable(&quot;damage_for&quot;);
 jai::checked_result&lt;jai::script_value&gt; r = fn.as_function()({eng-&gt;make_value(int64_t{4})});
-if (!r) { throw std::runtime_error(eng-&gt;format_error(r)); }   // &quot;Division by zero&quot;, ...
-int64_t dmg = r.value().as_int();                                  // 12</code></pre></div>
-<ul>
-<li><strong>Errors.</strong> Every failure comes back in the result: a run-time error, a script <code>throw</code> nothing caught (its text), an <code>import</code> the call reaches whose file is missing or whose edited module fails its check (<a href="07-hot-reload.html">Hot Reload</a>). <code>eng-&gt;format_error(r)</code> is the text and <code>eng-&gt;format_stack_trace()</code> the script stack. The call never throws for what the script did, and the engine is ready for the next call, so a result check is all a frame loop needs (<a href="#error-surfaces">Error surfaces</a> lists which calls report and which throw).</li>
-<li><strong>The budget.</strong> A call made while no script runs is a host entry: it gets a fresh execution-budget deadline, like <code>execute()</code> (<a href="05-safety-rails.html">Safety Rails</a>).</li>
-<li><strong><code>external_call_guard</code>.</strong> Needed only when the call can happen <em>while a script is running</em>: from inside a host function the script called, or from a signal the script emitted. Construct <code>jai::engine::external_call_guard guard(eng.get());</code> around the call so reference parameters do not bind against the script call in flight. A call from your own loop needs nothing; the guard is harmless there.</li>
-<li><strong>A typed wrapper.</strong> <code>auto damage = jai::convert_script_function&lt;int64_t(int64_t)&gt;(fn);</code> gives a <code>std::function</code> for callbacks. It is the throwing flavor: every failure inside it (a run-time error, a script <code>throw</code> nothing caught, a failed import) leaves the call as a <code>jai::runtime_error</code> carrying the text (<code>Division by zero</code>); a host function that calls it from script hands that error back to the script as its own. A null value converts to an empty <code>std::function</code> (test it with <code>if (cb)</code>; calling it throws <code>std::bad_function_call</code>), and any other value that is not a function makes the conversion throw.</li>
-</ul>
-<h2 id="reading-script-state-back">Reading script state back<a class="hlink" href="#reading-script-state-back" aria-label="link">&#8203;</a></h2>
-<p><code>get_variable(name)</code> reads a global; <code>as&lt;T&gt;()</code> converts it. How a container comes out follows its declared type: <code>array&lt;int&gt;</code>, <code>array&lt;string&gt;</code> and the other typed arrays are raw buffers that copy out as a <code>std::vector</code>, and only <code>array&lt;var&gt;</code> has a <code>script_value</code> vector to view:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int score = 7;
-array&lt;string&gt; log = ["spawned", "hit"];
-map&lt;string, int&gt; kills = {"orc": 3, "troll": 1};
-array&lt;var&gt; loot = [12, "rope", 2.5];</code></pre></div>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// examples/embed_quickstart makes these calls
-int64_t score = eng-&gt;get_variable(&quot;score&quot;).as_int();
-auto log   = eng-&gt;get_variable(&quot;log&quot;).as&lt;std::vector&lt;std::string&gt;&gt;();              // a typed array copies out
-auto kills = eng-&gt;get_variable(&quot;kills&quot;).as&lt;std::map&lt;std::string, int64_t&gt;&gt;();
+if (r) { std::cout &lt;&lt; &quot;damage_for(4) = &quot; &lt;&lt; r.value().as_int() &lt;&lt; &quot;\n&quot;; }
 
-jai::script_value loot = eng-&gt;get_variable(&quot;loot&quot;);   // hold the value: as_array() views into it
-const std::vector&lt;jai::script_value&gt;&amp; items = loot.as_array();       // array&lt;var&gt; only
+auto damage = jai::convert_script_function&lt;int64_t(int64_t)&gt;(fn);   // or a typed std::function
+std::cout &lt;&lt; &quot;damage(10) = &quot; &lt;&lt; damage(10) &lt;&lt; &quot;\n&quot;;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">damage_for(4) = 12
+damage(10) = 30</code></pre></div>
+<h2 id="hot-reload-loop">5. A hot-reload frame loop<a class="hlink" href="#hot-reload-loop" aria-label="link">&#8203;</a></h2>
+<p>Put the rules in a module the game imports, and call a script function every frame that reaches the import. When the module&#x27;s file changes, the next frame re-runs it, and the new functions apply from then on. The sample writes its two files, then saves an edit to <code>rules.jai</code> between frames 2 and 3, as you would in an editor:</p>
+<div class="codeblock cb-cpp" data-sample="quickstart-reload"><span class="cb-label">C++</span><pre><code class="lang-cpp">namespace fs = std::filesystem;
+const fs::path dir = fs::temp_directory_path() / &quot;jai_quickstart&quot;;
+fs::create_directories(dir);
+auto save = [&amp;](const char* name, const char* text) { std::ofstream(dir / name) &lt;&lt; text; };
+save(&quot;rules.jai&quot;, &quot;int damage_for(int frame) { return frame * 2; }&quot;);
+save(&quot;game.jai&quot;, &quot;import \&quot;rules.jai\&quot;;\n&quot;
+                 &quot;int tick(int frame) { import(\&quot;rules.jai\&quot;); return damage_for(frame); }&quot;);
 
-jai::script_value log_value = eng-&gt;get_variable(&quot;log&quot;);
-log_value.unchecked_array_node()-&gt;for_each(eng.get(), [](const jai::script_value&amp; line) {
-    std::cout &lt;&lt; line.as_string() &lt;&lt; &quot;\n&quot;;                         // any array kind, no copy of the buffer
-});</code></pre></div>
-<p><code>as_array()</code> on a typed array raises an error that names the type and the extraction that works (<code>array&lt;string&gt; is a typed buffer: ... extract as&lt;std::vector&lt;std::string&gt;&gt;</code>). <code>unchecked_array_node()</code> requires <code>is_array()</code>. A bound C++ object comes back with <code>as&lt;std::shared_ptr&lt;Monster&gt;&gt;()</code>, sharing the live object; a host function that takes <code>bound_array&lt;int64_t&gt;&amp;</code> mutates a typed array in place (<code>core/bound_array.hpp</code>). Writing back is <code>add_global(name, value)</code>, or an <code>execute</code> that assigns.</p>
-<h2 id="error-surfaces">Error surfaces<a class="hlink" href="#error-surfaces" aria-label="link">&#8203;</a></h2>
-<p>Each way of calling into script has one failure route. A call that returns a <code>checked_result</code> reports every failure in the result and never throws for what the script did; a call that returns a plain value throws for every failure. Which flavor a call is never depends on what went wrong:</p>
-<div class="tablewrap"><table><thead><tr><th>Call</th><th>A failure</th></tr></thead><tbody><tr><td><code>execute(source)</code>, <code>execute(source, instance_variables)</code>, <code>execute(jaibite&amp;)</code>, <code>execute_file(path)</code>, <code>execute_file_source</code>, <code>jaibite(source)</code></td><td>throws</td></tr><tr><td>a <code>std::function</code> from <code>convert_script_function&lt;Sig&gt;(fn)</code>, or the <code>std::function</code> parameter of a bound host function</td><td>throws (<code>jai::runtime_error</code>)</td></tr><tr><td><code>fn.as_function()(args)</code> on a script function, a lambda, a static method or a <code>reflect::bind</code> value</td><td>in the <code>checked_result</code></td></tr><tr><td><code>coroutine_handle::next(engine*, n)</code></td><td>in the <code>checked_result</code></td></tr><tr><td><code>extend_checked(...)</code> / <code>extend(...)</code></td><td>in the result / throws</td></tr><tr><td>a script receiver of a C++ signal (a function, a lambda or a source snippet)</td><td>throws out of the emit (the text a direct call of the receiver throws); the receivers after it do not run</td></tr></tbody></table></div>
-<p>The failures covered are the same for both flavors: a run-time error, a script <code>throw</code> nothing caught, a parse or check error, an <code>import</code> whose file is missing or whose edited module fails its check. A call made from inside running script (a host function the script called, calling back into script) is part of that script&#x27;s run: its failure travels on to the script, which can catch it. A signal emit is such a call: a receiver&#x27;s failure leaves the emit, through every emit it is nested in, to the C++ code or the script that fired the signal.</p>
-<p>Checking is <strong>strict by default</strong>, so the first surface you meet is a <em>load</em> error: the
-script is rejected before a single statement runs.</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// compiled and run against the library
-eng-&gt;execute(&quot;undefined_thing + 1&quot;);   // throws jai::static_check_error — nothing ran</code></pre></div>
-<p><code>what()</code> is the whole accumulated listing, compiler style: every error in the file, not just the first:</p>
-<div class="codeblock cb-plain"><pre><code class="lang-plain">static check failed:
+eng-&gt;import_recheck_interval(0);                  // see a save at once (the default looks every 0.2 s)
+eng-&gt;execute_file((dir / &quot;game.jai&quot;).string());
+jai::script_value tick = eng-&gt;get_variable(&quot;tick&quot;);
+for (int64_t frame = 1; frame &lt;= 4; ++frame) {
+    if (frame == 3) { save(&quot;rules.jai&quot;, &quot;int damage_for(int frame) { return frame * 100; }&quot;); }   // an edit lands
+    auto r = tick.as_function()({eng-&gt;make_value(frame)});
+    if (!r) { std::cout &lt;&lt; &quot;frame &quot; &lt;&lt; frame &lt;&lt; &quot;: &quot; &lt;&lt; eng-&gt;format_error(r) &lt;&lt; &quot;\n&quot;; continue; }
+    std::cout &lt;&lt; &quot;frame &quot; &lt;&lt; frame &lt;&lt; &quot;: &quot; &lt;&lt; r.value().as_int() &lt;&lt; &quot;\n&quot;;
+}</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">frame 1: 2
+frame 2: 4
+frame 3: 300
+frame 4: 400</code></pre></div>
+<p>A broken edit never stops the game. The changed module is parsed and checked before any of it runs; if it has a mistake, that frame&#x27;s call reports the listing in its result, the program keeps the code it had, and the next save tries again. <a href="07-hot-reload.html">Hot Reload</a> explains which state survives a reload and how live objects migrate when a class changes.</p>
+<h2 id="handle-errors">6. Handle errors<a class="hlink" href="#handle-errors" aria-label="link">&#8203;</a></h2>
+<p>Two rules cover every case. <code>execute()</code> throws, and every exception it throws derives from <code>std::exception</code>. A call through <code>as_function()</code> never throws for what the script did: the failure comes back in its result. Either way the engine stays ready for the next call:</p>
+<div class="codeblock cb-cpp" data-sample="quickstart-errors"><span class="cb-label">C++</span><pre><code class="lang-cpp">try {
+    eng-&gt;execute(&quot;undefined_thing + 1&quot;);           // rejected before anything runs
+} catch (const std::exception&amp; e) {
+    std::cout &lt;&lt; e.what() &lt;&lt; &quot;\n&quot;;
+}
+try {
+    eng-&gt;execute(R&quot;(throw &quot;out of mana&quot;;)&quot;);       // a throw nothing caught
+} catch (const std::exception&amp; e) {
+    std::cout &lt;&lt; &quot;script threw: &quot; &lt;&lt; e.what() &lt;&lt; &quot;\n&quot;;
+}
+eng-&gt;execute(&quot;int risky(int x) { return 10 / x; }&quot;);
+auto r = eng-&gt;get_variable(&quot;risky&quot;).as_function()({eng-&gt;make_value(int64_t{0})});
+if (!r) { std::cout &lt;&lt; &quot;risky(0) failed: &quot; &lt;&lt; eng-&gt;format_error(r) &lt;&lt; &quot;\n&quot;; }   // a call reports, never throws
+std::cout &lt;&lt; &quot;the engine carries on: &quot; &lt;&lt; eng-&gt;execute(&quot;40 + 2&quot;).as_int() &lt;&lt; &quot;\n&quot;;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">static check failed:
 &lt;script&gt;:1:1: error: use of undeclared identifier &#x27;undefined_thing&#x27;
     undefined_thing + 1
-    ^</code></pre></div>
-<p>Names your host injects at run time aren&#x27;t in the script&#x27;s text, so the checker cannot see them.
-<code>extern</code> declares one without defining it, and the same script becomes a <em>runtime</em> error
-instead, catchable and raised only if control flow actually reaches the name:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(&quot;extern function spawn_wave; spawn_wave(3);&quot;);
-// throws jai::script_exception: &quot;&#x27;spawn_wave&#x27; is declared extern but never defined&quot;</code></pre></div>
-<p>(<code>what()</code> is the error&#x27;s text, the same text a script <code>catch</code> sees.)</p>
-<p>The other two surfaces are unchanged by checking, and the engine survives all of them:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(&quot;throw \&quot;from script\&quot;;&quot;); // uncaught script throw -&gt; jai::script_exception: &quot;from script&quot;
-eng-&gt;execute(&quot;var x = ;&quot;);              // throws jai::parse_error:
-                                        //   &quot;Parse error: &lt;script&gt;:1:10: Expected expression&quot;
-eng-&gt;execute(&quot;40 + 2&quot;).as_int();        // 42</code></pre></div>
-<p>Every one of them derives from <code>std::exception</code>, so one <code>catch (const std::exception&amp;)</code>
-is a valid backstop (put one around the host&#x27;s own script calls: an exception that leaves <code>main</code> ends the process with its buffered output unflushed): <code>jai::static_check_error</code> for load-time type and name errors,
-<code>jai::parse_error</code> for syntax, and <code>jai::script_exception</code> for anything raised while
-running, an uncaught script <code>throw</code> included (it derives from <code>jai::runtime_error</code>). <code>jai::parse_error</code> and <code>jai::runtime_error</code> share the base
-<code>jai::exception</code>, which carries a <code>location()</code>; <code>jai::static_check_error</code>
-derives from <code>std::runtime_error</code> directly. Its listing <em>is</em> the location. <code>eng-&gt;format_stack_trace()</code> /
-<code>eng-&gt;last_stack_trace()</code> give the script stack of the most recent failure. For a
-<code>throw</code> two calls deep:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function inner() { throw "boom"; }
-function outer() { inner(); }
-outer();</code></pre></div>
-<div class="codeblock cb-plain"><pre><code class="lang-plain">  at inner (&lt;script&gt;:1)
-  at outer (&lt;script&gt;:2)
-  at &lt;script&gt; (&lt;script&gt;:3)</code></pre></div>
-<p>For errors that surface where nothing can catch them (a destructor that fails while the engine tears down its program-scope variables), install a sink with <code>eng-&gt;set_script_error_handler(...)</code>. The default sink is <code>std::cerr</code> (<code>engine.hpp</code>, <code>set_script_error_handler</code>).</p>
-<p>One subtlety worth knowing: <em>some</em> recoverable parse errors make the parser synchronize and return null instead of throwing, so the robust contract to code against is &quot;<code>execute()</code> returns and the engine stays usable&quot;, not &quot;every bad input throws&quot;.</p>
-<h2 id="the-time-source">The time source<a class="hlink" href="#the-time-source" aria-label="link">&#8203;</a></h2>
-<p>Every <code>time::</code> call a script makes (<a href="../guide/14-time.html">Time</a> in the language guide) reads one engine-owned clock, and the host can replace it. Three providers make up the source: <strong>monotonic</strong> (a steady reading, the clock behind <code>time::now()</code>, <code>time::engine_elapsed()</code>, <code>time::execute_elapsed()</code> and every stopwatch), <strong>wall</strong> (nanoseconds since the Unix epoch in UTC, behind <code>time::unix_time()</code> and every date) and <strong>sleep</strong> (what <code>time::sleep</code> and <code>time::sleep_ms</code> do). An empty provider selects the system one: <code>steady_clock</code>, <code>system_clock</code>, <code>this_thread::sleep_for</code>.</p>
-<p>The source lives on <code>eng-&gt;time()</code>, declared in <code>&lt;jaiscript/core/engine_time.hpp&gt;</code> (its own header because it brings in <code>&lt;chrono&gt;</code>, which a host that never touches the clock does not need to parse). A virtual clock is the whole integration for tests, replays, netcode and deterministic simulation. The script sees exactly the time the host says it is:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// compiled and run against the library
-std::chrono::nanoseconds sim_now{0};
-const auto epoch = std::chrono::nanoseconds(1700000000000000000LL);   // 2023-11-14T22:13:20Z
-eng-&gt;time().source(
-    [&amp;] { return sim_now; },                                          // monotonic
-    [&amp;] { return epoch + sim_now; },                                  // wall
-    [&amp;](std::chrono::nanoseconds d) { sim_now += d; });              // sleep advances the simulation
-sim_now += std::chrono::milliseconds(1500);
-eng-&gt;execute(&quot;print(time::now(), &#x27; &#x27;, time::utc_now().to_string());&quot;);</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1.5 2023-11-14T22:13:21.500Z</code></pre></div>
-<p>The engine reads its providers on a strict budget. Each <code>time::</code> call reads the provider it needs once, and only when it is called; constructing a stopwatch or a date reads nothing. Outside those calls the engine reads the monotonic provider in exactly one place: at a <strong>host entry</strong> (an <code>execute()</code>/<code>execute_file()</code>/jaibite run, or a script function or coroutine the host invokes while no script is running), and only after a loaded program names <code>time::execute_elapsed</code>, whose answer is measured from that reading. Nested executes, includes and imports belong to the entry that runs them. A stateful provider (a replay feeding recorded readings) therefore sees the same sequence of reads on every run of the same program.</p>
-<p>The execution budget and the import check window run on the real steady clock whatever the source, so a virtual clock can neither stall nor trip them. The engine keeps its own sample of that clock, read at each host entry (the reading the budget deadline starts from, and <code>time::execute_elapsed</code> too while the source is the system clock) and at the budget check&#x27;s periodic samples. While the monotonic provider is the system one, a <code>time::</code> read and a sleep&#x27;s wake refresh the sample as well; a host provider never does.</p>
-<p><code>time::engine_elapsed()</code> counts from the system clock&#x27;s reading when the engine was constructed; on a host monotonic provider it is that provider&#x27;s reading, so the host decides where zero is. <code>eng-&gt;time().source({}, {}, {})</code> restores the system clocks. The host reads the same clock scripts do through <code>eng-&gt;time().monotonic_now()</code>, <code>wall_now()</code> and <code>sleep_for(duration)</code>, and <code>eng-&gt;engine_elapsed()</code> and <code>execute_elapsed()</code>. A parallel body cannot call <code>time::</code> at all (the clock would make it differ from its serial run), so providers are only ever called on the engine&#x27;s thread.</p>
-<h2 id="practical-notes">Practical notes<a class="hlink" href="#practical-notes" aria-label="link">&#8203;</a></h2>
-<ul><li><strong>Reuse engines.</strong> Engine creation plus first-execute lazy init costs on the order of a hundred warm script executions, so an engine-per-evaluation architecture pays mostly overhead. Costs are quantified in <a href="11-performance.html#embedding-costs">Performance</a>.</li><li><code>execute()</code> re-parses only novel strings. A 64-entry LRU source cache makes repeated <code>execute(same_string)</code> skip the parse (and on the VM, the compile). For hot scripts use a <code>jaibite</code> (see the jaibite chapter).</li><li><code>eng-&gt;set_output_stream(stream)</code> redirects <code>print()</code>; pass <code>nullptr</code> to restore <code>std::cout</code>.</li><li>Include paths for script <code>include</code>/<code>import</code>: <code>eng-&gt;add_include_path(dir)</code>.</li>
-<li><strong>Checking is strict by default.</strong> Porting a loosely typed codebase? <code>eng-&gt;static_checking(jai::check_mode::warn)</code> collects diagnostics instead of gating, for the whole engine; <code>[[warn_mode]]</code> does the same for one file, block, or statement; <code>extern</code> declares the names you inject at run time. Full story in <a href="06-static-checking.html">Static Checking</a>.</li></ul><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/index.html"><span>&larr; embedding</span>Embedding &amp; Engine Guide</a><a class="next" rel="next" href="../embedding/02-dynamic-binder.html"><span>next &rarr;</span>dynamic_binder: Binding C++ Classes</a></nav></article>
+    ^
+
+script threw: out of mana
+risky(0) failed: Division by zero
+the engine carries on: 42</code></pre></div>
+<p>Checking is strict by default, so a mistake the checker can see is reported before a single statement runs, with every error in the file listed. <a href="17-host-api.html#error-surfaces">Error surfaces</a> lists the exception types and which calls throw, and <a href="06-static-checking.html">Static Checking</a> covers names your host injects at run time.</p>
+<h2 id="where-next">Where to go next<a class="hlink" href="#where-next" aria-label="link">&#8203;</a></h2>
+<ul>
+<li><a href="17-host-api.html">Host API in depth</a>: functions and direct entries, live bindings to C++ variables and their write-through rules, reading script state back, per-execution variables and the time source.</li>
+<li><a href="02-dynamic-binder.html">dynamic_binder</a>: binding classes in full.</li>
+<li><a href="05-safety-rails.html">Safety Rails</a>: execution budgets, memory caps and what an untrusted script can reach.</li>
+<li><a href="07-hot-reload.html">Hot Reload</a> and <a href="08-serialization.html">Serialization</a>: keeping state across edits and saves.</li>
+<li><code>examples/embed_quickstart/</code> in the repository: a complete host (a bound class, a signal, saves, hot reload, rails and the debugger).</li>
+</ul>
+<nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/index.html"><span>&larr; embedding</span>Embedding &amp; Engine Guide</a><a class="next" rel="next" href="../embedding/02-dynamic-binder.html"><span>next &rarr;</span>dynamic_binder: Binding C++ Classes</a></nav></article>
 </main>
 </div>
 <footer class="site-footer">

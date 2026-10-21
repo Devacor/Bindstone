@@ -66,11 +66,13 @@ GUIDE = [
      "The time:: namespace: monotonic and wall clocks, execute_elapsed, value-type stopwatches, validated calendar dates in UTC or local time, templates with format specs, and why parallel bodies cannot read the clock."),
     ("15-math.html", "Math: Vectors &amp; Colors",
      "The math value types: vec2, vec3, vec4, ivec2, ivec3 and color, their operators and value semantics, the component-wise and geometry libraries, perceptual color mixing, and packed vector arrays."),
+    ("16-parallel.html", "Parallel Loops",
+     "parallel_for, parallel_transform and parallel_reduce: what a parallel body may and may not do, the zip form, captured reads, index writes, constructing objects, C++ calls, and reductions that are bit-identical at every worker count."),
 ]
 
 EMBEDDING = [
     ("01-embedding-quickstart.html", "Embedding Quickstart",
-     "Two lines to a running engine, then the pieces you add: the standard library, globals, host functions, and where results come back."),
+     "From nothing to a scripted, hot-reloading game loop in six steps: add JaiScript to the build, run a script, bind a class, call a script function, reload an edit while the loop runs, and handle errors."),
     ("02-dynamic-binder.html", "dynamic_binder: Binding C++ Classes",
      "One declaration makes a field reflected, script-visible and serialized - then the fluent binder chain, verb by verb."),
     ("03-backends.html", "Backends: Interpreter vs VM",
@@ -101,6 +103,10 @@ EMBEDDING = [
      "One macro line makes a host vector, point or color struct cross every binding as math::vec3, math::ivec2 or math::color: parameters, returns, write-back, bound members, reflected properties and std::vector buffers."),
     ("16-thread-pool.html", "Thread Pool for Host Work",
      "jai::thread_pool for the host's own work: shared and pinned queues, continuations on a worker or posted to the host's thread, the run_posted drain, exceptions, spinning, and what destruction drops."),
+    ("17-host-api.html", "Host API in Depth",
+     "The rest of the engine's host API: functions and direct entries, live bindings to C++ variables and what writes through them, running files, per-execution variables, calling script and reading its state back, every error surface, and the time source."),
+    ("18-build-integration.html", "Building JaiScript into a Host",
+     "Every way into a project in full: CMake, Visual Studio and MSBuild, Xcode and an installed package, with the sources, flags and defines each needs, one file or per file, and Debug and Release notes."),
 ]
 
 LANGUAGE_BRIDGES = [

@@ -5,7 +5,10 @@
 
 Order: script syntax (node --check), links and anchors, HTML structure, internal leakage and stale facts, retired error
 texts, search index freshness, chrome freshness, then (unless --no-samples) every jaiscript
-sample on both backends under strict, with its expected output. Exit code 1 if any check fails.
+sample on both backends under strict, with its expected output, and the host samples: the C++ samples and the
+host-dependent script samples a page marks data-sample, which the "Doc Samples" suite of jaiscript_tests (beside the
+runner) compiles from its own copy of their code, checks against the page and runs, on both backends. Exit code 1 if any
+check fails.
 """
 
 import pathlib
@@ -54,6 +57,22 @@ def main():
         print("-- %s: %s" % (name, "ok" if rc == 0 else "FAILED (exit %d)" % rc))
         if rc:
             failed.append(name)
+    if not skip_samples:
+        print("=" * 72)
+        print("== host samples")
+        runner_path = pathlib.Path(runner[1]) if runner else None
+        bin_dir = runner_path.parent if runner_path else HERE.parents[1] / "build" / "bin"
+        tests = next((bin_dir / n for n in ("jaiscript_tests.exe", "jaiscript_tests") if (bin_dir / n).exists()), None)
+        if tests is None:
+            print("-- host samples: FAILED (no jaiscript_tests in %s: build it beside the runner)" % bin_dir)
+            failed.append("host samples")
+        else:
+            rc = 0
+            for backend in ([], ["--backend=vm"]):
+                rc |= subprocess.call([str(tests), "Doc Samples"] + backend, cwd=str(bin_dir))
+            print("-- host samples: %s" % ("ok" if rc == 0 else "FAILED"))
+            if rc:
+                failed.append("host samples")
     print("=" * 72)
     print("failed: %s" % (", ".join(failed) if failed else "none"))
     return 1 if failed else 0

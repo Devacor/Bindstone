@@ -133,6 +133,7 @@ namespace jai::detail {
     // swaps function values; body-pointer equality is the staleness check).
     struct parallel_admission {
         bool admitted = false;
+        uint64_t generation = 0;   // stamped per build by admit_cached (0: never cached), the key of the barrier's method admission
         bool inplace_root = false;   // parallel_for body (element bound in place) vs a transform fn
         std::error_code code{};
         std::string message;   // full "parallel_transform: ..." text (owned)
@@ -306,6 +307,7 @@ namespace jai::detail {
     // script path (no engine lock exists outside an active region).
     struct parallel_engine_state {
         std::unique_ptr<jai::thread_pool> pool;
+        std::vector<std::pair<size_t, jai::thread_pool::task_type>> region_tasks;   // a region's submission, its storage kept
         parallel_region_table* active_region = nullptr;   // non-null only while workers run
         std::mutex instance_registry_mutex;                // class_definition instance registry, region-time only
         bool region_running = false;                       // reentrancy guard (v0: no nesting)
@@ -314,11 +316,18 @@ namespace jai::detail {
         // region pins only the names it calls that are among them
         std::unordered_set<uint64_t> host_method_names;
         uint64_t host_method_names_key = UINT64_MAX;
+        // The barrier's method admission (element methods, constructions, destructors, operators), kept per region shape while
+        // nothing it read changed (parallel_transform.cpp's method_admission_record); program_destructors_key memoizes whether any
+        // class declares a destructor
+        std::shared_ptr<void> method_admissions;
+        uint64_t program_destructors_key = UINT64_MAX;
+        bool program_destructors = false;
         bool pending_registration_retry = false;           // exceptional join: drain before cache mutation or class reload
         fault_injection faults;                            // host/test checkpoints; disabled by default
         size_t thread_count_override = 0;                  // engine::parallel_thread_count(n)
         size_t spin_wait_us = 1000;                        // engine::parallel_spin_wait_us(us): the pool's spin-before-park budget
         std::unordered_map<const void*, parallel_admission> admission_cache;
+        uint64_t admission_generation = 0;
         // parallel_transform's chunk loop (k_parallel_chunk_transform), parsed once per engine
         // and provisioned per worker: one script entry per chunk, fn called in-loop per element,
         // results emitted into the worker's output slice
@@ -399,6 +408,10 @@ namespace jai::detail {
             uint64_t slot_cursor_cyc = 0;    // slots slice: cursor mint + call_args
             uint64_t admit_pool_cyc = 0;     // admit slice: thread count, pool acquire, cost cap, partition
             uint64_t admit_guard_cyc = 0;    // admit slice: region guard, type metadata
+            // the steady state: regions that built no slot, their admission (method admission through the guard), slots, pins, prewarm,
+            // the rest of setup and the submit
+            uint64_t steady_regions = 0, steady_admit_cyc = 0, steady_slots_cyc = 0, steady_pins_cyc = 0, steady_prewarm_cyc = 0, steady_rest_cyc = 0,
+                     steady_submit_cyc = 0;
             uint64_t slot_resets = 0;      // slots reused for a region (the provisioning fingerprint held)
             uint64_t slot_provisions = 0;  // slots built for a region (no slot, or another body's)
             uint64_t claims = 0;           // block claims (one fetch_add each) over every worker

@@ -35,11 +35,41 @@
 namespace jai {
 
     struct thread_pool::state {
+        // A worker's pinned queue: a ring that keeps its storage, so a region's submit allocates nothing once the queue has held a region
+        struct task_ring {
+            std::vector<task_type> slots;
+            size_t head = 0;
+            size_t count = 0;
+            bool empty() const { return count == 0; }
+            size_t size() const { return count; }
+            void push_back(task_type&& task) {
+                if (count == slots.size()) {
+                    std::vector<task_type> grown(slots.empty() ? 8 : slots.size() * 2);
+                    for (size_t i = 0; i < count; ++i) { grown[i] = std::move(slots[(head + i) & (slots.size() - 1)]); }
+                    slots.swap(grown);
+                    head = 0;
+                }
+                slots[(head + count) & (slots.size() - 1)] = std::move(task);
+                ++count;
+            }
+            void pop_front(task_type& task) {
+                task = std::move(slots[head]);
+                slots[head] = nullptr;
+                head = (head + 1) & (slots.size() - 1);
+                --count;
+            }
+            void clear() {
+                for (auto& slot : slots) { slot = nullptr; }
+                head = 0;
+                count = 0;
+            }
+        };
+
         struct worker {
             std::thread thread;
             std::thread::id id;
             std::mutex pinned_mutex;             // guards pinned; a submitter holding mutex_ takes it inside
-            std::deque<task_type> pinned;
+            task_ring pinned;
             std::atomic<bool> has_work{false};   // pinned queue non-empty: set under both locks, cleared under pinned_mutex
             bool parked = false;                 // waiting on work_cv_; read and written under mutex_
         };
@@ -121,12 +151,24 @@ namespace jai {
                 std::lock_guard<std::mutex> guard(mutex_);
                 if (stop_) { notify.wake = false; return; }
                 bool any_parked = false;
+                // counted before any task can run and finish; an enqueue that throws uncounts the rest
+                size_t queued = 0;
+                outstanding_.fetch_add(count, std::memory_order_relaxed);
+                struct uncount_on_exit {
+                    std::atomic<size_t>& outstanding;
+                    std::condition_variable& idle;
+                    const size_t& queued;
+                    size_t count;
+                    ~uncount_on_exit() {
+                        if (queued != count && outstanding.fetch_sub(count - queued) == count - queued) { idle.notify_all(); }
+                    }
+                } uncounted{outstanding_, idle_cv_, queued, count};
                 for (size_t i = 0; i < count; ++i) {
                     if (faults) { faults->checkpoint("pool.batch_enqueue", i); }
                     worker& w = *workers_[tasks[i].first];
                     push_pinned(w, std::move(tasks[i].second));
                     any_parked = any_parked || w.parked;
-                    outstanding_.fetch_add(1, std::memory_order_relaxed);
+                    ++queued;
                 }
                 note_batch();
                 notify.wake = any_parked;
@@ -235,8 +277,7 @@ namespace jai {
         bool pop_pinned(worker& me, task_type& task) {
             std::lock_guard<std::mutex> guard(me.pinned_mutex);
             if (me.pinned.empty() || stop_flag_.load(std::memory_order_acquire)) { return false; }
-            task = std::move(me.pinned.front());
-            me.pinned.pop_front();
+            me.pinned.pop_front(task);
             if (me.pinned.empty()) { me.has_work.store(false, std::memory_order_relaxed); }
             return true;
         }

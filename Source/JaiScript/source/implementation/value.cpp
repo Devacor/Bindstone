@@ -1916,14 +1916,14 @@ script_value script_value::parallel_detached_level(std::vector<type_info*>* coll
 
 // === Parallel captured-read borrow (see value.hpp) ===
 
-script_value script_value::make_parallel_borrow(const script_value& source, engine* eng) {
+script_value script_value::make_parallel_borrow(const script_value& source, engine* eng, bool sliced) {
     const script_value& v = source.deref();
     script_value result(std::monostate{}, eng);
     result.type_info_ = v.type_info_;
     parallel_borrow_tag tag;
     if (v.raw_storage_index() == TYPEID_ARRAY) {
         const auto& handle = v.storage_.get<strong_ptr<script_array>>();
-        tag.bits = reinterpret_cast<uintptr_t>(static_cast<const void*>(handle.get()));
+        tag.bits = reinterpret_cast<uintptr_t>(static_cast<const void*>(handle.get())) | (sliced ? parallel_borrow_tag::k_sliced_bit : 0);
     } else if (v.raw_storage_index() == TYPEID_MAP) {
         const auto& handle = v.storage_.get<strong_ptr<script_map>>();
         handle->prepare_order();   // workers read the borrow concurrently: its order view is built here, serially
@@ -1942,6 +1942,11 @@ const script_array* script_value::parallel_borrow_array() const noexcept {
         }
     }
     return nullptr;
+}
+
+bool script_value::is_sliced_parallel_borrow() const noexcept {
+    const auto* tag = storage_.get_if<TYPEID_PARALLEL_BORROW>();
+    return tag && tag->is_sliced();
 }
 
 const script_map* script_value::parallel_borrow_map() const noexcept {

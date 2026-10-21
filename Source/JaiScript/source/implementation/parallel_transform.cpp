@@ -3981,6 +3981,7 @@ namespace {
 		                                     // IS the region anchor (held until the join)
 		parallel_capture_kind kind = parallel_capture_kind::scalar;
 		bool shares_slots = false;           // written: its slots hold objects, so worker copies share them (written_slot_copy)
+		bool sliced = false;                 // borrow: the plan's sliced input, its elements' handles handed out (proven below)
 	};
 
 	std::vector<size_t> partition_flat(size_t n, size_t chunks) {
@@ -4264,6 +4265,7 @@ struct region_plan {
 	std::vector<size_t> bounds;                                      // empty: the flat partition
 	const parallel_admission* extra_seed_adm = nullptr;              // weight fn types (transform)
 	bool zip_arrays_fresh = false;                                   // the zip's arrays were allocated by the caller this call (the transform's output): exclusive by construction
+	uint64_t sliced_input = UINT64_MAX;                              // a captured array each element of which one worker alone reads (the reduce's input)
 #ifdef JAISCRIPT_VM_PROFILE
 	parallel_engine_state::region_phase_prof* prof = nullptr;
 #endif
@@ -4455,6 +4457,11 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			break;
 		case script_value::TYPEID_ARRAY:
 		case script_value::TYPEID_MAP: {
+			if (!method_scope && entry.name_id == plan.sliced_input && kind_index == script_value::TYPEID_ARRAY) {
+				cap.kind = parallel_capture_kind::borrow;
+				cap.sliced = !statically_all_primitive(*cap.source) && !parallel_content_all_primitive(*cap.source);
+				break;
+			}
 			const bool same_container = written_container(*cap.source);
 			const bool borrowable = entry.borrow_eligible && !same_container &&
 			                        (statically_all_primitive(*cap.source) || parallel_content_all_primitive(*cap.source));
@@ -4593,6 +4600,25 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	if (const auto [repeat, original] = repeated_handle_object(handle_objects); repeat != SIZE_MAX) {
 		return usage("elements " + std::to_string(original) + " and " + std::to_string(repeat) +
 		             " hold the same object (an object a body reaches through a handle element belongs to one element)");
+	}
+	// The sliced input: every element read whole by the one worker its chunk runs on, so each must be exclusive like a zipped array's
+	for (const auto& cap : captures) {
+		if (!cap.sliced) { continue; }
+		script_array* inode = const_cast<script_array*>(cap.source->unchecked_array_node());
+		if (inode->is_typed() && inode->kind() != script_array::kind_t::obj) { continue; }
+		std::vector<std::pair<const void*, size_t>> input_objects;
+		element_proof iproof = prove_elements(eng, *cap.source, *inode, inode->values(), reach_filter{}, plan.prefix, &value_types, &input_objects);   // the step copies each element
+		if (iproof.failed != SIZE_MAX) {
+			return usage("input element " + std::to_string(iproof.failed) +
+			             (iproof.what.empty() ? std::string(" cannot be proven exclusive") : ": " + iproof.what));
+		}
+		if (const auto [repeat, original] = repeated_handle_object(input_objects); repeat != SIZE_MAX) {
+			return usage("input elements " + std::to_string(original) + " and " + std::to_string(repeat) +
+			             " hold the same object (an object the step reaches through a handle element belongs to one element)");
+		}
+		for (const class_definition* cd : iproof.element_classes) {
+			if (std::find(element_classes.begin(), element_classes.end(), cd) == element_classes.end()) { element_classes.push_back(cd); }
+		}
 	}
 	// Disjoint index writes: the loop variable indexing an enclosing array takes distinct values, so no two elements write one slot
 	// (a value that is no int in range raises in its own iteration, as the serial loop's store does)
@@ -4982,7 +5008,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 					break;
 				case parallel_capture_kind::borrow:
 					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
-					provisioned = script_value::make_parallel_borrow(*cap.source, &eng);
+					provisioned = script_value::make_parallel_borrow(*cap.source, &eng, cap.sliced);
 					break;
 				case parallel_capture_kind::written:   // a fresh copy each region: the join reads back what this worker wrote
 					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
@@ -5768,6 +5794,10 @@ checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<
 			return raise(combine_adm->code, combine_adm->message);
 		}
 		adm = *step_adm;
+		const uint64_t input_id = eng.symbolize("__jai_reduce_xs");
+		for (const auto& capture : adm.captures) {
+			if (capture.name_id == input_id) { return usage("parallel_reduce: step names '__jai_reduce_xs', the reduction's own input"); }
+		}
 		wrapper = build_reduce_wrapper(eng, state, step);
 	}
 	if (n == 0) {
@@ -5823,6 +5853,7 @@ checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<
 		plan.chunk_wrapper = &wrapper;
 		plan.capture_env = capture_env;
 		plan.inplace = true;
+		plan.sliced_input = xs_id;
 		auto ran = run_region(eng, plan);
 		if (!ran) {
 			return checked_result<script_value>(ran.error(), std::string_view(state.error_text));
@@ -6055,6 +6086,7 @@ checked_result<script_value> parallel_borrow_subscript_read(const script_value& 
 			return arr->get(static_cast<size_t>(i), eng);
 		}
 		const script_value& elem = arr->values()[static_cast<size_t>(i)];
+		if (borrow.is_sliced_parallel_borrow()) { return script_value(elem); }   // the element's own handle: this worker alone reads it
 		switch (elem.raw_storage_index()) {
 		case script_value::TYPEID_NULL:
 		case script_value::TYPEID_INT:

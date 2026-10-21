@@ -183,7 +183,7 @@ print(type_of(s.clock), " ", s.clock.is_running());</code></pre></div>
 time::stopwatch false</code></pre></div>
 <p>The strict checker knows the namespace: a <code>time::</code> call with the wrong number of arguments (<code>'time::now' expects 0 argument(s), got 1</code>) or an argument it cannot take (<code>time::sleep("soon")</code>) fails the load, results carry their types, and a member neither type has (<code>no member 'nope' in class 'time::date'</code>) is a load error like any class&#x27;s.</p>
 <h2 id="time-and-parallel-loops">Time and parallel loops<a class="hlink" href="#time-and-parallel-loops" aria-label="link">&#8203;</a></h2>
-<p>A <code>parallel_for</code> computes exactly what its serial loop would. A clock read cannot keep that promise (the answer would depend on scheduling), so a parallel body that calls <code>time::</code> is rejected before any worker starts, with the usual catchable explanation:</p>
+<p>A <code>parallel_for</code> gives the same result at every worker count. A clock read cannot keep that promise (the answer would depend on scheduling), so a parallel body that calls <code>time::</code> is rejected before any worker starts, with the usual catchable explanation:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;float&gt; stamps = [0.0, 0.0, 0.0];
 try {
     parallel_for (auto&amp; s : stamps) { s = time::now(); }

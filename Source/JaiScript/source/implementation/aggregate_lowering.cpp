@@ -759,7 +759,7 @@ private:
 				auto* m = static_cast<const member_expr*>(c->callee.get());
 				if (m->is_static) {
 					const math_fn fn = math_intrinsic_for_call(m);
-					if (fn == math_fn::none || fn == math_fn::random_ || fn == math_fn::random_range || fn == math_fn::random_seed) return false;
+					if (fn == math_fn::none || fn == math_fn::random_ || fn == math_fn::random_range || fn == math_fn::random_int_ || fn == math_fn::random_seed) return false;
 				} else if (cand_of(m->object.get()) < 0 || vec_method_fn(vk::jai_vec3_type, m->member) == math_fn::none) {
 					return false;
 				}

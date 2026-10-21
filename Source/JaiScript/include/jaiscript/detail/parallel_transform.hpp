@@ -48,6 +48,8 @@ namespace jai {
 
 namespace jai::detail {
 
+    struct math_rng_state;
+
     // Thread -> per-worker limits table, installed on the engine only while a region's
     // workers are running (read-only during the region; built/torn down single-threaded).
     // engine::execution_limits() consults it so EVERY charge site — backends, shared
@@ -93,6 +95,8 @@ namespace jai::detail {
             // The C++ objects of serial-only classes that die on this chunk, released by the join; cursors name the element running
             std::vector<deferred_release>* deferred_releases = nullptr;
             const std::vector<script_value>* cursors = nullptr;
+            // The chunk's draw stream: engine::math_rng() on this thread answers it, never the engine's own stream
+            math_rng_state* draws = nullptr;
             size_t element() const noexcept { return cursors && !cursors->empty() ? cursors->front().element_cursor_index() : SIZE_MAX; }
         };
         std::vector<entry> entries;
@@ -214,6 +218,8 @@ namespace jai::detail {
         // (element_reach_all) binds the element IN PLACE on the worker: every remaining use is
         // a member read, so the copy is unobservable (a copy we can prove away goes).
         bool element_mutated = false;
+        // A math::random-family call the bodies can reach: the region seeds its chunks' draw streams with one engine draw
+        bool draws = false;
         bool transform_cursor = false;   // the transform delivers elements through a chunk cursor (set once its chunk loop lands)
     };
 

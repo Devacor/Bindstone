@@ -195,10 +195,42 @@ namespace jai::detail {
     // break STATE_HASH/differential-fuzz determinism across toolchains; (2) the
     // default seed is FIXED (unseeded engines are deterministic, matching the test
     // regime) rather than random_device - games seed via math::random_seed.
+    inline uint64_t splitmix64_mix(uint64_t z) noexcept {
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+        return z ^ (z >> 31);
+    }
+
+    // A parallel region's draw: a function of the region's seed, the element running and how many draws that element made
+    // before, so no draw depends on which worker runs the element or what it ran first
+    inline uint64_t region_counter_draw(uint64_t seed, uint64_t element, uint64_t draw) noexcept {
+        const uint64_t element_key = splitmix64_mix(seed ^ splitmix64_mix(element + 0x9E3779B97F4A7C15ull));
+        return splitmix64_mix(element_key + (draw + 1) * 0xD1B54A32D192ED03ull);
+    }
+
     struct math_rng_state {
         std::mt19937_64 generator{0x9E3779B97F4A7C15ull};
+        // Set on a parallel chunk's stream: the chunk's cursors name the running element (cursors[0])
+        const std::vector<script_value>* region_cursors = nullptr;
+        uint64_t region_seed = 0;
+        size_t region_element = SIZE_MAX;
+        uint64_t region_draws = 0;
 
-        uint64_t next() { return generator(); }
+        uint64_t next() { return region_cursors ? next_in_region() : generator(); }
+        uint64_t next_in_region() noexcept {
+            const size_t element = region_cursors->empty() ? SIZE_MAX : region_cursors->front().element_cursor_index();
+            if (element != region_element) {
+                region_element = element;
+                region_draws = 0;
+            }
+            return region_counter_draw(region_seed, element, region_draws++);
+        }
+        void begin_region(const std::vector<script_value>* cursors, uint64_t seed) noexcept {
+            region_cursors = cursors;
+            region_seed = seed;
+            region_element = SIZE_MAX;
+            region_draws = 0;
+        }
         void seed(uint64_t s) { generator.seed(s); }
         // Uniform [0.0, 1.0] INCLUSIVE of both ends (ranges are inclusive)
         double next_unit_inclusive() {

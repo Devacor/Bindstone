@@ -2939,6 +2939,59 @@ public:
 			check_eq(100.0, master->level, "the shared meter was never written");
 		});
 
+		test("random_draws_are_the_same_at_every_worker_count_and_advance_the_engine_stream_once_per_region", [this]() {
+			// A draw in a parallel body is keyed by the region's seed, its element and its count within the element: the body, a
+			// function it calls, an element's method, a reduce step and a transform give one result at 1 to 6 workers, and each
+			// region that can draw takes one draw from the engine stream (a region that cannot takes none)
+			const std::string src = R"(
+				class Die { int face = 0; void roll() { face = math::random_int(1, 6) * 100 + math::random_int(0, 99); } }
+				int noise(int i) { return math::random_int(0, 1000000) + i; }
+				int sum(int a, int b) { return a + b; }
+				int step(int acc, int x) { return acc + math::random_int(0, 9) + x % 7; }
+				int jitter(int i) { return math::random_int(0, 99) * 1000 + i; }
+				math::random_seed(2026);
+				array<int> xs; array<float> fs; array<int> ids; array<Die> dice;
+				for (int i = 0; i < 400; ++i) { xs.push(0); fs.push(0.0); ids.push(i); }
+				for (int i = 0; i < 300; ++i) { dice.push(Die()); }
+				parallel_for (auto& x : xs) { x = noise(0) * 10 + math::random_int(0, 9); }
+				array<int> first = xs;
+				parallel_for (auto& x : xs) { x = noise(0) * 10 + math::random_int(0, 9); }
+				parallel_for (auto& f, int id : fs, ids) { f = math::random() + math::random(1.0, 2.0) + math::random_range(0.0, 1.0) + id; }
+				parallel_for (auto& d : dice) { d.roll(); }
+				int total = parallel_reduce(xs, 0, step, sum);
+				array<int> jittered = parallel_transform(ids, jitter);
+				parallel_for (auto& x : xs) { x = x + 1; }
+				int after = math::random_int(0, 1000000000);
+				math::random_seed(2026);
+				for (int k = 0; k < 6; ++k) { math::random(); }
+				bool advanced = math::random_int(0, 1000000000) == after;
+				int faces = 0;
+				for (int i = 1; i < 300; ++i) { if (dice[i].face != dice[0].face) { faces++; } }
+				string out = to_string(advanced) + " " + to_string(first[0] != xs[0] - 1) + " " + to_string(faces > 250) + " " + to_string(total) + " " + to_string(after);
+				for (int i = 0; i < 400; ++i) { out = out + " " + to_string(xs[i]) + ":" + to_string(fs[i]) + ":" + to_string(jittered[i]); }
+				for (int i = 0; i < 300; ++i) { out = out + " " + to_string(dice[i].face); }
+				out;
+			)";
+			std::string expected;
+			std::shared_ptr<engine> e;
+			for (size_t workers : {size_t(1), size_t(2), size_t(3), size_t(4), size_t(5), size_t(6), size_t(6), size_t(6), size_t(6)}) {
+				e = make_engine();   // a fresh program each time: a second run's global declarations keep the first run's arrays
+				jai::stdlib::register_all(*e);
+				e->parallel_thread_count(workers);
+				const std::string got = e->execute(src).as_string();
+				check_true(got.rfind("true true true ", 0) == 0, "the regions advance the engine stream once each and draw distinct values");
+				if (expected.empty()) {
+					expected = got;
+				} else {
+					check_eq(expected, got, "workers " + std::to_string(workers));
+				}
+			}
+			std::string refused;
+			try { e->execute("array<int> ys = [1, 2, 3]; parallel_for (auto& y : ys) { math::random_seed(y); }"); } catch (const std::exception& ex) { refused = ex.what(); }
+			check_true(refused.find("parallel_for: math::random_seed cannot be called in a parallel body (seed before the loop: the loop's draws "
+			                        "come from a stream it seeds from the engine's) at 1:") != std::string::npos, refused);
+		});
+
 		test("elements_are_their_chunks_own_receivers_and_marks_cover_non_const_overloads", [this]() {
 			// A parallel_for element (and a zipped one, and a parallel_reduce accumulator) the distinctness check proved the only one
 			// of its C++ object takes non-const methods and property stores; a serial mark covers a name's non-const overloads unless

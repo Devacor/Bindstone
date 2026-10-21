@@ -1981,6 +1981,11 @@ void engine::recover_parallel_registrations() {
 }
 
 detail::math_rng_state& engine::math_rng() {
+    if (parallel_region_active_ && impl->parallel_ && impl->parallel_->active_region) {
+        if (const auto* chunk = impl->parallel_->active_region->find_entry(std::this_thread::get_id()); chunk && chunk->draws) {
+            return *chunk->draws;
+        }
+    }
     return impl->math_rng_;
 }
 

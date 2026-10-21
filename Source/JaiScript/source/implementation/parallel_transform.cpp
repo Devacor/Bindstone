@@ -105,6 +105,7 @@ namespace jai::detail {
 		cell_counters cells_folded{};   // this worker's block counters already folded into the engine's
 		parallel_schedule_cursor sched;   // this worker's place in the region's shared blocks (schedule null: the static partition)
 		std::vector<script_value> cursors;   // [0] = the range's chunk cursor, then the zip's arrays
+		math_rng_state draws;                // keyed by the element cursors[0] names
 		std::vector<script_value> call_args; // prepared at the barrier; no worker-entry allocation
 		// Live input vector ("safe AND free"): workers read the
 		// caller's vector directly - all-primitive elements (typed proof or one dynamic
@@ -445,9 +446,7 @@ namespace {
 		state.worker_overhead_ns = best;
 	}
 
-	// v0 host whitelist: pure math (stdlib/math.hpp minus the random family) + to_string.
-	// Everything else — print, io, json, user bindings — errors at admission until the
-	// parallel_for annotation surface (internal/parallel_design.md §5) exists.
+	// The library builtins that stay parallel (parallel_pure_function): pure math and to_string; the rest register serial
 	bool parallel_host_whitelisted(std::string_view name) {
 		static constexpr std::string_view k_whitelist[] = {
 			"abs", "sign", "min", "max", "clamp",
@@ -2037,13 +2036,14 @@ namespace {
 			if (call->callee && call->callee->get_type() == node_type::member_expr) {
 				auto* m = static_cast<member_expr*>(call->callee.get());
 				if (m->is_static) {
-					// math:: language intrinsics are pure value functions - admitted.
-					// The random trio stays rejected with its own message: it mutates
-					// the ENGINE-OWNED rng (worker race + worker-count nondeterminism).
+					// math:: intrinsics are value functions; a random draw reads the chunk's counter stream (engine::math_rng)
 					const jai::detail::math_fn fn = jai::detail::math_intrinsic_for_call(m);
-					if (fn == jai::detail::math_fn::random_ || fn == jai::detail::math_fn::random_range ||
-					    fn == jai::detail::math_fn::random_seed) {
-						return fail(m, "math::random/random_seed are not allowed in a parallel body (engine-owned rng state)");
+					if (fn == jai::detail::math_fn::random_seed) {
+						return fail(m, "math::random_seed cannot be called in a parallel body (seed before the loop: the loop's draws come from"
+						               " a stream it seeds from the engine's)");
+					}
+					if (fn == jai::detail::math_fn::random_ || fn == jai::detail::math_fn::random_range || fn == jai::detail::math_fn::random_int_) {
+						adm.draws = true;
 					}
 					if (fn != jai::detail::math_fn::none) {
 						for (const auto& a : call->arguments) {
@@ -4844,13 +4844,18 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	const uint64_t pf_prewarm1 = __rdtsc();
 #endif
 
+	// DRAWS: one engine draw seeds every chunk's counter stream, so a region's draws and the engine stream after it are the
+	// same at every worker count
+	const uint64_t draw_seed = adm->draws || method_adm.adm.draws ? eng.math_rng().next() : 0;
+	for (parallel_worker_slot* ctx : contexts) { ctx->draws.begin_region(&ctx->cursors, draw_seed); }
+
 	// REGION: pinned pool workers for chunks 1..W-1 (submit_to fixes each chunk's thread so
 	// the limits table can be built before fan-out), the calling thread runs chunk 0. The pool
 	// is built once per engine at the engine's worker count (calibrated then).
 	auto& table = region_guard.table;
 	state.faults.checkpoint("region.table_entry", 0);
 	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits, &contexts[0]->pending_instances, contexts[0]->backend.get(), &contexts[0]->method_env,
-	                          &contexts[0]->deferred_reports, &contexts[0]->pending_script_layers, &contexts[0]->deferred_releases, &contexts[0]->cursors });
+	                          &contexts[0]->deferred_reports, &contexts[0]->pending_script_layers, &contexts[0]->deferred_releases, &contexts[0]->cursors, &contexts[0]->draws });
 	if (worker_count > 1) {
 		const size_t pool_workers_needed = worker_count - 1;
 		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
@@ -4872,7 +4877,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			state.faults.checkpoint("region.table_entry", k);
 			table.entries.push_back({ detail::thread_pool_access::worker_thread_id(*state.pool, k - 1), &contexts[k]->limits, &contexts[k]->pending_instances,
 			                          contexts[k]->backend.get(), &contexts[k]->method_env, &contexts[k]->deferred_reports,
-			                          &contexts[k]->pending_script_layers, &contexts[k]->deferred_releases, &contexts[k]->cursors });
+			                          &contexts[k]->pending_script_layers, &contexts[k]->deferred_releases, &contexts[k]->cursors, &contexts[k]->draws });
 		}
 	}
 	region_guard.prepared = true;

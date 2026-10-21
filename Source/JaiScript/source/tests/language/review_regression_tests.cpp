@@ -4003,9 +4003,8 @@ public:
             check_eq(std::string("12.0|10.0|2.0|2.0"), r.as_string());
         });
 
-        // Parallel bodies admit math:: intrinsics (pure value functions; admission-time
-        // resolution doubles as the AST-cache prewarm) but reject the random trio
-        // (engine-owned rng = worker race).
+        // Parallel bodies admit math:: intrinsics (admission-time resolution doubles as the AST-cache prewarm); random draws
+        // read the region's counter stream, and math::random_seed is refused
         test("intrinsics_in_parallel_bodies", [this]() {
             auto e = make_engine();
             jai::stdlib::register_all(*e);
@@ -4019,7 +4018,7 @@ public:
             check_throws([&]() {
                 e->execute(R"(
                     var ys = [1.0, 2.0];
-                    float rbody(float y) { return y + math::random(); }
+                    float rbody(float y) { math::random_seed(7); return y; }
                     parallel_transform(ys, rbody);
                 )");
             });

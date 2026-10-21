@@ -1,8 +1,9 @@
 # Parallel execution design (`parallel_for` on one engine, thread_storage pads)
 
-`parallel_for` (including zip) and `parallel_transform` are implemented with captured reads,
-element members and host calls limited to a pure-math whitelist (`parallel_host_whitelisted`:
-the math builtins minus the random family, plus `to_string`). Safe mode proves a body or rejects
+`parallel_for` (including zip), `parallel_transform` and `parallel_reduce` are implemented with
+captured reads, element members, construction, C++ calls that are parallel unless registered serial
+(the library's own builtins are serial apart from pure math and `to_string`, §3) and random draws
+from a per-region counter stream (§3). Safe mode proves a body or rejects
 it; nothing silently runs serial for safety, though the cost cap may run a cheap small range on
 one thread. Worker count does not change the semantic admission rule, and any merge over
 per-worker results combines in iteration order. `thread_storage` pads, binding annotations, the
@@ -110,6 +111,20 @@ count — replayable, smoke-hashable; determinism is the testable guarantee (§8
 not deterministic is which thread ran an element and, when a region fails, which elements past
 the failing one had already run (their in-place writes stay) — and so whether a region near
 `engine::memory_cap` trips, and at which element (§6).
+
+**Random draws.** `math::random`, `math::random_int` and `math::random_range` in a body (or in a
+function, method, constructor or field initializer it reaches) draw from a counter-based stream, not
+the engine's: a region whose admitted code can draw (`parallel_admission::draws`) takes one draw
+from the engine stream at the barrier as its seed, and each draw is `region_counter_draw(seed,
+element, k)`, splitmix64 over the element index and the draw's number k within that element
+(`math_rng_state::next_in_region`; the element is the chunk cursor's index, a chunk for
+`parallel_reduce`). `engine::math_rng()` answers a chunk's thread with its stream through the region
+table. A region's draws and the engine stream after it are therefore identical at every worker count,
+and the stream advances by exactly one draw per region that can draw (none for a region that cannot,
+or for an empty range). The values differ from the serial loop's sequence by design: the serial loop
+interleaves its draws with the order elements run, which a parallel region does not have.
+`math::random_seed` in a body is refused at admission (`math::random_seed cannot be called in a
+parallel body ...`); a seed inside the region would have no order to apply in.
 
 **Thread count and the pool.** `engine::parallel_thread_count()` is the total context count
 (main runs chunk 0): the override when set, else `min(hardware_concurrency - 1, 6)`.
@@ -341,9 +356,9 @@ queue the host's own thread drains (MV's pools are instances of it). The paralle
   nothing else.
 - **No `yield` in parallel bodies** — error. Coroutine fibers/continuations cannot resume
   coherently across a parked barrier.
-- **`print`, `math::random` and `time::` are rejected at admission.** Proposed: `print` buffered
-  per thread and replayed in iteration order at the join (the fuzz harness byte-compares printed
-  output), and per-thread seeded rng streams deriving a per-chunk seed.
+- **`print`, `math::random_seed` and `time::` are rejected at admission** (random draws run on
+  the region's counter stream, §3). Proposed: `print` buffered per thread and replayed in iteration
+  order at the join (the fuzz harness byte-compares printed output).
 - **Bound C++ is callable only from the pure-math whitelist** (§5); everything else raises at
   admission.
 - **Testing: determinism IS the contract.** The differential fuzz harness runs one generated

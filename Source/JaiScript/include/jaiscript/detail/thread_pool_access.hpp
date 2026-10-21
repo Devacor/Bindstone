@@ -14,7 +14,8 @@
 namespace jai::detail {
 
     struct thread_pool_access {
-        static std::unique_ptr<thread_pool> make(size_t worker_count, const fault_injection* faults);
+        static std::unique_ptr<thread_pool> make(size_t worker_count, const fault_injection* faults,
+                                                 thread_pool::thread_speed speed = thread_pool::normal_threads);
 
         // A fork-join region's whole pinned task set in one lock and at most one wake; order within
         // a worker's queue matches the span's order. Moves each task out of the span.

@@ -20,6 +20,7 @@
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
+#include <jaiscript/thread_pool.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>   // jaibite save/load
 #include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/format_spec.hpp>       // format_value builtin (template-string specs)
@@ -161,6 +162,12 @@ checked_result<script_value> engine::checked_host_entry(host_entry_body run, voi
 }
 
 namespace {
+
+// A region waits for its slowest chunk, so only performance cores take one, leaving a hardware thread to the host
+size_t automatic_parallel_thread_count() {
+    const size_t hardware = std::max<size_t>(1, std::thread::hardware_concurrency());
+    return std::max<size_t>(1, std::min(thread_pool::performance_core_count(), hardware - 1));
+}
 
 const char* spec_value_type_name(const script_value& v) {
     switch (v.type()) {
@@ -449,6 +456,8 @@ struct engine::implementation {
     // Parallel machinery (parallel_transform v0): null until first touched, so an engine
     // that never runs a region carries only this pointer
     std::unique_ptr<detail::parallel_engine_state> parallel_;
+    // Resolved when set, so a region reads its context count without a branch
+    size_t parallel_thread_count_ = automatic_parallel_thread_count();
 
     // Custom output stream for print() - nullptr means use std::cout
     std::shared_ptr<std::ostream> output_stream;
@@ -4505,7 +4514,7 @@ detail::parallel_engine_state& engine::parallel_state() {
 }
 
 void engine::parallel_thread_count(size_t workers) {
-    parallel_state().thread_count_override = workers;
+    impl->parallel_thread_count_ = workers ? workers : automatic_parallel_thread_count();
 }
 
 void engine::parallel_spin_wait_us(size_t microseconds) {
@@ -4519,20 +4528,7 @@ size_t engine::parallel_spin_wait_us() const {
 }
 
 size_t engine::parallel_thread_count() const {
-    if (impl->parallel_ && impl->parallel_->thread_count_override) {
-        return impl->parallel_->thread_count_override;
-    }
-    // Auto is CAPPED, not hardware_concurrency: region entry pays a serial per-worker
-    // provisioning cost, and on high-core hybrid CPUs raw hw (24 on a 285HX) was
-    // measurably WORSE than serial (GLOOM 11.7 ms/tick at 24 vs 9.4 serial vs 7.0 at
-    // the sweep sweet spot). Auto = min(hardware_concurrency - 1, 6) - a consistent set of
-    // pre-allocated pool threads, built once per engine and reused by every region; the
-    // region's cost-adaptive rule wakes fewer for light bodies. Callers that know their
-    // workload set an explicit count.
-    constexpr size_t k_auto_worker_cap = 6;
-    const unsigned hw = std::thread::hardware_concurrency();
-    const size_t base = hw > 1 ? hw - 1 : 1;
-    return base < k_auto_worker_cap ? base : k_auto_worker_cap;
+    return impl->parallel_thread_count_;
 }
 
 const std::vector<size_t>& engine::last_parallel_chunk_bounds() const {

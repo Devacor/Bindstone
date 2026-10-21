@@ -106,6 +106,19 @@ public:
             }
         });
 
+        test("normal_and_fast_thread_pools_both_run_their_tasks", [this]() {
+            thread_pool normal{2};
+            thread_pool fast{2, thread_pool::fast_threads};
+            std::atomic<int> ran{0};
+            for (int i = 0; i < 8; ++i) {
+                normal.submit([&]() { ++ran; });
+                fast.submit([&]() { ++ran; });
+            }
+            normal.wait_idle();
+            fast.wait_idle();
+            check_eq(16, ran.load());
+        });
+
         test("an_empty_batch_continues_at_once", [this]() {
             thread_pool pool(1);
             std::atomic<int> on_pool{0};

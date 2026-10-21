@@ -127,7 +127,8 @@ interleaves its draws with the order elements run, which a parallel region does 
 parallel body ...`); a seed inside the region would have no order to apply in.
 
 **Thread count and the pool.** `engine::parallel_thread_count()` is the total context count
-(main runs chunk 0): the override when set, else `min(hardware_concurrency - 1, 6)`.
+(main runs chunk 0): the override when set, else `min(thread_pool::performance_core_count(), hardware_concurrency - 1)`,
+resolved into the engine when it is constructed or set.
 The pool threads are pre-allocated once per engine, sized to that count minus main, and reused
 by every region; a region only pays a submit, a wake and a join per pool worker. Because the
 partition never changes a result, the count woken is a pure cost knob, and both sides of it
@@ -342,8 +343,9 @@ from per-element totals without recording every charge site.
 ## 7. Threads are `jai::thread_pool`
 
 JaiScript owns the pool: `include/jaiscript/thread_pool.hpp` (shared queue + pinned
-`submit_to`, public, its body in `source/implementation/thread_pool.cpp`) is the `parallel_for` substrate. Standard C++ only
-(`std::thread`/`std::mutex`/`std::condition_variable`), no OS APIs — JaiScript stays the base
+`submit_to`, public, its body in `source/implementation/thread_pool.cpp`) is the `parallel_for` substrate. Standard C++ threading
+(`std::thread`/`std::mutex`/`std::condition_variable`); the only OS calls are the core count and a `fast_threads`
+pool's power-throttling opt-out (an engine's pool is one) — JaiScript stays the base
 library. A host uses the same class for its own work: `submit(task, then, where)` and
 `submit_batch(tasks, then, where)` continue on a worker or posted, and `post` / `run_posted` is the
 queue the host's own thread drains (MV's pools are instances of it). The parallel regions use only

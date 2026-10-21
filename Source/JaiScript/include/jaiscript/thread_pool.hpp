@@ -29,11 +29,18 @@ namespace jai {
         // the thread that calls run_posted().
         enum class then_on { pool, posted };
 
+        // fast_threads asks the OS never to throttle the workers to save power (EcoQoS on Windows,
+        // user-initiated QoS on Apple platforms), for work that waits on its slowest worker.
+        enum thread_speed { normal_threads, fast_threads };
+
         // One less than the hardware threads (the submitting thread is the other), at least 1.
         static size_t default_worker_count() noexcept;
+        // The cores of the fastest class the platform reports (a hybrid CPU's performance cores), else
+        // hardware_concurrency; between 1 and hardware_concurrency, detected on the first call.
+        static size_t performance_core_count() noexcept;
 
         // 0 workers means default_worker_count().
-        explicit thread_pool(size_t worker_count = 0);
+        explicit thread_pool(size_t worker_count = 0, thread_speed speed = normal_threads);
         thread_pool(const thread_pool&) = delete;
         thread_pool& operator=(const thread_pool&) = delete;
         // Drops queued tasks that have not started, finishes the ones running, and joins every worker.
@@ -73,7 +80,7 @@ namespace jai {
         friend struct detail::thread_pool_access;
         struct state;
 
-        thread_pool(size_t worker_count, const detail::fault_injection* faults);
+        thread_pool(size_t worker_count, thread_speed speed, const detail::fault_injection* faults);
 
         std::unique_ptr<state> state_;
     };

@@ -27,6 +27,9 @@ path-separator assumptions). Every site is guarded and carries a portable branch
   lookups (`_dupenv_s` / `getenv`), the per-platform app data and cache directories, and
   `engine::executable_path()` (Windows, macOS, `/proc/self/exe`).
 - **`debug/connector.cpp`**: Winsock vs BSD sockets for the DAP connector.
+- **`thread_pool.cpp`**: `thread_pool::performance_core_count()` asks `GetLogicalProcessorInformationEx` (Windows),
+  `/sys/devices/cpu_core/cpus` (Linux) or `sysctlbyname` (Apple), else `hardware_concurrency`; a `fast_threads`
+  pool's workers opt out of power throttling (`SetThreadInformation` on Windows, `pthread_set_qos_class_self_np` on Apple).
 - **`stdlib/time.hpp`**: `localtime_s` vs `localtime_r`.
 - **Compiler attributes**: `__declspec(noinline)` vs `__attribute__((noinline))` in
   `vm/vm_backend.hpp` and the cold-path macros (`JAI_MATH_COLD`, `JAI_VM_COLD_PATH`);

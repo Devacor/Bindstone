@@ -58,6 +58,7 @@ struct interpreter::binary_host {
     }
     uint64_t equality_id() const noexcept { return in.eq_method_id_; }
     bool defines_custom_equality(const script_value& v) const { return in.object_defines_custom_equality(v); }
+    bool worker_equality_refused(const script_value& v) const { return in.object_defines_custom_equality(v) && !in.worker_operators_pinned(v, { in.eq_method_id_, in.op_spaceship_id_ }); }
     bool unwinding() const noexcept { return in.is_unwinding_; }
     bool parallel_worker() const noexcept { return in.parallel_worker_; }
     size_t& equality_depth() noexcept { return in.structural_equality_depth_; }

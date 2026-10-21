@@ -116,6 +116,7 @@ struct script_static_method_dispatch {
 
 namespace detail {
     struct parallel_method_pin_table;
+    struct parallel_method_pin;
 
     // A nested run's failure (an include or import started by the running code), parked by the backend before the engine
     // turns it into a C++ exception and taken back by the op that started the run: the runtime error itself or the thrown
@@ -144,6 +145,10 @@ public:
 class execution_backend {
 public:
     virtual ~execution_backend() = default;
+
+	// A parallel chunk's call of a class operator through its region pin (self the receiver); nullopt when this backend is not a
+	// parallel worker or the region pinned no such operator of self's class
+	virtual std::optional<checked_result<script_value>> parallel_operator_call(const script_value&, uint64_t, std::vector<script_value>) { return std::nullopt; }
 
 	// Null: the callable runs through its function value. A prepared callback is released before the builtin returns.
 	virtual prepared_callback* prepare_callback(const script_value&) { return nullptr; }

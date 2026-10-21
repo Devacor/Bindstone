@@ -2258,6 +2258,12 @@ int engine::select_cpp_overload(const std::vector<script_value>& args,
     return bestIdx;
 }
 
+std::optional<checked_result<script_value>> engine::parallel_operator_call(const script_value& self, uint64_t id, std::vector<script_value> args) const {
+    if (!parallel_region_active()) { return std::nullopt; }
+    execution_backend* backend = region_chunk_backend();
+    return backend ? backend->parallel_operator_call(self, id, std::move(args)) : std::nullopt;
+}
+
 uint64_t engine::reflected_operator_id(uint64_t op_id) const noexcept {
     for (const auto& [op, reflected] : impl->reflected_operator_ids_) {
         if (op == op_id) { return reflected; }

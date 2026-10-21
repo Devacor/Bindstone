@@ -254,6 +254,21 @@ namespace jai::detail {
             script_value value{std::monostate{}, nullptr};
         };
         std::vector<static_entry> statics;
+        // The operators (and the implicit to_string/to_bool calls) of every class the region's objects can belong to, admitted at the
+        // barrier like methods: a worker dispatches an operator only through its class's pin (a script operator's overloads all
+        // walked, a host operator with its serial and mutating arities)
+        struct operator_entry {
+            const void* cls = nullptr;
+            uint64_t name_id = 0;
+            parallel_method_pin pin;
+        };
+        std::vector<operator_entry> operators;
+        const parallel_method_pin* find_operator(const void* cls, uint64_t name_id) const noexcept {
+            for (const auto& e : operators) {
+                if (e.cls == cls && e.name_id == name_id) { return &e.pin; }
+            }
+            return nullptr;
+        }
         // The worker's method sandbox: the root a construction without a constructor initializes its fields in
         std::shared_ptr<environment> definition_env;
         const parallel_method_pin* find(const void* cls, uint64_t name_id) const noexcept {
@@ -273,6 +288,10 @@ namespace jai::detail {
     // A pinned host method's call on a chunk: a mutating one refuses a receiver the chunk did not make
     checked_result<script_value> call_parallel_host_pin(const parallel_method_pin& pin, const script_value& receiver, uint64_t name_id,
                                                         std::vector<script_value> args, engine* eng, bool property = false);
+    // A pinned operator's call on self from a worker: a script operator resolves its overload without writing the class's resolution
+    // cache and runs on this worker's backend; a host operator follows call_parallel_host_pin's rules
+    checked_result<script_value> call_parallel_operator_pin(execution_backend& backend, const parallel_method_pin& pin, uint64_t name_id,
+                                                            const script_value& self, std::vector<script_value> args, engine* eng);
     // A pinned host method as the value a member read names: its call goes through call_parallel_host_pin
     script_value parallel_bound_pin(const parallel_method_pin& pin, const script_value& receiver, uint64_t name_id, engine* eng);
     // An instance's script field a worker reads and stores in place (a C++ property goes through its pinned accessor)

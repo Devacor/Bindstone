@@ -930,6 +930,9 @@ namespace jai {
             return parallel_region_active_ ? region_chunk_backend() : get_execution_backend();
         }
         execution_backend* region_chunk_backend() const;
+        // A parallel chunk's call of a class operator through its region pin, on the chunk's backend; nullopt outside a region or for an
+        // operator the region did not pin
+        std::optional<checked_result<script_value>> parallel_operator_call(const script_value& self, uint64_t id, std::vector<script_value> args) const;
         bool backend_unwinding() const;
         std::string backend_exception_text() const;   // the text of the exception the backend is unwinding with
         // A value's text as string + value spells it (a class's own to_string() runs; its error is the result)

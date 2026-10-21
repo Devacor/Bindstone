@@ -1702,6 +1702,103 @@ namespace {
 			}
 			return true;
 		}
+		// ===== Operators =====
+		// Every class a region's objects can belong to (the element classes, the constructed ones, their fields' classes and their
+		// subclasses, and with a C++ call in reach every registered class) gets a pin for each operator its chain binds: a script
+		// operator whose overloads all pass the walk, a C++ operator as host methods are. A worker dispatches an operator only
+		// through such a pin; an operator whose body the walk refuses stays unpinned, and dispatching it raises the verdict.
+		struct operator_request { const class_definition* cls = nullptr; uint64_t name_id = 0; const class_definition* owner = nullptr; bool script = false; };
+		std::vector<operator_request> operator_pins;
+		std::vector<uint64_t> operator_names() {
+			std::vector<uint64_t> ids;
+			for (const char* op : { "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "<=>", "~", "[]", "=", "()",
+			                        "to_string", "to_bool" }) {
+				const uint64_t id = sym.intern(op);
+				ids.push_back(id);
+				if (const uint64_t compound = eng.compound_operator_id(id)) { ids.push_back(compound); }
+				if (const uint64_t reflected = eng.reflected_operator_id(id)) { ids.push_back(reflected); }
+			}
+			return ids;
+		}
+		std::vector<const class_definition*> operator_classes(const std::vector<const class_definition*>& element_classes, bool host_calls) {
+			std::vector<const class_definition*> out;
+			std::vector<const class_definition*> work(element_classes.begin(), element_classes.end());
+			for (const auto& c : constructed_classes) { work.push_back(c.cls.get()); }
+			for (const class_definition* c : destructor_levels) { work.push_back(c); }
+			if (host_calls) { for_each_registered_class([&](const class_definition* cls) { work.push_back(cls); }); }
+			bool every_script_class = false;
+			auto note_type = [&](const type_info_ptr& t, auto&& self) -> void {
+				if (!t || t->base_type == script_value_type::jai_any_type) { every_script_class = true; return; }
+				switch (t->base_type) {
+				case script_value_type::jai_array_type:
+				case script_value_type::jai_shared_ptr_type:
+				case script_value_type::jai_weak_ptr_type:
+					self(t->element_type(), self);
+					return;
+				case script_value_type::jai_map_type:
+					self(t->key_type(), self);
+					self(t->value_type(), self);
+					return;
+				case script_value_type::jai_object_type: {
+					if (t->type_name.empty()) { every_script_class = true; return; }
+					if (auto cls = eng.get_class_registry().find_script_class(std::string(t->type_name))) { work.push_back(cls.get()); return; }
+					const auto& host_classes = eng.get_class_registry().cpp_classes_;
+					if (auto found = host_classes.find(std::string(t->type_name)); found != host_classes.end() && found->second) { work.push_back(found->second.get()); }
+					return;
+				}
+				default:
+					return;
+				}
+			};
+			while (!work.empty()) {
+				const class_definition* cls = work.back();
+				work.pop_back();
+				if (!cls || std::find(out.begin(), out.end(), cls) != out.end()) { continue; }
+				out.push_back(cls);
+				for (const class_definition* level : cls->construction_order()) {
+					if (!level) { continue; }
+					const uint32_t slots = level->field_slot_count();
+					for (uint32_t slot = 0; slot < slots; ++slot) { note_type(level->get_field_declared_type(level->slot_field(slot)), note_type); }
+				}
+				for (const auto& entry : eng.get_class_registry().script_classes_) {
+					if (entry.second && entry.second.get() != cls && entry.second->derives_from(cls)) { work.push_back(entry.second.get()); }
+				}
+				if (every_script_class) {
+					every_script_class = false;
+					for (const auto& entry : eng.get_class_registry().script_classes_) { if (entry.second) { work.push_back(entry.second.get()); } }
+				}
+			}
+			return out;
+		}
+		// the overloads of a script operator walk as methods of the class that declares them; false: the walk refused one (a trial the
+		// caller rolls back)
+		bool admit_script_operator(const class_definition* declaring, uint64_t name_id) {
+			const auto& table = declaring->script_method_overloads();
+			const auto found = table.find(name_id);
+			if (found == table.end()) { return false; }
+			const std::string where = " in operator '" + std::string(sym.get_string(name_id)) + "' of '" + declaring->get_name() + "'";
+			for (const auto& decl : found->second) {
+				if (!decl || !decl->body || decl->is_coroutine) { return fail(decl.get(), "operator" + where + " cannot be pinned"); }
+				if (!visited_methods.insert(decl.get()).second) { continue; }
+				note_body(decl);
+				const bool walked = walk_as_member_of(declaring, where, [&] {
+					for (const auto& p : decl->parameters) {
+						if (p.symbol_id == UINT64_MAX) { p.symbol_id = sym.intern(p.name); }
+						declare(p.symbol_id, typed_local(p.type));
+						collect_type(p.type);
+						if (p.default_value && !walk_expr(p.default_value)) { return false; }
+					}
+					collect_type(decl->return_type);
+					for (const auto& d : decl->body->declarations) {
+						if (!walk_stmt(d)) { return false; }
+					}
+					return true;
+				});
+				if (!walked) { return false; }
+			}
+			return true;
+		}
+
 		bool any_program_destructor() {
 			for (const auto& entry : eng.get_class_registry().script_classes_) {
 				const class_definition* cls = entry.second.get();
@@ -1931,10 +2028,22 @@ namespace {
 			}
 			case node_type::call_expr:
 				return walk_call(static_cast<call_expr*>(e.get()));
-			case node_type::member_expr:
+			case node_type::member_expr: {
 				if (proof_mode && chain_root_is_element(e)) { return proof_chain_value(e); }
 				if (proof_mode && global_rooted(e.get()) && proof_chain_type(e.get())) { return walk_chain_indexes(e.get()); }   // a serial proof reads program state in place: no accessor, no write
-				return walk_local_member_chain(static_cast<member_expr*>(e.get()), "member access");
+				auto* m = static_cast<member_expr*>(e.get());
+				if (m->is_static && m->object && m->object->get_type() == node_type::identifier_expr) {
+					// an enum's value (E::v): a constant the body reads through the enum's map, provisioned per worker as a captured read
+					auto* root = static_cast<identifier_expr*>(m->object.get());
+					if (root->symbol_id != UINT64_MAX && !is_local(root->symbol_id) && eng.is_enum_name(root->symbol_id)) {
+						if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }
+						(void)sym.get_class_var_id_with_view(root->symbol_id);   // the static read asks for a class of the name first
+						touch_capture(root, false);
+						return true;
+					}
+				}
+				return walk_local_member_chain(m, "member access");
+			}
 			case node_type::lambda_expr:
 				return fail(e.get(), "lambdas are not allowed in a parallel body");
 			case node_type::new_expr: {
@@ -2167,12 +2276,35 @@ namespace {
 			if (is_local(callee->symbol_id)) {
 				return fail(callee, "call target '" + callee_name + "' is not statically resolvable in a parallel body");
 			}
-			// Bare sibling-method calls resolve through the env→bound-method seam at
-			// runtime (the engine-backend escape the pins exist to prevent); the
-			// 'this.' spelling routes through the pinned dispatch op instead
+			// A bare sibling call of a script method is this.name(): the barrier pins the method for every class the receiver can
+			// be, and a worker parks it through the pin. A C++ base method stays on the 'this.' spelling
 			if (method_class && method_class->defines_method(callee->symbol_id)) {
-				return fail(callee, "method '" + callee_name + "' must be called as 'this." + callee_name +
-				               "()' in a parallel body (bare sibling calls are not admitted, v1)");
+				const script_value* bound = method_class->method_ptr(callee->symbol_id);
+				if (!bound || !bound->is_function() || !bound->as_function().target<script_method_dispatch>()) {
+					return fail(callee, "method '" + callee_name + "' must be called as 'this." + callee_name +
+					               "()' in a parallel body (a bare call of a C++ base method)");
+				}
+				uint64_t enclosing = 0;
+				const ast_node* enclosing_site = nullptr;
+				for (size_t i = 0; i < call->arguments.size() && i < 64; ++i) {
+					if (identifier_expr* root = enclosing_root(call->arguments[i])) {
+						enclosing |= uint64_t(1) << i;
+						if (!enclosing_site) { enclosing_site = root; }
+					}
+				}
+				bool recorded = false;
+				for (auto& rec : adm.element_method_calls) {
+					if (rec.name_id != callee->symbol_id) { continue; }
+					if (!rec.enclosing_site) { rec.enclosing_site = enclosing_site; }
+					rec.enclosing_arguments |= enclosing;
+					recorded = true;
+					break;
+				}
+				if (!recorded) { adm.element_method_calls.push_back({ callee->symbol_id, callee->name, callee, enclosing, enclosing_site }); }
+				for (const auto& a : call->arguments) {
+					if (!walk_expr(a)) { return false; }
+				}
+				return true;
 			}
 			// A script class's construction: the barrier walks what it runs (admit_construction)
 			if (!proof_mode && !primitive_ctor_name(callee->name) && constructor_class(callee->symbol_id)) {
@@ -4067,6 +4199,15 @@ checked_result<script_value> call_parallel_host_pin(const parallel_method_pin& p
 	args.insert(args.begin(), receiver);
 	return pin.method_value.as_function()(args);
 }
+checked_result<script_value> call_parallel_operator_pin(execution_backend& backend, const parallel_method_pin& pin, uint64_t name_id,
+                                                        const script_value& self, std::vector<script_value> args, engine* eng) {
+	if (const auto* dispatch = pin.method_value.is_function() ? pin.method_value.as_function().target<script_method_dispatch>() : nullptr) {
+		auto resolved = dispatch->cls->resolve_method_overload_shared(dispatch->name_id, args.data(), args.size());
+		if (!resolved) { return resolved.error_value(); }
+		return backend.execute_method_from(*dispatch, *resolved.value(), self, args, 0);
+	}
+	return call_parallel_host_pin(pin, self, name_id, std::move(args), eng);
+}
 void release_deferred_in_order(const std::vector<std::vector<deferred_release>*>& lists) {
 	std::vector<deferred_release> ordered;
 	for (auto* list : lists) {
@@ -4454,6 +4595,40 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 		method_adm.admit_host_accessors(adm->element_reached_members);
 		method_adm.admit_host_accessors(method_adm.adm.element_reached_members);
+		// operators: a script operator's walk is a trial, rolled back whole when it refuses (the operator stays unpinned)
+		{
+			const bool host_calls = !adm->host_functions.empty() || !method_adm.adm.host_functions.empty() || !method_adm.host_pins.empty() ||
+			                        !adm->static_calls.empty() || !method_adm.adm.static_calls.empty();
+			const std::vector<uint64_t> names = method_adm.operator_names();
+			std::vector<std::pair<const class_definition*, uint64_t>> tried;
+			// a fixed point: an operator body can construct objects of more classes, whose operators are candidates in turn
+			for (bool grew = true; grew;) {
+				grew = false;
+				for (const class_definition* cls : method_adm.operator_classes(element_classes, host_calls)) {
+					for (const uint64_t id : names) {
+						if (std::find(tried.begin(), tried.end(), std::make_pair(cls, id)) != tried.end()) { continue; }
+						tried.emplace_back(cls, id);
+						const script_value* bound = cls->method_ptr(id);
+						if (!bound || !bound->is_function()) { continue; }
+						if (const auto* dispatch = bound->as_function().target<script_method_dispatch>()) {
+							if (!dispatch->cls) { continue; }
+							// the operator's overloads, the constructions and methods they reach: all admitted, or none
+							admission_builder saved(method_adm);
+							if (!method_adm.admit_script_operator(dispatch->cls.get(), id) ||
+							    !method_adm.admit_region_classes(element_classes, element_methods, written_types, program_destructors)) {
+								method_adm.~admission_builder();
+								new (&method_adm) admission_builder(std::move(saved));
+								continue;
+							}
+							method_adm.operator_pins.push_back({ cls, id, dispatch->cls.get(), true });
+							grew = true;
+						} else {
+							method_adm.operator_pins.push_back({ cls, id, admission_builder::host_method_owner(cls, id), false });
+						}
+					}
+				}
+			}
+		}
 		for (const auto& entry : method_adm.adm.captures) {
 			auto classified = classify_and_add(entry, /*method_scope*/ true);
 			if (!classified) { return classified; }
@@ -4595,6 +4770,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 				slot->backend->set_parallel_method_pins(nullptr);
 				slot->method_pins.entries.clear();
 				slot->method_pins.statics.clear();
+				slot->method_pins.operators.clear();
 			}
 		}
 	} region_guard{ eng, state, pool->worker_slots, worker_count };
@@ -4757,6 +4933,36 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			slot->method_pins.entries.push_back({ am.cls, am.name_id, std::move(pin) });
 			if (slot->vm) { slot->vm->precompile_parallel_method(*am.decl); }
 		}
+		// Operators: a script operator's dispatcher in the worker's method sandbox (its overloads precompiled with the admitted
+		// bodies), a C++ operator's worker copy with its arities
+		slot->method_pins.operators.clear();
+		for (const auto& op : method_adm.operator_pins) {
+			const script_value* shared_method = op.cls->method_ptr(op.name_id);
+			if (!shared_method || !shared_method->is_function()) { continue; }
+			detail::parallel_method_pin pin;
+			if (op.script) {
+				const script_method_dispatch* src = shared_method->as_function().target<script_method_dispatch>();
+				if (!src) { continue; }
+				script_method_dispatch wd;
+				wd.eng = src->eng;
+				wd.cls = src->cls;
+				wd.name_id = src->name_id;
+				wd.definition_env = slot->method_env;
+				pin.method_value = script_value::make_function(std::move(wd), &eng);
+			} else {
+				pin.method_value = script_value::make_function(script_function(shared_method->as_function()), &eng);
+				const class_definition* owner = op.owner ? op.owner : op.cls;
+				if (const auto* overloads = owner->host_overloads(op.name_id)) {
+					for (const auto& overload : *overloads) {
+						if (!overload.is_const) { pin.mutating_arities |= uint64_t(1) << std::min<size_t>(overload.arity, 63); }
+					}
+				}
+				if (const serial_overloads* marked = owner->serial_method(op.name_id)) {
+					pin.serial_arities = *marked == serial_overloads::every || !owner->host_overloads(op.name_id) ? ~uint64_t(0) : pin.mutating_arities;
+				}
+			}
+			slot->method_pins.operators.push_back({ op.cls, op.name_id, std::move(pin) });
+		}
 		// Host methods and accessors: worker copies of the bound method values (a copy shares only the binding's own state)
 		for (const auto& host : method_adm.host_pins) {
 			state.faults.checkpoint("region.host_method_pin", k);
@@ -4834,7 +5040,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			for (const auto& expr : method_adm.admitted_expressions) { slot->vm->precompile_parallel_expression(expr); }
 		}
 		slot->method_pins.definition_env = slot->method_env;
-		const bool pinned = !slot->method_pins.entries.empty() || !slot->method_pins.statics.empty() || !method_adm.constructed_classes.empty() ||
+		const bool pinned = !slot->method_pins.entries.empty() || !slot->method_pins.statics.empty() || !slot->method_pins.operators.empty() || !method_adm.constructed_classes.empty() ||
 		                    !method_adm.destructor_levels.empty();
 		slot->backend->set_parallel_method_pins(pinned ? &slot->method_pins : nullptr);
 		contexts.push_back(slot.get());

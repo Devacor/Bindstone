@@ -356,7 +356,7 @@ namespace jai::detail {
 
 		// safe-mode workers: the operator wall would skip a custom operator== and the structural answer would diverge
 		// from the serial loop
-		if (h.parallel_worker() && (h.defines_custom_equality(left) || h.defines_custom_equality(right))) [[unlikely]] {
+		if (h.parallel_worker() && (h.worker_equality_refused(left) || h.worker_equality_refused(right))) [[unlikely]] {
 			return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
 				"custom operator dispatch on class instances is not admitted in a parallel body");
 		}

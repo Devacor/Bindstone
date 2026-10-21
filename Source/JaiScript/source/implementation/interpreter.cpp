@@ -2613,15 +2613,21 @@ bool interpreter::object_to_bool_via_method(const script_value& value) {
     }
 
     auto method_id = to_bool_id_;
-    auto method_val = target.method(method_id);
+    if (parallel_worker_ && !worker_operators_pinned(value, { method_id })) [[unlikely]] {
+        if (!is_unwinding_ && !limits_->terminal_error) {
+            const std::string message(detail::parallel_operator_verdict_text);
+            active_exception_value_ = make_value(message);
+            current_exception_ = script_exception(message);
+            is_unwinding_ = true;
+        }
+        return false;
+    }
+    auto method_val = operator_value(target, method_id);
     if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
         return true;  // No to_bool() method - objects are truthy by default
     }
 
-    script_value bound = create_bound_method(value, method_val);
-    const script_function& method = bound.as_function();
-    std::vector<script_value> no_args;
-    auto result = method(no_args);
+    auto result = operator_call(value, method_val, method_id, {});
     if (!result) {
         // truthiness has no error channel: the runtime error travels as the script exception its text would throw (a
         // terminal error keeps its latch) (KEEP BYTE-PARALLEL with vm_backend::object_to_bool_via_method)
@@ -2703,9 +2709,8 @@ checked_result<bool> interpreter::language_equal(const script_value& left, const
 }
 
 std::optional<checked_result<bool>> interpreter::object_equality_via_method(const script_value& left, const script_value& right) {
-    // Safe-mode workers never dispatch operator methods (increment B twin of the vm's
-    // gate; handle_equal raises the verdict before the structural fallback diverges)
-    if (parallel_worker_) [[unlikely]] { return std::nullopt; }
+    // a worker whose region did not pin the class's == leaves it to handle_equal, which raises the verdict
+    if (parallel_worker_ && !worker_operators_pinned(left, { eq_method_id_, op_spaceship_id_ })) [[unlikely]] { return std::nullopt; }
     auto target = resolve_member_target(left);
     if (!target) {
         return std::nullopt;
@@ -2713,7 +2718,7 @@ std::optional<checked_result<bool>> interpreter::object_equality_via_method(cons
 
     // Look for "==" method - used by both script classes (operator==) and dynamic_binder
     auto eq_id = eq_method_id_;
-    auto method_val = target.method(eq_id);
+    auto method_val = operator_value(target, eq_id);
     if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
         // Check if this is a transparent wrapper - if so, unwrap and retry
         if (target.class_def && target.class_def->is_transparent_wrapper()) {
@@ -2727,13 +2732,7 @@ std::optional<checked_result<bool>> interpreter::object_equality_via_method(cons
     }
     if (!equality_operator_candidate(target.class_def, eq_method_id_, op_spaceship_id_, right)) { return std::nullopt; }
 
-    // Create a bound method and call it with the right operand
-    script_value bound = create_bound_method(left, method_val);
-    const script_function& method = bound.as_function();
-    std::vector<script_value> args;
-    args.push_back(right);  // Push by copy (const ref)
-
-    auto result = method(args);
+    auto result = operator_call(left, method_val, eq_id, { right });
     // the method's runtime error is the comparison's (a script throw in flight keeps travelling on its own)
     if (!result && !is_unwinding_) { return checked_result<bool>(result.error_value()); }
     if (result.has_value() && result.value().is_bool()) {
@@ -2747,8 +2746,8 @@ std::optional<checked_result<bool>> interpreter::object_equality_via_method(cons
 // instance against a value of its class, or any value one of its != overloads takes when the chain declares <=>.
 // KEEP BYTE-PARALLEL with vm_backend::object_inequality_via_method
 std::optional<checked_result<bool>> interpreter::object_inequality_via_method(const script_value& left, const script_value& right) {
-    if (parallel_worker_) [[unlikely]] {
-        if (!right.is_null() && detail::instance_declares_operator(left, op_bang_equal_id_)) {
+    if (parallel_worker_ && !worker_operators_pinned(left, { op_bang_equal_id_ })) [[unlikely]] {
+        if (!right.is_null()) {
             return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
         }
         return std::nullopt;
@@ -2756,12 +2755,12 @@ std::optional<checked_result<bool>> interpreter::object_inequality_via_method(co
     if (!left.is_object() || right.is_null()) { return std::nullopt; }
     auto target = resolve_member_target(left);
     if (!target) { return std::nullopt; }
-    script_value method_val = target.method(op_bang_equal_id_);
+    script_value method_val = operator_value(target, op_bang_equal_id_);
     if (!method_val.is_function()) { return std::nullopt; }
     if (!equality_operator_candidate(target.class_def, op_bang_equal_id_, op_spaceship_id_, right)) {
         return std::nullopt;
     }
-    auto result = create_bound_method(left, method_val).as_function()(std::vector<script_value>{right});
+    auto result = operator_call(left, method_val, op_bang_equal_id_, { right });
     if (!result) {
         if (is_unwinding_) { return checked_result<bool>(false); }
         return checked_result<bool>(result.error_value());
@@ -2773,17 +2772,14 @@ std::optional<checked_result<bool>> interpreter::object_inequality_via_method(co
 // The right operand's <=> where the left operand has no operator: 5 < v is (v <=> 5) > 0, a
 // candidate only when its parameter takes the left operand. KEEP BYTE-PARALLEL with the vm twins below
 std::optional<checked_result<bool>> interpreter::object_comparison_reversed_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-    if (parallel_worker_) [[unlikely]] {
-        if (detail::instance_declares_operator(right, op_spaceship_id_)) {
-            return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-        }
-        return std::nullopt;
+    if (parallel_worker_ && !worker_operators_pinned(right, { op_spaceship_id_ })) [[unlikely]] {
+        return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
     }
     auto target = resolve_member_target(right);
     if (!target || !binary_operator_accepts(target.class_def, op_spaceship_id_, left)) { return std::nullopt; }
-    script_value method_val = target.method(op_spaceship_id_);
+    script_value method_val = operator_value(target, op_spaceship_id_);
     if (!method_val.is_function()) { return std::nullopt; }
-    auto result = create_bound_method(right, method_val).as_function()(std::vector<script_value>{left});
+    auto result = operator_call(right, method_val, op_spaceship_id_, { left });
     if (!result) {
         if (is_unwinding_) { return std::nullopt; }
         return checked_result<bool>(result.error_value());
@@ -2795,17 +2791,14 @@ std::optional<checked_result<bool>> interpreter::object_comparison_reversed_via_
 }
 
 std::optional<checked_result<script_value>> interpreter::object_spaceship_reversed_via_method(const script_value& left, const script_value& right) {
-    if (parallel_worker_) [[unlikely]] {
-        if (detail::instance_declares_operator(right, op_spaceship_id_)) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-        }
-        return std::nullopt;
+    if (parallel_worker_ && !worker_operators_pinned(right, { op_spaceship_id_ })) [[unlikely]] {
+        return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
     }
     auto target = resolve_member_target(right);
     if (!target || !binary_operator_accepts(target.class_def, op_spaceship_id_, left)) { return std::nullopt; }
-    script_value method_val = target.method(op_spaceship_id_);
+    script_value method_val = operator_value(target, op_spaceship_id_);
     if (!method_val.is_function()) { return std::nullopt; }
-    auto result = create_bound_method(right, method_val).as_function()(std::vector<script_value>{left});
+    auto result = operator_call(right, method_val, op_spaceship_id_, { left });
     if (!result) {
         if (is_unwinding_) { return std::nullopt; }
         return checked_result<script_value>(result.error_value());
@@ -2820,7 +2813,7 @@ std::optional<checked_result<script_value>> interpreter::object_spaceship_revers
 std::optional<checked_result<bool>> interpreter::object_spaceship_equality_via_method(const script_value& left, const script_value& right) {
     if (left.is_null() || right.is_null()) { return std::nullopt; }
     const auto call = [this](const script_value& self, const script_value& method_val, const script_value& arg, bool spaceship) -> std::optional<checked_result<bool>> {
-        auto result = create_bound_method(self, method_val).as_function()(std::vector<script_value>{arg});
+        auto result = operator_call(self, method_val, spaceship ? op_spaceship_id_ : eq_method_id_, { arg });
         if (!result) {
             if (is_unwinding_) { return checked_result<bool>(false); }
             return checked_result<bool>(result.error_value());
@@ -2835,13 +2828,13 @@ std::optional<checked_result<bool>> interpreter::object_spaceship_equality_via_m
         if (!self.is_object()) { return std::nullopt; }
         auto target = resolve_member_target(self);
         if (!target) { return std::nullopt; }
-        script_value spaceship = target.method(op_spaceship_id_);
-        if (!spaceship.is_function()) { return std::nullopt; }
-        if (parallel_worker_) [[unlikely]] {
-            return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation),
-                "custom operator dispatch on class instances is not admitted in a parallel body");
+        if (parallel_worker_ && !worker_operators_pinned(self, { op_spaceship_id_, eq_method_id_ })) [[unlikely]] {
+            if (!self.is_object() || !detail::instance_declares_operator(self, op_spaceship_id_)) { return std::nullopt; }
+            return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
         }
-        if (script_value eq = target.method(eq_method_id_); eq.is_function() && binary_operator_accepts(target.class_def, eq_method_id_, other)) {
+        script_value spaceship = operator_value(target, op_spaceship_id_);
+        if (!spaceship.is_function()) { return std::nullopt; }
+        if (script_value eq = operator_value(target, eq_method_id_); eq.is_function() && binary_operator_accepts(target.class_def, eq_method_id_, other)) {
             return call(self, eq, other, false);
         }
         if (binary_operator_accepts(target.class_def, op_spaceship_id_, other)) { return call(self, spaceship, other, true); }
@@ -2853,7 +2846,7 @@ std::optional<checked_result<bool>> interpreter::object_spaceship_equality_via_m
 
 // Generic helper for comparison operators (<, <=, >, >=) via custom methods
 std::optional<checked_result<bool>> interpreter::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-    if (parallel_worker_) [[unlikely]] {
+    if (parallel_worker_ && !worker_operators_pinned(left, { op_symbol_id, op_spaceship_id_ })) [[unlikely]] {
         if (detail::instance_declares_operator(left, op_symbol_id)) {
             return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
         }
@@ -2865,13 +2858,13 @@ std::optional<checked_result<bool>> interpreter::object_comparison_via_method(co
     }
 
     // Look for the operator method by symbol ID
-    auto method_val = target.method(op_symbol_id);
+    auto method_val = operator_value(target, op_symbol_id);
     const bool declared = method_val.is_function();
     const bool host_refuses = declared && host_operator_dispatch(method_val) && !host_operator_accepts(method_val, op_symbol_id, right);
     // an explicit operator no overload of which takes the operand yields to a <=> that does (C++20: that candidate is not viable)
-    if (!declared || host_refuses || (target.method(op_spaceship_id_).is_function() && !binary_operator_accepts(target.class_def, op_symbol_id, right))) {
-        if (script_value spaceship = target.method(op_spaceship_id_); spaceship.is_function() && binary_operator_accepts(target.class_def, op_spaceship_id_, right)) {
-            auto result = create_bound_method(left, spaceship).as_function()(std::vector<script_value>{right});
+    if (!declared || host_refuses || (operator_value(target, op_spaceship_id_).is_function() && !binary_operator_accepts(target.class_def, op_symbol_id, right))) {
+        if (script_value spaceship = operator_value(target, op_spaceship_id_); spaceship.is_function() && binary_operator_accepts(target.class_def, op_spaceship_id_, right)) {
+            auto result = operator_call(left, spaceship, op_spaceship_id_, { right });
             if (!result) {
                 if (is_unwinding_) { return std::nullopt; }
                 return checked_result<bool>(result.error_value());
@@ -2892,13 +2885,7 @@ std::optional<checked_result<bool>> interpreter::object_comparison_via_method(co
         if (!declared || host_refuses) { return std::nullopt; }  // No custom method - use default comparison
     }
 
-    // Create a bound method and call it with the right operand
-    script_value bound = create_bound_method(left, method_val);
-    const script_function& method = bound.as_function();
-    std::vector<script_value> args;
-    args.push_back(right);
-
-    auto result = method(args);
+    auto result = operator_call(left, method_val, op_symbol_id, { right });
     if (!result && !is_unwinding_) { return checked_result<bool>(result.error_value()); }
     if (result.has_value() && result.value().is_bool()) {
         return checked_result<bool>(result.value().unchecked_as_bool());
@@ -2933,18 +2920,19 @@ std::optional<checked_result<script_value>> interpreter::object_compound_operand
 // a op= b on an object: a bound compound operator (C++'s operator+=) that takes b changes a in place and the expression is a;
 // without one it is a = a op b through the binary operator. KEEP BYTE-PARALLEL with vm_backend::object_compound_via_method
 std::optional<checked_result<script_value>> interpreter::object_compound_via_method(const script_value& target, const script_value& right, uint64_t op_symbol_id) {
-    if (!parallel_worker_) {
-        if (const uint64_t compound_id = engine_->compound_operator_id(op_symbol_id)) {
-            if (auto owner = resolve_member_target(target)) {
-                script_value method_val = owner.method(compound_id);
-                if (method_val.is_function() && host_operator_accepts(method_val, compound_id, right)) {
-                    auto result = create_bound_method(target, method_val).as_function()(std::vector<script_value>{right});
-                    if (!result) {
-                        if (is_unwinding_) { return checked_result<script_value>(script_value(std::monostate{}, engine_)); }
-                        return checked_result<script_value>(result.error_value());
-                    }
-                    return checked_result<script_value>(target.deref());
+    if (const uint64_t compound_id = engine_->compound_operator_id(op_symbol_id)) {
+        if (parallel_worker_ && !worker_operators_pinned(target, { compound_id })) [[unlikely]] {
+            return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
+        }
+        if (auto owner = resolve_member_target(target)) {
+            script_value method_val = operator_value(owner, compound_id);
+            if (method_val.is_function() && host_operator_accepts(method_val, compound_id, right)) {
+                auto result = operator_call(target, method_val, compound_id, { right });
+                if (!result) {
+                    if (is_unwinding_) { return checked_result<script_value>(script_value(std::monostate{}, engine_)); }
+                    return checked_result<script_value>(result.error_value());
                 }
+                return checked_result<script_value>(target.deref());
             }
         }
     }
@@ -2954,14 +2942,17 @@ std::optional<checked_result<script_value>> interpreter::object_compound_via_met
 // The right operand's bound reflected operator taking the left one (C++'s free op(L, const R&)), for a left operand whose
 // own operator does not answer. KEEP BYTE-PARALLEL with vm_backend::object_reflected_via_method
 std::optional<checked_result<script_value>> interpreter::object_reflected_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-    if (parallel_worker_ || !right.deref().is_object()) { return std::nullopt; }
+    if (!right.deref().is_object()) { return std::nullopt; }
     const uint64_t reflected_id = engine_->reflected_operator_id(op_symbol_id);
     if (!reflected_id) { return std::nullopt; }
+    if (parallel_worker_ && !worker_operators_pinned(right, { reflected_id })) [[unlikely]] {
+        return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
+    }
     auto target = resolve_member_target(right);
     if (!target) { return std::nullopt; }
-    script_value method_val = target.method(reflected_id);
+    script_value method_val = operator_value(target, reflected_id);
     if (!method_val.is_function() || !host_operator_accepts(method_val, reflected_id, left)) { return std::nullopt; }
-    auto result = create_bound_method(right, method_val).as_function()(std::vector<script_value>{left});
+    auto result = operator_call(right, method_val, reflected_id, { left });
     if (!result) {
         if (is_unwinding_) { return checked_result<script_value>(script_value(std::monostate{}, engine_)); }
         return checked_result<script_value>(result.error_value());
@@ -2971,12 +2962,10 @@ std::optional<checked_result<script_value>> interpreter::object_reflected_via_me
 
 // Generic helper for arithmetic operators (+, -, *, /, %) via custom methods
 std::optional<checked_result<script_value>> interpreter::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-    // A worker never dispatches a class operator: one the class declares raises the verdict, never the builtin meaning
-    if (parallel_worker_) [[unlikely]] {
-        if (detail::instance_declares_operator(left, op_symbol_id)) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-        }
-        return std::nullopt;
+    // a worker dispatches a class operator through its region pin; one the class declares that the region could not pin raises the
+    // verdict, never the builtin meaning
+    if (parallel_worker_ && !worker_operators_pinned(left, { op_symbol_id })) [[unlikely]] {
+        return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
     }
     auto target = resolve_member_target(left);
     if (!target) {
@@ -2984,7 +2973,7 @@ std::optional<checked_result<script_value>> interpreter::object_arithmetic_via_m
     }
 
     // Look for the operator method by symbol ID
-    auto method_val = target.method(op_symbol_id);
+    auto method_val = operator_value(target, op_symbol_id);
     if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
         // Check if this is a transparent wrapper - if so, unwrap and retry
         if (target.class_def && target.class_def->is_transparent_wrapper()) {
@@ -2997,14 +2986,8 @@ std::optional<checked_result<script_value>> interpreter::object_arithmetic_via_m
         return std::nullopt;  // No custom method - use default arithmetic
     }
 
-    // Create a bound method and call it with the right operand
     if (host_operator_dispatch(method_val) && !host_operator_accepts(method_val, op_symbol_id, right)) { return std::nullopt; }
-    script_value bound = create_bound_method(left, method_val);
-    const script_function& method = bound.as_function();
-    std::vector<script_value> args;
-    args.push_back(right);
-
-    auto result = method(args);
+    auto result = operator_call(left, method_val, op_symbol_id, { right });
     if (!result && !is_unwinding_) { return checked_result<script_value>(result.error_value()); }
     if (result.has_value()) {
         return checked_result<script_value>(std::move(result.value()));
@@ -3016,7 +2999,7 @@ std::optional<checked_result<script_value>> interpreter::object_arithmetic_via_m
 // when the class declares none (the builtin meaning and text follow). KEEP BYTE-PARALLEL with vm_backend::object_unary_via_method
 std::optional<checked_result<script_value>> interpreter::object_unary_via_method(const script_value& operand, token_type op) {
     const uint64_t id = op == token_type::minus ? op_minus_id_ : op == token_type::plus ? op_plus_id_ : op_tilde_id_;
-    if (parallel_worker_) [[unlikely]] {
+    if (parallel_worker_ && !worker_operators_pinned(operand, { id })) [[unlikely]] {
         if (declares_unary_operator(detail::operand_instance_class(operand), id)) {
             return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
         }
@@ -3024,10 +3007,9 @@ std::optional<checked_result<script_value>> interpreter::object_unary_via_method
     }
     auto target = resolve_member_target(operand);
     if (!target || !declares_unary_operator(target.class_def, id)) { return std::nullopt; }
-    script_value method_val = target.method(id);
+    script_value method_val = operator_value(target, id);
     if (!method_val.is_function()) { return std::nullopt; }
-    script_value bound = create_bound_method(operand, method_val);
-    auto result = bound.as_function()(std::vector<script_value>{});
+    auto result = operator_call(operand, method_val, id, {});
     if (!result) {
         if (is_unwinding_) { return checked_result<script_value>(make_value()); }
         return checked_result<script_value>(result.error_value());
@@ -3039,7 +3021,15 @@ std::optional<checked_result<script_value>> interpreter::object_unary_via_method
 // pay for it. KEEP BYTE-PARALLEL with vm_backend::call_operator_of
 script_value interpreter::call_operator_of(const script_value& callee) {
     const script_value& v = callee.deref();
-    if (parallel_worker_ || (v.type() != script_value_type::jai_object_type && v.type() != script_value_type::jai_shared_ptr_type)) { return make_value(); }
+    if (v.type() != script_value_type::jai_object_type && v.type() != script_value_type::jai_shared_ptr_type) { return make_value(); }
+    if (parallel_worker_) [[unlikely]] {
+        // a worker calls the region's pin of operator() on this backend (KEEP BYTE-PARALLEL with the vm)
+        const detail::parallel_method_pin* pin = worker_operator_pin(v, op_call_id_);
+        if (!pin) { return make_value(); }
+        return script_value::make_function(script_function([backend = this, pin, receiver = v, id = op_call_id_, eng = engine_](const std::vector<script_value>& args) {
+            return detail::call_parallel_operator_pin(*backend, *pin, id, receiver, args, eng);
+        }), engine_);
+    }
     auto target = resolve_member_target(v);
     if (!target) { return make_value(); }
     script_value method_val = target.method(op_call_id_);
@@ -4280,11 +4270,23 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
             push_value(detail::utf8::char_value(text, static_cast<size_t>(index), engine_, cache));
         } else {
             if (left.is_object()) {
-                // Safe-mode workers: operator[]/global-operator dispatch copies shared
-                // method values — verdict (increment B; KEEP BYTE-PARALLEL with the vm)
+                // a worker's operator[] runs through its region pin; anything else keeps the verdict (KEEP BYTE-PARALLEL with the vm)
                 if (parallel_worker_) [[unlikely]] {
-                    return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                        "custom operator dispatch on class instances is not admitted in a parallel body");
+                    const detail::parallel_method_pin* pin = worker_operator_pin(left, subscript_op_id_);
+                    if (!pin) {
+                        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                            "custom operator dispatch on class instances is not admitted in a parallel body");
+                    }
+                    auto result = detail::call_parallel_operator_pin(*this, *pin, subscript_op_id_, left, { right }, engine_);
+                    if (!result) {
+                        return result.error_value();
+                    }
+                    if (want_string_target && !result.value().is_reference() && !is_unwinding_) {
+                        return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target),
+                            detail::by_value_subscript_store_text);
+                    }
+                    push_value(std::move(result.value()));
+                    return {};
                 }
                 // First, try to find operator[] as a method on the object (for class instances)
                 auto instance_result = left.checked_as<std::shared_ptr<class_instance>>();
@@ -6361,7 +6363,20 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             // Fallthrough to operator= check
                         }
 
-                        // Case 2: Different type - try operator=
+                        // Case 2: Different type - try operator= (a worker's through its region pin; KEEP BYTE-PARALLEL with the vm)
+                        if (parallel_worker_ && instance->get_class_definition() && instance->get_class_definition()->defines_method(assign_operator_id_)) [[unlikely]] {
+                            const detail::parallel_method_pin* pin = parallel_method_pins_ ? parallel_method_pins_->find_operator(instance->get_class_definition(), assign_operator_id_) : nullptr;
+                            if (!pin) {
+                                return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                                    "custom operator dispatch on class instances is not admitted in a parallel body");
+                            }
+                            auto result = detail::call_parallel_operator_pin(*this, *pin, assign_operator_id_, *currentVal, { std::move(value) }, engine_);
+                            if (result) {
+                                if (is_unwinding_) { push_value(make_value()); } else { push_stored(); }
+                                return checked_result<void>();
+                            }
+                            return result.error_value();
+                        }
                         script_value method = instance->get_method(assign_operator_id_, false);
                         if (method.is_function()) {
                             // Found operator= method - call it with the source value
@@ -7589,26 +7604,56 @@ checked_result<void> interpreter::compound_typed_store_back(script_value& target
 }
 
 // Helper to convert value to string, checking for to_string() method on objects
-// self's method name_id called with no arguments; a parallel worker never dispatches it. KEEP BYTE-PARALLEL with the other backend
+// Class operators on a parallel worker: dispatched only through the region's pin of the operator. KEEP BYTE-PARALLEL with the vm's twins
+const detail::parallel_method_pin* interpreter::worker_operator_pin(const script_value& v, uint64_t id) const {
+    const class_definition* cd = detail::operand_instance_class(v);
+    return parallel_method_pins_ && cd ? parallel_method_pins_->find_operator(cd, id) : nullptr;
+}
+bool interpreter::worker_operators_pinned(const script_value& v, std::initializer_list<uint64_t> ids) const {
+    const class_definition* cd = detail::operand_instance_class(v);
+    if (!cd) { return true; }
+    for (const uint64_t id : ids) {
+        if (cd->defines_method(id) && !(parallel_method_pins_ && parallel_method_pins_->find_operator(cd, id))) { return false; }
+    }
+    return true;
+}
+script_value interpreter::operator_value(const member_target& target, uint64_t id) const {
+    if (!parallel_worker_) { return target.method(id); }
+    const detail::parallel_method_pin* pin = parallel_method_pins_ && target.class_def ? parallel_method_pins_->find_operator(target.class_def, id) : nullptr;
+    return pin ? pin->method_value : script_value::make_invalid(nullptr);
+}
+checked_result<script_value> interpreter::operator_call(const script_value& self, const script_value& method_val, uint64_t id, std::vector<script_value> args) {
+    if (!parallel_worker_) { return create_bound_method(self, method_val).as_function()(args); }
+    const detail::parallel_method_pin* pin = worker_operator_pin(self, id);
+    if (!pin) { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text); }
+    return detail::call_parallel_operator_pin(*this, *pin, id, self, std::move(args), engine_);
+}
+std::optional<checked_result<script_value>> interpreter::parallel_operator_call(const script_value& self, uint64_t id, std::vector<script_value> args) {
+    const detail::parallel_method_pin* pin = parallel_worker_ ? worker_operator_pin(self, id) : nullptr;
+    if (!pin) { return std::nullopt; }
+    return detail::call_parallel_operator_pin(*this, *pin, id, self, std::move(args), engine_);
+}
+
+// self's method name_id called with no arguments; a parallel worker dispatches it only through its pin. KEEP BYTE-PARALLEL with the other backend
 checked_result<script_value> interpreter::invoke_method(const script_value& self, uint64_t name_id) {
-    if (parallel_worker_) [[unlikely]] { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text); }
+    if (parallel_worker_ && !worker_operator_pin(self, name_id)) [[unlikely]] { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text); }
     auto target = resolve_member_target(self);
-    script_value method_val = target ? target.method(name_id) : script_value(std::monostate{}, engine_);
+    script_value method_val = target ? operator_value(target, name_id) : script_value(std::monostate{}, engine_);
     if (!method_val.is_function()) { return checked_result<script_value>(make_error_code(runtime_error_code::member_not_found), "No method '{0}'", name_id); }
-    return create_bound_method(self, method_val).as_function()(std::vector<script_value>{});
+    return operator_call(self, method_val, name_id, {});
 }
 
 checked_result<std::string> interpreter::value_to_string_with_method(const script_value& val) {
     if (val.type() == script_value_type::jai_object_type) {
+        if (parallel_worker_ && !worker_operators_pinned(val, { to_string_id_ })) [[unlikely]] {
+            return checked_result<std::string>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
+        }
         auto target = resolve_member_target(val);
         if (target) {
             auto method_id = to_string_id_;
-            auto method_val = target.method(method_id);
+            auto method_val = operator_value(target, method_id);
             if (!method_val.is_null() && !method_val.is_invalid() && method_val.is_function()) {
-                script_value bound = create_bound_method(val, method_val);
-                const script_function& method = bound.as_function();
-                std::vector<script_value> no_args;
-                auto result = method(no_args);
+                auto result = operator_call(val, method_val, method_id, {});
                 if (!result) {
                     return result.error_value();   // KEEP BYTE-PARALLEL with vm_backend::value_to_string_with_method
                 }
@@ -7786,8 +7831,8 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
 namespace {
 
 // a bare identifier callee in an instance method's own frame that the member ladder may answer with a method of the receiver
-identifier_expr* sibling_method_callee(expression* callee, bool parallel_worker, const detail::member_scope_ctx& scope) {
-    if (callee->get_type() != node_type::identifier_expr || parallel_worker) return nullptr;
+identifier_expr* sibling_method_callee(expression* callee, const detail::member_scope_ctx& scope) {
+    if (callee->get_type() != node_type::identifier_expr) return nullptr;
     if (scope.state != detail::member_scope_state::instance || !scope.this_storage) return nullptr;
     auto* ident = static_cast<identifier_expr*>(callee);
     return ident->global_qualified || ident->slot_index != SIZE_MAX ? nullptr : ident;
@@ -7999,7 +8044,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
     // method_epoch) skips lookup + overload resolution for the hot monomorphic shape.
     {
         member_expr* const member = expr->callee->get_type() == node_type::member_expr ? static_cast<member_expr*>(expr->callee.get()) : nullptr;
-        identifier_expr* const sibling = member ? nullptr : sibling_method_callee(expr->callee.get(), parallel_worker_, member_scope_);
+        identifier_expr* const sibling = member ? nullptr : sibling_method_callee(expr->callee.get(), member_scope_);
         if ((member && !member->is_static && member->member_id != same_as_id_ &&
              (member->object->get_type() == node_type::identifier_expr || member->object->get_type() == node_type::this_expr)) || sibling) {
             method_site_cache& mcache = member ? member->mcache : expr->sibling_cache;
@@ -8162,7 +8207,27 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                 }
                 cls_raw = inst_raw ? inst_raw->get_class_definition() : nullptr;
                 const script_method_dispatch* d = nullptr;
-                if (cls_raw && mcache.cls == cls_raw && mcache.epoch == cls_raw->method_epoch()) {
+                if (parallel_worker_) [[unlikely]] {
+                    // a worker's bare sibling call enters the region's pin of the method (the site's cache is the engine's); KEEP
+                    // BYTE-PARALLEL with vm_backend::worker_park_sibling
+                    const detail::parallel_method_pin* pin = cls_raw && parallel_method_pins_ ? parallel_method_pins_->find(cls_raw, member_id) : nullptr;
+                    const script_method_dispatch* pd = pin && pin->resolved && pin->method_value.is_function() ? pin->method_value.as_function().target<script_method_dispatch>() : nullptr;
+                    const bool own = !inst_raw || inst_raw->has_field(member_id) || detail::own_scope_lookup(environment_.get(), member_scope_.floor, member_id);
+                    if (pd && !own) {
+                        dispatch = pd;
+                        def_env = pd->definition_env;
+                        cls_pin = pd->cls;
+                        parallel_pin_decl = pin->resolved;
+                    } else if (!own) {
+                        const script_value* bound = cls_raw->method_ptr(member_id);
+                        if (bound && bound->is_function() && bound->as_function().target<script_method_dispatch>()) {
+                            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                                "method '{0}' was not admitted in this parallel body (admitted: single-overload "
+                                "public methods of the element's class or its bases touching only element, local, or "
+                                "captured-read state)", member_id);
+                        }
+                    }
+                } else if (cls_raw && mcache.cls == cls_raw && mcache.epoch == cls_raw->method_epoch()) {
                     d = static_cast<const script_method_dispatch*>(mcache.dispatch);
                 } else if (cls_raw) {
                     if (!cls_raw->chain_has_nonpublic()) {

@@ -1516,6 +1516,13 @@ namespace jai::vm {
             std::string_view class_name() const;
         };
         member_target resolve_member_target(const script_value& objectValue) const;
+        const detail::parallel_method_pin* worker_operator_pin(const script_value& v, uint64_t id) const;
+        bool worker_operators_pinned(const script_value& v, std::initializer_list<uint64_t> ids) const;
+        script_value operator_value(const member_target& target, uint64_t id) const;
+        checked_result<script_value> operator_call(const script_value& self, const script_value& method_val, uint64_t id, std::vector<script_value> args);
+    public:
+        std::optional<checked_result<script_value>> parallel_operator_call(const script_value& self, uint64_t id, std::vector<script_value> args) override;
+    private:
 
         // Scope-environment free list for op_scope_push/pop (mirrors the interpreter's
         // environment pool). release only recycles unshared scopes, so anything captured
@@ -2047,6 +2054,7 @@ namespace jai::vm {
         // behavior from script_callable_thunk::operator().
         script_value make_bound_method_thunk(const script_value& this_val, script_value method);
         bool park_sibling_method(frame& f, const call_site& site);
+        int worker_park_sibling(frame& f, const call_site& site);
         op_status exec_math_pair(frame& f, const vm_instruction& ins, detail::math_fn fn);   // the sibling IC's hit: the class's method and this frame's receiver
         void arm_sibling_method(frame& f, const call_site& site, const script_value& resolved);
         // ONE native boundary for the direct dispatches (builtin methods, coroutine

@@ -1198,6 +1198,13 @@ namespace jai {
             std::string_view class_name() const;           // empty when unknown
         };
         member_target resolve_member_target(const script_value& objectValue) const;
+        const detail::parallel_method_pin* worker_operator_pin(const script_value& v, uint64_t id) const;
+        bool worker_operators_pinned(const script_value& v, std::initializer_list<uint64_t> ids) const;
+        script_value operator_value(const member_target& target, uint64_t id) const;
+        checked_result<script_value> operator_call(const script_value& self, const script_value& method_val, uint64_t id, std::vector<script_value> args);
+    public:
+        std::optional<checked_result<script_value>> parallel_operator_call(const script_value& self, uint64_t id, std::vector<script_value> args) override;
+    private:
 
         // Writes 'value' to a member of 'objectValue' (deref'd, object-typed): C++ property
         // setters (including on cpp_bound receivers) take precedence over instance fields.

@@ -458,6 +458,16 @@ inline script_value class_definition::get_method(uint64_t id, bool throw_if_miss
     return script_value::make_invalid(engine_);
 }
 
+inline const script_value* class_definition::method_ptr(uint64_t id) const {
+    if (auto it = methods_.find(id); it != methods_.end()) { return &it->second; }
+    for (const auto& parent : parent_classes_) {
+        if (parent) {
+            if (const script_value* found = parent->method_ptr(id)) { return found; }
+        }
+    }
+    return cpp_base_class_ ? cpp_base_class_->method_ptr(id) : nullptr;
+}
+
 [[noreturn]] inline JAI_NOINLINE void class_definition::throw_method_missing(const char* kind, uint64_t id) const {
     std::string name;
     if (auto eng = engine_) {
@@ -2675,12 +2685,21 @@ inline std::optional<checked_result<void>> user_assign_operator(const script_val
         }
     }
     const uint64_t assign_id = eng->get_symbolizer()->intern("=");
-    script_value method = instance->get_method(assign_id, false);
-    if (!method.is_function()) { return std::nullopt; }
+    const script_value* bound_assign = def->method_ptr(assign_id);
+    if (!bound_assign || !bound_assign->is_function()) { return std::nullopt; }
     if (eng->parallel_region_active()) {
+        // a chunk calls the operator through its region pin, on its own backend; an unpinned one keeps the verdict
+        if (auto called = eng->parallel_operator_call(current, assign_id, { value })) {
+            if (!*called) {
+                checked_result<void> failed = called->error_value();
+                return failed;
+            }
+            return checked_result<void>();
+        }
         return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
             "custom operator dispatch on class instances is not admitted in a parallel body");
     }
+    script_value method = *bound_assign;
     std::vector<script_value> args{current, value};
     auto result = method.as_function()(args);
     if (!result) {

@@ -16,14 +16,14 @@ public:
 
     void forge_tests() override {
 
-        // A malicious `_type_` value must NOT be parsed+executed as script source. The old
-        // path did `execute(type_name + "()")`, so a `_type_` of "g_flag = 99; Dummy" ran the
+        // A malicious `$type` value must NOT be parsed+executed as script source. The old
+        // path did `execute(type_name + "()")`, so a `$type` of "g_flag = 99; Dummy" ran the
         // injected statement. The fix resolves the type through the registry (no eval).
         test("from_json_type_name_not_executed", [&]() {
             auto eng = make_engine();
             jai::stdlib::register_all(*eng);
             eng->add_global("g_flag", script_value((script_int)0, eng.get()));
-            eng->add_global("payload", std::string(R"({"_type_":"g_flag = 99; Dummy"})"));
+            eng->add_global("payload", std::string(R"({"$type":"g_flag = 99; Dummy","$val":{}})"));
             (void)eng->execute("from_json(payload)");
             check_eq((script_int)0, eng->execute("g_flag").as_int()); // injection must NOT fire
         });
@@ -38,18 +38,18 @@ public:
             eng->execute("class Dummy { int x = 0; }");
             eng->add_global("g_flag", script_value((script_int)0, eng.get()));
             eng->add_global("payload",
-                std::string(R"({"_type_":"Dummy","x = 1; g_flag = 99; z":5})"));
+                std::string(R"({"$type":"Dummy","$val":{"x = 1; g_flag = 99; z":5}})"));
             (void)eng->execute("from_json(payload)");
             check_eq((script_int)0, eng->execute("g_flag").as_int()); // injection must NOT fire
         });
 
-        // Same injection through the binary path (from_binary reconstructs `_type_` maps too).
+        // Same injection through the binary path (from_binary reconstructs `$type` maps too).
         // The blob is produced from a map, so we don't hand-craft binary bytes.
         test("from_binary_type_name_not_executed", [&]() {
             auto eng = make_engine();
             jai::stdlib::register_all(*eng);
             eng->add_global("g_flag", script_value((script_int)0, eng.get()));
-            eng->execute(R"( auto blob = to_binary({"_type_": "g_flag = 99; Dummy"}); )");
+            eng->execute(R"( auto blob = to_binary({"$type": "g_flag = 99; Dummy", "$val": {}}); )");
             (void)eng->execute("from_binary(blob)");
             check_eq((script_int)0, eng->execute("g_flag").as_int());
         });
@@ -58,7 +58,7 @@ public:
             auto eng = make_engine();
             jai::stdlib::register_all(*eng);
             eng->add_global("g_flag", script_value((script_int)0, eng.get()));
-            eng->execute(R"( auto blob = to_base64({"_type_": "g_flag = 99; Dummy"}); )");
+            eng->execute(R"( auto blob = to_base64({"$type": "g_flag = 99; Dummy", "$val": {}}); )");
             (void)eng->execute("from_base64(blob)");
             check_eq((script_int)0, eng->execute("g_flag").as_int());
         });

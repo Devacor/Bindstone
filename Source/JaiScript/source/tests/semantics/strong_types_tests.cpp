@@ -2181,7 +2181,7 @@ public:
             // A float JSON payload into an int field converts on the way in
             check_both(R"(
                 class P { int hp = 0; }
-                var q = from_json("{\"_type_\": \"P\", \"hp\": 7.9}");
+                var q = from_json("{\"$type\": \"P\", \"$val\": {\"hp\": 7.9}}");
                 type_of(q.hp) + ":" + to_string(q.hp)
             )", "int:7", "JSON float into int field truncates");
         });
@@ -2321,7 +2321,7 @@ public:
             check_quad(q("array<K> ks = [K(1), K(2)]; ks.reverse(); to_string(ks[0].a)").c_str(), "2", "reverse");
             check_quad(q("array<K> ks = [K(1), K(2)]; ks[1].f()").c_str(), "k2", "method call on an element");
             check_quad(q("array<K> ks = [K(1)]; type_of(ks) + \"|\" + type_of(ks[0])").c_str(), "array|K", "type_of");
-            check_quad(q("array<K> ks = [K(1), K(2)]; to_json(ks)").c_str(), "[{\"_type_\":\"K\",\"a\":1},{\"_type_\":\"K\",\"a\":2}]", "json");
+            check_quad(q("array<K> ks = [K(1), K(2)]; to_json(ks)").c_str(), "[{\"$type\":\"K\",\"$val\":{\"a\":1}},{\"$type\":\"K\",\"$val\":{\"a\":2}}]", "json");
             check_quad(q("array<K> a = [K(1)]; array<K> b = a; array<K> c = [K(2)]; to_string(a == b) + \",\" + to_string(a == c) + \",\" + to_string(same_object(a, b))").c_str(), "true,false,false", "equality is memberwise (a copy equals its source, identity via same_object)");
             check_quad(q("shared_ptr<K> sp = K(7); array<K> ks = [sp]; sp.a = 8; to_string(ks[0].a) + \"|\" + type_of(ks[0])").c_str(), "8|K", "a shared_ptr element shares its instance");
             check_quad(q("shared_ptr<K> sp = K(7); array<K> ks = [sp]; auto c = ks; c[0].a = 9; to_string(ks[0].a) + \",\" + to_string(sp.a)").c_str(), "9,9", "copying an array keeps a shared element shared (C++ copy semantics)");

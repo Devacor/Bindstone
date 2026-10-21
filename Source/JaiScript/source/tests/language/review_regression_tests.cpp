@@ -5580,7 +5580,7 @@ public:
             expect("var v = {\"a\": [1, 2.5, \"s\", true, null], \"m\": {\"x\": {\"y\": 1}}}; to_json(from_json(to_json(v, 2))) == to_json(v);",
                    "true", "an indented document round-trips through from_json");
             expect("class P { int x = 1; array<int> v = [2]; } to_json(P(), 2);",
-                   "{\n  \"_type_\": \"P\",\n  \"x\": 1,\n  \"v\": [\n    2\n  ]\n}", "a class instance");
+                   "{\n  \"$type\": \"P\",\n  \"$val\": {\n    \"x\": 1,\n    \"v\": [\n      2\n    ]\n  }\n}", "a class instance");
         });
 
         test("type_keywords_are_member_names_after_a_dot", [expect]() {

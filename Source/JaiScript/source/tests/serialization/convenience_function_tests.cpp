@@ -264,13 +264,13 @@ public:
             script_value direct = eng->execute("from_json(\"{\\\"k\\\": [1, {\\\"n\\\": 2}]}\")");
             script_value cloned = direct.clone();   // threw "missing engine pointer" before the key fix
             check_eq((int64_t)3, eng->execute("1 + 2").as_int(), "engine stays usable after C++ clone");
-            // Typed-object reconstruction keys ("_type_" probe) still resolve
+            // Typed-object reconstruction keys ("$type" probe) still resolve
             auto probe = eng->execute(R"(
-                var m = from_json("{\"_type_\": \"NoSuchRegisteredClass\", \"v\": 7}");
-                to_string(m["v"]) + "|" + m["_type_"];
+                var m = from_json("{\"$type\": \"NoSuchRegisteredClass\", \"$val\": {\"v\": 7}}");
+                to_string(m["$val"]["v"]) + "|" + m["$type"];
             )");
             check_eq(std::string("7|NoSuchRegisteredClass"), probe.as_string(),
-                "string-content key ordering keeps _type_ lookup and map reads intact");
+                "string-content key ordering keeps $type lookup and map reads intact");
         });
 
         test("base64_raw_string_roundtrip", [this]() {

@@ -212,10 +212,15 @@ const script_value* binary_archive_writer::next_child(value_frame& f, script_val
 bool binary_archive_writer::begin_value(const script_value& given, std::vector<value_frame>& frames) {
     const script_value& value = given.is_reference() ? given.deref() : given;
 
-    // Write type tag first
-    write_uint8(static_cast<uint8_t>(value.type()));
+    // a handle to no object is null, as in JSON
+    script_value_type tag = value.type();
+    if ((tag == script_value_type::jai_weak_ptr_type && !value.get_weak_ptr().lock()) ||
+        (tag == script_value_type::jai_shared_ptr_type && !value.get_object_holder())) {
+        tag = script_value_type::jai_null_type;
+    }
+    write_uint8(static_cast<uint8_t>(tag));
 
-    switch (value.type()) {
+    switch (tag) {
         case script_value_type::jai_null_type:
             // Nothing to write
             break;
@@ -288,23 +293,12 @@ bool binary_archive_writer::begin_value(const script_value& given, std::vector<v
         }
 
         case script_value_type::jai_weak_ptr_type: {
-            // Serialize weak_ptr by tracking the shared_ptr it references
-            auto weak = value.get_weak_ptr();
-            auto shared = weak.lock();  // Try to lock to get shared_ptr<object_holder>
-
-            if (!shared) {
-                // Expired or null weak_ptr
-                write_uint32(0);
-            } else {
-                // Track the shared_ptr and write its ID
-                auto [id, is_new] = track_shared_ptr(shared.get());
-                write_uint32(id);
-
-                // If this is the first time seeing this shared object, serialize the data
-                // This makes serialization order-independent: weak_ptr can come before or after shared_ptr
-                if (is_new) {
-                    frames.emplace_back(frame_shape::values, script_value(std::monostate{}, engine_ref_)).values.push_back(weak_target_value(shared));
-                }
+            // the object rides with the archive's first reference to it, weak or shared
+            auto shared = value.get_weak_ptr().lock();
+            auto [id, is_new] = track_shared_ptr(shared.get());
+            write_uint32(id);
+            if (is_new) {
+                frames.emplace_back(frame_shape::values, script_value(std::monostate{}, engine_ref_)).values.push_back(weak_target_value(shared));
             }
             break;
         }
@@ -312,10 +306,6 @@ bool binary_archive_writer::begin_value(const script_value& given, std::vector<v
         case script_value_type::jai_shared_ptr_type: {
             // A shared handle: the object once under its id, every later handle the id alone (identity survives the load)
             auto holder = value.get_object_holder();
-            if (!holder) {
-                write_uint32(0);
-                break;
-            }
             auto [id, is_new] = track_shared_ptr(holder.get());
             write_uint32(id);
             if (is_new) {
@@ -921,19 +911,22 @@ bool binary_archive_reader::read_or_open(engine* eng, std::vector<value_frame>& 
 
         case script_value_type::jai_weak_ptr_type:
         case script_value_type::jai_shared_ptr_type: {
-            // A script handle reads back in from_json's tagged shape; its object follows the id's first appearance, since
-            // the writer and the reader walk one order
+            // A script handle reads back in from_json's shape, {"$id": N} or {"$ref": N} with its object under "$val" at the
+            // id's first appearance, since the writer and the reader walk one order
             const bool weak = vtype == script_value_type::jai_weak_ptr_type;
             const uint32_t id = read_little_endian<uint32_t>();
+            if (id == 0) {
+                out = script_value(std::monostate{}, eng);
+                return true;
+            }
             script_value record = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
-            const_cast<script_map&>(record.as_map()).insert_or_assign(script_value(std::string(weak ? "$weak_ptr_id" : "$shared_ptr_id"), eng),
+            const_cast<script_map&>(record.as_map()).insert_or_assign(script_value(std::string(weak ? "$ref" : "$id"), eng),
                                                                       script_value(static_cast<script_int>(id), eng));
-            if (id == 0 || !handle_ids_read_.insert(id).second) {
+            if (!handle_ids_read_.insert(id).second) {
                 out = std::move(record);
                 return true;
             }
-            value_frame& f = frames.emplace_back(frame_shape::handle, 1, std::move(record), eng);
-            f.data_key = weak ? "$weak_ptr_data" : "$shared_ptr_data";
+            frames.emplace_back(frame_shape::handle, 1, std::move(record), eng);
             return false;
         }
 
@@ -986,7 +979,7 @@ void binary_archive_reader::take_child(engine* eng, value_frame& f, script_value
             }
             break;
         case frame_shape::handle:
-            const_cast<script_map&>(f.built.as_map()).insert_or_assign(script_value(std::string(f.data_key), eng), std::move(child));
+            const_cast<script_map&>(f.built.as_map()).insert_or_assign(script_value(std::string("$val"), eng), std::move(child));
             break;
         case frame_shape::object:
             f.values.push_back(std::move(child));
@@ -1046,16 +1039,17 @@ script_value binary_archive_reader::finish_frame(engine* eng, value_frame& f) {
         return constructed_obj;
     }
 
-    script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
-    auto& map = const_cast<script_map&>(map_val.as_map());
-
-    map.insert_or_assign(script_value("_type_", eng), script_value(f.type_name, eng));
-
+    // the object in from_json's shape, {"$type": T, "$val": {members}}
+    script_value members = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+    auto& member_map = const_cast<script_map&>(members.as_map());
     for (uint32_t i = 0; i < property_count; ++i) {
-        map.insert_or_assign(script_value(f.names[i], eng), std::move(f.values[i]));
+        member_map.insert_or_assign(script_value(f.names[i], eng), std::move(f.values[i]));
     }
-
-    return map_val;
+    script_value record = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+    auto& record_map = const_cast<script_map&>(record.as_map());
+    record_map.insert_or_assign(script_value(std::string("$type"), eng), script_value(f.type_name, eng));
+    record_map.insert_or_assign(script_value(std::string("$val"), eng), std::move(members));
+    return record;
 }
 
 } // namespace jai::serialization

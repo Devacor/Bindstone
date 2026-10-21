@@ -346,7 +346,7 @@ print("{} spawned, first hp {}", spawned.size(), spawned[0].hp);   // 3 spawned,
 
 ```cpp
 function save_public(obj) {
-    var out = {"_type_": reflect::type_name(obj)};
+    var out = {"class": reflect::type_name(obj)};
     for (auto f : reflect::fields(obj)) {
         if (f["access"] != "public" || f["static"]) { continue; }
         out[f["name"]] = reflect::get(obj, f["name"]);
@@ -355,10 +355,10 @@ function save_public(obj) {
 }
 
 function load_public(json) {
-    var data = from_json(json);            // yields a plain map (keep _type_ a string key)
-    var obj = reflect::construct(data["_type_"]);
+    var data = from_json(json);            // a plain map
+    var obj = reflect::construct(data["class"]);
     for (auto kv : data) {
-        if (kv.first == "_type_") { continue; }
+        if (kv.first == "class") { continue; }
         if (reflect::has_field(obj, kv.first)) { reflect::set(obj, kv.first, kv.second); }
     }
     return obj;

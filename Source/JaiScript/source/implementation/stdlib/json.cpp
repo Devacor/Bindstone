@@ -40,7 +40,6 @@ namespace stdlib {
             script_value host_part = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
             auto& host_map = const_cast<script_map&>(host_part.as_map());
             for (const auto& [key, value] : map) {
-                if (key.is_string() && (key.as_string() == "_type_" || key.as_string() == "_version_")) { continue; }
                 host_map.emplace(key, value);
             }
             serialization::json_archive_writer writer(-1, eng);
@@ -84,7 +83,10 @@ namespace stdlib {
         const uint64_t member_id = field.id;
         if (const script_value* stored = inst.find_script_field_value(member_id)) {
             const type_info_ptr declared = def.get_field_declared_type(member_id);
-            if (declared && declared->base_type != script_value_type::jai_any_type && !v.is_null()) {
+            // a saved null is a handle field's empty handle, as `= null` makes it (an expired weak handle saves as null)
+            const bool handle_field = declared && (declared->base_type == script_value_type::jai_weak_ptr_type ||
+                                                   declared->base_type == script_value_type::jai_shared_ptr_type);
+            if (declared && declared->base_type != script_value_type::jai_any_type && (!v.is_null() || handle_field)) {
                 auto converted = detail::field_store_convert_no_script(v, declared, eng);
                 if (!converted) {
                     record_load_retype(eng, def, member_id, field_migration_outcome::reset, v, stored);
@@ -146,18 +148,46 @@ namespace stdlib {
 		return object;
 	}
 
-	inline bool archive_handle_parts(engine* eng, const script_map& map, script_int& id, const script_value*& data, bool& weak) {
-		weak = false;
-		auto id_it = map.find(script_value(std::string("$shared_ptr_id"), eng));
-		if (id_it == map.end()) {
-			id_it = map.find(script_value(std::string("$weak_ptr_id"), eng));
-			weak = true;
+	// One map's members by their archive keys: a key outside the set makes it no archive record
+	struct archive_record_keys {
+		const script_value* id = nullptr;
+		const script_value* ref = nullptr;
+		const script_value* type = nullptr;
+		const script_value* version = nullptr;
+		const script_value* val = nullptr;
+	};
+
+	inline bool read_archive_record_keys(const script_map& map, archive_record_keys& keys) {
+		if (map.empty() || map.size() > 3) { return false; }
+		for (const auto& [key, member] : map) {
+			if (!key.is_string()) { return false; }
+			const std::string& name = key.as_string();
+			const script_value** slot = name == "$id" ? &keys.id : name == "$ref" ? &keys.ref : name == "$type" ? &keys.type
+			                          : name == "$version" ? &keys.version : name == "$val" ? &keys.val : nullptr;
+			if (!slot) { return false; }
+			*slot = &member;
 		}
-		if (id_it == map.end() || !id_it->second.is_int()) { return false; }
-		auto data_it = map.find(script_value(std::string(weak ? "$weak_ptr_data" : "$shared_ptr_data"), eng));
-		if (map.size() == 2 && data_it == map.end()) { return false; }
-		id = id_it->second.as_int();
-		data = data_it == map.end() ? nullptr : &data_it->second;
+		return true;
+	}
+
+	// A handle: {"$id": N} or {"$ref": N}, and at its object's first reference the object's "$type" beside its "$val". The
+	// payload is the object's own archive form ({"$type": T, "$val": fields}), or the bare "$val" of an object with no class
+	inline bool archive_handle_parts(engine* eng, const script_map& map, script_int& id, script_value& payload, bool& has_payload, bool& weak) {
+		archive_record_keys keys;
+		if (!read_archive_record_keys(map, keys) || keys.version || (keys.id != nullptr) == (keys.ref != nullptr)) { return false; }
+		const script_value* id_value = keys.id ? keys.id : keys.ref;
+		if (!id_value->is_int() || (keys.type && (!keys.type->is_string() || !keys.val))) { return false; }
+		weak = keys.ref != nullptr;
+		id = id_value->as_int();
+		has_payload = keys.val != nullptr;
+		if (keys.type) {
+			payload = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+			auto& object = const_cast<script_map&>(payload.as_map());
+			object.emplace(script_value(std::string("$type"), eng), *keys.type);
+			object.emplace(script_value(std::string("$val"), eng), *keys.val);
+		} else if (keys.val) {
+			payload = *keys.val;
+		}
 		return true;
 	}
 
@@ -169,10 +199,11 @@ namespace stdlib {
 			if (value.is_map()) {
 				const auto& map = value.as_map();
 				script_int id = 0;
-				const script_value* data = nullptr;
+				script_value payload(std::monostate{}, eng);
+				bool has_payload = false;
 				bool weak = false;
-				if (map.size() <= 2 && archive_handle_parts(eng, map, id, data, weak) && data && id != 0) {
-					handles.payloads.try_emplace(id, *data);
+				if (archive_handle_parts(eng, map, id, payload, has_payload, weak) && has_payload && id != 0) {
+					handles.payloads.try_emplace(id, std::move(payload));
 				}
 				for (const auto& [key, child] : map) {
 					if (child.is_map() || child.is_array()) { pending.push_back(child); }
@@ -189,8 +220,8 @@ namespace stdlib {
 		throw serialization_error("Invalid shared_ptr ID: " + std::to_string(id));
 	}
 
-	// The archive form of one value back to a live value. A class instance (a {"_type_": Name, ...} map naming a registered
-	// class) is constructed, then its saved members are restored in the class's declaration order (each nested value built
+	// The archive form of one value back to a live value. A class instance (a {"$type": Name, "$val": {members}} map naming a
+	// registered class) is constructed, then its saved members are restored in the class's declaration order (each nested value built
 	// when its member is reached), without notifying, then its post_load(self, version) is queued for the end of the
 	// outermost load; a type name or member name is data, never code, and only the class's own members are looked up (the
 	// key-injection fix, B5)
@@ -233,6 +264,7 @@ namespace stdlib {
 			bool have_key = false;
 			bool finished = false;         // an instance whose setter threw: the in-flight exception leaves the load
 			script_int handle_id = 0;      // a handle frame's id, or the id an instance frame's object registered under
+			script_int version = 1;        // an instance frame's saved $version, for its post_load
 			bool weak = false;
 			const std::vector<engine::load_field>* order = nullptr;   // an instance frame's restore order (index walks it)
 			const engine::load_field* field = nullptr;                // the member the child rebuilds for
@@ -258,11 +290,20 @@ namespace stdlib {
 				return true;
 			}
 			const auto& map = value.as_map();
-			if (map.size() <= 2) {
-				script_int id = 0;
-				const script_value* data = nullptr;
-				bool weak = false;
-				if (archive_handle_parts(eng_, map, id, data, weak)) { return open_handle(id, data, weak, out); }
+			archive_record_keys keys;
+			if (read_archive_record_keys(map, keys)) {
+				if (keys.id || keys.ref) {
+					script_int id = 0;
+					script_value payload(std::monostate{}, eng_);
+					bool has_payload = false;
+					bool weak = false;
+					if (archive_handle_parts(eng_, map, id, payload, has_payload, weak)) {
+						return open_handle(id, has_payload ? &payload : nullptr, weak, out);
+					}
+				} else if (keys.type && keys.val && keys.type->is_string() && keys.val->is_map() && (!keys.version || keys.version->is_int())) {
+					const script_int version = keys.version ? keys.version->as_int() : 1;
+					if (open_instance(*keys.val, keys.type->as_string(), version, handle_id)) { return false; }
+				}
 			}
 			if (json_string_keys_ && map.size() == 1) {
 				const auto& [tag, payload] = *map.begin();
@@ -277,8 +318,6 @@ namespace stdlib {
 					return false;
 				}
 			}
-			auto type_it = map.find(script_value("_type_", eng_));
-			if (type_it != map.end() && type_it->second.is_string() && open_instance(value, type_it->second.as_string(), handle_id)) { return false; }
 			frame f(shape::map, value, script_value::make_map(json_string_keys_ ? eng_->get_type_info_string() : nullptr, nullptr, eng_), eng_);
 			f.next = map.begin();
 			frames_.push_back(std::move(f));
@@ -337,7 +376,7 @@ namespace stdlib {
 		// A load constructs: a class with a zero-argument constructor runs it as Name() would whatever its access, its initializer
 		// list included (a hybrid's builds its C++ base), and its error or throw is the load's; a class without one is created
 		// without one, its C++ base through load_hybrid's ladder, then its field initializers. False leaves the map a map
-		bool open_instance(const script_value& value, const std::string& type_name, script_int handle_id) {
+		bool open_instance(script_value fields, const std::string type_name, script_int version, script_int handle_id) {
 			const std::shared_ptr<class_definition> class_def = eng_->get_class_definition(type_name);
 			if (!class_def) { return false; }
 			script_value ctor = eng_->get_variable(type_name);
@@ -357,7 +396,7 @@ namespace stdlib {
 				}
 				instance = std::move(constructed.value());
 			} else if (cpp_base) {
-				instance = load_hybrid(eng_, value.as_map(), class_def, *cpp_base);
+				instance = load_hybrid(eng_, fields.as_map(), class_def, *cpp_base);
 			} else {
 				auto created = class_def->create_instance();
 				if (!created) { return false; }
@@ -368,8 +407,9 @@ namespace stdlib {
 			class_definition* def = created_instance ? created_instance->get_class_definition() : nullptr;
 			if (!def) { return false; }
 			if (handle_id != 0) { handles_.loaded.try_emplace(handle_id, script_handle_of(eng_, instance)); }
-			frame f(shape::instance, value, std::move(instance), eng_);
+			frame f(shape::instance, std::move(fields), std::move(instance), eng_);
 			f.order = &eng_->load_field_order(*def);
+			f.version = version;
 			frames_.push_back(std::move(f));
 			return true;
 		}
@@ -486,11 +526,7 @@ namespace stdlib {
 		// post_load(self, version), the class's migration hook: queued as the object completes, so the hooks run in completion
 		// order (children before parents) once the outermost load is done
 		void run_post_load(frame& f) {
-			script_int version = 1;
-			const auto& map = f.source.as_map();
-			auto version_it = map.find(script_value("_version_", eng_));
-			if (version_it != map.end() && version_it->second.is_int()) { version = version_it->second.as<script_int>(); }
-			eng_->defer_post_load(f.built, version);
+			eng_->defer_post_load(f.built, f.version);
 		}
 	};
 

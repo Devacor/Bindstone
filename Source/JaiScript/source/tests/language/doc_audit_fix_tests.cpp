@@ -68,12 +68,12 @@ public:
                 " class B { int z = 1; int a = 2; } class D : B { int y = 3; int b = 4; }"
                 " class H { string name = \"Vex\"; int hp = 30; array<string> bag = [\"rope\"]; }";
             expect(defs + " K k; to_json(k);",
-                   "{\"_type_\":\"K\",\"vole\":1,\"wolf\":2,\"xeno\":3,\"yak\":4,\"zeta\":5,\"apple\":\"a\",\"bag\":[1],\"cat\":1.5,\"dog\":7}",
+                   "{\"$type\":\"K\",\"$val\":{\"vole\":1,\"wolf\":2,\"xeno\":3,\"yak\":4,\"zeta\":5,\"apple\":\"a\",\"bag\":[1],\"cat\":1.5,\"dog\":7}}",
                    "a class whose field names were interned out of order");
-            expect(defs + " D d; to_json(d);", "{\"_type_\":\"D\",\"z\":1,\"a\":2,\"y\":3,\"b\":4}", "a base's fields come first");
-            expect(defs + " H h; to_json(h);", "{\"_type_\":\"H\",\"name\":\"Vex\",\"hp\":30,\"bag\":[\"rope\"]}", "the audit's example");
+            expect(defs + " D d; to_json(d);", "{\"$type\":\"D\",\"$val\":{\"z\":1,\"a\":2,\"y\":3,\"b\":4}}", "a base's fields come first");
+            expect(defs + " H h; to_json(h);", "{\"$type\":\"H\",\"$val\":{\"name\":\"Vex\",\"hp\":30,\"bag\":[\"rope\"]}}", "the audit's example");
             expect(defs + " K k; auto back = from_binary(to_binary(k)); to_json(back);",
-                   "{\"_type_\":\"K\",\"vole\":1,\"wolf\":2,\"xeno\":3,\"yak\":4,\"zeta\":5,\"apple\":\"a\",\"bag\":[1],\"cat\":1.5,\"dog\":7}",
+                   "{\"$type\":\"K\",\"$val\":{\"vole\":1,\"wolf\":2,\"xeno\":3,\"yak\":4,\"zeta\":5,\"apple\":\"a\",\"bag\":[1],\"cat\":1.5,\"dog\":7}}",
                    "the binary archive keeps the order");
         });
 

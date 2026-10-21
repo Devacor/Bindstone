@@ -12,6 +12,8 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/core/jaibite.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
+#include <jaiscript/thread_pool.hpp>
+#include <algorithm>
 #include <cstring>
 #include <sstream>
 #include <new>
@@ -286,6 +288,30 @@ public:
 			check_ge(r.as_int(), (int64_t)1);
 			e->parallel_thread_count(3);
 			check_eq((int64_t)3, e->execute("return thread_count();").as_int());
+		});
+
+		test("performance_cores_lie_within_the_hardware_threads_and_stay_stable", [this]() {
+			const size_t hardware = std::max<size_t>(1, std::thread::hardware_concurrency());
+			const size_t cores = jai::thread_pool::performance_core_count();
+			check_ge(cores, (size_t)1);
+			check_true(cores <= hardware);
+			check_eq(cores, jai::thread_pool::performance_core_count());
+		});
+
+		test("auto_thread_count_is_the_performance_cores_below_the_hardware_threads", [this]() {
+			const size_t hardware = std::max<size_t>(1, std::thread::hardware_concurrency());
+			const size_t automatic = std::max<size_t>(1, std::min(jai::thread_pool::performance_core_count(), hardware - 1));
+			auto e = make_engine();
+			check_eq(automatic, e->parallel_thread_count());
+			check_eq((int64_t)automatic, e->execute("return thread_count();").as_int());
+			e->parallel_thread_count(automatic + 5);
+			check_eq(automatic + 5, e->parallel_thread_count());
+			check_eq((int64_t)(automatic + 5), e->execute("return thread_count();").as_int());
+			e->parallel_thread_count(1);
+			check_eq((size_t)1, e->parallel_thread_count());
+			e->parallel_thread_count(0);
+			check_eq(automatic, e->parallel_thread_count());
+			check_eq((int64_t)automatic, e->execute("return thread_count();").as_int());
 		});
 
 		test("empty_and_small_arrays", [this]() {

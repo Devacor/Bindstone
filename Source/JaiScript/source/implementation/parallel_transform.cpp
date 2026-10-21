@@ -4790,7 +4790,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t pf_adm1 = __rdtsc();
 #endif
-	// THREAD COUNT: the override or min(hardware_concurrency - 1, 6), one context below
+	// THREAD COUNT: the engine's count (the host's, else min(performance cores, hardware_concurrency - 1)), one context below
 	// k_parallel_small_n, then the measured-cost cap (internal/parallel_design.md section 3)
 	size_t worker_count = eng.parallel_thread_count();
 	if (worker_count < 1) { worker_count = 1; }
@@ -5289,7 +5289,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			const auto build_start = std::chrono::steady_clock::now();
 			state.faults.checkpoint("region.pool_create");
 			state.pool = detail::thread_pool_access::make(
-				std::max(pool_workers_needed, eng.parallel_thread_count() > 1 ? eng.parallel_thread_count() - 1 : size_t(1)), &state.faults);
+				std::max(pool_workers_needed, eng.parallel_thread_count() > 1 ? eng.parallel_thread_count() - 1 : size_t(1)), &state.faults,
+				thread_pool::fast_threads);
 			state.pool->spin_budget_ns(static_cast<int64_t>(state.spin_wait_us) * 1000);
 			region_guard.pending_pool = state.pool.get();
 			calibrate_pool_overhead(state);

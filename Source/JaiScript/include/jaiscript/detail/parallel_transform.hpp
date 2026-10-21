@@ -326,7 +326,6 @@ namespace jai::detail {
         bool program_destructors = false;
         bool pending_registration_retry = false;           // exceptional join: drain before cache mutation or class reload
         fault_injection faults;                            // host/test checkpoints; disabled by default
-        size_t thread_count_override = 0;                  // engine::parallel_thread_count(n)
         size_t spin_wait_us = 1000;                        // engine::parallel_spin_wait_us(us): the pool's spin-before-park budget
         std::unordered_map<const void*, parallel_admission> admission_cache;
         uint64_t admission_generation = 0;

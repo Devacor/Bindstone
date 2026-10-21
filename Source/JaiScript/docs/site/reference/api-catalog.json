@@ -2204,7 +2204,7 @@
       "signature": "thread_count() -> int",
       "provider": "core",
       "effect": "observe",
-      "notes": "",
+      "notes": "The threads a parallel region runs on: the count the host set, else the performance cores, at most one fewer than the hardware threads.",
       "source": "source/implementation/engine.cpp",
       "form": "function",
       "availability": "Every engine",

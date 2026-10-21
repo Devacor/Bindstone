@@ -1,6 +1,7 @@
 #include "../../include/jaiscript/thread_pool.hpp"
 #include "../../include/jaiscript/detail/fault_injection.hpp"
 #include "../../include/jaiscript/detail/thread_pool_access.hpp"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -11,9 +12,29 @@
 #if defined(_M_X64) || defined(__x86_64__) || defined(_M_IX86) || defined(__i386__)
 #include <immintrin.h>
 #endif
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#if !defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0602
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602
+#endif
+#include <windows.h>
+#include <cstdint>
+#elif defined(__APPLE__)
+#include <pthread.h>
+#include <sys/sysctl.h>
+#elif defined(__linux__)
+#include <fstream>
+#endif
 
-// Standard C++ only (std::thread/mutex/condition_variable), no OS APIs, and zero static state: every
-// queue, lock and handler lives in the pool's state. Task exceptions go to on_exception (or are
+// Standard C++ (std::thread/mutex/condition_variable) apart from performance_core_count's platform queries and the
+// fast_threads power-throttling opt-out, and no static state beyond that function's cached answer: every queue, lock and
+// handler lives in the pool's state. Task exceptions go to on_exception (or are
 // swallowed), never allowed to kill a worker.
 //
 // Two submission modes, because the parallel design's pinned worker engines must always run on their
@@ -33,6 +54,65 @@
 // notifying). Task order and placement never change.
 
 namespace jai {
+
+    namespace {
+        size_t platform_performance_cores() {
+#if defined(_WIN32)
+            DWORD length = 0;
+            GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &length);
+            if (length == 0) { return 0; }
+            std::vector<std::uint64_t> buffer(length / sizeof(std::uint64_t) + 1);
+            const char* records = reinterpret_cast<const char*>(buffer.data());
+            if (!GetLogicalProcessorInformationEx(RelationProcessorCore, reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data()), &length)) { return 0; }
+            // One record per physical core; the higher the efficiency class, the faster the core
+            size_t result = 0;
+            BYTE fastest = 0;
+            for (DWORD offset = 0; offset < length;) {
+                const auto& core = *reinterpret_cast<const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(records + offset);
+                if (core.Size == 0) { break; }
+                if (core.Processor.EfficiencyClass > fastest) {
+                    fastest = core.Processor.EfficiencyClass;
+                    result = 0;
+                }
+                if (core.Processor.EfficiencyClass == fastest) { ++result; }
+                offset += core.Size;
+            }
+            return result;
+#elif defined(__APPLE__)
+            int value = 0;
+            size_t size = sizeof(value);
+            return sysctlbyname("hw.perflevel0.physicalcpu", &value, &size, nullptr, 0) == 0 && value > 0 ? static_cast<size_t>(value) : 0;
+#elif defined(__linux__)
+            // Intel hybrid chips list their performance cores' logical CPUs here, as ranges ("0-11" or "0-7,16-19")
+            std::ifstream file("/sys/devices/cpu_core/cpus");
+            size_t result = 0;
+            long first = 0;
+            while (file >> first) {
+                long last = first;
+                if (file.peek() == '-') {
+                    file.get();
+                    if (!(file >> last)) { return 0; }
+                }
+                if (first < 0 || last < first) { return 0; }
+                result += static_cast<size_t>(last - first + 1);
+                if (file.peek() != ',') { break; }
+                file.get();
+            }
+            return result;
+#else
+            return 0;
+#endif
+        }
+
+        void opt_out_of_power_throttling() {
+#if defined(_WIN32)
+            THREAD_POWER_THROTTLING_STATE throttling {THREAD_POWER_THROTTLING_CURRENT_VERSION, THREAD_POWER_THROTTLING_EXECUTION_SPEED, 0};
+            SetThreadInformation(GetCurrentThread(), ThreadPowerThrottling, &throttling, sizeof(throttling));
+#elif defined(__APPLE__)
+            pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
+#endif
+        }
+    }
 
     struct thread_pool::state {
         // A worker's pinned queue: a ring that keeps its storage, so a region's submit allocates nothing once the queue has held a region
@@ -82,7 +162,7 @@ namespace jai {
             then_on where;
         };
 
-        state(size_t worker_count, const detail::fault_injection* faults) {
+        state(size_t worker_count, thread_speed speed, const detail::fault_injection* faults) {
             if (worker_count == 0) worker_count = default_worker_count();
             try {
                 if (faults) { faults->checkpoint("pool.worker_storage"); }
@@ -93,7 +173,10 @@ namespace jai {
                 }
                 for (size_t i = 0; i < worker_count; ++i) {
                     if (faults) { faults->checkpoint("pool.thread_start", i); }
-                    workers_[i]->thread = std::thread([this, i] { run_worker(i); });
+                    workers_[i]->thread = std::thread([this, i, speed] {
+                        if (speed == fast_threads) { opt_out_of_power_throttling(); }
+                        run_worker(i);
+                    });
                     workers_[i]->id = workers_[i]->thread.get_id();
                 }
             } catch (...) {
@@ -419,15 +502,24 @@ namespace jai {
         bool stop_ = false;
     };
 
+    size_t thread_pool::performance_core_count() noexcept {
+        static const size_t result = [] {
+            const size_t hardware = std::max<size_t>(1, std::thread::hardware_concurrency());
+            const size_t detected = platform_performance_cores();
+            return detected == 0 ? hardware : std::min(detected, hardware);
+        }();
+        return result;
+    }
+
     size_t thread_pool::default_worker_count() noexcept {
         const unsigned hw = std::thread::hardware_concurrency();
         return hw > 1 ? hw - 1 : 1;
     }
 
-    thread_pool::thread_pool(size_t worker_count) : thread_pool(worker_count, nullptr) {}
+    thread_pool::thread_pool(size_t worker_count, thread_speed speed) : thread_pool(worker_count, speed, nullptr) {}
 
-    thread_pool::thread_pool(size_t worker_count, const detail::fault_injection* faults) :
-        state_(std::make_unique<state>(worker_count, faults)) {}
+    thread_pool::thread_pool(size_t worker_count, thread_speed speed, const detail::fault_injection* faults) :
+        state_(std::make_unique<state>(worker_count, speed, faults)) {}
 
     thread_pool::~thread_pool() = default;
 
@@ -447,8 +539,8 @@ namespace jai {
 
     namespace detail {
 
-        std::unique_ptr<thread_pool> thread_pool_access::make(size_t worker_count, const fault_injection* faults) {
-            return std::unique_ptr<thread_pool>(new thread_pool(worker_count, faults));
+        std::unique_ptr<thread_pool> thread_pool_access::make(size_t worker_count, const fault_injection* faults, thread_pool::thread_speed speed) {
+            return std::unique_ptr<thread_pool>(new thread_pool(worker_count, speed, faults));
         }
 
         void thread_pool_access::submit_pinned_batch(thread_pool& pool, std::pair<size_t, thread_pool::task_type>* tasks, size_t count,

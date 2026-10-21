@@ -3,6 +3,10 @@
 #ifndef __JAISCRIPT_CORE_CLASS_DEFINITION_HPP__
 #define __JAISCRIPT_CORE_CLASS_DEFINITION_HPP__
 
+// engine.hpp ends with bodies that need class_definition complete: entered from here, they wait for the end of this file
+#ifndef __JAISCRIPT_CORE_ENGINE_HPP__
+#define JAISCRIPT_ENGINE_BODIES_AFTER_CLASS_DEFINITION
+#endif
 #include "engine.hpp"
 #include "native_cast.hpp"
 #include "script_extensible.hpp"
@@ -1359,5 +1363,12 @@ inline bool class_instance::is_cpp_class() const {
 }
 
 } // namespace jai
+
+#ifdef JAISCRIPT_ENGINE_BODIES_AFTER_CLASS_DEFINITION
+#undef JAISCRIPT_ENGINE_BODIES_AFTER_CLASS_DEFINITION
+#include "engine_impl.hpp"
+#include "conversion_registry_templates.hpp"
+#include "value_impl.hpp"
+#endif
 
 #endif // __JAISCRIPT_CORE_CLASS_DEFINITION_HPP__

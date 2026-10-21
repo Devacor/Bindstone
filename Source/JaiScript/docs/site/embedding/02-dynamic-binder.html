@@ -436,11 +436,11 @@ The idiom is safe by construction, not by luck. And <code>!=</code> worked witho
 <code>==</code> exists, script <code>!=</code> is its negation.</p>
 <p>A <code>T&amp;</code> result binds a reference as C++ binds one: after <code>var&amp; c = owner.child();</code>, member writes
 through <code>c</code> land in the object, and <code>c</code> keeps the owner's object alive like the chain above. <code>c = other;</code>
-copy-assigns into the object when the binder can use the class's copy assignment: a trivially assignable class, a string and a
-standard container of such answer on their own, and any other copy-assignable class declares
-<code>template&lt;&gt; struct jai::copy_assignment&lt;C&gt; : std::true_type {};</code>, because C++ cannot tell from outside a class whether
-its implicit assignment compiles (one that copies a container of a move-only type reports assignable and fails once used).
-Without it the assignment raises <code>Cannot assign to a reference to 'C': it has no copy assignment script can use</code>. A plain
+runs the class's bound operator=: <code>.method("=", &amp;C::operator=)</code>, or a lambda taking <code>(C&amp;, const C&amp;)</code>, and
+further <code>"="</code> overloads from other types resolve like any overload set. A class that binds no <code>"="</code> refuses with
+<code>Cannot assign to a reference to 'C': its binding has no operator=</code>, as C++ refuses a class without one; binding it on a class
+whose assignment cannot compile (one copying a container of a move-only type) fails at the binding, as C++ does.
+<code>auto_bind</code> binds <code>"="</code> for a trivially copy-assignable class. A plain
 <code>var c = owner.child();</code> is a handle to the same object, since bound objects are reference types at the boundary.</p>
 <p>The verbs:</p>
 <ul>
@@ -498,7 +498,7 @@ wrappers, <code>JAI_SIGNAL_PROPERTY</code> connect surfaces), base classes from 
 and common methods by concept (<code>to_string()</code>, <code>size()</code>, <code>empty()</code>, <code>==</code>/<code>!=</code>
 from <code>operator==</code>). A <code>static T::jai_auto_bind(dynamic_binder&lt;T&gt;&amp;)</code> hook lets a
 class bind its own private members. Modes: <code>all</code>, <code>properties</code>,
-<code>hierarchy</code>.</li>
+<code>hierarchy</code>. It binds <code>"="</code> only for a trivially copy-assignable class.</li>
 <li><code>.bound_engine()</code>: the engine this binder targets; configure lambdas use it for
 <code>bind_signal_type</code> and globals.</li>
 <li><code>.serial_only_constructor()</code>: the class&#x27;s constructor or destructor touches state other objects

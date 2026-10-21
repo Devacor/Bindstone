@@ -1053,12 +1053,6 @@ public:
         return copy_function_ != nullptr;
     }
 
-    // A bound class's copy assignment (*dst = *src), when the C++ type has one: what an assignment through a reference to an
-    // object of the class runs
-    using assign_function = void (*)(void* dst, const void* src);
-    void set_assign_function(assign_function assign) { assign_function_ = assign; }
-    assign_function object_assign_function() const { return assign_function_; }
-
     // 'nocopy class': instances refuse by-value copies, like a deleted C++ copy constructor.
     // Inherited: a class derived from a nocopy class is nocopy, and so is a script class over
     // a C++ base that has no copy function (a deleted copy constructor reads the same way).
@@ -1284,7 +1278,6 @@ private:
     std::function<script_value(script_value&, engine*)> unwrap_function_;
 
     copy_function copy_function_;
-    assign_function assign_function_ = nullptr;
     bool nocopy_ = false;
     bool serial_only_construction_ = false;
     std::unordered_map<uint64_t, serial_overloads> serial_methods_;

@@ -652,9 +652,6 @@ private:
     static std::shared_ptr<void> copy_native_object(const void* src) {
         return std::make_shared<T>(*static_cast<const T*>(src));
     }
-    static void assign_native_object(void* dst, const void* src) {
-        *static_cast<T*>(dst) = *static_cast<const T*>(src);
-    }
 
 public:
     
@@ -1691,6 +1688,10 @@ public:
                 method("==", [](const T& a, const T& b) -> bool { return a == b; });
                 method("!=", [](const T& a, const T& b) -> bool { return !(a == b); });
             }
+            // copy assignment only where it cannot fail to compile; any other class binds "=" itself
+            if constexpr (std::is_trivially_copy_assignable_v<T> && !std::is_empty_v<T>) {
+                method("=", [](T& self, const T& other) -> T& { return self = other; });
+            }
         }
 
         // Call T::jai_auto_bind(*this) if it exists - allows classes to register private members
@@ -1799,9 +1800,6 @@ public:
         // Register automatic copy function for copyable types
         if constexpr (std::is_copy_constructible_v<T>) {
             class_def_->set_copy_function(&copy_native_object);
-        }
-        if constexpr (copy_assignment<T>::value) {
-            class_def_->set_assign_function(&assign_native_object);
         }
         
         class_def_->set_cpp_backed(true);   // reflect::is_cpp_bound's class-form answer

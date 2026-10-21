@@ -1514,8 +1514,10 @@ namespace jai {
 
 } // namespace jai
 
+#ifndef JAISCRIPT_ENGINE_BODIES_AFTER_CLASS_DEFINITION
 #include "engine_impl.hpp"
 #include "conversion_registry_templates.hpp"
 #include "value_impl.hpp"
+#endif
 
 #endif // __JAISCRIPT_CORE_ENGINE_HPP__

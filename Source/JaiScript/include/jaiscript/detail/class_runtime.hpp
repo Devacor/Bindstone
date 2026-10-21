@@ -2677,14 +2677,18 @@ inline std::optional<checked_result<void>> user_assign_operator(const script_val
     if (!def) { return std::nullopt; }
     const script_value& value = value_in.is_reference() ? value_in.deref() : value_in;
     if (value.is_null()) { return std::nullopt; }
+    const uint64_t assign_id = eng->get_symbolizer()->intern("=");
     if (value.raw_storage_index() == script_value::TYPEID_OBJECT || value.raw_storage_index() == script_value::TYPEID_SHARED_PTR) {
         auto source_holder = const_cast<script_value&>(value).get_object_holder();
         if (source_holder && source_holder->is_class_instance_wrapper && source_holder->data) {
             const class_definition* source_def = static_cast<class_instance*>(source_holder->data.get())->get_class_definition();
-            if (source_def && (source_def == def || source_def->derives_from(def))) { return std::nullopt; }   // a host class's own copy keeps its replace
+            // a bound class's own copy runs the operator= its binding binds ("="), as C++ assigns into the held object; without one
+            // the store replaces the object with a copy-constructed one (script owns the slot's storage)
+            if (source_def && (source_def == def || source_def->derives_from(def)) && !(def->is_cpp_class() && def->has_method(assign_id))) {
+                return std::nullopt;
+            }
         }
     }
-    const uint64_t assign_id = eng->get_symbolizer()->intern("=");
     const script_value* bound_assign = def->method_ptr(assign_id);
     if (!bound_assign || !bound_assign->is_function()) { return std::nullopt; }
     if (eng->parallel_region_active()) {
@@ -2856,10 +2860,18 @@ inline checked_result<void> compound_slot_store(script_value& target, script_val
 }
 
 // An element or map value declared a class (array<T>, map<K, T>) holding an instance takes a source of that class by the copy
-// assignment, the element keeping its object; nullopt for a var element or any other store, which replaces
+// assignment (a bound class's bound "="), the element keeping its object; nullopt for a var element or any other store, which
+// replaces
 inline std::optional<checked_result<void>> element_copy_assign(const script_value& current, const script_value& source, const type_info_ptr& element_type, engine* eng) {
     if (!element_type || element_type->base_type != script_value_type::jai_object_type || element_type->type_name.empty()) { return std::nullopt; }
-    return class_copy_assign(current, source, eng, element_type.get());
+    if (auto copied = class_copy_assign(current, source, eng, element_type.get())) { return copied; }
+    const script_value& held = current.is_reference() ? current.deref() : current;
+    if (!eng || held.raw_storage_index() != script_value::TYPEID_OBJECT) { return std::nullopt; }
+    auto holder = const_cast<script_value&>(held).get_object_holder();
+    if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return std::nullopt; }
+    const class_definition* def = static_cast<class_instance*>(holder->data.get())->get_class_definition();
+    if (!def || !def->is_cpp_class() || !def->has_method(eng->get_symbolizer()->intern("="))) { return std::nullopt; }
+    return user_assign_operator(current, source, eng, element_type.get());
 }
 }
 

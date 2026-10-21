@@ -480,9 +480,11 @@ overload set. <code>auto_bind</code> binds <code>"="</code> for a trivially copy
 no <code>"="</code> refuses the assignment with <code>Cannot assign to a reference to 'C': its binding has no
 operator=</code>, as C++ refuses a class without one. Binding <code>"="</code> on a class whose assignment cannot
 compile (one copying a container of a move-only type) fails at the binding, as C++ does.</p>
-<p>Only a reference to an object the host returned runs operator=. After <code>var&amp; r = a;</code> over a script
-variable, <code>r = other;</code> stores into the variable as <code>a = other;</code> does: <code>a</code> takes a copy
-of <code>other</code> made by the copy constructor.</p>
+<p>A script variable, field or element declared <code>C</code> holds its own object, and assigning into it runs the
+bound operator= on that object: <code>a = other;</code>, and <code>r = other;</code> after <code>var&amp; r = a;</code>.
+Without a bound <code>"="</code>, the assignment replaces the held object with one the copy constructor builds from
+<code>other</code>; script owns that storage. A <code>var</code> variable is dynamic and takes a copy of
+<code>other</code> in place of what it held.</p>
 <p>The verbs:</p>
 <ul>
 <li><code>.constructor&lt;Args...&gt;()</code>: typed constructor overload; script calls

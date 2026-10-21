@@ -2629,13 +2629,21 @@ namespace jai::vm {
             uint32_t const_index = 0;
             vm_instruction orig{opcode::op_halt, 0, 0, 0};
             const member_expr* expr = nullptr;
+            bool prefolded = false;   // folded at a region barrier (a worker's chunk): an enum name reads the program scope's
         };
         std::vector<fold_site> fold_sites_;
         std::unordered_set<const chunk*> body_chunks_;   // chunk_for_body's chunks: pinned by the cache for the backend's lifetime
-        std::optional<script_value> folded_static_value(const member_expr* expr);
+        std::unordered_set<const chunk*> prefolded_chunks_;
+        uint64_t prefold_epoch_ = 0;
+        size_t prefold_cached_ = 0;
+        std::optional<script_value> folded_static_value(const member_expr* expr, bool prefold = false);
         void fold_static_read(frame& f, const vm_instruction& ins, const member_expr* expr, const script_value& out);
+        bool prefold_chunk(const std::shared_ptr<chunk>& code);
     public:
         void revalidate_folds();
+        // A worker's chunks, at the region barrier: every scoped const read (E::v, C::K, ns::x) folds before the region runs, and the
+        // folds already made follow a definition that ran since (a worker cannot fold in the region: its symbols are frozen)
+        void prefold_parallel_reads(uint64_t fold_epoch);
     private:
         op_status non_lvalue_target(const expression* target);
         op_status exec_cast(frame& f, const vm_instruction& ins);

@@ -186,6 +186,43 @@ function par_serial(int n) -> string { array<Unit> us = fill(n); for (auto& u : 
 				"0|true|true|", "siblings and enums");
 		});
 
+		test("scoped_const_reads_fold_before_the_region_and_follow_a_redeclaration", [this]() {
+			same_everywhere({ R"JAI(
+enum Mode { Idle, Walk, Run }
+class Tune { static const int K = 7; }
+function body(var& v) -> void { int acc = 0; for (int k = 0; k < 8; ++k) { if (v % 3 == Mode::Run) { acc = acc + Tune::K; } else { acc = acc + Mode::Walk; } } v = acc + Mode::Idle * 100; }
+function serial(int n) -> string { array<int> xs = []; for (int i = 0; i < n; ++i) { xs.push(i); } for (auto& v : xs) { body(v); } return to_string(xs); }
+function par(int n) -> string { array<int> xs = []; for (int i = 0; i < n; ++i) { xs.push(i); } parallel_for (auto& v : xs) { body(v); } return to_string(xs); }
+0;)JAI", "par(300) == serial(300);", "par(300) == serial(300);", "enum Mode { Run, Idle, Walk } 0;", "par(300) == serial(300);", "par(300) == serial(300);",
+				  "class Tune { static int K = 7; } 0;", "try { par(30); } catch (err) { return err; } return \"ran\";" },
+				"0|true|true|0|true|true|0|parallel_for: 'Tune::K' is no longer a constant (a parallel body reads only const statics of a primitive value)|", "scoped const folds");
+		});
+
+		test("a_slots_kept_pins_follow_the_element_classes_between_regions", [this]() {
+			same_everywhere({ R"JAI(
+class Ka { int n = 0; function f(int k) -> int { return k * 2 + n; } }
+class Kb { int n = 0; function f(int k) -> int { return k * 3 - n; } }
+class Kc { float x = 0.0; Kc operator+(Kc o) { Kc r; r.x = x + o.x; return r; } }
+class Kd { int n = 0; Kc c; function f(int k) -> int { Kc one; one.x = 1.5; c = c + one; return k + n + math::itrunc(c.x); } }
+function step(var& v) -> void { int s = 0; for (int k = 0; k < 6; ++k) { s = s + v.f(k); } v.n = s; }
+function sum(var& vs) -> int { int t = 0; for (auto& v : vs) { t = t + v.n; } return t; }
+function make_a(int n) -> array<Ka> { array<Ka> vs = []; for (int i = 0; i < n; ++i) { Ka v = Ka(); v.n = i % 5; vs.push(v); } return vs; }
+function make_b(int n) -> array<Kb> { array<Kb> vs = []; for (int i = 0; i < n; ++i) { Kb v = Kb(); v.n = i % 7; vs.push(v); } return vs; }
+function make_d(int n) -> array<Kd> { array<Kd> vs = []; for (int i = 0; i < n; ++i) { Kd v = Kd(); v.n = i % 3; vs.push(v); } return vs; }
+function run(var& vs) -> int { parallel_for (auto& v : vs) { step(v); } return sum(vs); }
+function ser(var& vs) -> int { for (auto& v : vs) { step(v); } return sum(vs); }
+function par_a(int n) -> int { var vs = make_a(n); return run(vs); }
+function par_b(int n) -> int { var vs = make_b(n); return run(vs); }
+function par_d(int n) -> int { var vs = make_d(n); return run(vs); }
+function ser_a(int n) -> int { var vs = make_a(n); return ser(vs); }
+function ser_b(int n) -> int { var vs = make_b(n); return ser(vs); }
+function ser_d(int n) -> int { var vs = make_d(n); return ser(vs); }
+0;)JAI", "par_a(200) == ser_a(200) && par_b(200) == ser_b(200) && par_d(200) == ser_d(200);",
+				"par_d(200) == ser_d(200) && par_a(200) == ser_a(200) && par_a(200) == ser_a(200) && par_b(200) == ser_b(200);",
+				"class Kb { int n = 0; function f(int k) -> int { return k * 5 + n; } } 0;", "par_b(200) == ser_b(200) && par_a(200) == ser_a(200);" },
+				"0|true|true|0|true|", "kept pins");
+		});
+
 		test("method_field_stores_run_on_workers_as_on_the_engine", [this]() {
 			same_everywhere({ R"JAI(
 class Body {

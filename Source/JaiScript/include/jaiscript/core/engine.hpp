@@ -1049,6 +1049,9 @@ namespace jai {
         // every host registration). Cross-function proofs cache against it.
         uint64_t definition_epoch() const;
         void bump_definition_epoch();
+        // moves when a declaration that can change a folded scoped const runs (a class, a namespace, an enum at program scope)
+        uint64_t fold_epoch() const;
+        void bump_fold_epoch();
         // A program unit's name for diagnostics: its file's path, <script> for a literal, <host> for unit 0
         std::string unit_label(uint32_t unit) const;
         // The shadowing unit whose code is running (0 = the host: a file by path or a literal by

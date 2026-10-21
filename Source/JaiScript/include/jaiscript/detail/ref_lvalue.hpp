@@ -446,6 +446,104 @@ namespace jai::detail {
 		return nullptr;
 	}
 
+	// One member step of a reference chain over `cur`, the dereferenced value its base names: the final step's reference (or
+	// its error), else nullopt with cur advanced to the member's value. `rooted` pins what a final step mints under the chain's
+	// array root.
+	template <class Rooted>
+	inline std::optional<checked_result<script_value>> ref_member_step(script_value& cur, const member_expr* m, bool is_final,
+	                                                                 environment* caller_env, engine* eng, string_symbolizer* symbolizer,
+	                                                                 Rooted&& rooted) {
+		const uint64_t member_id = m->member_id != UINT64_MAX ? m->member_id : symbolizer->intern(m->member);
+		if (class_instance* plain = ref_plain_script_field(cur, m, symbolizer)) {
+			if (is_final) {
+				auto ref = plain_field_reference(cur, plain, m, member_id, eng);
+				if (!ref) { return ref; }
+				return rooted(std::move(ref.value()));
+			}
+			// the site's slot for this class (ref_plain_script_field proved the class and its epochs), with find_field_value's
+			// ladder kept for a field outside the slots
+			const uint32_t slot = m->ref_field_slot;
+			script_value* field_value = slot != class_definition::k_no_field_slot ? plain->field_slot_value(slot) : plain->find_field_value(member_id);
+			if (!field_value) {
+				return ref_non_lvalue_error();
+			}
+			auto derefed = ref_checked_deref(*field_value);
+			if (!derefed) { return derefed; }
+			cur = std::move(derefed.value());
+			return std::nullopt;
+		}
+		// Binder .property() members bind on every receiver kind (a same-named
+		// script field shadows: getter_id 0 keeps the FIELD path below); a
+		// non-final property step reads through a native getter only
+		auto property = resolve_cpp_property(cur, member_id, eng);
+		if (property.view.def && property.view.def->chain_has_nonpublic()) [[unlikely]] {
+			// Access enforcement at the bind site: the ref is minted in the CALLER's
+			// context, so a private field can't escape by-reference either
+			auto access_ok = enforce_member_access(property.view.def, member_id,
+				caller_env ? caller_env->find_access_context() : nullptr);
+			if (!access_ok) { return access_ok.error_value(); }
+		}
+		if (property) {
+			if (is_final) {
+				return bind_cpp_property_ref(cur, property, member_id, eng, symbolizer);
+			}
+			if (symbolizer->frozen()) {
+				return ref_non_lvalue_error();
+			}
+			auto read = read_cpp_property_site(cur, property, /*bind_point*/ true);
+			if (!read) { return read; }
+			cur = std::move(read.value());
+			return std::nullopt;
+		}
+		auto instance = property.view.instance;
+		if (!instance) {
+			return ref_non_lvalue_error();   // raw C++ handles without such a property, non-objects: not supported
+		}
+		script_value* field_value = instance->find_field_value(member_id);
+		if (!field_value || !ref_field_is_script_backed(instance, member_id) ||
+		    ref_field_has_user_accessor(instance, m, member_id, symbolizer)) {
+			return ref_non_lvalue_error();
+		}
+		ref_note_plain_script_field(property.view.def, m, member_id, symbolizer);
+		if (is_final) {
+			if (field_value->is_reference()) {
+				// Field already holds a reference: share its holder (matches
+				// set_field's write-through semantics)
+				if (!field_value->get_reference_holder()) {
+					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+				}
+				return script_value(*field_value);
+			}
+			// DECLARED field type wins as the constraint (typed fields enforce like
+			// locals; 'var' declares any and stays unconstrained); undeclared ('auto')
+			// fields fall back to the bind-time value tag
+			type_info_ptr tag = nullptr;
+			if (const class_definition* field_class_def = instance->get_class_definition()) {
+				tag = field_class_def->get_field_declared_type(member_id);
+			}
+			if (!tag) {
+				tag = field_value->get_type_info();
+			}
+			type_info_ptr constraint = nullptr;
+			if (tag && tag->base_type != script_value_type::jai_any_type &&
+			    tag->base_type != script_value_type::jai_null_type) {
+				constraint = tag;
+			}
+			// the receiver's own holder pins a script instance it owns (a script instance's holder is never re-pointed to a layer); a
+			// layer reached through a C++ object keeps its shared pin
+			if (cur.raw_storage_index() == script_value::TYPEID_OBJECT && cur.unchecked_object_handle() && instance->get_class_definition() &&
+			    instance->get_class_definition()->is_script_class() &&
+			    cur.unchecked_object_handle()->data.get() == static_cast<void*>(instance.get())) {
+				return rooted(script_value::make_field_reference(cur.unchecked_object_handle(), instance.get(), member_id, eng, std::move(constraint), *field_value));
+			}
+			return rooted(script_value::make_field_reference(instance, member_id, eng, std::move(constraint), *field_value));
+		}
+		auto derefed = ref_checked_deref(*field_value);
+		if (!derefed) { return derefed; }
+		cur = std::move(derefed.value());
+		return std::nullopt;
+	}
+
 	// Binds a field/subscript/chain lvalue argument to a reference parameter. Resolution
 	// is pure pointer/value chasing over already-evaluated state - it never runs script,
 	// never throws, and never mutates the instance (a NATIVE property getter may run for
@@ -560,100 +658,15 @@ namespace jai::detail {
 				continue;
 			}
 			if (step->get_type() == node_type::member_expr) {
-				const auto* m = static_cast<const member_expr*>(step);
-				const uint64_t member_id = m->member_id != UINT64_MAX ? m->member_id : symbolizer->intern(m->member);
-				if (class_instance* plain = ref_plain_script_field(cur, m, symbolizer)) {
-					if (is_final) {
-						auto ref = plain_field_reference(cur, plain, m, member_id, eng);
-						if (!ref) { return ref; }
-						return rooted(std::move(ref.value()));
-					}
-					// the site's slot for this class (ref_plain_script_field proved the class and its epochs), with find_field_value's
-					// ladder kept for a field outside the slots
-					const uint32_t slot = m->ref_field_slot;
-					script_value* field_value = slot != class_definition::k_no_field_slot ? plain->field_slot_value(slot) : plain->find_field_value(member_id);
-					if (!field_value) {
-						return ref_non_lvalue_error();
-					}
-					auto derefed = ref_checked_deref(*field_value);
-					if (!derefed) { return derefed; }
-					cur = std::move(derefed.value());
-					continue;
+				if (auto done = ref_member_step(cur, static_cast<const member_expr*>(step), is_final, caller_env, eng, symbolizer, rooted)) {
+					return std::move(*done);
 				}
-				// Binder .property() members bind on every receiver kind (a same-named
-				// script field shadows: getter_id 0 keeps the FIELD path below); a
-				// non-final property step reads through a native getter only
-				auto property = resolve_cpp_property(cur, member_id, eng);
-				if (property.view.def && property.view.def->chain_has_nonpublic()) [[unlikely]] {
-					// Access enforcement at the bind site: the ref is minted in the CALLER's
-					// context, so a private field can't escape by-reference either
-					auto access_ok = enforce_member_access(property.view.def, member_id,
-						caller_env ? caller_env->find_access_context() : nullptr);
-					if (!access_ok) { return access_ok.error_value(); }
-				}
-				if (property) {
-					if (is_final) {
-						return bind_cpp_property_ref(cur, property, member_id, eng, symbolizer);
-					}
-					if (symbolizer->frozen()) {
-						return ref_non_lvalue_error();
-					}
-					auto read = read_cpp_property_site(cur, property, /*bind_point*/ true);
-					if (!read) { return read; }
-					cur = std::move(read.value());
-					continue;
-				}
-				auto instance = property.view.instance;
-				if (!instance) {
-					return ref_non_lvalue_error();   // raw C++ handles without such a property, non-objects: not supported
-				}
-				script_value* field_value = instance->find_field_value(member_id);
-				if (!field_value || !ref_field_is_script_backed(instance, member_id) ||
-				    ref_field_has_user_accessor(instance, m, member_id, symbolizer)) {
-					return ref_non_lvalue_error();
-				}
-				ref_note_plain_script_field(property.view.def, m, member_id, symbolizer);
-				if (is_final) {
-					if (field_value->is_reference()) {
-						// Field already holds a reference: share its holder (matches
-						// set_field's write-through semantics)
-						if (!field_value->get_reference_holder()) {
-							return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-						}
-						return script_value(*field_value);
-					}
-					// DECLARED field type wins as the constraint (typed fields enforce like
-					// locals; 'var' declares any and stays unconstrained); undeclared ('auto')
-					// fields fall back to the bind-time value tag
-					type_info_ptr tag = nullptr;
-					if (const class_definition* field_class_def = instance->get_class_definition()) {
-						tag = field_class_def->get_field_declared_type(member_id);
-					}
-					if (!tag) {
-						tag = field_value->get_type_info();
-					}
-					type_info_ptr constraint = nullptr;
-					if (tag && tag->base_type != script_value_type::jai_any_type &&
-					    tag->base_type != script_value_type::jai_null_type) {
-						constraint = tag;
-					}
-					// the receiver's own holder pins a script instance it owns (a script instance's holder is never re-pointed to a layer); a
-					// layer reached through a C++ object keeps its shared pin
-					if (cur.raw_storage_index() == script_value::TYPEID_OBJECT && cur.unchecked_object_handle() && instance->get_class_definition() &&
-					    instance->get_class_definition()->is_script_class() &&
-					    cur.unchecked_object_handle()->data.get() == static_cast<void*>(instance.get())) {
-						return rooted(script_value::make_field_reference(cur.unchecked_object_handle(), instance.get(), member_id, eng, std::move(constraint), *field_value));
-					}
-					return rooted(script_value::make_field_reference(instance, member_id, eng, std::move(constraint), *field_value));
-				}
-				auto derefed = ref_checked_deref(*field_value);
-				if (!derefed) { return derefed; }
-				cur = std::move(derefed.value());
 			} else {
 				const auto* b = static_cast<const binary_expr*>(step);
-				script_int index = 0;
+				script_value key(std::monostate{}, eng);
 				if (b->right->get_type() == node_type::literal_expr) {
-					index = static_cast<const literal_expr*>(b->right.get())->value.unchecked_as_int();
+					key = static_cast<const literal_expr*>(b->right.get())->value;
+					key.set_engine(eng);
 				} else {
 					const script_value* index_ptr = resolve_identifier_ptr(static_cast<const identifier_expr*>(b->right.get()));
 					if (!index_ptr) {
@@ -661,15 +674,38 @@ namespace jai::detail {
 					}
 					auto index_derefed = ref_checked_deref(*index_ptr);
 					if (!index_derefed) { return index_derefed; }
-					// is_int (not raw index) so a bound-int index stays a valid lvalue index
-					if (!index_derefed.value().is_int()) {
+					key = std::move(index_derefed.value());
+				}
+				if (cur.is_map()) {
+					// an existing entry only: a reference binding reads the map, and a read never inserts
+					const strong_ptr<script_map> map_storage = cur.get_map_storage();
+					auto entry = map_storage->find(key);
+					if (entry == map_storage->end()) {
 						return ref_non_lvalue_error();
 					}
-					index = index_derefed.value().unchecked_as_int();
+					script_value& value_ref = const_cast<script_value&>(entry->second);
+					if (!is_final) {
+						auto derefed = ref_checked_deref(value_ref);
+						if (!derefed) { return derefed; }
+						cur = std::move(derefed.value());
+						continue;
+					}
+					if (value_ref.is_reference()) {
+						if (!value_ref.get_reference_holder()) {
+							return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+						}
+						return script_value(value_ref);
+					}
+					if (!value_ref.has_valid_engine()) { value_ref.set_engine(eng); }
+					auto map_type_info = cur.get_type_info();
+					return rooted(script_value::make_map_entry_reference(map_storage, entry->first, &value_ref, eng,
+						map_type_info ? map_type_info->value_type() : nullptr));
 				}
-				if (!cur.is_array()) {
-					return ref_non_lvalue_error();   // maps/strings keep the non-lvalue error
+				// is_int (not raw index) so a bound-int index stays a valid lvalue index
+				if (!cur.is_array() || !key.is_int()) {
+					return ref_non_lvalue_error();   // strings keep the non-lvalue error
 				}
+				const script_int index = key.unchecked_as_int();
 				auto storage = cur.get_array_storage();
 				if (index < 0 || static_cast<size_t>(index) >= storage->size()) {
 					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed array element");
@@ -701,6 +737,25 @@ namespace jai::detail {
 			}
 		}
 		return ref_non_lvalue_error();   // unreachable: step_count >= 1
+	}
+
+	// A stamped member read (member_expr::place_read_field) whose base evaluated to a reference: the reference the chain's
+	// member step mints over the referent, pinned under the array the base names; else a non-reference and the ordinary read
+	inline checked_result<script_value> evaluated_member_reference(const script_value& object, const member_expr* m, environment* caller_env,
+	                                                               engine* eng, string_symbolizer* symbolizer) {
+		script_value none(std::monostate{}, eng);
+		const auto* holder = object.is_reference() ? object.get_reference_holder() : nullptr;
+		if (!holder) { return none; }
+		auto value = ref_checked_deref(object);
+		if (!value) { return none; }
+		const strong_ptr<script_array> root = holder->elem_root ? holder->elem_root : holder->container;
+		auto rooted = [&root](script_value ref) -> checked_result<script_value> {
+			if (root) { script_value::pin_element_root(ref, root); }
+			return ref;
+		};
+		auto bound = ref_member_step(value.value(), m, true, caller_env, eng, symbolizer, rooted);
+		if (!bound || (!*bound && bound->error() == make_error_code(runtime_error_code::invalid_reference))) { return none; }
+		return std::move(*bound);
 	}
 
 	// ---- Constrained store-through enforcement ----

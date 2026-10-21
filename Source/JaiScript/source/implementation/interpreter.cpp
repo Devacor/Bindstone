@@ -8841,8 +8841,14 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
         push_value(make_value());
         return {};
     }
-    if (expr->component_lvalue) [[unlikely]] {
+    if (expr->place_read) [[unlikely]] {
+        // KEEP BYTE-PARALLEL with vm_backend::exec_get_member
         script_value part = detail::math::evaluated_component_reference(objectValue, expr, engine_);
+        if (!part.is_reference() && expr->place_read == member_expr::place_read_field) {
+            auto field = detail::evaluated_member_reference(objectValue, expr, environment_.get(), engine_, string_symbolizer_);
+            if (!field) { return field.error_value(); }
+            part = std::move(field.value());
+        }
         if (part.is_reference()) {
             push_value(std::move(part));
             return {};
@@ -12159,11 +12165,11 @@ std::optional<checked_result<script_value>> interpreter::named_storage_reference
     auto resolved = detail::resolve_ref_lvalue(value, detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
         environment_.get(), engine_, string_symbolizer_);
     if (resolved) { return std::move(resolved); }
-    // a math component returns a COMPONENT reference; anything else keeps the kernel's verdict
-    auto part = resolved.error() == make_error_code(runtime_error_code::invalid_reference)
-        ? component_reference(value, call_stack_.empty() ? nullptr : &call_stack_.back(), environment_)
-        : checked_result<script_value>(make_value());
-    if (!part || !part.value().is_reference()) { return std::move(resolved); }
+    if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) { return std::move(resolved); }
+    // a math component returns a COMPONENT reference; the kernel's generic verdict leaves the rest to evaluation (an operator[]
+    // returning T&, a computed index), as a reference argument binds an evaluated reference
+    auto part = component_reference(value, call_stack_.empty() ? nullptr : &call_stack_.back(), environment_);
+    if (!part || !part.value().is_reference()) { return std::nullopt; }
     return std::move(part);
 }
 

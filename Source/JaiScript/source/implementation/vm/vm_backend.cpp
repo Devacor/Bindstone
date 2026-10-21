@@ -15239,6 +15239,20 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 		object = std::move(stack_.back());
 		stack_.pop_back();
 	}
+	if (expr->place_read) [[unlikely]] {
+		// a stamped read over an evaluated reference hands back the member's reference (KEEP BYTE-PARALLEL with the interpreter's
+		// member read)
+		script_value part = detail::math::evaluated_component_reference(*receiver, expr, engine_);
+		if (!part.is_reference() && expr->place_read == member_expr::place_read_field) {
+			auto field = detail::evaluated_member_reference(*receiver, expr, environment_.get(), engine_, symbolizer_);
+			if (!field) { return raise_from(field); }
+			part = std::move(field.value());
+		}
+		if (part.is_reference()) {
+			stack_.push_back(std::move(part));
+			return {};
+		}
+	}
 	// Field-read site IC (flat classes tier-1 stage B): epoch-validated {class, slot}
 	// per ip replaces the resolve ladder with one slot load. The fill probes mirror
 	// member_access_value's precedence EXACTLY (same_as, access, sp-builtin-name
@@ -15299,13 +15313,6 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 #endif
 	// the ladder may run a getter that rebinds the local: it owns the snapshot LOAD would have made
 	if (receiver != &object) { object = *receiver; }
-	if (expr->component_lvalue) [[unlikely]] {
-		script_value part = detail::math::evaluated_component_reference(object, expr, engine_);
-		if (part.is_reference()) {
-			stack_.push_back(std::move(part));
-			return {};
-		}
-	}
 	script_value out = make_null();
 	VM_TRY(member_access_value(f, object, expr, out));
 	stack_.push_back(std::move(out));
@@ -19002,22 +19009,26 @@ op_status vm_backend::exec_ref_return_lvalue(frame& f, const vm_instruction& ins
 		}
 		return {};
 	}
+	// the chain's storage and true, else false and the operand's evaluation follows (KEEP BYTE-PARALLEL with the interpreter's
+	// named_storage_reference)
 	ensure_frame_member_scope(f, environment_.get());   // kernel reads the frame's member scope
-	auto resolved = detail::resolve_ref_lvalue(
-		static_cast<const expression*>(f.code->nodes[ins.a].get()),
-		caller_view(&f), environment_.get(), engine_, symbolizer_);
+	const auto* operand = static_cast<const expression*>(f.code->nodes[ins.a].get());
+	auto resolved = detail::resolve_ref_lvalue(operand, caller_view(&f), environment_.get(), engine_, symbolizer_);
 	if (!resolved) {
-		// a math component returns a COMPONENT reference; anything else keeps the kernel's verdict
-		if (resolved.error() == make_error_code(runtime_error_code::invalid_reference)) {
-			auto part = component_reference(&f, static_cast<const expression*>(f.code->nodes[ins.a].get()), environment_);
-			if (part && part.value().is_reference()) {
-				stack_.push_back(std::move(part.value()));
-				return {};
-			}
+		if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
+			return raise_from(resolved);
 		}
-		return raise_from(resolved);
+		// a math component returns a COMPONENT reference
+		auto part = component_reference(&f, operand, environment_);
+		if (!part || !part.value().is_reference()) {
+			stack_.push_back(script_value(false, engine_));
+			return {};
+		}
+		stack_.push_back(std::move(part.value()));
+	} else {
+		stack_.push_back(std::move(resolved.value()));
 	}
-	stack_.push_back(std::move(resolved.value()));
+	stack_.push_back(script_value(true, engine_));
 	return {};
 }
 

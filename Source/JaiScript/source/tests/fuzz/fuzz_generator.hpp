@@ -90,7 +90,7 @@ namespace jai::fuzz {
 		std::string emit() {
 			flat_ = make_table("zA", false);
 			rows_ = make_table("zR", true);
-			std::vector<std::string> head{"var zout = \"\";", "var zp = [];", decl_text(flat_), decl_text(rows_)};
+			std::vector<std::string> head{"var zout = \"\";", "var zp = [];", "map<string, int> zh;", decl_text(flat_), decl_text(rows_)};
 			const int drivers = static_cast<int>(rng_.range(1, 3));
 			std::vector<std::string> calls;
 			for (int d = 0; d < drivers; ++d) {
@@ -340,8 +340,16 @@ namespace jai::fuzz {
 				else body += (i ? " + \",\" + " : "") + use;
 			}
 			const std::string text = templ ? "`" + body + ";`" : "\"\" + " + body + " + \";\"";
-			if (returns) callees_.push_back(sig + ") -> string { return " + text + "; }");
-			else callees_.push_back(sig + (rng_.chance(50) ? ") -> void" : ")") + " { zout = zout + " + text + "; }");
+			// a template-string key under a compound op or ++/-- (the vm's index-tree landing once raised an internal error for it)
+			std::string keyed;
+			if (templ && rng_.chance(40)) {
+				static constexpr const char* const ops[] = {"++", "--", " += 2", " -= 1"};
+				const std::string key = "zh[`" + body + "`]";
+				const uint32_t op = rng_.below(5);
+				keyed = (op == 4 ? "++" + key : key + ops[op]) + "; zout = zout + " + key + " + \";\"; ";
+			}
+			if (returns) callees_.push_back(sig + ") -> string { " + keyed + "return " + text + "; }");
+			else callees_.push_back(sig + (rng_.chance(50) ? ") -> void" : ")") + " { " + keyed + "zout = zout + " + text + "; }");
 			return name;
 		}
 		std::string consumer(const loop_ctx& c, const std::string& local) {

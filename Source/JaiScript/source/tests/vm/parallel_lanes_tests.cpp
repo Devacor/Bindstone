@@ -3,11 +3,16 @@
 // result and to the serial loop's, across regions and across a redefinition between them.
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <string>
 
 using namespace jai;
 using namespace jai::foundry;
+
+namespace parallel_lanes_hosts {
+	struct gauge { int64_t n = 0; gauge() = default; explicit gauge(int64_t a_n) : n(a_n) {} };
+}
 
 namespace jai::foundry::tests {
 
@@ -91,6 +96,94 @@ function par(int n) -> float {
 }
 0;)JAI", "par(200) == serial(200);", "par(200) == serial(200);" },
 				"0|true|true|", "inherited methods");
+		});
+
+		test("class_operators_run_through_their_pins_on_workers", [this]() {
+			same_everywhere({ R"JAI(
+class V2 {
+	float x = 0.0; float y = 0.0;
+	V2 operator+(V2 o) { V2 r; r.x = x + o.x; r.y = y + o.y; return r; }
+	V2 operator-(V2 o) { V2 r; r.x = x - o.x; r.y = y - o.y; return r; }
+	V2 operator*(float k) { V2 r; r.x = x * k; r.y = y * k; return r; }
+	V2 operator-() { V2 r; r.x = -x; r.y = -y; return r; }
+	bool operator==(V2 o) { return x == o.x && y == o.y; }
+	int operator<=>(V2 o) { float a = x * x + y * y; float b = o.x * o.x + o.y * o.y; if (a < b) { return -1; } if (a > b) { return 1; } return 0; }
+	float operator[](int i) { if (i == 0) { return x; } return y; }
+	function to_string() -> string { return "(" + x + "," + y + ")"; }
+}
+class Body { V2 p; V2 v; int near = 0; string tag = ""; }
+function fill(int n) -> array<Body> { array<Body> bs = []; for (int i = 0; i < n; ++i) { Body b = Body(); b.p.x = i % 7; b.p.y = i % 3; b.v.x = 0.5; b.v.y = -0.25; bs.push(b); } return bs; }
+function step(var& b) -> void {
+	V2 origin;
+	for (int k = 0; k < 5; ++k) { b.p = b.p + b.v * 0.1; b.v = -b.v; }
+	if (b.p < b.v || b.p == origin) { b.near = b.near + 1; }
+	if (b.p != b.v) { b.near = b.near + 10; }
+	b.near = b.near + math::itrunc(b.p[0] * 100.0);
+	b.tag = to_string(b.p);
+}
+function sum(var& bs) -> string { int n = 0; string t = ""; for (auto& b : bs) { n = n + b.near; t = b.tag; } return to_string(n) + " " + t; }
+function serial(int n) -> string { array<Body> bs = fill(n); for (auto& b : bs) { step(b); } return sum(bs); }
+function par(int n) -> string { array<Body> bs = fill(n); parallel_for (auto& b : bs) { step(b); } return sum(bs); }
+0;)JAI", "par(200) == serial(200);", "par(200) == serial(200);" },
+				"0|true|true|", "operators");
+		});
+
+		test("bound_operators_run_through_their_pins_on_workers", [this]() {
+			// a C++ class's operators: the const ones on any object, op= on the chunk's own objects (an element, one it made)
+			using parallel_lanes_hosts::gauge;
+			auto run_bound = [](bool vm, size_t workers) {
+				auto e = engine::make();
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+				stdlib::register_all(*e);
+				e->parallel_thread_count(workers);
+				dynamic_binder<gauge>(*e, "Gauge")
+					.constructor<int64_t>()
+					.property("n", &gauge::n)
+					.method("+", [](const gauge& a_self, const gauge& a_other) { return gauge(a_self.n + a_other.n); })
+					.method("-", [](const gauge& a_self, const gauge& a_other) { return gauge(a_self.n - a_other.n); })
+					.method("==", [](const gauge& a_self, int64_t a_other) { return a_self.n == a_other; })
+					.method("<", [](const gauge& a_self, const gauge& a_other) { return a_self.n < a_other.n; })
+					.method("+=", [](gauge& a_self, const gauge& a_other) -> gauge& { a_self.n += 10 * a_other.n; return a_self; })
+					.build();
+				std::string out;
+				try {
+					out = e->execute(R"JAI(
+function step(var& g) -> void { Gauge one = Gauge(1); Gauge h = g + one; h += one; if (h == 23 || h < g) { g += one; } g += h - one; }
+function fill(int n) -> array<Gauge> { array<Gauge> gs = []; for (int i = 0; i < n; ++i) { gs.push(Gauge(i % 9)); } return gs; }
+function total(var& gs) -> int { int t = 0; for (auto& g : gs) { t = t + g.n; } return t; }
+array<Gauge> a = fill(300); array<Gauge> b = fill(300);
+for (auto& g : a) { step(g); }
+parallel_for (auto& g : b) { step(g); }
+to_string(total(a)) + " " + to_string(total(b));
+)JAI").to_string();
+				} catch (const std::exception& ex) { out = std::string("throw:") + ex.what(); }
+				return out;
+			};
+			const std::string reference = run_bound(false, 1);
+			check(reference.find("throw") == std::string::npos, "the bound operators run: " + reference);
+			const size_t space = reference.find(' ');
+			check_eq(reference.substr(0, space), reference.substr(space + 1), "the parallel loop lands the serial loop's totals");
+			for (size_t workers : { size_t(1), size_t(4) }) {
+				for (bool vm : { false, true }) { check_eq(reference, run_bound(vm, workers), std::string(vm ? "vm " : "interpreter ") + std::to_string(workers)); }
+			}
+		});
+
+		test("bare_sibling_calls_and_enum_values_run_on_workers", [this]() {
+			same_everywhere({ R"JAI(
+enum Mode { Idle, Walk, Run }
+class Unit {
+	int mode = 0; float x = 0.0; int ticks = 0;
+	function speed() -> float { if (mode == Mode::Run) { return 2.0; } if (mode == Mode::Walk) { return 1.0; } return 0.0; }
+	function advance(float dt) -> void { x = x + speed() * dt; ticks = ticks + 1; }
+	function run(int n) -> void { for (int k = 0; k < n; ++k) { advance(0.5); } if (ticks > 10) { mode = Mode::Idle; } }
+}
+function fill(int n) -> array<Unit> { array<Unit> us = []; for (int i = 0; i < n; ++i) { Unit u = Unit(); u.mode = i % 3; us.push(u); } return us; }
+function sum(var& us) -> string { float x = 0.0; int idle = 0; for (auto& u : us) { x = x + u.x; if (u.mode == Mode::Idle) { idle = idle + 1; } } return to_string(x) + " " + to_string(idle); }
+function serial(int n) -> string { array<Unit> us = fill(n); for (auto& u : us) { u.run(12); } return sum(us); }
+function par(int n) -> string { array<Unit> us = fill(n); parallel_for (auto& u : us) { u.run(12); if (u.mode == Mode::Walk) { u.x = u.x + 1.0; } } return sum(us); }
+function par_serial(int n) -> string { array<Unit> us = fill(n); for (auto& u : us) { u.run(12); if (u.mode == Mode::Walk) { u.x = u.x + 1.0; } } return sum(us); }
+0;)JAI", "par(240) == par_serial(240);", "par(240) == par_serial(240);" },
+				"0|true|true|", "siblings and enums");
 		});
 
 		test("method_field_stores_run_on_workers_as_on_the_engine", [this]() {

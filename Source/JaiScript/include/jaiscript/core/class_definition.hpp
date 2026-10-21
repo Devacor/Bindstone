@@ -538,7 +538,9 @@ public:
     // or resolution cache): the in-loop call paths pin through the record instead of
     // paying a shared_ptr copy per call
     inline checked_result<const std::shared_ptr<function_decl>*> resolve_method_overload_ref(uint64_t name_id, const script_value* args, size_t argc) const;
-    inline const std::shared_ptr<function_decl>* resolve_method_overload_core(uint64_t name_id, const script_value* args, size_t argc, std::error_code& ec) const;
+    // resolve_method_overload_ref that only reads the resolution cache (a parallel worker resolves while other workers read it)
+    inline checked_result<const std::shared_ptr<function_decl>*> resolve_method_overload_shared(uint64_t name_id, const script_value* args, size_t argc) const;
+    inline const std::shared_ptr<function_decl>* resolve_method_overload_core(uint64_t name_id, const script_value* args, size_t argc, std::error_code& ec, bool may_cache = true) const;
     inline error_propagator method_overload_miss(std::error_code ec, uint64_t name_id, const script_value* args, size_t argc) const;
 
     // Single-overload probe for inline-cache fill: the lone overload for name_id, or
@@ -664,6 +666,9 @@ public:
     inline bool has_static_field(uint64_t id) const;
 
     inline script_value get_method(uint64_t id, bool throw_if_missing = true) const;
+    // get_method's binding without a copy (a parallel worker reads the class's method values and never touches their counts); null when
+    // the chain binds none
+    inline const script_value* method_ptr(uint64_t id) const;
 
     // kind + name + "' not found in class '" + class + "'", out of line so the chain walks stay lean
     [[noreturn]] inline JAI_NOINLINE void throw_method_missing(const char* kind, uint64_t id) const;

@@ -2216,11 +2216,12 @@ public:
 		});
 
 		test("custom_operator_denied_with_verdict", [this]() {
-			// Increment B: operator dispatch would race shared method values; a custom
-			// op== additionally must not silently fall back to structural equality
+			// an operator whose body the region cannot admit (here it writes enclosing state) stays unpinned: dispatching it raises
+			// the verdict, and a custom op== never silently falls back to structural equality
 			auto e = make_engine();
 			auto r = e->execute(R"(
-				class Vec { int x = 0; function operator==(Vec other) { return x == other.x; } }
+				int calls = 0;
+				class Vec { int x = 0; function operator==(Vec other) { calls = calls + 1; return x == other.x; } }
 				var a = [];
 				for (var i = 0; i < 32; i++) { auto v = Vec(); v.x = i % 2; a.push(v); }
 				auto probe = Vec();
@@ -2231,9 +2232,9 @@ public:
 			check_true(msg.find("custom operator dispatch on class instances is not admitted in a parallel body") != std::string::npos);
 		});
 
-		test("custom_arithmetic_comparison_and_unary_operators_deny_with_the_verdict", [this]() {
-			// the operator wall never dispatches a class operator on a worker: one the class declares raises the verdict instead
-			// of falling to the builtin meaning's 'Invalid operands'
+		test("custom_arithmetic_comparison_and_unary_operators_run_through_their_pins", [this]() {
+			// the region pins each operator of the element's class (its body walked like a method's, the objects it constructs
+			// admitted with it): a worker dispatches it as the serial loop does
 			auto e = make_engine();
 			auto r = e->execute(R"(
 				class Vo {
@@ -2250,10 +2251,9 @@ public:
 				string d = t([&]() { parallel_for (auto& v : vs) { v = -v; } });
 				array<Plain> ps = [Plain(), Plain()];
 				string p = t([&]() { parallel_for (auto& q : ps) { q.v = q.v + 1; } });
-				a + "|" + c + "|" + d + "|" + p + "|" + ps[0].v;
+				a + "|" + c + "|" + d + "|" + p + "|" + ps[0].v + "|" + vs[0].v + "|" + vs[1].v;
 			)");
-			const std::string verdict = "custom operator dispatch on class instances is not admitted in a parallel body";
-			check_eq(verdict + "|" + verdict + "|" + verdict + "|none|2", r.as<std::string>());
+			check_eq(std::string("none|none|none|none|2|-2|-2"), r.as<std::string>());
 		});
 
 		test("class_changing_assignment_denied_with_verdict", [this]() {
@@ -2407,7 +2407,7 @@ public:
 			};
 			const std::map<std::string, std::string> expected = {
 				{ "own_method", "value 2208" },
-				{ "nested_own_method", "error parallel_for: method 'inner' must be called as 'this.inner()' in a parallel body (bare sibling calls are not admitted, v1)" },
+				{ "nested_own_method", "value 2208" },
 				{ "explicit_sibling_method", "value 2208" },
 				{ "nested_field_method", "error method 'read' was not admitted in this parallel body (admitted: single-overload public methods of the element's class or its bases touching only element, local, or captured-read state)" },
 				{ "getter", "error only direct field access on class instances is allowed in a parallel body" },

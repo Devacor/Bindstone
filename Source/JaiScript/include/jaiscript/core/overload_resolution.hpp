@@ -40,7 +40,8 @@ inline bool declares_unary_operator(const class_definition* def, uint64_t name_i
             for (const auto& d : it->second) { if (arity_accepts(d->parameters, 0)) { return true; } }
         }
     }
-    return !script_declared && def && def->get_method(name_id, false).is_function();
+    const script_value* bound = !script_declared && def ? def->method_ptr(name_id) : nullptr;
+    return bound && bound->is_function();
 }
 
 // A typed parameter takes the argument with no mismatch (the scorer's rows: the class or a subclass, the same kind, int<->float)
@@ -100,7 +101,8 @@ inline bool binary_operator_accepts(const class_definition* def, uint64_t name_i
             return false;
         }
     }
-    return def && host_operator_accepts(def->get_method(name_id, false), name_id, arg);
+    const script_value* bound = def ? def->method_ptr(name_id) : nullptr;
+    return bound && host_operator_accepts(*bound, name_id, arg);
 }
 
 // other is a value of def's class or a subclass
@@ -124,7 +126,7 @@ inline bool value_of_class(const class_definition* def, const script_value& othe
 // of the class or an overload whose parameter names a type takes it
 inline bool equality_operator_candidate(const class_definition* def, uint64_t name_id, uint64_t spaceship_id, const script_value& other) {
     if (!def) { return true; }
-    if (def->get_method(spaceship_id, false).is_function()) { return binary_operator_accepts(def, name_id, other); }
+    if (const script_value* spaceship = def->method_ptr(spaceship_id); spaceship && spaceship->is_function()) { return binary_operator_accepts(def, name_id, other); }
     return value_of_class(def, other) || binary_operator_accepts(def, name_id, other, true);
 }
 
@@ -534,7 +536,7 @@ inline checked_result<std::shared_ptr<function_decl>> select_declaration(const s
 // AND exactly one matches this arity (same-arity overloads depend on argument types).
 // Span core; the vector overload forwards (call-arg windows resolve on the stack slice).
 inline const std::shared_ptr<function_decl>* class_definition::resolve_method_overload_core(
-    uint64_t name_id, const script_value* args, size_t argc, std::error_code& ec) const {
+    uint64_t name_id, const script_value* args, size_t argc, std::error_code& ec, bool may_cache) const {
     auto it = method_overloads_.find(name_id);
     if (it == method_overloads_.end() || it->second.empty()) {
         ec = make_error_code(runtime_error_code::member_not_found);
@@ -577,7 +579,7 @@ inline const std::shared_ptr<function_decl>* class_definition::resolve_method_ov
                 ++arity_match_count;
             }
         }
-        if (arity_match_count == 1) {
+        if (arity_match_count == 1 && may_cache) {
             overload_cache_key cache_key{name_id, argc};
             return &overload_resolution_cache_.insert_or_assign(cache_key, *best_ast).first->second;
         }
@@ -598,6 +600,19 @@ inline checked_result<const std::shared_ptr<function_decl>*> class_definition::r
     uint64_t name_id, const script_value* args, size_t argc) const {
     std::error_code ec;
     const auto* best = resolve_method_overload_core(name_id, args, argc, ec);
+    if (best) {
+        return best;
+    }
+    if (ec == make_error_code(runtime_error_code::member_not_found)) {
+        return checked_result<const std::shared_ptr<function_decl>*>(ec, "No overload of '{0}' exists", name_id);
+    }
+    return method_overload_miss(ec, name_id, args, argc);
+}
+
+inline checked_result<const std::shared_ptr<function_decl>*> class_definition::resolve_method_overload_shared(
+    uint64_t name_id, const script_value* args, size_t argc) const {
+    std::error_code ec;
+    const auto* best = resolve_method_overload_core(name_id, args, argc, ec, false);
     if (best) {
         return best;
     }

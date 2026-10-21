@@ -171,6 +171,10 @@ namespace jai::detail {
 		// so a worker never proves (interning, global lookups) and never runs stale
 		std::vector<std::pair<std::shared_ptr<script_defined_function>, std::shared_ptr<script_defined_function>>> alias_stamps;
 		std::vector<std::pair<uint64_t, std::string>> host_functions;   // refreshed each reuse
+		// this worker's copy of each host function a body calls, kept while the program scope binds the name to the same function
+		// (source pins it, so the identity names one function): a registration or redefinition binds another and the copy is minted again
+		struct host_copy { const void* identity = nullptr; script_value source{std::monostate{}, nullptr}; script_value copy{std::monostate{}, nullptr}; };
+		std::unordered_map<uint64_t, host_copy> host_copies;
 
 #ifdef JAISCRIPT_VM_PROFILE
 		// Worker thread stamps chunk entry/exit; main reads after wait_idle (the pool
@@ -199,6 +203,7 @@ namespace jai::detail {
 				p.wake_samples ? (double)p.worker_span_sum / p.wake_samples : 0.0);
 			fprintf(stderr, "  worker span per region: slowest avg %.0f | fastest avg %.0f | main chunk avg %.0f cyc\n",
 				(double)p.region_span_max_sum / p.regions, (double)p.region_span_min_sum / p.regions, (double)p.main_chunk_cyc / p.regions);
+			fprintf(stderr, "  slots: reused %llu | built %llu\n", (unsigned long long)p.slot_resets, (unsigned long long)p.slot_provisions);
 			fprintf(stderr, "  block claims %llu (%.1f/region), avg %.0f max %llu cyc per claim | join latency (last chunk end -> joined) avg %.0f cyc\n",
 				(unsigned long long)p.claims, (double)p.claims / p.regions, p.claims ? (double)p.claim_cyc / p.claims : 0.0,
 				(unsigned long long)p.claim_cyc_max, (double)p.join_lat_sum / p.regions);
@@ -1295,8 +1300,8 @@ namespace {
 		// A method on the chunk-exclusive element is exactly as safe as the same accesses
 		// spelled inline in the loop body — the walk proves it: self fields read/write OK,
 		// captured global reads collect as ordinary captures, everything shared-mutating
-		// gets a verdict naming the violation. v1 admits single-overload non-coroutine
-		// methods defined on the element's own class.
+		// gets a verdict naming the violation. Admitted: single-overload non-coroutine
+		// methods the element's class defines or inherits (the method its dispatch answers with).
 		struct admitted_method {
 			const class_definition* cls = nullptr;
 			uint64_t name_id = 0;
@@ -1310,9 +1315,19 @@ namespace {
 			// A method the barrier cannot pin is a verdict
 			auto unpinnable = [&](std::string reason) { return fail(site, std::move(reason)); };
 			auto decl = cls->single_method_overload_ptr(name_id);
+			const class_definition* declaring = cls;
+			if (!decl && !cls->has_method(name_id)) {
+				// an inherited method: the base class whose method the receiver's dispatch answers with
+				const script_value inherited = cls->get_method(name_id, false);
+				const script_method_dispatch* dispatch = inherited.is_function() ? inherited.as_function().target<script_method_dispatch>() : nullptr;
+				if (dispatch && dispatch->cls && dispatch->cls.get() != cls && dispatch->cls->is_script_class()) {
+					declaring = dispatch->cls.get();
+					decl = declaring->single_method_overload_ptr(name_id);
+				}
+			}
 			if (!decl) {
 				return unpinnable("method '" + std::string(name) + "' on class '" + cls->get_name() +
-				                  "' is not admitted in a parallel body (only single-overload methods defined on the element's own class)");
+				                  "' is not admitted in a parallel body (only single-overload methods of the element's class or its bases)");
 			}
 			if (decl->is_coroutine) {
 				return fail(site, "coroutine method '" + std::string(name) + "' is not allowed in a parallel body");
@@ -1334,16 +1349,19 @@ namespace {
 				return unpinnable("class '" + cls->get_name() +
 				                  "' has non-public members — its methods are not admitted in a parallel body");
 			}
+			// each receiver class gets its pin; a body shared by several (an inherited method) is walked once
+			const bool pinned = std::any_of(admitted_methods.begin(), admitted_methods.end(),
+			                                [&](const admitted_method& m) { return m.cls == cls && m.name_id == name_id; });
+			if (!pinned) { admitted_methods.push_back({ cls, name_id, name, decl }); }
 			if (!visited_methods.insert(decl.get()).second) { return true; }   // recursion / already admitted
 			// Pre-mint the shared parameter storage (a mutable lazy cache on the AST
 			// node): workers dispatching this method concurrently must only ever READ it
 			if (!decl->shared_params_cache) {
 				decl->shared_params_cache = std::make_shared<const std::vector<parameter>>(decl->parameters);
 			}
-			admitted_methods.push_back({ cls, name_id, name, decl });
 
 			const class_definition* saved_class = method_class;
-			method_class = cls;
+			method_class = declaring;
 			decltype(scopes) saved;
 			saved.swap(scopes);
 			scopes.emplace_back();
@@ -2519,9 +2537,9 @@ namespace {
 	}
 
 	// Reuse a persisted slot: re-slice limits, re-arm the budget clock, clear residual
-	// execution state (a prior call may have ended mid-chunk on an error), refresh the
-	// host-function copies (registration may have changed - reconstruction is cheaper
-	// than detecting it). Provisioned script-function copies stay - that is the point.
+	// execution state (a prior call may have ended mid-chunk on an error), mint again the
+	// host-function copies whose program-scope binding changed (parallel_host_copy).
+	// Provisioned script-function copies stay - that is the point.
 	// Main thread, per region entry: prove (or re-validate) each admitted function's read-only
 	// parameters on the live function and copy the verdict onto the worker's private copy
 	void restamp_alias_proofs(engine& eng, parallel_worker_slot& slot) {
@@ -2530,6 +2548,19 @@ namespace {
 			copy->alias_proof_epoch = source->alias_proof_epoch;
 			copy->alias_proof_mask = source->alias_proof_mask;
 		}
+	}
+
+	// Main thread: the slot's copy of a host function, minted when the program scope's binding of the name changed since the last one
+	script_value parallel_host_copy(engine& eng, parallel_worker_slot& slot, uint64_t name_id, const std::string& name) {
+		const script_value* bound = eng.get_global_environment()->get_value_ptr(name_id);
+		const void* identity = bound && bound->raw_storage_index() == script_value::TYPEID_FUNCTION ? static_cast<const void*>(&bound->unchecked_as_function()) : nullptr;
+		parallel_worker_slot::host_copy& cached = slot.host_copies[name_id];
+		if (identity && cached.identity == identity && !cached.copy.is_null()) { return cached.copy; }
+		script_value copy = eng.make_parallel_host_function_copy(name);
+		cached.identity = identity;
+		cached.source = identity ? *bound : script_value(std::monostate{}, &eng);
+		cached.copy = copy;
+		return copy;
 	}
 
 	void reset_worker_slot(engine& eng, parallel_worker_slot& slot, std::chrono::nanoseconds budget) {
@@ -2544,7 +2575,7 @@ namespace {
 			                                                          &slot.limits, budget);
 		}
 		for (const auto& [name_id, name] : slot.host_functions) {
-			script_value copy = eng.make_parallel_host_function_copy(name);
+			script_value copy = parallel_host_copy(eng, slot, name_id, name);
 			if (slot.vm) { slot.vm->adopt_math_alias(name_id, copy); }
 			slot.root_env->define(name_id, std::move(copy));
 		}
@@ -2980,7 +3011,7 @@ namespace {
 			}
 		}
 		for (const auto& [name_id, name] : adm.host_functions) {
-			script_value copy = eng.make_parallel_host_function_copy(name);
+			script_value copy = parallel_host_copy(eng, *ctx, name_id, name);
 			if (ctx->vm) { ctx->vm->adopt_math_alias(name_id, copy); }
 			ctx->root_env->define(name_id, std::move(copy));
 		}
@@ -4592,8 +4623,14 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 #endif
 		if (slot && slot_matches(*slot, *adm, *plan.root_fn, use_vm)) {
 			reset_worker_slot(eng, *slot, budget);
+#ifdef JAISCRIPT_VM_PROFILE
+			if (plan.prof) { ++plan.prof->slot_resets; }
+#endif
 		} else {
 			slot = provision_worker(eng, *adm, budget, use_vm, plan.chunk_wrapper);
+#ifdef JAISCRIPT_VM_PROFILE
+			if (plan.prof) { ++plan.prof->slot_provisions; }
+#endif
 		}
 #ifdef JAISCRIPT_VM_PROFILE
 		const uint64_t pf_s1 = __rdtsc();
@@ -4787,7 +4824,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			slot->method_env->define(name_id, script_value::make_function(script_callable_thunk{ &eng, std::move(payload) }, &eng));
 		}
 		for (const auto& [name_id, name] : method_adm.adm.host_functions) {
-			script_value copy = eng.make_parallel_host_function_copy(name);
+			script_value copy = parallel_host_copy(eng, *slot, name_id, std::string(name));
 			if (slot->vm) { slot->vm->adopt_math_alias(name_id, copy); }
 			slot->capture_name_ids.push_back(name_id);
 			slot->method_env->define(name_id, std::move(copy));

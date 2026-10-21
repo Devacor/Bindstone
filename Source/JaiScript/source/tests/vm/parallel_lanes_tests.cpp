@@ -77,6 +77,22 @@ function par(int n) -> string { array<int> xs = []; for (int i = 0; i < n; ++i) 
 				"", "constructors");
 		});
 
+		test("inherited_methods_run_on_elements_and_on_objects_a_body_makes", [this]() {
+			same_everywhere({ R"JAI(
+class Base { float x = 1.0; function twice() -> float { return x * 2.0; } function bump() -> void { x = x + 1.0; } }
+class D : Base { float y = 0.5; function sum() -> float { return this.twice() + y; } }
+class E : Base { int k = 3; }
+function fill(int n) -> array<D> { array<D> ds = []; for (int i = 0; i < n; ++i) { D d = D(); d.x = i % 9; d.y = i % 4; ds.push(d); } return ds; }
+function serial(int n) -> float { array<D> ds = fill(n); float s = 0.0; for (auto& d : ds) { d.bump(); E e = E(); e.x = d.y; e.bump(); s = s + d.sum() + e.twice() + e.k; } return s; }
+function par(int n) -> float {
+	array<D> ds = fill(n); array<float> out = []; for (int i = 0; i < n; ++i) { out.push(0.0); }
+	parallel_for (auto& d, auto& o : ds, out) { d.bump(); E e = E(); e.x = d.y; e.bump(); o = d.sum() + e.twice() + e.k; }
+	float s = 0.0; for (auto& o : out) { s = s + o; } return s;
+}
+0;)JAI", "par(200) == serial(200);", "par(200) == serial(200);" },
+				"0|true|true|", "inherited methods");
+		});
+
 		test("method_field_stores_run_on_workers_as_on_the_engine", [this]() {
 			same_everywhere({ R"JAI(
 class Body {

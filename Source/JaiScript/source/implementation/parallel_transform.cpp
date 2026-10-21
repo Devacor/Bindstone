@@ -159,6 +159,10 @@ namespace jai::detail {
 		// values + pre-resolved overloads (parallel-method-admission rule). Rebuilt per
 		// call (element classes are a runtime fact); cleared at the join.
 		detail::parallel_method_pin_table method_pins;
+		// The method admission record the pins were built for (0: none): a reused slot keeps them, and the constructors and
+		// function copies they define in its scopes, while the region runs under the same record
+		uint64_t pins_serial = 0;
+		std::vector<uint64_t> pinned_name_ids;
 
 		// Provisioning fingerprint: reuse is valid only while these match the current
 		// call. Script bodies are identity-compared (hot reload swaps bodies -> rebuild);
@@ -203,7 +207,8 @@ namespace jai::detail {
 				p.wake_samples ? (double)p.worker_span_sum / p.wake_samples : 0.0);
 			fprintf(stderr, "  worker span per region: slowest avg %.0f | fastest avg %.0f | main chunk avg %.0f cyc\n",
 				(double)p.region_span_max_sum / p.regions, (double)p.region_span_min_sum / p.regions, (double)p.main_chunk_cyc / p.regions);
-			fprintf(stderr, "  slots: reused %llu | built %llu\n", (unsigned long long)p.slot_resets, (unsigned long long)p.slot_provisions);
+			fprintf(stderr, "  slots: reused %llu | built %llu | pins kept %llu | pins built %llu\n", (unsigned long long)p.slot_resets, (unsigned long long)p.slot_provisions,
+				(unsigned long long)p.pins_kept, (unsigned long long)p.pins_built);
 			fprintf(stderr, "  block claims %llu (%.1f/region), avg %.0f max %llu cyc per claim | join latency (last chunk end -> joined) avg %.0f cyc\n",
 				(unsigned long long)p.claims, (double)p.claims / p.regions, p.claims ? (double)p.claim_cyc / p.claims : 0.0,
 				(unsigned long long)p.claim_cyc_max, (double)p.join_lat_sum / p.regions);
@@ -511,6 +516,18 @@ namespace {
 		const script_function& f = v.as_function();
 		if (const auto* thunk = f.target<script_callable_thunk>()) { return &thunk->payload; }
 		return nullptr;
+	}
+
+	// Class::K as a constant: the class the name means and a const static of a primitive value it holds
+	std::optional<script_value> class_constant_value(engine& eng, uint64_t class_name_id, uint64_t member_id) {
+		const auto cls = eng.get_class_definition(std::string(eng.get_symbolizer()->get_string(class_name_id)));
+		if (!cls || !cls->is_const_static(member_id) || !cls->static_method_in_chain(member_id).is_null()) { return std::nullopt; }
+		const script_value* value = cls->find_static_field_in_chain(member_id);
+		if (!value) { return std::nullopt; }
+		const script_value& v = value->deref();
+		const size_t idx = v.raw_storage_index();
+		if (idx != script_value::TYPEID_INT && idx != script_value::TYPEID_FLOAT && idx != script_value::TYPEID_BOOL && idx != script_value::TYPEID_CHAR) { return std::nullopt; }
+		return script_value(v);
 	}
 
 	// ============================== ADMISSION ==============================
@@ -1500,6 +1517,7 @@ namespace {
 			const auto found = host_classes.find(std::string(sym.get_string(name_id)));
 			return found != host_classes.end() ? found->second : nullptr;
 		}
+		bool class_constant(uint64_t name_id, uint64_t member_id) { return class_constant_value(eng, name_id, member_id).has_value(); }
 		// The first host class in cls's chain marked serial_only_constructor()
 		static const class_definition* serial_only_base(const class_definition* cls) {
 			if (!cls) { return nullptr; }
@@ -2046,6 +2064,17 @@ namespace {
 						(void)sym.get_class_var_id_with_view(root->symbol_id);   // the static read asks for a class of the name first
 						touch_capture(root, false);
 						return true;
+					}
+					// a class constant (C::K, a const static of a primitive value): pinned per worker at the barrier
+					if (root->symbol_id != UINT64_MAX && !is_local(root->symbol_id)) {
+						if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }
+						if (class_constant(root->symbol_id, m->member_id)) {
+							(void)sym.get_class_var_id_with_view(root->symbol_id);
+							bool seen = false;
+							for (const auto& r : adm.const_static_reads) { seen = seen || (r.class_name_id == root->symbol_id && r.name_id == m->member_id); }
+							if (!seen) { adm.const_static_reads.push_back({ root->symbol_id, m->member_id }); }
+							return true;
+						}
 					}
 				}
 				return walk_local_member_chain(m, "member access");
@@ -4275,6 +4304,7 @@ struct region_plan {
 	// One region shape's method admission: the key it was admitted under and the builder holding what it pinned
 	struct method_admission_record {
 		uint64_t generation = 0;
+		uint64_t serial = 0;   // names this record to the slots that keep its pins (0: an uncached record, never kept)
 		const char* prefix = nullptr;
 		std::vector<const class_definition*> element_classes;
 		std::vector<type_info*> written_types;
@@ -4289,6 +4319,7 @@ struct region_plan {
 		static constexpr size_t k_records = 16;   // region shapes a program cycles through; the oldest leaves first
 		std::vector<std::unique_ptr<method_admission_record>> records;
 		std::unique_ptr<method_admission_record> uncached;   // an admission admit_cached never stamped: admitted afresh each region
+		uint64_t next_serial = 0;
 		method_admission_record* find(uint64_t generation, const char* prefix, const std::vector<const class_definition*>& classes, const std::vector<type_info*>& written,
 		                              bool element_methods, bool destructors, bool inplace, uint64_t registry_key, uint64_t definition_epoch) {
 			if (generation == 0) { return nullptr; }
@@ -4317,6 +4348,7 @@ struct region_plan {
 				uncached = std::move(r);
 				return *uncached;
 			}
+			r->serial = ++next_serial;
 			if (records.size() >= k_records) { records.erase(records.begin()); }
 			records.push_back(std::move(r));
 			return *records.back();
@@ -4888,9 +4920,6 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 				slot->raw_input = nullptr;
 				slot->typed_input = nullptr;
 				slot->backend->set_parallel_method_pins(nullptr);
-				slot->method_pins.entries.clear();
-				slot->method_pins.statics.clear();
-				slot->method_pins.operators.clear();
 			}
 		}
 	} region_guard{ eng, state, pool->worker_slots, worker_count };
@@ -4917,7 +4946,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 #ifdef JAISCRIPT_VM_PROFILE
 		const uint64_t pf_s0 = __rdtsc();
 #endif
-		if (slot && slot_matches(*slot, *adm, *plan.root_fn, use_vm)) {
+		const bool slot_fresh = !(slot && slot_matches(*slot, *adm, *plan.root_fn, use_vm));
+		if (!slot_fresh) {
 			reset_worker_slot(eng, *slot, budget);
 #ifdef JAISCRIPT_VM_PROFILE
 			if (plan.prof) { ++plan.prof->slot_resets; }
@@ -5028,136 +5058,170 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 #ifdef JAISCRIPT_VM_PROFILE
 		{ const uint64_t now = __rdtsc(); pf_caps += now - pf_a; pf_a = now; }
 #endif
-		// Method pins: each worker gets a dispatcher copy per admitted element method
-		slot->method_pins.entries.clear();
-		for (const auto& am : method_adm.admitted_methods) {
-			state.faults.checkpoint("region.method_pin", k);
-			const script_value shared_method = am.cls->get_method(am.name_id, false);
-			const script_method_dispatch* src = shared_method.is_function()
-				? shared_method.as_function().target<script_method_dispatch>() : nullptr;
-			if (!src) {
-				return usage("method '" + std::string(am.name) + "' has no script dispatcher (internal)");
-			}
-			script_method_dispatch wd;
-			wd.eng = src->eng;
-			wd.cls = src->cls;
-			wd.name_id = src->name_id;
-			// The worker's method sandbox, not the class's defining scope: a method body's captured
-			// reads resolve to this worker's provisioned copies (a borrowed string table read through
-			// the live global copied the shared literal's handle across threads; safe mode too), and
-			// not to the body's captures, which may be the caller's locals under the same names
-			wd.definition_env = slot->method_env;
-			detail::parallel_method_pin pin;
-			pin.method_value = script_value::make_function(std::move(wd), &eng);
-			pin.resolved = am.decl;
-			slot->method_pins.entries.push_back({ am.cls, am.name_id, std::move(pin) });
-			if (slot->vm) { slot->vm->precompile_parallel_method(*am.decl); }
+		// A reused slot keeps the pins of the record it last ran under (a capture of one of their names provisions over them: rebuild)
+		bool keep_pins = record->serial != 0 && !slot_fresh && slot->pins_serial == record->serial;
+		for (uint64_t id : slot->capture_name_ids) {
+			keep_pins = keep_pins && std::find(slot->pinned_name_ids.begin(), slot->pinned_name_ids.end(), id) == slot->pinned_name_ids.end();
 		}
-		// Operators: a script operator's dispatcher in the worker's method sandbox (its overloads precompiled with the admitted
-		// bodies), a C++ operator's worker copy with its arities
-		slot->method_pins.operators.clear();
-		for (const auto& op : method_adm.operator_pins) {
-			const script_value* shared_method = op.cls->method_ptr(op.name_id);
-			if (!shared_method || !shared_method->is_function()) { continue; }
-			detail::parallel_method_pin pin;
-			if (op.script) {
-				const script_method_dispatch* src = shared_method->as_function().target<script_method_dispatch>();
-				if (!src) { continue; }
+#ifdef JAISCRIPT_VM_PROFILE
+		if (plan.prof) { ++(keep_pins ? plan.prof->pins_kept : plan.prof->pins_built); }
+#endif
+		if (keep_pins) {
+			if (slot->vm) {
+				for (const auto& [name_id, name] : method_adm.adm.host_functions) {
+					if (const script_value* copy = slot->method_env->get_own_value_ptr(name_id)) { slot->vm->adopt_math_alias(name_id, *copy); }
+				}
+				slot->vm->prefold_parallel_reads(eng.fold_epoch());
+			}
+		} else {
+			for (uint64_t id : slot->pinned_name_ids) {
+				if (script_value* value = slot->root_env->get_own_value_ptr(id)) { *value = script_value(std::monostate{}, &eng); }
+				if (script_value* value = slot->method_env->get_own_value_ptr(id)) { *value = script_value(std::monostate{}, &eng); }
+			}
+			slot->pinned_name_ids.clear();
+			slot->pins_serial = 0;
+			// Method pins: each worker gets a dispatcher copy per admitted element method
+			slot->method_pins.entries.clear();
+			for (const auto& am : method_adm.admitted_methods) {
+				state.faults.checkpoint("region.method_pin", k);
+				const script_value shared_method = am.cls->get_method(am.name_id, false);
+				const script_method_dispatch* src = shared_method.is_function()
+					? shared_method.as_function().target<script_method_dispatch>() : nullptr;
+				if (!src) {
+					return usage("method '" + std::string(am.name) + "' has no script dispatcher (internal)");
+				}
 				script_method_dispatch wd;
 				wd.eng = src->eng;
 				wd.cls = src->cls;
 				wd.name_id = src->name_id;
+				// The worker's method sandbox, not the class's defining scope: a method body's captured
+				// reads resolve to this worker's provisioned copies (a borrowed string table read through
+				// the live global copied the shared literal's handle across threads; safe mode too), and
+				// not to the body's captures, which may be the caller's locals under the same names
 				wd.definition_env = slot->method_env;
+				detail::parallel_method_pin pin;
 				pin.method_value = script_value::make_function(std::move(wd), &eng);
-			} else {
-				pin.method_value = script_value::make_function(script_function(shared_method->as_function()), &eng);
-				const class_definition* owner = op.owner ? op.owner : op.cls;
-				if (const auto* overloads = owner->host_overloads(op.name_id)) {
+				pin.resolved = am.decl;
+				slot->method_pins.entries.push_back({ am.cls, am.name_id, std::move(pin) });
+				if (slot->vm) { slot->vm->precompile_parallel_method(*am.decl); }
+			}
+			// Operators: a script operator's dispatcher in the worker's method sandbox (its overloads precompiled with the admitted
+			// bodies), a C++ operator's worker copy with its arities
+			slot->method_pins.operators.clear();
+			for (const auto& op : method_adm.operator_pins) {
+				const script_value* shared_method = op.cls->method_ptr(op.name_id);
+				if (!shared_method || !shared_method->is_function()) { continue; }
+				detail::parallel_method_pin pin;
+				if (op.script) {
+					const script_method_dispatch* src = shared_method->as_function().target<script_method_dispatch>();
+					if (!src) { continue; }
+					script_method_dispatch wd;
+					wd.eng = src->eng;
+					wd.cls = src->cls;
+					wd.name_id = src->name_id;
+					wd.definition_env = slot->method_env;
+					pin.method_value = script_value::make_function(std::move(wd), &eng);
+				} else {
+					pin.method_value = script_value::make_function(script_function(shared_method->as_function()), &eng);
+					const class_definition* owner = op.owner ? op.owner : op.cls;
+					if (const auto* overloads = owner->host_overloads(op.name_id)) {
+						for (const auto& overload : *overloads) {
+							if (!overload.is_const) { pin.mutating_arities |= uint64_t(1) << std::min<size_t>(overload.arity, 63); }
+						}
+					}
+					if (const serial_overloads* marked = owner->serial_method(op.name_id)) {
+						pin.serial_arities = *marked == serial_overloads::every || !owner->host_overloads(op.name_id) ? ~uint64_t(0) : pin.mutating_arities;
+					}
+				}
+				slot->method_pins.operators.push_back({ op.cls, op.name_id, std::move(pin) });
+			}
+			// Host methods and accessors: worker copies of the bound method values (a copy shares only the binding's own state)
+			for (const auto& host : method_adm.host_pins) {
+				state.faults.checkpoint("region.host_method_pin", k);
+				const script_value shared_method = host.cls->get_method(host.name_id, false);
+				if (!shared_method.is_function()) { continue; }
+				detail::parallel_method_pin pin;
+				pin.method_value = script_value::make_function(script_function(shared_method.as_function()), &eng);
+				const std::string_view name = eng.get_symbolizer()->get_string(host.name_id);
+				if (const auto* overloads = host.owner->host_overloads(host.name_id)) {
 					for (const auto& overload : *overloads) {
 						if (!overload.is_const) { pin.mutating_arities |= uint64_t(1) << std::min<size_t>(overload.arity, 63); }
 					}
+				} else if (name.starts_with("_set_")) {
+					pin.mutating_arities = ~uint64_t(0);
 				}
-				if (const serial_overloads* marked = owner->serial_method(op.name_id)) {
-					pin.serial_arities = *marked == serial_overloads::every || !owner->host_overloads(op.name_id) ? ~uint64_t(0) : pin.mutating_arities;
+				if (const serial_overloads* marked = host.owner->serial_method(host.name_id)) {
+					pin.serial_arities = *marked == serial_overloads::every || !host.owner->host_overloads(host.name_id) ? ~uint64_t(0) : pin.mutating_arities;
+				}
+				slot->method_pins.entries.push_back({ host.cls, host.name_id, std::move(pin) });
+			}
+			slot->method_pins.statics.clear();
+			for (const parallel_admission* source : std::initializer_list<const parallel_admission*>{ adm, &method_adm.adm }) {
+				for (const auto& call : source->static_calls) {
+					const auto& host_classes = eng.get_class_registry().cpp_classes_;
+					const auto host = host_classes.find(std::string(eng.get_symbolizer()->get_string(call.class_name_id)));
+					if (host == host_classes.end()) { continue; }
+					const script_value shared_method = host->second->static_method_in_chain(call.name_id);
+					if (!shared_method.is_function() || slot->method_pins.find_static(call.class_name_id, call.name_id)) { continue; }
+					slot->method_pins.statics.push_back({ call.class_name_id, call.name_id,
+					                                      script_value::make_function(script_function(shared_method.as_function()), &eng) });
+				}
+				for (const auto& read : source->const_static_reads) {
+					if (slot->method_pins.find_static(read.class_name_id, read.name_id)) { continue; }
+					std::optional<script_value> constant = class_constant_value(eng, read.class_name_id, read.name_id);
+					if (!constant) {
+						return usage("'" + std::string(eng.get_symbolizer()->get_string(read.class_name_id)) + "::" + std::string(eng.get_symbolizer()->get_string(read.name_id)) +
+						             "' is no longer a constant (a parallel body reads only const statics of a primitive value)");
+					}
+					slot->method_pins.statics.push_back({ read.class_name_id, read.name_id, std::move(*constant) });
 				}
 			}
-			slot->method_pins.operators.push_back({ op.cls, op.name_id, std::move(pin) });
-		}
-		// Host methods and accessors: worker copies of the bound method values (a copy shares only the binding's own state)
-		for (const auto& host : method_adm.host_pins) {
-			state.faults.checkpoint("region.host_method_pin", k);
-			const script_value shared_method = host.cls->get_method(host.name_id, false);
-			if (!shared_method.is_function()) { continue; }
-			detail::parallel_method_pin pin;
-			pin.method_value = script_value::make_function(script_function(shared_method.as_function()), &eng);
-			const std::string_view name = eng.get_symbolizer()->get_string(host.name_id);
-			if (const auto* overloads = host.owner->host_overloads(host.name_id)) {
-				for (const auto& overload : *overloads) {
-					if (!overload.is_const) { pin.mutating_arities |= uint64_t(1) << std::min<size_t>(overload.arity, 63); }
+			// Constructions: the class's constructor value resolves to a worker-private one whose code reads the worker's method
+			// sandbox, its constructor and destructor bodies compiled here
+			for (const auto& made : method_adm.constructed_classes) {
+				state.faults.checkpoint("region.constructor_pin", k);
+				if (!made.cls->is_script_class()) {   // a host class's constructor (a hybrid's base, or the class itself): a worker copy
+					script_value host_ctor = eng.make_parallel_host_function_copy(made.cls->get_name());
+					slot->pinned_name_ids.push_back(made.name_id);
+					slot->root_env->define(made.name_id, host_ctor);
+					slot->method_env->define(made.name_id, std::move(host_ctor));
+					continue;
 				}
-			} else if (name.starts_with("_set_")) {
-				pin.mutating_arities = ~uint64_t(0);
+				script_callable payload;
+				payload.kind = script_callable::kind_type::constructor;
+				payload.cls = made.cls;
+				if (!std::static_pointer_cast<script_class_definition>(made.cls)->get_constructor_asts().empty()) { payload.definition_env = slot->method_env; }
+				script_value ctor = script_value::make_function(script_callable_thunk{ &eng, std::move(payload) }, &eng);
+				slot->pinned_name_ids.push_back(made.name_id);
+				slot->root_env->define(made.name_id, ctor);
+				slot->method_env->define(made.name_id, std::move(ctor));
 			}
-			if (const serial_overloads* marked = host.owner->serial_method(host.name_id)) {
-				pin.serial_arities = *marked == serial_overloads::every || !host.owner->host_overloads(host.name_id) ? ~uint64_t(0) : pin.mutating_arities;
+			// The functions and host functions class code calls, worker-private copies in the method sandbox
+			for (const auto& [name_id, source_fn] : method_adm.adm.script_functions) {
+				if (name_id == UINT64_MAX) { continue; }
+				state.faults.checkpoint("region.method_function", k);
+				auto copy = std::make_shared<script_defined_function>(source_fn->name, std::vector<parameter>(source_fn->parameters()), source_fn->return_type,
+				                                                      source_fn->body, slot->method_env, source_fn->local_count);
+				copy->unit = source_fn->unit;
+				if (slot->vm) { slot->vm->precompile_parallel_function(*copy); }
+				script_callable payload;
+				payload.kind = script_callable::kind_type::function;
+				payload.fn = std::move(copy);
+				slot->pinned_name_ids.push_back(name_id);
+				slot->method_env->define(name_id, script_value::make_function(script_callable_thunk{ &eng, std::move(payload) }, &eng));
 			}
-			slot->method_pins.entries.push_back({ host.cls, host.name_id, std::move(pin) });
-		}
-		slot->method_pins.statics.clear();
-		for (const parallel_admission* source : std::initializer_list<const parallel_admission*>{ adm, &method_adm.adm }) {
-			for (const auto& call : source->static_calls) {
-				const auto& host_classes = eng.get_class_registry().cpp_classes_;
-				const auto host = host_classes.find(std::string(eng.get_symbolizer()->get_string(call.class_name_id)));
-				if (host == host_classes.end()) { continue; }
-				const script_value shared_method = host->second->static_method_in_chain(call.name_id);
-				if (!shared_method.is_function() || slot->method_pins.find_static(call.class_name_id, call.name_id)) { continue; }
-				slot->method_pins.statics.push_back({ call.class_name_id, call.name_id,
-				                                      script_value::make_function(script_function(shared_method.as_function()), &eng) });
+			for (const auto& [name_id, name] : method_adm.adm.host_functions) {
+				script_value copy = parallel_host_copy(eng, *slot, name_id, std::string(name));
+				if (slot->vm) { slot->vm->adopt_math_alias(name_id, copy); }
+				slot->pinned_name_ids.push_back(name_id);
+				slot->method_env->define(name_id, std::move(copy));
 			}
-		}
-		// Constructions: the class's constructor value resolves to a worker-private one whose code reads the worker's method
-		// sandbox, its constructor and destructor bodies compiled here
-		for (const auto& made : method_adm.constructed_classes) {
-			state.faults.checkpoint("region.constructor_pin", k);
-			if (!made.cls->is_script_class()) {   // a host class's constructor (a hybrid's base, or the class itself): a worker copy
-				script_value host_ctor = eng.make_parallel_host_function_copy(made.cls->get_name());
-				slot->capture_name_ids.push_back(made.name_id);
-				slot->root_env->define(made.name_id, host_ctor);
-				slot->method_env->define(made.name_id, std::move(host_ctor));
-				continue;
+			if (slot->vm) {
+				for (const auto& body : method_adm.admitted_bodies) { slot->vm->precompile_parallel_method(*body); }
+				for (const auto& expr : method_adm.admitted_expressions) { slot->vm->precompile_parallel_expression(expr); }
+				slot->vm->prefold_parallel_reads(eng.fold_epoch());
 			}
-			script_callable payload;
-			payload.kind = script_callable::kind_type::constructor;
-			payload.cls = made.cls;
-			if (!std::static_pointer_cast<script_class_definition>(made.cls)->get_constructor_asts().empty()) { payload.definition_env = slot->method_env; }
-			script_value ctor = script_value::make_function(script_callable_thunk{ &eng, std::move(payload) }, &eng);
-			slot->capture_name_ids.push_back(made.name_id);
-			slot->root_env->define(made.name_id, ctor);
-			slot->method_env->define(made.name_id, std::move(ctor));
-		}
-		// The functions and host functions class code calls, worker-private copies in the method sandbox
-		for (const auto& [name_id, source_fn] : method_adm.adm.script_functions) {
-			if (name_id == UINT64_MAX) { continue; }
-			state.faults.checkpoint("region.method_function", k);
-			auto copy = std::make_shared<script_defined_function>(source_fn->name, std::vector<parameter>(source_fn->parameters()), source_fn->return_type,
-			                                                      source_fn->body, slot->method_env, source_fn->local_count);
-			copy->unit = source_fn->unit;
-			if (slot->vm) { slot->vm->precompile_parallel_function(*copy); }
-			script_callable payload;
-			payload.kind = script_callable::kind_type::function;
-			payload.fn = std::move(copy);
-			slot->capture_name_ids.push_back(name_id);
-			slot->method_env->define(name_id, script_value::make_function(script_callable_thunk{ &eng, std::move(payload) }, &eng));
-		}
-		for (const auto& [name_id, name] : method_adm.adm.host_functions) {
-			script_value copy = parallel_host_copy(eng, *slot, name_id, std::string(name));
-			if (slot->vm) { slot->vm->adopt_math_alias(name_id, copy); }
-			slot->capture_name_ids.push_back(name_id);
-			slot->method_env->define(name_id, std::move(copy));
-		}
-		if (slot->vm) {
-			for (const auto& body : method_adm.admitted_bodies) { slot->vm->precompile_parallel_method(*body); }
-			for (const auto& expr : method_adm.admitted_expressions) { slot->vm->precompile_parallel_expression(expr); }
+			slot->pins_serial = record->serial;
 		}
 		slot->method_pins.definition_env = slot->method_env;
 		const bool pinned = !slot->method_pins.entries.empty() || !slot->method_pins.statics.empty() || !slot->method_pins.operators.empty() || !method_adm.constructed_classes.empty() ||

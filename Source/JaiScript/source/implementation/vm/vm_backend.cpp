@@ -15395,7 +15395,7 @@ op_status vm_backend::exec_get_static(frame& f, const vm_instruction& ins) {
 // is checked against its const's current value: the same value keeps the constant, another value patches it, a member that is
 // no longer a const (or no longer there) rewrites the site back to its general read. A running frame sees the change at its next
 // instruction, as the interpreter, which reads the const every time, does.
-std::optional<script_value> vm_backend::folded_static_value(const member_expr* expr) {
+std::optional<script_value> vm_backend::folded_static_value(const member_expr* expr, bool prefold) {
 	if (!expr || !expr->object || expr->member_id == UINT64_MAX) { return std::nullopt; }
 	auto foldable = [](const script_value& v) {
 		const size_t idx = v.raw_storage_index();
@@ -15434,7 +15434,9 @@ std::optional<script_value> vm_backend::folded_static_value(const member_expr* e
 		// E::v of a program-scope enum: the value its const map holds (an enum declared in a function or a block is the scope's, never folded)
 		if (expr->object->get_type() != node_type::identifier_expr || !engine_->is_enum_name(name_id)) { return std::nullopt; }
 		const script_value* cell = engine_->get_global_environment()->get_value_ptr(name_id);
-		if (!cell || !engine_->const_cell(cell) || environment_->get_value_ptr(name_id) != cell) { return std::nullopt; }
+		// a barrier fold reads the program scope's enum: the worker's scope holds the region's capture of it, and a chunk that
+		// declares an enum of its own is never prefolded
+		if (!cell || !engine_->const_cell(cell) || (!prefold && environment_->get_value_ptr(name_id) != cell)) { return std::nullopt; }
 		const script_value& base = cell->deref();
 		if (base.raw_storage_index() != script_value::TYPEID_MAP) { return std::nullopt; }
 		auto it = base.as_map().find(map_string_key_probe{ expr->member });
@@ -15472,16 +15474,73 @@ void vm_backend::fold_static_read(frame& f, const vm_instruction& ins, const mem
 
 // a declaration that may change a folded const ran (a class, a namespace, an enum): every fold site checks its const again
 void vm_backend::revalidate_folds() {
+	if (!parallel_worker_ && engine_) { engine_->bump_fold_epoch(); }   // the workers' barrier folds check their sites against it
 	if (fold_sites_.empty()) { return; }
 	for (auto& site : fold_sites_) {
 		if (!site.code || site.code->code[site.ip].op != opcode::op_const_folded) { continue; }
-		const std::optional<script_value> now = folded_static_value(site.expr);
+		const std::optional<script_value> now = folded_static_value(site.expr, site.prefolded);
 		if (!now) {
 			site.code->code[site.ip] = site.orig;   // no longer a foldable const: the general read again
 			continue;
 		}
 		script_value& k = site.code->constants[site.const_index];
 		if (k.raw_storage_index() != now->raw_storage_index() || !(k == *now)) { k = script_value(*now); }
+	}
+}
+
+bool vm_backend::prefold_chunk(const std::shared_ptr<chunk>& code) {
+	bool folded_any = false;
+	for (const auto& ins : code->code) {
+		if (ins.op == opcode::op_enum_decl) { return false; }   // its enum is the scope's: E::v in this chunk may name it
+	}
+	for (size_t ip = 0; ip < code->code.size(); ++ip) {
+		const vm_instruction ins = code->code[ip];
+		if (ins.op != opcode::op_get_static || ins.a >= code->nodes.size()) { continue; }
+		const auto* expr = static_cast<const member_expr*>(code->nodes[ins.a].get());
+		const std::optional<script_value> folded = folded_static_value(expr, true);
+		if (!folded) { continue; }
+		fold_site site;
+		site.code = code.get();
+		site.pin = code;
+		site.ip = static_cast<uint32_t>(ip);
+		site.orig = ins;
+		site.expr = expr;
+		site.prefolded = true;
+		site.const_index = static_cast<uint32_t>(code->constants.size());
+		code->constants.push_back(script_value(*folded));
+		fold_sites_.push_back(std::move(site));
+		code->code[ip] = vm_instruction{opcode::op_const_folded, fold_sites_.back().const_index, static_cast<uint32_t>(fold_sites_.size() - 1), 0};
+		folded_any = true;
+	}
+	return folded_any;
+}
+
+void vm_backend::prefold_parallel_reads(uint64_t fold_epoch) {
+	if (debug_hook_) { return; }
+	bool changed = false;
+	if (fold_epoch != prefold_epoch_ && !fold_sites_.empty()) {
+		revalidate_folds();
+		changed = true;
+	}
+	prefold_epoch_ = fold_epoch;
+	auto visit = [&](const std::shared_ptr<chunk>& code) {
+		if (!code || !prefolded_chunks_.insert(code.get()).second) { return; }
+		changed = prefold_chunk(code) || changed;
+		for (const auto& defaults : code->param_default_chunks) {
+			if (defaults && prefolded_chunks_.insert(defaults.get()).second) { changed = prefold_chunk(defaults) || changed; }
+		}
+	};
+	const size_t cached = chunk_cache_.size() + expr_chunk_cache_.size() + parallel_expr_chunks_.size();
+	if (cached != prefold_cached_) {   // the caches only grow: a scan covers every chunk compiled since the last one
+		prefold_cached_ = cached;
+		for (auto& [key, entry] : chunk_cache_) { visit(entry.compiled); }
+		for (auto& [key, entry] : expr_chunk_cache_) { visit(entry.compiled); }
+		for (auto& [key, entry] : parallel_expr_chunks_) { visit(entry.compiled); }
+	}
+	if (changed) {   // the block constants a worker copied of a chunk miss its new or patched constants
+		worker_block_constants_.clear();
+		worker_block_constants_code_ = nullptr;
+		worker_block_constants_mru_ = nullptr;
 	}
 }
 

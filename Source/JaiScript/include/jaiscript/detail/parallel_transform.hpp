@@ -190,6 +190,8 @@ namespace jai::detail {
             uint64_t name_id = 0;
         };
         std::vector<static_call> static_calls;
+        // Class constants the bodies read (Class::K, a const static of a primitive value): pinned per worker at the barrier
+        std::vector<static_call> const_static_reads;
         std::vector<element_method_call> element_method_calls;
         // Script classes the bodies construct (Name(args), new Name(args), Name n(args)) with the argument count. Admission
         // only collects; the barrier resolves each name against the live class and walks every constructor, base
@@ -412,6 +414,7 @@ namespace jai::detail {
             // the rest of setup and the submit
             uint64_t steady_regions = 0, steady_admit_cyc = 0, steady_slots_cyc = 0, steady_pins_cyc = 0, steady_prewarm_cyc = 0, steady_rest_cyc = 0,
                      steady_submit_cyc = 0;
+            uint64_t pins_kept = 0, pins_built = 0;   // slots whose pins were kept from the record they last ran under, or built
             uint64_t slot_resets = 0;      // slots reused for a region (the provisioning fingerprint held)
             uint64_t slot_provisions = 0;  // slots built for a region (no slot, or another body's)
             uint64_t claims = 0;           // block claims (one fetch_add each) over every worker

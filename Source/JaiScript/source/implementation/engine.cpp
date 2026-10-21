@@ -1634,6 +1634,7 @@ struct engine::implementation {
     // cache initialized to epoch 0 always misses its first query.
     uint64_t class_definition_epoch_ = 1;
     uint64_t definition_epoch_ = 1;
+    uint64_t fold_epoch_ = 1;
     std::unordered_set<const script_value*> const_cells_;
     // Shadowing units (environment::define_variable): a file by its lexically normal path, a
     // literal by its content, numbered at first execution; 0 is the host
@@ -4143,6 +4144,14 @@ std::string engine::unit_label(uint32_t unit) const {
         if (id == unit) { return key.empty() || key.front() == '\n' ? std::string("<script>") : key; }
     }
     return "<host>";
+}
+
+uint64_t engine::fold_epoch() const {
+    return impl->fold_epoch_;
+}
+
+void engine::bump_fold_epoch() {
+    ++impl->fold_epoch_;
 }
 
 void engine::bump_definition_epoch() {

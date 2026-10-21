@@ -527,9 +527,7 @@ void vm_backend::debug_statement_boundary(frame& f) {
 	while (count) {
 		const ast_node* sn = c.debug_spans[entered[--count] - 1].node;
 		if (!debug_hook_ || !debug_hook_->wants_statement(static_cast<uint32_t>(sn->location.line))) { continue; }
-		debug_paused_frame_ = &f;
 		debug_hook_->on_statement(sn, static_cast<int>(depth));
-		debug_paused_frame_ = nullptr;
 	}
 }
 
@@ -538,10 +536,8 @@ void vm_backend::debug_stop_at(const ast_node* node) {
 	debug_hook_->on_statement(node, static_cast<int>(call_records_top_ + static_cast<size_t>(current_call_depth_)));
 }
 
-std::vector<std::pair<std::string, script_value>> vm_backend::get_current_frame_locals() const {
+std::vector<std::pair<std::string, script_value>> vm_backend::frame_slot_locals(const frame* f) const {
 	std::vector<std::pair<std::string, script_value>> out;
-	const frame* f = debug_paused_frame_;
-	if (!f && call_records_top_ > 0) { f = &call_records_[call_records_top_ - 1]->f; }
 	if (!f || !f->locals || f->top_level || !f->code) { return out; }   // global scope: env fallback
 
 	// slot -> name from the chunk's operands: decls carry their variable_decl node
@@ -790,6 +786,8 @@ bool vm_backend::has_variable(const std::string& name) const {
 
 void vm_backend::begin_host_call() {
 	if (engine_) { limits_ = &engine_->execution_limits(); }
+	// a host entry is a debug sync point: a host-paced frame loop picks up attach, breakpoints and pause
+	if (debug_controller_.load(std::memory_order_relaxed) || debug_hook_) [[unlikely]] { sync_debug_hook(); }
 	arm_execution_deadline();
 	limits_->reset_for_execute();
 }
@@ -1218,9 +1216,13 @@ void vm_backend::note_compiled(const chunk& compiled) {
 	if (const auto& sink = engine_->disassembly_sink()) { sink(disassemble(compiled, symbolizer_), chunk_manifest(compiled, symbolizer_)); }
 }
 
+namespace {
+const source_location* location_of(const ast_node* node) { return node ? &node->location : nullptr; }
+}
+
 // the grafts whose bodies hold ip, innermost first: each one's frame named by its callee at the line node points to, then node moves to
-// its caller's statement (out null: counted only)
-size_t vm_backend::graft_frames_at(const chunk& code, size_t ip, const ast_node** node) {
+// its caller's statement (node null: counted only)
+size_t vm_backend::graft_frames_at(const chunk& code, size_t ip, const ast_node** node, std::vector<stack_frame>& out) {
 	const chunk::inline_site* held[16];
 	size_t count = 0;
 	for (const chunk::cell_loop& loop : code.cell_loops) {   // a block's door call stands at its copy: the general instruction it copies
@@ -1233,11 +1235,19 @@ size_t vm_backend::graft_frames_at(const chunk& code, size_t ip, const ast_node*
 	if (node) {
 		for (size_t i = 0; i < count; ++i) {
 			const ast_node* at = *node;
-			captured_trace_.push_back({ std::string(held[i]->decl->name), at ? at->location.filename : std::string(), at ? at->location.line : 0, at ? at->location.column : 0 });
+			out.push_back(trace_frame_at(std::string(held[i]->decl->name), location_of(at)));
 			*node = held[i]->call_stmt;
 		}
 	}
 	return count;
+}
+
+const ast_node* vm_backend::frame_statement(const frame& fr) {
+	return fr.ip < fr.code->stmt_nodes.size() ? fr.code->stmt_nodes[fr.ip] : nullptr;
+}
+
+std::string vm_backend::frame_function_name(const frame& fr) {
+	return fr.code->function_name.empty() ? std::string("<anonymous>") : fr.code->function_name;
 }
 
 void vm_backend::capture_stack_trace() {
@@ -1246,7 +1256,7 @@ void vm_backend::capture_stack_trace() {
 	size_t walked = 0;
 	for (auto it = frames_.rbegin(); it != frames_.rend(); ++it, ++walked) {
 		frame* fr = *it;
-		const ast_node* node = fr->ip < fr->code->stmt_nodes.size() ? fr->code->stmt_nodes[fr->ip] : nullptr;
+		const ast_node* node = frame_statement(*fr);
 		if (fr->top_level) {
 			top_node = node;
 			break;
@@ -1254,27 +1264,47 @@ void vm_backend::capture_stack_trace() {
 		if (captured_trace_.size() >= k_stack_trace_frames) {   // the frames above the innermost top-level one, counted, not walked
 			const size_t first = top_frame_mark_ == SIZE_MAX ? 0 : top_frame_mark_ + 1;
 			size_t grafted = 0;   // a frame stopped at a call a graft makes counts the grafts around it, as their frames would
-			for (auto rest = it; rest != frames_.rend() && !(*rest)->top_level; ++rest) { if ((*rest)->code->graft_calls) { grafted += graft_frames_at(*(*rest)->code, (*rest)->ip, nullptr); } }
+			for (auto rest = it; rest != frames_.rend() && !(*rest)->top_level; ++rest) { if ((*rest)->code->graft_calls) { grafted += graft_frames_at(*(*rest)->code, (*rest)->ip, nullptr, captured_trace_); } }
 			cap_stack_trace(captured_trace_, frames_.size() - first - walked + 1 + grafted);
 			trace_captured_ = true;
 			return;
 		}
-		graft_frames_at(*fr->code, fr->ip, &node);   // inlined callees: their frames as the interpreter has them, innermost first, each caller's line its call's
-		captured_trace_.push_back({
-			fr->code->function_name.empty() ? std::string("<anonymous>") : fr->code->function_name,
-			node ? node->location.filename : std::string(),
-			node ? node->location.line : 0,
-			node ? node->location.column : 0
-		});
+		graft_frames_at(*fr->code, fr->ip, &node, captured_trace_);   // inlined callees: their frames as the interpreter has them, innermost first, each caller's line its call's
+		captured_trace_.push_back(trace_frame_at(frame_function_name(*fr), location_of(node)));
 	}
-	captured_trace_.push_back({
-		"<script>",
-		top_node ? top_node->location.filename : std::string(),
-		top_node ? top_node->location.line : 0,
-		top_node ? top_node->location.column : 0
-	});
+	captured_trace_.push_back(trace_frame_at("<script>", location_of(top_node)));
 	cap_stack_trace(captured_trace_);
 	trace_captured_ = true;
+}
+
+// capture_stack_trace's walk, uncapped, with the top level only while a top-level frame is live; slot_frames names the
+// frame whose slots hold each entry's locals (null for an inlined call and the top level)
+std::vector<stack_frame> vm_backend::debug_frame_walk(std::vector<const frame*>* slot_frames) const {
+	std::vector<stack_frame> out;
+	for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
+		const frame* fr = *it;
+		const ast_node* node = frame_statement(*fr);
+		if (fr->top_level) {
+			out.push_back(trace_frame_at("<script>", location_of(node)));
+			if (slot_frames) { slot_frames->push_back(nullptr); }
+			break;
+		}
+		const size_t grafts = graft_frames_at(*fr->code, fr->ip, &node, out);
+		if (slot_frames) { slot_frames->insert(slot_frames->end(), grafts, nullptr); }
+		out.push_back(trace_frame_at(frame_function_name(*fr), location_of(node)));
+		if (slot_frames) { slot_frames->push_back(fr); }
+	}
+	return out;
+}
+
+std::vector<stack_frame> vm_backend::debug_frames() const {
+	return debug_frame_walk(nullptr);
+}
+
+std::vector<std::pair<std::string, script_value>> vm_backend::get_frame_locals(size_t frame_index) const {
+	std::vector<const frame*> slot_frames;
+	debug_frame_walk(&slot_frames);
+	return frame_index < slot_frames.size() ? frame_slot_locals(slot_frames[frame_index]) : std::vector<std::pair<std::string, script_value>>{};
 }
 
 // KEEP BYTE-PARALLEL with interpreter::park_nested_failure / absorb_nested_trace

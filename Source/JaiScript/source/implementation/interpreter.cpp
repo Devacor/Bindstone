@@ -3265,10 +3265,11 @@ std::shared_ptr<environment> interpreter::get_global_environment() const {
     return global_env ? global_env : environment_;
 }
 
-// Debug sync point: execute entry + every 1024 budget ticks, always on the script
-// thread. Mirrors the transport-writable controller state into the plain per-statement
-// gate (debug_hook_) and the controller's hot cache; a session that just ended gets a
-// fresh budget deadline (the armed one is long past after any pause).
+// Debug sync point: execute entry, host entries, time::sleep, every 1024 budget ticks and an
+// armed session's pending change, always on the script thread. Mirrors the transport-writable
+// controller state into the plain per-statement gate (debug_hook_) and the controller's hot
+// cache; a session that just ended gets a fresh budget deadline (the armed one is long past
+// after any pause).
 void interpreter::sync_debug_hook() {
     auto* dbg = debugger_.load(std::memory_order_acquire);
     debug::controller* next = (dbg && dbg->sync_hot_state()) ? dbg : nullptr;
@@ -3278,6 +3279,8 @@ void interpreter::sync_debug_hook() {
 
 void interpreter::begin_host_call() {
     if (engine_) { limits_ = &engine_->execution_limits(); }
+    // a host entry is a debug sync point: a host-paced frame loop picks up attach, breakpoints and pause
+    if (debugger_.load(std::memory_order_relaxed) || debug_hook_) [[unlikely]] { sync_debug_hook(); }
     arm_execution_deadline();
     limits_->reset_for_execute();
 }
@@ -13889,10 +13892,10 @@ static void collect_frame_slot_names(const statement* s,
     }
 }
 
-std::vector<std::pair<std::string, script_value>> interpreter::get_current_frame_locals() const {
+std::vector<std::pair<std::string, script_value>> interpreter::get_frame_locals(size_t frame_index) const {
     std::vector<std::pair<std::string, script_value>> out;
-    if (call_stack_.empty()) return out;                 // global scope: caller falls back to env
-    const call_frame& frame = call_stack_.back();
+    if (frame_index >= call_stack_.size()) return out;   // the top level: the caller reads its environment
+    const call_frame& frame = call_stack_[call_stack_.size() - 1 - frame_index];
     const script_defined_function* fn = frame.function;
     if (!fn) return out;
 
@@ -15200,22 +15203,25 @@ void interpreter::capture_stack_trace() {
             trace_captured_ = true;
             return;
         }
-        const ast_node* node = it->current_node;
-        captured_trace_.push_back({
-            it->function_name.empty() ? std::string("<anonymous>") : std::string(it->function_name),
-            node ? node->location.filename : std::string(),
-            node ? node->location.line : 0,
-            node ? node->location.column : 0
-        });
+        captured_trace_.push_back(call_frame_trace(*it));
     }
-    captured_trace_.push_back({
-        "<script>",
-        top_level_node_ ? top_level_node_->location.filename : std::string(),
-        top_level_node_ ? top_level_node_->location.line : 0,
-        top_level_node_ ? top_level_node_->location.column : 0
-    });
+    captured_trace_.push_back(trace_frame_at("<script>", top_level_node_ ? &top_level_node_->location : nullptr));
     cap_stack_trace(captured_trace_);
     trace_captured_ = true;
+}
+
+stack_frame interpreter::call_frame_trace(const call_frame& frame) {
+    return trace_frame_at(frame.function_name.empty() ? std::string("<anonymous>") : std::string(frame.function_name),
+                          frame.current_node ? &frame.current_node->location : nullptr);
+}
+
+// capture_stack_trace's walk, uncapped, with the top level only while a top-level run is in flight
+std::vector<stack_frame> interpreter::debug_frames() const {
+    std::vector<stack_frame> out;
+    out.reserve(call_stack_.size() + 1);
+    for (auto it = call_stack_.rbegin(); it != call_stack_.rend(); ++it) { out.push_back(call_frame_trace(*it)); }
+    if (execute_depth_ > 0) { out.push_back(trace_frame_at("<script>", top_level_node_ ? &top_level_node_->location : nullptr)); }
+    return out;
 }
 
 void interpreter::note_clock_sample(std::chrono::steady_clock::time_point now) {

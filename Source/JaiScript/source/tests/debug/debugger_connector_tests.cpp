@@ -1,7 +1,7 @@
 // End-to-end DAP attach test: a raw TCP client speaks the Debug Adapter Protocol to a live
 // jai::debug::debug_connector and walks the full loop — handshake, setBreakpoints, run,
 // stopped, stackTrace, scopes, variables (read-only), continue. Proves the transport +
-// routing + park/pump wiring without needing VS Code. Interpreter backend only (the hook).
+// routing + park/pump wiring without needing VS Code, on the backend --backend= picks.
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
@@ -9,6 +9,7 @@
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 
 #include <jaiscript/debug/connector.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 
 #ifdef _WIN32
     #ifndef WIN32_LEAN_AND_MEAN
@@ -192,6 +193,12 @@ int extract_int(const std::string& buf, const std::string& key) {
     bool any = false;
     while (p < buf.size() && buf[p] >= '0' && buf[p] <= '9') { v = v * 10 + (buf[p] - '0'); ++p; any = true; }
     return any ? sign * v : -1;
+}
+
+// The variablesReference of the scope named `name` in a scopes reply
+int scope_reference(const std::string& buf, const std::string& name) {
+    const size_t p = buf.find("\"name\":\"" + name + "\"");
+    return p == std::string::npos ? -1 : extract_int(buf.substr(p), "variablesReference");
 }
 
 // Keep the regression buildable against the pre-privilege baseline: that engine
@@ -379,18 +386,19 @@ public:
             int frame_id = extract_int(step_buf, "id");   // generation-scoped; changes per stop
             check_gt(frame_id, 0);
 
-            // scopes -> Locals; x==1 now (line 1 ran), y/z not declared yet
+            // scopes -> Locals + Globals; the top level's x==1 now (line 1 ran), y/z not declared yet
             std::string scopes_buf;
             std::string sreq = R"({"seq":8,"type":"request","command":"scopes","arguments":{"frameId":)"
                 + std::to_string(frame_id) + "}}";
             send_dap(cli, sreq);
-            check_true(wait_for(cli, scopes_buf, "\"name\":\"Locals\""));
-            int locals_ref = extract_int(scopes_buf, "variablesReference");
-            check_gt(locals_ref, 0);
+            check_true(wait_for(cli, scopes_buf, "\"name\":\"Globals\""));
+            check_true(scopes_buf.find("\"name\":\"Locals\"") != std::string::npos);
+            int globals_ref = scope_reference(scopes_buf, "Globals");
+            check_gt(globals_ref, 0);
 
             std::string vars_buf;
             std::string vreq = R"({"seq":9,"type":"request","command":"variables","arguments":{"variablesReference":)"
-                + std::to_string(locals_ref) + "}}";
+                + std::to_string(globals_ref) + "}}";
             send_dap(cli, vreq);
             check_true(wait_for(cli, vars_buf, "\"command\":\"variables\""));
             check_true(vars_buf.find("\"name\":\"x\"") != std::string::npos);
@@ -417,6 +425,148 @@ public:
             wait_for(cli, cont_buf, "\"command\":\"disconnect\"", 1000);
             close_client(cli);
             // eng's destructor stops the connector (joins its thread, detaches the controller).
+        });
+
+        // The reviewer's frame loop: a script that sleeps between a few statements is already running when the editor
+        // attaches; the breakpoint stops it, and a pause after continue stops it again
+        test("dap_sleep_paced_loop_stops_at_a_breakpoint_and_pauses", [this]() {
+            wsa_up();
+            auto eng = make_engine();
+            eng->execution_budget(0);
+            jai::stdlib::register_all(eng);
+            auto conn = std::make_shared<jai::debug::debug_connector>(0);
+            eng->set_debug_connector(conn);
+            sock_t cli = connect_client(conn->port());
+            check_true(cli != kBad);
+            if (cli == kBad) return;
+            struct client_guard { sock_t socket; ~client_guard() { close_client(socket); } } close{cli};
+
+            std::string buf;
+            send_dap(cli, R"({"seq":1,"type":"request","command":"initialize"})");
+            check_true(wait_for(cli, buf, "\"event\":\"initialized\""));
+
+            std::string script_error;
+            std::thread script([&] {
+                try {
+                    eng->execute("int frames = 0;\nbool quit = false;\nwhile (!quit && frames < 400) {\n"
+                                 "    time::sleep_ms(20);\n    frames = frames + 1;\n}\n");
+                } catch (const std::exception& e) { script_error = e.what(); }
+            });
+            struct script_guard {
+                jai::debug::controller& debugger;
+                std::thread& thread;
+                ~script_guard() { debugger.set_enabled(false); if (thread.joinable()) thread.join(); }
+            } join{eng->debugger(), script};
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            send_dap(cli, R"({"seq":2,"type":"request","command":"attach"})");
+            check_true(wait_for(cli, buf, "\"command\":\"attach\""));
+            send_dap(cli, R"({"seq":3,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":"<script>"},"breakpoints":[{"line":5}]}})");
+            check_true(wait_for(cli, buf, "\"verified\":true"));
+            send_dap(cli, R"({"seq":4,"type":"request","command":"configurationDone"})");
+            check_true(wait_for(cli, buf, "\"event\":\"stopped\""), "the breakpoint stops the running loop");
+            check_true(buf.find("\"reason\":\"breakpoint\"") != std::string::npos);
+
+            std::string pause_buf;
+            send_dap(cli, R"({"seq":5,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":"<script>"},"breakpoints":[]}})");
+            check_true(wait_for(cli, pause_buf, "\"request_seq\":5"));
+            send_dap(cli, R"({"seq":6,"type":"request","command":"continue","arguments":{"threadId":1}})");
+            check_true(wait_for(cli, pause_buf, "\"request_seq\":6"));
+            send_dap(cli, R"({"seq":7,"type":"request","command":"pause","arguments":{"threadId":1}})");
+            check_true(wait_for(cli, pause_buf, "\"event\":\"stopped\""), "the pause stops the running loop");
+            check_true(pause_buf.find("\"reason\":\"pause\"") != std::string::npos);
+
+            auto& dbg = eng->debugger();
+            dbg.post_command([&] { dbg.set_variable("quit", eng->make_value(true)); });
+            std::string end_buf;
+            send_dap(cli, R"({"seq":8,"type":"request","command":"continue","arguments":{"threadId":1}})");
+            check_true(wait_for(cli, end_buf, "\"request_seq\":8"));
+            script.join();
+            check_eq(std::string(), script_error);
+            check_true(eng->get_variable("frames").as_int() < 400, "the paused loop was released through quit");
+        });
+
+        // Stopped two calls deep: every frame lists innermost first, each frame's scopes answer its own locals, and the
+        // Globals scope answers the program scope
+        test("dap_stack_trace_lists_every_frame_with_its_locals_and_globals", [this]() {
+            wsa_up();
+            auto eng = make_engine();
+            auto conn = std::make_shared<jai::debug::debug_connector>(0);
+            eng->set_debug_connector(conn);
+            sock_t cli = connect_client(conn->port());
+            check_true(cli != kBad);
+            if (cli == kBad) return;
+            struct client_guard { sock_t socket; ~client_guard() { close_client(socket); } } close{cli};
+
+            std::string buf;
+            send_dap(cli, R"({"seq":1,"type":"request","command":"initialize"})");
+            check_true(wait_for(cli, buf, "\"event\":\"initialized\""));
+            send_dap(cli, R"({"seq":2,"type":"request","command":"attach"})");
+            check_true(wait_for(cli, buf, "\"command\":\"attach\""));
+            send_dap(cli, R"({"seq":3,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":"<script>"},"breakpoints":[{"line":4}]}})");
+            check_true(wait_for(cli, buf, "\"verified\":true"));
+
+            std::thread script([&] {
+                eng->execute("int counter = 7;\n"
+                             "function inner(int a) -> int {\n"
+                             "    int b = a + 1;\n"
+                             "    return b * 2;\n"
+                             "}\n"
+                             "function tick(int n) -> int {\n"
+                             "    int local_tick = n + 10;\n"
+                             "    return inner(local_tick);\n"
+                             "}\n"
+                             "auto result = tick(counter);\n");
+            });
+            struct script_guard {
+                jai::debug::controller& debugger;
+                std::thread& thread;
+                ~script_guard() { debugger.set_enabled(false); if (thread.joinable()) thread.join(); }
+            } join{eng->debugger(), script};
+            check_true(wait_for(cli, buf, "\"event\":\"stopped\""));
+
+            std::string frames_buf;
+            send_dap(cli, R"({"seq":4,"type":"request","command":"stackTrace","arguments":{"threadId":1}})");
+            check_true(wait_for(cli, frames_buf, "\"totalFrames\":3"));
+            const size_t inner_at = frames_buf.find("\"name\":\"inner\"");
+            const size_t tick_at = frames_buf.find("\"name\":\"tick\"");
+            const size_t top_at = frames_buf.find("\"name\":\"<script>\",\"line\"");   // the frame, not a source's name
+            check_true(inner_at != std::string::npos && tick_at != std::string::npos && top_at != std::string::npos);
+            check_true(inner_at < tick_at && tick_at < top_at, "innermost first, the top level last");
+            const size_t tick_id_at = frames_buf.rfind("\"id\":", tick_at);
+            const int tick_frame = tick_id_at == std::string::npos ? -1 : extract_int(frames_buf.substr(tick_id_at), "id");
+            check_gt(tick_frame, 0);
+            check_eq(8, extract_int(frames_buf.substr(tick_at), "line"));
+
+            std::string scopes_buf;
+            send_dap(cli, R"({"seq":5,"type":"request","command":"scopes","arguments":{"frameId":)" + std::to_string(tick_frame) + "}}");
+            check_true(wait_for(cli, scopes_buf, "\"name\":\"Globals\""));
+            const int tick_locals = scope_reference(scopes_buf, "Locals");
+            const int globals = scope_reference(scopes_buf, "Globals");
+            check_gt(tick_locals, 0);
+            check_gt(globals, 0);
+
+            std::string locals_buf;
+            send_dap(cli, R"({"seq":6,"type":"request","command":"variables","arguments":{"variablesReference":)" + std::to_string(tick_locals) + "}}");
+            check_true(wait_for(cli, locals_buf, "\"name\":\"local_tick\",\"value\":\"17\""));
+            check_true(locals_buf.find("\"name\":\"n\",\"value\":\"7\"") != std::string::npos);
+            check_true(locals_buf.find("\"name\":\"a\"") == std::string::npos, "the caller's frame shows its own locals");
+
+            std::string globals_buf;
+            send_dap(cli, R"({"seq":7,"type":"request","command":"variables","arguments":{"variablesReference":)" + std::to_string(globals) + "}}");
+            check_true(wait_for(cli, globals_buf, "\"name\":\"counter\",\"value\":\"7\""));
+
+            std::string page_buf;
+            send_dap(cli, R"({"seq":8,"type":"request","command":"stackTrace","arguments":{"threadId":1,"startFrame":1,"levels":1}})");
+            check_true(wait_for(cli, page_buf, "\"totalFrames\":3"));
+            check_true(page_buf.find("\"name\":\"tick\"") != std::string::npos);
+            check_true(page_buf.find("\"name\":\"inner\"") == std::string::npos, "startFrame and levels page the stack");
+
+            std::string end_buf;
+            send_dap(cli, R"({"seq":9,"type":"request","command":"continue","arguments":{"threadId":1}})");
+            check_true(wait_for(cli, end_buf, "\"request_seq\":9"));
+            script.join();
+            check_eq(int64_t(36), eng->get_variable("result").as_int());
         });
 
         test("dap_breakpoint_on_a_path_no_unit_carries_stays_unverified", [this]() {

@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/debug/controller.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
 
 #include <atomic>
@@ -9,6 +10,7 @@
 #include <thread>
 #include <chrono>
 #include <future>
+#include <optional>
 #include <filesystem>
 #include <fstream>
 
@@ -284,6 +286,200 @@ public:
         check_eq(std::string("42"), value_of("total"));
         check_true(done.load());
         check_eq(static_cast<int64_t>(42), eng->get_variable("r").as_int());
+    }
+
+    // Stops reported on the script thread, waited for one at a time from the driver thread
+    struct stop_waiter {
+        std::mutex m;
+        std::condition_variable cv;
+        bool stopped = false;
+        jai::debug::stop_info last;
+
+        explicit stop_waiter(jai::debug::controller& dbg) {
+            dbg.set_on_stopped([this](const jai::debug::stop_info& si) {
+                std::lock_guard<std::mutex> lk(m);
+                last = si;
+                stopped = true;
+                cv.notify_all();
+            });
+        }
+
+        // The stop, or nothing when none came within the timeout
+        std::optional<jai::debug::stop_info> wait(std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
+            std::unique_lock<std::mutex> lk(m);
+            if (!cv.wait_for(lk, timeout, [&] { return stopped; })) return std::nullopt;
+            stopped = false;
+            return last;
+        }
+    };
+
+    // Runs read on the parked script thread and hands back its answer (nothing when the thread never ran it)
+    template<typename Read>
+    static auto parked_read(jai::debug::controller& dbg, Read read) -> std::optional<decltype(read())> {
+        auto answer = std::make_shared<std::promise<decltype(read())>>();
+        auto fut = answer->get_future();
+        dbg.post_command([answer, read] { answer->set_value(read()); });
+        if (fut.wait_for(std::chrono::seconds(5)) != std::future_status::ready) return std::nullopt;
+        return fut.get();
+    }
+
+    static std::string value_named(const std::vector<jai::debug::variable_info>& vars, const std::string& name) {
+        for (const auto& v : vars) { if (v.name == name) return v.value; }
+        return "<missing>";
+    }
+
+    // A frame loop paced by sleeps runs a few statements between them, far fewer than the 1024 back edges and calls
+    // the budget clock samples at: an attach with a breakpoint, and then a pause, made while it runs stop it at once
+    void sleep_paced_loop_stops_promptly(jai::backend_type type) {
+        auto eng = make_backend_engine(type);
+        eng->execution_budget(0);
+        jai::stdlib::register_all(eng);
+        auto& dbg = eng->debugger();
+        stop_waiter stops(dbg);
+
+        const std::string src =
+            "int frames = 0;\n"                         // line 1
+            "bool quit = false;\n"                      // line 2
+            "while (!quit && frames < 400) {\n"         // line 3
+            "    time::sleep_ms(20);\n"                 // line 4
+            "    frames = frames + 1;\n"                // line 5
+            "}\n";
+        std::string script_error;
+        std::thread script([&] {
+            try { eng->execute(src); } catch (const std::exception& e) { script_error = e.what(); }
+        });
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));   // running, no session armed
+
+        dbg.set_breakpoints("<script>", {5});
+        dbg.set_enabled(true);
+        const auto hit = stops.wait();
+        std::optional<int64_t> frames_at_hit;
+        if (hit) {
+            frames_at_hit = parked_read(dbg, [&] { return eng->get_variable("frames").as_int(); });
+            dbg.clear_breakpoints();
+            dbg.resume();
+        }
+
+        dbg.request_pause();
+        const auto pause = stops.wait();
+        std::optional<int64_t> frames_at_pause;
+        if (pause) {
+            frames_at_pause = parked_read(dbg, [&] {
+                dbg.set_variable("quit", eng->make_value(true));
+                return eng->get_variable("frames").as_int();
+            });
+        }
+        dbg.detach();
+        script.join();
+
+        check_eq(std::string(), script_error);
+        check_true(hit.has_value(),"a breakpoint set while a sleep-paced loop runs must stop it");
+        if (hit) {
+            check_eq(std::string("breakpoint"), hit->reason);
+            check_eq(5, hit->line);
+        }
+        check_true(frames_at_hit.has_value() && *frames_at_hit < 100, "the stop comes within a few sleeps of the attach");
+        check_true(pause.has_value(), "a pause while a sleep-paced loop runs must stop it");
+        if (pause) check_eq(std::string("pause"), pause->reason);
+        check_true(frames_at_pause.has_value() && *frames_at_pause < 200, "the pause comes within a few sleeps of the request");
+        check_true(eng->get_variable("frames").as_int() < 400, "the paused loop was released through quit");
+    }
+
+    struct stack_view {
+        std::vector<jai::debug::frame_info> frames;
+        std::vector<std::vector<jai::debug::variable_info>> locals;
+        std::vector<jai::debug::variable_info> globals;
+    };
+
+    static stack_view read_stack(jai::debug::controller& dbg) {
+        stack_view result;
+        result.frames = dbg.list_frames();
+        for (size_t i = 0; i < result.frames.size(); ++i) { result.locals.push_back(dbg.list_locals(i)); }
+        result.globals = dbg.list_globals();
+        return result;
+    }
+
+    // The stack at a stop lists every frame innermost first, named and located as an error trace has it, the top level
+    // last; each frame has its own locals and the program scope its globals
+    void stack_trace_lists_every_frame_with_its_locals(jai::backend_type type) {
+        auto eng = make_backend_engine(type);
+        auto& dbg = eng->debugger();
+        stop_waiter stops(dbg);
+        dbg.set_breakpoints("<script>", {4, 13});
+        dbg.set_enabled(true);
+
+        const std::string src =
+            "int counter = 7;\n"                        // line 1
+            "function inner(int a) -> int {\n"          // line 2
+            "    int b = a + 1;\n"                      // line 3
+            "    return b * 2;\n"                       // line 4  (breakpoint)
+            "}\n"                                       // line 5
+            "function tick(int n) -> int {\n"           // line 6
+            "    int local_tick = n + 10;\n"            // line 7
+            "    return inner(local_tick);\n"           // line 8
+            "}\n"                                       // line 9
+            "auto result = tick(counter);\n"            // line 10
+            "{\n"                                       // line 11
+            "    int block_local = result + 1;\n"       // line 12
+            "    int twice = block_local * 2;\n"        // line 13 (breakpoint, at the top level)
+            "}\n";
+        std::string script_error;
+        std::thread script([&] {
+            try { eng->execute(src); } catch (const std::exception& e) { script_error = e.what(); }
+        });
+
+        const auto nested = stops.wait();
+        std::optional<stack_view> in_inner;
+        if (nested) {
+            in_inner = parked_read(dbg, [&] { return read_stack(dbg); });
+            dbg.resume();
+        }
+        const auto top = stops.wait();
+        std::optional<stack_view> at_top;
+        if (top) {
+            at_top = parked_read(dbg, [&] { return read_stack(dbg); });
+            dbg.resume();
+        }
+        dbg.detach();
+        script.join();
+
+        check_eq(std::string(), script_error);
+        check_true(in_inner.has_value());
+        if (in_inner) {
+            const auto& s = *in_inner;
+            check_eq(size_t(3), s.frames.size());
+            if (s.frames.size() == 3) {
+                check_eq(std::string("inner"), s.frames[0].name);
+                check_eq(4, s.frames[0].line);
+                check_eq(std::string("tick"), s.frames[1].name);
+                check_eq(8, s.frames[1].line);
+                check_eq(std::string("<script>"), s.frames[2].name);
+                check_eq(10, s.frames[2].line);
+                check_eq(std::string("<script>"), s.frames[1].file);
+                check_eq(std::string("17"), value_named(s.locals[0], "a"));
+                check_eq(std::string("18"), value_named(s.locals[0], "b"));
+                check_eq(std::string("<missing>"), value_named(s.locals[0], "n"));
+                check_eq(std::string("7"), value_named(s.locals[1], "n"));
+                check_eq(std::string("17"), value_named(s.locals[1], "local_tick"));
+                check_eq(std::string("<missing>"), value_named(s.locals[1], "a"));
+                check_true(s.locals[2].empty(), "the top level's block scopes are out of reach below a call");
+            }
+            check_eq(std::string("7"), value_named(s.globals, "counter"));
+            check_eq(std::string("<missing>"), value_named(s.globals, "result"));
+            check_eq(std::string("<missing>"), value_named(s.globals, "tick"));
+        }
+        check_true(at_top.has_value());
+        if (at_top) {
+            const auto& s = *at_top;
+            check_eq(size_t(1), s.frames.size());
+            if (s.frames.size() == 1) {
+                check_eq(std::string("<script>"), s.frames[0].name);
+                check_eq(13, s.frames[0].line);
+                check_eq(std::string("37"), value_named(s.locals[0], "block_local"));
+                check_eq(std::string("<missing>"), value_named(s.locals[0], "counter"));
+            }
+            check_eq(std::string("36"), value_named(s.globals, "result"));
+        }
     }
 
     // Parallel regions are ATOMIC to the debugger. A breakpoint inside the
@@ -595,6 +791,18 @@ public:
         });
         test("vm_frame_locals_name_bare_compound_rhs", [this]() {
             frame_locals_name_bare_compound_rhs(jai::backend_type::vm);
+        });
+        test("sleep_paced_loop_stops_promptly", [this]() {
+            sleep_paced_loop_stops_promptly(jai::backend_type::interpreter);
+        });
+        test("vm_sleep_paced_loop_stops_promptly", [this]() {
+            sleep_paced_loop_stops_promptly(jai::backend_type::vm);
+        });
+        test("stack_trace_lists_every_frame_with_its_locals", [this]() {
+            stack_trace_lists_every_frame_with_its_locals(jai::backend_type::interpreter);
+        });
+        test("vm_stack_trace_lists_every_frame_with_its_locals", [this]() {
+            stack_trace_lists_every_frame_with_its_locals(jai::backend_type::vm);
         });
         test("parallel_region_atomic_to_debugger", [this]() {
             parallel_region_atomic_to_debugger(jai::backend_type::interpreter);

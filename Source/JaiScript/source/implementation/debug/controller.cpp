@@ -34,8 +34,9 @@ controller::controller(engine* eng) : engine_(eng) {}
 void controller::set_enabled(bool on) {
     bool was = enabled_.exchange(on, std::memory_order_acq_rel);
     if (on == was) return;
-    // The interpreter notices at its next debug sync point (execute entry / the
-    // 1024-tick budget sample). While its hook is armed it suspends wall-clock deadline
+    sync_requested_.store(true, std::memory_order_release);
+    // The backend notices at its next debug sync point (execute or host entry, a
+    // time::sleep, the 1024-tick budget sample). While its hook is armed it suspends wall-clock deadline
     // checks itself and re-arms a fresh deadline when the session ends — a script parked
     // for minutes is never killed by the budget, and nothing here touches engine state
     // cross-thread. Leaving a session must never strand a parked thread or a live step mode.
@@ -59,6 +60,7 @@ void controller::publish_breakpoints(const std::string& file, std::vector<int> l
     records[file] = breakpoint_record{std::move(lines), ++next->sequence};
     breakpoints_.store(std::move(next), std::memory_order_release);
     bp_version_.fetch_add(1, std::memory_order_release);   // after publication: sync sees an at-least-as-new snapshot
+    sync_requested_.store(true, std::memory_order_release);
 }
 
 void controller::set_on_source_loaded(std::function<void(const std::string&)> cb) {
@@ -92,10 +94,12 @@ void controller::clear_breakpoints() {
     next->clear_sequence = next->sequence;
     breakpoints_.store(std::move(next), std::memory_order_release);
     bp_version_.fetch_add(1, std::memory_order_release);
+    sync_requested_.store(true, std::memory_order_release);
 }
 
 void controller::request_pause() {
     pending_pause_.store(1, std::memory_order_relaxed);
+    sync_requested_.store(true, std::memory_order_release);
 }
 
 void controller::resume() {
@@ -138,6 +142,7 @@ void controller::detach() {
     std::lock_guard<std::mutex> lk(mtx_);
     step_mode_.store(static_cast<int>(step_mode::none), std::memory_order_relaxed);
     pending_pause_.store(0, std::memory_order_relaxed);
+    sync_requested_.store(true, std::memory_order_release);
     resume_requested_ = true;
     cv_.notify_all();
 }
@@ -156,29 +161,13 @@ void controller::set_variable(const std::string& name, const script_value& value
     engine_->add_global(name, value);
 }
 
-std::vector<frame_info> controller::list_frames() const {
-    // The top frame only: the stop location (internal/DEBUGGER_DESIGN.md phasing).
-    return { frame_info{ "script", current_stop_.file, current_stop_.line } };
-}
+namespace {
 
-std::vector<variable_info> controller::list_locals() const {
+// callables are noise in a Variables view
+std::vector<variable_info> rendered_variables(const std::vector<std::pair<std::string, script_value>>& named) {
     std::vector<variable_info> out;
-    auto* backend = engine_->get_execution_backend();
-    if (!backend) return out;
-
-    // Function locals live in the call frame's slot vector, which the environment's flat map
-    // does NOT hold — ask the backend to name them from the frame's function AST. At global
-    // scope (no frame) that is empty, so fall back to the environment's named locals/globals.
-    auto named = backend->get_current_frame_locals();
-    if (named.empty()) {
-        if (auto env = backend->get_current_environment()) {
-            for (const auto& [name, value] : env->get_local_variables())
-                named.emplace_back(std::string(name), value);
-        }
-    }
-
     for (const auto& [name, value] : named) {
-        if (value.is_function()) continue;   // callables are noise in a Locals view
+        if (value.is_function()) continue;
         std::string type;
         if (value.is_array()) type = "array";
         else if (value.is_map()) type = "map";
@@ -189,6 +178,57 @@ std::vector<variable_info> controller::list_locals() const {
     std::sort(out.begin(), out.end(),
               [](const variable_info& a, const variable_info& b) { return a.name < b.name; });
     return out;
+}
+
+// The scopes between the innermost environment and the program scope, an inner name hiding an outer one
+std::vector<std::pair<std::string, script_value>> block_scope_variables(const environment* env, const environment* program) {
+    std::vector<std::pair<std::string, script_value>> out;
+    std::unordered_set<std::string_view> seen;
+    for (; env && env != program; env = env->get_parent().get()) {
+        for (const auto& [name, value] : env->get_local_variables()) {
+            if (seen.insert(name).second) { out.emplace_back(std::string(name), value); }
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+std::vector<frame_info> controller::list_frames() const {
+    std::vector<frame_info> out;
+    if (auto* backend = engine_->get_execution_backend()) {
+        for (const auto& f : backend->debug_frames()) {
+            out.push_back(frame_info{ f.function, f.file, static_cast<int>(f.line) });
+        }
+    }
+    if (out.empty()) { out.push_back(frame_info{ "<script>", {}, 0 }); }
+    // the innermost frame stands where it stopped (a statement that holds the next one stops first)
+    out.front().file = current_stop_.file;
+    out.front().line = current_stop_.line;
+    return out;
+}
+
+std::vector<variable_info> controller::list_locals(size_t frame) const {
+    auto* backend = engine_->get_execution_backend();
+    if (!backend) return {};
+    // Function locals live in the call frame's slot vector, which the environment's flat map
+    // does NOT hold — ask the backend to name them from the frame's function AST. The top
+    // level's block scopes are environments, reachable only while it is the innermost frame.
+    const auto frames = backend->debug_frames();
+    const bool top_level = frames.empty() || (frame + 1 == frames.size() && frames.back().function == "<script>");
+    if (!top_level) return rendered_variables(backend->get_frame_locals(frame));
+    if (frame != 0) return {};
+    const auto env = backend->get_current_environment();
+    const auto program = engine_->get_global_environment();
+    return rendered_variables(block_scope_variables(env.get(), program.get()));
+}
+
+std::vector<variable_info> controller::list_globals() const {
+    std::vector<std::pair<std::string, script_value>> named;
+    if (const auto program = engine_->get_global_environment()) {
+        for (const auto& [name, value] : program->get_local_variables()) { named.emplace_back(std::string(name), value); }
+    }
+    return rendered_variables(named);
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +249,7 @@ bool controller::breakpoint_hit(const std::string& file, int line) const {
 }
 
 bool controller::sync_hot_state() {
+    sync_requested_.exchange(false, std::memory_order_acquire);   // before the reads: a change raised after it syncs again
     if (!enabled_.load(std::memory_order_acquire)) {
         hot_step_or_pause_ = false;
         hot_line_bloom_ = nullptr;
@@ -312,10 +353,12 @@ bool controller::stops_at(const ast_node* node) noexcept {
 }
 
 void controller::on_statement(const ast_node* node, int depth) {
-    if (!stops_at(node)) return;
     // Reentrancy: a repl/inspection closure that runs script code must not itself trip
     // breakpoints or stepping (we'd park recursively). Same thread, so a plain flag.
     if (in_command_) return;
+    // An armed session's next statement applies a pending breakpoint edit, pause or detach
+    if (sync_requested_.load(std::memory_order_relaxed)) [[unlikely]] { engine_->get_execution_backend()->sync_debug_hook(); }
+    if (!stops_at(node)) return;
     // A detach can race the cached gate; never park for a session that just ended.
     if (!enabled_.load(std::memory_order_relaxed)) return;
     std::string reason;
@@ -352,8 +395,9 @@ void controller::park(const stop_info& si) {
     paused_.store(false, std::memory_order_release);
     lk.unlock();
     // Park exit is a debug sync point: a step mode set by the resume side and any
-    // breakpoints edited during the pause must be live from the very next statement.
-    sync_hot_state();
+    // breakpoints edited during the pause must be live from the very next statement,
+    // and a detach during the pause disarms the backend's gate at once.
+    engine_->get_execution_backend()->sync_debug_hook();
 }
 
 } // namespace jai::debug

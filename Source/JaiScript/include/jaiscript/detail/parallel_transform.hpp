@@ -380,6 +380,8 @@ namespace jai::detail {
             uint64_t slot_cursor_cyc = 0;    // slots slice: cursor mint + call_args
             uint64_t admit_pool_cyc = 0;     // admit slice: thread count, pool acquire, cost cap, partition
             uint64_t admit_guard_cyc = 0;    // admit slice: region guard, type metadata
+            uint64_t slot_resets = 0;      // slots reused for a region (the provisioning fingerprint held)
+            uint64_t slot_provisions = 0;  // slots built for a region (no slot, or another body's)
             uint64_t claims = 0;           // block claims (one fetch_add each) over every worker
             uint64_t claim_cyc = 0;        // cycles inside those fetch_adds (the counter's contention)
             uint64_t claim_cyc_max = 0;    // the slowest single claim

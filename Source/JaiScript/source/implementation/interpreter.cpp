@@ -8043,7 +8043,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                     if (parallel_worker_ && cls_raw && !worker_pin) [[unlikely]] {
                         return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
                             "method '{0}' was not admitted in this parallel body (admitted: single-overload "
-                            "public methods on the element's own class touching only element, local, or "
+                            "public methods of the element's class or its bases touching only element, local, or "
                             "captured-read state)", member->member_id);
                     }
                     if (worker_pin && !worker_pin->resolved) [[unlikely]] {

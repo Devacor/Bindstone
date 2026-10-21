@@ -2212,7 +2212,7 @@ public:
 				return "no-error";
 			)");
 			auto msg = r.as<std::string>();
-			check_true(msg.find("only single-overload methods defined on the element's own class") != std::string::npos);
+			check_true(msg.find("only single-overload methods of the element's class or its bases") != std::string::npos);
 		});
 
 		test("custom_operator_denied_with_verdict", [this]() {
@@ -2409,7 +2409,7 @@ public:
 				{ "own_method", "value 2208" },
 				{ "nested_own_method", "error parallel_for: method 'inner' must be called as 'this.inner()' in a parallel body (bare sibling calls are not admitted, v1)" },
 				{ "explicit_sibling_method", "value 2208" },
-				{ "nested_field_method", "error method 'read' was not admitted in this parallel body (admitted: single-overload public methods on the element's own class touching only element, local, or captured-read state)" },
+				{ "nested_field_method", "error method 'read' was not admitted in this parallel body (admitted: single-overload public methods of the element's class or its bases touching only element, local, or captured-read state)" },
 				{ "getter", "error only direct field access on class instances is allowed in a parallel body" },
 				{ "literal_string", "value 2208" },
 				{ "captured_string_table", "value 2208" },

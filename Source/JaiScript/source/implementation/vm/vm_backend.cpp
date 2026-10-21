@@ -8136,11 +8136,12 @@ std::vector<chunk::entry_memo_row>* vm_backend::cells_entry_rows(frame& f) {
 const chunk::entry_memo_row* vm_backend::cells_entry_row(frame& f, const chunk::cell_loop& loop) {
 	const std::vector<chunk::entry_memo_row>* rows = cells_entry_rows(f);
 	const size_t li = static_cast<size_t>(&loop - f.code->cell_loops.data());
-	if (!rows || li >= rows->size()) { note_worker_decline(worker_decline::entry_row_none); return nullptr; }
+	if (!rows || li >= rows->size()) { note_entry_row(worker_decline::entry_row_none); return nullptr; }
 	const chunk::entry_memo_row& row = (*rows)[li];
-	if (row.env_of != environment_.get()) { note_worker_decline(worker_decline::entry_row_env); return nullptr; }
-	if (row.env_serial != env_symbolizer_->env_epoch()) { note_worker_decline(worker_decline::entry_row_serial); return nullptr; }
-	if (row.sites.size() != loop.sites.size() || !cells_entry_scope_free(f)) { note_worker_decline(worker_decline::entry_row_shape); return nullptr; }
+	if (row.env_of != environment_.get()) { note_entry_row(worker_decline::entry_row_env); return nullptr; }
+	if (row.env_serial != env_symbolizer_->env_epoch()) { note_entry_row(worker_decline::entry_row_serial); return nullptr; }
+	if (row.sites.size() != loop.sites.size() || !cells_entry_scope_free(f)) { note_entry_row(worker_decline::entry_row_shape); return nullptr; }
+	note_entry_row(worker_decline::count);
 	return &row;
 }
 
@@ -12279,28 +12280,14 @@ bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
 	if (holds && worker_holds) { *worker_holds = &fn; }
 	return holds;
 }
-// the element's index in the vector, SIZE_MAX when it lies in another (a caller chunk's site)
-template <class T> static size_t index_within(const T& item, const std::vector<T>& items) {
-	const uintptr_t at = reinterpret_cast<uintptr_t>(&item), base = reinterpret_cast<uintptr_t>(items.data());
-	return at >= base && at < base + items.size() * sizeof(T) ? (at - base) / sizeof(T) : SIZE_MAX;
-}
-// a worker's row for a call site's parked callee (null: the chunk has no record on this worker)
-vm_backend::worker_chunk_env_cache::call_ic* vm_backend::worker_call_ic(const frame& f, const call_site& site) {
-	worker_chunk_env_cache* rec = worker_chunk_record(f.code);
-	if (!rec) return nullptr;
-	const size_t i = index_within(site, f.code->call_sites);
-	if (i >= f.code->call_sites.size()) return nullptr;   // a site of another chunk (a caller's)
-	if (rec->call_ics.size() < f.code->call_sites.size()) { rec->call_ics.resize(f.code->call_sites.size()); }
-	return &rec->call_ics[i];
-}
-// a worker's row for an inline site's validated callee (null: the chunk has no record on this worker)
-const script_function** vm_backend::worker_inline_holds(const frame& f, const chunk::inline_site& site) {
-	worker_chunk_env_cache* rec = worker_chunk_record(f.code);
-	if (!rec) return nullptr;
-	const size_t i = index_within(site, f.code->inline_sites);
-	if (i >= f.code->inline_sites.size()) return nullptr;
-	if (rec->inline_holds.size() < f.code->inline_sites.size()) { rec->inline_holds.resize(f.code->inline_sites.size(), nullptr); }
-	return &rec->inline_holds[i];
+// a worker record's per-site rows, sized once for the record's chunk
+JAI_NOINLINE void vm_backend::size_worker_rows(worker_chunk_env_cache& rec) {
+	const chunk& code = *rec.code;
+	rec.call_ics.resize(code.call_sites.size());
+	rec.native_rows.resize(code.call_sites.size());
+	rec.inline_holds.resize(code.inline_sites.size(), nullptr);
+	rec.method_holds.resize(code.inline_sites.size(), {nullptr, 0});
+	rec.rows_sized = true;
 }
 // a method graft's guard: the receiver slot holds an instance whose class the guard validated at its current method epoch, and the
 // instance carries no field of the method's name; the validation is the call's own resolution (one public overload with the graft's
@@ -12360,8 +12347,8 @@ bool vm_backend::worker_inline_method_holds(frame& f, const chunk::inline_site& 
 	worker_chunk_env_cache* rec = worker_chunk_record(f.code);
 	if (!rec) { note_worker_decline(worker_decline::inline_method); return false; }
 	const size_t site_index = index_within(site, f.code->inline_sites);
-	if (site_index >= f.code->inline_sites.size()) return false;
-	if (rec->method_holds.size() < f.code->inline_sites.size()) { rec->method_holds.resize(f.code->inline_sites.size(), {nullptr, 0}); }
+	if (site_index == SIZE_MAX) return false;
+	if (!rec->rows_sized) [[unlikely]] { size_worker_rows(*rec); }
 	auto& row = rec->method_holds[site_index];
 	if (row.first == cd && row.second == cd->method_epoch()) return true;
 	note_worker_decline(worker_decline::inline_method);
@@ -12716,7 +12703,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 				{
 					return raise_(make_error_code(runtime_error_code::unsupported_operation),
 						"method '{0}' was not admitted in this parallel body (admitted: single-overload "
-						"public methods on the element's own class touching only element, local, or "
+						"public methods of the element's class or its bases touching only element, local, or "
 						"captured-read state)", member_id);
 				}
 			}
@@ -15007,7 +14994,14 @@ JAI_FORCEINLINE void* vm_backend::native_site_self(const call_site& site, class_
 	return detail::host_method_self(&inst, site.nat_hit);
 }
 
-void* vm_backend::worker_native_self(const frame& f, const call_site& site, class_definition& cd, class_instance& inst, uint64_t id, size_t argc, const void*& entry) {
+JAI_NOINLINE void vm_backend::worker_native_refill(worker_chunk_env_cache::native_row& row, class_definition& cd, class_instance& inst, uint64_t id, uint64_t stamp) {
+	row.cd = &cd;
+	row.stamp = stamp;
+	row.shape = cd.field_shape_epoch();
+	row.field_free = !cd.chain_declares_field(id) && cd.field_slot(id) == class_definition::k_no_field_slot;
+	detail::host_method_fill(&cd, &inst, id, engine_, row.hit);
+}
+JAI_FORCEINLINE void* vm_backend::worker_native_self(const frame& f, const call_site& site, class_definition& cd, class_instance& inst, uint64_t id, size_t argc, const void*& entry) {
 	const detail::parallel_method_pin* pin = parallel_method_pins_ ? parallel_method_pins_->find(&cd, id) : nullptr;
 	if (!pin || pin->resolved) { return nullptr; }
 	const uint64_t arity_bit = uint64_t(1) << std::min<size_t>(argc, 63);
@@ -15018,17 +15012,11 @@ void* vm_backend::worker_native_self(const frame& f, const call_site& site, clas
 	worker_chunk_env_cache* rec = worker_chunk_record(f.code);
 	if (!rec) { note_worker_decline(worker_decline::native_lane); return nullptr; }
 	const size_t site_index = index_within(site, f.code->call_sites);
-	if (site_index >= f.code->call_sites.size()) { return nullptr; }
-	if (rec->native_rows.size() < f.code->call_sites.size()) { rec->native_rows.resize(f.code->call_sites.size()); }
+	if (site_index == SIZE_MAX) { return nullptr; }
+	if (!rec->rows_sized) [[unlikely]] { size_worker_rows(*rec); }
 	worker_chunk_env_cache::native_row& row = rec->native_rows[site_index];
 	const uint64_t stamp = cd.is_script_class() ? cd.method_epoch() : cd.native_stamp();
-	if (row.cd != &cd || row.stamp != stamp || row.shape != cd.field_shape_epoch()) [[unlikely]] {
-		row.cd = &cd;
-		row.stamp = stamp;
-		row.shape = cd.field_shape_epoch();
-		row.field_free = !cd.chain_declares_field(id) && cd.field_slot(id) == class_definition::k_no_field_slot;
-		detail::host_method_fill(&cd, &inst, id, engine_, row.hit);
-	}
+	if (row.cd != &cd || row.stamp != stamp || row.shape != cd.field_shape_epoch()) [[unlikely]] { worker_native_refill(row, cd, inst, id, stamp); }
 	if (!row.hit.entry || ((!row.field_free || inst.has_user_overflow_fields()) && inst.has_field(id))) { return nullptr; }
 	entry = row.hit.entry;
 	return detail::host_method_self(&inst, row.hit);
@@ -16862,7 +16850,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				if (!(parallel_method_pins_ && cd && parallel_method_pins_->find(cd, member->member_id))) {
 					return raise_(make_error_code(runtime_error_code::unsupported_operation),
 						"method '{0}' was not admitted in this parallel body (admitted: single-overload "
-						"public methods on the element's own class touching only element, local, or "
+						"public methods of the element's class or its bases touching only element, local, or "
 						"captured-read state)", member->member_id);
 				}
 			}
@@ -19772,6 +19760,10 @@ void vm_backend::dump_opcode_profile() const {
 			if (profile_worker_declines_[k]) { line += std::string(line.empty() ? "" : " | ") + k_decline_names[k] + " " + std::to_string(profile_worker_declines_[k]); }
 		}
 		if (!line.empty()) { fprintf(stderr, "[vm-profile] worker declines: %s\n", line.c_str()); }
+		if (profile_entry_rows_[4] + profile_entry_rows_[0]) {
+			fprintf(stderr, "[vm-profile] entry rows: hit %llu | none %llu | env %llu | serial %llu | shape %llu\n", (unsigned long long)profile_entry_rows_[4],
+				(unsigned long long)profile_entry_rows_[0], (unsigned long long)profile_entry_rows_[1], (unsigned long long)profile_entry_rows_[2], (unsigned long long)profile_entry_rows_[3]);
+		}
 	}
 	const uint64_t er_total = profile_env_resolve_[0] + profile_env_resolve_[1] + profile_env_resolve_[2] +
 	                          profile_env_resolve_[3] + profile_env_resolve_[4] + profile_env_resolve_[6];

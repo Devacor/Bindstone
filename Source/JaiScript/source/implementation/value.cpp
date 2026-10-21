@@ -1177,20 +1177,19 @@ script_value script_value::make_referent_reference(const script_value& handle, e
     return v;
 }
 
-// an assignment through a reference to a bound object: copy-assigns the value's object of that class into it
+// an assignment through a reference to a bound object: the operator= the referent's class binds ("="), as C++ calls the class's own
 void script_value::reference_holder::store_referent(const script_value& value, engine* eng) {
-    const property_binding& binding = *property;
-    const class_definition* def = binding.referent_class;
-    const auto assign = def ? def->object_assign_function() : nullptr;
-    if (!assign || !def->cpp_type()) {
-        throw runtime_error("Cannot assign to a reference to '" + (def ? def->get_name() : std::string("object")) + "': it has no copy assignment script can use");
+    const class_definition* def = property->referent_class;
+    const uint64_t assign_id = eng->get_symbolizer()->intern("=");
+    if (!def || !def->has_method(assign_id)) {
+        throw runtime_error("Cannot assign to a reference to '" + (def ? def->get_name() : std::string("object")) + "': its binding has no operator=");
     }
-    const script_value& v = value.is_reference() ? value.deref() : value;
-    auto source = detail::checked_native_reference(v, *def->cpp_type(), def->get_type_id());
-    if (!source) {
-        throw runtime_error(format_error(source, *eng->get_symbolizer()));
+    script_value assign = def->get_method(assign_id, false);
+    std::vector<script_value> args{ *cell(), value.is_reference() ? value.deref() : value };
+    auto assigned = assign.as_function()(args);
+    if (!assigned) {
+        throw runtime_error(format_error(assigned, *eng->get_symbolizer()));
     }
-    if (source.value() != binding.referent) { assign(binding.referent, source.value()); }
 }
 
 script_value script_value::make_cpp_member_reference(const script_value& receiver, std::shared_ptr<void> object_pin,

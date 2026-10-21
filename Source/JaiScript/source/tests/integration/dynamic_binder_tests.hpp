@@ -13,7 +13,8 @@
 #include <vector>
 
 // A self-referential host type whose implicit copy assignment would copy a vector of unique_ptrs (std::is_copy_assignable says
-// yes and the assignment fails to compile), a type holding one by value, and a copy-assignable type that declares it
+// yes and the assignment fails to compile), a type holding one by value, a copy-assignable type that binds "=", and one whose
+// own operator= does more than copy
 namespace jai::foundry::tests {
 struct SelfTree {
     std::string id = "root";
@@ -33,14 +34,16 @@ struct NamedThing {
     std::string name = "named";
     NamedThing& self() { return *this; }
 };
+struct CountedAssign {
+    std::string name = "counted";
+    int64_t assigned = 0;
+    CountedAssign() = default;
+    CountedAssign(const CountedAssign&) = default;
+    CountedAssign& operator=(const CountedAssign& other) { name = other.name + "!"; ++assigned; return *this; }
+    CountedAssign& operator=(const std::string& text) { name = text; ++assigned; return *this; }
+    CountedAssign& self() { return *this; }
+};
 }
-template<> struct jai::copy_assignment<jai::foundry::tests::NamedThing> : std::true_type {};
-static_assert(!jai::copy_assignment<jai::foundry::tests::SelfTree>::value && !jai::copy_assignment<jai::foundry::tests::TreeHolder>::value,
-              "a class's assignment is unknowable from outside it");
-static_assert(!jai::copy_assignment<std::vector<std::unique_ptr<int>>>::value && !jai::copy_assignment<std::map<int, std::unique_ptr<int>>>::value,
-              "a container of a move-only type has none");
-static_assert(jai::copy_assignment<std::vector<std::string>>::value && jai::copy_assignment<std::map<std::string, std::vector<int>>>::value,
-              "strings and containers of them have one");
 
 namespace jai::foundry::tests {
 
@@ -299,7 +302,7 @@ public:
     static std::shared_ptr<engine> method_lane_engine() {
         auto eng = make_engine();
         jai::stdlib::register_all(*eng);
-        dynamic_binder<RefInner>(*eng, "RefInner").constructor<>().property("v", &RefInner::v).build();
+        dynamic_binder<RefInner>(*eng, "RefInner").constructor<>().property("v", &RefInner::v).auto_bind().build();
         dynamic_binder<RefFixed>(*eng, "RefFixed").constructor<>().property("v", &RefFixed::v).build();
         dynamic_binder<RefOwner>(*eng, "RefOwner")
             .constructor<>()
@@ -905,16 +908,40 @@ public:
             jai::stdlib::register_all(*eng);
             dynamic_binder<SelfTree>(*eng, "SelfTree").constructor<>().property("id", &SelfTree::id).method("self", &SelfTree::self).build();
             dynamic_binder<TreeHolder>(*eng, "TreeHolder").constructor<>().property("name", &TreeHolder::name).method("self", &TreeHolder::self).build();
-            dynamic_binder<NamedThing>(*eng, "NamedThing").constructor<>().property("name", &NamedThing::name).method("self", &NamedThing::self).build();
+            dynamic_binder<NamedThing>(*eng, "NamedThing").constructor<>().property("name", &NamedThing::name).method("self", &NamedThing::self)
+                .method("=", static_cast<NamedThing& (NamedThing::*)(const NamedThing&)>(&NamedThing::operator=)).build();
             for (const char* cls : {"SelfTree", "TreeHolder"}) {
                 std::string message;
                 try { eng->execute(std::string("var t = ") + cls + "(); var& r = t.self(); r = " + cls + "();"); } catch (const std::exception& error) { message = error.what(); }
-                check_eq(std::string("Cannot assign to a reference to '") + cls + "': it has no copy assignment script can use", message);
+                check_eq(std::string("Cannot assign to a reference to '") + cls + "': its binding has no operator=", message);
             }
             check_eq(std::string("renamed"), eng->execute("var s = SelfTree(); var& sr = s.self(); sr.id = \"renamed\"; s.id;").as_string(),
                      "member writes through the reference still land");
             check_eq(std::string("other"), eng->execute("var n = NamedThing(); var& nr = n.self(); var m = NamedThing(); m.name = \"other\"; nr = m; n.name;").as_string(),
-                     "a declared copy assignment assigns");
+                     "a bound \"=\" assigns");
+        });
+
+        // A bound "=" is the class's own operator=: a user-defined one runs (here it marks the copy and counts), and an "=" overload
+        // from another type resolves like any overload set
+        test("a_bound_operator_assign_runs_the_classes_own", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            dynamic_binder<CountedAssign>(*eng, "CountedAssign").constructor<>()
+                .property("name", &CountedAssign::name).property("assigned", &CountedAssign::assigned).method("self", &CountedAssign::self)
+                .method("=", static_cast<CountedAssign& (CountedAssign::*)(const CountedAssign&)>(&CountedAssign::operator=))
+                .method("=", static_cast<CountedAssign& (CountedAssign::*)(const std::string&)>(&CountedAssign::operator=))
+                .build();
+            auto out = eng->execute(R"(
+                var a = CountedAssign();
+                var& r = a.self();
+                var b = CountedAssign();
+                b.name = "copied";
+                r = b;
+                string s = a.name + "," + to_string(a.assigned) + ";";
+                r = "text";
+                s + a.name + "," + to_string(a.assigned);
+            )").as_string();
+            check_eq(std::string("copied!,1;text,2"), out);
         });
 
         // A host method's T& result binds a var& or auto& as C++ binds a reference: member writes and assignments land in
@@ -942,7 +969,7 @@ public:
                 s;
             )").as_string();
             check_eq(std::string("9,8,8,13,21"), out);
-            check_eq(std::string("Cannot assign to a reference to 'RefFixed': it has no copy assignment script can use"), [&]() {
+            check_eq(std::string("Cannot assign to a reference to 'RefFixed': its binding has no operator="), [&]() {
                 try { eng->execute("var f = RefOwner(); var& fc = f.fixed_child(); fc = RefFixed();"); } catch (const std::exception& error) { return std::string(error.what()); }
                 return std::string("no error");
             }());

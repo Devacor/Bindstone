@@ -2725,6 +2725,7 @@ std::optional<checked_result<bool>> interpreter::object_equality_via_method(cons
         }
         return std::nullopt;  // No == method - use default reference comparison
     }
+    if (!equality_operator_candidate(target.class_def, eq_method_id_, op_spaceship_id_, right)) { return std::nullopt; }
 
     // Create a bound method and call it with the right operand
     script_value bound = create_bound_method(left, method_val);
@@ -2743,7 +2744,7 @@ std::optional<checked_result<bool>> interpreter::object_equality_via_method(cons
 }
 
 // A declared operator!= wins over !(a == b) (C++20), asked where operator== would be: a class
-// instance against a non-null value of its kind, or any value one of its != overloads takes when the chain declares <=>.
+// instance against a value of its class, or any value one of its != overloads takes when the chain declares <=>.
 // KEEP BYTE-PARALLEL with vm_backend::object_inequality_via_method
 std::optional<checked_result<bool>> interpreter::object_inequality_via_method(const script_value& left, const script_value& right) {
     if (parallel_worker_) [[unlikely]] {
@@ -2757,7 +2758,7 @@ std::optional<checked_result<bool>> interpreter::object_inequality_via_method(co
     if (!target) { return std::nullopt; }
     script_value method_val = target.method(op_bang_equal_id_);
     if (!method_val.is_function()) { return std::nullopt; }
-    if (left.type() != right.type() && (!target.method(op_spaceship_id_).is_function() || !binary_operator_accepts(target.class_def, op_bang_equal_id_, right))) {
+    if (!equality_operator_candidate(target.class_def, op_bang_equal_id_, op_spaceship_id_, right)) {
         return std::nullopt;
     }
     auto result = create_bound_method(left, method_val).as_function()(std::vector<script_value>{right});
@@ -2865,7 +2866,9 @@ std::optional<checked_result<bool>> interpreter::object_comparison_via_method(co
 
     // Look for the operator method by symbol ID
     auto method_val = target.method(op_symbol_id);
-    if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
+    const bool declared = method_val.is_function();
+    // an explicit operator no overload of which takes the operand yields to a <=> that does (C++20: that candidate is not viable)
+    if (!declared || (target.method(op_spaceship_id_).is_function() && !binary_operator_accepts(target.class_def, op_symbol_id, right))) {
         if (script_value spaceship = target.method(op_spaceship_id_); spaceship.is_function() && binary_operator_accepts(target.class_def, op_spaceship_id_, right)) {
             auto result = create_bound_method(left, spaceship).as_function()(std::vector<script_value>{right});
             if (!result) {
@@ -2885,7 +2888,7 @@ std::optional<checked_result<bool>> interpreter::object_comparison_via_method(co
                 return object_comparison_via_method(unwrapped, right, op_symbol_id);
             }
         }
-        return std::nullopt;  // No custom method - use default comparison
+        if (!declared) { return std::nullopt; }  // No custom method - use default comparison
     }
 
     // Create a bound method and call it with the right operand

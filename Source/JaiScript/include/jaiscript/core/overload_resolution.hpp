@@ -58,8 +58,30 @@ inline bool parameter_admits(const parameter& p, const script_value& raw) {
            (kind == script_value_type::jai_float_type && p.type->base_type == script_value_type::jai_int_type);
 }
 
+// A host class's binary operator takes arg when one of its one-argument overloads scores it as the call's dispatch would; an
+// untyped binding takes anything
+inline bool host_operator_accepts(const class_definition& def, uint64_t name_id, const script_value& arg) {
+    const script_value method = def.get_method(name_id, false);
+    if (!method.is_function()) { return false; }
+    const auto* dispatch = method.as_function().target<class_definition::cpp_method_dispatch>();
+    if (!dispatch) { return true; }
+    const auto& table = dispatch->cls->cpp_method_overload_table();
+    const auto by_name = table.find(name_id);
+    if (by_name == table.end()) { return true; }
+    const auto unary = by_name->second.find(1);
+    if (unary == by_name->second.end() || unary->second.empty()) { return false; }
+    std::vector<std::vector<param_type_info>> signatures;
+    signatures.reserve(unary->second.size());
+    for (const auto& entry : unary->second) {
+        if (entry.param_types.empty()) { return true; }
+        signatures.push_back(entry.param_types);
+    }
+    engine* eng = dispatch->cls->get_engine();
+    return !eng || eng->select_cpp_overload(std::vector<script_value>{arg, arg}, signatures) >= 0;
+}
+
 // The chain's binary operator `name_id` is a candidate for `arg`: the nearest script declaration has a one-argument overload
-// that takes it (C++: a candidate the argument cannot reach is not viable), or a host class's method of that name
+// that takes it (C++: a candidate the argument cannot reach is not viable), or a host class's overload of that name takes it
 inline bool binary_operator_accepts(const class_definition* def, uint64_t name_id, const script_value& arg) {
     for (const class_definition* c = def; c; c = c->get_parent().get()) {
         const auto& overloads = c->script_method_overloads();
@@ -70,7 +92,27 @@ inline bool binary_operator_accepts(const class_definition* def, uint64_t name_i
             return false;
         }
     }
-    return def && def->get_method(name_id, false).is_function();
+    return def && host_operator_accepts(*def, name_id, arg);
+}
+
+// The chain's == (or !=) is a candidate for other: with <=> in the chain an overload must take it; without, other must be a
+// value of the class (a class without <=> compares only values of the class)
+inline bool equality_operator_candidate(const class_definition* def, uint64_t name_id, uint64_t spaceship_id, const script_value& other) {
+    if (!def) { return true; }
+    if (def->get_method(spaceship_id, false).is_function()) { return binary_operator_accepts(def, name_id, other); }
+    const script_value& d = other.deref();
+    if (!d.is_object()) { return false; }
+    const class_definition* other_def = nullptr;
+    auto holder = const_cast<script_value&>(d).get_object_holder();
+    if (!holder) { return false; }
+    if (holder->is_class_instance_wrapper) {
+        other_def = holder->data ? static_cast<class_instance*>(holder->data.get())->get_class_definition() : nullptr;
+    } else if (holder->type_name == def->get_name()) {
+        return true;
+    } else if (engine* eng = def->get_engine(); eng && !holder->type_name.empty()) {
+        other_def = eng->get_class_definition(std::string(holder->type_name)).get();
+    }
+    return other_def && (other_def == def || other_def->is_subtype_of(def->get_name()));
 }
 
 // A reversed comparison: a < b answered by b's <=> is (b <=> a) > 0, and so on

@@ -3635,6 +3635,7 @@ private:
 					                  : el.kind == ctype::int_k ? operand_class_int_int
 					                  : el.kind == ctype::float_k ? operand_class_float_float : operand_class_unknown;
 					stamp(b->static_operand_class, cls, operand_class_unknown);
+					if (cont.kind == ctype::map_k && !cont.tentative && r.kind == ctype::object_k && !r.tentative && !r.cls.empty()) { warn_identity_map_key(b, r.cls); }
 					const uint8_t receiver = cont.tentative ? 0 : cont.kind == ctype::string_k ? 1 : cont.kind == ctype::array_k ? 2 : cont.kind == ctype::map_k ? 3 : 0;
 					stamp(b->subscript_receiver, receiver, uint8_t(0));
 					return el;
@@ -3653,6 +3654,7 @@ private:
 				if (l.kind == ctype::object_k) {
 					if (auto user = class_binary_operator(l.cls, b->op.type, r)) { return *user; }
 				}
+				if (r.kind == ctype::object_k) { warn_missing_reflected(b, l, r); }
 				return binary_result(l, b->op.type, r);
 			}
 			case node_type::unary_expr: {
@@ -4458,7 +4460,8 @@ private:
 			auto* subscript = static_cast<binary_expr*>(target);
 			if (subscript->op.type == token_type::left_bracket) {
 				const ctype recv = declared_container_receiver(subscript->left.get(), infer(subscript->left.get()));
-				infer(subscript->right.get());
+				const ctype key = infer(subscript->right.get());
+				if (recv.kind == ctype::map_k && !recv.tentative && key.kind == ctype::object_k && !key.tentative && !key.cls.empty()) { warn_identity_map_key(subscript, key.cls); }
 				stamp(subscript->static_operand_class, operand_class_unknown, operand_class_unknown);
 				if (recv.kind == ctype::object_k && !recv.tentative && subscript_returns_by_value(recv.cls)) {
 					std::string text(detail::by_value_subscript_store_text);
@@ -4618,6 +4621,44 @@ private:
 
     // A class operand's binary arithmetic, bitwise or <=> operator runs when an overload of the chain's nearest set takes the
     // right operand (both backends): its declared result, or unknown; nullopt when none takes it (the builtin rule applies)
+    // A number or bool on the left of a bound class's arithmetic or bitwise operator, which the class binds no reflected
+    // operator for: the run time raises "No bound ..."; the warning names the binding to add
+    void warn_missing_reflected(const binary_expr* b, const ctype& l, const ctype& r) {
+        if (r.tentative || l.tentative || r.cls.empty()) { return; }
+        if (l.kind != ctype::int_k && l.kind != ctype::float_k && l.kind != ctype::bool_k) { return; }
+        const char* op = nullptr;
+        switch (b->op.type) {
+            case token_type::plus: op = "+"; break;
+            case token_type::minus: op = "-"; break;
+            case token_type::star: op = "*"; break;
+            case token_type::slash: op = "/"; break;
+            case token_type::percent: op = "%"; break;
+            case token_type::ampersand: op = "&"; break;
+            case token_type::pipe: op = "|"; break;
+            case token_type::caret: op = "^"; break;
+            case token_type::left_shift: op = "<<"; break;
+            case token_type::right_shift: op = ">>"; break;
+            default: return;
+        }
+        if (find_sclass(r.cls)) { return; }
+        auto def = eng_.get_class_definition(std::string(r.cls));
+        if (!def || def->is_script_class() || def->get_method(eng_.symbolize(engine::reflected_operator_name(op)), false).is_function()) { return; }
+        const std::string lt = ctype_name(l);
+        diag(diag_level::warning, b->location, "No bound '" + lt + " " + op + " " + std::string(r.cls) + "': bind operator \"" + op + "\" as (" + lt + ", " +
+             std::string(r.cls) + ") on " + std::string(r.cls) + ", or convert the operand");
+    }
+
+    // A value of a class with no <, <=> or hash() keys a map by identity (core/script_map.hpp): the run time warns once, the
+    // checker at the site
+    void warn_identity_map_key(const binary_expr* b, std::string_view cls) {
+        for (std::string_view name : {std::string_view("<"), std::string_view("<=>"), std::string_view("hash")}) {
+            const member_hit hit = lookup_member(cls, name, /*want_static=*/false);
+            if (hit.found || !hit.certain) { return; }
+        }
+        diag(diag_level::warning, b->location, "map keys of class '" + std::string(cls) +
+             "' compare by identity: declare operator<=> (or operator<) or hash() to key its values by value");
+    }
+
     std::optional<ctype> class_binary_operator(std::string_view cls, token_type op, const ctype& r) {
         std::string_view name;
         switch (op) {

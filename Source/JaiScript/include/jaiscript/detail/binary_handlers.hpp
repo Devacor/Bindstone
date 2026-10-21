@@ -15,6 +15,8 @@
 //   std::optional<checked_result<bool>> object_equality(l, r); bool defines_custom_equality(const script_value&)
 //   std::optional<checked_result<bool>> object_inequality(l, r)   // a declared operator!=, ahead of !(l == r)
 //   object_comparison_reversed(l, r, id), object_spaceship_reversed(l, r), object_spaceship_equality(l, r)   // <=> answers
+//   std::optional<checked_result<script_value>> object_reflected(l, r, id)   // r's bound reflected operator taking l (C++'s op(L, const R&))
+//   const class_definition* operand_class(const script_value&); uint64_t equality_id()   // an operand's class (null: no object)
 //   bool unwinding(); bool parallel_worker(); size_t& equality_depth()   // memberwise ==/<=> levels nested natively
 //   checked_result<script_value> equal(l, r)   // the backend's == entry
 //   checked_result<script_value> spaceship_member(l, r, order_walk*)   // the backend's <=> on a member pair of a walk
@@ -124,6 +126,30 @@ namespace jai::detail {
 		return cd && binary_operator_accepts(cd, id, r);
 	}
 
+	// No bound operator takes these operands: the text names the operation and the binding to add (a bound left operand's
+	// operator taking the right one, else a bound right operand's reflected operator or <=>); nullopt when neither is bound
+	template <class Host>
+	JAI_NOINLINE std::optional<checked_result<script_value>> bound_operator_miss(Host& h, const script_value& l, const script_value& r, uint64_t id) {
+		engine* eng = h.engine();
+		string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+		if (!symbols || symbols->frozen()) { return std::nullopt; }
+		const std::string op(symbols->get_string(id));
+		const class_definition* lc = h.operand_class(l);
+		const std::string lt = slot_source_type_name(l.deref(), eng);
+		const std::string rt = slot_source_type_name(r.deref(), eng);
+		std::string fix;
+		if (lc && host_operator_dispatch(lc->get_method(id, false))) {
+			fix = "\"" + op + "\" taking " + rt + " on " + lt;
+		} else if (const class_definition* rc = h.operand_class(r); rc && !rc->is_script_class() && !lc) {
+			const bool relational = op == "<" || op == "<=" || op == ">" || op == ">=" || op == "<=>";
+			fix = relational ? "\"<=>\" taking " + lt + " on " + rt : "\"" + op + "\" as (" + lt + ", " + rt + ") on " + rt;
+		} else {
+			return std::nullopt;
+		}
+		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "No bound '{0}': bind operator {1}, or convert the operand",
+		                                    symbols->intern(lt + " " + op + " " + rt), symbols->intern(fix));
+	}
+
 	template <arith_op Op>
 	inline bool arithmetic_has_builtin(size_t li, size_t ri) noexcept {
 		if (numeric_storage(li) && numeric_storage(ri)) { return true; }
@@ -160,10 +186,16 @@ namespace jai::detail {
 		if (object_storage(li) && arithmetic_has_builtin<Op>(uli, uri) && h.operator_takes(left, right, method_id)) {
 			if (auto custom = h.object_arithmetic(left, right, method_id)) { return std::move(*custom); }
 		}
+		if (!object_storage(li) && object_storage(ri) && arithmetic_has_builtin<Op>(uli, uri)) {
+			if (auto reflected = h.object_reflected(left, right, method_id)) { return std::move(*reflected); }
+		}
 		if (auto result = arithmetic_on_values<Op>(h, unwrapped_left, unwrapped_right, uli, uri)) {
 			return std::move(*result);
 		}
 		if (auto custom = h.object_arithmetic(left, right, method_id)) { return std::move(*custom); }
+		if (h.unwinding()) { return h.make_int(0); }
+		if (auto reflected = h.object_reflected(left, right, method_id)) { return std::move(*reflected); }
+		if (auto miss = bound_operator_miss(h, left, right, method_id)) { return std::move(*miss); }
 		return type_mismatch_error(arith_invalid_text<Op>());
 	}
 
@@ -226,11 +258,18 @@ namespace jai::detail {
 		}
 		// a script throw inside the operator method is in flight: it leaves, not the invalid-operands error
 		if (h.unwinding()) { return h.make_bool(false); }
+		if (auto reflected = h.object_reflected(left, right, method_id)) {
+			if (!*reflected) { return reflected->error_value(); }
+			const script_value& answer = reflected->value().deref();
+			return h.make_bool(answer.is_bool() ? answer.unchecked_as_bool() : true);
+		}
+		if (h.unwinding()) { return h.make_bool(false); }
 		if (auto reversed = h.object_comparison_reversed(left, right, method_id)) {
 			if (!*reversed) { return reversed->error_value(); }
 			return h.make_bool(reversed->value());
 		}
 		if (h.unwinding()) { return h.make_bool(false); }
+		if (auto miss = bound_operator_miss(h, left, right, method_id)) { return std::move(*miss); }
 		return type_mismatch_error(order_invalid_text<Op>());
 	}
 
@@ -241,6 +280,22 @@ namespace jai::detail {
 		if (right.is_weak_ptr()) { return right.get_weak_ptr().expired(); }
 		if (auto holder = right.get_object_holder()) { return holder->type_name == "weak_ptr_holder" && !holder->data; }
 		return true;
+	}
+
+	// a == b through an operator==: the left operand's, then the right operand's bound reflected one, then the right operand's
+	// own with the operands reversed (C++20); each only when one of its overloads takes the other operand
+	template <class Host>
+	inline std::optional<checked_result<bool>> equality_candidates(Host& h, const script_value& left, const script_value& right) {
+		if (auto custom = h.object_equality(left, right)) { return custom; }
+		if (h.unwinding()) { return checked_result<bool>(false); }
+		if (auto reflected = h.object_reflected(left, right, h.equality_id())) {
+			if (!*reflected) { return checked_result<bool>(reflected->error_value()); }
+			const script_value& answer = reflected->value().deref();
+			return checked_result<bool>(answer.is_bool() ? answer.unchecked_as_bool() : true);
+		}
+		if (h.unwinding()) { return checked_result<bool>(false); }
+		if (h.operand_class(left) == h.operand_class(right)) { return std::nullopt; }
+		return h.object_equality(right, left);
 	}
 
 	// == : memberwise on heavy values (detail/structural_equality.hpp), identity for handles and host objects. A bound
@@ -270,7 +325,11 @@ namespace jai::detail {
 		if (unwrapped_left.is_null() || unwrapped_right.is_null()) { return h.make_bool(unwrapped_left.is_null() && unwrapped_right.is_null()); }
 		if (math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] { return h.make_bool(math::equal(left, right)); }
 		if (unwrapped_left.type() != unwrapped_right.type()) {
-			if (unwrapped_left.is_object() || unwrapped_right.is_object()) {   // a class's <=> may take the other kind
+			if (unwrapped_left.is_object() || unwrapped_right.is_object()) {   // a class's ==, or its <=>, may take the other kind (either side, C++20)
+				if (auto custom = equality_candidates(h, left, right)) {
+					if (!*custom) { return custom->error_value(); }
+					return h.make_bool(custom->value());
+				}
 				if (auto mixed = h.object_spaceship_equality(left, right)) {
 					if (!*mixed) { return mixed->error_value(); }
 					return h.make_bool(mixed->value());
@@ -301,7 +360,7 @@ namespace jai::detail {
 			return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
 				"custom operator dispatch on class instances is not admitted in a parallel body");
 		}
-		if (auto custom = h.object_equality(left, right)) {
+		if (auto custom = equality_candidates(h, left, right)) {
 			if (!*custom) { return custom->error_value(); }
 			return h.make_bool(custom->value());
 		}
@@ -363,9 +422,12 @@ namespace jai::detail {
 		if (auto builtin = builtin_order(h, left, right, walk)) { return std::move(*builtin); }
 		if (math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] { return math::ordering_error(left, right); }
 		if (auto custom = h.object_arithmetic(left, right, method_id)) { return std::move(*custom); }
-		if (!h.unwinding()) {
-			if (auto reversed = h.object_spaceship_reversed(left, right)) { return std::move(*reversed); }
-		}
+		if (h.unwinding()) { return h.make_int(0); }
+		if (auto reflected = h.object_reflected(left, right, method_id)) { return std::move(*reflected); }
+		if (h.unwinding()) { return h.make_int(0); }
+		if (auto reversed = h.object_spaceship_reversed(left, right)) { return std::move(*reversed); }
+		if (h.unwinding()) { return h.make_int(0); }
+		if (auto miss = bound_operator_miss(h, left, right, method_id)) { return std::move(*miss); }
 		return type_mismatch_error("Invalid operands for <=> operator");
 	}
 
@@ -394,6 +456,9 @@ namespace jai::detail {
 		}
 		if (!left.is_int() || !right.is_int()) {
 			if (auto custom = h.object_arithmetic(left, right, method_id)) { return std::move(*custom); }
+			if (h.unwinding()) { return h.make_int(0); }
+			if (auto reflected = h.object_reflected(left, right, method_id)) { return std::move(*reflected); }
+			if (auto miss = bound_operator_miss(h, left, right, method_id)) { return std::move(*miss); }
 			return type_mismatch_error(bit_invalid_text<Op>());
 		}
 		const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();

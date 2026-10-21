@@ -83,7 +83,8 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
 - Every `script_value` carries its engine: `script_value(v, eng)`, `script_value(std::monostate{}, eng)` for null.
 - `operator==`, `operator<=>` and `map_key_hash` stay consistent: `<=>` is a strict weak ordering (map iteration and
   serialization order) and equivalent keys hash alike. Float keys order totally (a NaN key is found again; `0.0` and
-  `-0.0` are one key); complex values order and hash by held-pointer identity.
+  `-0.0` are one key); complex values order and hash by held-pointer identity, except a class value map key, which keys
+  by its class's `<`/`<=>`, else its `hash()` with `==`, else by identity (`core/script_map.hpp`).
 - Never read a `script_value` after moving from it (the move constructor nulls the source).
 - Integer arithmetic goes through `jai::ints::try_add/try_sub/try_mul/try_div/mod`, never raw `a + b` on `script_int`:
   the overflow policy (checked by default, `JAISCRIPT_WRAP_ON_OVERFLOW` wraps) lives there, and arithmetic is never UB.

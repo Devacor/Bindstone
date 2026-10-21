@@ -503,6 +503,7 @@ public:
         // how the overloads taking argc arguments bind argument i (detail::arg_binding bits: 4 = the lvalue, for a C++ T& the
         // call writes back; 8 = the host's)
         inline uint8_t argument_binding(size_t i, size_t argc) const;
+        inline std::optional<checked_result<script_value>> single_overload_miss(const std::vector<script_value>& args) const;
     };
 
     void add_method(const std::string& name, script_function func, size_t arity = SIZE_MAX);
@@ -683,6 +684,9 @@ public:
     // builtin handle method. Cheap: no symbolizer / no throw.
     // A script class of the chain (this one or a script ancestor) defines a method of the name: it answers before the C++ base's
     inline bool script_chain_defines_method(uint64_t id) const;
+    // true the first time a map keys a value of this class by identity (the warning is given once per class)
+    bool first_identity_key() const noexcept { return !identity_key_warned_.exchange(true, std::memory_order_relaxed); }
+
     bool defines_method(uint64_t id) const {
         if (methods_.find(id) != methods_.end()) { return true; }
         for (const auto& parent : parent_classes_) {
@@ -1287,6 +1291,7 @@ private:
     std::unordered_map<uint64_t, serial_overloads> serial_methods_;
     std::unordered_set<uint64_t> serial_static_methods_;
     std::unordered_map<uint64_t, std::vector<host_overload>> host_overloads_;
+    mutable std::atomic<bool> identity_key_warned_{false};
     mutable bool nocopy_memo_ = false;
     mutable uint64_t nocopy_memo_epoch_ = 0;
 

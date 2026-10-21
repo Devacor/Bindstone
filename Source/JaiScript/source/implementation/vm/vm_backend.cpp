@@ -1496,6 +1496,15 @@ checked_result<script_string> vm_backend::concat_text(const script_value& left, 
 	return out;
 }
 
+// self's method name_id called with no arguments; a parallel worker never dispatches it. KEEP BYTE-PARALLEL with the other backend
+checked_result<script_value> vm_backend::invoke_method(const script_value& self, uint64_t name_id) {
+	if (parallel_worker_) [[unlikely]] { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text); }
+	auto target = resolve_member_target(self);
+	script_value method_val = target ? target.method(name_id) : script_value(std::monostate{}, engine_);
+	if (!method_val.is_function()) { return checked_result<script_value>(make_error_code(runtime_error_code::member_not_found), "No method '{0}'", name_id); }
+	return make_bound_method(self, method_val).as_function()(std::vector<script_value>{});
+}
+
 checked_result<std::string> vm_backend::value_to_string_with_method(const script_value& val) {
 	if (val.type() == script_value_type::jai_object_type) {
 		auto target = resolve_member_target(val);
@@ -1676,8 +1685,9 @@ std::optional<checked_result<bool>> vm_backend::object_comparison_via_method(con
 	}
 	auto method_val = target.method(op_symbol_id);
 	const bool declared = method_val.is_function();
+	const bool host_refuses = declared && host_operator_dispatch(method_val) && !host_operator_accepts(method_val, op_symbol_id, right);
 	// an explicit operator no overload of which takes the operand yields to a <=> that does (C++20: that candidate is not viable)
-	if (!declared || (target.method(op_spaceship_id_).is_function() && !binary_operator_accepts(target.class_def, op_symbol_id, right))) {
+	if (!declared || host_refuses || (target.method(op_spaceship_id_).is_function() && !binary_operator_accepts(target.class_def, op_symbol_id, right))) {
 		if (script_value spaceship = target.method(op_spaceship_id_); spaceship.is_function() && binary_operator_accepts(target.class_def, op_spaceship_id_, right)) {   // KEEP BYTE-PARALLEL with the interpreter
 			auto result = make_bound_method(left, spaceship).as_function()(std::vector<script_value>{right});
 			if (!result) {
@@ -1696,7 +1706,7 @@ std::optional<checked_result<bool>> vm_backend::object_comparison_via_method(con
 				return object_comparison_via_method(unwrapped, right, op_symbol_id);
 			}
 		}
-		if (!declared) { return std::nullopt; }
+		if (!declared || host_refuses) { return std::nullopt; }
 	}
 	script_value bound = make_bound_method(left, method_val);
 	const script_function& method = bound.as_function();
@@ -1708,6 +1718,69 @@ std::optional<checked_result<bool>> vm_backend::object_comparison_via_method(con
 		return checked_result<bool>(result.value().unchecked_as_bool());
 	}
 	return std::nullopt;
+}
+
+// A compound whose target or operand is an object (an element's, a reference's, a map value's): the target class's compound
+// or binary operator, else the operand's reflected one; nullopt keeps the compound's text. KEEP BYTE-PARALLEL with interpreter
+std::optional<checked_result<script_value>> vm_backend::object_compound_operand(const script_value& left, token_type op, const script_value& right) {
+	uint64_t id = 0;
+	switch (op) {
+		case token_type::plus: id = op_plus_id_; break;
+		case token_type::minus: id = op_minus_id_; break;
+		case token_type::star: id = op_star_id_; break;
+		case token_type::slash: id = op_slash_id_; break;
+		case token_type::percent: id = op_percent_id_; break;
+		case token_type::ampersand: id = op_ampersand_id_; break;
+		case token_type::pipe: id = op_pipe_id_; break;
+		case token_type::caret: id = op_caret_id_; break;
+		case token_type::left_shift: id = op_left_shift_id_; break;
+		case token_type::right_shift: id = op_right_shift_id_; break;
+		default: return std::nullopt;
+	}
+	if (left.is_object()) {
+		if (auto custom = object_compound_via_method(left, right, id)) { return custom; }
+	}
+	if (right.is_object()) { return object_reflected_via_method(left, right, id); }
+	return std::nullopt;
+}
+
+// a op= b on an object: a bound compound operator (C++'s operator+=) that takes b changes a in place and the expression is a;
+// without one it is a = a op b through the binary operator. KEEP BYTE-PARALLEL with interpreter::object_compound_via_method
+std::optional<checked_result<script_value>> vm_backend::object_compound_via_method(const script_value& target, const script_value& right, uint64_t op_symbol_id) {
+	if (!parallel_worker_) {
+		if (const uint64_t compound_id = engine_->compound_operator_id(op_symbol_id)) {
+			if (auto owner = resolve_member_target(target)) {
+				script_value method_val = owner.method(compound_id);
+				if (method_val.is_function() && host_operator_accepts(method_val, compound_id, right)) {
+					auto result = make_bound_method(target, method_val).as_function()(std::vector<script_value>{right});
+					if (!result) {
+						if (is_unwinding_) { return checked_result<script_value>(make_null()); }
+						return checked_result<script_value>(result.error_value());
+					}
+					return checked_result<script_value>(target.deref());
+				}
+			}
+		}
+	}
+	return object_arithmetic_via_method(target, right, op_symbol_id);
+}
+
+// The right operand's bound reflected operator taking the left one (C++'s free op(L, const R&)), for a left operand whose
+// own operator does not answer. KEEP BYTE-PARALLEL with interpreter::object_reflected_via_method
+std::optional<checked_result<script_value>> vm_backend::object_reflected_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+	if (parallel_worker_ || !right.deref().is_object()) { return std::nullopt; }
+	const uint64_t reflected_id = engine_->reflected_operator_id(op_symbol_id);
+	if (!reflected_id) { return std::nullopt; }
+	auto target = resolve_member_target(right);
+	if (!target) { return std::nullopt; }
+	script_value method_val = target.method(reflected_id);
+	if (!method_val.is_function() || !host_operator_accepts(method_val, reflected_id, left)) { return std::nullopt; }
+	auto result = make_bound_method(right, method_val).as_function()(std::vector<script_value>{left});
+	if (!result) {
+		if (is_unwinding_) { return checked_result<script_value>(make_null()); }
+		return checked_result<script_value>(result.error_value());
+	}
+	return checked_result<script_value>(std::move(result.value()));
 }
 
 std::optional<checked_result<script_value>> vm_backend::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
@@ -1733,6 +1806,7 @@ std::optional<checked_result<script_value>> vm_backend::object_arithmetic_via_me
 		}
 		return std::nullopt;
 	}
+	if (host_operator_dispatch(method_val) && !host_operator_accepts(method_val, op_symbol_id, right)) { return std::nullopt; }
 	script_value bound = make_bound_method(left, method_val);
 	const script_function& method = bound.as_function();
 	std::vector<script_value> args;
@@ -2268,6 +2342,12 @@ struct vm_backend::binary_host {
 	std::optional<checked_result<bool>> object_comparison_reversed(const script_value& l, const script_value& r, uint64_t id) { return vm.object_comparison_reversed_via_method(l, r, id); }
 	std::optional<checked_result<script_value>> object_spaceship_reversed(const script_value& l, const script_value& r) { return vm.object_spaceship_reversed_via_method(l, r); }
 	std::optional<checked_result<bool>> object_spaceship_equality(const script_value& l, const script_value& r) { return vm.object_spaceship_equality_via_method(l, r); }
+	std::optional<checked_result<script_value>> object_reflected(const script_value& l, const script_value& r, uint64_t id) { return vm.object_reflected_via_method(l, r, id); }
+	const class_definition* operand_class(const script_value& v) const {
+		if (vm.parallel_worker_) [[unlikely]] { return detail::operand_instance_class(v); }
+		return v.deref().is_object() ? vm.resolve_member_target(v).class_def : nullptr;
+	}
+	uint64_t equality_id() const noexcept { return vm.eq_method_id_; }
 	bool defines_custom_equality(const script_value& v) const { return vm.object_defines_custom_equality(v); }
 	bool unwinding() const noexcept { return vm.is_unwinding_; }
 	bool parallel_worker() const noexcept { return vm.parallel_worker_; }
@@ -2432,7 +2512,10 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 	// compound's text (KEEP BYTE-PARALLEL with interpreter::evaluate_arithmetic)
 	if (detail::bitwise_token(op)) [[unlikely]] {
 		const auto integral = [](size_t idx) { return idx == script_value::TYPEID_INT || idx == script_value::TYPEID_CHAR; };
-		if (compound >= 0 && (!integral(li) || !integral(ri))) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
+		if (compound >= 0 && (!integral(li) || !integral(ri))) {
+			if (auto custom = object_compound_operand(left, op, right)) { return std::move(*custom); }
+			return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_);
+		}
 		return handle_binary_op(op, left, right);
 	}
 
@@ -2490,7 +2573,10 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 	} else {
 		if (detail::math::owns_arithmetic(li, ri)) [[unlikely]]
 			return detail::math::binary(detail::math::bop_of(op), left, right, engine_);
-		if (compound >= 0) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
+		if (compound >= 0) {
+			if (auto custom = object_compound_operand(left, op, right)) { return std::move(*custom); }
+			return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_);
+		}
 		return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), "Left operand must be numeric");
 	}
 	if (ri == script_value::TYPEID_INT) {
@@ -2500,7 +2586,10 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 	} else {
 		if (detail::math::owns_arithmetic(li, ri)) [[unlikely]]
 			return detail::math::binary(detail::math::bop_of(op), left, right, engine_);
-		if (compound >= 0) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
+		if (compound >= 0) {
+			if (auto custom = object_compound_operand(left, op, right)) { return std::move(*custom); }
+			return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_);
+		}
 		return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), "Right operand must be numeric");
 	}
 
@@ -3791,7 +3880,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 		if (leftType == script_value_type::jai_object_type) {
 			const uint64_t op_symbol_id = compound_kind_symbol(kind);
 			if (op_symbol_id != 0) {
-				auto custom_outcome = object_arithmetic_via_method(target, rightValue, op_symbol_id);
+				auto custom_outcome = object_compound_via_method(target, rightValue, op_symbol_id);
 				if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
 				std::optional<script_value> custom_result;
 				if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
@@ -4087,7 +4176,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 	if (currentValue.is_object()) {
 		const uint64_t op_symbol_id = compound_kind_symbol(kind);
 		if (op_symbol_id != 0) {
-			auto custom_outcome = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
+			auto custom_outcome = object_compound_via_method(currentValue, rightValue, op_symbol_id);
 			if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
 			std::optional<script_value> custom_result;
 			if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
@@ -15764,7 +15853,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 	if (currentValue.is_object()) {
 		const uint64_t op_symbol_id = compound_kind_symbol(kind);
 		if (op_symbol_id != 0) {
-			auto custom_outcome = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
+			auto custom_outcome = object_compound_via_method(currentValue, rightValue, op_symbol_id);
 			if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
 			std::optional<script_value> custom_result;
 			if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }

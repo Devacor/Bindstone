@@ -68,8 +68,8 @@ namespace jai::detail {
 				const script_value* y = nullptr;
 				if (frame.is_map) {
 					const auto& li = frame.left_entries[i]; const auto& ri = frame.right_entries[i];
-					// Keys retain map lookup/iteration identity semantics; values use language ordering.
-					order = order_sign(li.first <=> ri.first);
+					// Keys order as the map orders them (core/script_map.hpp); values use language ordering.
+					order = static_cast<script_int>(map_key_order(li.first, ri.first));
 					x = &li.second;
 					y = &ri.second;
 				} else {
@@ -154,8 +154,8 @@ namespace jai::detail {
 			const script_value* y = nullptr;
 			if (frame.is_map) {
 				const auto& li = frame.left_entries[i]; const auto& ri = frame.right_entries[i];
-				// Keys retain map lookup/iteration identity semantics; values use language ordering.
-				if (const auto cmp = order_sign(li.first <=> ri.first)) { return script_value(cmp, eng); }
+				// Keys order as the map orders them (core/script_map.hpp); values use language ordering.
+				if (const auto cmp = static_cast<script_int>(map_key_order(li.first, ri.first))) { return script_value(cmp, eng); }
 				x = &li.second;
 				y = &ri.second;
 			} else {

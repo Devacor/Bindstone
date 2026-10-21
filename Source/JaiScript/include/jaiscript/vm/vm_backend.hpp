@@ -1453,6 +1453,9 @@ namespace jai::vm {
         std::optional<checked_result<bool>> object_spaceship_equality_via_method(const script_value& left, const script_value& right);
         std::optional<checked_result<bool>> object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
         std::optional<checked_result<script_value>> object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<script_value>> object_reflected_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<script_value>> object_compound_via_method(const script_value& target, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<script_value>> object_compound_operand(const script_value& left, token_type op, const script_value& right);
         std::optional<checked_result<script_value>> object_unary_via_method(const script_value& operand, token_type op);   // a class's unary - + ~
         script_value call_operator_of(const script_value& callee);   // the instance's operator() bound to it, else null
         op_status raise_method_value(const member_expr* expr, const script_value& object, bool bindable);   // obj.method without a call
@@ -1589,7 +1592,8 @@ namespace jai::vm {
                 [](void* self, const script_value& a, const script_value& b) { return static_cast<vm_backend*>(self)->language_equal(a, b); },
                 [](void* self) { return static_cast<vm_backend*>(self)->is_unwinding_; }, const_cast<vm_backend*>(this)};
         }
-        checked_result<bool> language_equal(const script_value& a, const script_value& b);   // the language's == (a global operator==, the value's own)
+        checked_result<bool> language_equal(const script_value& a, const script_value& b) override;
+        checked_result<script_value> invoke_method(const script_value& self, uint64_t name_id) override;   // the language's == (a global operator==, the value's own)
 
         void raise_script_exception(const std::string& message, const source_location& location);
         // the member paths' composed texts, built out of line (no string temporaries in the handlers)

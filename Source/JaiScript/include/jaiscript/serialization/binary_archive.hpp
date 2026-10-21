@@ -262,7 +262,6 @@ private:
         script_value built;
         script_value key;
         bool have_key = false;
-        const char* data_key = nullptr;
         std::string type_name;
         uint32_t version = 0;
         std::vector<std::string> names;

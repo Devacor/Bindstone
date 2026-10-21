@@ -72,9 +72,9 @@ namespace deep_detail {
 	}
 	std::string nested_links(int depth, int last) {
 		std::string result;
-		for (int i = 0; i < depth; ++i) { result += "{\"_type_\":\"Link\",\"n\":" + std::to_string(i == depth - 1 ? last : i) + ",\"next\":"; }
+		for (int i = 0; i < depth; ++i) { result += "{\"$type\":\"Link\",\"$val\":{\"n\":" + std::to_string(i == depth - 1 ? last : i) + ",\"next\":"; }
 		result += "null";
-		result.append(static_cast<size_t>(depth), '}');
+		result.append(static_cast<size_t>(depth) * 2, '}');
 		return result;
 	}
 
@@ -201,9 +201,9 @@ public:
 					string out = to_string(length_of(from_json(to_json(head))));
 					out += " " + to_string(length_of(from_binary(to_binary(head))));
 					string nested = "";
-					for (int i = 0; i < depth; i++) { nested += "{\"_type_\":\"Link\",\"next\":"; }
+					for (int i = 0; i < depth; i++) { nested += "{\"$type\":\"Link\",\"$val\":{\"next\":"; }
 					nested += "null";
-					for (int i = 0; i < depth; i++) { nested += "}"; }
+					for (int i = 0; i < depth; i++) { nested += "}}"; }
 					var values = from_json(nested);
 					var copied = values;
 					out += " " + to_string(to_json(copied) == to_json(values));   // a walk by value would copy the rest of the chain per step

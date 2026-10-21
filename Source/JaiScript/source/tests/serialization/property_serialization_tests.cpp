@@ -946,8 +946,8 @@ public:
 
             // Manually create JSON with unknown field that doesn't exist in v3
             std::string old_json = R"({
-                "_type_": "versioned_object",
-                "_version_": 2,
+                "$type": "versioned_object",
+                "$version": 2,
                 "x": 100,
                 "y": 200,
                 "z": 300,
@@ -1005,8 +1005,8 @@ public:
         test("skip_unknown_property", [&]() {
             // Test that unknown properties are silently skipped for forward/backward compatibility
             std::string json_with_extra_field = R"({
-                "_type_": "test_object",
-                "_version_": 1,
+                "$type": "test_object",
+                "$version": 1,
                 "health": 50,
                 "nonexistent": 123
             })";
@@ -1139,8 +1139,8 @@ public:
 
             // Manually create JSON with different field order
             std::string json_different_order = R"({
-                "_type_": "test_object",
-                "_version_": 1,
+                "$type": "test_object",
+                "$version": 1,
                 "speed": 2.5,
                 "name": "field_order_test",
                 "health": 100,
@@ -1203,8 +1203,8 @@ public:
         test("json_partial_field_order_with_missing", [&]() {
             // Test loading JSON with only some fields present in different order
             std::string json_partial = R"({
-                "_type_": "test_object",
-                "_version_": 1,
+                "$type": "test_object",
+                "$version": 1,
                 "name": "partial_test",
                 "health": 50
             })";
@@ -1345,8 +1345,8 @@ public:
         test("post_load_validation_json", [&]() {
             // Test that post_load can validate and correct data
             std::string json = R"({
-                "_type_": "validated_object",
-                "_version_": 1,
+                "$type": "validated_object",
+                "$version": 1,
                 "score": 150,
                 "category": ""
             })";
@@ -1400,8 +1400,8 @@ public:
         test("post_load_migration_hook_called_json", [&]() {
             // Test that the migration hook is actually called
             std::string json = R"({
-                "_type_": "migrated_object_v2",
-                "_version_": 1,
+                "$type": "migrated_object_v2",
+                "$version": 1,
                 "new_name": "test_name",
                 "value": 42
             })";
@@ -1460,8 +1460,8 @@ public:
         test("post_load_without_hook_not_called", [&]() {
             // Test that hook is NOT called if we don't use load_with_hook
             std::string json = R"({
-                "_type_": "computed_object",
-                "_version_": 1,
+                "$type": "computed_object",
+                "$version": 1,
                 "width": 5,
                 "height": 5
             })";
@@ -1580,7 +1580,7 @@ public:
             }
 
             // Create JSON representing v1 data (no max_health field)
-            std::string json_v1 = R"({"_type_":"GameCharacter","_version_":1,"health":80})";
+            std::string json_v1 = R"({"$type":"GameCharacter","$version":1,"$val":{"health":80}})";
 
             // Store JSON as a variable to avoid string escaping issues
             eng->add_global("json_str", script_value(json_v1, eng.get()));

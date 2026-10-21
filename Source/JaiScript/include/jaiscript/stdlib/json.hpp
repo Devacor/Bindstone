@@ -8,9 +8,9 @@
 namespace jai {
 namespace stdlib {
 
-	// The script handles one load resolves: {"$shared_ptr_id": N, "$shared_ptr_data": object} at an object's first appearance in
-	// write order, {"$shared_ptr_id": N} after it, and the $weak_ptr_id twins alias one object per id across the archive. A load
-	// visits keys in map order, not write order, so an id met before its object finds the object's archived form by index
+	// The script handles one load resolves: {"$id": N, "$type": T, "$val": fields} at an object's first appearance in write order,
+	// {"$id": N} after it, and the weak {"$ref": N} twins alias one object per id across the archive. A load visits keys in map
+	// order, not write order, so an id met before its object finds the object's archived form by index
 	struct archive_handles {
 		const script_value* root = nullptr;
 		std::unordered_map<script_int, script_value> loaded;

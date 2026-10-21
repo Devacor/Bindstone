@@ -435,7 +435,7 @@ public:
         // forward reference): we then inline the data under the same id so the reader can
         // reconstruct it. Without this the old code wrote {"$ref": 0} (lookup_shared_id
         // returned 0 for the not-yet-written object) and the link was silently dropped on
-        // load. Mirrors the shared_ptr path and the script weak_ptr ($weak_ptr_data) path;
+        // load. Mirrors the shared_ptr path and the script weak handle's path;
         // because depth-first write/read order is identical, the data always precedes any
         // back-reference, so no forward reference survives to load time.
         else if constexpr (is_std_weak_ptr_v<T>) {

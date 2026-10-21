@@ -148,11 +148,12 @@ void json_archive_writer::begin_object(const std::string& type_name, uint32_t ve
     container_stack_.push(ContainerType::Object);
     first_in_container_.push(true);
 
-    // Write _type_ and _version_ metadata
-    write_property_name("_type_");
-    write_string(type_name);
+    if (!type_name.empty()) {
+        write_property_name("$type");
+        write_string(type_name);
+    }
     if (version > 1) {
-        write_property_name("_version_");
+        write_property_name("$version");
         write_uint32(version);
     }
 }
@@ -274,33 +275,12 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
     const script_value& value = given.is_reference() ? given.deref() : given;
     switch (value.type()) {
         case script_value_type::jai_weak_ptr_type: {
-            // a weak_ptr writes its id; its object rides along the first time the archive meets it
-            auto weak = value.get_weak_ptr();
-            auto shared = weak.lock();
-            if (indent_ > 0) {
-                open_value('{');
-                auto [id, is_new] = shared ? track_shared_ptr(shared.get()) : std::pair<uint32_t, bool>{0, false};
-                write_value_key("$weak_ptr_id", false);
-                (*stream_) << id;
-                if (is_new) {
-                    write_value_key("$weak_ptr_data", true);
-                    frames.emplace_back(write_shape::payload, weak_target_value(shared));
-                    return;
-                }
-                close_value('}', false);
-            } else if (!shared) {
-                (*stream_) << "{\"$weak_ptr_id\": 0}";
-            } else {
-                auto [id, is_new] = track_shared_ptr(shared.get());
-                (*stream_) << "{\"$weak_ptr_id\": " << id;
-                if (is_new) {
-                    (*stream_) << ", \"$weak_ptr_data\": ";
-                    write_frame& f = frames.emplace_back(write_shape::payload, weak_target_value(shared));
-                    f.compact_weak = true;
-                    return;
-                }
-                (*stream_) << "}";
+            const auto shared = value.get_weak_ptr().lock();
+            if (!shared) {
+                (*stream_) << "null";
+                return;
             }
+            begin_handle("$ref", shared, frames);
             return;
         }
 
@@ -310,16 +290,7 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
                 (*stream_) << "null";
                 return;
             }
-            auto [id, is_new] = track_shared_ptr(holder.get());
-            open_value('{');
-            write_value_key("$shared_ptr_id", false);
-            (*stream_) << id;
-            if (is_new) {
-                write_value_key("$shared_ptr_data", true);
-                frames.emplace_back(write_shape::payload, weak_target_value(holder));
-                return;
-            }
-            close_value('}', false);
+            begin_handle("$id", holder, frames);
             return;
         }
 
@@ -349,49 +320,15 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
         }
 
         case script_value_type::jai_object_type: {
-            auto type_info = value.get_type_info();
-            std::string type_name = type_info ? type_info->type_name : "unknown";
-
-            auto eng = engine_ref_;
-            if (!eng) {
+            if (!engine_ref_) {
                 (*stream_) << "null";
                 return;
             }
-
-            std::shared_ptr<class_instance> instance;
-            try {
-                instance = value.as<std::shared_ptr<class_instance>>();
-            } catch (...) {
-                // not a class_instance: the fallback below
-            }
-            if (instance) {
-                auto class_def = instance->get_class_definition();
-
-                // For script classes, type_info->type_name may be "any" - use the actual class name
-                if (class_def) {
-                    type_name = class_def->get_name();
-                }
-
+            if (std::shared_ptr<class_instance> instance = written_instance(value)) {
                 open_value('{');
-                write_value_key("_type_", false);
-                (*stream_) << '"' << escape_json_string_local(type_name) << '"';
-
-                if (class_def) {
-                    write_frame& f = frames.emplace_back(write_shape::instance, value);
-                    f.names = class_def->get_property_names();
-                    f.class_def = class_def;
-                    f.instance = instance;
-                } else {
-                    // No class definition - serialize fields directly (slot order: deterministic, ≈ declaration order)
-                    write_frame& f = frames.emplace_back(write_shape::fields, value);
-                    instance->for_each_field([&](uint64_t field_id, const script_value& field_val) {
-                        f.fields.emplace_back(std::string(eng->get_symbolizer()->get_string(field_id)), field_val);
-                    });
-                }
+                begin_instance_members(value, std::move(instance), false, frames);
                 return;
             }
-
-            // Fallback for other object types
             (*stream_) << to_json_impl_fallback(value);
             return;
         }
@@ -402,12 +339,61 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
     }
 }
 
+std::shared_ptr<class_instance> json_archive_writer::written_instance(const script_value& value) {
+    try {
+        return value.as<std::shared_ptr<class_instance>>();
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void json_archive_writer::begin_handle(std::string_view id_key, const strong_ptr<script_value::object_holder>& holder, std::vector<write_frame>& frames) {
+    auto [id, is_new] = track_shared_ptr(holder.get());
+    open_value('{');
+    write_value_key(id_key, false);
+    (*stream_) << id;
+    if (is_new) {
+        script_value object = weak_target_value(holder);
+        if (std::shared_ptr<class_instance> instance = engine_ref_ ? written_instance(object) : nullptr) {
+            begin_instance_members(object, std::move(instance), true, frames);
+            return;
+        }
+        write_value_key("$val", true);
+        (*stream_) << (engine_ref_ ? to_json_impl_fallback(object) : std::string("null"));
+    }
+    close_value('}', false);
+}
+
+void json_archive_writer::begin_instance_members(const script_value& value, std::shared_ptr<class_instance> instance, bool comma,
+                                                 std::vector<write_frame>& frames) {
+    class_definition* class_def = instance->get_class_definition();
+    std::string type_name;
+    if (class_def) {
+        type_name = class_def->get_name();
+    } else {
+        auto type_info = value.get_type_info();
+        type_name = type_info ? type_info->type_name : "unknown";
+    }
+    write_value_key("$type", comma);
+    (*stream_) << '"' << escape_json_string_local(type_name) << '"';
+    write_value_key("$val", true);
+    open_value('{');
+    if (class_def) {
+        write_frame& f = frames.emplace_back(write_shape::instance, value);
+        f.names = class_def->get_property_names();
+        f.class_def = class_def;
+        f.instance = std::move(instance);
+    } else {
+        // slot order: deterministic, close to declaration order
+        write_frame& f = frames.emplace_back(write_shape::fields, value);
+        instance->for_each_field([&](uint64_t field_id, const script_value& field_val) {
+            f.fields.emplace_back(std::string(engine_ref_->get_symbolizer()->get_string(field_id)), field_val);
+        });
+    }
+}
+
 const script_value* json_archive_writer::next_child(write_frame& f, script_value& scratch) {
     switch (f.shape) {
-        case write_shape::payload:
-            if (f.index++ > 0) { return nullptr; }
-            scratch = f.source;
-            return &scratch;
         case write_shape::array: {
             if (f.index >= f.count) { return nullptr; }
             write_value_separator(f.index > 0);
@@ -452,12 +438,14 @@ const script_value* json_archive_writer::next_child(write_frame& f, script_value
             }
         case write_shape::instance: {
             if (!next_serialized_property(f.source, f.instance.get(), f.class_def, engine_ref_, f.names, f.index, scratch, aborted_)) { return nullptr; }
-            write_value_key(f.names[f.index - 1], true);
+            write_value_key(f.names[f.index - 1], !f.first);
+            f.first = false;
             return &scratch;
         }
         case write_shape::fields:
             if (f.index >= f.fields.size()) { return nullptr; }
-            write_value_key(f.fields[f.index].first, true);
+            write_value_key(f.fields[f.index].first, !f.first);
+            f.first = false;
             return &f.fields[f.index++].second;
     }
     return nullptr;
@@ -465,9 +453,6 @@ const script_value* json_archive_writer::next_child(write_frame& f, script_value
 
 void json_archive_writer::end_frame(write_frame& f) {
     switch (f.shape) {
-        case write_shape::payload:
-            if (f.compact_weak) { (*stream_) << "}"; } else { close_value('}', false); }
-            break;
         case write_shape::array:
             close_value(']', f.count == 0);
             break;
@@ -480,6 +465,7 @@ void json_archive_writer::end_frame(write_frame& f) {
             break;
         case write_shape::instance:
         case write_shape::fields:
+            close_value('}', f.first);
             close_value('}', false);
             break;
     }
@@ -751,14 +737,13 @@ bool json_archive_reader::begin_object(std::string& type_name, uint32_t& version
     const uint32_t count = obj.u.agg.count;
     type_name.clear();
     version = 1;
-    // _type_/_version_ are read directly off the flat members — no script_value keys.
     for (uint32_t m = 0; m < count; ++m) {
         const JNode& k = nodes_[first + 2 * m];
         std::string_view kv(chars_.data() + k.u.str.off, k.u.str.len);
         const JNode& v = nodes_[first + 2 * m + 1];
-        if (kv == "_type_" && v.tag == JTag::Str) {
+        if (kv == "$type" && v.tag == JTag::Str) {
             type_name.assign(chars_.data() + v.u.str.off, v.u.str.len);
-        } else if (kv == "_version_" && v.tag == JTag::Int) {
+        } else if (kv == "$version" && v.tag == JTag::Int) {
             version = static_cast<uint32_t>(v.u.i);
         }
     }
@@ -795,13 +780,13 @@ bool json_archive_reader::read_property_name(std::string& name) {
         return false;
     }
     auto& s = object_stack_.top();
-    // Sequential cursor over the flat members; skip the _type_/_version_ metadata.
+    // the record's $type/$version are its metadata, not properties
     while (s.cursor < s.count) {
         const JNode& k = nodes_[s.first + 2 * s.cursor];
         std::string_view kv(chars_.data() + k.u.str.off, k.u.str.len);
         const uint32_t valNode = s.first + 2 * s.cursor + 1;
         ++s.cursor;
-        if (kv != "_type_" && kv != "_version_") {
+        if (kv != "$type" && kv != "$version") {
             name.assign(kv);
             cpv_node_ = valNode;
             cpv_valid_ = true;

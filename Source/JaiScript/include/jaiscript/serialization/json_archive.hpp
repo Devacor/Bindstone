@@ -69,16 +69,15 @@ public:
 private:
     enum class ContainerType { Object, Array };
 
-    enum class write_shape : uint8_t { payload, array, map, tagged_map, instance, fields };
+    enum class write_shape : uint8_t { array, map, tagged_map, instance, fields };
     struct write_frame {
         write_frame(write_shape a_shape, script_value a_source) : shape(a_shape), source(std::move(a_source)) {}
         write_shape shape;
-        script_value source;            // the container, the instance, or a handle's payload
+        script_value source;            // the container or the instance
         size_t index = 0;
         size_t count = 0;
         bool first = true;
         uint8_t phase = 0;              // a tagged map's pair: 0 its key next, 1 its value next, 2 its close
-        bool compact_weak = false;      // a compact weak_ptr record closes with a bare '}'
         script_map::const_iterator next{};
         class_definition* class_def = nullptr;
         std::shared_ptr<class_instance> instance;   // an instance frame's object: its script fields save as stored
@@ -95,6 +94,15 @@ private:
     const script_value* next_child(write_frame& f, script_value& scratch);
 
     void end_frame(write_frame& f);
+
+    static std::shared_ptr<class_instance> written_instance(const script_value& value);
+
+    // {"$id": N} or {"$ref": N}; the archive's first reference to the object carries its "$type" and "$val" beside the id
+    void begin_handle(std::string_view id_key, const strong_ptr<script_value::object_holder>& holder, std::vector<write_frame>& frames);
+
+    // An instance's "$type" and its fields under "$val", inside an object already open: the frame closes both
+    void begin_instance_members(const script_value& value, std::shared_ptr<class_instance> instance, bool comma,
+                                std::vector<write_frame>& frames);
 
     // Local helper functions to avoid circular includes
     // write_value's layout: compact (indent_ <= 0) or one member per line, indent_ spaces per level
@@ -239,7 +247,7 @@ private:
 
     // Builds a full script_value subtree from a flat node, its containers on an explicit frame stack — only used when a raw
     // composite is actually requested (read_value: stdlib from_json, a script value inside a C++ record).
-    // Keys are ENGINE-CARRYING string values: ordering and map.find(script_value("_type_"/...))
+    // Keys are ENGINE-CARRYING string values: ordering and map.find(script_value("$type"/...))
     // rank by type-then-content (type_info never participates), and every value in the result
     // must clone/detach — the old ast_literal_tag keys had no engine pointer, so copying any
     // deserialized map died with "Cannot clone script_value: missing engine pointer".

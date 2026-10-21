@@ -2097,16 +2097,16 @@ private:
 				class L { int v = 1; void post_load(int version) { int z = 0; v = v / z; } }
 			)";
 			expect_texts({
-				{"from_json post_load", H, "var o = from_json(\"{\\\"_type_\\\":\\\"L\\\",\\\"v\\\":3}\");", "Division by zero", check_mode::strict},
+				{"from_json post_load", H, "var o = from_json(\"{\\\"$type\\\":\\\"L\\\",\\\"$val\\\":{\\\"v\\\":3}}\");", "Division by zero", check_mode::strict},
 			});
 			expect("hooks that succeed", R"(
 				class L2 { int v = 1; void post_load(int version) { v = v + 10 * version; } }
 				class S2 { int v = 1; void _set_v(int x) { int z = 0; v = x / z; } int _get_v() { return v * 100; } }
 				class P { int raw = 1; int _get_v() { int z = 0; return raw / z; } }
-				var a = from_json("{\"_type_\":\"L2\",\"v\":3}");
-				var b = from_json("{\"_type_\":\"S2\",\"v\":3}");
+				var a = from_json("{\"$type\":\"L2\",\"$val\":{\"v\":3}}");
+				var b = from_json("{\"$type\":\"S2\",\"$val\":{\"v\":3}}");
 				"" + a.v + "|" + b.v + "|" + to_json(b) + "|" + to_json(P());
-			)", "13|300|{\"_type_\":\"S2\",\"v\":3}|{\"_type_\":\"P\",\"raw\":1}");
+			)", "13|300|{\"$type\":\"S2\",\"$val\":{\"v\":3}}|{\"$type\":\"P\",\"$val\":{\"raw\":1}}");
 		});
 		test("array_slice_defaults_and_removal_presence", [this]() {
 			expect("slice defaults", R"(
@@ -2767,10 +2767,10 @@ private:
 				h.hp = 9;
 				h.dmg = 5;
 				trip(s) + "|" + trip(c) + "|" + trip(OnlyArgs::make(7)) + "|" + trip(h) + "|" + t([]() { return Saved().n; });
-			)", "{\"_type_\":\"Saved\",\"n\":5} {\"_type_\":\"Saved\",\"n\":5}|"
-			    "{\"_type_\":\"SavedChild\",\"n\":6,\"name\":\"late\"} {\"_type_\":\"SavedChild\",\"n\":6,\"name\":\"late\"}|"
-			    "{\"_type_\":\"OnlyArgs\",\"value\":7,\"tag\":\"made\"} {\"_type_\":\"OnlyArgs\",\"value\":7,\"tag\":\"made\"}|"
-			    "{\"_type_\":\"Shown\",\"hp\":9,\"dmg\":5} {\"_type_\":\"Shown\",\"hp\":9,\"dmg\":5}|"
+			)", "{\"$type\":\"Saved\",\"$val\":{\"n\":5}} {\"$type\":\"Saved\",\"$val\":{\"n\":5}}|"
+			    "{\"$type\":\"SavedChild\",\"$val\":{\"n\":6,\"name\":\"late\"}} {\"$type\":\"SavedChild\",\"$val\":{\"n\":6,\"name\":\"late\"}}|"
+			    "{\"$type\":\"OnlyArgs\",\"$val\":{\"value\":7,\"tag\":\"made\"}} {\"$type\":\"OnlyArgs\",\"$val\":{\"value\":7,\"tag\":\"made\"}}|"
+			    "{\"$type\":\"Shown\",\"$val\":{\"hp\":9,\"dmg\":5}} {\"$type\":\"Shown\",\"$val\":{\"hp\":9,\"dmg\":5}}|"
 			    "Cannot access private constructor of class 'Saved',", check_mode::off);
 		});
 		test("the_strict_checker_reports_an_outside_private_construction_at_load_with_the_runtime_text", [this]() {
@@ -4229,8 +4229,8 @@ private:
 				class R { int v = 0; R() { throw "no R"; } }
 				class Ok { int v = 0; }
 				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = e; } return r; }
-				t([]() { var x = from_json("{\"_type_\": \"R\", \"v\": 3}"); return "loaded"; }) + "|" +
-				t([]() { var x = from_json("{\"_type_\": \"Ok\", \"v\": 3}"); return type_of(x) + ":" + x.v; });
+				t([]() { var x = from_json("{\"$type\": \"R\", \"$val\": {\"v\": 3}}"); return "loaded"; }) + "|" +
+				t([]() { var x = from_json("{\"$type\": \"Ok\", \"$val\": {\"v\": 3}}"); return type_of(x) + ":" + x.v; });
 			)", "no R|Ok:3", check_mode::warn);
 		});
 	}

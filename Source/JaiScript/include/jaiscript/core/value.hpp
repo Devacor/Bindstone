@@ -2701,8 +2701,9 @@ namespace detail {
 
         // Safe weak_ptr access
         jai::weaker_ptr<object_holder> get_weak_ptr() const {
-            if (type() == script_value_type::jai_weak_ptr_type) {
-                return storage_.get<jai::weaker_ptr<object_holder>>();
+            // a null typed weak_ptr<T> (`w = null`) holds no weak handle
+            if (const auto* weak = storage_.get_if<jai::weaker_ptr<object_holder>>()) {
+                return *weak;
             }
             return jai::weaker_ptr<object_holder>();
         }

@@ -563,7 +563,7 @@ public:
                 .build();
 
             // Create JSON with health > max_health to test hook correction
-            std::string json = R"({"_type_":"Character","_version_":2,"id":1,"name":"Test","health":150,"max_health":100})";
+            std::string json = R"({"$type":"Character","$version":2,"$val":{"id":1,"name":"Test","health":150,"max_health":100}})";
             eng->add_global("test_json", script_value(json, eng.get()));
 
             eng->execute("var loaded = from_json(test_json);");
@@ -672,7 +672,7 @@ public:
             )");
 
             // Simulate v1 JSON (no doors field)
-            std::string v1_json = R"({"_type_":"Car","_version_":1,"speed":60,"fuel":75,"wheels":4})";
+            std::string v1_json = R"({"$type":"Car","$version":1,"$val":{"speed":60,"fuel":75,"wheels":4}})";
             eng->add_global("v1_json", script_value(v1_json, eng.get()));
 
             eng->execute("var loaded = from_json(v1_json);");
@@ -1097,9 +1097,9 @@ public:
             stdlib::register_all(*eng);
             auto r = eng->execute(R"(
                 string out = "";
-                try { from_json("{\"$shared_ptr_id\": 4}"); out = "loaded"; } catch (e) { out = e; }
-                out += " | " + type_of(from_json("{\"$weak_ptr_id\": 4}"));
-                try { from_json("{\"$shared_ptr_id\": 1, \"$shared_ptr_data\": {\"a\": {\"$shared_ptr_id\": 1}}}"); out += " | loaded"; } catch (e) { out += " | " + e; }
+                try { from_json("{\"$id\": 4}"); out = "loaded"; } catch (e) { out = e; }
+                out += " | " + type_of(from_json("{\"$ref\": 4}"));
+                try { from_json("{\"$id\": 1, \"$val\": {\"a\": {\"$id\": 1}}}"); out += " | loaded"; } catch (e) { out += " | " + e; }
                 out;
             )");
             check_eq(std::string("Invalid shared_ptr ID: 4 | weak_ptr | Invalid shared_ptr ID: 1"), r.as<std::string>());
@@ -2161,7 +2161,7 @@ public:
 
             eng->hot_reload_reporting(true);
             eng->clear_hot_reload_reports();
-            eng->add_global("bad", eng->execute(R"(from_json("{\"_type_\":\"Watchkin\",\"health\":\"oops\",\"armor\":4,\"mood\":\"sad\"}"))"));
+            eng->add_global("bad", eng->execute(R"(from_json("{\"$type\":\"Watchkin\",\"$val\":{\"health\":\"oops\",\"armor\":4,\"mood\":\"sad\"}}"))"));
             check_eq((script_int)100, eng->execute("bad.health").as<script_int>(), "a C++ property keeps its constructed value");
             check_eq((script_int)4, eng->execute("bad.armor").as_int(), "the values that fit load");
             check_eq((script_int)5, eng->execute("bad.mood").as_int(), "a script field keeps its constructed value");
@@ -2647,8 +2647,8 @@ public:
         }
     )";
 
-    static constexpr const char* k_reload_golden = "fields 61 4 2 reloaded\nsame false false\nalias true true 61 reloaded\ncopy false false 61 5 reloaded\neq true false\nfresh 100 2 false\njson {\"_type_\":\"Voidkin\",\"health\":61,\"label\":\"creature\",\"chomp\":4,\"fangs\":2}\nbinary 61 4 2 reloaded\n";
-    static constexpr const char* k_report_golden = "h.health 7\nget 7\nset set\ncompound set!\nhas_field true true\nfields []\nmethods [{\"access\":\"public\",\"arity\":0,\"from\":\"HybridCreature\",\"name\":\"speak\",\"params\":[],\"static\":false}]\nspeak grr\nbind grr\ninvoke grr\ntype HybridCreature true\neq true false\ncopy false false 7 set!\ncopy independent 7\njson {\"_type_\":\"HybridCreature\",\"health\":7,\"label\":\"set!\"}\nfrom_json 7 set!\nfrom_binary 7 set!\nv.health 42 8 voidkin\nv.get 42 8\nv.set 43\nv.fields [{\"access\":\"public\",\"from\":\"Voidkin\",\"kind\":\"field\",\"name\":\"chomp\",\"static\":false,\"type\":\"int\"}]\nv.methods [{\"access\":\"public\",\"arity\":0,\"from\":\"Voidkin\",\"name\":\"speak\",\"params\":[],\"static\":false}]\nv.bind voidkin voidkin\nv.type Voidkin false\nv.eq true false\nv.copy false false 43 8\nv.json {\"_type_\":\"Voidkin\",\"health\":43,\"label\":\"creature\",\"chomp\":8}\nv.from_json 43 8 voidkin\nv.from_binary 43 8 voidkin\nextend 9 3 voidkin Voidkin\nextend.get 9\nextend.json {\"_type_\":\"Voidkin\",\"health\":9,\"label\":\"creature\",\"chomp\":3}\ng.charge 5\ng.set 9 9\ng.spark 14 3\ng.fields [{\"access\":\"public\",\"from\":\"NativeGadget\",\"kind\":\"field\",\"name\":\"charge\",\"static\":false,\"type\":\"int\"},{\"access\":\"public\",\"from\":\"NativeGadget\",\"kind\":\"signal\",\"name\":\"on_spark\",\"static\":false,\"type\":\"var\"}]\ng.methods [{\"access\":\"public\",\"arity\":1,\"from\":\"NativeGadget\",\"name\":\"spark\",\"params\":[{\"default\":false,\"name\":\"arg0\",\"type\":\"int\"}],\"static\":false}]\ng.json {\"_type_\":\"NativeGadget\",\"charge\":14,\"on_spark\":{\"_type_\":\"Signal\"}}\ng.eq true false\n";
+    static constexpr const char* k_reload_golden = "fields 61 4 2 reloaded\nsame false false\nalias true true 61 reloaded\ncopy false false 61 5 reloaded\neq true false\nfresh 100 2 false\njson {\"$type\":\"Voidkin\",\"$val\":{\"health\":61,\"label\":\"creature\",\"chomp\":4,\"fangs\":2}}\nbinary 61 4 2 reloaded\n";
+    static constexpr const char* k_report_golden = "h.health 7\nget 7\nset set\ncompound set!\nhas_field true true\nfields []\nmethods [{\"access\":\"public\",\"arity\":0,\"from\":\"HybridCreature\",\"name\":\"speak\",\"params\":[],\"static\":false}]\nspeak grr\nbind grr\ninvoke grr\ntype HybridCreature true\neq true false\ncopy false false 7 set!\ncopy independent 7\njson {\"$type\":\"HybridCreature\",\"$val\":{\"health\":7,\"label\":\"set!\"}}\nfrom_json 7 set!\nfrom_binary 7 set!\nv.health 42 8 voidkin\nv.get 42 8\nv.set 43\nv.fields [{\"access\":\"public\",\"from\":\"Voidkin\",\"kind\":\"field\",\"name\":\"chomp\",\"static\":false,\"type\":\"int\"}]\nv.methods [{\"access\":\"public\",\"arity\":0,\"from\":\"Voidkin\",\"name\":\"speak\",\"params\":[],\"static\":false}]\nv.bind voidkin voidkin\nv.type Voidkin false\nv.eq true false\nv.copy false false 43 8\nv.json {\"$type\":\"Voidkin\",\"$val\":{\"health\":43,\"label\":\"creature\",\"chomp\":8}}\nv.from_json 43 8 voidkin\nv.from_binary 43 8 voidkin\nextend 9 3 voidkin Voidkin\nextend.get 9\nextend.json {\"$type\":\"Voidkin\",\"$val\":{\"health\":9,\"label\":\"creature\",\"chomp\":3}}\ng.charge 5\ng.set 9 9\ng.spark 14 3\ng.fields [{\"access\":\"public\",\"from\":\"NativeGadget\",\"kind\":\"field\",\"name\":\"charge\",\"static\":false,\"type\":\"int\"},{\"access\":\"public\",\"from\":\"NativeGadget\",\"kind\":\"signal\",\"name\":\"on_spark\",\"static\":false,\"type\":\"var\"}]\ng.methods [{\"access\":\"public\",\"arity\":1,\"from\":\"NativeGadget\",\"name\":\"spark\",\"params\":[{\"default\":false,\"name\":\"arg0\",\"type\":\"int\"}],\"static\":false}]\ng.json {\"$type\":\"NativeGadget\",\"$val\":{\"charge\":14,\"on_spark\":{\"$type\":\"Signal\",\"$val\":{}}}}\ng.eq true false\n";
     // hybrid JSON, hybrid binary (hex), host JSON, host binary (hex), gadget JSON: one line each
     static constexpr const char* k_archives_golden = "{\"$id\": 1,\"$type\": \"Voidkin\",\"$script\": \"{\\\"chomp\\\":7}\",\"$val\": {\"health\": 42,\"label\": \"gnasher\"}}\n01000000000000000004000000030000002469640500000024747970650700000024736372697074040000002476616c040000000b0000000f000000380000000100000007000000566f69646b696e0b0000007b2263686f6d70223a377d01000000000000000002000000060000006865616c7468050000006c6162656c040000000b0000002a00000007000000676e61736865720202\n{\"$id\": 1,\"$val\": {\"health\": 13,\"label\": \"plain\"}}\n0100000000000000000200000003000000246964040000002476616c04000000360000000100000001000000000000000002000000060000006865616c7468050000006c6162656c04000000090000000d00000005000000706c61696e0202\n{\"$id\": 1,\"$val\": {\"charge\": 21,\"on_spark\": {\"parameter_names\": [],\"observers\": [],\"owned_observers\": {\"note\": {\"parameter_names\": [],\"script\": \"mark(arg_0);\"}}}}}";
     static std::vector<std::string> golden_lines() {

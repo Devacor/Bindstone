@@ -162,6 +162,7 @@ namespace jai::vm {
         // [6]=fast-head hit (env identity + engine serial) [7]=fast-head arm
         // [8]=this-field IC hit [9]=this-field IC arm
         uint64_t profile_env_resolve_[10] = {};
+        uint64_t profile_worker_declines_[32] = {};   // by worker_decline: a fast path a worker passed over for the slower general form
         // exec_call_from_scratch decomposition (the 38%-row honesty check): brackets the
         // EXEC BODY only, so [0]/[1] are pure call machinery (in-loop callee bodies run
         // after return) while [2] swallows the whole native execution — region waits,
@@ -405,6 +406,7 @@ namespace jai::vm {
             external_site_stack_.clear();
             execution_budget_ = budget;
             if (worker_math_alias_rows_) { worker_math_alias_rows_->fill(engine::math_alias_row{}); }
+            for (auto& rec : worker_env_caches_) { std::fill(rec->inline_holds.begin(), rec->inline_holds.end(), nullptr); rec->call_ics.clear(); rec->method_holds.clear(); }
             parallel_worker_ = true;
             arm_execution_deadline();
         }
@@ -413,6 +415,17 @@ namespace jai::vm {
         // wall (methods aren't provisioned per worker - their shared body caches and
         // arbitrary env reach are unsafe off-thread) checks this. Never set on the engine's own backend.
         bool parallel_worker_ = false;
+        // A fast path a worker passes over for the general form (profile builds count each on workers: the parallel inventory)
+        enum class worker_decline : uint8_t {
+            entry_row_none, entry_row_env, entry_row_serial, entry_row_shape, probe_ic, raw_probe, inline_fn_memo, inline_method,
+            sibling_method, math_alias, store_env, enum_entry, native_lane, bound_in_loop, ctor_in_loop, new_in_loop, bare_host,
+            ordinary_site, static_fold, host_method_pin, count
+        };
+#ifdef JAISCRIPT_VM_PROFILE
+        void note_worker_decline(worker_decline k) noexcept { if (parallel_worker_) { ++profile_worker_declines_[static_cast<size_t>(k)]; } }
+#else
+        void note_worker_decline(worker_decline) noexcept {}
+#endif
         size_t structural_equality_depth_ = 0;   // memberwise ==/<=> levels nested natively (detail/structural_equality.hpp)
         // parallel_for chunk loop: the worker's element cursor (a reference value owned by the
         // worker slot) that op_parallel_advance re-points and op_parallel_element pushes
@@ -447,9 +460,27 @@ namespace jai::vm {
             std::vector<uint64_t> site_epochs;   // per inline site: the definition epoch this worker last validated its globals and callees at
             std::vector<chunk::entry_memo_row> entry_rows;   // the worker's block-entry rows for this chunk (chunk::entry_memos' rule)
             std::vector<chunk::member_ic_entry> member_ic;   // the worker's member IC rows for this chunk (chunk::member_ic's rule)
+            // per inline site: the callee function object this worker last validated the graft against (chunk::inline_site::holds_fn's
+            // rule); worker copies live for a region, so the rows clear when the worker is configured for the next one
+            std::vector<const script_function*> inline_holds;
+            // per call site: the callee the worker's probe last parked (call_site::ic_*'s rule), held by the row; a hit parks it as the
+            // general probe would, pinned
+            struct call_ic { const script_function* identity = nullptr; const script_defined_function* fn = nullptr; strong_ptr<script_function> pin; uint32_t argc = 0; bool native = false; };
+            std::vector<call_ic> call_ics;
+            // per inline site of a method graft: the class (at its method epoch) the worker validated the graft for against the region's pin
+            std::vector<std::pair<const class_definition*, uint64_t>> method_holds;
+            // per method call site: the bound method's direct lane for the receiver class (call_site::nat_*'s rule)
+            struct native_row { const class_definition* cd = nullptr; uint64_t stamp = 0; uint64_t shape = 0; bool field_free = false; detail::host_method_hit hit; };
+            std::vector<native_row> native_rows;
         };
-        std::vector<worker_chunk_env_cache> worker_env_caches_;
-        worker_chunk_env_cache* worker_chunk_record(const chunk* code);
+        std::vector<std::unique_ptr<worker_chunk_env_cache>> worker_env_caches_;   // records never move: callers keep pointers
+        std::unordered_map<const chunk*, worker_chunk_env_cache*> worker_env_index_;
+        worker_chunk_env_cache* worker_env_mru_ = nullptr;
+        worker_chunk_env_cache* worker_chunk_record(const chunk* code) {
+            if (worker_env_mru_ && worker_env_mru_->code == code) { return worker_env_mru_; }
+            return worker_chunk_record_slow(code);
+        }
+        worker_chunk_env_cache* worker_chunk_record_slow(const chunk* code);
         // the member IC rows a site reads and fills: the chunk's on the main engine, a worker's own in its record of the chunk (the chunk is
         // shared); null: no rows, the probe answers each read
         std::vector<chunk::member_ic_entry>* member_ic_rows(const chunk& code) {
@@ -487,7 +518,7 @@ namespace jai::vm {
                 if (worker_string_private(it->second)) { ++it; } else { it = worker_borrowed_strings_.erase(it); }
             }
             for (auto& rec : worker_env_caches_) {
-                for (script_value& own : rec.string_constants) {
+                for (script_value& own : rec->string_constants) {
                     if (own.raw_storage_index() == script_value::TYPEID_STRING && !worker_string_private(own)) { own = script_value(std::monostate{}, engine_); }
                 }
             }
@@ -506,7 +537,6 @@ namespace jai::vm {
             return worker_block_constants_for(code);
         }
         const script_value* worker_block_constants_for(const chunk& code);
-        size_t worker_env_mru_ = 0;
         environment* worker_root_env_ = nullptr;   // slot root env (identity stable per slot)
 
         // Compile a per-worker function copy's body on the MAIN thread at the region
@@ -1796,9 +1826,11 @@ namespace jai::vm {
         // only (workers keep their private machinery); method-locals frames only so
         // this-resolution is one pointer read.
         script_value* this_field_ic_probe(frame& f, size_t cache_slot, uint64_t sym) {
-            if (!cached_global_env_ || cache_slot == SIZE_MAX) { return nullptr; }
+            if (cache_slot == SIZE_MAX) { return nullptr; }
             if (!f.locals || !f.locals->is_method || !f.locals->this_object_ptr) { return nullptr; }
-            auto& cache = f.code->env_lookup_cache;
+            std::vector<env_lookup_cache_entry>* rows = frame_lookup_rows(f);
+            if (!rows) { return nullptr; }
+            auto& cache = *rows;
             if (cache.size() <= cache_slot) { return nullptr; }
             const auto& entry = cache[cache_slot];
             if (entry.this_field_serial == 0 || entry.this_field_sym != sym) { return nullptr; }
@@ -1844,7 +1876,10 @@ namespace jai::vm {
         // A bound method's direct lane at a method call site (detail/host_member_access.hpp host_method_fill): the receiver class's
         // own, or a script layer's C++ base's. True when the lane ran the call (out holds the status); false sends the call on.
         // The object the site's lane runs on for this receiver (site.nat_hit.entry), else null: the call goes on
-        void* native_site_self(const call_site& site, class_definition& cd, class_instance& inst, uint64_t id);
+        void* native_site_self(const call_site& site, class_definition& cd, class_instance& inst, uint64_t id, const void*& entry);
+        // a worker's: the region pins the host method, the call's arity is neither serial nor a mutation of an object the chunk did not make
+        // (the pinned call raises those), and the worker's own row holds the lane
+        void* worker_native_self(const frame& f, const call_site& site, class_definition& cd, class_instance& inst, uint64_t id, size_t argc, const void*& entry);
         void native_site_refill(const call_site& site, class_definition& cd, class_instance& inst, uint64_t id, uint64_t stamp);
         // the instance a host-method call's receiver holds when the site's ordinary-path memo answers it, else null
         class_instance* ordinary_site_instance(const call_site& site, const script_value& receiver) const;
@@ -1854,9 +1889,11 @@ namespace jai::vm {
         bool bare_host_read(frame& f, size_t cache_slot, script_value& out);
         bool bare_host_fill_read(frame& f, size_t cache_slot, uint64_t sym, class_instance* inst, script_value& out);
         void this_field_ic_arm(frame& f, size_t cache_slot, class_instance* instance, uint64_t sym) {
-            if (!cached_global_env_ || cache_slot == SIZE_MAX) { return; }
+            if (cache_slot == SIZE_MAX) { return; }
             if (!f.locals || !f.locals->is_method) { return; }
-            auto& cache = f.code->env_lookup_cache;
+            std::vector<env_lookup_cache_entry>* rows = frame_lookup_rows(f);
+            if (!rows) { return; }
+            auto& cache = *rows;
             // env_lookup_cached sizes this vector on ITS fill path; a method body that
             // only reads fields resolves at the member probe and never gets there
             if (cache.size() < f.code->code.size() * 3) [[unlikely]] {
@@ -1890,9 +1927,11 @@ namespace jai::vm {
         // Store-side this-field IC (bare method-field writes): the read proof plus the
         // arm-time facts of the store landing. Returns the live cell, or null for the ladder.
         script_value* this_field_store_probe(frame& f, size_t cache_slot, uint64_t sym, type_info*& declared_out) {
-            if (!cached_global_env_ || cache_slot == SIZE_MAX) { return nullptr; }
+            if (cache_slot == SIZE_MAX) { return nullptr; }
             if (!f.locals || !f.locals->is_method || !f.locals->this_object_ptr) { return nullptr; }
-            auto& cache = f.code->env_lookup_cache;
+            std::vector<env_lookup_cache_entry>* rows = frame_lookup_rows(f);
+            if (!rows) { return nullptr; }
+            auto& cache = *rows;
             if (cache.size() <= cache_slot) { return nullptr; }
             const auto& entry = cache[cache_slot];
             if (entry.this_store_state != 1 || entry.this_field_sym != sym) { return nullptr; }
@@ -1913,8 +1952,10 @@ namespace jai::vm {
         }
         void this_field_store_arm(frame& f, size_t cache_slot, class_instance* instance, uint64_t sym) {
             this_field_ic_arm(f, cache_slot, instance, sym);
-            if (!cached_global_env_ || cache_slot == SIZE_MAX || !f.locals || !f.locals->is_method) { return; }
-            auto& cache = f.code->env_lookup_cache;
+            if (cache_slot == SIZE_MAX || !f.locals || !f.locals->is_method) { return; }
+            std::vector<env_lookup_cache_entry>* rows = frame_lookup_rows(f);
+            if (!rows) { return; }
+            auto& cache = *rows;
             if (cache.size() <= cache_slot) { return; }
             auto& entry = cache[cache_slot];
             class_definition* cd = instance ? instance->get_class_definition() : nullptr;
@@ -2127,11 +2168,31 @@ namespace jai::vm {
         __declspec(noinline)
 #endif
         bool inline_site_holds(frame& f, const chunk::inline_site& site);
+        const script_function** worker_inline_holds(const frame& f, const chunk::inline_site& site);
+        worker_chunk_env_cache::call_ic* worker_call_ic(const frame& f, const call_site& site);
+        // the lookup rows of the frame's chunk: the chunk's own on the main engine, a worker's own in its record of the chunk, sized once
+        // so the frames' tables never move (null: the chunk has no record on this worker)
+        std::vector<env_lookup_cache_entry>* frame_lookup_rows(const frame& f) {
+            if (cached_global_env_) { return &f.code->env_lookup_cache; }
+            if (!parallel_worker_) { return nullptr; }
+            worker_chunk_env_cache* rec = worker_chunk_record(f.code);
+            if (!rec) { return nullptr; }
+            if (rec->entries.size() < f.code->code.size() * 3) [[unlikely]] { rec->entries.resize(f.code->code.size() * 3); }
+            return &rec->entries;
+        }
+        // a worker frame's own lookup row for cache_slot, the frame's table found once (null: the chunk has no record on this worker)
+        const env_lookup_cache_entry* worker_armed_entry(frame& f, size_t cache_slot) {
+            if (f.env_table_code == f.code) { return cache_slot < f.code->code.size() * 3 ? &f.env_table[cache_slot] : nullptr; }
+            env_lookup_cache_entry* e = cache_slot < f.code->code.size() * 3 ? worker_env_cache_slot(f.code, cache_slot) : nullptr;
+            if (e) { f.env_table_code = f.code; f.env_table = e - cache_slot; }
+            return e;
+        }
         bool inline_globals_hold(const frame& f, const chunk::inline_site& site);
         bool inline_forward_callees_hold(const chunk::inline_site& site);
         bool math_alias_holds(frame& f, const chunk::cell_loop::math_alias_site& site);
         bool call_typed_land(frame& caller, const script_value& v);   // op_call_typed's landing (the caller's ip on the call)
-        bool inline_method_holds(frame& f, const chunk::inline_site& site);   // the identity, read without running a getter
+        bool inline_method_holds(frame& f, const chunk::inline_site& site);
+        bool worker_inline_method_holds(frame& f, const chunk::inline_site& site);   // the identity, read without running a getter
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
         op_status exec_c_mload(frame& f, const vm_instruction& ins);   // a member read site: the field's kind and payload into the cell
         op_status exec_c_mstore(frame& f, const vm_instruction& ins);   // a member store site: the field's payload written in place when the kinds agree

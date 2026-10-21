@@ -2129,18 +2129,11 @@ script_value vm_backend::worker_owned_string(const script_array* node, uint64_t 
 	return own;
 }
 
-vm_backend::worker_chunk_env_cache* vm_backend::worker_chunk_record(const chunk* code) {
-	if (worker_env_mru_ < worker_env_caches_.size() &&
-	    worker_env_caches_[worker_env_mru_].code == code) {
-		return &worker_env_caches_[worker_env_mru_];
-	}
-	for (size_t i = 0; i < worker_env_caches_.size(); ++i) {
-		if (worker_env_caches_[i].code == code) {
-			worker_env_mru_ = i;
-			return &worker_env_caches_[i];
-		}
-	}
-	return nullptr;
+JAI_NOINLINE vm_backend::worker_chunk_env_cache* vm_backend::worker_chunk_record_slow(const chunk* code) {
+	auto it = worker_env_index_.find(code);
+	if (it == worker_env_index_.end()) { return nullptr; }
+	worker_env_mru_ = it->second;
+	return it->second;
 }
 
 env_lookup_cache_entry* vm_backend::worker_env_cache_slot(const chunk* code, size_t cache_slot) {
@@ -2153,12 +2146,11 @@ env_lookup_cache_entry* vm_backend::worker_env_cache_slot(const chunk* code, siz
 }
 
 void vm_backend::worker_pin_env_cache(const std::shared_ptr<void>& pin, const chunk* code) {
-	for (const auto& rec : worker_env_caches_) {
-		if (rec.code == code) { return; }
-	}
-	worker_chunk_env_cache rec;
-	rec.pin = pin;
-	rec.code = code;
+	if (worker_env_index_.count(code)) { return; }
+	auto rec = std::make_unique<worker_chunk_env_cache>();
+	rec->pin = pin;
+	rec->code = code;
+	worker_env_index_.emplace(code, rec.get());
 	worker_env_caches_.push_back(std::move(rec));
 }
 
@@ -3031,7 +3023,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 					return op_status::ok;
 				}
 			}
-		} else if (!(ins.c & store_flag_global_only) && cached_global_env_ && !parallel_worker_) {
+		} else if (!(ins.c & store_flag_global_only) && (cached_global_env_ || parallel_worker_)) {
 			// an environment variable through the load's armed cache: the full path's walk resolves the same cell (get_env_var_ptr
 			// and vm_storage_lookup share the ladder), and a frame whose member scope is active keeps the full path's member rules
 			bool plain = !f.locals || f.top_level;
@@ -3159,7 +3151,9 @@ JAI_FORCEINLINE bool vm_backend::store_scalar_lane(script_value& slot, script_va
 // the cell env_lookup_cached hands a load at this site when its two-compare head is armed (an environment-local cell; a this or static
 // fallback never arms); null = the full path resolves the store
 script_value* vm_backend::env_store_cell(frame& f, size_t cache_slot, uint64_t symbol_id) {
-	auto& cache = f.code->env_lookup_cache;
+	std::vector<env_lookup_cache_entry>* rows = frame_lookup_rows(f);
+	if (!rows) { note_worker_decline(worker_decline::store_env); return nullptr; }
+	auto& cache = *rows;
 	if (cache.size() > cache_slot) {
 		const env_lookup_cache_entry& e = cache[cache_slot];
 		if (e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch()) return e.fast_ptr;
@@ -3303,7 +3297,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			}
 			if (declared && declared->base_type != script_value_type::jai_any_type) {
 				auto converted = detail::field_store_convert(incoming, declared, engine_, sym,
-					static_cast<const class_definition*>(f.code->env_lookup_cache[f.ip * 3].this_field_class));
+					static_cast<const class_definition*>((*frame_lookup_rows(f))[f.ip * 3].this_field_class));
 				if (!converted) {
 					return raise_from(converted);
 				}
@@ -5042,10 +5036,12 @@ op_status vm_backend::exec_math_pair(frame& f, const vm_instruction& ins, detail
 // else takes the probe's outcome (0 parked for the real call, -1 raised)
 int vm_backend::math_alias_verdict(frame& f, const call_site& site, uint8_t fn, size_t cache_slot) {
 	const void* identity = math_alias_rows_ ? math_alias_rows_[fn].identity : nullptr;
-	if (identity && cached_global_env_ && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) {
+	std::vector<env_lookup_cache_entry>* rows = identity && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only)) ? frame_lookup_rows(f) : nullptr;
+	if (identity && !rows) { note_worker_decline(worker_decline::math_alias); }
+	if (rows) {
 		bool plain_frame = !f.locals || f.top_level;
 		if (!plain_frame && !f.locals->is_method) { ensure_frame_member_scope(f, environment_.get()); plain_frame = !frame_scope_active(f); }
-		const auto& cache = f.code->env_lookup_cache;
+		const auto& cache = *rows;
 		if (plain_frame && cache_slot < cache.size()) {
 			const env_lookup_cache_entry& e = cache[cache_slot];
 			if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() &&
@@ -8140,11 +8136,11 @@ std::vector<chunk::entry_memo_row>* vm_backend::cells_entry_rows(frame& f) {
 const chunk::entry_memo_row* vm_backend::cells_entry_row(frame& f, const chunk::cell_loop& loop) {
 	const std::vector<chunk::entry_memo_row>* rows = cells_entry_rows(f);
 	const size_t li = static_cast<size_t>(&loop - f.code->cell_loops.data());
-	if (!rows || li >= rows->size()) return nullptr;
+	if (!rows || li >= rows->size()) { note_worker_decline(worker_decline::entry_row_none); return nullptr; }
 	const chunk::entry_memo_row& row = (*rows)[li];
-	if (row.env_of != environment_.get()) return nullptr;
-	if (row.env_serial != env_symbolizer_->env_epoch()) return nullptr;
-	if (row.sites.size() != loop.sites.size() || !cells_entry_scope_free(f)) return nullptr;
+	if (row.env_of != environment_.get()) { note_worker_decline(worker_decline::entry_row_env); return nullptr; }
+	if (row.env_serial != env_symbolizer_->env_epoch()) { note_worker_decline(worker_decline::entry_row_serial); return nullptr; }
+	if (row.sites.size() != loop.sites.size() || !cells_entry_scope_free(f)) { note_worker_decline(worker_decline::entry_row_shape); return nullptr; }
 	return &row;
 }
 
@@ -8201,6 +8197,7 @@ const script_value* vm_backend::env_operand_value(frame& f, const chunk::cell_lo
 	// an enum's map is const (internal/const.md 11): while the name holds the same map node, the entry found last time answers
 	const strong_ptr<script_map>& node = base.unchecked_get_map_storage();
 	if (er.enum_map && er.enum_map == node && !parallel_worker_) { return er.enum_entry; }
+	note_worker_decline(worker_decline::enum_entry);
 	const script_map& map = base.as_map();
 	auto it = map.find(map_string_key_probe{ static_cast<const member_expr*>(f.code->nodes[er.member_node].get())->member });
 	if (it == map.end() || it->second.raw_storage_index() != script_value::TYPEID_INT) return nullptr;
@@ -8804,7 +8801,8 @@ op_status vm_backend::exec_c_call(frame& f, const vm_instruction& ins) {
 // frame program of the call's arity; the general probe's own resolution otherwise
 bool vm_backend::raw_probe(frame& f, const chunk::cell_loop& loop, uint32_t index) {
 	const chunk::cell_loop::cell_call& cc = loop.calls[index];
-	if (parallel_worker_ || debug_hook_ || has_custom_numeric_ops_ || !cached_global_env_ || !f.window_backed || !f.locals || f.top_level || f.locals->is_method) return false;
+	if (parallel_worker_) { note_worker_decline(worker_decline::raw_probe); return false; }
+	if (debug_hook_ || has_custom_numeric_ops_ || !cached_global_env_ || !f.window_backed || !f.locals || f.top_level || f.locals->is_method) return false;
 	const call_site& site = f.code->call_sites[f.code->code[cc.probe_ip].a];
 	if (!site.ic_fn || site.ic_argc != cc.args.size() || site.callee.slot != k_invalid_u32 || (site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) return false;
 	ensure_frame_member_scope(f, environment_.get());
@@ -12272,17 +12270,45 @@ bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
 	if (v->raw_storage_index() != script_value::TYPEID_FUNCTION) return false;
 	const script_function& fn = v->unchecked_as_function();
 	if (!parallel_worker_ && site.holds_fn.get() == &fn) return true;   // every condition below is fixed for one function object
+	const script_function** worker_holds = parallel_worker_ ? worker_inline_holds(f, site) : nullptr;
+	if (worker_holds && *worker_holds == &fn) return true;
+	note_worker_decline(worker_decline::inline_fn_memo);
 	const auto* thunk = fn.target<script_callable_thunk>();
 	const bool holds = thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn && (!thunk->payload.fn->closure_env || (parallel_worker_ && thunk->payload.fn->closure_env.get() == worker_root_env_)) && thunk->payload.fn->body.get() == site.body;   // a worker's copy of the callee closes over the worker's root
 	if (holds && !parallel_worker_) { site.holds_fn = *v->get_storage().get_if<script_value::TYPEID_FUNCTION>(); }
+	if (holds && worker_holds) { *worker_holds = &fn; }
 	return holds;
+}
+// the element's index in the vector, SIZE_MAX when it lies in another (a caller chunk's site)
+template <class T> static size_t index_within(const T& item, const std::vector<T>& items) {
+	const uintptr_t at = reinterpret_cast<uintptr_t>(&item), base = reinterpret_cast<uintptr_t>(items.data());
+	return at >= base && at < base + items.size() * sizeof(T) ? (at - base) / sizeof(T) : SIZE_MAX;
+}
+// a worker's row for a call site's parked callee (null: the chunk has no record on this worker)
+vm_backend::worker_chunk_env_cache::call_ic* vm_backend::worker_call_ic(const frame& f, const call_site& site) {
+	worker_chunk_env_cache* rec = worker_chunk_record(f.code);
+	if (!rec) return nullptr;
+	const size_t i = index_within(site, f.code->call_sites);
+	if (i >= f.code->call_sites.size()) return nullptr;   // a site of another chunk (a caller's)
+	if (rec->call_ics.size() < f.code->call_sites.size()) { rec->call_ics.resize(f.code->call_sites.size()); }
+	return &rec->call_ics[i];
+}
+// a worker's row for an inline site's validated callee (null: the chunk has no record on this worker)
+const script_function** vm_backend::worker_inline_holds(const frame& f, const chunk::inline_site& site) {
+	worker_chunk_env_cache* rec = worker_chunk_record(f.code);
+	if (!rec) return nullptr;
+	const size_t i = index_within(site, f.code->inline_sites);
+	if (i >= f.code->inline_sites.size()) return nullptr;
+	if (rec->inline_holds.size() < f.code->inline_sites.size()) { rec->inline_holds.resize(f.code->inline_sites.size(), nullptr); }
+	return &rec->inline_holds[i];
 }
 // a method graft's guard: the receiver slot holds an instance whose class the guard validated at its current method epoch, and the
 // instance carries no field of the method's name; the validation is the call's own resolution (one public overload with the graft's
 // body, no user getter of the method's name, no field shadowing it), plus no user accessor owning a bare field the body names and each
 // such field declared where the method's class finds it. A worker takes the fallback (its pinned call).
 bool vm_backend::inline_method_holds(frame& f, const chunk::inline_site& site) {
-	if (parallel_worker_ || !cached_global_env_) return false;
+	if (parallel_worker_) { return worker_inline_method_holds(f, site); }
+	if (!cached_global_env_) return false;
 	const script_value* r = frame_slot(f, site.receiver_slot);
 	if (!r) return false;
 	const script_value& v = r->deref();
@@ -12317,6 +12343,42 @@ bool vm_backend::inline_method_holds(frame& f, const chunk::inline_site& site) {
 	site.holds_epoch = cd->method_epoch();
 	return true;
 }
+// a worker's method graft: the receiver's class holds the region's pin of the method, whose body is the graft's, and the bare fields the
+// body names resolve as on the main engine; validated once per class and method epoch in the worker's own row
+bool vm_backend::worker_inline_method_holds(frame& f, const chunk::inline_site& site) {
+	const script_value* r = frame_slot(f, site.receiver_slot);
+	if (!r || !parallel_method_pins_) { note_worker_decline(worker_decline::inline_method); return false; }
+	const script_value& v = r->deref();
+	const size_t k = v.raw_storage_index();
+	if (k != script_value::TYPEID_OBJECT && k != script_value::TYPEID_SHARED_PTR) return false;
+	const auto& holder = v.unchecked_object_handle();
+	if (!holder || !holder->is_class_instance_wrapper || !holder->data || holder->type_id == coroutine_handle_type_id_) return false;
+	auto* inst = static_cast<class_instance*>(holder->data.get());
+	class_definition* cd = inst->get_class_definition();
+	if (!cd) return false;
+	if (inst->has_user_overflow_fields() && inst->has_field(site.member_id)) return false;
+	worker_chunk_env_cache* rec = worker_chunk_record(f.code);
+	if (!rec) { note_worker_decline(worker_decline::inline_method); return false; }
+	const size_t site_index = index_within(site, f.code->inline_sites);
+	if (site_index >= f.code->inline_sites.size()) return false;
+	if (rec->method_holds.size() < f.code->inline_sites.size()) { rec->method_holds.resize(f.code->inline_sites.size(), {nullptr, 0}); }
+	auto& row = rec->method_holds[site_index];
+	if (row.first == cd && row.second == cd->method_epoch()) return true;
+	note_worker_decline(worker_decline::inline_method);
+	if (site.field_class && cd != site.field_class) return false;
+	if (cd->chain_has_nonpublic() || cd->chain_declares_field(site.member_id) || cd->field_slot(site.member_id) != class_definition::k_no_field_slot) return false;
+	const detail::parallel_method_pin* pin = parallel_method_pins_->find(cd, site.member_id);
+	if (!pin || !pin->resolved || pin->resolved->is_coroutine || pin->resolved->body.get() != site.body || !pin->method_value.is_function()) return false;
+	const auto* dispatch = pin->method_value.unchecked_as_function().target<script_method_dispatch>();
+	if (!dispatch || !dispatch->cls) return false;
+	for (const uint64_t id : site.field_ids) {
+		if (cd->user_accessor(symbolizer_->get_getter_id_with_view(id).first) || cd->user_accessor(symbolizer_->get_setter_id_with_view(id).first)) return false;
+		const class_definition* at = cd->find_field_declaring_class(id);
+		if (!at || at != dispatch->cls->find_field_declaring_class(id)) return false;
+	}
+	row = {cd, cd->method_epoch()};
+	return true;
+}
 op_status vm_backend::exec_inline_guard(frame& f, const vm_instruction& ins) {
 	const chunk::inline_site& site = f.code->inline_sites[ins.a];
 	if (inline_site_holds(f, site)) { ++f.ip; return {}; }
@@ -12334,6 +12396,22 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 #endif
 	const call_site& site = f.code->call_sites[ins.a];
 	const size_t argc = ins.b;
+	if (parallel_worker_ && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) {
+		if (const worker_chunk_env_cache::call_ic* ic = worker_call_ic(f, site); ic && ic->identity && (ic->fn ? argc == ic->argc : ic->native)) {
+			bool plain_frame = !f.locals || f.top_level;
+			if (!plain_frame && !f.locals->is_method) { ensure_frame_member_scope(f, environment_.get()); plain_frame = !frame_scope_active(f); }
+			const env_lookup_cache_entry* e = plain_frame ? worker_armed_entry(f, f.ip * 3) : nullptr;
+			if (e && e->fast_ptr && e->fast_env == environment_.get() && e->fast_serial == env_symbolizer_->env_epoch() &&
+			    e->fast_ptr->raw_storage_index() == script_value::TYPEID_FUNCTION && &e->fast_ptr->unchecked_as_function() == ic->identity) {
+				pending_callee& pc = pending_callees_.emplace_back();
+				pc.fn = ic->fn;
+				pc.pin = ic->pin;
+				pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
+				return {};
+			}
+			note_worker_decline(worker_decline::probe_ic);
+		}
+	}
 	if (cached_global_env_ && ((site.ic_fn && argc == site.ic_argc) || site.ic_native) && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) {
 		bool plain_frame = !f.locals || f.top_level;
 		if (!plain_frame && !f.locals->is_method) { ensure_frame_member_scope(f, environment_.get()); plain_frame = !frame_scope_active(f); }
@@ -12372,6 +12450,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 // and method epoch (no own-scope binding, no field of the name, one overload on an all-public chain) is the class's dispatcher on this
 // frame's receiver, parked as such; the call enters it as the bound method it would have minted
 bool vm_backend::park_sibling_method(frame& f, const call_site& site) {
+	if (parallel_worker_ && f.locals && !f.top_level && f.locals->is_method) { note_worker_decline(worker_decline::sibling_method); return false; }
 	if (parallel_worker_ || !cached_global_env_ || !f.locals || f.top_level || !f.locals->is_method) return false;
 	ensure_frame_member_scope(f, environment_.get());
 	if (frame_scope_state(f) != detail::member_scope_state::instance || !f.locals->scope_this) return false;
@@ -12471,7 +12550,9 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 				pc.fn = thunk->payload.fn.get();
 				pc.pin = *calleeVal.get_storage().get_if<script_value::TYPEID_FUNCTION>();
 				parked_direct = true;
-				if (cached_global_env_ && !thunk->payload.fn->closure_env) {
+				if (parallel_worker_) {
+					if (worker_chunk_env_cache::call_ic* ic = worker_call_ic(f, site)) { *ic = { &calleeVal.unchecked_as_function(), pc.fn, pc.pin, static_cast<uint32_t>(argc), false }; }
+				} else if (cached_global_env_ && !thunk->payload.fn->closure_env) {
 					retire_site_callee(site);
 					site.ic_pin = pc.pin;
 					site.ic_identity = &calleeVal.unchecked_as_function();
@@ -12485,7 +12566,9 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 				// on the same identity the script callee's cache keys on
 				pc.pin = *calleeVal.get_storage().get_if<script_value::TYPEID_FUNCTION>();
 				parked_direct = true;
-				if (cached_global_env_) {
+				if (parallel_worker_) {
+					if (worker_chunk_env_cache::call_ic* ic = worker_call_ic(f, site)) { *ic = { &calleeVal.unchecked_as_function(), nullptr, pc.pin, 0, true }; }
+				} else if (cached_global_env_) {
 					retire_site_callee(site);
 					site.ic_pin = pc.pin;
 					site.ic_identity = &calleeVal.unchecked_as_function();
@@ -13551,6 +13634,7 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	// (call_record::method_result_anchor). Coroutine methods, foreign engines, and
 	// parallel workers fall to the opaque path (identical behavior; the worker rules
 	// live there). A resolution decline falls through for the identical error.
+	if (parallel_worker_ && thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::bound_method) { note_worker_decline(worker_decline::bound_in_loop); }
 	if (thunk && thunk->eng == engine_ &&
 	    thunk->payload.kind == script_callable::kind_type::bound_method &&
 	    thunk->payload.this_obj && thunk->payload.bound_dispatch &&
@@ -13583,8 +13667,7 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	// ctor body in-loop - the same door as op_new. Workers stay opaque (their rules
 	// live in execute_callable); coroutine ctors take the native tail inside.
 	if (thunk && thunk->eng == engine_ &&
-	    thunk->payload.kind == script_callable::kind_type::constructor &&
-	    !parallel_worker_) {
+	    thunk->payload.kind == script_callable::kind_type::constructor) {
 		const std::shared_ptr<script_class_definition> no_class;
 		const std::shared_ptr<script_class_definition>* cached = cached_global_env_ ? site_script_class(&site, thunk) : nullptr;
 		const std::shared_ptr<script_class_definition> cast = cached || !thunk->payload.cls || !thunk->payload.cls->is_script_class()
@@ -14843,6 +14926,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 
 bool vm_backend::bare_host_read(frame& f, size_t cache_slot, script_value& out) {
 	const auto& table = f.code->bare_host_ic;
+	if (parallel_worker_ && cache_slot < table.size()) { note_worker_decline(worker_decline::bare_host); }
 	if (cache_slot >= table.size() || parallel_worker_) { return false; }
 	const chunk::bare_host_entry& entry = table[cache_slot];
 	if (!entry.hit.lane || !f.locals->scope_this) { return false; }
@@ -14871,6 +14955,7 @@ JAI_NOINLINE bool vm_backend::bare_host_fill_read(frame& f, size_t cache_slot, u
 }
 
 class_instance* vm_backend::ordinary_site_instance(const call_site& site, const script_value& receiver) const {
+	if (parallel_worker_ && site.ord_cd) { const_cast<vm_backend*>(this)->note_worker_decline(worker_decline::ordinary_site); }
 	if (!site.ord_cd || parallel_worker_) { return nullptr; }
 	const script_value& objv = receiver.deref();
 	if (objv.raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
@@ -14911,14 +14996,42 @@ JAI_NOINLINE void vm_backend::native_site_refill(const call_site& site, class_de
 	detail::host_method_fill(&cd, &inst, id, engine_, site.nat_hit);
 }
 
-JAI_FORCEINLINE void* vm_backend::native_site_self(const call_site& site, class_definition& cd, class_instance& inst, uint64_t id) {
+JAI_FORCEINLINE void* vm_backend::native_site_self(const call_site& site, class_definition& cd, class_instance& inst, uint64_t id, const void*& entry) {
 	const uint64_t stamp = cd.is_script_class() ? cd.method_epoch() : cd.native_stamp();
 	if (site.nat_cd != &cd || site.nat_stamp != stamp || site.nat_shape != cd.field_shape_epoch()) [[unlikely]] {
 		if (!cached_global_env_) { return nullptr; }
 		native_site_refill(site, cd, inst, id, stamp);
 	}
 	if (!site.nat_hit.entry || native_field_shadowed(site, inst, id)) { return nullptr; }
+	entry = site.nat_hit.entry;
 	return detail::host_method_self(&inst, site.nat_hit);
+}
+
+void* vm_backend::worker_native_self(const frame& f, const call_site& site, class_definition& cd, class_instance& inst, uint64_t id, size_t argc, const void*& entry) {
+	const detail::parallel_method_pin* pin = parallel_method_pins_ ? parallel_method_pins_->find(&cd, id) : nullptr;
+	if (!pin || pin->resolved) { return nullptr; }
+	const uint64_t arity_bit = uint64_t(1) << std::min<size_t>(argc, 63);
+	if ((pin->serial_arities & arity_bit) ||
+	    ((pin->mutating_arities & arity_bit) && !(inst.region_tag() != 0 && inst.region_tag() == engine_->parallel_region_serial()))) {
+		return nullptr;
+	}
+	worker_chunk_env_cache* rec = worker_chunk_record(f.code);
+	if (!rec) { note_worker_decline(worker_decline::native_lane); return nullptr; }
+	const size_t site_index = index_within(site, f.code->call_sites);
+	if (site_index >= f.code->call_sites.size()) { return nullptr; }
+	if (rec->native_rows.size() < f.code->call_sites.size()) { rec->native_rows.resize(f.code->call_sites.size()); }
+	worker_chunk_env_cache::native_row& row = rec->native_rows[site_index];
+	const uint64_t stamp = cd.is_script_class() ? cd.method_epoch() : cd.native_stamp();
+	if (row.cd != &cd || row.stamp != stamp || row.shape != cd.field_shape_epoch()) [[unlikely]] {
+		row.cd = &cd;
+		row.stamp = stamp;
+		row.shape = cd.field_shape_epoch();
+		row.field_free = !cd.chain_declares_field(id) && cd.field_slot(id) == class_definition::k_no_field_slot;
+		detail::host_method_fill(&cd, &inst, id, engine_, row.hit);
+	}
+	if (!row.hit.entry || ((!row.field_free || inst.has_user_overflow_fields()) && inst.has_field(id))) { return nullptr; }
+	entry = row.hit.entry;
+	return detail::host_method_self(&inst, row.hit);
 }
 
 JAI_NOINLINE void vm_backend::fill_host_member_hit(class_definition* cd, const class_instance* inst, uint64_t member_id,
@@ -15277,7 +15390,8 @@ std::optional<script_value> vm_backend::folded_static_value(const member_expr* e
 }
 
 void vm_backend::fold_static_read(frame& f, const vm_instruction& ins, const member_expr* expr, const script_value& out) {
-	if (parallel_worker_ || debug_hook_ || (engine_ && engine_->parallel_region_active()) || !f.code) { return; }
+	if (parallel_worker_) { note_worker_decline(worker_decline::static_fold); return; }
+	if (debug_hook_ || (engine_ && engine_->parallel_region_active()) || !f.code) { return; }
 	if (!f.pin && !body_chunks_.count(f.code)) { return; }   // a chunk whose lifetime the fold can hold
 	if (f.ip >= f.code->code.size() || f.code->code[f.ip].op != opcode::op_get_static || f.code->code[f.ip].a != ins.a) { return; }
 	const std::optional<script_value> folded = folded_static_value(expr);
@@ -16508,12 +16622,13 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					class_definition* cd = inst->get_class_definition();
 					// A host class's direct lane (class_definition::native_method): the bound method's body on the
 					// C++ object, the receiver and arguments read in place; a declined shape takes the ordinary call
-					if (!parallel_worker_ && cd && (cd->has_native_methods() || (cd->is_cpp_class() && !cd->get_parent_classes().empty()))) {
-						if (void* self = native_site_self(site, *cd, *inst, member->member_id)) {
+					if (cd && (cd->has_native_methods() || (cd->is_cpp_class() && !cd->get_parent_classes().empty()))) {
+						const void* nat_entry = nullptr;
+						if (void* self = parallel_worker_ ? worker_native_self(f, site, *cd, *inst, member->member_id, argc, nat_entry) : native_site_self(site, *cd, *inst, member->member_id, nat_entry)) {
 							script_value out = make_null();
 							bool taken = false;
 							try {
-								taken = (*static_cast<const class_definition::native_entry*>(site.nat_hit.entry))(self, objd, stack_.data() + args_base, argc, out);
+								taken = (*static_cast<const class_definition::native_entry*>(nat_entry))(self, objd, stack_.data() + args_base, argc, out);
 							} catch (...) {
 								return call_threw(args_base - 1);
 							}
@@ -16565,12 +16680,13 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					else { ++profile_slice_gate_[3]; }   // mic guard failed (unarmed/epoch/class/field)
 #endif
 					// a script layer's C++ base method (the script method cache never holds one, so a script method it serves never gets here)
-					if (!parallel_worker_ && cd && cd->is_script_class()) {
-						if (void* self = native_site_self(site, *cd, *inst, member->member_id)) {
+					if (cd && cd->is_script_class()) {
+						const void* nat_entry = nullptr;
+						if (void* self = parallel_worker_ ? worker_native_self(f, site, *cd, *inst, member->member_id, argc, nat_entry) : native_site_self(site, *cd, *inst, member->member_id, nat_entry)) {
 							script_value out = make_null();
 							bool taken = false;
 							try {
-								taken = (*static_cast<const class_definition::native_entry*>(site.nat_hit.entry))(self, objd, stack_.data() + args_base, argc, out);
+								taken = (*static_cast<const class_definition::native_entry*>(nat_entry))(self, objd, stack_.data() + args_base, argc, out);
 							} catch (...) {
 								return call_threw(args_base - 1);
 							}
@@ -16736,6 +16852,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
 				if (const detail::parallel_method_pin* host = parallel_method_pins_ && cd ? parallel_method_pins_->find(cd, member->member_id) : nullptr;
 				    host && !host->resolved) {
+					note_worker_decline(worker_decline::host_method_pin);
 					std::vector<script_value> host_args(arguments.begin(), arguments.end());
 					auto called = detail::call_parallel_host_pin(*host, object, member->member_id, std::move(host_args), engine_);
 					if (!called) { return raise_from(called); }
@@ -17213,6 +17330,29 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		return {};
 	}
 
+	if (parallel_worker_ && expr->type->base_type == script_value_type::jai_object_type) {
+		// a worker resolves the class name through its own lookup rows and enters the constructor in the loop; the site's memo is the main engine's
+		if (ins.c && f.code->call_sites[ins.c - 1].new_symbol != UINT64_MAX) {
+			script_value* ctor_cell = new_class_cell(f, ins, *expr->type);
+			const script_callable_thunk* thunk = ctor_cell && ctor_cell->deref().raw_storage_index() == script_value::TYPEID_FUNCTION
+				? ctor_cell->deref().unchecked_as_function().target<script_callable_thunk>() : nullptr;
+			if (thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::constructor && thunk->payload.cls && thunk->payload.cls->is_script_class()) {
+				const auto script_cls = std::static_pointer_cast<script_class_definition>(thunk->payload.cls);
+				if (script_cls->get_constructor_asts().empty()) {
+					auto result = construct_default_instance(script_cls, args);
+					if (!result) {
+						return raise_from(result);
+					}
+					stack_.push_back(std::move(result.value()));
+					return {};
+				}
+				if (thunk->payload.definition_env) {
+					return enter_constructor_in_loop(f, script_cls, thunk->payload.definition_env, args, nullptr, &f.code->call_sites[ins.c - 1]);
+				}
+			}
+		}
+		note_worker_decline(worker_decline::new_in_loop);
+	}
 	if (cached_global_env_ && !parallel_worker_ && expr->type->base_type == script_value_type::jai_object_type) {
 		script_value* ctor_cell = new_class_cell(f, ins, *expr->type);
 		if (ctor_cell && ctor_cell->is_function()) {
@@ -19622,6 +19762,16 @@ void vm_backend::dump_opcode_profile() const {
 		fprintf(stderr, "[vm-profile] exec_call bound-method: entered %llu | in-loop %llu | bound-opaque %llu | other-opaque %llu\n",
 			(unsigned long long)profile_bound_method_paths_[0], (unsigned long long)profile_bound_method_paths_[1],
 			(unsigned long long)profile_bound_method_paths_[2], (unsigned long long)profile_bound_method_paths_[3]);
+	}
+	{
+		static const char* const k_decline_names[] = { "entry-row-none", "entry-row-env", "entry-row-serial", "entry-row-shape", "probe-ic", "raw-probe",
+			"inline-fn-memo", "inline-method", "sibling-method", "math-alias", "store-env", "enum-entry", "native-lane", "bound-in-loop",
+			"ctor-in-loop", "new-in-loop", "bare-host", "ordinary-site", "static-fold", "host-method-pin" };
+		std::string line;
+		for (size_t k = 0; k < static_cast<size_t>(worker_decline::count); ++k) {
+			if (profile_worker_declines_[k]) { line += std::string(line.empty() ? "" : " | ") + k_decline_names[k] + " " + std::to_string(profile_worker_declines_[k]); }
+		}
+		if (!line.empty()) { fprintf(stderr, "[vm-profile] worker declines: %s\n", line.c_str()); }
 	}
 	const uint64_t er_total = profile_env_resolve_[0] + profile_env_resolve_[1] + profile_env_resolve_[2] +
 	                          profile_env_resolve_[3] + profile_env_resolve_[4] + profile_env_resolve_[6];

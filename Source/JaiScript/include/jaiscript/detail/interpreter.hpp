@@ -241,7 +241,7 @@ namespace jai {
 
         // Wire (or clear) the step-debugger. The statement hook itself tests only the
         // plain cached gate debug_hook_, refreshed from this atomic at the debug sync
-        // points (sync_debug_hook): execute entry and the 1024-tick budget sample.
+        // points (sync_debug_hook).
         void set_debug_controller(debug::controller* c) override {
             debugger_.store(c, std::memory_order_release);
         }
@@ -523,9 +523,14 @@ namespace jai {
             return environment_ ? environment_->find_access_context() : nullptr;
         }
 
-        // Debugger: named slot-locals (params + reached body decls) of the current call frame,
-        // reconstructed from the frame's function AST. Empty at global scope / for foreign frames.
-        std::vector<std::pair<std::string, script_value>> get_current_frame_locals() const override;
+        std::vector<stack_frame> debug_frames() const override;
+        // Debugger: named slot-locals (params + reached body decls) of a call frame, reconstructed
+        // from the frame's function AST. Empty at global scope / for foreign frames.
+        std::vector<std::pair<std::string, script_value>> get_frame_locals(size_t frame) const override;
+        // Debug sync point (out of line: needs the controller type). Refreshes
+        // debug_hook_ + the controller's hot cache, and hands a session-end a fresh
+        // budget deadline (the armed one is long past after a pause).
+        void sync_debug_hook() override;
 
         // Get the global (root) environment from the engine directly
         // Previously walked up the parent chain, but that can diverge when closures/methods
@@ -787,6 +792,7 @@ namespace jai {
         bool trace_captured_ = false;
         const ast_node* top_level_node_ = nullptr;
         void capture_stack_trace();
+        static stack_frame call_frame_trace(const call_frame& frame);
 
         std::optional<error_propagator> run_error_;   // the runtime error that ended this run's top level
         detail::nested_failure nested_failure_;
@@ -938,12 +944,6 @@ namespace jai {
         // The next dispatch is no new statement execution (set only while armed): a for initializer, whose header
         // stopped, or a statement a coroutine resume re-enters.
         const ast_node* debug_quiet_node_ = nullptr;
-
-        // Debug sync point (out of line: needs the controller type). Refreshes
-        // debug_hook_ + the controller's hot cache, and hands a session-end a fresh
-        // budget deadline (the armed one is long past after a pause). Called at execute
-        // entry (prepare_for_execution) and every 1024 budget ticks.
-        void sync_debug_hook();
 
         // Cached common values to avoid repeated allocations (initialized in set_engine_reference)
         std::optional<script_value> cached_null_;

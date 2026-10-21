@@ -1,8 +1,9 @@
 # JaiScript Debugger — Design
 
 The controller stops on both backends with breakpoints, pause and step over/into/out; `list_frames` returns the
-top frame only; the connector answers `evaluate` empty and does not handle `setVariable`. Not built: a multi-frame
-stack, `setVariable`/`evaluate`, conditional breakpoints and logpoints, value history.
+call stack (innermost first, the top level last), `list_locals(frame)` each frame's locals and `list_globals` the
+program scope; the connector answers `evaluate` empty and does not handle `setVariable`. Not built:
+`setVariable`/`evaluate`, conditional breakpoints and logpoints, value history, expandable structured values.
 
 `jai::debug::listen(engine&, port = default_port, host)` builds a connector, attaches it and returns it
 (`connector.hpp`); `jai::debug::default_port` is 52472. Incoming DAP breakpoint paths normalize on the script
@@ -162,9 +163,9 @@ per-expression stepping**, to keep the detached hot path free.
 | DAP | Mechanism |
 |-----|-----------|
 | `setBreakpoints` | Store per-file line set as an atomically-published snapshot (see Concurrency contract). **Resolve at hit time, not set time** — the hook compares `current_node->location` / `stmt_nodes[ip]->location` (path,line) against the snapshot. VM function bodies compile to their own chunks lazily on first call (`chunk_for_body`), so pre-scanning `stmt_nodes` at set time misses any not-yet-called function; hit-time compare needs no pre-index (the `ast_node*` carries its location either way). Snap a line with no statement to the next statement's line and report it back. |
-| `stackTrace` | `controller::list_frames` returns the stop location as the one (top) frame `{name, source.path, line}`. VS Code opens/focuses the top frame's `source.path` automatically — this is what makes stepping auto-open the right `.jai` file across `include`s. Not built: walking `call_stack_` (interp) / `frames_` (VM) for the full stack. |
-| `scopes` | One "Locals" scope. |
-| `variables` | `controller::list_locals`: the backend's `get_current_frame_locals()`, or at global scope the environment's `get_local_variables()`; callables are hidden and values render with `to_string()`. Variables are flat (`variablesReference` 0). **Handles are generation-scoped** (see Concurrency contract) — never store a raw `environment*`/`call_frame*` across an unpark. |
+| `stackTrace` | `controller::list_frames` over the backend's `debug_frames()`: the error-trace walk (`call_stack_` in the interpreter, `frames_` plus graft frames in the VM, the same names and lines), uncapped, with `<script>` last only while a top-level run is in flight; frame 0 carries the stop location. `startFrame`/`levels` page it. VS Code opens/focuses the top frame's `source.path` automatically — this is what makes stepping auto-open the right `.jai` file across `include`s. |
+| `scopes` | "Locals" for the frame and "Globals" (the program scope). |
+| `variables` | Locals: `controller::list_locals(frame)`, the backend's `get_frame_locals(frame)` for a function frame (an inlined graft frame has none: its slots are its caller's), and for the top level, while it is the innermost frame, the environments between the current one and the program scope. Globals: `list_globals`, the program scope's own variables. Callables are hidden and values render with `to_string()`. Variables are flat (`variablesReference` 0 on each). **Handles are generation-scoped** (generation mod 2048 over a 20-bit payload: 1 = Globals, frame i is id i+1 and Locals i+2; see Concurrency contract) — never store a raw `environment*`/`call_frame*` across an unpark. |
 | `setVariable` | `controller::set_variable` writes through `add_global` and skips the typed-local ladder; DAP `setVariable` is unsupported. A full edit would route through `enforce_type_compatibility` (object fields self-enforce through `class_instance::enforce_field_write`). |
 | `continue` | `resume()`: clear step mode, set `resume_requested_` and notify (under the controller mutex). |
 | `next` / `stepIn` / `stepOut` | Set step mode with base depth = current stack depth; unpark. Hook stops when: In = next statement, any depth; Over = depth ≤ base; Out = depth < base. |
@@ -291,12 +292,12 @@ The DAP connector (`jai::debug::debug_connector`, gated by `JAISCRIPT_ENABLE_DEB
    iteration (a predictable branch when no session), statement entries from `chunk::debug_spans`
    via an out-of-line detector
    (`debug_statement_boundary`, out of line so `run_dispatch`'s Debug frame stays flat —
-   invariants.md §5; see "Where a stop lands" below), sync points at
-   `prepare_for_execution` + the vm's 1024-tick budget twin + park exit, and the SAME park (the
+   invariants.md §5; see "Where a stop lands" below), the same sync points as the interpreter
+   (see "Debugger performance"), and the SAME park (the
    script thread blocks in the hook inside `run_dispatch`; suspended fibers stay suspended
    — no fiber-level suspension machinery). A stopped frame's locals are
-   named **lazily**: `get_current_frame_locals` scans the parked frame's chunk
-   (`debug_paused_frame_`, exact even for native-entry frames) for decl/load/store/incdec
+   named **lazily**: `get_frame_locals` scans the frame's chunk (the `frames_` entry the
+   trace walk maps it to, exact even for native-entry frames) for decl/load/store/incdec
    operands PLUS the fused side tables (`fused_binary_protos`, `counted_for_protos`,
    `compound_fused_protos`, `iter_protos`, `destructure_protos`) and maps symbol→name through
    the interner. No name table baked into release chunks. Known delta from the interpreter: a
@@ -362,21 +363,28 @@ clock. The implementation:
 
 - **The per-statement path reads plain script-thread memory only.** `dispatch_stmt`/
   `dispatch_decl` test one cached plain pointer (`interpreter::debug_hook_`, null unless a
-  session is enabled). When it is non-null, `controller::wants_statement(line)` reads two more
-  plain members: a step/pause flag and an 8 KB **line bloom** (bit = breakpoint line mod 65536).
-  No atomics, no mutexes, no `shared_ptr` loads, no string hashing.
+  session is enabled). When it is non-null, `controller::wants_statement(line)` reads a plain
+  step/pause flag, one relaxed atomic (`sync_requested_`) and an 8 KB **line bloom** (bit =
+  breakpoint line mod 65536). No mutexes, no `shared_ptr` loads, no string hashing; with no
+  session armed nothing past the plain gate runs.
 - **Debug sync points (the off-cycle pattern).** The script thread pulls transport-side state
   (attach/detach, breakpoint edits, pause requests) into its cache only at: (a) **`execute()`
-  entry** (`prepare_for_execution` → `sync_debug_hook`), (b) **the every-1024-ticks budget
-  sample** (`execution_budget_exhausted` cold block — the same sampling the script-timeout
-  clock uses; the tick counts even for budget-0 hosts so a long-running script still
-  syncs), and (c) **park exit** (resume/step/detach re-sync before the next statement runs, so
-  stepping is exact, never 1024-statements late). Cost of a steady-state sync: three relaxed
-  loads + a version compare; the breakpoint table/bloom rebuild runs only when
+  entry** (`prepare_for_execution` → `sync_debug_hook`), (b) **host entries**
+  (`begin_host_call`: a host call of a script function or method, a coroutine resume — one
+  relaxed load when no debugger was ever constructed), (c) **`time::sleep`/`time::sleep_ms`
+  returns** (a frame loop paced by sleeps runs a handful of ticks per frame), (d) **the
+  every-1024-ticks budget sample** (`execution_budget_exhausted` cold block — the same sampling
+  the script-timeout clock uses; the tick counts even for budget-0 hosts so a long-running
+  script still syncs), (e) **an armed session's next statement** after a transport change
+  (every control-side call raises `sync_requested_`; `wants_statement` lets it through and
+  `on_statement` runs the backend's `sync_debug_hook`), and (f) **park exit** (resume/step/detach
+  re-sync before the next statement runs, so stepping is exact). Cost of a steady-state sync:
+  three relaxed loads + a version compare; the breakpoint table/bloom rebuild runs only when
   `setBreakpoints` actually changed something (`bp_version_`).
-- **Consequence (documented latency):** a breakpoint set or pause requested *mid-execution*
-  binds within ~1024 statements, or at the next `execute()` entry, whichever comes first.
-  Anything done while parked (the normal IDE flow) is exact and immediate.
+- **Consequence (documented latency):** while a session is armed, a breakpoint edit or pause
+  binds at the next statement. An attach binds at the first of (a)-(d): the next host entry,
+  sleep return, or within 1024 back edges and calls. Anything done while parked (the normal IDE
+  flow) is exact and immediate.
 - **Transport side stays lock-based/atomic** — `set_breakpoints` publishes an immutable
   snapshot + bumps `bp_version_` (release); the script thread re-caches on version mismatch
   (acquire). The hand-off is the sync point; the hot path never touches the shared table.

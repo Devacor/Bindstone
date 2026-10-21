@@ -37,9 +37,10 @@ struct stop_info {
 // file path -> the lines that carry a breakpoint (sorted, deduped)
 using breakpoint_table = std::unordered_map<std::string, std::vector<int>>;
 
-// One stack frame at a stop (parked-thread inspection result).
+// One stack frame at a stop (parked-thread inspection result), named as an error trace names it: the function,
+// "<anonymous>" for a lambda, "<script>" for the top level.
 struct frame_info {
-    std::string name;   // display name ("script")
+    std::string name;
     std::string file;
     int line = 0;
 };
@@ -65,11 +66,12 @@ public:
 // call from a thread other than the one running the script; inspection methods must run
 // on the parked script thread (post them via post_command()).
 //
-// Cost model (internal/DEBUGGER_DESIGN.md "Debugger performance"): the per-statement path
-// reads ONLY the plain script-thread hot cache below — no atomics, no locks, no string
-// hashing. Transport-side writes (enable, breakpoints, pause) land in atomics and are
-// pulled into the cache by sync_hot_state(), which the interpreter calls only at its
-// debug sync points (execute entry, the 1024-tick budget sample, park exit).
+// Cost model (internal/DEBUGGER_DESIGN.md "Debugger performance"): with no session armed the
+// backends never call in here per statement; armed, the per-statement gate reads the plain
+// hot cache plus one relaxed flag, with no locks and no string hashing. Transport-side writes
+// (enable, breakpoints, pause) land in atomics, raise sync_requested_, and are pulled into the
+// cache by sync_hot_state() at the debug sync points: host entries, time::sleep returns, the
+// 1024-tick budget sample, park exit and, while a session is armed, the next statement.
 class controller {
 public:
     explicit controller(engine* eng);
@@ -107,16 +109,19 @@ public:
     // ---- inspection: call ONLY on the parked script thread (via post_command) ----
     script_value get_variable(const std::string& name) const;   // live scope at the stop
     void set_variable(const std::string& name, const script_value& value);
-    std::vector<frame_info> list_frames() const;   // stack at the stop (the top frame only)
-    std::vector<variable_info> list_locals() const;// in-scope locals at the stop (callables hidden)
+    std::vector<frame_info> list_frames() const;   // the call stack at the stop, innermost first, the top level last
+    // Frame `frame`'s locals, in list_frames order (callables hidden): a function's parameters and reached locals; the
+    // top level's block-scoped names while it is the innermost frame
+    std::vector<variable_info> list_locals(size_t frame = 0) const;
+    std::vector<variable_info> list_globals() const;   // the program scope's variables (callables hidden)
 
     // ---- script/hot path: the interpreter statement hook ----
-    // Per-statement gate, checked BEFORE on_statement: plain script-thread cache only.
-    // Step/pause force the slow path; breakpoints filter through a 64 Kbit line bloom
-    // (bit = line mod 65536), so a statement whose line matches no breakpoint line costs
-    // two predictable branches. Bloom collisions just take the slow path and miss there.
+    // Per-statement gate of an armed session, checked BEFORE on_statement. Step/pause and a
+    // pending transport change (on_statement syncs it) force the slow path; breakpoints filter
+    // through a 64 Kbit line bloom (bit = line mod 65536), so a statement whose line matches no
+    // breakpoint line costs a few predictable branches. Bloom collisions just miss on the slow path.
     bool wants_statement(uint32_t line) const noexcept {
-        if (hot_step_or_pause_) return true;
+        if (hot_step_or_pause_ || sync_requested_.load(std::memory_order_relaxed)) return true;
         const uint64_t* bloom = hot_line_bloom_;
         if (!bloom) return false;
         const uint32_t b = line & (line_bloom_bits - 1);
@@ -128,7 +133,8 @@ public:
     static bool stops_at(const ast_node* node) noexcept;
 
     // Pull transport-side state (enable, breakpoint edits, pause requests) into the
-    // script-thread hot cache. Called ONLY on the script thread at the debug sync points;
+    // script-thread hot cache. Called ONLY on the script thread at the debug sync points
+    // (through the backend's sync_debug_hook, which mirrors the answer into its gate);
     // returns whether the statement hook should stay armed (session enabled). Steady
     // state is three relaxed loads + one version compare — the bloom/table rebuild runs
     // only when set_breakpoints actually changed something.
@@ -159,6 +165,8 @@ private:
     std::atomic<bool> enabled_{false};
     std::atomic<bool> paused_{false};
     std::atomic<int> pending_pause_{0};
+    // Raised by every transport-side change: an armed session's next statement syncs on it.
+    std::atomic<bool> sync_requested_{false};
     std::atomic<int> step_mode_{static_cast<int>(step_mode::none)};
     std::atomic<int> step_base_depth_{0};
     std::atomic<int> current_stop_depth_{0};   // depth of the current stop (step over/out base)

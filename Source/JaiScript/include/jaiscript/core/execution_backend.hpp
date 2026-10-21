@@ -180,10 +180,14 @@ public:
     // locals from it while parked.
     virtual std::shared_ptr<environment> get_current_environment() const = 0;
 
-    // Named slot-based locals of the current (innermost) call frame — params + reached body
-    // locals, which the environment's flat map does not hold. The debugger prefers this for
-    // the Locals view.
-    virtual std::vector<std::pair<std::string, script_value>> get_current_frame_locals() const = 0;
+    // The call stack a parked debugger shows: innermost first, each frame named and located as an error trace has it,
+    // the top level ("<script>") last while a top-level run is in flight
+    virtual std::vector<stack_frame> debug_frames() const = 0;
+    // Named slot-based locals of debug_frames()[frame] — params + reached body locals, which the environment's flat map
+    // does not hold. Empty for the top level and an inlined call (its slots belong to its caller's frame).
+    virtual std::vector<std::pair<std::string, script_value>> get_frame_locals(size_t frame) const = 0;
+    // A debug sync point (script thread only): pull the controller's transport state into the statement gate
+    virtual void sync_debug_hook() = 0;
 
     // Core execution
     virtual script_value execute(const std::vector<declaration_ptr>& declarations) = 0;

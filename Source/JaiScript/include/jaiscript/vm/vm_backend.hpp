@@ -326,7 +326,7 @@ namespace jai::vm {
         // run_dispatch detects statement boundaries via chunk::stmt_nodes
         // and drives the SAME controller as the interpreter. The per-op path tests one
         // plain cached pointer (debug_hook_); transport state is pulled in only at the
-        // debug sync points (prepare_for_execution, the 1024-tick budget sample, park exit).
+        // debug sync points (sync_debug_hook).
         void set_debug_controller(debug::controller* controller) override {
             debug_controller_.store(controller, std::memory_order_release);
         }
@@ -334,9 +334,15 @@ namespace jai::vm {
         // Innermost live environment (debugger locals fallback / globals scope).
         std::shared_ptr<environment> get_current_environment() const override { return environment_; }
 
-        // Named slot locals of the parked frame, reconstructed lazily from the chunk's
+        std::vector<stack_frame> debug_frames() const override;
+        // Named slot locals of a parked frame, reconstructed lazily from the chunk's
         // decl/load/store operands (no name table baked into release chunks).
-        std::vector<std::pair<std::string, script_value>> get_current_frame_locals() const override;
+        std::vector<std::pair<std::string, script_value>> get_frame_locals(size_t frame) const override;
+        // Debug sync point (prepare_for_execution, host entries, time::sleep, every 1024 budget
+        // ticks, an armed session's pending change, park exit via the controller): mirrors
+        // debug_controller_ into the plain per-op gate and hands a session-end a fresh budget
+        // deadline. Twin of interpreter::sync_debug_hook.
+        void sync_debug_hook() override;
 
         bool is_unwinding() const override { return is_unwinding_; }
         const script_exception& get_current_exception() const override { return current_exception_.value(); }
@@ -984,9 +990,6 @@ namespace jai::vm {
         const frame* debug_last_frame_ = nullptr;
         const chunk* debug_last_code_ = nullptr;
         size_t debug_last_depth_ = SIZE_MAX;
-        // The frame parked at the current stop (set around on_statement) — exact locals
-        // source for get_current_frame_locals while the script thread is parked.
-        frame* debug_paused_frame_ = nullptr;
         environment* cached_global_env_ = nullptr;   // env_lookup_cached gate (never dereferenced)
         // stdlib math aliases (engine::register_math_alias): the engine's rows, or on a worker its own copies' rows
         const engine::math_alias_row* math_alias_rows_ = nullptr;
@@ -1219,10 +1222,6 @@ namespace jai::vm {
         }
         bool execution_limit_exhausted_slow();
         error_propagator execution_limit_failure();
-        // Debug sync point (execute entry + every 1024 budget ticks + park exit via the
-        // controller): mirrors debug_controller_ into the plain per-op gate and hands a
-        // session-end a fresh budget deadline. Twin of interpreter::sync_debug_hook.
-        void sync_debug_hook();
         // Statement-boundary edge detection + hook fire; out of line so run_dispatch's
         // Debug frame stays flat (JAI_MAX_CALL_DEPTH path). Called only when armed.
         void debug_statement_boundary(frame& f);
@@ -1432,7 +1431,11 @@ namespace jai::vm {
                                                             return_conv conv, bool proven, std::string_view callee = {});
 
         void capture_stack_trace();
-        size_t graft_frames_at(const chunk& code, size_t ip, const ast_node** node);
+        static size_t graft_frames_at(const chunk& code, size_t ip, const ast_node** node, std::vector<stack_frame>& out);
+        static const ast_node* frame_statement(const frame& fr);
+        static std::string frame_function_name(const frame& fr);
+        std::vector<stack_frame> debug_frame_walk(std::vector<const frame*>* slot_frames) const;
+        std::vector<std::pair<std::string, script_value>> frame_slot_locals(const frame* f) const;
         void absorb_nested_trace();
         op_status raise_nested_failure(const std::exception& e);
         op_status raise_nested_failure_statement(const std::exception& e);

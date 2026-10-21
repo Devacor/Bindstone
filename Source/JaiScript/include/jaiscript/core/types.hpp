@@ -278,6 +278,11 @@ namespace jai {
         size_t elided = 0;   // the final marker: this many outer frames are not listed
     };
 
+    // A frame of `function` standing at `at` (null: no statement located yet)
+    inline stack_frame trace_frame_at(std::string function, const source_location* at) {
+        return at ? stack_frame{ std::move(function), at->filename, at->line, at->column } : stack_frame{ std::move(function) };
+    }
+
     // A trace lists the innermost frames and one final marker for the rest, so a catch deep in a recursion costs the same
     // as a shallow one
     inline constexpr size_t k_stack_trace_frames = 64;

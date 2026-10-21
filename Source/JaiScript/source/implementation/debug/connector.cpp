@@ -644,13 +644,19 @@ struct debug_connector::impl {
         } else if (cmd == "threads") {
             enqueue(make_response(req_seq, cmd, true, "{\"threads\":[{\"id\":1,\"name\":\"script\"}]}"));
         } else if (cmd == "stackTrace") {
-            post_park_only(req_seq, cmd, [this, req_seq] { reply_stack_trace(req_seq); });
+            const jval* start = args ? args->find("startFrame") : nullptr;
+            const jval* levels = args ? args->find("levels") : nullptr;
+            const int first = start ? std::max(0, start->as_int()) : 0;
+            const int count = levels ? std::max(0, levels->as_int()) : 0;
+            post_park_only(req_seq, cmd, [this, req_seq, first, count] { reply_stack_trace(req_seq, first, count); });
         } else if (cmd == "scopes") {
-            if (!generation_matches(args, "frameId")) { enqueue(make_response(req_seq, cmd, false, "", "stale frame")); return; }
-            post_park_only(req_seq, cmd, [this, req_seq] { reply_scopes(req_seq); });
+            const int frame_id = handle_payload(args, "frameId");
+            if (frame_id < 0) { enqueue(make_response(req_seq, cmd, false, "", "stale frame")); return; }
+            post_park_only(req_seq, cmd, [this, req_seq, frame_id] { reply_scopes(req_seq, frame_id - 1); });
         } else if (cmd == "variables") {
-            if (!generation_matches(args, "variablesReference")) { enqueue(make_response(req_seq, cmd, false, "", "stale reference")); return; }
-            post_park_only(req_seq, cmd, [this, req_seq] { reply_variables(req_seq); });
+            const int reference = handle_payload(args, "variablesReference");
+            if (reference < 0) { enqueue(make_response(req_seq, cmd, false, "", "stale reference")); return; }
+            post_park_only(req_seq, cmd, [this, req_seq, reference] { reply_variables(req_seq, reference); });
         } else if (cmd == "continue") {
             ctrl_->resume();
             enqueue(make_response(req_seq, cmd, true, "{\"allThreadsContinued\":true}"));
@@ -684,11 +690,23 @@ struct debug_connector::impl {
         ctrl_->post_command(std::move(reply));
     }
 
-    bool generation_matches(const jval* args, const char* key) const {
-        if (!args) return false;
+    // A frame id or variables reference: the stop's generation (mod 2048) over a 20-bit payload, a positive int32
+    static constexpr int kHandlePayloadBits = 20;
+    static constexpr int kHandlePayloadMask = (1 << kHandlePayloadBits) - 1;
+    static constexpr int kGlobalsPayload = 1;   // a frame's Locals is 2 + its index; frame ids are 1 + the index
+    int handle(int payload) const {
+        return ((gen_.load(std::memory_order_acquire) & 0x7FF) << kHandlePayloadBits) | payload;
+    }
+
+    // The payload of the handle under `key` when it belongs to this stop, else -1
+    int handle_payload(const jval* args, const char* key) const {
+        if (!args) return -1;
         const jval* v = args->find(key);
-        if (!v) return false;
-        return (v->as_int() >> 8) == gen_.load(std::memory_order_acquire);
+        if (!v) return -1;
+        const int h = v->as_int();
+        if (h <= 0 || (h >> kHandlePayloadBits) != (gen_.load(std::memory_order_acquire) & 0x7FF)) return -1;
+        const int payload = h & kHandlePayloadMask;
+        return payload > 0 ? payload : -1;
     }
 
     void handle_set_breakpoints(int req_seq, const jval* args) {
@@ -728,34 +746,40 @@ struct debug_connector::impl {
     }
 
     // ---- park-only replies (run on the parked script thread) ----
-    void reply_stack_trace(int req_seq) {
+    // levels 0: every frame from first
+    void reply_stack_trace(int req_seq, int first, int levels) {
         auto frames = ctrl_->list_frames();
-        int gen = gen_.load(std::memory_order_acquire);
+        const size_t begin = std::min(frames.size(), static_cast<size_t>(first));
+        const size_t end = levels > 0 ? std::min(frames.size(), begin + static_cast<size_t>(levels)) : frames.size();
         std::string arr = "[";
-        for (size_t i = 0; i < frames.size(); ++i) {
-            if (i) arr += ",";
-            int frame_id = (gen << 8) | static_cast<int>(i + 1);
+        for (size_t i = begin; i < end; ++i) {
+            if (i > begin) arr += ",";
+            // a frame past the handle space still lists; its scopes answer stale
+            const int frame_id = i + 1 <= static_cast<size_t>(kHandlePayloadMask - 2) ? handle(static_cast<int>(i + 1)) : 0;
             arr += "{\"id\":" + std::to_string(frame_id)
                 + ",\"name\":\"" + json_escape(frames[i].name) + "\""
                 + ",\"line\":" + std::to_string(frames[i].line)
-                + ",\"column\":1"
-                + ",\"source\":{\"name\":\"" + json_escape(frames[i].file) + "\",\"path\":\"" + json_escape(frames[i].file) + "\"}}";
+                + ",\"column\":1";
+            if (!frames[i].file.empty()) {
+                arr += ",\"source\":{\"name\":\"" + json_escape(frames[i].file) + "\",\"path\":\"" + json_escape(frames[i].file) + "\"}";
+            }
+            arr += "}";
         }
         arr += "]";
         enqueue(make_response(req_seq, "stackTrace", true,
                               "{\"stackFrames\":" + arr + ",\"totalFrames\":" + std::to_string(frames.size()) + "}"));
     }
 
-    void reply_scopes(int req_seq) {
-        int gen = gen_.load(std::memory_order_acquire);
-        int locals_ref = (gen << 8) | 1;
-        std::string body = "{\"scopes\":[{\"name\":\"Locals\",\"variablesReference\":"
-            + std::to_string(locals_ref) + ",\"expensive\":false}]}";
+    void reply_scopes(int req_seq, int frame) {
+        std::string body = "{\"scopes\":[{\"name\":\"Locals\",\"presentationHint\":\"locals\",\"variablesReference\":"
+            + std::to_string(handle(kGlobalsPayload + 1 + frame)) + ",\"expensive\":false},"
+            + "{\"name\":\"Globals\",\"variablesReference\":" + std::to_string(handle(kGlobalsPayload)) + ",\"expensive\":false}]}";
         enqueue(make_response(req_seq, "scopes", true, body));
     }
 
-    void reply_variables(int req_seq) {
-        auto vars = ctrl_->list_locals();
+    void reply_variables(int req_seq, int reference) {
+        auto vars = reference == kGlobalsPayload ? ctrl_->list_globals()
+                                                 : ctrl_->list_locals(static_cast<size_t>(reference - kGlobalsPayload - 1));
         std::string arr = "[";
         for (size_t i = 0; i < vars.size(); ++i) {
             if (i) arr += ",";

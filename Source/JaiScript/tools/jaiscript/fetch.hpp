@@ -6,7 +6,7 @@
 // store), libcurl on POSIX when the build found it, else the curl executable every Linux and
 // macOS install carries. Registered by register_fetch() next to the console and net bindings.
 //
-// Script surface (docs/site/embedding/01-embedding-quickstart.html lists the runner's host API):
+// Script surface (docs/site/reference/index.html#runner-host-api lists the runner's host API):
 //   auto d = Download();  d.start(url, path);  d.pump();  d.done()  d.success()  d.error()
 //   d.received()  d.total()  d.fraction()  d.cancel()
 //   sha256_file(path) -> hex string ("" when unreadable)

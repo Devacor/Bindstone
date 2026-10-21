@@ -681,6 +681,39 @@ public:
             check_eq(engine->execute(R"(`${ {"a": {"b": 2}}["a"]["b"] }`;)").as<std::string>(), "2");
         });
 
+        // a template string of two or more splices is an append chain: the vm's index-tree landing took it for a fused
+        // binary inside a function and raised an internal error at a map key under a compound op, ++ or --
+        test("template_string_keys_under_compound_ops_in_functions", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(std::string(R"({"012":0,"1-2":2,"12":226,"121":-6,"1212":2,"34":4,"a1b2c":-2,"v113":113,"v226":226}|{"12":"ss"}|226|3443)"),
+                engine->execute(R"(
+                    map<string, int> heat;
+                    map<string, string> names;
+                    void f(int x, int y) {
+                        heat[`${x}${y}`]++;
+                        heat[`${x}${y}`] += 2;
+                        ++heat[`${x}-${y}`];
+                        heat[`a${x}b${y}c`]--;
+                        heat[`${x}${y}${x}`] -= 3;
+                        heat[`${x:02d}${y}`] *= 1;
+                        heat["" + x + y] += 10;
+                        heat[`${x}${y}`] = heat[`${x}${y}`] + 100;
+                        names[`${x}${y}`] += "s";
+                        int v = heat[`${x}${y}`];
+                        heat[`v${v}`] = v;
+                        string k = `${x}${y}`;
+                        heat[k + `${x}${y}`] += 1;
+                        heat[`${x + y}${y * 2}`] |= 4;
+                    }
+                    f(1, 2);
+                    f(1, 2);
+                    int g(int x, int y) { return heat[`${x}${y}`]; }
+                    string h(int x, int y) { return `${x}${y}` + `${y}${x}`; }
+                    to_json(heat) + "|" + to_json(names) + "|" + to_string(g(1, 2)) + "|" + h(3, 4);
+                )").as<std::string>());
+        });
+
         test("template_string_splice_no_runaway", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);

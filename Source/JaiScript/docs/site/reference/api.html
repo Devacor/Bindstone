@@ -82,7 +82,8 @@ print(to_json(values));</code></pre></div>
 <section class="api-group"><h2 id="group-netchannel">NetChannel</h2>
 <div class="api-entry" data-provider="runner" data-search="netchannel.close() -&gt; void network  standalone jaiscript.exe"><h3 id="api-e75502deda4b"><code>NetChannel.close() -&gt; void</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; network</p>
 </div>
-<div class="api-entry" data-provider="runner" data-search="netchannel.connect(host: string, port: int) -&gt; bool network  standalone jaiscript.exe"><h3 id="api-0d2650104b26"><code>NetChannel.connect(host: string, port: int) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; network</p>
+<div class="api-entry" data-provider="runner" data-search="netchannel.connect(host: string, port: int) -&gt; bool network asynchronous: true while the connection is being made; pump() then fires on_connect(), or on_disconnect(&quot;connect refused&quot;). false when the attempt fails at once. standalone jaiscript.exe"><h3 id="api-0d2650104b26"><code>NetChannel.connect(host: string, port: int) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; network</p>
+<p>Asynchronous: true while the connection is being made; pump() then fires on_connect(), or on_disconnect(&quot;connect refused&quot;). False when the attempt fails at once.</p>
 </div>
 <div class="api-entry" data-provider="runner" data-search="netchannel.connected() -&gt; bool observe  standalone jaiscript.exe"><h3 id="api-42413fcb379e"><code>NetChannel.connected() -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; observe</p>
 </div>
@@ -588,11 +589,11 @@ print(v[&quot;hp&quot;], &quot; &quot;, v[&quot;tags&quot;][0]);</code></pre></d
 </div>
 <div class="api-entry" data-provider="core" data-search="parent_dir(path: string) -&gt; string observe  every engine"><h3 id="api-9a65d35e1a8d"><code>parent_dir(path: string) -&gt; string</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="runner" data-search="play_midi(path: string) -&gt; bool audio windows mci sequencer, one track; false off windows. standalone jaiscript.exe"><h3 id="api-6a2d87f1a5d7"><code>play_midi(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
-<p>Windows MCI sequencer, one track; false off Windows.</p>
+<div class="api-entry" data-provider="runner" data-search="play_midi(path: string) -&gt; bool audio windows mci sequencer, one track; false for a missing file and off windows. standalone jaiscript.exe"><h3 id="api-6a2d87f1a5d7"><code>play_midi(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
+<p>Windows MCI sequencer, one track; false for a missing file and off Windows.</p>
 </div>
-<div class="api-entry" data-provider="runner" data-search="play_wav(path: string) -&gt; bool audio asynchronous windows playback; different files can overlap, replay restarts a file; false off windows. standalone jaiscript.exe"><h3 id="api-75c0f76cc3aa"><code>play_wav(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
-<p>Asynchronous Windows playback; different files can overlap, replay restarts a file; false off Windows.</p>
+<div class="api-entry" data-provider="runner" data-search="play_wav(path: string) -&gt; bool audio asynchronous windows playback; different files can overlap, replay restarts a file; false for a missing file and off windows. standalone jaiscript.exe"><h3 id="api-75c0f76cc3aa"><code>play_wav(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
+<p>Asynchronous Windows playback; different files can overlap, replay restarts a file; false for a missing file and off Windows.</p>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="print(format_or_values: var...) -&gt; void output, callback format string placeholders when applicable; instance to_string methods are respected; skip_newline/skip_flush are control tokens. register_all() or area registration"><h3 id="api-3fd5504ea777"><code>print(format_or_values: var...) -&gt; void</code></h3><p><strong>register_all() or area registration</strong> &middot; output, callback</p>
 <p>Format string placeholders when applicable; instance to_string methods are respected; skip_newline/skip_flush are control tokens.</p>

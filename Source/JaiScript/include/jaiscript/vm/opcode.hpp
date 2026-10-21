@@ -102,7 +102,9 @@ namespace jai::vm {
                               // (load_flag_global_only for ::name); pushes a shared/boxed
                               // reference to the named storage (ref-return producer)
         op_ref_return_lvalue, // a=node index (lvalue expr); pushes an owner-pinned reference
-                              // via detail::resolve_ref_lvalue (ref-return producer)
+                              // via detail::resolve_ref_lvalue and true, or false alone when the
+                              // chain names no storage the kernel reaches (ref-return producer;
+                              // c=1: C::s / ns::x, the read's storage replaces it, nothing pushed)
 
         op_return_ident,    // a=slot, b=symbol index, c=load flags: fused `return <ident>;`
                             // (LOAD+RETURN; resolution mirrors op_load via fused_ident_value)

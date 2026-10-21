@@ -6021,7 +6021,7 @@ uint32_t vm_compiler::member_base_slot(const expression* e) const {
 	const expression* root = m->object.get();
 	if (root->get_type() == node_type::member_expr) {
 		const auto* prefix = static_cast<const member_expr*>(root);
-		if (prefix->is_static || prefix->null_safe || prefix->component_lvalue || !prefix->object) return k_invalid_u32;
+		if (prefix->is_static || prefix->null_safe || prefix->place_read || !prefix->object) return k_invalid_u32;
 		root = prefix->object.get();
 	}
 	if (root->get_type() != node_type::identifier_expr) return k_invalid_u32;
@@ -6092,7 +6092,7 @@ bool vm_compiler::elem_member_operand(const expression* e) const {
 	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body || loops_.empty()) return false;
 	if (!e || e->get_type() != node_type::member_expr) return false;
 	const auto* m = static_cast<const member_expr*>(e);
-	if (m->is_static || m->null_safe || !m->object || m->object->get_type() != node_type::binary_expr) return false;
+	if (m->is_static || m->null_safe || m->place_read || !m->object || m->object->get_type() != node_type::binary_expr) return false;
 	const auto* b = static_cast<const binary_expr*>(m->object.get());
 	if (b->op.type != token_type::left_bracket || b->static_operand_class != operand_class_object_element || !b->left || b->left->get_type() != node_type::identifier_expr) return false;
 	auto* id = static_cast<identifier_expr*>(b->left.get());
@@ -6510,9 +6510,23 @@ bool vm_compiler::numeric_value_binary(expression* e) {
 	return binary_lands_fused(b);
 }
 
+// A left-deep `+` chain of two or more from a string literal (a template string): compile_binary emits it as appends, never as
+// a fused binary, ahead of every other shape decision
+static bool string_append_chain(const binary_expr* b) {
+	size_t links = 0;
+	const expression* e = b;
+	while (e->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::plus) {
+		++links;
+		e = static_cast<const binary_expr*>(e)->left.get();
+	}
+	return links >= 2 && e->get_type() == node_type::literal_expr &&
+	       static_cast<const literal_expr*>(e)->value.raw_storage_index() == script_value::TYPEID_STRING;
+}
+
 bool vm_compiler::binary_lands_fused(binary_expr* b) {
 	if (!typed_lowering_ || !temps_active_ || !chunk_->is_function_body) return false;
 	if (b->op.type == token_type::left_bracket || b->op.type == token_type::ampersand_ampersand || b->op.type == token_type::pipe_pipe) return false;
+	if (string_append_chain(b)) return false;
 	if (!detail::transient_read_marker::is_value_binary_op(b->op.type)) return false;
 	auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
 	auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e) || ternary_temp_operand(e); };
@@ -6541,7 +6555,11 @@ bool vm_compiler::compile_storage_reference(const expression_ptr& value) {
 		return true;
 	}
 	if (detail::is_ref_bindable_lvalue(value.get())) {
+		// the kernel's storage, else the operand evaluates (an operator[] returning T&, a key the kernel cannot reach)
 		emit(opcode::op_ref_return_lvalue, add_node(value));
+		const size_t bound = emit(opcode::op_jump_if_true, k_invalid_u32, 1);
+		compile_expression(value);
+		patch_jump(bound, chunk_->code.size());
 		return true;
 	}
 	if (value->get_type() == node_type::member_expr && static_cast<const member_expr*>(value.get())->is_static) {
@@ -6632,24 +6650,18 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		return;
 	}
 
-	if (expr->op.type == token_type::plus) {
-		// a left-deep `+` chain from a string literal (a template string): the literal, then each operand and its append, the
-		// order the chain evaluates in
+	if (string_append_chain(expr.get())) {
+		// the literal, then each operand and its append, the order the chain evaluates in
 		std::vector<const binary_expr*> chain;
-		const expression* e = expr.get();
-		while (e->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::plus) {
+		for (const expression* e = expr.get(); e->get_type() == node_type::binary_expr; e = static_cast<const binary_expr*>(e)->left.get()) {
 			chain.push_back(static_cast<const binary_expr*>(e));
-			e = static_cast<const binary_expr*>(e)->left.get();
 		}
-		if (chain.size() >= 2 && e->get_type() == node_type::literal_expr &&
-		    static_cast<const literal_expr*>(e)->value.raw_storage_index() == script_value::TYPEID_STRING) {
-			compile_expression(chain.back()->left);
-			for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
-				compile_expression((*it)->right);
-				emit(opcode::op_concat_append);
-			}
-			return;
+		compile_expression(chain.back()->left);
+		for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+			compile_expression((*it)->right);
+			emit(opcode::op_concat_append);
 		}
+		return;
 	}
 
 	if (expr->op.type == token_type::left_bracket) {
@@ -7335,7 +7347,7 @@ bool vm_compiler::try_emit_fused_push(const std::shared_ptr<call_expr>& expr) {
 uint32_t vm_compiler::place_argument_base(const expression* arg) {
 	if (!arg || arg->get_type() != node_type::member_expr) return k_invalid_u32;
 	const auto* m = static_cast<const member_expr*>(arg);
-	if (m->is_static || m->null_safe || m->is_arrow || m->component_lvalue || m->enum_constant || jai::detail::math::any_component_name(m->member) ||
+	if (m->is_static || m->null_safe || m->is_arrow || m->place_read || m->enum_constant || jai::detail::math::any_component_name(m->member) ||
 	    !m->object || m->object->get_type() != node_type::identifier_expr || velem_operand(m)) return k_invalid_u32;
 	return member_base_slot(m);
 }
@@ -7605,7 +7617,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 // and a shape the cell translation takes (a truth test, a compound operand, a declaration's move)
 void vm_compiler::member_tail_into_temp(const expression* e) {
 	if (!e || !member_temp_operand(e)) return;
-	if (e->get_type() == node_type::member_expr && static_cast<const member_expr*>(e)->component_lvalue) return;   // the read hands back a reference
+	if (e->get_type() == node_type::member_expr && static_cast<const member_expr*>(e)->place_read) return;   // the read hands back a reference
 	auto& code = chunk_->code;
 	const size_t n = code.size();
 	if (n && code.back().op == opcode::op_get_member && code.back().b != 0 &&
@@ -7646,13 +7658,13 @@ void vm_compiler::compile_member(const std::shared_ptr<member_expr>& expr) {
 		emit(opcode::op_get_static, add_node(expr));
 		return;
 	}
-	if (velem_operand(expr.get()) && !expr->component_lvalue) {
+	if (velem_operand(expr.get()) && !expr->place_read) {
 		fused_operand t;
 		compile_member_into_temp(expr, t);
 		emit(opcode::op_load, t.slot, temp_symbol_index(), 0);
 		return;
 	}
-	if (!expr->component_lvalue && expr->object && expr->object->get_type() == node_type::identifier_expr) {
+	if (!expr->place_read && expr->object && expr->object->get_type() == node_type::identifier_expr) {
 		if (const uint32_t base = member_base_slot(expr.get()); base != k_invalid_u32) {
 			emit(opcode::op_get_member, add_node(expr), base + 1);
 			return;

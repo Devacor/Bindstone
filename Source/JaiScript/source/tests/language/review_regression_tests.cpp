@@ -5166,6 +5166,58 @@ public:
                 check_eq((size_t)2, r.as_array().size(), use_vm ? "vm: top-level return hands the host the global's handle" : "interp: top-level return hands the host the global's handle");
             }
         });
+        // a reference return names the storage of any lvalue chain: a map entry by any key, a computed index or key, a member of
+        // an element or entry, an operator[] returning T& (the kernel's map steps, then the operand's evaluation)
+        test("lvalue_chains_return_by_reference", [expect]() {
+            expect(R"(
+                class Leaf { int hp = 1; }
+                class Hp { int hp = 1; Leaf child; }
+                class Grid { array<int> cells = [0, 0, 0]; int& operator[](int i) { return cells[i]; } }
+                map<string, int> m = {"a": 1};
+                map<string, array<int>> rows = {"q": [1, 2]};
+                map<string, Hp> units = {"u": Hp()};
+                array<Hp> hs = [Hp(), Hp()];
+                Grid g;
+                string key = "a";
+                int& entry(string k) { return m[k]; }
+                int& global_key() { return m[key]; }
+                int& cell(string k, int i) { return rows[k][i]; }
+                int& unit_hp(string k) { return units[k].hp; }
+                int& literal_hp() { return units["u"].hp; }
+                int& computed_hp(int i) { return hs[i + 1].hp; }
+                int& nested_hp(int i) { return hs[i + 1].child.hp; }
+                int& computed_key(string k) { return rows[k + ""][0]; }
+                int& grid_at(int i) { return g[i]; }
+                entry("a") += 5;
+                global_key() *= 2;
+                cell("q", 1) += 10;
+                unit_hp("u") += 20;
+                literal_hp() += 300;
+                computed_hp(0) += 4;
+                nested_hp(0) = 9;
+                computed_key("q") -= 1;
+                grid_at(2) = 7;
+                int& d1 = units[key == "a" ? "u" : key].hp;
+                d1 += 1000;
+                auto& d2 = hs[key.size()].child;
+                d2.hp += 1;
+                to_json(m) + " " + to_json(rows) + " " + to_string(units["u"].hp) + " " + to_string(hs[1].hp) + " " +
+                    to_string(hs[1].child.hp) + " " + to_json(g.cells)
+            )", R"({"a":12} {"q":[0,12]} 1321 5 10 [0,0,7])", "every lvalue chain returns and binds by reference");
+        });
+        test("a_reference_return_of_no_storage_names_the_return", [expect]() {
+            expect(R"(
+                map<string, int> m = {"a": 1};
+                int one() { return 1; }
+                int& entry(string k) { return m[k]; }
+                int& call_result() { return one(); }
+                var seen = "";
+                try { entry("missing") = 3; } catch (e) { seen = seen + e + "|"; }
+                try { call_result() = 3; } catch (e) { seen = seen + e + "|"; }
+                seen + to_json(m)
+            )", "Function with reference return type must return an lvalue reference|"
+                "Function with reference return type must return an lvalue reference|{\"a\":1}", "a missing entry and a by-value call are no storage");
+        });
     }
 };
 

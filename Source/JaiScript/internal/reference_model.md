@@ -60,8 +60,19 @@ allocates except the first boxing of a variable.
   a reference binds: ref args, `var&`/`T&` declarations, `cast<T&>`, ref returns
   (`detail/math_component_store.hpp` `component_reference`, both backends). A component over a base only evaluation
   names (`f(a[i+1].x)`) reads as a COMPONENT ref over the evaluated element reference: the parse-time pass stamps such
-  reads in those positions (`member_expr::component_lvalue`), so the index runs once. A vector local whose component
+  reads in those positions (`member_expr::place_read`), so the index runs once. A vector local whose component
   is bound that way stays boxed (the aggregate lowering's escape rule).
+- **Members over an evaluated base** where a reference surely binds (a `T&` declaration, `cast<T&>`, a ref return:
+  `return m[k + s].hp`, `auto& c = a[i + 1].child`): the pass stamps every member of the chain
+  `place_read_field`, and a stamped read whose base evaluated to a reference mints the kernel's member-step reference
+  over the referent (`ref_lvalue.hpp` `evaluated_member_reference`, pinned under the base element's array). An
+  argument keeps the component-only stamp: the parameter's kind is unknown at parse time and a by-value argument
+  would pay the mint.
+- **Map steps** in a structural chain (`m[k]`, `m[k].f`, `rows[k][i]`, an identifier or int-literal key) bind an
+  existing entry; a missing key is the kernel's non-lvalue verdict (a read never inserts). A ref return or a
+  reference parameter's default whose chain the kernel cannot bind evaluates the operand instead (an `operator[]`
+  returning `T&`, a computed key): the vm's `op_ref_return_lvalue` pushes the reference and true, or false and the
+  operand's code follows.
 - **C++ properties** (`obj.prop`, `this.prop`, the bare `prop` inside a hybrid's methods and
   lambdas, chains ending in one, `[&]` captures of one) mint CPP-MEMBER / PROPERTY refs on
   every receiver kind: hybrid layers, script-constructed C++ objects, plain wrappers of

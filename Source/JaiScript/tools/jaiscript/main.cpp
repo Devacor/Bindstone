@@ -579,6 +579,10 @@ void register_console_game_io(jai::engine& eng) {
 	// everywhere, a graceful no-op off-Windows so scripts stay portable.
 	eng.add_function("play_wav", [](const std::string& path) -> bool {
 #ifdef _WIN32
+		const DWORD attributes = ::GetFileAttributesA(path.c_str());
+		if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {   // async PlaySound reports success for a file it never finds
+			return false;
+		}
 		auto it = g_wav_aliases.find(path);
 		if (it == g_wav_aliases.end()) {
 			std::string alias = "jaiwav" + std::to_string(g_wav_aliases.size());
@@ -1915,7 +1919,7 @@ int run_selftest(const console_state& con) {
 			}, jai::filesystem);
 			expect_privilege(eng->execute("read_file(fixture + \"/content.txt\");").as_string() == "unchanged",
 				"default file access remains enabled");
-			eng->execute("var saved_read = read_file; var pending = Download(); var saved_start = pending.start;");
+			eng->execute("var saved_read = read_file; var pending = Download(); var saved_start = reflect::bind(pending, \"start\");");
 			eng->execute("revoke_filesystem();");
 			expect_privilege(revoke_calls == 1 && !eng->is_enabled(jai::filesystem),
 				"host callback revokes subsequent access");
@@ -1993,6 +1997,8 @@ int run_selftest(const console_state& con) {
 				"move_file(fixture + \"/save.tmp\", fixture + \"/save.txt\") && !file_exists(fixture + \"/save.tmp\") && "
 				"read_file(fixture + \"/save.txt\") == \"new\" && !move_file(fixture + \"/save.tmp\", fixture + \"/save.txt\");").as_bool(),
 				"move_file replaces the destination and answers false for a missing source");
+			expect_privilege(!eng->execute("play_wav(fixture + \"/missing.wav\") || play_midi(fixture + \"/missing.mid\");").as_bool(),
+				"play_wav and play_midi answer false for a missing file");
 			expect_privilege(!eng->execute("saved_start(\"jaiscript-selftest://never-network\", "
 				"fixture + \"/reenabled-download.bin\");").as_bool()
 				&& eng->execute("pending.error();").as_string() == "download: only http and https URLs are supported",

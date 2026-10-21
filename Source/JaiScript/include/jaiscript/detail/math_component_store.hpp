@@ -197,7 +197,7 @@ namespace jai::detail::math {
 		return script_value::make_component_reference(base, static_cast<size_t>(c), eng);
 	}
 
-	// A stamped component read (member_expr::component_lvalue) whose base evaluated to a reference: the COMPONENT reference
+	// A stamped component read (member_expr::place_read) whose base evaluated to a reference: the COMPONENT reference
 	// over that reference, else a non-reference and the ordinary read
 	inline script_value evaluated_component_reference(const script_value& object, const member_expr* m, engine* eng) {
 		script_value none(std::monostate{}, eng);

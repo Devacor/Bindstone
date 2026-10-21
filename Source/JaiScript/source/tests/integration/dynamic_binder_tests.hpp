@@ -43,6 +43,13 @@ struct CountedAssign {
     CountedAssign& operator=(const std::string& text) { name = text; ++assigned; return *this; }
     CountedAssign& self() { return *this; }
 };
+struct PlainCopy {
+    std::string name = "plain";
+    int64_t built = 0;
+    PlainCopy() = default;
+    PlainCopy(const PlainCopy& other) : name(other.name), built(other.built + 1) {}
+    PlainCopy& operator=(const PlainCopy&) = default;
+};
 }
 
 namespace jai::foundry::tests {
@@ -923,6 +930,52 @@ public:
 
         // A bound "=" is the class's own operator=: a user-defined one runs (here it marks the copy and counts), and an "=" overload
         // from another type resolves like any overload set
+        // A slot typed as a bound class holds its own object: an assignment into it (a variable, a reference to one, a field, an
+        // element) runs the binding's "=" on that object when one is bound, and otherwise replaces it with a copy-constructed one;
+        // a var slot takes the new value as it is
+        test("a_typed_slot_of_a_bound_class_assigns_through_its_operator", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            dynamic_binder<CountedAssign>(*eng, "CountedAssign").constructor<>()
+                .property("name", &CountedAssign::name).property("assigned", &CountedAssign::assigned)
+                .method("=", static_cast<CountedAssign& (CountedAssign::*)(const CountedAssign&)>(&CountedAssign::operator=))
+                .build();
+            dynamic_binder<PlainCopy>(*eng, "PlainCopy").constructor<>().property("name", &PlainCopy::name).property("built", &PlainCopy::built).build();
+            auto out = eng->execute(R"(
+                class Holder { CountedAssign g = CountedAssign(); }
+                CountedAssign a = CountedAssign();
+                CountedAssign b = CountedAssign();
+                b.name = "bee";
+                a = b;
+                string s = a.name + "," + to_string(a.assigned) + ";";
+                var& r = a;
+                r = b;
+                s += a.name + "," + to_string(a.assigned) + ";";
+                Holder h = Holder();
+                h.g = b;
+                s += h.g.name + "," + to_string(h.g.assigned) + ";";
+                array<CountedAssign> arr = [CountedAssign()];
+                arr[0] = b;
+                s += arr[0].name + "," + to_string(arr[0].assigned) + ";";
+                map<string, CountedAssign> m;
+                m["k"] = CountedAssign();
+                m["k"] = b;
+                s += m["k"].name + "," + to_string(m["k"].assigned) + ";";
+                var v = CountedAssign();
+                v = b;
+                b.name = "moved";
+                s += v.name + "," + to_string(v.assigned) + ";";
+                PlainCopy p = PlainCopy();
+                PlainCopy q = PlainCopy();
+                q.name = "q";
+                p = q;
+                q.name = "changed";
+                s += p.name + "," + to_string(p.built);
+                s;
+            )").as_string();
+            check_eq(std::string("bee!,1;bee!,2;bee!,1;bee!,1;bee!,1;bee,0;q,1"), out);
+        });
+
         test("a_bound_operator_assign_runs_the_classes_own", [this]() {
             auto eng = make_engine();
             jai::stdlib::register_all(*eng);

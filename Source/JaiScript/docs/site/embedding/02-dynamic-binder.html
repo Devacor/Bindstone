@@ -460,9 +460,17 @@ stateful functor keeps one state.</li>
 final value back into the script argument, exactly as for <code>add_function</code> (see
 <a href="01-embedding-quickstart.html#the-exact-width-as-aliasing-rules">the quickstart</a>): <code>gate.add(total, 5)</code>
 with <code>void add(int64_t&amp; target, int64_t by)</code> leaves the sum in <code>total</code>.</li>
-<li><code>.method("+", ...)</code>: operator overloading by token, <code>+ - * / % == != &lt; &lt;= &gt;
-&gt;= &lt;=&gt;</code> and <code>[]</code>. Script classes can overload operators from the other side, so a
-type can start in script and graduate to C++ without call sites changing.</li>
+<li><code>.method("+", ...)</code>: operator overloading by token, the same set a script class declares:
+<code>+ - * / % &amp; | ^ &lt;&lt; &gt;&gt; == != &lt; &lt;= &gt; &gt;= &lt;=&gt;</code>, unary <code>- + ~</code> (a lambda
+taking only the object), <code>[]</code>, <code>()</code> and <code>=</code>, with <code>to_bool</code> for
+<code>!v</code> and <code>if (v)</code>. The bound operators follow the script rules of the
+<a href="../guide/04-operators.html">operators chapter</a>: <code>&lt;=&gt;</code> supplies <code>&lt; &lt;= &gt; &gt;=</code>
+and <code>==</code>, <code>==</code> supplies <code>!=</code>, and a compound <code>a += b</code> is <code>a = a + b</code>.
+An operator counts for an operand only when one of its overloads takes it: with <code>operator&lt;(const Money&amp;)</code>
+and <code>operator&lt;=&gt;(int64_t)</code> bound, <code>m &lt; 5</code> runs the <code>&lt;=&gt;</code>, and with only
+<code>operator+(const Money&amp;)</code>, <code>m + "!"</code> is the builtin concatenation of <code>m</code>&#x27;s text.
+Script classes can overload operators from the other side, so a type can start in script and graduate to C++ without
+call sites changing.</li>
 <li><code>.static_method(name, fn)</code>: free function or lambda (stateful lambdas included), called as
 <code>Vec2::axes()</code>. Bound-class arguments work (<code>Vec2::dot(a, b)</code> above); returning a bound
 class doesn&#x27;t compile in either form. See the last section.</li>

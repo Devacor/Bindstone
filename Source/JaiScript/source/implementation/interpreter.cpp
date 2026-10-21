@@ -2867,8 +2867,9 @@ std::optional<checked_result<bool>> interpreter::object_comparison_via_method(co
     // Look for the operator method by symbol ID
     auto method_val = target.method(op_symbol_id);
     const bool declared = method_val.is_function();
+    const bool host_refuses = declared && host_operator_dispatch(method_val) && !host_operator_accepts(method_val, op_symbol_id, right);
     // an explicit operator no overload of which takes the operand yields to a <=> that does (C++20: that candidate is not viable)
-    if (!declared || (target.method(op_spaceship_id_).is_function() && !binary_operator_accepts(target.class_def, op_symbol_id, right))) {
+    if (!declared || host_refuses || (target.method(op_spaceship_id_).is_function() && !binary_operator_accepts(target.class_def, op_symbol_id, right))) {
         if (script_value spaceship = target.method(op_spaceship_id_); spaceship.is_function() && binary_operator_accepts(target.class_def, op_spaceship_id_, right)) {
             auto result = create_bound_method(left, spaceship).as_function()(std::vector<script_value>{right});
             if (!result) {
@@ -2888,7 +2889,7 @@ std::optional<checked_result<bool>> interpreter::object_comparison_via_method(co
                 return object_comparison_via_method(unwrapped, right, op_symbol_id);
             }
         }
-        if (!declared) { return std::nullopt; }  // No custom method - use default comparison
+        if (!declared || host_refuses) { return std::nullopt; }  // No custom method - use default comparison
     }
 
     // Create a bound method and call it with the right operand
@@ -2903,6 +2904,69 @@ std::optional<checked_result<bool>> interpreter::object_comparison_via_method(co
         return checked_result<bool>(result.value().unchecked_as_bool());
     }
     return std::nullopt;
+}
+
+// A compound whose target or operand is an object (an element's, a reference's, a map value's): the target class's compound
+// or binary operator, else the operand's reflected one; nullopt keeps the compound's text. KEEP BYTE-PARALLEL with vm_backend
+std::optional<checked_result<script_value>> interpreter::object_compound_operand(const script_value& left, token_type op, const script_value& right) {
+    uint64_t id = 0;
+    switch (op) {
+        case token_type::plus: id = op_plus_id_; break;
+        case token_type::minus: id = op_minus_id_; break;
+        case token_type::star: id = op_star_id_; break;
+        case token_type::slash: id = op_slash_id_; break;
+        case token_type::percent: id = op_percent_id_; break;
+        case token_type::ampersand: id = op_ampersand_id_; break;
+        case token_type::pipe: id = op_pipe_id_; break;
+        case token_type::caret: id = op_caret_id_; break;
+        case token_type::left_shift: id = op_left_shift_id_; break;
+        case token_type::right_shift: id = op_right_shift_id_; break;
+        default: return std::nullopt;
+    }
+    if (left.is_object()) {
+        if (auto custom = object_compound_via_method(left, right, id)) { return custom; }
+    }
+    if (right.is_object()) { return object_reflected_via_method(left, right, id); }
+    return std::nullopt;
+}
+
+// a op= b on an object: a bound compound operator (C++'s operator+=) that takes b changes a in place and the expression is a;
+// without one it is a = a op b through the binary operator. KEEP BYTE-PARALLEL with vm_backend::object_compound_via_method
+std::optional<checked_result<script_value>> interpreter::object_compound_via_method(const script_value& target, const script_value& right, uint64_t op_symbol_id) {
+    if (!parallel_worker_) {
+        if (const uint64_t compound_id = engine_->compound_operator_id(op_symbol_id)) {
+            if (auto owner = resolve_member_target(target)) {
+                script_value method_val = owner.method(compound_id);
+                if (method_val.is_function() && host_operator_accepts(method_val, compound_id, right)) {
+                    auto result = create_bound_method(target, method_val).as_function()(std::vector<script_value>{right});
+                    if (!result) {
+                        if (is_unwinding_) { return checked_result<script_value>(script_value(std::monostate{}, engine_)); }
+                        return checked_result<script_value>(result.error_value());
+                    }
+                    return checked_result<script_value>(target.deref());
+                }
+            }
+        }
+    }
+    return object_arithmetic_via_method(target, right, op_symbol_id);
+}
+
+// The right operand's bound reflected operator taking the left one (C++'s free op(L, const R&)), for a left operand whose
+// own operator does not answer. KEEP BYTE-PARALLEL with vm_backend::object_reflected_via_method
+std::optional<checked_result<script_value>> interpreter::object_reflected_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+    if (parallel_worker_ || !right.deref().is_object()) { return std::nullopt; }
+    const uint64_t reflected_id = engine_->reflected_operator_id(op_symbol_id);
+    if (!reflected_id) { return std::nullopt; }
+    auto target = resolve_member_target(right);
+    if (!target) { return std::nullopt; }
+    script_value method_val = target.method(reflected_id);
+    if (!method_val.is_function() || !host_operator_accepts(method_val, reflected_id, left)) { return std::nullopt; }
+    auto result = create_bound_method(right, method_val).as_function()(std::vector<script_value>{left});
+    if (!result) {
+        if (is_unwinding_) { return checked_result<script_value>(script_value(std::monostate{}, engine_)); }
+        return checked_result<script_value>(result.error_value());
+    }
+    return checked_result<script_value>(std::move(result.value()));
 }
 
 // Generic helper for arithmetic operators (+, -, *, /, %) via custom methods
@@ -2934,6 +2998,7 @@ std::optional<checked_result<script_value>> interpreter::object_arithmetic_via_m
     }
 
     // Create a bound method and call it with the right operand
+    if (host_operator_dispatch(method_val) && !host_operator_accepts(method_val, op_symbol_id, right)) { return std::nullopt; }
     script_value bound = create_bound_method(left, method_val);
     const script_function& method = bound.as_function();
     std::vector<script_value> args;
@@ -4986,7 +5051,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     uint64_t op_symbol_id = 0;
                     op_symbol_id = compound_op_symbol(expr->op.type);
                     if (op_symbol_id != 0) {
-                        auto custom_outcome = object_arithmetic_via_method(target, rightValue, op_symbol_id);
+                        auto custom_outcome = object_compound_via_method(target, rightValue, op_symbol_id);
                         if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
                         std::optional<script_value> custom_result;
                         if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
@@ -5330,7 +5395,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 if (currentValue.is_object()) {
                     const uint64_t op_symbol_id = compound_op_symbol(expr->op.type);
                     if (op_symbol_id != 0) {
-                        auto custom_outcome = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
+                        auto custom_outcome = object_compound_via_method(currentValue, rightValue, op_symbol_id);
                         if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
                         std::optional<script_value> custom_result;
                         if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
@@ -5517,7 +5582,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             if (currentValue.is_object()) {
                 const uint64_t op_symbol_id = compound_op_symbol(expr->op.type);
                 if (op_symbol_id != 0) {
-                    auto custom_outcome = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
+                    auto custom_outcome = object_compound_via_method(currentValue, rightValue, op_symbol_id);
                     if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
                     std::optional<script_value> custom_result;
                     if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
@@ -7524,6 +7589,15 @@ checked_result<void> interpreter::compound_typed_store_back(script_value& target
 }
 
 // Helper to convert value to string, checking for to_string() method on objects
+// self's method name_id called with no arguments; a parallel worker never dispatches it. KEEP BYTE-PARALLEL with the other backend
+checked_result<script_value> interpreter::invoke_method(const script_value& self, uint64_t name_id) {
+    if (parallel_worker_) [[unlikely]] { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text); }
+    auto target = resolve_member_target(self);
+    script_value method_val = target ? target.method(name_id) : script_value(std::monostate{}, engine_);
+    if (!method_val.is_function()) { return checked_result<script_value>(make_error_code(runtime_error_code::member_not_found), "No method '{0}'", name_id); }
+    return create_bound_method(self, method_val).as_function()(std::vector<script_value>{});
+}
+
 checked_result<std::string> interpreter::value_to_string_with_method(const script_value& val) {
     if (val.type() == script_value_type::jai_object_type) {
         auto target = resolve_member_target(val);
@@ -7582,7 +7656,10 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     // compound's text (KEEP BYTE-PARALLEL with vm_backend::evaluate_arithmetic)
     if (detail::bitwise_token(op)) [[unlikely]] {
         const auto integral = [](size_t idx) { return idx == script_value::TYPEID_INT || idx == script_value::TYPEID_CHAR; };
-        if (compound >= 0 && (!integral(li) || !integral(ri))) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
+        if (compound >= 0 && (!integral(li) || !integral(ri))) {
+            if (auto custom = object_compound_operand(left, op, right)) { return std::move(*custom); }
+            return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_);
+        }
         switch (op) {
             case token_type::ampersand: return handle_bitwise_and(left, right);
             case token_type::pipe: return handle_bitwise_or(left, right);
@@ -7653,7 +7730,10 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     } else {
         if (detail::math::owns_arithmetic(li, ri)) [[unlikely]]
             return detail::math::binary(detail::math::bop_of(op), left, right, engine_);
-        if (compound >= 0) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
+        if (compound >= 0) {
+            if (auto custom = object_compound_operand(left, op, right)) { return std::move(*custom); }
+            return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_);
+        }
         return checked_result<script_value>(
             make_error_code(runtime_error_code::invalid_numeric_operand),
             "Left operand must be numeric");
@@ -7666,7 +7746,10 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     } else {
         if (detail::math::owns_arithmetic(li, ri)) [[unlikely]]
             return detail::math::binary(detail::math::bop_of(op), left, right, engine_);
-        if (compound >= 0) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
+        if (compound >= 0) {
+            if (auto custom = object_compound_operand(left, op, right)) { return std::move(*custom); }
+            return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_);
+        }
         return checked_result<script_value>(
             make_error_code(runtime_error_code::invalid_numeric_operand),
             "Right operand must be numeric");

@@ -9,7 +9,11 @@
 // entries built on the first iteration after a change. Entries never move: a reference or pointer to a key or value stays valid
 // until that entry is erased. An iteration iterator carries its key, so after the map changes under it (the body of a range-for
 // inserting or erasing) it continues with the next greater key, as a std::map iterator walks; a find() iterator carries none
-// (concurrent readers of a borrowed map only find). Included at the end of value.hpp, where script_value is complete.
+// (concurrent readers of a borrowed map only find). A class value key (an instance or a bound object held by value, not a
+// handle) keys by its class: through the class's < or <=> (equivalent when neither is less), else its hash() with its ==, else
+// by identity. Ordered and hashed class keys are found through class_keys_, one sorted run per class (by the class's order, or
+// by hash() value), and sit in the hashed index under their identity as well, so every walk over entries sees them; an
+// identity key is an ordinary entry. Included at the end of value.hpp, where script_value is complete.
 
 #include <bit>
 #include <cstring>
@@ -61,6 +65,19 @@ namespace jai {
         }
         bool operator()(const map_string_key_probe& p, const script_value& b) const { return (*this)(b, p); }
     };
+
+    // A map key's place among class value keys (value.cpp): its class when the class orders or hashes its keys, else null
+    const class_definition* map_class_key_class(const script_value& key);
+    // a < b, a == b or a > b as map keys (-1, 0, 1): class keys of one class by their class, otherwise operator<=>; a key's
+    // operator that fails raises it
+    int map_class_key_order(const script_value& a, const script_value& b);
+    inline int map_key_order(const script_value& a, const script_value& b) {
+        if (a.raw_storage_index() == script_value::TYPEID_OBJECT && b.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
+            return map_class_key_order(a, b);
+        }
+        const auto c = a <=> b;
+        return c < 0 ? -1 : c > 0 ? 1 : 0;
+    }
 
     class script_map {
     public:
@@ -141,6 +158,10 @@ namespace jai {
             void destroy(entry* e) noexcept { e->~entry(); auto* n = reinterpret_cast<free_node*>(e); n->next = free_; free_ = n; }
         };
         struct slot { size_t hash; entry* e; };
+        struct class_key_index;
+        struct class_key_index_deleter { void operator()(class_key_index* index) const noexcept; };
+        // where a class key is (found) or goes (run, at) among its class's keys
+        struct class_probe { entry* found = nullptr; size_t run = 0; size_t at = 0; size_t hash = 0; script_int key_hash = 0; };
         static constexpr size_t min_capacity = 8;
 
         entry_pool pool_;
@@ -150,20 +171,52 @@ namespace jai {
         uint64_t gen_ = 1;                          // moves on every insert, erase or clear
         mutable std::vector<value_type*> order_;    // the entries by key, valid while order_gen_ == gen_
         mutable uint64_t order_gen_ = 0;
+        std::unique_ptr<class_key_index, class_key_index_deleter> class_keys_;   // null until a class key arrives
         struct entry_memo_storage { const script_map* owner = nullptr; uint64_t gen = 0; const void* e = nullptr; };
         mutable entry_memo_storage lane_memo_;      // the vm's main-thread map lanes' memo (a copy names its source: dead by the owner test)
 
         void changed() noexcept { ++gen_; }
+        class_probe probe_class(const script_value& key, const class_definition* cls) const;
+        void insert_class_entry(const class_definition* cls, const class_probe& at, entry* e);
+        void erase_class_entry(entry* e) noexcept;
+        void copy_class_keys(const script_map& o, const std::vector<std::pair<const entry*, entry*>>& copies);
+        void build_order_with_class_keys() const;
+        size_t index_after_class_key(const script_value& key, const class_definition* cls) const;
+        // the index without e (backward shift); e stays allocated
+        void unlink_entry(entry* gone) noexcept {
+            size_t i = home(gone->hash);
+            while (slots_[i].e != gone) { i = (i + 1) & mask(); }
+            for (size_t j = i;;) {
+                j = (j + 1) & mask();
+                if (!slots_[j].e) break;
+                const size_t k = home(slots_[j].hash);
+                if ((j > i && (k <= i || k > j)) || (j < i && k <= i && k > j)) { slots_[i] = slots_[j]; i = j; }
+            }
+            slots_[i] = slot{0, nullptr};
+            --size_;
+            changed();
+        }
         size_t home(size_t h) const noexcept { return static_cast<size_t>((static_cast<uint64_t>(h) * 0x9E3779B97F4A7C15ull) >> shift_); }
         size_t mask() const noexcept { return slots_.size() - 1; }
 
         template <typename K>
         entry* find_entry(const K& key) const {
             if (size_ == 0) return nullptr;
+            size_t h;
             if constexpr (std::is_same_v<K, script_value>) {
-                if (key.raw_storage_index() == script_value::TYPEID_INT) return find_int_entry(key.unchecked_as_int(), &key, nullptr);
+                const size_t k = key.raw_storage_index();
+                if (k == script_value::TYPEID_INT) return find_int_entry(key.unchecked_as_int(), &key, nullptr);
+                if (k == script_value::TYPEID_STRING) {
+                    h = script_value::map_string_key_hash(key.unchecked_as_string());
+                } else {
+                    if (k == script_value::TYPEID_OBJECT) [[unlikely]] {
+                        if (const class_definition* cls = map_class_key_class(key)) { return probe_class(key, cls).found; }
+                    }
+                    h = key.map_key_hash();
+                }
+            } else {
+                h = script_value_hash{}(key);
             }
-            const size_t h = script_value_hash{}(key);
             const short_key b = short_of(key);
             for (size_t i = home(h);; i = (i + 1) & mask()) {
                 const slot& s = slots_[i];
@@ -200,7 +253,22 @@ namespace jai {
         // the entry for key, inserted (made by make(hash, key)) when absent
         template <typename K, typename Make>
         std::pair<entry*, bool> find_or_insert(K&& key, Make&& make) {
-            const size_t h = script_value_hash{}(key);
+            size_t h;
+            if constexpr (std::is_same_v<std::decay_t<K>, script_value>) {
+                const size_t k = key.raw_storage_index();
+                if (k == script_value::TYPEID_INT) {
+                    h = map_key_mix(script_value_type::jai_int_type, static_cast<uint64_t>(key.unchecked_as_int()));
+                } else if (k == script_value::TYPEID_STRING) {
+                    h = script_value::map_string_key_hash(key.unchecked_as_string());
+                } else {
+                    if (k == script_value::TYPEID_OBJECT) [[unlikely]] {
+                        if (const class_definition* cls = map_class_key_class(key)) { return insert_class_key(std::forward<K>(key), make, cls); }
+                    }
+                    h = key.map_key_hash();
+                }
+            } else {
+                h = script_value_hash{}(key);
+            }
             if (size_ != 0) {
                 const short_key b = short_of(key);
                 for (size_t i = home(h);; i = (i + 1) & mask()) {
@@ -216,9 +284,30 @@ namespace jai {
             changed();
             return {e, true};
         }
+        template <typename K, typename Make>
+        JAI_NOINLINE std::pair<entry*, bool> insert_class_key(K&& key, Make& make, const class_definition* cls) {
+            const class_probe at = probe_class(key, cls);
+            if (at.found) return {at.found, false};
+            grow_for(size_ + 1);
+            entry* e = make(at.hash, std::forward<K>(key));
+            place(e);
+            ++size_;
+            changed();
+            insert_class_entry(cls, at, e);
+            return {e, true};
+        }
         // the index without key's entry (backward shift: no tombstones); the entry, still allocated, or null
         entry* unlink(const script_value& key) {
             if (size_ == 0) return nullptr;
+            if (key.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
+                if (const class_definition* cls = map_class_key_class(key)) {
+                    entry* gone = probe_class(key, cls).found;
+                    if (!gone) return nullptr;
+                    erase_class_entry(gone);
+                    unlink_entry(gone);
+                    return gone;
+                }
+            }
             const size_t h = script_value_hash{}(key);
             size_t i = home(h);
             for (;; i = (i + 1) & mask()) {
@@ -244,25 +333,33 @@ namespace jai {
             out.reserve(size_);
             for (slot& s : slots_) { if (s.e) { out.push_back(s.e); s = slot{0, nullptr}; } }
             size_ = 0;
+            class_keys_.reset();
             return out;
         }
         void copy_from(const script_map& o) {
             grow_for(o.size_);
+            std::vector<std::pair<const entry*, entry*>> copies;
+            if (o.class_keys_) { copies.reserve(o.size_); }
             for (const slot& s : o.slots_) {
                 if (!s.e) continue;
-                place(pool_.make(s.hash, s.e->kv.first, s.e->kv.second));
+                entry* e = pool_.make(s.hash, s.e->kv.first, s.e->kv.second);
+                place(e);
                 ++size_;
+                if (o.class_keys_) { copies.emplace_back(s.e, e); }
             }
+            if (o.class_keys_) { copy_class_keys(o, copies); }
         }
         void take_from(script_map& o) noexcept {
             pool_ = std::move(o.pool_);
             slots_ = std::move(o.slots_); o.slots_.clear();
             size_ = o.size_; o.size_ = 0;
             shift_ = o.shift_; o.shift_ = 64;
+            class_keys_ = std::move(o.class_keys_);
         }
 
         void build_order() const {
             if (order_gen_ == gen_) return;
+            if (class_keys_) [[unlikely]] { build_order_with_class_keys(); return; }
             order_.clear();
             order_.reserve(size_);
             for (const slot& s : slots_) { if (s.e) order_.push_back(&s.e->kv); }
@@ -273,6 +370,9 @@ namespace jai {
         // the position after `key` in key order (the first entry whose key is greater)
         size_t index_after(const script_value& key) const {
             build_order();
+            if (class_keys_ && key.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
+                if (const class_definition* cls = map_class_key_class(key)) { return index_after_class_key(key, cls); }
+            }
             auto it = std::upper_bound(order_.begin(), order_.end(), key,
                 [](const script_value& k, const value_type* e) { return script_value_map_less{}(k, e->first); });
             return static_cast<size_t>(it - order_.begin());
@@ -345,6 +445,7 @@ namespace jai {
         script_map() = default;
         script_map(const script_map& o) { copy_from(o); }
         script_map(script_map&& o) noexcept { take_from(o); o.changed(); }
+        bool has_class_keys() const noexcept { return class_keys_ != nullptr; }
         script_map& operator=(const script_map& o) {
             if (this != &o) {
                 script_map fresh(o);

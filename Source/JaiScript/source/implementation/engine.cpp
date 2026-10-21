@@ -671,6 +671,9 @@ struct engine::implementation {
     uint64_t op_left_shift_id_ = 0;
     uint64_t op_right_shift_id_ = 0;
     uint64_t post_load_id_ = 0;
+    std::vector<std::pair<uint64_t, uint64_t>> reflected_operator_ids_;   // a binary operator's id -> its reflected binding's name id
+    std::vector<std::pair<uint64_t, uint64_t>> compound_operator_ids_;    // + -> +=, and so on for the compound forms
+    map_key_ids map_key_ids_;
 
     // Type name registry for custom classes (maps typeid name to user-friendly name)
 
@@ -2255,6 +2258,22 @@ int engine::select_cpp_overload(const std::vector<script_value>& args,
     return bestIdx;
 }
 
+uint64_t engine::reflected_operator_id(uint64_t op_id) const noexcept {
+    for (const auto& [op, reflected] : impl->reflected_operator_ids_) {
+        if (op == op_id) { return reflected; }
+    }
+    return 0;
+}
+
+const engine::map_key_ids& engine::map_key_operator_ids() const noexcept { return impl->map_key_ids_; }
+
+uint64_t engine::compound_operator_id(uint64_t op_id) const noexcept {
+    for (const auto& [op, compound] : impl->compound_operator_ids_) {
+        if (op == op_id) { return compound; }
+    }
+    return 0;
+}
+
 void engine::initialize_engine_reference() {
     library_registration library(*this);
     // Pass the engine reference to the conversion registry
@@ -2279,6 +2298,13 @@ void engine::initialize_engine_reference() {
     impl->op_left_shift_id_ = impl->string_symbolizer_.intern("<<");
     impl->op_right_shift_id_ = impl->string_symbolizer_.intern(">>");
     impl->post_load_id_ = impl->string_symbolizer_.intern("post_load");
+    for (const char* op : {"+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "<", "<=", ">", ">=", "==", "!=", "<=>"}) {
+        impl->reflected_operator_ids_.emplace_back(impl->string_symbolizer_.intern(op), impl->string_symbolizer_.intern(reflected_operator_name(op)));
+    }
+    impl->map_key_ids_ = map_key_ids{impl->op_less_id_, impl->op_spaceship_id_, impl->op_equal_equal_id_, impl->string_symbolizer_.intern("hash")};
+    for (const char* op : {"+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>"}) {
+        impl->compound_operator_ids_.emplace_back(impl->string_symbolizer_.intern(op), impl->string_symbolizer_.intern(std::string(op) + "="));
+    }
 
     // Now that we have a proper engine reference, add conversions and functions that create script_value
     auto engine_weak = this;

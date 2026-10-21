@@ -506,10 +506,17 @@ with <code>void add(int64_t&amp; target, int64_t by)</code> leaves the sum in <c
 taking only the object), <code>[]</code>, <code>()</code> and <code>=</code>, with <code>to_bool</code> for
 <code>!v</code> and <code>if (v)</code>. The bound operators follow the script rules of the
 <a href="../guide/04-operators.html">operators chapter</a>: <code>&lt;=&gt;</code> supplies <code>&lt; &lt;= &gt; &gt;=</code>
-and <code>==</code>, <code>==</code> supplies <code>!=</code>, and a compound <code>a += b</code> is <code>a = a + b</code>.
+and <code>==</code>, <code>==</code> supplies <code>!=</code>, and <code>5 == m</code> asks <code>m</code>'s <code>==</code> taking an int. A bound
+compound operator runs in place: <code>.method("+=", [](Money&amp; self, const Money&amp; o) -&gt; Money&amp; { ... })</code> answers
+<code>m += o</code> for a variable, a field, an element, a map value or a reference, and the expression is <code>m</code>; with none bound,
+<code>m += o</code> is <code>m = m + o</code>. A lambda whose first parameter is another type and whose second is the class binds the reflected
+form, C++'s free <code>operator-(int64_t, const Money&amp;)</code>: <code>.method("-", [](int64_t l, const Money&amp; r) { ... })</code> answers
+<code>5 - m</code> where 5 has no <code>-</code> for a Money. Arithmetic never reverses on its own.
 An operator counts for an operand only when one of its overloads takes it: with <code>operator&lt;(const Money&amp;)</code>
 and <code>operator&lt;=&gt;(int64_t)</code> bound, <code>m &lt; 5</code> runs the <code>&lt;=&gt;</code>, and with only
-<code>operator+(const Money&amp;)</code>, <code>m + "!"</code> is the builtin concatenation of <code>m</code>&#x27;s text.
+<code>operator+(const Money&amp;)</code>, <code>m + "!"</code> is the builtin concatenation of <code>m</code>&#x27;s text. When no bound overload takes the operands, the error names the binding to add:
+<code>No bound 'Money * int': bind operator "*" taking int on Money, or convert the operand</code>, and the checker warns where it sees
+a number left of a bound class's operator that has no reflected form.
 Script classes can overload operators from the other side, so a type can start in script and graduate to C++ without
 call sites changing.</li>
 <li><code>.static_method(name, fn)</code>: free function or lambda (stateful lambdas included), called as

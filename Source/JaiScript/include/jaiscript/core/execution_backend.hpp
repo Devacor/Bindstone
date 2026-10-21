@@ -152,6 +152,9 @@ public:
 	// Cold library bridge: sorting uses the backend's ordinary < expression semantics.
 	// Primitive buffers bypass this only while the backend's < has no global override.
 	virtual checked_result<bool> language_less(const script_value&, const script_value&) = 0;
+	virtual checked_result<bool> language_equal(const script_value&, const script_value&) = 0;
+	// self's method name_id called with no arguments (a class value map key's hash())
+	virtual checked_result<script_value> invoke_method(const script_value& self, uint64_t name_id) = 0;
 	virtual bool native_less_available() const = 0;
 	virtual checked_result<script_value> array_transform(uint64_t, script_value&, const std::vector<script_value>&) = 0;
 	virtual checked_result<script_value> map_transform(uint64_t, script_value&, const std::vector<script_value>&) = 0;

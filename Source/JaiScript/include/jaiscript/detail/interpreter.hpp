@@ -603,7 +603,8 @@ namespace jai {
         checked_result<script_value> handle_greater(const script_value& left, const script_value& right);
         checked_result<script_value> handle_greater_equal(const script_value& left, const script_value& right);
         checked_result<script_value> handle_equal(const script_value& left, const script_value& right);
-        checked_result<bool> language_equal(const script_value& left, const script_value& right);
+        checked_result<bool> language_equal(const script_value& left, const script_value& right) override;
+        checked_result<script_value> invoke_method(const script_value& self, uint64_t name_id) override;
         const expression* compound_map_target_ = nullptr;   // the subscript a general compound is reading as its target
         builtin_method_context builtin_ctx() {
             return builtin_method_context{engine_, string_symbolizer_,
@@ -1166,6 +1167,9 @@ namespace jai {
         std::optional<checked_result<bool>> object_spaceship_equality_via_method(const script_value& left, const script_value& right);
         std::optional<checked_result<bool>> object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
         std::optional<checked_result<script_value>> object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<script_value>> object_reflected_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<script_value>> object_compound_via_method(const script_value& target, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<script_value>> object_compound_operand(const script_value& left, token_type op, const script_value& right);
         std::optional<checked_result<script_value>> object_unary_via_method(const script_value& operand, token_type op);   // a class's unary - + ~
         script_value call_operator_of(const script_value& callee);   // the instance's operator() bound to it, else null
         checked_result<void> method_value_error(const member_expr* expr, const script_value& object, bool bindable);   // obj.method without a call

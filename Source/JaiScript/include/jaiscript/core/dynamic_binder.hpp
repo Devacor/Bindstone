@@ -992,6 +992,13 @@ public:
         constexpr bool has_self_param = first_param_is_self<args_tuple>();
         using CallableType = std::decay_t<Callable>;
         if constexpr (!has_self_param) {
+            if constexpr (second_param_is_self<args_tuple>()) {
+                // C++'s free op(L, const T&) bound for T: the reflected operator `5 - t` reaches when 5 has none for t
+                if (binary_operator_token(name)) {
+                    return method(engine::reflected_operator_name(name), reflected<typename traits::return_type>(
+                        std::make_shared<CallableType>(std::forward<Callable>(callable)), static_cast<args_tuple*>(nullptr)), required);
+                }
+            }
             // a callable without a T& / const T& first parameter is a method that ignores its receiver
             return method(name, receiver_ignoring<typename traits::return_type>(
                 std::make_shared<CallableType>(std::forward<Callable>(callable)), static_cast<args_tuple*>(nullptr)), required);
@@ -1035,6 +1042,28 @@ public:
             using First = std::tuple_element_t<0, Tuple>;
             return std::is_same_v<First, T&> || std::is_same_v<First, const T&>;
         }
+    }
+
+    template<typename Tuple>
+    static constexpr bool second_param_is_self() {
+        if constexpr (std::tuple_size_v<Tuple> != 2) {
+            return false;
+        } else {
+            using Second = std::tuple_element_t<1, Tuple>;
+            return std::is_same_v<Second, T&> || std::is_same_v<Second, const T&> || std::is_same_v<Second, T>;
+        }
+    }
+
+    template<typename R, typename C, typename Left, typename Self>
+    static auto reflected(std::shared_ptr<C> callable, std::tuple<Left, Self>*) {
+        using SelfParam = std::conditional_t<std::is_same_v<Self, T&>, T&, const T&>;
+        return [callable](SelfParam self, Left left) -> R { return (*callable)(std::forward<Left>(left), self); };
+    }
+
+    static bool binary_operator_token(std::string_view name) {
+        static constexpr std::string_view tokens[] = {"+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "<", "<=", ">", ">=", "==", "!=", "<=>"};
+        for (std::string_view t : tokens) { if (name == t) { return true; } }
+        return false;
     }
 
     template<typename R, typename C, typename... Args>

@@ -1317,6 +1317,15 @@ namespace jai {
         // Rank same-arity C++ method overload candidates (each a parameter-type signature) against
         // a call's actual arguments (args[0] = 'this'); returns the best candidate index, or -1.
         // Shares the free-function overload scorer so resolution stays consistent.
+        // The name a class's reflected binary operator binds under (C++'s free op(L, const T&) bound for T): no script spelling reaches it
+        static std::string reflected_operator_name(std::string_view op) { return "reflected " + std::string(op); }
+        // The reflected binding's name id for a binary operator's id (0: not a binary operator)
+        uint64_t reflected_operator_id(uint64_t op_id) const noexcept;
+        // The compound form's name id for a binary operator's id ("+" -> "+="; 0: none)
+        uint64_t compound_operator_id(uint64_t op_id) const noexcept;
+        // The names a class value map key's class orders, compares and hashes through (core/script_map.hpp)
+        struct map_key_ids { uint64_t less = 0; uint64_t spaceship = 0; uint64_t equal = 0; uint64_t hash = 0; };
+        const map_key_ids& map_key_operator_ids() const noexcept;
         int select_cpp_overload(const std::vector<script_value>& args,
                                 const std::vector<std::vector<param_type_info>>& candidateParamTypes) const;
 

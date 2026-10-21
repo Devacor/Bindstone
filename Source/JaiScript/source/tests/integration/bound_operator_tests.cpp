@@ -2,6 +2,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/detail/type_checker.hpp>
 
 #include <memory>
 #include <string>
@@ -21,6 +22,11 @@ namespace bound_operator_hosts {
 		int64_t id = 0;
 		tag() = default;
 		explicit tag(int64_t a_id) : id(a_id) {}
+	};
+	struct meter {
+		int64_t n = 0;
+		meter() = default;
+		explicit meter(int64_t a_n) : n(a_n) {}
 	};
 }
 
@@ -49,6 +55,22 @@ public:
 			.property("id", &tag::id)
 			.method("==", [](const tag& a_self, const tag& a_other) { return a_self.id == a_other.id; })
 			.method("<=>", [](const tag& a_self, const tag& a_other) -> int64_t { return a_self.id < a_other.id ? -1 : a_self.id > a_other.id ? 1 : 0; })
+			.build();
+		return eng;
+	}
+
+	static std::shared_ptr<engine> make_meter_engine() {
+		using bound_operator_hosts::meter;
+		auto eng = make_engine();
+		stdlib::register_all(eng);
+		dynamic_binder<meter>(*eng, "Meter")
+			.constructor<int64_t>()
+			.property("n", &meter::n)
+			.method("-", [](const meter& a_self, const meter& a_other) { return meter(a_self.n - a_other.n); })
+			.method("-", [](int64_t a_left, const meter& a_right) { return meter(a_left - a_right.n); })
+			.method("==", [](const meter& a_self, int64_t a_other) { return a_self.n == a_other; })
+			.method("add", [](meter& a_self, const meter& a_other) { a_self.n += a_other.n; })
+			.method("+=", [](meter& a_self, const meter& a_other) -> meter& { a_self.n += 100 * a_other.n; return a_self; })
 			.build();
 		return eng;
 	}
@@ -102,9 +124,70 @@ public:
 				class Q { int v = 0; Q() {} }
 				P p = P();
 			)");
+			script->execute("class N { int v = 3; N() {} bool operator==(int a_n) { return v == a_n; } } N n = N();");
+			check_eq(true, script->execute("n == 3 && 3 == n && n != 4 && 4 != n").as_bool());
 			check_eq(false, script->execute("p == Q()").as_bool());
 			check_eq(true, script->execute("p != Q()").as_bool());
 			check_eq(true, script->execute("p == P()").as_bool());
+		});
+
+		test("a_bound_reflected_operator_answers_a_left_operand_with_none", [this]() {
+			auto eng = make_meter_engine();
+			eng->execute("Meter m = Meter(3);");
+			check_eq((int64_t)7, eng->execute("(10 - m).n").as_int());
+			check_eq((int64_t)1, eng->execute("(m - Meter(2)).n").as_int());
+			check_eq(true, eng->execute("m == 3 && 3 == m && m != 4 && 4 != m").as_bool());
+		});
+
+		test("a_missing_bound_operator_names_the_binding_to_add", [this]() {
+			auto eng = make_meter_engine();
+			eng->execute("Meter m = Meter(3);");
+			auto miss = [&](const std::string& code) {
+				try { eng->execute(code); } catch (const std::exception& e) { return std::string(e.what()); }
+				return std::string("no error");
+			};
+			check_true(miss("m - 1").find("No bound 'Meter - int': bind operator \"-\" taking int on Meter, or convert the operand") != std::string::npos, miss("m - 1"));
+			check_true(miss("2 * m").find("No bound 'int * Meter': bind operator \"*\" as (int, Meter) on Meter, or convert the operand") != std::string::npos, miss("2 * m"));
+			check_true(miss("2 < m").find("No bound 'int < Meter': bind operator \"<=>\" taking int on Meter, or convert the operand") != std::string::npos, miss("2 < m"));
+			check_true(miss("m.add(5)").find("No overload of 'add' takes (int)") != std::string::npos, miss("m.add(5)"));
+			auto money = make_bound_engine();
+			money->execute("Money a = Money(1);");
+			std::string spaceship;
+			try { money->execute("a <=> Money(2)"); } catch (const std::exception& e) { spaceship = e.what(); }
+			check_true(spaceship.find("No bound 'Money <=> Money': bind operator \"<=>\" taking Money on Money, or convert the operand") != std::string::npos, spaceship);
+		});
+
+		test("a_bound_compound_operator_changes_its_target_in_place", [this]() {
+			auto eng = make_meter_engine();
+			eng->execute(R"(
+				Meter m = Meter(1);
+				m += Meter(2);
+				class Box { Meter inner = Meter(1); Box() {} }
+				Box box = Box();
+				box.inner += Meter(1);
+				array<Meter> ms = [Meter(1)];
+				ms[0] += Meter(3);
+				Meter& alias = m;
+				alias += Meter(1);
+			)");
+			check_eq((int64_t)301, eng->execute("m.n").as_int());
+			check_eq((int64_t)101, eng->execute("box.inner.n").as_int());
+			check_eq((int64_t)301, eng->execute("ms[0].n").as_int());
+			check_eq((int64_t)401, eng->execute("(m += Meter(1)).n").as_int());
+			auto money = make_bound_engine();
+			check_eq((int64_t)3, money->execute("Money a = Money(1); a += Money(2); a.cents").as_int());
+		});
+
+		test("the_checker_warns_where_a_reflected_binding_is_missing", [this]() {
+			auto eng = make_meter_engine();
+			auto report = eng->check("Meter m = Meter(3); auto x = 2 * m; auto y = 2 - m;");
+			check_eq((size_t)0, report.error_count());
+			size_t warned = 0;
+			for (const auto& d : report.diagnostics) {
+				if (d.message.find("No bound 'int * Meter': bind operator \"*\" as (int, Meter) on Meter") != std::string::npos) { ++warned; }
+				check_true(d.message.find("int - Meter") == std::string::npos, d.message);
+			}
+			check_eq((size_t)1, warned);
 		});
 
 		test("a_script_operator_that_cannot_take_the_operand_yields_to_the_bound_base", [this]() {

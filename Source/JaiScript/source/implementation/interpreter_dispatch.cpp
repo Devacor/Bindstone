@@ -51,6 +51,12 @@ struct interpreter::binary_host {
     std::optional<checked_result<bool>> object_comparison_reversed(const script_value& l, const script_value& r, uint64_t id) { return in.object_comparison_reversed_via_method(l, r, id); }
     std::optional<checked_result<script_value>> object_spaceship_reversed(const script_value& l, const script_value& r) { return in.object_spaceship_reversed_via_method(l, r); }
     std::optional<checked_result<bool>> object_spaceship_equality(const script_value& l, const script_value& r) { return in.object_spaceship_equality_via_method(l, r); }
+    std::optional<checked_result<script_value>> object_reflected(const script_value& l, const script_value& r, uint64_t id) { return in.object_reflected_via_method(l, r, id); }
+    const class_definition* operand_class(const script_value& v) const {
+        if (in.parallel_worker_) [[unlikely]] { return detail::operand_instance_class(v); }
+        return v.deref().is_object() ? in.resolve_member_target(v).class_def : nullptr;
+    }
+    uint64_t equality_id() const noexcept { return in.eq_method_id_; }
     bool defines_custom_equality(const script_value& v) const { return in.object_defines_custom_equality(v); }
     bool unwinding() const noexcept { return in.is_unwinding_; }
     bool parallel_worker() const noexcept { return in.parallel_worker_; }

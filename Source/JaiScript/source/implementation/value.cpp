@@ -2513,6 +2513,247 @@ size_t script_value::map_key_hash() const noexcept {
     }
 }
 
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Class value map keys (core/script_map.hpp). A class keys its values by its own operators: ordered through < or <=> (two
+// keys are one when neither is less), else hashed through hash() with == (identity when it declares no ==), else by identity
+// with a warning. The class's operators run on the calling thread's backend; one that fails raises out of the map operation,
+// which leaves the map unchanged.
+namespace {
+
+	enum class key_policy : uint8_t { ordered, hashed, identity };
+
+	const class_definition* by_value_object_class(const script_value& key) {
+		if (key.type() != script_value_type::jai_object_type) { return nullptr; }
+		const auto* holder = key.peek_object_holder();
+		if (!holder) { return nullptr; }
+		if (holder->is_class_instance_wrapper) {
+			return holder->data ? static_cast<class_instance*>(holder->data.get())->get_class_definition() : nullptr;
+		}
+		engine* eng = key.get_engine();
+		if (!eng) { return nullptr; }
+		if (holder->type_id != UINT64_MAX) { return eng->get_class_definition(holder->type_id).get(); }
+		return holder->type_name.empty() ? nullptr : eng->get_class_definition(std::string(holder->type_name)).get();
+	}
+
+	key_policy policy_of(const class_definition* cls, const engine::map_key_ids& ids) {
+		if (cls->defines_method(ids.less) || cls->defines_method(ids.spaceship)) { return key_policy::ordered; }
+		if (cls->defines_method(ids.hash)) { return key_policy::hashed; }
+		return key_policy::identity;
+	}
+
+	execution_backend& key_backend(const script_value& key) {
+		engine* eng = key.get_engine();
+		execution_backend* backend = eng ? eng->calling_backend() : nullptr;
+		if (!backend) { throw runtime_error("A class map key's operators need the engine that made the key"); }
+		return *backend;
+	}
+
+	[[noreturn]] JAI_NOINLINE void raise_key_failure(const script_value& key, const error_propagator& error) {
+		execution_backend& backend = key_backend(key);
+		if (backend.is_unwinding()) { throw script_exception(backend.get_current_exception()); }
+		throw_checked_error(key.get_engine(), error.static_msg, error.symbol_id, error.symbol_id2);
+	}
+
+	bool key_less(const script_value& a, const script_value& b) {
+		execution_backend& backend = key_backend(a);
+		auto answer = backend.language_less(a, b);
+		if (!answer || backend.is_unwinding()) [[unlikely]] { raise_key_failure(a, answer ? error_propagator{} : answer.error_value()); }
+		return answer.value();
+	}
+
+	bool key_equal(const script_value& a, const script_value& b, const class_definition* cls, const engine::map_key_ids& ids) {
+		if (!cls->defines_method(ids.equal)) { return (a <=> b) == 0; }
+		execution_backend& backend = key_backend(a);
+		auto answer = backend.language_equal(a, b);
+		if (!answer || backend.is_unwinding()) [[unlikely]] { raise_key_failure(a, answer ? error_propagator{} : answer.error_value()); }
+		return answer.value();
+	}
+
+	JAI_NOINLINE script_int key_hash_value(const script_value& key, const engine::map_key_ids& ids) {
+		execution_backend& backend = key_backend(key);
+		auto answer = backend.invoke_method(key, ids.hash);
+		if (!answer || backend.is_unwinding()) [[unlikely]] { raise_key_failure(key, answer ? error_propagator{} : answer.error_value()); }
+		const script_value& value = answer.value().deref();
+		if (!value.is_int()) {
+			throw runtime_error("hash() of a map key must return an int");
+		}
+		return value.unchecked_as_int();
+	}
+
+	const engine::map_key_ids& key_ids(const script_value& key) { return key.get_engine()->map_key_operator_ids(); }
+
+}
+
+const class_definition* map_class_key_class(const script_value& key) {
+	const class_definition* cls = by_value_object_class(key);
+	if (!cls) { return nullptr; }
+	const key_policy policy = policy_of(cls, key_ids(key));
+	if (policy != key_policy::identity) { return cls; }
+	if (cls->first_identity_key()) {
+		key.get_engine()->report_script_warning("map keys of class '" + cls->get_name() +
+			"' compare by identity: declare operator<=> (or operator<) or hash() to key its values by value");
+	}
+	return nullptr;
+}
+
+struct script_map::class_key_index {
+	struct run {
+		const class_definition* cls = nullptr;
+		bool hashed = false;
+		std::vector<entry*> keys;        // by the class's order, or by hash() value
+		std::vector<script_int> hashes;  // a hashed run's hash() values, beside its keys
+	};
+	std::vector<run> runs;
+};
+
+void script_map::class_key_index_deleter::operator()(class_key_index* index) const noexcept { delete index; }
+
+script_map::class_probe script_map::probe_class(const script_value& key, const class_definition* cls) const {
+	class_probe at;
+	at.hash = script_value_hash{}(key);
+	const engine::map_key_ids& ids = key_ids(key);
+	const bool hashed = policy_of(cls, ids) == key_policy::hashed;
+	if (hashed) { at.key_hash = key_hash_value(key, ids); }
+	if (!class_keys_) { return at; }
+	auto& runs = class_keys_->runs;
+	at.run = runs.size();
+	for (size_t r = 0; r < runs.size(); ++r) { if (runs[r].cls == cls) { at.run = r; break; } }
+	if (at.run == runs.size()) { return at; }
+	const auto& run = runs[at.run];
+	if (!hashed) {
+		size_t lo = 0, hi = run.keys.size();
+		while (lo < hi) {
+			const size_t mid = lo + (hi - lo) / 2;
+			if (key_less(run.keys[mid]->kv.first, key)) { lo = mid + 1; } else { hi = mid; }
+		}
+		at.at = lo;
+		if (lo < run.keys.size() && !key_less(key, run.keys[lo]->kv.first)) { at.found = run.keys[lo]; }
+		return at;
+	}
+	const auto first = std::lower_bound(run.hashes.begin(), run.hashes.end(), at.key_hash);
+	size_t i = static_cast<size_t>(first - run.hashes.begin());
+	for (; i < run.hashes.size() && run.hashes[i] == at.key_hash; ++i) {
+		if (key_equal(run.keys[i]->kv.first, key, cls, ids)) { at.found = run.keys[i]; return at; }
+	}
+	at.at = i;
+	return at;
+}
+
+void script_map::insert_class_entry(const class_definition* cls, const class_probe& at, entry* e) {
+	if (!class_keys_) { class_keys_.reset(new class_key_index()); }
+	auto& runs = class_keys_->runs;
+	if (at.run == runs.size()) {
+		class_key_index::run fresh;
+		fresh.cls = cls;
+		fresh.hashed = policy_of(cls, key_ids(e->kv.first)) == key_policy::hashed;
+		runs.push_back(std::move(fresh));
+	}
+	auto& run = runs[at.run];
+	run.keys.insert(run.keys.begin() + static_cast<ptrdiff_t>(at.at), e);
+	if (run.hashed) { run.hashes.insert(run.hashes.begin() + static_cast<ptrdiff_t>(at.at), at.key_hash); }
+}
+
+void script_map::erase_class_entry(entry* e) noexcept {
+	if (!class_keys_) { return; }
+	auto& runs = class_keys_->runs;
+	for (size_t r = 0; r < runs.size(); ++r) {
+		auto& keys = runs[r].keys;
+		const auto it = std::find(keys.begin(), keys.end(), e);
+		if (it == keys.end()) { continue; }
+		const ptrdiff_t at = it - keys.begin();
+		keys.erase(it);
+		if (runs[r].hashed) { runs[r].hashes.erase(runs[r].hashes.begin() + at); }
+		if (keys.empty()) { runs.erase(runs.begin() + static_cast<ptrdiff_t>(r)); }
+		if (runs.empty()) { class_keys_.reset(); }
+		return;
+	}
+}
+
+void script_map::copy_class_keys(const script_map& o, const std::vector<std::pair<const entry*, entry*>>& copies) {
+	std::unordered_map<const entry*, entry*> to_copy(copies.begin(), copies.end());
+	class_keys_.reset(new class_key_index(*o.class_keys_));
+	for (auto& run : class_keys_->runs) {
+		for (auto& e : run.keys) { e = to_copy.at(e); }
+	}
+}
+
+namespace {
+	// the order of class keys among keys: by class name (then the class's identity), each class's keys in its run's order;
+	// ahead of the other values of the object type
+	bool class_run_before(const class_definition* a, const class_definition* b) {
+		if (a->get_name() != b->get_name()) { return a->get_name() < b->get_name(); }
+		return std::less<const class_definition*>{}(a, b);
+	}
+}
+
+void script_map::build_order_with_class_keys() const {
+	order_.clear();
+	order_.reserve(size_);
+	for (const slot& s : slots_) { if (s.e) order_.push_back(&s.e->kv); }
+	std::vector<const class_key_index::run*> runs;
+	for (const auto& run : class_keys_->runs) { runs.push_back(&run); }
+	std::sort(runs.begin(), runs.end(), [](const auto* a, const auto* b) { return class_run_before(a->cls, b->cls); });
+	std::unordered_map<const value_type*, std::pair<size_t, size_t>> rank;
+	for (size_t r = 0; r < runs.size(); ++r) {
+		for (size_t i = 0; i < runs[r]->keys.size(); ++i) { rank.emplace(&runs[r]->keys[i]->kv, std::pair<size_t, size_t>{r, i}); }
+	}
+	std::sort(order_.begin(), order_.end(), [&rank](const value_type* a, const value_type* b) {
+		const auto ra = rank.find(a);
+		const auto rb = rank.find(b);
+		const bool ca = ra != rank.end(), cb = rb != rank.end();
+		if (ca && cb) { return ra->second < rb->second; }
+		if (ca || cb) {
+			const script_value_type ta = a->first.type(), tb = b->first.type();
+			if (ta != tb) { return ta < tb; }
+			return ca;
+		}
+		return script_value_map_less{}(a->first, b->first);
+	});
+	order_gen_ = gen_;
+}
+
+size_t script_map::index_after_class_key(const script_value& key, const class_definition* cls) const {
+	const engine::map_key_ids& ids = key_ids(key);
+	const bool hashed = policy_of(cls, ids) == key_policy::hashed;
+	const script_int key_hash = hashed ? key_hash_value(key, ids) : 0;
+	std::unordered_map<const value_type*, std::pair<const class_definition*, script_int>> class_of;
+	for (const auto& run : class_keys_->runs) {
+		for (size_t i = 0; i < run.keys.size(); ++i) { class_of.emplace(&run.keys[i]->kv, std::pair{run.cls, run.hashed ? run.hashes[i] : 0}); }
+	}
+	// key < e in the order build_order_with_class_keys sorts by
+	const auto before = [&](const value_type* e) {
+		const auto found = class_of.find(e);
+		if (found == class_of.end()) {
+			const script_value_type te = e->first.type();
+			return te != script_value_type::jai_object_type ? script_value_type::jai_object_type < te : true;
+		}
+		const class_definition* ec = found->second.first;
+		if (ec != cls) { return class_run_before(cls, ec); }
+		return hashed ? key_hash < found->second.second : key_less(key, e->first);
+	};
+	const auto it = std::partition_point(order_.begin(), order_.end(), [&](const value_type* e) { return !before(e); });
+	return static_cast<size_t>(it - order_.begin());
+}
+
+int map_class_key_order(const script_value& a, const script_value& b) {
+	const auto identity = [&]() { const auto c = a <=> b; return c < 0 ? -1 : c > 0 ? 1 : 0; };
+	if (a.type() != b.type()) { return identity(); }
+	const class_definition* ca = map_class_key_class(a);
+	const class_definition* cb = map_class_key_class(b);
+	if (!ca && !cb) { return identity(); }
+	if (!ca || !cb) { return ca ? -1 : 1; }
+	if (ca != cb) { return class_run_before(ca, cb) ? -1 : 1; }
+	const engine::map_key_ids& ids = key_ids(a);
+	if (policy_of(ca, ids) == key_policy::ordered) {
+		if (key_less(a, b)) { return -1; }
+		return key_less(b, a) ? 1 : 0;
+	}
+	const script_int ha = key_hash_value(a, ids), hb = key_hash_value(b, ids);
+	if (ha != hb) { return ha < hb ? -1 : 1; }
+	return key_equal(a, b, ca, ids) ? 0 : identity();
+}
+
 } // namespace jai
 
 namespace jai::detail {

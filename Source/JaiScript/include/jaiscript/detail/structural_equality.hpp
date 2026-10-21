@@ -214,7 +214,7 @@ namespace jai::detail {
         case equality_frame::shape::map: {
             if (frame.left_entry == frame.left_map->end()) { return member_step::done; }
             if (frame.right_entry == frame.right_map->end()) { return member_step::unequal; }
-            if ((frame.left_entry->first <=> frame.right_entry->first) != 0) { return member_step::unequal; }
+            if (map_key_order(frame.left_entry->first, frame.right_entry->first) != 0) { return member_step::unequal; }
             x = &frame.left_entry->second;
             y = &frame.right_entry->second;
             ++frame.left_entry;
@@ -299,7 +299,7 @@ namespace jai::detail {
         compare_depth_scope scope(h.equality_depth());
         auto ib = b->begin();
         for (auto ia = a->begin(); ia != a->end(); ++ia, ++ib) {
-            if (ib == b->end() || (ia->first <=> ib->first) != 0) { return script_value(false, eng); }
+            if (ib == b->end() || map_key_order(ia->first, ib->first) != 0) { return script_value(false, eng); }
             auto answer = equal_operands(h, ia->second, ib->second, nullptr);
             if (!answer) { return answer; }
             if (!answer.value().unchecked_as_bool()) { return script_value(false, eng); }

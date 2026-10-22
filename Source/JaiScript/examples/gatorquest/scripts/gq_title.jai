@@ -412,7 +412,7 @@ array<string> saved_gators() {
 	for (int i = 0; i < files.size(); ++i) {
 		if (!files[i].ends_with(".gqc")) { continue; }
 		string n = files[i].substr(0, files[i].size() - 4);
-		n.replace_all("_", " ");
+		n.replace("_", " ");
 		out.push(n);
 	}
 	return out;

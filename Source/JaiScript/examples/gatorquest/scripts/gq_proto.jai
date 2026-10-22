@@ -16,8 +16,8 @@ int VIEW_R = 24;               // snapshot radius in tiles
 
 string clean_text(string s) {
 	string out = s;
-	out.replace_all("|", "/");
-	out.replace_all("\n", " ");
+	out.replace("|", "/");
+	out.replace("\n", " ");
 	return out;
 }
 

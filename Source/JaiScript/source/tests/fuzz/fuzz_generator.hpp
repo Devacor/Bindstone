@@ -819,7 +819,7 @@ namespace jai::fuzz {
 						case 5: return base + ".repeat(" + std::to_string(rng_.range(0, 3)) + ")";
 						case 6: {
 							const std::string to = string_literal();
-							return base + ".replace_all(" + string_literal() + ", " + to + ")";
+							return base + ".replace(" + string_literal() + ", " + to + ")";
 						}
 						default: return base + ".pad_left(" + std::to_string(rng_.range(0, 6)) + ", \"*\")";
 					}

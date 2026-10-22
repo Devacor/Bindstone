@@ -344,8 +344,8 @@ public:
 				"var a = [1]; for (int i = 0; i < 30; i++) { a.append(a); }",
 				"var a = [\"a\", \"b\", \"c\"]; string sep = \"x\".repeat(500000); a.join(sep);",
 				"var a = [\"a\", \"b\", \"c\"]; string sep = \"x\".repeat(500000); string::join(a, sep);",
-				"string s = \"x\".repeat(500000); s.replace_all(\"x\", \"yyyy\");",
-				"string s = \"x\".repeat(500000); string::replace_all(s, \"x\", \"yyyy\");",
+				"string s = \"x\".repeat(500000); s.replace(\"x\", \"yyyy\");",
+				"string s = \"x\".repeat(500000); string::replace(s, \"x\", \"yyyy\");",
 				"string s = \"x\".repeat(500000); var parts = s.split(\"\");",
 				"string s = \"x\".repeat(500000); var parts = s.utf8_chars();",
 				"string s = \"x\\n\".repeat(300000); var parts = s.lines();",
@@ -401,18 +401,18 @@ public:
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());
 		});
 
-		// replace_all builds its result in one pass (replacing in place shifted the tail at every hit: two million hits ran
+		// replace builds its result in one pass (replacing in place shifted the tail at every hit: two million hits ran
 		// for minutes, out of the budget's reach inside one builtin)
-		test("replace_all_is_linear_in_the_hits", [this]() {
+		test("replace_is_linear_in_the_hits", [this]() {
 			auto e = make_engine();
 			stdlib::register_all(*e);
 			e->execution_budget(60.0);
 			const auto start = std::chrono::steady_clock::now();
-			check_eq((int64_t)4000000, e->execute("string s = \"x\".repeat(2000000); s.replace_all(\"x\", \"yy\"); s.size()").as_int());
-			check_eq((int64_t)4000000, e->execute("string s = \"x\".repeat(2000000); string::replace_all(s, \"x\", \"yy\").size()").as_int());
-			check_eq(std::string("a-b-c"), e->execute("string s = \"a, b, c\"; s.replace_all(\", \", \"-\")").as<std::string>());
-			check_eq(std::string("xxyxxy"), e->execute("string s = \"xyxy\"; s.replace_all(\"x\", \"xx\")").as<std::string>());
-			check_eq(std::string("q"), e->execute("string s = \"aaaa\"; s.replace_all(\"aa\", \"\"); s + \"q\"").as<std::string>());
+			check_eq((int64_t)4000000, e->execute("string s = \"x\".repeat(2000000); s.replace(\"x\", \"yy\"); s.size()").as_int());
+			check_eq((int64_t)4000000, e->execute("string s = \"x\".repeat(2000000); string::replace(s, \"x\", \"yy\").size()").as_int());
+			check_eq(std::string("a-b-c"), e->execute("string s = \"a, b, c\"; s.replace(\", \", \"-\")").as<std::string>());
+			check_eq(std::string("xxyxxy"), e->execute("string s = \"xyxy\"; s.replace(\"x\", \"xx\")").as<std::string>());
+			check_eq(std::string("q"), e->execute("string s = \"aaaa\"; s.replace(\"aa\", \"\"); s + \"q\"").as<std::string>());
 			check_true(std::chrono::steady_clock::now() - start < std::chrono::seconds(10), "two million hits finish at once");
 		});
 	}

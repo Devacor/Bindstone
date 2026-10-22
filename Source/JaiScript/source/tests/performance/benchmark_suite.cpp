@@ -1278,7 +1278,7 @@ public:
         benchmark("String Method Chaining", [this]() {
             test_engine->execute(R"(
                 auto s = "  HELLO WORLD  ";
-                s.trim().to_lower().replace_all(" ", "_");
+                s.trim().to_lower().replace(" ", "_");
             )");
         });
     }

@@ -61,7 +61,7 @@ int run_savetest(string base_dir) {
 	check(save_roundtrip(dir), "round trip keeps the exact state hash");
 	string first = read_file(world_path());
 	string crlf = first;
-	crlf.replace_all("\n", "\r\n");
+	crlf.replace("\n", "\r\n");
 	write_file(world_path(), crlf);
 	check(load_sealed(world_path(), WORLD_MAGIC) != "" && SAVE_NOTE == "", "a save whose line endings a tool converted to CRLF still verifies");
 	write_file(world_path(), first);
@@ -497,8 +497,8 @@ string replace_once(string text, string from, string to) {
 	string f = from;
 	string t = to;
 	if (text.contains("\r\n")) {
-		f.replace_all("\n", "\r\n");
-		t.replace_all("\n", "\r\n");
+		f.replace("\n", "\r\n");
+		t.replace("\n", "\r\n");
 	}
 	int at = text.find(f);
 	if (at < 0) { print("  (edit target not found: " + from + ")"); return text; }
@@ -543,8 +543,8 @@ int run_hotreload() {
 	// whatever the checkout did, two files get \r\n and three get \n: both paths always run
 	for (int i = 0; i < copies.size(); ++i) {
 		string text = read_file(copies[i]);
-		text.replace_all("\r\n", "\n");
-		if (i == 0 || i == 2) { text.replace_all("\n", "\r\n"); }
+		text.replace("\r\n", "\n");
+		if (i == 0 || i == 2) { text.replace("\n", "\r\n"); }
 		write_file(copies[i], text);
 	}
 	array<string> first = dev_poll();

@@ -37,7 +37,7 @@ namespace jai {
         std::string_view{"append"}, std::string_view{"to_lower"}, std::string_view{"to_upper"}, std::string_view{"trim"},
         std::string_view{"trim_left"}, std::string_view{"trim_right"}, std::string_view{"pad_left"},
         std::string_view{"pad_right"}, std::string_view{"pad_center"}, std::string_view{"replace_first"},
-        std::string_view{"replace_last"}, std::string_view{"replace_all"}, std::string_view{"insert"},
+        std::string_view{"replace_last"}, std::string_view{"replace"}, std::string_view{"insert"},
         std::string_view{"erase"}, std::string_view{"remove_prefix"}, std::string_view{"remove_suffix"},
         std::string_view{"reverse"}, std::string_view{"repeat"}
     };

@@ -3946,7 +3946,7 @@ public:
             check_quad("class R { string n = \"n\"; string get() { return n; } } var r = R(); string g = r.get(); g.to_upper(); r.n + g", "nN", "returned field copy");
             check_quad("string a = \"hello\"; string b = a; to_string(b.length()) + b.substr(1) + to_string(b.find(\"l\")) + a", "5ello2hello", "observers on a copy");
             check_quad("string a = \"ab\"; string b = a; b.repeat(2); a + b", "ababab", "repeat on a copy");
-            check_quad("string s = \"x\"; s.insert(0, s); s.replace_all(\"x\", s); s", "xxxx", "an argument aliasing the receiver reads the pre-write content");
+            check_quad("string s = \"x\"; s.insert(0, s); s.replace(\"x\", s); s", "xxxx", "an argument aliasing the receiver reads the pre-write content");
         });
 
         test("string_mutator_receiver_lvalue_battery", [check_quad]() {
@@ -3967,16 +3967,16 @@ public:
             check_quad("string s = \"abc\"; s.substr(1).to_upper(); s", "abc", "a call result is a temporary");
             check_quad("function mk() { return \"t\"; } mk().to_upper()", "T", "temporary mutation lands in the result");
             check_quad("string q = \"hello\"; var f = []() { q.to_upper(); }; f(); q", "HELLO", "a string method taken as a value is a lambda over the receiver");
-            check_quad("string a = \"hello\"; string b = a; b.to_lower(); b.trim(); b.trim_left(); b.trim_right(); b.pad_left(6, ' '); b.pad_right(7, ' '); b.pad_center(9, '*'); b.replace_first(\"h\", \"j\"); b.replace_last(\"o\", \"y\"); b.replace_all(\"l\", \"L\"); b.insert(0, \">\"); b.erase(0, 1); b.remove_prefix(1); b.remove_suffix(1); b.reverse(); b.repeat(1); b.to_upper(); a + \"|\" + b",
+            check_quad("string a = \"hello\"; string b = a; b.to_lower(); b.trim(); b.trim_left(); b.trim_right(); b.pad_left(6, ' '); b.pad_right(7, ' '); b.pad_center(9, '*'); b.replace_first(\"h\", \"j\"); b.replace_last(\"o\", \"y\"); b.replace(\"l\", \"L\"); b.insert(0, \">\"); b.erase(0, 1); b.remove_prefix(1); b.remove_suffix(1); b.reverse(); b.repeat(1); b.to_upper(); a + \"|\" + b",
                        "hello| YLLEJ ", "all seventeen mutators on a copy leave the source");
-            check_quad("var arr = [\"hello\"]; string a = arr[0]; arr[0].to_lower(); arr[0].trim(); arr[0].trim_left(); arr[0].trim_right(); arr[0].pad_left(6, ' '); arr[0].pad_right(7, ' '); arr[0].pad_center(9, '*'); arr[0].replace_first(\"h\", \"j\"); arr[0].replace_last(\"o\", \"y\"); arr[0].replace_all(\"l\", \"L\"); arr[0].insert(0, \">\"); arr[0].erase(0, 1); arr[0].remove_prefix(1); arr[0].remove_suffix(1); arr[0].reverse(); arr[0].repeat(1); arr[0].to_upper(); a + \"|\" + arr[0]",
+            check_quad("var arr = [\"hello\"]; string a = arr[0]; arr[0].to_lower(); arr[0].trim(); arr[0].trim_left(); arr[0].trim_right(); arr[0].pad_left(6, ' '); arr[0].pad_right(7, ' '); arr[0].pad_center(9, '*'); arr[0].replace_first(\"h\", \"j\"); arr[0].replace_last(\"o\", \"y\"); arr[0].replace(\"l\", \"L\"); arr[0].insert(0, \">\"); arr[0].erase(0, 1); arr[0].remove_prefix(1); arr[0].remove_suffix(1); arr[0].reverse(); arr[0].repeat(1); arr[0].to_upper(); a + \"|\" + arr[0]",
                        "hello| YLLEJ ", "all seventeen mutators through an element receiver land in the element");
         });
 
         test("string_mutator_chain_battery", [check_quad]() {
             // Mutators return self for chaining; a chain rooted at an lvalue keeps writing
-            // to the root (guide ch.9 pins `t.trim().to_upper().replace_all(...)` -> t)
-            check_quad("var t = \"  hello world  \"; t.trim().to_upper().replace_all(\"WORLD\", \"JAI\"); t", "HELLO JAI", "guide ch.9 chain on a variable");
+            // to the root (guide ch.9 pins `t.trim().to_upper().replace(...)` -> t)
+            check_quad("var t = \"  hello world  \"; t.trim().to_upper().replace(\"WORLD\", \"JAI\"); t", "HELLO JAI", "guide ch.9 chain on a variable");
             check_quad("auto name = \"jai\"; auto upper = name.to_upper(); name + upper", "JAIJAI", "guide ch.9: the mutator's result is the mutated receiver");
             check_quad("auto name = \"jai\"; auto upper = name; upper.to_upper(); name + \"|\" + upper", "jai|JAI", "guide ch.9: copy first keeps the original");
             check_quad("string a = \"  x \"; string b = a; b.trim().to_upper(); a + \"|\" + b", "  x |X", "chain on a copy leaves the source");

@@ -484,7 +484,7 @@ public:
             rejected("map<string,int> m = {\"a\": 1}; for (auto& kv : m) { kv.first.to_upper(); } 0", "by-reference pair, string mutator");
             rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { kv.first.insert(0, \"x\"); } 0", "insert");
             rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { kv.first.erase(0, 1); } 0", "erase");
-            rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { kv.first.replace_all(\"a\", \"b\"); } 0", "replace_all");
+            rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { kv.first.replace(\"a\", \"b\"); } 0", "replace");
             rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { kv.first = \"z\"; } 0", "store");
             rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { kv.first += \"!\"; } 0", "compound store");
             rejected("map<int,int> m = {1: 1}; for (auto kv : m) { kv.first++; } 0", "postfix ++ (desugars to += 1)");

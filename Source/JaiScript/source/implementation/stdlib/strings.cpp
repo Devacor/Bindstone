@@ -30,7 +30,7 @@ namespace stdlib {
         sign("is_valid_utf8", {1, 1, {text}, script_value_type::jai_bool_type, false});
         sign("join", {1, 2, {script_value_type::jai_array_type, text}, any, false});
         sign("trim", {1, 1, {text}, any, true});
-        sign("replace_all", {3, 3, {text, text, text}, any, true});
+        sign("replace", {3, 3, {text, text, text}, any, true});
         sign("repeat", {2, 2, {text, integer}, any, true});
         sign("pad_left", {2, 3, {text, integer, any}, any, true});
         sign("pad_right", {2, 3, {text, integer, any}, any, true});
@@ -152,9 +152,9 @@ namespace stdlib {
             while (n > b && space(s[n - 1])) --n;
             return a[0]->is_utf8_string() ? script_value::make_utf8(s.substr(b, n - b), e) : script_value(s.substr(b, n - b), e);
         });
-        def("replace_all", [=](engine* e, const std::vector<const script_value*>& a) -> R {
-            if (a.size() != 3) return count_error("string::replace_all expects exactly 3 arguments (s, from, to)");
-            if (!a[0]->is_text() || !a[1]->is_text() || !a[2]->is_text()) return type_error("string::replace_all expects string arguments");
+        def("replace", [=](engine* e, const std::vector<const script_value*>& a) -> R {
+            if (a.size() != 3) return count_error("string::replace expects exactly 3 arguments (s, from, to)");
+            if (!a[0]->is_text() || !a[1]->is_text() || !a[2]->is_text()) return type_error("string::replace expects string arguments");
             const std::string& s = a[0]->unchecked_text(); const std::string& from = a[1]->unchecked_text(); const std::string& to = a[2]->unchecked_text();
             if (from.empty()) return a[0]->is_utf8_string() ? script_value::make_utf8(s, e) : script_value(s, e);
             std::string out; size_t at = 0, hit;

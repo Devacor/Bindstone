@@ -165,7 +165,7 @@ hand back a scratch); compound assignment routes those refs through
 A string `script_value` holds one `strong_ptr<script_string>` node and every copy
 boundary shares it (O(1) copies; `clone()` / `clone_for_assignment` stay shallow for
 strings). Value semantics hold because every in-place string write - the mutators in
-`k_string_mutator_method_names` (`to_upper`, `trim`, `replace_all`, ...), `+=` on a variable or bare field, a host
+`k_string_mutator_method_names` (`to_upper`, `trim`, `replace`, ...), `+=` on a variable or bare field, a host
 `std::string&` - goes through ONE gate, `script_value::unchecked_as_string_ref()`: a node
 any other holder shares is replaced by a private copy first (copy-on-write, memory_cap
 charged deferred), so the write lands in the storage the script named and nowhere else.

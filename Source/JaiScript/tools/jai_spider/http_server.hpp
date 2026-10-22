@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-namespace jaiweb {
+namespace spider_host {
 
 using jai_runner::net_socket;
 using jai_runner::net_bad_socket;
@@ -130,6 +130,10 @@ public:
 	}
 
 	int port() const { return bound_port_; }
+
+	// the largest request body from the next request read on
+	void max_body(size_t a_bytes) { limits_.max_body_bytes = a_bytes; }
+	size_t max_body() const { return limits_.max_body_bytes; }
 
 	// told of every request the server answers itself (400, 413, 431, 503, ...): the peer, the status and why
 	void on_rejected(std::function<void(const std::string&, int, const std::string&)> callback) { rejected_ = std::move(callback); }
@@ -613,7 +617,7 @@ private:
 			out += "\r\n";
 		}
 		if (!response.has_header("date")) { out += "Date: " + http_date(std::time(nullptr)) + "\r\n"; }
-		if (!response.has_header("server")) { out += "Server: jaiweb\r\n"; }
+		if (!response.has_header("server")) { out += "Server: jai_spider\r\n"; }
 		if (!bodiless) { out += "Content-Length: " + std::to_string(length) + "\r\n"; }
 		out += close_after ? "Connection: close\r\n\r\n" : "Connection: keep-alive\r\n\r\n";
 		if (head_only || bodiless) { return; }
@@ -638,4 +642,4 @@ private:
 	std::function<void(const std::string&, int, const std::string&)> rejected_;
 };
 
-} // namespace jaiweb
+} // namespace spider_host

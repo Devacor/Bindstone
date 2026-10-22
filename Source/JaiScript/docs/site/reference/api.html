@@ -1253,6 +1253,43 @@ print(reflect::invoke(Orc(), &quot;add&quot;, 2, 3));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="shared_ptr&lt;t&gt;.use_count() -&gt; int observe  every engine"><h3 id="api-c15caac1cc5a"><code>shared_ptr&lt;T&gt;.use_count() -&gt; int</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
 </section>
+<section class="api-group"><h2 id="group-spider">spider</h2>
+<div class="api-entry" data-provider="stdlib" data-search="spider::response(status: int = 200, body: string = &quot;&quot;) -&gt; spider::response construct a new response, as a server handler builds one. register_spider() + a host transport + the network permission"><h3 id="api-2d3deb4ac004"><code>spider::Response(status: int = 200, body: string = &quot;&quot;) -&gt; spider::Response</code></h3><p><strong>register_spider() + a host transport + the network permission</strong> &middot; construct</p>
+<p>A new response, as a server handler builds one.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="spider::catch(url: string, options: map = {}) -&gt; spider::response network a get (options.method overrides) through the host&#x27;s transport; options method, headers, timeout (30 s), type, redirects (5). errors name the call, the url and the reason. register_spider() + a host transport + the network permission"><h3 id="api-88985606faf4"><code>spider::catch(url: string, options: map = {}) -&gt; spider::Response</code></h3><p><strong>register_spider() + a host transport + the network permission</strong> &middot; network</p>
+<p>A GET (options.method overrides) through the host&#x27;s transport; options method, headers, timeout (30 s), type, redirects (5). Errors name the call, the URL and the reason.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="spider::get(url: string, options: map = {}) -&gt; spider::response network the plain name of spider::catch. register_spider() + a host transport + the network permission"><h3 id="api-93df3bc222a3"><code>spider::get(url: string, options: map = {}) -&gt; spider::Response</code></h3><p><strong>register_spider() + a host transport + the network permission</strong> &middot; network</p>
+<p>The plain name of spider::catch.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="spider::post(url: string, content: var, options: map = {}) -&gt; spider::response network the plain name of spider::sling, url first. register_spider() + a host transport + the network permission"><h3 id="api-24b7ea6f3ca9"><code>spider::post(url: string, content: var, options: map = {}) -&gt; spider::Response</code></h3><p><strong>register_spider() + a host transport + the network permission</strong> &middot; network</p>
+<p>The plain name of spider::sling, URL first.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="spider::sling(content: var, url: string, options: map = {}) -&gt; spider::response network a post carrying content: text as text/plain, anything else as json, a map as a form with type &quot;form&quot;. register_spider() + a host transport + the network permission"><h3 id="api-2de86d0c2a09"><code>spider::sling(content: var, url: string, options: map = {}) -&gt; spider::Response</code></h3><p><strong>register_spider() + a host transport + the network permission</strong> &middot; network</p>
+<p>A POST carrying content: text as text/plain, anything else as JSON, a map as a form with type &quot;form&quot;.</p>
+</div>
+</section>
+<section class="api-group"><h2 id="group-spider-response">spider::Response</h2>
+<div class="api-entry" data-provider="stdlib" data-search="spider::response.clear_cookie(name: string, options: map = {}) -&gt; void mutate adds a set-cookie line with max-age=0. register_spider()"><h3 id="api-6031c96552a1"><code>spider::Response.clear_cookie(name: string, options: map = {}) -&gt; void</code></h3><p><strong>register_spider()</strong> &middot; mutate</p>
+<p>Adds a Set-Cookie line with Max-Age=0.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="spider::response.header(name: string) -&gt; string observe the header in any spelling of its name; &quot;&quot; when absent. register_spider()"><h3 id="api-26b9cd34bbf4"><code>spider::Response.header(name: string) -&gt; string</code></h3><p><strong>register_spider()</strong> &middot; observe</p>
+<p>The header in any spelling of its name; &quot;&quot; when absent.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="spider::response.header(name: string, value: string) -&gt; spider::response&amp; mutate sets a header, replacing one of the same name in any spelling; chains. register_spider()"><h3 id="api-57dd2e748053"><code>spider::Response.header(name: string, value: string) -&gt; spider::Response&amp;</code></h3><p><strong>register_spider()</strong> &middot; mutate</p>
+<p>Sets a header, replacing one of the same name in any spelling; chains.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="spider::response.json() -&gt; var deserialize from_json of the body. register_spider()"><h3 id="api-7aceef9147d1"><code>spider::Response.json() -&gt; var</code></h3><p><strong>register_spider()</strong> &middot; deserialize</p>
+<p>from_json of the body.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="spider::response.ok() -&gt; bool observe true for a 2xx status. register_spider()"><h3 id="api-2ff8934182f4"><code>spider::Response.ok() -&gt; bool</code></h3><p><strong>register_spider()</strong> &middot; observe</p>
+<p>True for a 2xx status.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="spider::response.set_cookie(name: string, value: string, options: map = {}) -&gt; void mutate adds a set-cookie line, the value percent-encoded; options max_age, expires, path, domain, secure, http_only (true), same_site (&quot;lax&quot;). register_spider()"><h3 id="api-107f9c2e4fac"><code>spider::Response.set_cookie(name: string, value: string, options: map = {}) -&gt; void</code></h3><p><strong>register_spider()</strong> &middot; mutate</p>
+<p>Adds a Set-Cookie line, the value percent-encoded; options max_age, expires, path, domain, secure, http_only (true), same_site (&quot;Lax&quot;).</p>
+</div>
+</section>
 <section class="api-group"><h2 id="group-string">string</h2>
 <div class="api-entry" data-provider="stdlib" data-search="string::append(value: text, part: text, parts: text...) -&gt; self copy returns new text; preserves first input text kind. inputs do not mutate. register_all() or area registration"><h3 id="api-48849930d985"><code>string::append(value: text, part: text, parts: text...) -&gt; Self</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
 <p>Returns new text; preserves first input text kind. Inputs do not mutate.</p>
@@ -1849,6 +1886,11 @@ print(u.to_string());</code></pre></div>
 <tr><td><code>pair.second</code></td><td>var</td><td>read/write / stdlib</td><td>Map iteration keys remain protected from mutation.</td></tr>
 <tr><td><code>regex.flags</code></td><td>string</td><td>read-only / core</td><td></td></tr>
 <tr><td><code>regex.pattern</code></td><td>string</td><td>read-only / core</td><td>Saved by to_json and from_json.</td></tr>
+<tr><td><code>spider::Response.body</code></td><td>string</td><td>read/write / stdlib</td><td></td></tr>
+<tr><td><code>spider::Response.cookies</code></td><td>array&lt;string&gt;</td><td>read/write / stdlib</td><td>The Set-Cookie lines, one per cookie.</td></tr>
+<tr><td><code>spider::Response.headers</code></td><td>map&lt;string, string&gt;</td><td>read/write / stdlib</td><td>A received answer&#x27;s names lowercased, repeats joined with &quot;, &quot;.</td></tr>
+<tr><td><code>spider::Response.status</code></td><td>int</td><td>read/write / stdlib</td><td>The status code.</td></tr>
+<tr><td><code>spider::Response.url</code></td><td>string</td><td>read/write / stdlib</td><td>The URL that answered, after redirects.</td></tr>
 <tr><td><code>string::whitespace</code></td><td>string</td><td>constant / stdlib</td><td>Space, tab, LF, VT, FF, CR; split() whitespace sentinel.</td></tr>
 <tr><td><code>time::date.day</code></td><td>int</td><td>read/write / stdlib</td><td>Validated calendar field.</td></tr>
 <tr><td><code>time::date.hour</code></td><td>int</td><td>read/write / stdlib</td><td>Validated calendar field.</td></tr>

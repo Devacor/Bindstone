@@ -37,6 +37,7 @@ namespace jai {
     class class_registry;
     class execution_backend;
     class engine_time;
+    class http_transport;
     class string_symbolizer;
     struct import_site;
     namespace vm { class vm_backend; struct coverage_tables; }
@@ -607,6 +608,12 @@ namespace jai {
         };
         using file_stamp_reading = std::function<std::optional<file_stamp>(const std::string& a_path)>;
         void file_stamp_source(file_stamp_reading a_source);
+
+        // The HTTP stack spider::catch / sling / get / post send through (<jaiscript/core/http_transport.hpp>); none is
+        // installed by default, and a call without one raises a catchable error naming this function. Install it on the
+        // engine thread while no script runs.
+        void http_transport(std::shared_ptr<jai::http_transport> a_transport);
+        const std::shared_ptr<jai::http_transport>& http_transport() const noexcept;
 
         // The clock time:: reads and the running execute's deadline (<jaiscript/core/engine_time.hpp>, which brings <chrono>)
         engine_time time();

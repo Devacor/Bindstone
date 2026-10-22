@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""jaiweb's gate: start the host on a free port over a copy of tests/app and drive it over HTTP.
+"""jai_spider's gate: start the host on a free port over a copy of tests/app and drive it over HTTP.
 
-    python tools/jaiweb/tests/jaiweb_test.py --exe build/bin/jaiweb [--backend vm|interp|both] [--verbose]
+    python tools/jai_spider/tests/spider_test.py --exe build/bin/jai_spider [--runner build/bin/jaiscript]
+        [--backend vm|interp|both] [--verbose]
 
 Covers routing, query/form/multipart/JSON parsing, headers and cookies, sessions, SQLite CRUD with bound parameters
 and transactions, script errors and the execution budget (500 with the process alive), hot reload between two
 requests, a rejected reload that keeps serving, state kept across a reload, static files (types, ETag, 304, HEAD,
 traversal), the limits (413, 431, 400), chunked bodies, keep-alive and pipelining, and the shutdown endpoint; then
-serves a copy of examples/guestbook and walks its pages, form, session and JSON API.
+serves a copy of examples/guestbook and walks its pages, form, session and JSON API. With --runner, the runner's
+spider:: client (tests/client.jai, tests/client_catch.jai) calls the same server through each transport the build has:
+methods, content kinds, options, the redirect policy, timeouts and errors.
 """
 import argparse
 import http.client
@@ -44,11 +47,11 @@ class Server:
 				if self.process.poll() is not None:
 					break
 				continue
-			if line.startswith("jaiweb: serving") and " on http://" in line:
+			if line.startswith("jai_spider: spinning") and " on http://" in line:
 				self.port = int(line.split(" on http://", 1)[1].split("/", 1)[0].rsplit(":", 1)[1])
 				break
 		if self.port is None:
-			raise RuntimeError("jaiweb did not start:\n" + "\n".join(self.log))
+			raise RuntimeError("jai_spider did not start:\n" + "\n".join(self.log))
 
 	def _pump(self):
 		for raw in self.process.stdout:
@@ -202,7 +205,7 @@ class Suite:
 		self.check("form() parses an urlencoded body", r.json() == {"name": "Ada L", "msg": "<b>", "n": "1"}, r.text())
 		r = self.request("POST", "/echo/json", json.dumps({"a": [1, 2], "b": {"c": "d"}}), {"Content-Type": "application/json"})
 		self.check("json() reads the body", r.json() == {"got": {"a": [1, 2], "b": {"c": "d"}}}, r.text())
-		boundary = "----jaiwebBoundary7"
+		boundary = "----spiderBoundary7"
 		body = (
 			"--" + boundary + "\r\n"
 			"Content-Disposition: form-data; name=\"title\"\r\n\r\n"
@@ -372,10 +375,10 @@ class Suite:
 		self.check("keep-alive serves two requests on one connection", first.status == 200 and second.status == 200 and second.read() == b'{"id":"1"}')
 		c.close()
 		raw = self.raw(b"POST /echo/body HTTP/1.1\r\nHost: t\r\nContent-Length: 70000\r\n\r\n" + b"x" * 1000)
-		self.check("a body over --max-body is 413", raw.startswith(b"HTTP/1.1 413"), raw[:80].decode("latin-1"))
+		self.check("a body over spin's max_body is 413", raw.startswith(b"HTTP/1.1 413"), raw[:80].decode("latin-1"))
 		chunk = b"%x\r\n" % 40000 + b"y" * 40000 + b"\r\n"
 		raw = self.raw(b"POST /echo/body HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\n" + chunk + chunk)
-		self.check("a chunked body over --max-body is 413", raw.startswith(b"HTTP/1.1 413"), raw[:80].decode("latin-1"))
+		self.check("a chunked body over spin's max_body is 413", raw.startswith(b"HTTP/1.1 413"), raw[:80].decode("latin-1"))
 		raw = self.raw(b"GET / HTTP/1.1\r\nHost: t\r\nX-Big: " + b"z" * 70000 + b"\r\n\r\n")
 		self.check("a head over the limit is 431", raw.startswith(b"HTTP/1.1 431"), raw[:80].decode("latin-1"))
 		raw = self.raw(b"NOT A REQUEST\r\n\r\n")
@@ -390,16 +393,46 @@ class Suite:
 		self.check("the server serves on after malformed traffic", r.status == 200)
 
 
-def run_backend(exe, backend, verbose):
-	work = pathlib.Path(tempfile.mkdtemp(prefix="jaiweb_test_"))
+def client_transports():
+	# the transport a build installs by default, and on Windows the socket transport too (JAISCRIPT_HTTP_TRANSPORT=socket)
+	return [None, "socket"] if os.name == "nt" else [None]
+
+
+def run_client(suite, runner, backend, transport):
+	env = dict(os.environ)
+	label = "default transport"
+	if transport:
+		env["JAISCRIPT_HTTP_TRANSPORT"] = transport
+		label = transport + " transport"
+	base = "http://127.0.0.1:" + str(suite.server.port)
+	result = subprocess.run([runner, "--backend=" + backend, str(HERE / "client.jai"), "--", base], capture_output=True, timeout=180, env=env)
+	out = result.stdout.decode("utf-8", "replace")
+	if suite.verbose:
+		print(out)
+	for line in out.splitlines():
+		if line.startswith("FAIL "):
+			suite.check("client (" + label + "): " + line[5:], False)
+	summary = [line for line in out.splitlines() if line.startswith("client: ")]
+	suite.check("client (" + label + "): every check ran and held", result.returncode == 0 and summary and summary[-1].endswith(" 0 failed") and not summary[-1].startswith("client: 0 passed"),
+		(summary[-1] if summary else "no summary") + " " + result.stderr.decode("utf-8", "replace")[-600:])
+	result = subprocess.run([runner, "--backend=" + backend, str(HERE / "client_catch.jai"), "--", base], capture_output=True, timeout=60, env=env)
+	out = (result.stdout + result.stderr).decode("utf-8", "replace")
+	suite.check("client (" + label + "): spider::catch is spider::get", "catch: ok" in out, out[-600:])
+
+
+def run_backend(exe, runner, backend, verbose):
+	work = pathlib.Path(tempfile.mkdtemp(prefix="spider_test_"))
 	app_dir = work / "app"
 	shutil.copytree(FIXTURE, app_dir)
-	server = Server(exe, app_dir, backend, ["--max-body", "64K", "--budget", "1", "--timeout", "10"])
+	server = Server(exe, app_dir, backend, ["--max-body", "1M", "--budget", "1", "--timeout", "10"])
 	suite = Suite(server, app_dir, verbose)
 	try:
 		suite.run()
-		r = suite.request("POST", "/__jaiweb/shutdown", fresh=True)
-		suite.check("POST /__jaiweb/shutdown stops the server", r.status == 200)
+		if runner:
+			for transport in client_transports():
+				run_client(suite, runner, backend, transport)
+		r = suite.request("POST", "/__spider/shutdown", fresh=True)
+		suite.check("POST /__spider/shutdown stops the server", r.status == 200)
 		try:
 			code = server.process.wait(timeout=10)
 			suite.check("the process exits cleanly after the shutdown request", code == 0, "exit code " + str(code))
@@ -408,28 +441,28 @@ def run_backend(exe, backend, verbose):
 	finally:
 		server.stop()
 		if suite.failures or verbose:
-			print("---- jaiweb log (" + backend + ")")
+			print("---- jai_spider log (" + backend + ")")
 			print(server.log_text())
 		shutil.rmtree(work, ignore_errors=True)
-	print("jaiweb " + backend + ": " + str(suite.passed) + " passed, " + str(len(suite.failures)) + " failed")
+	print("jai_spider " + backend + ": " + str(suite.passed) + " passed, " + str(len(suite.failures)) + " failed")
 	return not suite.failures
 
 
 def run_broken_start(exe, backend, verbose):
-	work = pathlib.Path(tempfile.mkdtemp(prefix="jaiweb_broken_"))
+	work = pathlib.Path(tempfile.mkdtemp(prefix="spider_broken_"))
 	app_dir = work / "app"
 	shutil.copytree(FIXTURE, app_dir)
 	(app_dir / "greeting.jai").write_text('string greeting() { return missing_name; }\n', encoding="utf-8")
 	server = Server(exe, app_dir, backend, [])
 	suite = Suite(server, app_dir, verbose)
 	try:
-		suite.check("an app that does not load is reported at start", suite.wait_for_log("jaiweb: the app did not load:") and suite.wait_for_log("missing_name"))
+		suite.check("an app that does not load is reported at start", suite.wait_for_log("jai_spider: the app did not load:") and suite.wait_for_log("missing_name"))
 		r = suite.request("GET", "/greeting")
 		suite.check("an app that never loaded answers 500 with its listing", r.status == 500 and b"did not load" in r.body and b"missing_name" in r.body, r.text()[:300])
 		suite.write_module("greeting.jai", 'string greeting() { return "fixed"; }\n')
 		r = suite.request("GET", "/greeting")
 		suite.check("the fixed app serves on the next request", r.status == 200 and r.text() == "fixed", r.text()[:300])
-		suite.check("the recovery is logged", suite.wait_for_log("jaiweb: the app loads"))
+		suite.check("the recovery is logged", suite.wait_for_log("jai_spider: the app loads"))
 	finally:
 		server.stop()
 		if suite.failures or verbose:
@@ -441,7 +474,7 @@ def run_broken_start(exe, backend, verbose):
 
 
 def run_guestbook(exe, backend, verbose):
-	work = pathlib.Path(tempfile.mkdtemp(prefix="jaiweb_guestbook_"))
+	work = pathlib.Path(tempfile.mkdtemp(prefix="spider_guestbook_"))
 	app_dir = work / "guestbook"
 	shutil.copytree(EXAMPLE, app_dir, ignore=shutil.ignore_patterns("*.db", "*.db-*", ".cache"))
 	server = Server(exe, app_dir, backend, [])
@@ -477,18 +510,22 @@ def run_guestbook(exe, backend, verbose):
 def main():
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--exe", required=True)
+	parser.add_argument("--runner", default="")
 	parser.add_argument("--backend", default="both", choices=["vm", "interp", "both"])
 	parser.add_argument("--verbose", action="store_true")
 	args = parser.parse_args()
 	exe = args.exe
 	if not os.path.isfile(exe) and os.path.isfile(exe + ".exe"):
 		exe += ".exe"
+	runner = args.runner
+	if runner and not os.path.isfile(runner) and os.path.isfile(runner + ".exe"):
+		runner += ".exe"
 	backends = ["vm", "interp"] if args.backend == "both" else [args.backend]
 	results = []
 	for backend in backends:
-		results += [run_backend(exe, backend, args.verbose), run_broken_start(exe, backend, args.verbose), run_guestbook(exe, backend, args.verbose)]
+		results += [run_backend(exe, runner, backend, args.verbose), run_broken_start(exe, backend, args.verbose), run_guestbook(exe, backend, args.verbose)]
 	ok = all(results)
-	print("jaiweb: " + ("every check holds" if ok else "FAILED"))
+	print("jai_spider: " + ("every check holds" if ok else "FAILED"))
 	return 0 if ok else 1
 
 

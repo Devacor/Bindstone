@@ -109,8 +109,8 @@ EMBEDDING = [
      "The rest of the engine's host API: functions and direct entries, live bindings to C++ variables and what writes through them, running files, per-execution variables, calling script and reading its state back, every error surface, and the time source."),
     ("18-build-integration.html", "Building JaiScript into a Host",
      "Every way into a project in full: CMake, Visual Studio and MSBuild, Xcode and an installed package, with the sources, flags and defines each needs, one file or per file, and Debug and Release notes."),
-    ("19-web-host.html", "jaiweb: a Web Application Host",
-     "jaiweb serves a JaiScript program over HTTP/1.1: a handler per request, Request, Response and a Router in script, SQLite bound as a class, cookie sessions, static files, and modules that reload on the request after they are saved."),
+    ("19-jai-spider.html", "jai_spider: a Web Application Host",
+     "jai_spider serves a JaiScript program over HTTP/1.1: the handler the app hands to spider::spin, Request and a Router in script, spider::Response shared with the spider:: client, SQLite bound as a class, cookie sessions, static files, and modules that reload on the request after they are saved."),
 ]
 
 LANGUAGE_BRIDGES = [

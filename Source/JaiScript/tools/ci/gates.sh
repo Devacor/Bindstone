@@ -2,7 +2,7 @@
 # The CI gates, one per argument, so the workflow can give each its own step and a
 # local run can reproduce any of them:
 #
-#   BIN=build/bin tools/ci/gates.sh tests-interp tests-vm fuzz gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency jaiweb
+#   BIN=build/bin tools/ci/gates.sh tests-interp tests-vm fuzz gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider
 #   tools/ci/gates.sh all
 #
 # BIN is the directory holding the built executables (default: build/bin under the
@@ -209,16 +209,18 @@ gate_embed_quickstart() {
 	rm -rf "$work"
 }
 
-# jaiweb on a free port over a copy of its test app and of the guestbook example, both backends
-gate_jaiweb() {
-	local exe="$BIN/jaiweb" py
+# jai_spider on a free port over a copy of its test app and of the guestbook example, and the runner's spider:: client
+# against it, both backends
+gate_spider() {
+	local exe="$BIN/jai_spider" runner="$BIN/jaiscript" py
 	[ -f "$exe.exe" ] && exe="$exe.exe"
+	[ -f "$runner.exe" ] && runner="$runner.exe"
 	py="$(python_cmd)"
-	run_logged "$py" "$ROOT/tools/jaiweb/tests/jaiweb_test.py" --exe "$exe"
-	want "jaiweb: expected every check to hold" "^jaiweb: every check holds\$"
+	run_logged "$py" "$ROOT/tools/jai_spider/tests/spider_test.py" --exe "$exe" --runner "$runner"
+	want "spider: expected every check to hold" "^jai_spider: every check holds\$"
 }
 
-ALL=(tests-interp tests-vm fuzz gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency jaiweb)
+ALL=(tests-interp tests-vm fuzz gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider)
 MILESTONE=(gloom-workers gloom-long timedemo amalgamation)
 CROSS=(android)
 
@@ -227,7 +229,7 @@ CROSS=(android)
 
 for gate in "$@"; do
 	case "$gate" in
-		tests-interp | tests-vm | fuzz | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency | jaiweb) ;;
+		tests-interp | tests-vm | fuzz | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency | spider) ;;
 		gloom-workers | gloom-long | timedemo | amalgamation | android) ;;
 		*) echo "unknown gate: $gate (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]})" >&2; exit 2 ;;
 	esac

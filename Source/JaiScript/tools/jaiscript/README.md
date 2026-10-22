@@ -144,7 +144,12 @@ The full JaiScript stdlib is always registered (`jai::stdlib::register_all`): fo
 helpers, `sha256(s)` and `sha256_file(path)` (a hex digest, the file
 streamed; it needs the `filesystem` privilege and raises `read_file`'s error below), and the opt-in `web::`
 library (`jai::stdlib::register_web`: `web::html_escape`, `web::url_encode`, `web::form_encode`,
-`web::parse_query`, `web::build_query`, `web::parse_url` and the rest). (The bare engine only ships concatenating `print`, `thread_count`,
+`web::parse_query`, `web::build_query`, `web::parse_url` and the rest), and the opt-in `spider::` HTTP client
+(`jai::stdlib::register_spider`: `spider::catch(url[, options])`, also spelled `spider::get`, and
+`spider::sling(content, url[, options])`, also spelled `spider::post(url, content[, options])`, each answering a
+`spider::Response`) with the `network` permission granted and the transport of `tools/jaiscript/http_transport.hpp`:
+WinHTTP on Windows, sockets elsewhere with HTTPS through OpenSSL when the build found it (plain HTTP otherwise);
+`JAISCRIPT_HTTP_TRANSPORT=socket` picks the socket transport on Windows. (The bare engine only ships concatenating `print`, `thread_count`,
 `parallel_transform`, `parallel_reduce` and the builtin container/string methods — the runner opts into
 everything.) On top, the host binds file IO so scripts can actually save things:
 

@@ -50,8 +50,8 @@ classify() {
 		tools/ci/*) pick ci-scripts "the CI scripts ($p)" ;;
 		tools/lsp/*) pick lsp "the language server ($p)" ;;
 		tools/vscode-jaiscript/*) NOTES="$NOTES $p" ;;
-		tools/jaiscript/*) pick gatorquest "the runner ($p)"; pick verify-site "the runner runs the site's samples ($p)"; pick jaiweb "jaiweb shares the runner's file IO and sockets ($p)" ;;
-		tools/jaiweb/*) pick jaiweb "the web host ($p)" ;;
+		tools/jaiscript/*) pick gatorquest "the runner ($p)"; pick verify-site "the runner runs the site's samples ($p)"; pick spider "jai_spider shares the runner's file IO, sockets and HTTP transport ($p)" ;;
+		tools/jai_spider/*) pick spider "the web host ($p)" ;;
 		examples/gloom/*) pick gloom "the GLOOM example ($p)" ;;
 		examples/demoreel/*) pick demoreel "the demoreel ($p)" ;;
 		examples/crawler/*) pick crawler "the crawler ($p)" ;;
@@ -73,6 +73,8 @@ classify() {
 		include/jaiscript/properties/* | include/jaiscript/properties.hpp | include/jaiscript/serialization/* | source/implementation/serialization/* | \
 		source/implementation/properties.cpp | source/implementation/schema_binding.cpp)
 			pick debug-suites "the property system or the archives ($p)"; HOST_ARCHIVES=1; pick android "libc++ and 32-bit compile the library ($p)" ;;
+		source/implementation/stdlib/spider.cpp | include/jaiscript/stdlib/spider.hpp | include/jaiscript/core/http_transport.hpp | include/jaiscript/net/*)
+			pick debug-suites "the spider:: client ($p)"; pick spider "the spider:: client against a live server ($p)"; pick android "libc++ and 32-bit compile the library ($p)" ;;
 		include/* | source/implementation/*) pick debug-suites "the library ($p)"; pick android "libc++ and 32-bit compile the library ($p)" ;;
 		CMakeLists.txt | */CMakeLists.txt | cmake/* | source/jaiscript.cpp | CMakePresets.json)
 			pick debug-suites "the build ($p)"; pick amalgamation "the build's file lists ($p)"; pick android "libc++ and 32-bit compile the library ($p)" ;;
@@ -111,7 +113,7 @@ if [ "$BUILD" = 1 ]; then
 			verify-site) release_targets="$release_targets jaiscript_runner jaiscript_tests" ;;
 			lsp) release_targets="$release_targets jaiscript_lsp" ;;
 			embed-quickstart) release_targets="$release_targets embed_quickstart" ;;
-			jaiweb) release_targets="$release_targets jaiweb" ;;
+			spider) release_targets="$release_targets jai_spider jaiscript_runner" ;;
 		esac
 	done
 	# shellcheck disable=SC2086

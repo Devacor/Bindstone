@@ -7,13 +7,20 @@ target_link_libraries(jaiscript_runner PRIVATE jaiscript)
 
 # Download (tools/jaiscript/fetch.hpp): WinHTTP on Windows; libcurl on POSIX when present, else the
 # curl executable at run time. No new dependency is required to build.
+# spider:: (tools/jaiscript/http_transport.hpp): WinHTTP on Windows; sockets elsewhere, with HTTPS through OpenSSL when
+# the build finds it (plain HTTP otherwise).
 if(WIN32)
-    target_link_libraries(jaiscript_runner PRIVATE winhttp winmm)
+    target_link_libraries(jaiscript_runner PRIVATE winhttp winmm ws2_32)
 else()
     find_package(CURL QUIET)
     if(CURL_FOUND)
         target_link_libraries(jaiscript_runner PRIVATE CURL::libcurl)
         target_compile_definitions(jaiscript_runner PRIVATE JAISCRIPT_RUNNER_HAS_CURL=1)
+    endif()
+    find_package(OpenSSL QUIET)
+    if(OPENSSL_FOUND)
+        target_link_libraries(jaiscript_runner PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+        target_compile_definitions(jaiscript_runner PRIVATE JAISCRIPT_TOOLS_HAVE_OPENSSL=1)
     endif()
 endif()
 

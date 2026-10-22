@@ -1,5 +1,6 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/core/engine_time.hpp>
+#include <jaiscript/core/http_transport.hpp>
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/ast.hpp>
@@ -1720,6 +1721,8 @@ struct engine::implementation {
         return true;
 #endif
     }
+
+    std::shared_ptr<jai::http_transport> http_transport;
 
     // A file's stamp through the host's engine::file_stamp_source, else the file system's
     engine::file_stamp_reading file_stamp_source;
@@ -4989,6 +4992,14 @@ std::string engine::app_cache_dir(const std::string& app) const {
 
 void engine::file_stamp_source(file_stamp_reading source) {
     impl->file_stamp_source = std::move(source);
+}
+
+void engine::http_transport(std::shared_ptr<jai::http_transport> transport) {
+    impl->http_transport = std::move(transport);
+}
+
+const std::shared_ptr<jai::http_transport>& engine::http_transport() const noexcept {
+    return impl->http_transport;
 }
 
 engine_time engine::time() {

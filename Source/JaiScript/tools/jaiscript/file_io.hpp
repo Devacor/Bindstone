@@ -1,5 +1,5 @@
 #pragma once
-// The host file IO the runner and the jaiweb host register: read_file, write_file, file_exists, delete_file,
+// The host file IO the runner and the jai_spider host register: read_file, write_file, file_exists, delete_file,
 // move_file, dir_exists, make_dirs, writable_dir and list_dir, each requiring the engine's filesystem privilege.
 #include <jaiscript/jaiscript.hpp>
 

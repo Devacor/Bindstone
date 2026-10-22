@@ -6,7 +6,7 @@
 // before touching the shareware episode (free to redistribute, not open source);
 // `jaidoom.jai -- bootstrap` does the same without a screen for scripts and CI.
 //
-// Host API used (runner): Download, sha256_file, zip_extract, write_file, file_exists.
+// Host API used (runner): Download, zip_extract, write_file, file_exists; sha256_file is the stdlib's.
 
 import "wad.jai";
 import "sound.jai";

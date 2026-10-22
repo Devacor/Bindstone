@@ -615,8 +615,8 @@ too, for a const overload that still touches shared state),
 <code>.serial_static_method("name")</code> for a static method, and <code>engine::serial_function("name")</code> after
 registering a free function. A body that names a serial free function or static method is refused when the statement
 is reached; a serial method is refused when it is called, since the receiver&#x27;s class is known only then. The
-library&#x27;s own builtins are serial (<code>print</code>, I/O, JSON, reflection, the clock) apart from pure math and
-<code>to_string</code>.</p>
+library&#x27;s own builtins are serial (<code>print</code>, I/O, JSON, reflection, the clock) apart from pure math,
+<code>to_string</code>, <code>html_escape</code>, <code>html_unescape</code> and <code>sha256</code>.</p>
 <p>The receiver follows the signature. A non-const member function (a <code>T&amp;</code> self in a lambda, a property
 store) runs only on an object the calling worker owns: the element it is running (a range or zipped element, or a
 <code>parallel_reduce</code> accumulator, which the statement proves the only element of its object), or one it constructed

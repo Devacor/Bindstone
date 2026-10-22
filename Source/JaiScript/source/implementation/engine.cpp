@@ -3555,6 +3555,11 @@ void engine::add_function_with_arity_and_full_types(const std::string& name, scr
     register_overload_impl(name, arity, std::move(func), paramTypes, /*createSetOnFirst=*/false);
 }
 
+void engine::add_function_with_arity_and_full_types(const std::string& name, script_function func, size_t arity, const std::vector<param_type_info>& paramTypes, script_value_type result) {
+    stage_host_result(result);
+    register_overload_impl(name, arity, std::move(func), paramTypes, /*createSetOnFirst=*/false);
+}
+
 string_symbolizer* engine::get_symbolizer() {
     return &impl->string_symbolizer_;
 }

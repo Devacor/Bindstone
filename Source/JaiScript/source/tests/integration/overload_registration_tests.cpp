@@ -40,6 +40,17 @@ public:
             check_eq(std::string("fsi|fsi|fsi|"), eng->execute(loop).as<std::string>(), "the added int overload wins for an int");
         });
 
+        // A std::string parameter reads a utf8_string's bytes, as the checker already admits; an exact string overload still wins
+        test("a_utf8_string_reaches_a_string_parameter", [this]() {
+            auto eng = make_engine();
+            eng->add_function("bytes_of", [](std::string a) -> script_int { return static_cast<script_int>(a.size()); });
+            check_eq((int64_t)3, eng->execute("utf8_string u = \"a\xC3\xA9\"; bytes_of(u);").as_int());
+            check_eq((int64_t)3, eng->execute("var u = \"a\xC3\xA9\".to_utf8(); bytes_of(u);").as_int());
+            eng->add_function("kind", [](const std::string& a) -> std::string { (void)a; return "string"; });
+            eng->add_function("kind", [](script_int a) -> std::string { (void)a; return "int"; });
+            check_eq(std::string("string int"), eng->execute("var u = \"x\".to_utf8(); kind(u) + \" \" + kind(1);").as<std::string>());
+        });
+
         test("one_overload_rejects_with_the_set_text", [this]() {
             auto eng = make_engine();
             eng->add_function("one", [](double a) -> double { return a; });

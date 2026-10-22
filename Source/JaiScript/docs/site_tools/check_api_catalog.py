@@ -35,6 +35,7 @@ def main():
 		('include/jaiscript/stdlib/reflection.hpp','reflect',r'add\("([^"\n]+)"'),
 		('include/jaiscript/stdlib/strings.hpp','string',r'(?:sign|def)\("([^"\n]+)"'),
 		('include/jaiscript/stdlib/json.hpp','global',r'add_(?:variadic_)?function\("([^"\n]+)"'),
+		('source/implementation/stdlib/web_text.cpp','global',r'add_function_with_arity_and_full_types\("([^"\n]+)"'),
 		('tools/jaiscript/fetch.hpp','Download',r'\.method\("([^"\n]+)"'),
 		('tools/jaiscript/sound.hpp','Sound',r'\.method\("([^"\n]+)"'),
 		('tools/jaiscript/sound.hpp','global',r'add_function\("([^"\n]+)"'),

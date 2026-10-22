@@ -13,7 +13,7 @@
 #include <jaiscript/properties/property_serialization.hpp>   // property_manager::load template bodies
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 #include <jaiscript/debug/connector.hpp>
-#include "fetch.hpp"   // Download, sha256_file, zip_extract (runner host API)
+#include "fetch.hpp"   // Download, zip_entries, zip_extract (runner host API)
 #include "sound.hpp"   // load_sound, play_sound, stop_sounds (runner host API)
 #endif
 
@@ -227,9 +227,10 @@ void print_usage() {
 		"           (message + stack trace on stderr), usage errors exit 2.\n"
 		"\n"
 		"environment: the full JaiScript stdlib is always registered (print/format/to_string/\n"
-		"  type_of, math, to_json/from_json, containers) plus host file IO: read_file(path),\n"
+		"  type_of, math, to_json/from_json, containers, html_escape/html_unescape(s), sha256(s),\n"
+		"  sha256_file(path)) plus host file IO: read_file(path),\n"
 		"  write_file(path, text) (creates missing folders), file_exists(path), delete_file(path), Download,\n"
-		"  sha256_file(path), zip_entries(zip), zip_extract(zip, entry, dest), dir_exists(path),\n"
+		"  zip_entries(zip), zip_extract(zip, entry, dest), dir_exists(path),\n"
 		"  make_dirs(path), list_dir(path), writable_dir(path). Locations are language builtins:\n"
 		"  executable_dir() (alias bin_dir()), root_script_dir() (the script this run started with),\n"
 		"  current_script_dir() (the file whose code is running), the *_path() twins, resolve_path(name)\n"

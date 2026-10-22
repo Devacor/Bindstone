@@ -9,6 +9,7 @@ namespace stdlib {
         register_io_functions(eng_ref);
         register_container_types(eng_ref);
         register_string_functions(eng_ref);
+        register_web_text_functions(eng_ref);
         register_reflection_functions(eng_ref);   // the reflect:: capability — separately
                                                   // composable for hosts that grant stdlib
                                                   // without reflection

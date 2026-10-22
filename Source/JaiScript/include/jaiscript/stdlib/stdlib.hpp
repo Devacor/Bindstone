@@ -6,6 +6,7 @@
 #include "containers.hpp"
 #include "strings.hpp"
 #include "reflection.hpp"
+#include "web_text.hpp"
 // Native math:: vectors and colors are core language values; host adapters are opt-in.
 
 namespace jai {
@@ -27,6 +28,8 @@ namespace stdlib {
     inline void register_container_types(engine* e) { register_container_types(*e); }
     inline void register_string_functions(const std::shared_ptr<engine>& e) { register_string_functions(*e); }
     inline void register_string_functions(engine* e) { register_string_functions(*e); }
+    inline void register_web_text_functions(const std::shared_ptr<engine>& e) { register_web_text_functions(*e); }
+    inline void register_web_text_functions(engine* e) { register_web_text_functions(*e); }
     // time.hpp (the stopwatch and calendar internals, with <chrono>) is the library's; hosts need only the registration
     void register_time_functions(engine& eng_ref);
     inline void register_time_functions(const std::shared_ptr<engine>& e) { register_time_functions(*e); }

@@ -5860,18 +5860,6 @@
     },
     {
       "owner": "global",
-      "name": "sha256_file",
-      "signature": "sha256_file(path: string) -> string",
-      "provider": "runner",
-      "effect": "filesystem",
-      "notes": "",
-      "source": "tools/jaiscript/fetch.hpp",
-      "form": "function",
-      "availability": "Standalone jaiscript.exe",
-      "display": "sha256_file(path: string) -> string"
-    },
-    {
-      "owner": "global",
       "name": "zip_entries",
       "signature": "zip_entries(path: string) -> array<string>",
       "provider": "runner",
@@ -6621,6 +6609,66 @@
       "form": "function",
       "availability": "register_all() or area registration",
       "display": "string::append(value: text, part: text, parts: text...) -> Self"
+    },
+    {
+      "owner": "global",
+      "name": "html_escape",
+      "signature": "html_escape(value: text) -> same_text_kind",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "Writes & < > \" ' as &amp; &lt; &gt; &quot; &#39; (htmlspecialchars with ENT_QUOTES); every other byte, UTF-8 included, is kept.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "function",
+      "availability": "register_all() or area registration",
+      "display": "html_escape(value: text) -> same_text_kind",
+      "example": {
+        "code": "print(html_escape(\"<a title=\\\"Tom & Jerry's\\\">\"));",
+        "output": "&lt;a title=&quot;Tom &amp; Jerry&#39;s&quot;&gt;"
+      }
+    },
+    {
+      "owner": "global",
+      "name": "html_unescape",
+      "signature": "html_unescape(value: text) -> same_text_kind",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "Reads the HTML5 named references (legacy names without the ;, longest match) and numeric ones as a browser does in text; 0, surrogates and values past U+10FFFF become U+FFFD; anything else is kept.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "function",
+      "availability": "register_all() or area registration",
+      "display": "html_unescape(value: text) -> same_text_kind",
+      "example": {
+        "code": "print(html_unescape(\"&lt;b&gt; &copy &#x41;&#66; &bogus;\"));",
+        "output": "<b> © AB &bogus;"
+      }
+    },
+    {
+      "owner": "global",
+      "name": "sha256",
+      "signature": "sha256(bytes: text) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "The SHA-256 digest of the bytes (a utf8_string's UTF-8 bytes), 64 lowercase hex digits.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "function",
+      "availability": "register_all() or area registration",
+      "display": "sha256(bytes: text) -> string",
+      "example": {
+        "code": "print(sha256(\"abc\"));",
+        "output": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+      }
+    },
+    {
+      "owner": "global",
+      "name": "sha256_file",
+      "signature": "sha256_file(path: string) -> string",
+      "provider": "stdlib",
+      "effect": "filesystem",
+      "notes": "The SHA-256 digest of the file's bytes, streamed in chunks; a file it cannot read raises Cannot read file '<path>': <reason>.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "function",
+      "availability": "register_all() or area registration",
+      "display": "sha256_file(path: string) -> string"
     }
   ],
   "fields": [

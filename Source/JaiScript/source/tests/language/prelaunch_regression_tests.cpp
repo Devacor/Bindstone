@@ -432,10 +432,15 @@ public:
 			prelaunch_detail::bind_native(*eng);
 			auto child = std::make_shared<prelaunch_detail::native_child>();
 			eng->add_global("native_child", child);
-			auto value = eng->execute("array<NativeChild> children = [native_child]; children;");
+			auto value = eng->execute("array<shared_ptr<NativeChild>> children = [cast<shared_ptr<NativeChild>>(native_child)]; children;");   // naming the child as a value element copies it
 			auto bases = value.as<std::vector<std::shared_ptr<prelaunch_detail::second_base>>>();
 			check_eq(size_t{1}, bases.size());
-			check(bases[0].get() == static_cast<prelaunch_detail::second_base*>(child.get()));
+			check(bases[0].get() == static_cast<prelaunch_detail::second_base*>(child.get()), "handle");
+			child->second = 23;
+			auto copied = eng->execute("array<NativeChild> copies = [native_child]; copies;").as<std::vector<std::shared_ptr<prelaunch_detail::second_base>>>();
+			check_eq(size_t{1}, copied.size());
+			check(copied[0].get() != static_cast<prelaunch_detail::second_base*>(child.get()), "copy");
+			check_eq(23, copied[0]->second);
 		});
 
 		test("native_unrelated_pointer_rejected", [this]() {

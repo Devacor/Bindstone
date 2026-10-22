@@ -74,6 +74,19 @@ print("after p.set(42):    p.x = {}", p.x);</code></pre></div>
 after try_mutate(p): p.x = 1
 after p.set(42):    p.x = 42</code></pre></div>
 <p>So: <strong>methods mutate their receiver; free functions receive copies.</strong> When a mutation &quot;doesn&#x27;t stick&quot;, check whether you passed the object by value.</p>
+<p>Container literals copy the same way, as <code>std::vector{a, a}</code> does in C++. An element that names existing storage (a variable, a field, an element) goes into the literal as a copy, exactly the copy <code>push</code> or an assignment makes, so <code>[h, h]</code> holds two separate objects and changing one changes neither the other nor <code>h</code>. Map literal keys and values, nested literals, typed declarations such as <code>array&lt;Hero&gt; party = [h, h];</code> and field initializers follow the rule, and a bound C++ object copies through its copy constructor. An element that is a temporary (a call result, a construction, a nested literal, a number or a string) goes in without a copy, because nothing else can see it. A <code>shared_ptr</code> element copies the handle, so the elements share its object:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero { int hp = 10; }
+Hero h = Hero();
+auto party = [h, h];          // two copies of h
+party[0].hp = 1;
+print("{} {} {}", h.hp, party[0].hp, party[1].hp);
+
+shared_ptr&lt;Hero&gt; s = new Hero();
+auto links = [s, s];          // two handles to s's object
+links[0].hp = 3;
+print("{} {}", s.hp, links[1].hp);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">10 1 10
+3 3</code></pre></div>
 <p>Returns follow the same rule. A function that returns by value hands back a value that aliases nothing the function could name: a global, a field or an element it returns is copied (a local or a parameter simply moves out), so changing the result never reaches the callee&#x27;s storage. A <code>-&gt; T&amp;</code> or <code>T&amp; name()</code> return is the alias:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; stock = [1, 2, 3];
 array&lt;int&gt; get_stock() { return stock; }          // by value: the caller gets a copy

@@ -4585,6 +4585,14 @@ public:
                 {"array<int> x = [1]; var arr = [x]; arr[0][0] = 9; to_string(x[0]) + to_string(arr[0][0])", "19"},
                 {"class U { string n; U(string s) { n = s; } } function f() -> string { U d = U(\"d\"); var arr = [d]; arr[0].n = \"e\"; return d.n + arr[0].n; } f()", "de"},
                 {"class U { string n; U(string s) { n = s; } } U a = U(\"a\"); function g() -> string { a.n = \"z\"; return \"g\"; } var arr = [a, g()]; arr[0].n + a.n", "az"},
+                {"class U { string n; U(string s) { n = s; } } U a = U(\"a\"); var m = {\"x\": a, \"y\": a}; m[\"x\"].n = \"e\"; a.n + m[\"x\"].n + m[\"y\"].n", "aea"},
+                {"class U { string n; U(string s) { n = s; } } U a = U(\"a\"); var nest = [[a, a], {\"k\": a}]; nest[0][0].n = \"z\"; a.n + nest[0][0].n + nest[0][1].n + nest[1][\"k\"].n", "azaa"},
+                {"class U { string n; U(string s) { n = s; } } U a = U(\"a\"); map<string, U> m = {\"p\": a, \"q\": a}; m[\"p\"].n = \"t\"; a.n + m[\"p\"].n + m[\"q\"].n", "ata"},
+                {"class U { string n; U(string s) { n = s; } } class H { U one = U(\"o\"); array<U> ys = [one, one]; } H h = H(); h.ys[0].n = \"y\"; h.one.n + h.ys[0].n + h.ys[1].n", "oyo"},
+                {"array<int> x = [1]; array<array<int>> g = [x, x]; g[0][0] = 9; to_string(x[0]) + to_string(g[0][0]) + to_string(g[1][0])", "191"},
+                {"function f() { return [[1, 2]]; } var f1 = f(); f1[0][0] = 9; to_string(f()[0][0]) + to_string(f1[0][0])", "19"},
+                {"int s = 0; for (int i = 0; i < 3; ++i) { var x = [[0], {\"k\": [0]}]; x[0][0] += 1; x[1][\"k\"][0] += 1; s += x[0][0] + x[1][\"k\"][0]; } s", "6"},
+                {"class U { string n; U(string s) { n = s; } } shared_ptr<U> h = new U(\"h\"); var arr = [h, h]; var m = {\"k\": h}; arr[0].n = \"e\"; h.n + arr[1].n + m[\"k\"].n", "eee"},
                 {"class U { string n; U(string s) { n = s; } } shared_ptr<U> h = new U(\"h\"); var arr = [h]; arr[0].n = \"e\"; h.n", "e"},
             };
             for (bool vm : {false, true}) {

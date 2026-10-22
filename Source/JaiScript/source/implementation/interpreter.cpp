@@ -10496,7 +10496,7 @@ checked_result<void> interpreter::visit_array_literal_expr_t(array_literal_expr*
         if (elem.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
             elem = elem.detached_for_store();
         }
-        if (copy) { elem = detail::clone_for_literal(elem, string_symbolizer_); }
+        if (copy) { elem = clone_for_assignment(elem); }
         array.push_back(std::move(elem));
     }
 
@@ -10562,8 +10562,8 @@ checked_result<void> interpreter::visit_map_literal_expr_t(map_literal_expr* exp
         if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
             value = value.detached_for_store();
         }
-        if (copy_key) { key = detail::clone_for_literal(key, string_symbolizer_); }
-        if (copy_value) { value = detail::clone_for_literal(value, string_symbolizer_); }
+        if (copy_key) { key = clone_for_assignment(key); }
+        if (copy_value) { value = clone_for_assignment(value); }
 
         // Insert into map
         map.insert_or_assign(std::move(key), std::move(value));

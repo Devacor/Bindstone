@@ -150,6 +150,13 @@ if(JAISCRIPT_BUILD_RUNNER)
 endif()
 # --- end jaiscript runner ---
 
+# --- jaiweb (tools/jaiweb): the web application host (HTTP/1.1, hot-reloading app modules, bundled SQLite) ---
+option(JAISCRIPT_BUILD_WEB "Build the jaiweb web application host" ${JAISCRIPT_IS_TOP_LEVEL})
+if(JAISCRIPT_BUILD_WEB)
+    add_subdirectory(tools/jaiweb)
+endif()
+# --- end jaiweb ---
+
 # --- jaiscript_lsp (tools/lsp): the language server (LSP over stdio) the VS Code extension launches ---
 option(JAISCRIPT_BUILD_LSP "Build the jaiscript_lsp language server" ${JAISCRIPT_IS_TOP_LEVEL})
 if(JAISCRIPT_BUILD_LSP)

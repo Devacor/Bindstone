@@ -586,18 +586,27 @@ Semantics: reads see barrier-time content, indistinguishable from pure since wri
 banned; iteration-order error selection, budget rails, and 1-vs-N determinism hold and are
 pinned over capture workloads.
 
-### 13d. Host-const bonus: DEFERRED (design note)
+### 13d. Captured objects (`parallel_capture_kind::object`)
 
-The proposal — auto-mark const-qualified host METHODS as read-safe callables inside
-parallel bodies via dynamic_binder's static knowledge of member-function constness — has
-no reachable surface: parallel bodies cannot hold host objects at all (elements,
-captures, and results are value-semantic - script value classes, never bound host
-objects), so there is no receiver a const method could be invoked on. The plumbing only becomes
-meaningful with the §5 binding-annotation sweep / object tier, where `const T&`-receiver
-methods would slot in as automatic `read_world`/`self_only` candidates — the binder can
-detect constness via the member-function-pointer type at registration (cheap), but the
-admission walker would also need static receiver typing to resolve WHICH binding a
-member call hits, which is exactly the object-tier work. Revisit there.
+A captured class instance, or a `shared_ptr` to one, is read through a worker's own view, so no handle a worker copies is
+another thread's: a script value class (`class_definition::flat_value_semantics`, no script destructor in its value tree,
+no runtime-added fields) gets a detached copy per worker at the barrier (`clone()`, which runs no user code, then
+`normalize_element_inplace` detaches the strings and containers the copy shares with the source), and a C++ class's
+instance gets a new instance and holders over the same C++ object (`script_value::parallel_host_view`). Script values
+holding a C++ object, script classes over a C++ base and `weak_ptr` captures stay refused.
+
+Admission (`walk_local_member_chain`, `walk_call`): member chains rooted at a captured name read (`capture_entry::member_use`;
+a non-object capture with one is refused at the barrier), stores through them are refused, and a method on such a chain
+is recorded (`parallel_admission::captured_method_calls`) and collected like an element's method, so the barrier pins it for
+the captured objects' classes (`admission_builder::captured_classes`, keyed into the method admission record after a null).
+At the barrier a script method that writes its object (`detail::receiver_write_analysis`, transitive through `this` calls and
+field calls) is refused, a builtin mutator is refused when no captured class defines the name, and a C++ method follows the
+host-call rules at the call (serial pins raise; a non-const one needs a region tag the view never has). A captured handle
+used as a value (`capture_entry::bare_use`) is refused: a view is not the object. Before the element proof (which would part
+an aliased element from its object), the statement walks the range's and zipped arrays' object trees for the identities the
+captured objects hold (`element_reaches_object`, script instances by address, C++-backed ones by their C++ object) and
+refuses an element that reaches one; the walk runs only when an object is captured. A method-scope capture (a global a
+pinned method reads) gets the view and the alias walk; its classes are not added to the pinned set.
 
 ### 13e. The pair idiom (the sanctioned pattern where capture isn't enough)
 
@@ -637,9 +646,8 @@ Use captured reads for shared inputs and the pair idiom for per-chunk inputs/out
 A `parallel_transform` body may name members on chains rooted at its element parameter
 or any worker-private local: `fn(Node n) { return n.first.a.v + n.xs[1] + n.counts["k"]; }`.
 The parameter is the worker's private by-value copy, so a store into it (`n.x = 5`,
-`n.x++`) is legal and invisible to the source. Chains rooted at a captured name keep the
-admission rejection (`member access reaches captured state 'g' (captured reads are
-read-only, and objects cannot be captured)`); methods on the element stay behind the
+`n.x++`) is legal and invisible to the source. Chains rooted at a captured name read a captured
+object (§13d) and refuse a store; methods on the element stay behind the
 worker method wall in the transform (the barrier admits element methods for `parallel_for`
 only), and `this`/getters/setters are rejected. The admission walk is ONE walk
 for both forms (`walk_local_member_chain`); it records the members every element-rooted

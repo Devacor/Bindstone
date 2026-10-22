@@ -616,13 +616,16 @@ too, for a const overload that still touches shared state),
 registering a free function. A body that names a serial free function or static method is refused when the statement
 is reached; a serial method is refused when it is called, since the receiver&#x27;s class is known only then. The
 library&#x27;s own builtins are serial (<code>print</code>, I/O, JSON, reflection, the clock) apart from pure math,
-<code>to_string</code>, <code>sha256</code> and the <code>web::</code> text functions.</p>
+<code>to_string</code>, <code>sha256</code> and the <code>web::</code> text functions.
+Leaving a method unmarked declares it safe to call from any worker at once, so a binding whose method changes state
+that other objects or threads share must register it serial: that is the whole contract a parallel body checks.</p>
 <p>The receiver follows the signature. A non-const member function (a <code>T&amp;</code> self in a lambda, a property
 store) runs only on an object the calling worker owns: the element it is running (a range or zipped element, or a
 <code>parallel_reduce</code> accumulator, which the statement proves the only element of its object), or one it constructed
 or copied. A const member function
-also runs on an object the worker did not make, such as one a C++ function hands back, because C++ constness says it does
-not change the object. A non-const call on such an object is refused when it runs. Arguments follow the rules a script
+also runs on an object the worker did not make, such as one a C++ function hands back or one the body reads from the
+enclosing scope (a captured object: every worker reaches the same C++ object through a view of its own), because C++
+constness says it does not change the object. A non-const call on such an object is refused when it runs. Arguments follow the rules a script
 call follows: a non-const <code>T&amp;</code> parameter, which writes back into its argument, cannot take enclosing
 state.</p>
 <div class="codeblock cb-cpp" data-sample="binder-meter-host"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Meter {

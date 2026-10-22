@@ -294,6 +294,9 @@ namespace detail {
                                              detail::deep_copy_work& work, unsigned depth) const;
         void parallel_detached_subtree_into(script_value& dest, std::vector<type_info*>* collected_types,
                                             std::vector<const void*>* collected_nodes) const;
+        // A parallel worker's view of a captured C++ class instance (the barrier makes one per worker): a new instance and
+        // holders of its own over the same C++ object, so no count a worker moves is another thread's
+        script_value parallel_host_view() const;
 
         // === Parallel captured-read borrow (internal/parallel_design.md, captured reads) ===
         // A borrow VIEW of an enclosing container: one raw tagged pointer, so copying the

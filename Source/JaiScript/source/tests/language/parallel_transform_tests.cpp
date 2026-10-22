@@ -1140,18 +1140,18 @@ public:
 			check_true(r.as<std::string>().find("host function 'parallel_transform' is marked serial_function() and cannot be called in a parallel body") != std::string::npos);
 		});
 
-		// Member chains root at the element (the worker's private by-value copy) or a local;
-		// a chain rooted at a captured name keeps the in-place form's rejection text
+		// Member chains root at the element (the worker's private by-value copy), a local or a captured object (read only);
+		// a store through a captured name, and a member of a captured value that is no object, are refused
 		test("rejects_member_access_on_captured_name", [this]() {
 			auto e = make_engine();
+			jai::stdlib::register_all(*e);
 			auto r = e->execute(R"(
 				class P { int a = 1; }
 				var g = P();
 				int f(int x) { return g.a + x; }
-				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
-				return "no-error";
+				return to_json(parallel_transform([1, 2, 3], f));
 			)");
-			check_true(r.as<std::string>().find("member access reaches captured state 'g' (captured reads are read-only, and objects cannot be captured)") != std::string::npos, r.as<std::string>());
+			check_eq(std::string("[2,3,4]"), r.as<std::string>());
 
 			auto r2 = e->execute(R"(
 				class P2 { int a = 1; }
@@ -1168,7 +1168,7 @@ public:
 				try { parallel_transform([1, 2, 3], f3); } catch (e) { return e; }
 				return "no-error";
 			)");
-			check_true(r3.as<std::string>().find("member access reaches captured state 'm'") != std::string::npos, r3.as<std::string>());
+			check_true(r3.as<std::string>().find("parallel_transform: member access reaches captured state 'm' (captured reads are read-only, and only a captured object has members) at 3:") != std::string::npos, r3.as<std::string>());
 		});
 
 		// === Element members (transformmembers): a body reads members of its own element ===
@@ -2044,6 +2044,111 @@ public:
 			for (const refusal& r : refusals) {
 				const std::string got = error_of(e, r.source);
 				check_true(got.find(r.text) != std::string::npos, std::string(r.source) + ": expected '" + r.text + "', got '" + got + "'");
+			}
+		});
+
+		test("captured_value_objects_read_through_fields_and_read_only_methods", [this]() {
+			// A captured instance of a flat value class (nested ones and strings included) reads through its fields and through
+			// methods that write no part of it; each worker reads its own view, so results match the serial loop
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			const std::string src = R"(
+				class Vec3 {
+					float x = 0.0; float y = 0.0; float z = 0.0;
+					Vec3() {}
+					Vec3(float a, float b, float c) { x = a; y = b; z = c; }
+					float dot(Vec3 o) { return x * o.x + y * o.y + z * o.z; }
+					float len2() { return x * x + y * y + z * z; }
+					float len2_twice() { return len2() * 2.0; }
+				}
+				class Ray { Vec3 origin; Vec3 dir; string tag = "ray"; array<int> weights = [1, 2, 3]; }
+				Vec3 cam = Vec3(1.0, 2.0, 3.0);
+				Ray ray; ray.origin = Vec3(0.5, 0.25, 0.125); ray.dir = Vec3(0.0, 1.0, 0.0);
+				shared_ptr<Vec3> light = new Vec3(4.0, 5.0, 6.0);
+				array<float> out = []; array<float> serial = [];
+				for (int i = 0; i < 200; i++) { out.push(0.0); serial.push(0.0); }
+				float shade(int i) {
+					Vec3 p = Vec3(i * 0.5, i * 0.25, 1.0);
+					return cam.dot(p) + cam.len2_twice() + ray.origin.y * i + ray.dir.len2() + ray.tag.size() + ray.weights[i % 3] + light.dot(p) + light.z;
+				}
+				parallel_for (int i = 0; i < 200; i++) { out[i] = shade(i); }
+				for (int i = 0; i < 200; i++) { serial[i] = shade(i); }
+				return [to_json(out), to_json(serial)];
+			)";
+			check_matches_serial_at(e, src, {1, 4, 8});
+			check_eq((int)detail::parallel_capture_kind::object, (int)capture_kind(e, "cam"));
+			check_eq((int)detail::parallel_capture_kind::object, (int)capture_kind(e, "ray"));
+			check_eq((int)detail::parallel_capture_kind::object, (int)capture_kind(e, "light"));
+			check_eq(std::string("1 2 3"), e->execute("return `${cam.x:.0f} ${cam.y:.0f} ${cam.z:.0f}`;").as<std::string>());   // never written
+		});
+
+		test("captured_objects_refuse_writes_and_aliases", [this]() {
+			// A captured object is read-only: a field store, a method that writes its object and a container mutator on a field
+			// are refused; a captured handle reads through members only; and no element may reach a captured object, since its
+			// lane may write it while every worker reads its own view
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			e->parallel_thread_count(4);
+			const std::string prelude = R"(
+				class C { int n = 0; array<int> seen = []; int bump() { n++; return n; } int peek() { return n; } void grow() { seen.push(n); } }
+				class Holder { C inner; int touch() { inner.bump(); return 0; } }
+				class Bad { shared_ptr<C> link; }
+				C c; Holder holder; Bad bad; bad.link = new C();
+				shared_ptr<C> h = new C();
+				array<shared_ptr<C>> hs = [new C(), h, new C()];
+				array<int> idx = [0, 1, 2, 3]; array<int> out = [0, 0, 0, 0];
+			)";
+			struct refusal { const char* body; const char* text; };
+			const refusal refusals[] = {
+				{ "parallel_for (int i : idx) { out[i] = c.bump(); }", "parallel_for: method 'bump' of 'C' writes its object, and captured 'c' is read-only (write a local copy, or the element) at 9:" },
+				{ "parallel_for (int i : idx) { c.grow(); }", "parallel_for: method 'grow' of 'C' writes its object, and captured 'c' is read-only" },
+				{ "parallel_for (int i : idx) { out[i] = holder.touch(); }", "parallel_for: method 'touch' of 'Holder' writes its object, and captured 'holder' is read-only" },
+				{ "parallel_for (int i : idx) { out[i] = holder.inner.bump(); }", "parallel_for: method 'bump' of 'C' writes its object, and captured 'holder' is read-only" },
+				{ "parallel_for (int i : idx) { c.n = i; }", "parallel_for: member store reaches captured state 'c' (captured reads are read-only) at 9:" },
+				{ "parallel_for (int i : idx) { c.seen.push(i); }", "parallel_for: method 'push' may mutate captured state 'c' at 9:" },
+				{ "parallel_for (int i : idx) { out[i] = bad.link.n; }", "parallel_for: captured name 'bad' is not value-semantic (an object holding a handle, a function, a var field or a C++ object)" },
+				{ "parallel_for (int i : idx) { shared_ptr<C> mine = h; out[i] = mine.n; }", "parallel_for: captured handle 'h' is read through its members and methods only (a worker reads its own view of the object) at 9:" },
+				{ "parallel_for (auto& e : hs) { e.n = h.peek() + 1; }", "parallel_for: element 1 reaches the object captured as 'h' (a captured object is read-only, and an element's lane may write it)" },
+			};
+			for (const refusal& r : refusals) {
+				const std::string got = error_of(e, prelude + r.body);
+				check_true(got.rfind(r.text, 0) == 0, std::string(r.body) + ": expected '" + r.text + "', got '" + got + "'");
+			}
+			check_eq(std::string("[1,1,1,1]"), e->execute(prelude + "parallel_for (int i : idx) { out[i] = h.peek() + c.peek() + holder.inner.peek() + 1; } return to_json(out);").as<std::string>());
+		});
+
+		test("captured_cpp_objects_run_their_parallel_methods", [this]() {
+			// A captured C++ object runs the methods its binding leaves parallel; a serial one raises the binder's text, and a
+			// non-const one is refused on an object the body did not make
+			struct gauge {
+				double level = 0.0;
+				void add(double amount) { level += amount; }
+				double reading() const { return level; }
+				void publish() const {}
+			};
+			const std::string src = "Gauge g; g.add(7.0);\n"
+			                        "array<float> xs = [1.0, 2.0, 3.0, 4.0];\n"
+			                        "parallel_for (auto& x : xs) { x = x * 10.0 + g.reading(); }\n"
+			                        "print(to_json(xs));\n"
+			                        "try { parallel_for (auto& x : xs) { g.publish(); } } catch (e) { print(e); }\n"
+			                        "try { parallel_for (auto& x : xs) { g.add(x); } } catch (e) { print(e); }\n"
+			                        "print(g.reading());\n";
+			const std::string expected =
+				"[17.0,27.0,37.0,47.0]\n"
+				"C++ method 'publish' of 'Gauge' is marked serial_method() and cannot be called in a parallel body\n"
+				"C++ method 'add' of 'Gauge' changes an object this parallel body did not make (only its const methods may run on it)\n"
+				"7.0\n";
+			for (size_t workers : {size_t(1), size_t(4), size_t(8)}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(*e);
+				auto out = std::make_shared<std::ostringstream>();
+				e->set_output_stream(out);
+				jai::dynamic_binder<gauge>(*e, "Gauge").constructor<>().method("add", &gauge::add).method("reading", &gauge::reading)
+					.method("publish", &gauge::publish).serial_method("publish", serial_overloads::every).build();
+				e->parallel_thread_count(workers);
+				try { e->execute(src); } catch (const std::exception& ex) { *out << "threw: " << ex.what(); }
+				check_eq(expected, out->str(), std::to_string(workers));
+				check_eq((int)detail::parallel_capture_kind::object, (int)capture_kind(e, "g"));
 			}
 		});
 

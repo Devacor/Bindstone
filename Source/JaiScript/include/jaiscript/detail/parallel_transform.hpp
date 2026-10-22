@@ -126,7 +126,9 @@ namespace jai::detail {
     //   snapshot - one per-worker detached deep copy at the barrier (everything else:
     //              non-primitive content or non-subscript uses such as iteration,
     //              read-only methods, whole-value reads)
-    enum class parallel_capture_kind : int { scalar = 0, string = 1, borrow = 2, snapshot = 3, written = 4 };   // written: a fresh private copy per worker, merged back at the join
+    // written: a fresh private copy per worker, merged back at the join; object: a class instance (or a handle to one) read
+    // through a worker's own view - a detached copy of a value-class instance, a view sharing a C++ object - never written
+    enum class parallel_capture_kind : int { scalar = 0, string = 1, borrow = 2, snapshot = 3, written = 4, object = 5 };
 
     // Amortized admission verdict for one function body (keyed by body block pointer).
     // The graph snapshot records what the body needs provisioned per worker; entries are
@@ -156,7 +158,18 @@ namespace jai::detail {
             uint64_t name_id = 0;
             std::string_view name;
             bool borrow_eligible = true;   // every touch was a subscript read root
+            const ast_node* bare_use = nullptr;   // a use of the value itself (not a member chain or a method receiver)
+            const ast_node* member_use = nullptr;   // a member chain rooted at it: only a captured object has members
         };
+        // A method called on a chain rooted at a captured name (cam.len(), cam.inner.len()): the barrier refuses one that writes
+        // its object, and a container's mutating builtin
+        struct captured_method_call {
+            uint64_t capture_id = 0;
+            uint64_t name_id = 0;
+            std::string_view name;
+            const ast_node* site = nullptr;
+        };
+        std::vector<captured_method_call> captured_method_calls;
         std::vector<capture_entry> captures;
         // parallel_for's disjoint index writes: `out[i] = v` (and op=, ++, --) where out is an enclosing array and i a loop
         // variable the body never writes. Each worker writes a private copy of out; the join copies back slot out[i] of every

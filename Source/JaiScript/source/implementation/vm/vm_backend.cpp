@@ -16885,6 +16885,13 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					stack_.push_back(std::move(r.value()));
 					return {};
 				}
+			} else if (receiver_type == script_value::TYPEID_PARALLEL_BORROW) [[unlikely]] {
+				// a captured container's count in a parallel body (KEEP BYTE-PARALLEL with interpreter::eval_member_access)
+				auto count = detail::parallel_borrow_count(objd, member->member, argc, engine_);
+				if (!count) { return raise_from(detail::parallel_borrow_method_refusal()); }
+				stack_.truncate(args_base - 1);
+				stack_.push_back(std::move(*count));
+				return {};
 			} else if (receiver_type == script_value::TYPEID_ARRAY && argc == 1 &&
 			           f.code->builtin_indexed &&
 			           site.bi_array != builtin_method_registries::k_no_builtin) {

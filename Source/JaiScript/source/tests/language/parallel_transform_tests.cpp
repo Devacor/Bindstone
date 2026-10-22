@@ -916,7 +916,7 @@ public:
 			expect_error("g.push(4);", "method 'push' may mutate captured state 'g'");
 			expect_error("g.sort();", "method 'sort' may mutate captured state 'g'");
 			expect_error("var& r = g;", "reference declaration would alias enclosing state 'g'");
-			expect_error("helper_ref(g[0]);", "argument passes enclosing state 'g' by reference");
+			expect_error("helper_ref(g[0]);", "argument passes enclosing state 'g' to reference parameter 'a' of 'helper_ref' (captured reads are read-only; 'helper_ref' only reads it: declare it const int& a)");
 			expect_error("for (auto& v : g) { }", "cannot iterate captured state 'g' by reference");
 		});
 
@@ -1849,7 +1849,143 @@ public:
 		}
 	}
 
+	detail::parallel_capture_kind capture_kind(const std::shared_ptr<engine>& e, const char* name) {
+		const uint64_t id = e->symbolize(name);
+		for (const auto& [seen, kind] : e->last_parallel_captures()) {
+			if (seen == id) { return kind; }
+		}
+		check_true(false, std::string("no capture named ") + name);
+		return detail::parallel_capture_kind::written;
+	}
+	std::string error_of(const std::shared_ptr<engine>& e, const std::string& source) {
+		std::string result = "no error";
+		try { e->execute(source); } catch (const std::exception& ex) { result = ex.what(); }
+		return result;
+	}
+
 	void forge_tests() override {
+		test("const_ref_parameters_take_captured_state_as_a_captured_read", [this]() {
+			// Enclosing state passed to a const T& parameter is read in place: a callee that only subscripts it (directly, through
+			// another const T& parameter, recursively, or with the count builtins) keeps the borrow tier, so no worker copies it
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			const std::string src = R"(
+				array<int> grid = []; array<int> idx = []; array<int> out = []; array<int> serial = [];
+				for (int i = 0; i < 1000; i++) { grid.push(i * 3 % 997); idx.push(i); out.push(0); serial.push(0); }
+				map<string, int> weights = {"a": 2, "b": 5};
+				string label = "abc";
+				int at_c(const array<int>& g, int i) { return g[i] * 2; }
+				int inner(const array<int>& h, int i) { return h[i] + 1; }
+				int outer(const array<int>& g, int i) { return inner(g, i) * 2; }
+				int rec(const array<int>& g, int i) { return i <= 0 ? g[0] : g[i] + rec(g, i - 1); }
+				int last(const array<int>& g, int i) { return g.empty() ? -1 : g[g.size() - 1 - i % g.length()]; }
+				int wt(const map<string, int>& m) { return m["a"] + m["b"] + m.size(); }
+				int ln(const string& s) { return s.size(); }
+				int el(const int& v) { return v * 10; }
+				int f(int i) { return at_c(grid, i) + outer(grid, i) + rec(grid, i % 5) + last(grid, i) + wt(weights) + ln(label) + el(grid[i]); }
+				parallel_for (int i : idx) { out[i] = f(i); }
+				for (int i : idx) { serial[i] = f(i); }
+				return [to_json(out), to_json(serial)];
+			)";
+			check_matches_serial_at(e, src, {1, 4, 8});
+			check_eq((int)detail::parallel_capture_kind::borrow, (int)capture_kind(e, "grid"));
+			check_eq((int)detail::parallel_capture_kind::borrow, (int)capture_kind(e, "weights"));
+		});
+
+		test("const_ref_parameters_used_whole_read_a_worker_copy", [this]() {
+			// A callee that iterates its const T& parameter reads it whole: the capture is a per-worker snapshot, as a direct
+			// whole-value read is, and the results match the serial loop
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			const std::string src = R"(
+				array<int> grid = []; array<int> idx = []; array<int> out = []; array<int> serial = [];
+				for (int i = 0; i < 300; i++) { grid.push(i % 17); idx.push(i); out.push(0); serial.push(0); }
+				int count_below(const array<int>& g, int limit) { int c = 0; for (int v : g) { if (v < limit) { c++; } } return c; }
+				parallel_for (int i : idx) { out[i] = count_below(grid, i % 17); }
+				for (int i : idx) { serial[i] = count_below(grid, i % 17); }
+				return [to_json(out), to_json(serial)];
+			)";
+			check_matches_serial_at(e, src, {1, 4, 8});
+			check_eq((int)detail::parallel_capture_kind::snapshot, (int)capture_kind(e, "grid"));
+			// a whole use reached through mutual recursion (the forwarding call meets its target mid-walk) settles the same way
+			const std::string mutual = R"(
+				array<int> grid = []; array<int> idx = []; array<int> out = []; array<int> serial = [];
+				for (int i = 0; i < 300; i++) { grid.push(i % 17); idx.push(i); out.push(0); serial.push(0); }
+				int fwd(const array<int>& g, int i) { return i > 0 ? whole(g, i - 1) : g[0]; }
+				int whole(const array<int>& x, int i) { if (i > 0) { return fwd(x, i - 1); } int c = 0; for (int v : x) { c += v; } return c; }
+				parallel_for (int i : idx) { out[i] = fwd(grid, i % 4); }
+				for (int i : idx) { serial[i] = fwd(grid, i % 4); }
+				return [to_json(out), to_json(serial)];
+			)";
+			check_matches_serial_at(e, mutual, {1, 4, 8});
+			check_eq((int)detail::parallel_capture_kind::snapshot, (int)capture_kind(e, "grid"));
+		});
+
+		test("const_ref_of_state_the_region_writes_is_refused", [this]() {
+			// The index-written array and the range itself change during the region: a const T& of either would read slots
+			// other elements write
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			e->parallel_thread_count(4);
+			const std::string prelude = "array<int> idx = [0, 1, 2, 3]; array<int> out = [0, 0, 0, 0]; int r(const array<int>& g, int i) { return g[i]; }\n";
+			const std::string written = error_of(e, prelude + "parallel_for (int i : idx) { out[i] = r(out, i); }");
+			check_true(written.rfind("parallel_for: body touches 'out' beyond the slot it writes, out[i] at 2:", 0) == 0, written);
+			const std::string range = error_of(e, prelude + "parallel_for (auto& x : idx) { x = r(idx, 0); }");
+			check_true(range.rfind("parallel_for: captured name 'idx' is the container being mutated (reads through it would race the element writes)", 0) == 0, range);
+		});
+
+		test("non_const_ref_parameters_refuse_captured_state_and_name_the_fix", [this]() {
+			// A non-const T& parameter is a write channel: refused, with const T& suggested when the callee only reads it; a
+			// script method's parameter alike (its receiver class is known at the statement)
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			e->parallel_thread_count(4);
+			const std::string prelude = R"(
+				array<int> grid = [1, 2, 3]; array<int> idx = [0, 1, 2]; array<int> out = [0, 0, 0];
+				int reads(array<int>& g, int i) { return g[i]; }
+				int writes(array<int>& g, int i) { g[i] = 0; return i; }
+				class W { int v = 0; void m(array<int>& g) { g.push(1); v = g.size(); } void n(const array<int>& g) { v = g[0] + g.size(); } }
+				array<W> ws = [W(), W()];
+			)";
+			const std::string reads = error_of(e, prelude + "parallel_for (int i : idx) { out[i] = reads(grid, i); }");
+			check_true(reads.rfind("parallel_for: argument passes enclosing state 'grid' to reference parameter 'g' of 'reads' (captured reads are read-only;"
+			                       " 'reads' only reads it: declare it const array<int>& g) at 7:", 0) == 0, reads);
+			const std::string writes = error_of(e, prelude + "parallel_for (int i : idx) { out[i] = writes(grid, i); }");
+			check_true(writes.rfind("parallel_for: argument passes enclosing state 'grid' to reference parameter 'g' of 'writes', which writes it (captured reads"
+			                        " are read-only; pass a copy, or take it as const T& where it is only read) at 7:", 0) == 0, writes);
+			const std::string method = error_of(e, prelude + "parallel_for (auto& w : ws) { w.m(grid); }");
+			check_true(method.rfind("parallel_for: argument passes enclosing state 'grid' to reference parameter 'g' of 'W::m', which writes it", 0) == 0, method);
+			check_eq((int64_t)4, e->execute(prelude + "parallel_for (auto& w : ws) { w.n(grid); } return ws[0].v + ws[1].v - 4;").as_int());
+		});
+
+		test("captured_containers_answer_their_count_without_a_copy", [this]() {
+			// size(), length() and empty() read a borrowed container's count, so a body (or a by-value lambda capture) bounding
+			// its reads by the size keeps the borrow tier: no worker copies the container
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			const std::string src = R"(
+				array<int> grid = []; array<int> xs = [];
+				for (int i = 0; i < 500; i++) { grid.push(i * 7 % 101); }
+				for (int i = 0; i < 64; i++) { xs.push(i * 9); }
+				array<int> none = [];
+				int f(int x) { int s = 0; for (int k = x % 7; k < grid.size(); k += 7) { s += grid[k]; } return s + (none.empty() ? 1 : 0) + grid.length(); }
+				auto lam = [=](int x) { return x < grid.size() ? grid[x] : -1; };
+				var serial_f = []; var serial_lam = [];
+				for (int x : xs) { serial_f.push(f(x)); serial_lam.push(lam(x * 2)); }
+				var doubled = parallel_transform(xs, [](int x) { return x * 2; });
+				return [[parallel_transform(xs, f), parallel_transform(doubled, lam)], [serial_f, serial_lam]];
+			)";
+			check_matches_serial_at(e, src, {1, 4, 8});
+			check_eq((int)detail::parallel_capture_kind::borrow, (int)capture_kind(e, "grid"));
+			auto direct = e->execute(R"(
+				var out = [0, 0];
+				parallel_for (auto& o, int i : out, [0, 1]) { o = grid.size() + none.size() + i; }
+				return out[1];
+			)");
+			check_eq((int64_t)501, direct.as_int());
+			check_eq((int)detail::parallel_capture_kind::borrow, (int)capture_kind(e, "grid"));
+		});
+
 		test("inlined_leaf_inside_a_worker_body_matches_serial_1_2_8", [this]() {
 			// A leaf grafted into a parallel_for body runs in the workers too (the worker's copy of the callee closes over the
 			// worker's root, which the guard accepts); the values match the serial loop at every worker count

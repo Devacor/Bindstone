@@ -48,6 +48,7 @@
 #include <jaiscript/detail/range_for_diagnostic.hpp>   // range-for texts (vm parity)
 #include <jaiscript/detail/map_entry_binding.hpp>
 #include <jaiscript/detail/float_text.hpp>
+#include <jaiscript/detail/regex_library.hpp>   // regex(literal) compiled at load (vm parity)
 #include <jaiscript/debug/controller.hpp>     // step-debugger statement hook
 #include <stdexcept>
 #include <cmath>
@@ -7930,6 +7931,17 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                 push_value(std::move(result.value()));
                 return {};
             }
+        }
+    }
+
+    // regex(literal pattern[, flags]) while the name binds the engine's constructor: the pattern the checker compiled at load;
+    // anything else is the ordinary call below (KEEP BYTE-PARALLEL with vm_backend::exec_regex_constant)
+    if (expr->regex_constant && expr->callee->get_type() == node_type::identifier_expr) [[unlikely]] {
+        const script_value* bound = string_receiver_cell(static_cast<const identifier_expr*>(expr->callee.get()));
+        script_value made = make_value();
+        if (bound && detail::regex_library::make_constant(*bound, expr->regex_constant, made)) {
+            push_value(std::move(made));
+            return {};
         }
     }
 

@@ -34,6 +34,7 @@
 #include <jaiscript/detail/return_flow.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/constant_arguments.hpp>
+#include <jaiscript/detail/regex_library.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -468,6 +469,8 @@ private:
         const enum_decl* enum_def = nullptr;   // an enum declared in a function or block: local to that scope
         bool is_const = false;            // const T x / const T& p / a const reference (auto& over a const) (internal/const.md)
         ctype referent;                   // the class (or typed container) a reference or an auto range-for variable holds: member diagnostics only
+        bool has_const_text = false;      // a const declared with a literal text (a + of them): a regex pattern the load can check
+        std::string const_text;
     };
 
     // A reference's (or an auto loop variable's) known class or typed container, for member diagnostics alone
@@ -1814,7 +1817,12 @@ private:
 
     // a T& / var& / shared_ptr<T> declaration bound to a const (an auto& or a const T& takes it as a const reference)
     void check_const_bind(variable_decl* decl, var_entry& entry) {
-        if (decl->is_const) { entry.is_const = true; stamp_const(decl->const_check, const_none, {}); return; }
+        if (decl->is_const) {
+            entry.is_const = true;
+            entry.has_const_text = decl->initializer && detail::regex_library::constant_text(decl->initializer.get(), entry.const_text);
+            stamp_const(decl->const_check, const_none, {});
+            return;
+        }
         if (!decl->initializer || !decl->type) { stamp_const(decl->const_check, const_none, {}); return; }
         const bool reference = decl->type->base_type == script_value_type::jai_reference_type;
         const bool handle = handle_type(decl->type.get());
@@ -4246,6 +4254,36 @@ private:
         return t;
     }
 
+	// regex(pattern[, flags]) naming the engine's constructor with texts the load can see (literals, or consts declared with
+	// them): an invalid pattern is the load's error, and literal texts compile here once for both backends (call_expr::regex_constant)
+	void check_regex_constant(call_expr* c) {
+		const size_t n = c->arguments.size();
+		std::string texts[2];
+		bool literal = n == 1 || n == 2;
+		bool known = literal;
+		for (size_t k = 0; k < n && known; ++k) {
+			const expression* a = c->arguments[k].get();
+			if (detail::regex_library::constant_text(a, texts[k])) { continue; }
+			literal = false;
+			const var_entry* v = a->get_type() == node_type::identifier_expr && !static_cast<const identifier_expr*>(a)->global_qualified
+				? find_local(static_cast<const identifier_expr*>(a)->name) : nullptr;
+			known = v && v->has_const_text;
+			if (known) { texts[k] = v->const_text; }
+		}
+		detail::regex::compiled_ptr re;
+		if (known && detail::regex_library::is_constructor(eng_.get_variable("regex"))) {
+			if (c->regex_constant && detail::regex::pattern_of(*c->regex_constant) == texts[0] && detail::regex::flags_of(*c->regex_constant) == texts[1]) {
+				re = c->regex_constant;
+			} else {
+				std::string error;
+				re = detail::regex::compile(texts[0], texts[1], error);
+				if (!re) { diag(diag_level::error, c->arguments[0]->location, error); }
+			}
+		}
+		if (proofs_ == proof_mode::stamp) { c->regex_constant = literal ? re : nullptr; }
+		else if (proofs_ == proof_mode::clear) { c->regex_constant.reset(); }
+	}
+
 	// Top-level code runs in order: a call there to a function this file declares only further down finds nothing yet
 	void report_call_before_declaration(std::string_view name, const std::vector<const function_decl*>& decls, const source_location& at) {
 		const function_decl* first = nullptr;
@@ -4297,6 +4335,7 @@ private:
 			if (enums_.count(id->name)) { return {}; }
 			std::string name(id->name);
 			if (extra_global(name)) { note_global_use(id->name); return {}; }
+			if (name == "regex") { check_regex_constant(c); }
 			if (eng_.is_type_name(name) || eng_.get_class_registry().find_script_class(name)) {
 				return object_of(id->name);   // registered class ctor: args lenient
 			}

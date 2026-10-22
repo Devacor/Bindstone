@@ -44,6 +44,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/const_rules.hpp>   // const guards (interp parity)
 #include <jaiscript/detail/aggregate_init.hpp>
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (interp parity)
+#include <jaiscript/detail/regex_library.hpp>
 #include <jaiscript/detail/host_member_access.hpp>
 #include <jaiscript/detail/namespace_scope.hpp>  // a namespace's variable cells and the ns::x store target (shared with the interpreter)
 #include <jaiscript/vm/disassembler.hpp>  // the listing sink's text
@@ -5116,6 +5117,25 @@ int vm_backend::math_alias_verdict(frame& f, const call_site& site, uint8_t fn, 
 	if (!resolved) return -1;
 	if (identity && resolved->raw_storage_index() == script_value::TYPEID_FUNCTION && &resolved->unchecked_as_function() == identity) return 1;
 	return park_callee(f, site, 1, *resolved) == op_status::failed ? -1 : 0;
+}
+
+op_status vm_backend::exec_regex_constant(frame& f, const vm_instruction& ins) {
+	const call_site& site = f.code->call_sites[ins.a];
+	std::optional<script_value> scratch;
+	probe_callee_resolving_ = true;
+	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3);
+	probe_callee_resolving_ = false;
+	if (!resolved) return op_status::failed;
+	const chunk::regex_constant& rc = f.code->regex_constants[ins.b];
+	script_value made(std::monostate{}, engine_);
+	if (detail::regex_library::make_constant(*resolved, rc.re, made)) {
+		stack_.push_back(std::move(made));
+		return {};
+	}
+	if (park_callee(f, site, ins.c, *resolved) == op_status::failed) return op_status::failed;
+	stack_.push_back(script_value(detail::regex::pattern_of(*rc.re), engine_));
+	if (ins.c == 2) { stack_.push_back(script_value(detail::regex::flags_of(*rc.re), engine_)); }
+	return exec_call_from_scratch(f, vm_instruction{opcode::op_call_from_scratch, ins.c, ins.a, 0});
 }
 
 op_status vm_backend::exec_math_guard(frame& f, const vm_instruction& ins) {
@@ -19320,6 +19340,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_ref_return_lvalue: return exec_ref_return_lvalue(f, ins);
 		case opcode::op_ref_target_store: return exec_ref_target_store(f, ins);
 		case opcode::op_const_guard: return exec_const_guard(f, ins);
+		case opcode::op_regex_constant: return exec_regex_constant(f, ins);
 		case opcode::op_index_store: return exec_index_store(f, ins);
 		case opcode::op_index_compound_fused: return exec_index_compound_fused(f, ins);
 		case opcode::op_math: return exec_math(f, ins);
@@ -20765,6 +20786,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_place_arg:
 			case opcode::op_take_temp:
 			case opcode::op_const_guard:
+			case opcode::op_regex_constant:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or

@@ -227,6 +227,7 @@ namespace {
 			case opcode::op_c_push:
 			case opcode::op_call:
 			case opcode::op_probe_callee:
+			case opcode::op_regex_constant:
 			case opcode::op_call_from_scratch:
 			case opcode::op_call_typed:
 			case opcode::op_probe_member:
@@ -446,6 +447,7 @@ namespace {
 			case opcode::op_c_push:
 			case opcode::op_call:
 			case opcode::op_probe_callee:
+			case opcode::op_regex_constant:
 			case opcode::op_call_from_scratch:
 			case opcode::op_call_typed:
 			case opcode::op_probe_member:
@@ -7400,6 +7402,17 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 		if (ident->name == "__jai_parallel_advance" && expr->arguments.size() == 1) {
 			compile_expression(expr->arguments[0]);
 			emit(opcode::op_parallel_advance);
+			return;
+		}
+		if (expr->regex_constant && !callee_probes_.count(expr.get())) {
+			call_site site;
+			site.call_node = add_node(expr);
+			site.callee = make_fused_operand(expr->callee);
+			for (const auto& arg : expr->arguments) { record_argument_source(site, arg, expr->arguments.size()); }
+			chunk_->call_sites.push_back(std::move(site));
+			chunk_->regex_constants.push_back(chunk::regex_constant{expr->regex_constant, static_cast<uint32_t>(expr->arguments.size())});
+			emit(opcode::op_regex_constant, static_cast<uint32_t>(chunk_->call_sites.size() - 1),
+			     static_cast<uint32_t>(chunk_->regex_constants.size() - 1), static_cast<uint32_t>(expr->arguments.size()));
 			return;
 		}
 		if (ident->name == "__jai_parallel_element" && expr->arguments.size() <= 1) {

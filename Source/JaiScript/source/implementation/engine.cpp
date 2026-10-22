@@ -25,6 +25,7 @@
 #include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/format_spec.hpp>       // format_value builtin (template-string specs)
 #include <jaiscript/detail/binary_data.hpp>
+#include <jaiscript/detail/regex_library.hpp>
 #include <jaiscript/debug/controller.hpp>         // engine::debugger()
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
@@ -2752,6 +2753,8 @@ void engine::initialize_engine_reference() {
     // binary::reader / writer / layout and the width tokens (detail/binary_data.hpp): string's reader() builtin
     // returns a binary::reader, so the library exists on every engine
     binary::register_library(*this);
+    // regex, regex::match and regex::escape (detail/regex_library.hpp): engine-core, so a constant pattern compiles once at load
+    detail::regex_library::register_library(*this);
 
     // Note: weak_ptr and shared_ptr are now handled as type constructors in the interpreter
     // They are keywords and follow C++ semantics:

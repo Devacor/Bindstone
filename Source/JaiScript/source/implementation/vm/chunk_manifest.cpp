@@ -1,4 +1,5 @@
 #include <jaiscript/vm/chunk_manifest.hpp>
+#include <jaiscript/detail/regex.hpp>
 #include <cstdio>
 #include <cstring>
 #include <sstream>
@@ -81,6 +82,14 @@ namespace {
 			}
 			out << pre << "constants " << ch.constants.size() << "\n";
 			for (size_t i = 0; i < ch.constants.size(); ++i) { out << pre << " " << i << " " << constant(ch.constants[i]) << "\n"; }
+			if (!ch.regex_constants.empty()) {
+				out << pre << "regex_constants " << ch.regex_constants.size() << "\n";
+				for (size_t i = 0; i < ch.regex_constants.size(); ++i) {
+					const auto& rc = ch.regex_constants[i];
+					out << pre << " " << i << " pattern=" << esc(rc.re ? detail::regex::pattern_of(*rc.re) : std::string()) << " flags="
+					    << esc(rc.re ? detail::regex::flags_of(*rc.re) : std::string()) << " argc=" << rc.argc << "\n";
+				}
+			}
 			out << pre << "symbols " << ch.symbols.size() << "\n";
 			for (size_t i = 0; i < ch.symbols.size(); ++i) { out << pre << " " << i << " " << id(ch.symbols[i]) << "\n"; }
 			out << pre << "messages " << ch.messages.size() << "\n";

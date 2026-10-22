@@ -464,6 +464,88 @@ CRIT for   150|
 caught: format spec &#x27;:.2f&#x27; does not apply to string value
 3.14 vs  3.14159</code></pre></div>
 <p>The rules: <code>.N</code> means <em>fixed</em> (bare or with <code>f</code>; <code>:f</code> alone is 6 decimals), <code>^</code> centering puts the odd fill char on the right, and a malformed spec (<code>${x:q}</code>, <code>${x:#x}</code>) is rejected <strong>at lex time</strong> with <code>Unsupported format spec ':q' in template string</code>. The spec starts at a top-level <code>:</code> that closes no ternary <code>?</code>, so <code>${a ? b : c}</code> stays an expression and <code>${m["k"]:6}</code> / map-literal colons just work; parenthesize a ternary to give it a spec. Splices desugar to the engine-core builtin <code>format_value(value, "spec")</code>, available on every engine, one shared implementation, so <strong>both backends produce byte-identical output and error text</strong>.</p>
+<h2 id="regular-expressions">Regular expressions<a class="hlink" href="#regular-expressions" aria-label="link">&#8203;</a></h2>
+<p><code>regex(pattern)</code> and <code>regex(pattern, flags)</code> make a <code>regex</code>, a value that searches text. Write a pattern as a raw string, <code>R"(\d+)"</code> (<a href="01-hello.html">Hello &amp; Basics</a>), so its backslashes stay backslashes; in a plain string every one doubles (<code>"\\d+"</code>). Matching runs in linear time: no pattern backtracks, so no pattern and text can stall a search, and a hostile pattern from a request is as safe to run as a known one.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">regex date = regex(R"((?&lt;year&gt;\d{4})-(?&lt;month&gt;\d\d)-(?&lt;day&gt;\d\d))");
+var m = date.search("due 2026-10-21, paid 2026-11-02");
+print(m.text(), " at ", m.start(), "..", m.end());
+print(m[1], " / ", m["month"], " / ", m["day"], " (", m.size(), " slots)");
+for (var each : date.find_all("2026-10-21 2026-11-02")) { print(each["day"], " at ", each.start()); }
+print(date.replace("on 2026-10-21", "${day}.${month}.${year}"));
+print(regex(R"(\d+)").replace("a1b22c333", (x) =&gt; "&lt;" + to_string(x.text().size()) + "&gt;"));
+print(to_json(regex(R"(\s*,\s*)").split("red , green,blue ,  gold")));
+print(regex(R"(^[a-z_]\w*$)", "i").matches("Player_2"), " ", regex(R"(^[a-z_]\w*$)").matches("2fast"));
+print(date.search("no dates here") == null);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2026-10-21 at 4..14
+2026 / 10 / 21 (4 slots)
+21 at 0
+02 at 11
+on 21.10.2026
+a&lt;1&gt;b&lt;2&gt;c&lt;3&gt;
+["red","green","blue","gold"]
+true false
+true
+</code></pre></div>
+<div class="tablewrap"><table><thead><tr><th>call</th><th>answers</th></tr></thead><tbody><tr><td><code>r.search(text)</code>, <code>r.search(text, start)</code></td><td>the leftmost match at or after <code>start</code> (a position as <code>find</code> counts them; the text before it still counts for <code>^</code> and <code>\b</code>), a <code>regex::match</code>, or <code>null</code></td></tr><tr><td><code>r.matches(text)</code></td><td>whether the whole text matches (any way through the pattern: <code>regex("a|ab").matches("ab")</code> is true)</td></tr><tr><td><code>r.find_all(text)</code></td><td>every match, left to right, as an array of <code>regex::match</code></td></tr><tr><td><code>r.replace(text, with)</code>, <code>r.replace_first(text, with)</code></td><td>the text with every match (or the first) replaced by a replacement text or by what a function returns for the match</td></tr><tr><td><code>r.split(text)</code>, <code>r.split(text, max_splits)</code></td><td>the pieces between matches; each split's capture groups follow its piece; a count keeps the rest in the last piece</td></tr><tr><td><code>r.pattern</code>, <code>r.flags</code></td><td>the pattern and the flags it was made with (read-only)</td></tr><tr><td><code>regex::escape(text)</code></td><td>a pattern that matches the text literally</td></tr></tbody></table></div>
+<p>A <code>regex::match</code> is the match and its groups: <code>m.text()</code> and <code>m[0]</code> are the whole match, <code>m[i]</code> group <code>i</code> and <code>m["name"]</code> a named group, <code>null</code> for a group that took no part; <code>m.start(g)</code> and <code>m.end(g)</code> are its positions (group 0 when <code>g</code> is left out; <code>-1</code> for a group that took no part), and <code>m.size()</code> counts the whole match and every group. A group in a loop keeps the text of the loop's last pass. A match is a value: it holds its own texts, and the text it came from can change after.</p>
+<h3 id="regex-syntax">The syntax<a class="hlink" href="#regex-syntax" aria-label="link">&#8203;</a></h3>
+<div class="tablewrap"><table><thead><tr><th>construct</th><th>matches</th></tr></thead><tbody><tr><td><code>a</code>, <code>\.</code>, <code>\t \n \r \f \v \0</code></td><td>the character; a backslash before punctuation or a space takes it literally, and before a letter that names nothing it is an error</td></tr><tr><td><code>\xNN</code>, <code>\uXXXX</code>, <code>\u{X}</code></td><td>a byte on a string and U+00NN on a utf8_string; a code point (its UTF-8 bytes on a string)</td></tr><tr><td><code>.</code></td><td>any character but a newline (with flag <code>s</code>, any)</td></tr><tr><td><code>[abc]</code>, <code>[a-z]</code>, <code>[^...]</code>, <code>[]</code>, <code>[^]</code></td><td>one character of the set, or not of it; <code>-</code> first or last is literal, <code>[]</code> matches nothing and <code>[^]</code> anything</td></tr><tr><td><code>\d \w \s</code>, <code>\D \W \S</code></td><td>an ASCII digit, word character (letters, digits, <code>_</code>) or whitespace (space, tab, newline, carriage return, vertical tab, form feed), or anything else; inside a class too</td></tr><tr><td><code>^</code>, <code>$</code></td><td>the start or end of the text (with flag <code>m</code>, of a line: <code>\n</code> ends one); <code>$</code> does not match before a final newline</td></tr><tr><td><code>\A</code>, <code>\z</code></td><td>the start or end of the text, whatever the flags</td></tr><tr><td><code>\b</code>, <code>\B</code></td><td>a word boundary, or a position that is not one</td></tr><tr><td><code>(...)</code>, <code>(?&lt;name&gt;...)</code>, <code>(?:...)</code></td><td>a capture group (numbered from 1 by its opening parenthesis), a named one (also numbered), a group that captures nothing</td></tr><tr><td><code>x|y</code></td><td>the first alternative that leads to a match (an empty alternative matches empty)</td></tr><tr><td><code>* + ?</code>, <code>{n} {n,} {n,m}</code></td><td>repetition, as many as possible; a count runs to 1000, and a brace that starts no count is a literal brace</td></tr><tr><td><code>*? +? ??</code>, <code>{n,m}?</code></td><td>repetition, as few as possible</td></tr><tr><td><code>(?i)</code>, <code>(?-i)</code>, <code>(?i:...)</code></td><td>turns flags on or off to the end of the enclosing group, or inside the group alone (any of <code>i m s x</code>)</td></tr></tbody></table></div>
+<p>The flags string holds any of <code>i</code> (letters match either case: ASCII letters, as <code>to_upper</code> maps them), <code>m</code> (<code>^</code> and <code>$</code> at line breaks), <code>s</code> (<code>.</code> takes a newline) and <code>x</code> (spaces and <code>#</code> comments outside a class are ignored); another letter, or one twice, raises. Among the matches that start leftmost, the one an alternation's order and each repetition's greed reach first wins, as in ECMAScript, Perl and PCRE; a loop pass that matches empty ends the loop.</p>
+<h3 id="regex-replace">Replacements and empty matches<a class="hlink" href="#regex-replace" aria-label="link">&#8203;</a></h3>
+<p>In a replacement text <code>$1</code> to <code>$99</code> are groups (the longest number the pattern has: <code>$10</code> with one group is <code>$1</code> then <code>0</code>), <code>$0</code> the whole match, <code>${n}</code> and <code>${name}</code> a group by number or name, and <code>$$</code> a dollar sign; a group that took no part is empty, and a reference to a group the pattern lacks, or a <code>$</code> before anything else, raises. A function replacement takes the <code>regex::match</code> and returns the text, once per match, in order. Empty matches follow ECMAScript: after an empty match the next search starts one character on, so <code>find_all</code>, <code>replace</code> and <code>split</code> see a match between every character a pattern can match empty there, and <code>split</code> splits nothing at a piece's start or at the end of the text.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string out = "";
+for (var m : regex("a*").find_all("baaab")) { out += "[" + m.text() + "]@" + to_string(m.start()) + " "; }
+print(out);
+print(regex("x*").replace("abc", "-"));
+print(to_json(regex("").split("abc")), " ", to_json(regex("(,)").split("a,b")), " ", to_json(regex(",").split("a,b,c,d", 2)));
+print(regex(R"((\w+) (\w+))").replace("ada lovelace", "$2, $1 ($$5, $0)"));
+try { regex("(a)").replace("a", "$2"); } catch (e) { print("caught: ", e); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[]@0 [aaa]@1 []@4 []@5 
+-a-b-c-
+["a","b","c"] ["a",",","b"] ["a","b","c,d"]
+lovelace, ada ($5, ada lovelace)
+caught: regex: the replacement names group 2 at position 0, but the pattern has 1 group
+</code></pre></div>
+<h3 id="regex-utf8">Strings match by byte, utf8_strings by character<a class="hlink" href="#regex-utf8" aria-label="link">&#8203;</a></h3>
+<p>A pattern is UTF-8 text. On a <code>string</code> a character is a byte: <code>.</code> and a class match one byte, positions count bytes, and a non-ASCII character in the pattern matches its UTF-8 bytes. On a <code>utf8_string</code> a character is a code point: <code>.</code> and classes take whole characters, positions count characters, an empty match moves on by a whole character, and the texts come back as <code>utf8_string</code>. A class that holds a multi-byte character would hold part of a character on a string, so using it on one raises (match the <code>utf8_string</code>, or write the bytes with <code>\xNN</code>). A byte of a <code>utf8_string</code> that starts no valid sequence is matched by nothing, and counts as one character in a position.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string bytes = "café 🙂";
+utf8_string text = bytes;
+print(regex("^.{4}").search(bytes).text().size(), " bytes, ", regex("^.{4}").search(text).text(), " as characters");
+var m = regex("é.(.)").search(text);
+print(m.start(), "..", m.end(), " ", type_of(m[1]), " ", m[1]);
+print(regex("é").search(bytes).start(), " ", regex("é").search(text).start());
+try { regex("[à-ÿ]").search(bytes); } catch (e) { print("caught: ", e); }
+print(regex("[à-ÿ]").search(text).start());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">4 bytes, café as characters
+3..6 utf8_string 🙂
+3 3
+caught: regex: the class at position 0 holds 'à', a character of more than one byte, but a string matches by bytes (match a utf8_string, or write its bytes as \xNN)
+3
+</code></pre></div>
+<h3 id="regex-constant">A constant pattern compiles once<a class="hlink" href="#regex-constant" aria-label="link">&#8203;</a></h3>
+<p>When a <code>regex(...)</code> call's pattern and flags are string literals (a raw string, or a <code>+</code> of literals), the pattern compiles once, at load, on both backends: a <code>regex(R"(\d+)")</code> in a loop costs no compile per pass, only the new value. An invalid one is the load's error, at the argument, with its position in the pattern (<code>error: regex: missing ')' to close the group at position 0</code>); a pattern named by a <code>const string</code> this unit declares from literals is checked the same way. A pattern built at run time compiles when the call runs and raises the same texts, catchably; the engine keeps its recent patterns compiled, so building the same one again is cheap.</p>
+<p>In a <code>parallel_for</code> body make the regex in the body: a constant one compiles once for every worker, and its calls run on any worker. A regex captured from outside the loop is refused as every captured object is, and a function replacement as every function value is (<a href="16-parallel.html">Parallel Loops</a>).</p>
+<h3 id="regex-linear-time">Linear time, and what it leaves out<a class="hlink" href="#regex-linear-time" aria-label="link">&#8203;</a></h3>
+<p>A search runs a DFA built as the text is read, with the Pike VM over the match alone when groups are wanted; both read each byte a bounded number of times, and each keeps its own memory within a fixed budget, so a search takes time in proportion to the text times the pattern and never more. Backreferences (<code>\1</code>, <code>\k&lt;name&gt;</code>), lookahead and lookbehind (<code>(?=</code>, <code>(?!</code>, <code>(?&lt;=</code>, <code>(?&lt;!</code>), atomic groups (<code>(?&gt;</code>), possessive quantifiers (<code>*+</code>) and recursion (<code>(?R)</code>) need backtracking, so a pattern that uses one is an error that names it. Patterns whose program grows past the engine's limit (a deeply nested count, <code>(a{1000}){1000}</code>) raise too.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string pattern = R"((\w+)\1)";
+try { regex(pattern); } catch (e) { print("caught: ", e); }
+string open = "(a|b";
+try { regex(open); } catch (e) { print("caught: ", e); }
+string many = "";
+for (int i = 0; i &lt; 30000; ++i) { many += "a"; }
+print(regex("(a+)+$").search(many + "!") == null, " ", regex("^(a|aa)*$").matches(many));
+print(regex::escape("1+1=2? [yes]"), " ", regex("^" + regex::escape("1+1=2?") + "$").matches("1+1=2?"));
+print(to_json(regex(R"(\d+)", "i")));
+regex back = from_json(to_json(regex(R"(\d+)", "i")));
+print(back.pattern, " ", back.flags, " ", back.search("x42").text());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: regex: the backreference '\1' at position 5 is not supported: matching runs in linear time, without backtracking
+caught: regex: missing ')' to close the group at position 0
+true true
+1\+1=2\?\ \[yes\] true
+{"$type":"regex","$val":{"pattern":"\\d+","flags":"i"}}
+\d+ i 42
+</code></pre></div>
+<p><code>to_json</code> writes a regex as its pattern and flags, and <code>from_json</code> and <code>from_binary</code> compile it again. A <code>regex::match</code> is a result rather than saved state: save its texts and positions instead.</p>
 <h2 id="parallel-transform">Parallel loops<a class="hlink" href="#parallel-transform" aria-label="link">&#8203;</a></h2>
 <p><code>parallel_for</code>, <code>parallel_transform</code> and <code>parallel_reduce</code> run a loop over an array on every core, with results identical to the serial loop at every worker count. <a href="16-parallel.html">Parallel Loops</a> covers them: what a parallel body may do, the zip form, captured reads, index writes, constructing objects, C++ calls and reductions.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/08-coroutines.html"><span>&larr; previous</span>Coroutines</a><a class="next" rel="next" href="../guide/10-modules.html"><span>next &rarr;</span>Modules: include vs import</a></nav></article>
 </main>

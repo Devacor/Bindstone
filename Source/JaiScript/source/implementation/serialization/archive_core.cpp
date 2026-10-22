@@ -12,7 +12,8 @@ std::pair<uint32_t, bool> archive_writer_core::track_shared_ptr(const void* raw_
     if (raw_ptr == nullptr) {
         return {0, false};
     }
-    auto [it, inserted] = shared_ptr_ids_.try_emplace(raw_ptr, next_shared_id_);
+    if (!shared_ptr_ids_) { shared_ptr_ids_ = std::make_unique<std::unordered_map<const void*, uint32_t>>(); }
+    auto [it, inserted] = shared_ptr_ids_->try_emplace(raw_ptr, next_shared_id_);
     if (inserted) {
         ++next_shared_id_;
     }
@@ -45,23 +46,28 @@ void archive_writer_core::consume_value_context() {
 }
 
 void* archive_writer_core::get_user_context_raw(std::type_index ti) const {
-    auto it = user_contexts_.find(ti);
-    if (it != user_contexts_.end()) {
-        return it->second;
+    if (user_contexts_) {
+        if (auto it = user_contexts_->find(ti); it != user_contexts_->end()) {
+            return it->second;
+        }
     }
     return ti == engine_context_type_index() ? static_cast<void*>(engine_ref_) : nullptr;
 }
 
 void archive_writer_core::set_user_context_raw(std::type_index ti, void* context) {
-    user_contexts_[ti] = context;
+    if (!user_contexts_) { user_contexts_ = std::make_unique<std::unordered_map<std::type_index, void*>>(); }
+    (*user_contexts_)[ti] = context;
 }
 
 uint32_t archive_writer_core::lookup_shared_id(const void* raw_ptr) const {
     if (raw_ptr == nullptr) {
         return 0;
     }
-    auto it = shared_ptr_ids_.find(raw_ptr);
-    return it != shared_ptr_ids_.end() ? it->second : 0;
+    if (!shared_ptr_ids_) {
+        return 0;
+    }
+    auto it = shared_ptr_ids_->find(raw_ptr);
+    return it != shared_ptr_ids_->end() ? it->second : 0;
 }
 
 archive_reader_core::archive_reader_core(engine* eng) : engine_ref_(eng) {}
@@ -69,19 +75,23 @@ archive_reader_core::archive_reader_core(engine* eng) : engine_ref_(eng) {}
 archive_reader_core::~archive_reader_core() = default;
 
 void archive_reader_core::store_deserialized(uint32_t id, std::shared_ptr<void> complete, std::type_index type) {
-    cpp_shared_ptrs_[id] = deserialized_entry{ std::move(complete), type };
+    if (!cpp_shared_ptrs_) { cpp_shared_ptrs_ = std::make_unique<std::unordered_map<uint32_t, deserialized_entry>>(); }
+    (*cpp_shared_ptrs_)[id] = deserialized_entry{ std::move(complete), type };
 }
 
 bool archive_reader_core::has_deserialized_shared(uint32_t id) const {
-    return id != 0 && cpp_shared_ptrs_.find(id) != cpp_shared_ptrs_.end();
+    return id != 0 && cpp_shared_ptrs_ && cpp_shared_ptrs_->find(id) != cpp_shared_ptrs_->end();
 }
 
 std::shared_ptr<void> archive_reader_core::get_deserialized_shared_adjusted(uint32_t id, std::type_index target) const {
     if (id == 0) {
         return nullptr;
     }
-    auto it = cpp_shared_ptrs_.find(id);
-    if (it == cpp_shared_ptrs_.end()) {
+    if (!cpp_shared_ptrs_) {
+        return nullptr;
+    }
+    auto it = cpp_shared_ptrs_->find(id);
+    if (it == cpp_shared_ptrs_->end()) {
         return nullptr;
     }
     // A back-reference may request a different base view than the original load; reject it
@@ -95,15 +105,17 @@ std::shared_ptr<void> archive_reader_core::get_deserialized_shared_adjusted(uint
 }
 
 void* archive_reader_core::get_user_context_raw(std::type_index ti) const {
-    auto it = user_contexts_.find(ti);
-    if (it != user_contexts_.end()) {
-        return it->second;
+    if (user_contexts_) {
+        if (auto it = user_contexts_->find(ti); it != user_contexts_->end()) {
+            return it->second;
+        }
     }
     return ti == engine_context_type_index() ? static_cast<void*>(engine_ref_) : nullptr;
 }
 
 void archive_reader_core::set_user_context_raw(std::type_index ti, void* context) {
-    user_contexts_[ti] = context;
+    if (!user_contexts_) { user_contexts_ = std::make_unique<std::unordered_map<std::type_index, void*>>(); }
+    (*user_contexts_)[ti] = context;
 }
 
 } // namespace jai::serialization

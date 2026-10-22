@@ -2698,20 +2698,6 @@ inline std::optional<checked_result<void>> user_assign_operator(const script_val
     return checked_result<void>();
 }
 
-// A literal's element taken from an existing object (a name, a member, an element): the capture rule - a script value copies,
-// a C++-backed object and a handle are shared (C++ aggregate initialization copies its elements)
-inline script_value clone_for_capture(const script_value& value, string_symbolizer* symbolizer);
-inline script_value clone_for_literal(const script_value& value, string_symbolizer* symbolizer) {
-    const script_value& target = value.deref();
-    switch (target.raw_storage_index()) {
-        case script_value::TYPEID_NULL: case script_value::TYPEID_INT: case script_value::TYPEID_FLOAT: case script_value::TYPEID_STRING:
-        case script_value::TYPEID_CHAR: case script_value::TYPEID_BOOL:
-            return target;
-        default:
-            return clone_for_capture(target, symbolizer);
-    }
-}
-
 // A value capture: C++-backed objects (make_object wrappers, raw cpp holders, a class instance wrapping a C++ object) and
 // shared_ptr handles are reference types in script, so the capture shares them; a pure script value deep-copies
 inline script_value clone_for_capture(const script_value& value, string_symbolizer* symbolizer) {

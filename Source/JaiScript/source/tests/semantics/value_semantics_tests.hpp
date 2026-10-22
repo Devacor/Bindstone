@@ -53,8 +53,9 @@ bool TrackedObject::verbose = false;
 
 // Copy-count pins for the engine's designed value semantics (VM parity bar):
 // - Declarations clone only lvalue initializers; temporaries (ctor results) bind with no copy.
-// - Assignment into variables, array elements, map entries, and push() deep-clones (1 C++ copy
-//   via the class copy_function), except shared_ptr-typed values which share.
+// - Assignment into variables, array elements, map entries, push() and a container literal's
+//   lvalue elements deep-clones (1 C++ copy via the class copy_function), except shared_ptr-typed
+//   values which share; a literal's temporary elements move.
 // - Lambda captures share C++-backed objects (clone_for_capture) regardless of capture mode.
 // - Calls into C++ never deep-clone args script-side; a by-value C++ param costs exactly the
 //   one copy function_binder makes, a T& param costs zero.
@@ -302,10 +303,124 @@ public:
             auto eng = make_engine();
             register_tracked_object(*eng);
 
-            eng->execute("auto obj = TrackedObject(42); auto arr = [obj, obj, obj];");
+            auto result = eng->execute("auto obj = TrackedObject(42); auto arr = [obj, obj, obj]; arr[0].value = 7; "
+                                       "obj.value * 10000 + arr[0].value * 100 + arr[1].value");
 
-            // A C++-backed object in a literal is shared (the capture rule); a script value copies
+            // Each element is a copy of its own, as push() and element assignment make
+            check_eq(3, TrackedObject::copy_count);
+            check_eq(420742, result.as<int>());
+        });
+
+        test("map_literal_copies", [this]() {
+            auto eng = make_engine();
+            register_tracked_object(*eng);
+
+            auto result = eng->execute("auto obj = TrackedObject(42); auto m = {\"a\": obj, \"b\": obj}; m[\"a\"].value = 7; "
+                                       "obj.value * 10000 + m[\"a\"].value * 100 + m[\"b\"].value");
+
+            check_eq(2, TrackedObject::copy_count);
+            check_eq(420742, result.as<int>());
+        });
+
+        test("nested_and_typed_literals_copy", [this]() {
+            auto eng = make_engine();
+            register_tracked_object(*eng);
+
+            auto result = eng->execute(R"(
+                auto obj = TrackedObject(42);
+                var nest = [[obj, obj], {"k": obj}];
+                array<TrackedObject> typed = [obj, obj];
+                nest[0][0].value = 1;
+                typed[0].value = 2;
+                obj.value * 1000000 + nest[0][1].value * 10000 + nest[1]["k"].value * 100 + typed[1].value
+            )");
+
+            // The inner literals are temporaries of the outer one: only the named elements copy
+            check_eq(5, TrackedObject::copy_count);
+            check_eq(42424242, result.as<int>());
+        });
+
+        test("literal_temporaries_no_copy", [this]() {
+            auto eng = make_engine();
+            register_tracked_object(*eng);
+
+            auto result = eng->execute(R"(
+                function make(int v) { return TrackedObject(v); }
+                var arr = [TrackedObject(1), make(2), [TrackedObject(3)]];
+                var m = {"a": TrackedObject(4), "b": make(5)};
+                arr[0].value + arr[1].value + arr[2][0].value + m["a"].value + m["b"].value
+            )");
+
             check_eq(0, TrackedObject::copy_count);
+            check_eq(15, result.as<int>());
+        });
+
+        test("literal_handles_share", [this]() {
+            auto eng = make_engine();
+            register_tracked_object(*eng);
+
+            auto result = eng->execute(R"(
+                shared_ptr<TrackedObject> h = new TrackedObject(1);
+                var arr = [h, h];
+                var m = {"a": h};
+                arr[0].value = 5;
+                h.value * 100 + arr[1].value * 10 + m["a"].value
+            )");
+
+            // a handle copies as a shared_ptr does: every element names the one object
+            check_eq(0, TrackedObject::copy_count);
+            check_eq(555, result.as<int>());
+
+            struct HandleSource {
+                std::shared_ptr<TrackedObject> obj = std::make_shared<TrackedObject>(1);
+                std::shared_ptr<TrackedObject> get_object() { return obj; }
+            };
+            dynamic_binder<HandleSource>(*eng, "HandleSource")
+                .constructor<>()
+                .method("get_object", &HandleSource::get_object)
+                .build();
+            auto host = eng->execute(R"(
+                auto source = HandleSource();
+                shared_ptr<TrackedObject> g = source.get_object();
+                var held = [g, g];
+                held[0].value = 4;
+                g.value * 10 + held[1].value
+            )");
+            check_eq(0, TrackedObject::copy_count);
+            check_eq(44, host.as<int>());
+        });
+
+        test("literal_element_copies_before_a_later_element_writes_its_source", [this]() {
+            auto eng = make_engine();
+            register_tracked_object(*eng);
+
+            auto result = eng->execute(R"(
+                auto obj = TrackedObject(42);
+                function poke() { obj.value = 9; return 0; }
+                var arr = [obj, poke()];
+                arr[0].value * 100 + obj.value
+            )");
+
+            check_eq(1, TrackedObject::copy_count);
+            check_eq(4209, result.as<int>());
+        });
+
+        test("field_initializer_literal_copies", [this]() {
+            auto eng = make_engine();
+            register_tracked_object(*eng);
+
+            auto result = eng->execute(R"(
+                class Squad {
+                    TrackedObject lead = TrackedObject(1);
+                    array<TrackedObject> pair = [lead, lead];
+                }
+                Squad s = Squad();
+                s.pair[0].value = 3;
+                s.lead.value * 100 + s.pair[0].value * 10 + s.pair[1].value
+            )");
+
+            check_eq(2, TrackedObject::copy_count);
+            check_eq(131, result.as<int>());
         });
 
         test("reference_parameter_preserves_modifications", [this]() {

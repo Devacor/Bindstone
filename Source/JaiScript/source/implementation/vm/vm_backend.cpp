@@ -2015,7 +2015,7 @@ void vm_backend::exec_array(frame& f, const vm_instruction& ins) {
 		if (stack_[base + i].raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 			stack_[base + i] = stack_[base + i].detached_for_store();
 		}
-		if (copy) { array.push_back(detail::clone_for_literal(stack_[base + i], symbolizer_)); continue; }
+		if (copy) { array.push_back(clone_for_assignment(stack_[base + i])); continue; }
 		array.push_back(std::move(stack_[base + i]));
 	}
 	stack_.truncate(base);
@@ -2043,7 +2043,7 @@ void vm_backend::exec_map(frame& f, const vm_instruction& ins) {
 		if (stack_[base + i].raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 			stack_[base + i] = stack_[base + i].detached_for_store();
 		}
-		if (copy) { script_value copied = detail::clone_for_literal(stack_[base + i], symbolizer_); stack_[base + i] = std::move(copied); }
+		if (copy) { script_value copied = clone_for_assignment(stack_[base + i]); stack_[base + i] = std::move(copied); }
 	}
 	for (size_t i = 0; i < n; ++i) {
 		map.insert_or_assign(std::move(stack_[base + i * 2]), std::move(stack_[base + i * 2 + 1]));
@@ -20524,7 +20524,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			}
 			case opcode::op_deref_top:
-				if (ins.a) { script_value v = detail::clone_for_literal(stack_.back(), symbolizer_); stack_.back() = std::move(v); break; }
+				if (ins.a) { script_value v = clone_for_assignment(stack_.back()); stack_.back() = std::move(v); break; }
 				if (stack_.back().raw_storage_index() == script_value::TYPEID_REFERENCE) { script_value v = stack_.back().deref(); stack_.back() = std::move(v); }
 				break;
 

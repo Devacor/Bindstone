@@ -14947,7 +14947,8 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 							shared_parameters_for(func_decl.get()),
 							func_decl->return_type,
 							func_decl->body,
-							ns_env
+							ns_env,
+							func_decl->local_count
 						);
 						payload.fn->unit = func_decl->unit;
 						return backend->execute_callable(payload, args);
@@ -17878,8 +17879,8 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 				if (class_def_var->is_object()) {
 					auto obj_holder = class_def_var->get_object_holder();
 					if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
-						auto class_def = std::static_pointer_cast<class_definition>(obj_holder->data);
-						ns_data->classes[class_decl_ptr->name_id] = class_def;
+						detail::register_namespace_class(*engine_, *ns_data, decl->name, class_decl_ptr->name_id,
+						                                 std::static_pointer_cast<class_definition>(obj_holder->data));
 					}
 				}
 			}

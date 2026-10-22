@@ -10,6 +10,7 @@
 // Host-registered entries (script_namespace_data::variables) stay values the host owns: readable
 // through `ns::name`, never assigned from script.
 
+#include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/ast.hpp>
@@ -30,6 +31,22 @@ namespace jai::detail {
 		if (ns == namespaces.end() || !ns->second) { return nullptr; }
 		auto cls = ns->second->classes.find(eng.symbolize(qualified.substr(cut + 2)));
 		return cls != ns->second->classes.end() ? cls->second : nullptr;
+	}
+
+	// `ns::C` reaches the class's constructor and definition as its bare name does: an importer never saw the declaration
+	inline void register_namespace_class(engine& eng, script_namespace_data& ns, std::string_view ns_name, uint64_t class_name_id,
+	                                     const std::shared_ptr<class_definition>& def) {
+		ns.classes[class_name_id] = def;
+		std::string qualified = std::string(ns_name) + "::" + def->get_name();
+		if (auto owner = eng.get_class_definition(qualified); owner && owner->get_name() == qualified) { return; }   // a host class registered under that spelling keeps it
+		auto& symbols = *eng.get_symbolizer();
+		const auto globals = eng.get_global_environment();
+		const uint64_t qualified_id = symbols.intern(qualified);
+		if (const script_value* ctor = globals->get_value_ptr(class_name_id)) { globals->define(qualified_id, *ctor); }
+		if (const script_value* cls = globals->get_value_ptr(symbols.get_class_var_id_with_view(class_name_id).first)) {
+			globals->define(symbols.get_class_var_id_with_view(qualified_id).first, *cls);
+		}
+		def->set_namespace_spelling(std::move(qualified), qualified_id);
 	}
 
 	inline const std::shared_ptr<environment>& namespace_scope(engine& eng, script_namespace_data& ns) {

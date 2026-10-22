@@ -3695,6 +3695,16 @@ std::shared_ptr<class_definition> engine::get_class_definition(const std::string
         return std::static_pointer_cast<class_definition>(script_class);
     }
 
+    // `ns::C`: the class a script namespace declares, which answers to that spelling
+    if (const size_t cut = name.rfind("::"); cut != std::string::npos) {
+        const auto ns_id = impl->string_symbolizer_.find(std::string_view(name).substr(0, cut));
+        const auto class_id = ns_id ? impl->string_symbolizer_.find(std::string_view(name).substr(cut + 2)) : std::nullopt;
+        if (class_id) {
+            if (auto ns = impl->script_namespaces_.find(*ns_id); ns != impl->script_namespaces_.end() && ns->second) {
+                if (auto cls = ns->second->classes.find(*class_id); cls != ns->second->classes.end()) { return cls->second; }
+            }
+        }
+    }
     return nullptr;
 }
 
@@ -3710,7 +3720,7 @@ std::shared_ptr<class_definition> engine::get_class_definition(uint64_t type_id)
     // This is slower but script classes should eventually be added to classesByTypeId as well
     // TODO: Index script classes by type_id for O(1) lookup
     for (const auto& [name, script_class] : impl->class_registry_.script_classes_) {
-        if (impl->string_symbolizer_.intern(name) == type_id) {
+        if (impl->string_symbolizer_.intern(name) == type_id || script_class->answers_to_id(type_id)) {
             return std::static_pointer_cast<class_definition>(script_class);
         }
     }
@@ -6464,6 +6474,7 @@ bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id) {
     if (!eng) { return false; }
     auto def = eng->get_class_definition(derived_id);
     if (!def) { return false; }
+    if (def->answers_to_id(base_id)) { return true; }
     std::vector<const class_definition*> stack;
     stack.push_back(def.get());
     int budget = 64;
@@ -6472,7 +6483,7 @@ bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id) {
         stack.pop_back();
         for (const auto& parent : cur->get_parent_classes()) {
             if (!parent) { continue; }
-            if (parent->get_type_id() == base_id) { return true; }
+            if (parent->answers_to_id(base_id)) { return true; }
             stack.push_back(parent.get());
         }
     }

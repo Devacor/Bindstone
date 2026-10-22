@@ -670,16 +670,17 @@ struct call_frame {
 
         const std::vector<parameter>& parameters() const noexcept { return *shared_parameters; }
 
+        // slots is the body's frame size (its declaration's local_count): the vm places its temporaries above it
         script_defined_function(std::string_view n, std::vector<parameter> params,
                             type_info_ptr retType, std::shared_ptr<block_stmt> b,
-                            std::shared_ptr<environment> env = nullptr, size_t slots = 0)
+                            std::shared_ptr<environment> env, size_t slots)
             : script_defined_function(n, std::make_shared<const std::vector<parameter>>(std::move(params)),
                                       retType, std::move(b), std::move(env), slots) {}
 
         // Sharing constructor: node-cached parameter storage, zero per-mint copies
         script_defined_function(std::string_view n, std::shared_ptr<const std::vector<parameter>> params,
                             type_info_ptr retType, std::shared_ptr<block_stmt> b,
-                            std::shared_ptr<environment> env = nullptr, size_t slots = 0)
+                            std::shared_ptr<environment> env, size_t slots)
             : name(n), shared_parameters(std::move(params)), return_type(retType), body(std::move(b)), closure_env(std::move(env)), local_count(slots) {
             for (const auto& p : *shared_parameters) {
                 if (p.is_reference) { has_reference_parameters = true; break; }

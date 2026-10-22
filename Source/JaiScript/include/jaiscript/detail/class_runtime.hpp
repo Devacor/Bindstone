@@ -1076,7 +1076,7 @@ inline std::vector<std::string> class_definition::get_property_names(bool includ
 }
 
 inline bool class_definition::is_subtype_of(const std::string& base_class_name) const {
-    if (name_ == base_class_name) {
+    if (answers_to(base_class_name)) {
         return true;
     }
 
@@ -2567,7 +2567,7 @@ inline checked_result<void> implicit_copy_assign(class_instance* dest, const cla
 // The class named `name` in c's chain (c itself or a base), null when none
 inline const class_definition* chain_class_named(const class_definition* c, std::string_view name) {
     if (!c) { return nullptr; }
-    if (c->get_name() == name) { return c; }
+    if (c->answers_to(name)) { return c; }
     for (const auto& parent : c->get_parent_classes()) {
         if (const class_definition* found = chain_class_named(parent.get(), name)) { return found; }
     }

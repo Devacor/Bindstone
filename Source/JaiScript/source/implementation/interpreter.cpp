@@ -13060,8 +13060,8 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                 if (class_def_var->is_object()) {
                     auto obj_holder = class_def_var->get_object_holder();
                     if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
-                        auto class_def = std::static_pointer_cast<class_definition>(obj_holder->data);
-                        ns_data->classes[class_decl_ptr->name_id] = class_def;
+                        detail::register_namespace_class(*engine_, *ns_data, decl->name, class_decl_ptr->name_id,
+                                                         std::static_pointer_cast<class_definition>(obj_holder->data));
                     }
                 }
             }

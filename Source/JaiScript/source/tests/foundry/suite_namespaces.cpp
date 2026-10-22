@@ -481,6 +481,32 @@ public:
             check_eq(std::string("100 2 2"), result.as<std::string>());
         });
 
+        test("a_namespace_functions_frame_holds_its_locals_and_its_temporaries_apart", [&]() {
+            // the vm places a body's temporaries above its declared locals: a namespace function's frame is its declaration's
+            // size, so a loop bound read from a parameter stays the parameter
+            for (bool proofs : {true, false}) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(*eng);
+                eng->type_proofs(proofs);
+                auto result = eng->execute(R"(
+                    namespace qq {
+                        int loop(array<string> pattern) {
+                            int n = 0;
+                            for (int i = 0; i < pattern.size(); i++) { n += 1; }
+                            return n;
+                        }
+                        string joined(array<string> parts, string sep) {
+                            string out = "";
+                            for (int i = 0; i < parts.size(); i++) { out += (i > 0 ? sep : "") + parts[i] + to_string(i * 2 + parts.size()); }
+                            return out;
+                        }
+                    }
+                    to_string(qq::loop(["a"])) + " " + to_string(qq::loop(["a", "b", "c"])) + " " + qq::joined(["x", "y"], "-")
+                )");
+                check_eq(std::string("1 3 x2-y4"), result.to_string(), proofs ? "proofs on" : "proofs off");
+            }
+        });
+
         test("namespace_variable_binds_a_reference_by_its_qualified_name", [&]() {
             auto eng = make_engine();
             jai::stdlib::register_all(*eng);

@@ -103,6 +103,24 @@ routes.post("/items/nested", (Request req) => {
 	return json({"thrown": thrown, "outer": db.value("SELECT COUNT(*) FROM items WHERE name = 'outer'"),
 		"inner": db.value("SELECT COUNT(*) FROM items WHERE name = 'inner'"), "open": db.in_transaction()});
 });
-routes.get("/sql-error",(Request req) => db.query("SELECT * FROM missing_table"));
+routes.get("/sql-error", (Request req) => db.query("SELECT * FROM missing_table"));
+db.execute("CREATE TABLE IF NOT EXISTS kinds (v)");
+routes.get("/sql/in", (Request req) => db.query("SELECT name FROM items WHERE qty IN (?) ORDER BY name", [101, 102]));
+routes.get("/sql/in-empty", (Request req) => db.query("SELECT name FROM items WHERE qty IN (?)", []));
+routes.get("/sql/sorted", (Request req) => db.query("SELECT name FROM items ORDER BY {}, id", sql_choose(req.query.get("by", "name"), ["name", "qty DESC", "price"])));
+routes.get("/sql/injected", (Request req) => {
+	var text = "SELECT name FROM items WHERE name = '" + req.query.get("n", "") + "'";
+	[[warn_mode]] return json(db.query(text));
+});
+routes.get("/sql/reflected", (Request req) => {
+	var text = "DELETE FROM items";
+	return json(reflect::invoke(db, "execute", text));
+});
+routes.get("/sql/fragment-misuse", (Request req) => db.query("SELECT name FROM items WHERE name = ?", sql_choose("name", ["name"])));
+routes.post("/sql/types", (Request req) => {
+	db.execute("DELETE FROM kinds");
+	for (var v : [1, 2.5, true, null, "it's \"q\" \xC3\xA9"]) { db.execute("INSERT INTO kinds (v) VALUES (?)", v); }
+	return db.query("SELECT typeof(v) AS t, v FROM kinds ORDER BY rowid");
+});
 
 Response handle(Request req) { return routes.dispatch(req); }

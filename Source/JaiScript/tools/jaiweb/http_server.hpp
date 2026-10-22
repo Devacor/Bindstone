@@ -509,7 +509,7 @@ private:
 		std::string_view path = target.substr(0, question);
 		if (question != std::string_view::npos) { request.query_string = std::string(target.substr(question + 1)); }
 		if (const size_t hash = request.query_string.find('#'); hash != std::string::npos) { request.query_string.resize(hash); }
-		request.path = url_decode(path);
+		request.path = percent_decode(path);
 		return request.path.find('\0') == std::string::npos;
 	}
 

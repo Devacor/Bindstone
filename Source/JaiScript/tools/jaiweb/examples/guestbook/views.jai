@@ -1,7 +1,7 @@
 // The guestbook's pages: plain functions that return HTML. Every value from a visitor goes through h(), which
 // escapes it; the page text around it is written as it is.
 
-string h(var value) { return html_escape(to_string(value)); }
+string h(var value) { return web::html_escape(to_string(value)); }
 
 string when(int unix_seconds) { return time::date_from_unix(unix_seconds).format("${year}-${month:02}-${day:02} ${military_hours:02}:${minutes:02}"); }
 

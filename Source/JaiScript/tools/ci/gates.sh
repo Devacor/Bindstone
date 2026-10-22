@@ -9,6 +9,12 @@
 # repository root; a relative BIN is taken from the repository root too). FUZZ_ITERATIONS
 # sets the fuzz run's program count (default 300) and FUZZ_CORPUS a directory it keeps divergent programs in. The milestone gates outside `all`
 # (gloom-workers, gloom-long, timedemo, amalgamation) are the battery's (tools/ci/battery.sh).
+#
+# The android gate cross-compiles the library and the suites with the Android NDK (libc++, the standard library Apple
+# platforms use too; the 32-bit ABI catches pointer-size assumptions). It builds and runs nothing else, and skips with a
+# message when no NDK is found. ANDROID_NDK_ROOT names the NDK (else ANDROID_NDK_HOME, ANDROID_NDK, or the newest ndk/
+# under ANDROID_HOME, ANDROID_SDK_ROOT or the SDK's default home); ANDROID_ABIS the ABIs (default arm64-v8a armeabi-v7a);
+# ANDROID_BUILD_DIR the build tree (default build-android, one directory per ABI; relative to the repository root).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -150,6 +156,45 @@ gate_gatorquest() {
 	done
 }
 
+android_ndk() {
+	local candidate sdk
+	for candidate in "${ANDROID_NDK_ROOT:-}" "${ANDROID_NDK_HOME:-}" "${ANDROID_NDK:-}"; do
+		[ -n "$candidate" ] && [ -f "$candidate/build/cmake/android.toolchain.cmake" ] && { echo "$candidate"; return 0; }
+	done
+	for sdk in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "${LOCALAPPDATA:-}/Android/Sdk" "$HOME/Library/Android/sdk" "$HOME/Android/Sdk"; do
+		[ -n "$sdk" ] || continue
+		command -v cygpath > /dev/null 2>&1 && sdk="$(cygpath -u "$sdk")"
+		[ -d "$sdk/ndk" ] || continue
+		candidate="$(ls -d "$sdk"/ndk/*/ 2> /dev/null | sort -V | tail -n 1)"
+		candidate="${candidate%/}"
+		[ -n "$candidate" ] && [ -f "$candidate/build/cmake/android.toolchain.cmake" ] && { echo "$candidate"; return 0; }
+	done
+	return 1
+}
+
+gate_android() {
+	local ndk build abi exe extra=()
+	ndk="$(android_ndk)" || { echo "android: no Android NDK found (set ANDROID_NDK_ROOT), skipped"; return 0; }
+	if ! command -v ninja > /dev/null 2>&1; then
+		for exe in "$ndk"/../../cmake/*/bin/ninja "$ndk"/../../cmake/*/bin/ninja.exe; do
+			[ -f "$exe" ] && extra+=("-DCMAKE_MAKE_PROGRAM=$exe") && break
+		done
+	fi
+	command -v cygpath > /dev/null 2>&1 && ndk="$(cygpath -m "$ndk")"
+	# CMake hands clang++ a short 8.3 name for a path with spaces, which no longer selects its C++ driver (libc++ goes unlinked)
+	case "$ndk" in *" "*) extra+=("-DCMAKE_CXX_FLAGS=--driver-mode=g++") ;; esac
+	build="${ANDROID_BUILD_DIR:-build-android}"
+	case "$build" in /* | [A-Za-z]:*) ;; *) build="$ROOT/$build" ;; esac
+	echo "android: NDK $ndk"
+	for abi in ${ANDROID_ABIS:-arm64-v8a armeabi-v7a}; do
+		run cmake -Wno-deprecated -S "$ROOT" -B "$build/$abi" -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_TOOLCHAIN_FILE=$ndk/build/cmake/android.toolchain.cmake" \
+			"-DANDROID_ABI=$abi" -DANDROID_PLATFORM=android-21 -DJAISCRIPT_BUILD_EXAMPLES=OFF -DJAISCRIPT_BUILD_RUNNER=OFF \
+			-DJAISCRIPT_BUILD_LSP=OFF -DJAISCRIPT_INSTALL=OFF "${extra[@]+"${extra[@]}"}" > /dev/null
+		run cmake --build "$build/$abi" --target jaiscript jaiscript_tests
+		echo "android $abi: the library and the suites build"
+	done
+}
+
 gate_embed_quickstart() {
 	local work
 	work="$(mktemp -d)"
@@ -175,15 +220,16 @@ gate_jaiweb() {
 
 ALL=(tests-interp tests-vm fuzz gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency jaiweb)
 MILESTONE=(gloom-workers gloom-long timedemo amalgamation)
+CROSS=(android)
 
-[ "$#" -gt 0 ] || { echo "usage: $0 <gate>... (${ALL[*]} all; milestone: ${MILESTONE[*]})" >&2; exit 2; }
+[ "$#" -gt 0 ] || { echo "usage: $0 <gate>... (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]})" >&2; exit 2; }
 [ "$1" = all ] && set -- "${ALL[@]}"
 
 for gate in "$@"; do
 	case "$gate" in
 		tests-interp | tests-vm | fuzz | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency | jaiweb) ;;
-		gloom-workers | gloom-long | timedemo | amalgamation) ;;
-		*) echo "unknown gate: $gate (${ALL[*]} all; milestone: ${MILESTONE[*]})" >&2; exit 2 ;;
+		gloom-workers | gloom-long | timedemo | amalgamation | android) ;;
+		*) echo "unknown gate: $gate (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]})" >&2; exit 2 ;;
 	esac
 	echo "== gate: $gate"
 	( "gate_${gate//-/_}" )

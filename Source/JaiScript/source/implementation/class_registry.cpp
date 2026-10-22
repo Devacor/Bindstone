@@ -1354,6 +1354,22 @@ static bool dispatch_native_overloads(const void* state, void* self, const scrip
     return pick && pick->lane(pick->state.get(), self, receiver, args, argc, out);
 }
 
+bool class_definition::script_declares_user_accessor(uint64_t id) const {
+    if (!is_script_class()) { return false; }
+    const script_value* found = user_accessor(id);
+    if (!found) { return false; }
+    auto cpp_base = find_cpp_base_class();
+    return !(cpp_base && cpp_base->user_accessor(id) == found);
+}
+
+void class_definition::add_native_method(uint64_t id, native_method fn) {
+    native_entry& e = native_methods_[id];
+    e.plain = fn;
+    e.lane = nullptr;
+    e.state.reset();
+    restamp_native_methods();
+}
+
 void class_definition::add_native_lane(uint64_t id, native_lane fn, std::shared_ptr<const void> state, native_exact exact) {
     restamp_native_methods();
     if (native_lane_names_.count(id)) { return; }

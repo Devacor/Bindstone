@@ -62,17 +62,20 @@ classify() {
 		source/tests/fuzz/*) pick fuzz "the fuzzer ($p)"; pick debug-suites "the fuzzer's suite ($p)" ;;
 		source/tests/*) pick debug-suites "a test ($p)" ;;
 		include/jaiscript/vm/* | source/implementation/vm/*)
-			pick debug-suites "the VM or its compiler ($p)"; hashes "the VM or its compiler ($p)"; pick fuzz "the VM against its oracle ($p)" ;;
+			pick debug-suites "the VM or its compiler ($p)"; hashes "the VM or its compiler ($p)"; pick fuzz "the VM against its oracle ($p)"
+			pick android "libc++ and 32-bit compile the library ($p)" ;;
 		source/implementation/interpreter.cpp | source/implementation/interpreter_dispatch.cpp | include/jaiscript/detail/interpreter.hpp)
-			pick debug-suites "the interpreter ($p)"; hashes "the interpreter ($p)"; pick fuzz "the interpreter against the VM ($p)" ;;
+			pick debug-suites "the interpreter ($p)"; hashes "the interpreter ($p)"; pick fuzz "the interpreter against the VM ($p)"
+			pick android "libc++ and 32-bit compile the library ($p)" ;;
 		include/jaiscript/detail/* | source/implementation/parser.cpp | source/implementation/lexer.cpp | source/implementation/type_checker.cpp)
-			pick debug-suites "a kernel both backends share ($p)"; hashes "a kernel both backends share ($p)"; pick fuzz "a kernel both backends share ($p)" ;;
+			pick debug-suites "a kernel both backends share ($p)"; hashes "a kernel both backends share ($p)"; pick fuzz "a kernel both backends share ($p)"
+			pick android "libc++ and 32-bit compile the library ($p)" ;;
 		include/jaiscript/properties/* | include/jaiscript/properties.hpp | include/jaiscript/serialization/* | source/implementation/serialization/* | \
 		source/implementation/properties.cpp | source/implementation/schema_binding.cpp)
-			pick debug-suites "the property system or the archives ($p)"; HOST_ARCHIVES=1 ;;
-		include/* | source/implementation/*) pick debug-suites "the library ($p)" ;;
+			pick debug-suites "the property system or the archives ($p)"; HOST_ARCHIVES=1; pick android "libc++ and 32-bit compile the library ($p)" ;;
+		include/* | source/implementation/*) pick debug-suites "the library ($p)"; pick android "libc++ and 32-bit compile the library ($p)" ;;
 		CMakeLists.txt | */CMakeLists.txt | cmake/* | source/jaiscript.cpp | CMakePresets.json)
-			pick debug-suites "the build ($p)"; pick amalgamation "the build's file lists ($p)" ;;
+			pick debug-suites "the build ($p)"; pick amalgamation "the build's file lists ($p)"; pick android "libc++ and 32-bit compile the library ($p)" ;;
 		*) pick debug-suites "a path no rule names, so the suites ($p)" ;;
 	esac
 }

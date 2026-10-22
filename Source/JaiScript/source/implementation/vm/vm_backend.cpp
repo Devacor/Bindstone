@@ -4697,7 +4697,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 		if (script_value* g = engine_->get_global_environment()->get_value_ptr(sym)) {
 			return &binding_value(*g, observed);
 		}
-		raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(sym), sym);
+		(void)raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(sym), sym);
 		return nullptr;
 	}
 	if (operand.slot != k_invalid_u32 && f.locals && !f.top_level) {
@@ -4753,13 +4753,13 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 			                                         f.locals->scope_static, sym, /*want_methods*/ true);
 			if (member) {
 				if (auto access = detail::bare_member_access(member, sym, frame_access_context(f)); !access) {
-					raise_from(access);
+					(void)raise_from(access);
 					return nullptr;
 				}
 				if (member.what == detail::member_probe_hit::kind::method) {
 					if (member.instance && f.locals->scope_this) {
 						if (!probe_callee_resolving_) {
-							raise_bare_method_value(sym, *f.locals->scope_this);
+							(void)raise_bare_method_value(sym, *f.locals->scope_this);
 							return nullptr;
 						}
 						scratch.emplace(make_bound_method_thunk(*f.locals->scope_this, std::move(member.method_value)));
@@ -4777,7 +4777,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 					auto read = detail::read_bare_cpp_property(*f.locals->scope_this, member.instance,
 					                                           member.method_value, member.getter_id, sym);
 					if (!read) {
-						raise_from(read);
+						(void)raise_from(read);
 						return nullptr;
 					}
 					scratch.emplace(std::move(read.value()));
@@ -4799,11 +4799,11 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 			}
 			if (probe_callee_resolving_ && f.locals->scope_this) {   // KEEP BYTE-PARALLEL with interpreter::visit_identifier_expr
 				if (auto refused = detail::refuse_cdtor_call(f.locals->scope_this->get_class_instance().get(), sym)) {
-					raise_from(*refused);
+					(void)raise_from(*refused);
 					return nullptr;
 				}
 			}
-			raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(sym), sym);
+			(void)raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(sym), sym);
 			return nullptr;
 		}
 	}
@@ -4829,7 +4829,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 					auto read = detail::read_bare_cpp_property(this_val, instance.get(),
 					                                           instance->get_method(getter_id, false), getter_id, sym);
 					if (!read) {
-						raise_from(read);
+						(void)raise_from(read);
 						return nullptr;
 					}
 					scratch.emplace(std::move(read.value()));
@@ -4856,14 +4856,14 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 				}
 				if (probe_callee_resolving_) {
 					if (auto refused = detail::refuse_cdtor_call(instance.get(), sym)) {
-						raise_from(*refused);
+						(void)raise_from(*refused);
 						return nullptr;
 					}
 				}
 			}
 		}
 	}
-	raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(sym), sym);
+	(void)raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(sym), sym);
 	return nullptr;
 }
 
@@ -6554,7 +6554,7 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 		script_value converted = std::move(converted_result.value());
 		*target_ptr = std::move(converted);
 	} else {
-		*target_ptr = std::move(resultValue.clone());
+		*target_ptr = resultValue.clone();
 	}
 	if (typed_element) {
 		refHolder->container->set(refHolder->container_index, *target_ptr);
@@ -11505,7 +11505,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 						script_value converted = std::move(converted_result.value());
 						*target_ptr = std::move(converted);
 					} else {
-						*target_ptr = std::move(resultValue.clone());
+						*target_ptr = resultValue.clone();
 					}
 					stack_.pop_back();   // rhs
 					stack_.pop_back();   // index

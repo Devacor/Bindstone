@@ -11,6 +11,12 @@ headers, and everything else in this repository — the test suite, the runner, 
   `.github/workflows/ci.yml` targets MSVC, GCC 14 and Clang on Ubuntu 24.04. Older compilers
   may work; they are untested. The library uses `std::to_chars` for doubles and
   `std::strong_order`, so a standard library without those will not get far.
+- **libc++ and 32-bit hosts.** The Android NDK (r27c: Clang 18 and libc++, the standard library Apple
+  platforms use too) builds every target for arm64-v8a, armeabi-v7a, x86_64 and x86, and a 32-bit
+  MSVC build runs the full suite on both backends. `tools/ci/gates.sh android` cross-compiles the
+  library and the suite with the NDK it finds (`ANDROID_NDK_ROOT`, or the newest under the SDK).
+  An NDK under a path with spaces needs `-DCMAKE_CXX_FLAGS=--driver-mode=g++`: CMake hands
+  clang++ its short 8.3 name, which no longer selects the C++ driver, and libc++ goes unlinked.
 - **CMake 3.20+.**
 - **Ninja**, optional but recommended. It gives single-configuration build directories, which
   makes the output paths predictable.

@@ -70,6 +70,7 @@ Source/JaiScript/squirrel
 
 Source/JaiScript/out/
 Source/JaiScript/build-debug/
+Source/JaiScript/build-android/
 # Status, ledger and plan notes: kept on disk, never tracked (design notes agents need live in Source/JaiScript/internal/)
 /.internal/
 Source/JaiScript/.internal/

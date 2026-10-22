@@ -15,6 +15,8 @@ path-separator assumptions). Every site is guarded and carries a portable branch
   `±1 × INT64_MIN` overflow cases handled before the `out / a` probe, and that probe can never hit
   the `INT64_MIN / -1` hardware trap (the only `out == INT64_MIN, a == -1` shape is caught by the
   explicit case above it).
+- **`_mul128`** is x64-only: `integer_ops.hpp` takes it (and `<intrin.h>`) under `_M_X64`; 32-bit and ARM64 MSVC take the
+  generic fallback.
 - **`<intrin.h>` containment**: `integer_ops.hpp` reaches engine.cpp, interpreter.cpp,
   parser.cpp and vm_backend.cpp directly, and interpreter.cpp, interpreter_dispatch.cpp and
   vm_backend.cpp through `detail/scalar_ops.hpp` (included by `detail/binary_handlers.hpp`); no
@@ -31,6 +33,11 @@ path-separator assumptions). Every site is guarded and carries a portable branch
   `/sys/devices/cpu_core/cpus` (Linux) or `sysctlbyname` (Apple), else `hardware_concurrency`; a `fast_threads`
   pool's workers opt out of power throttling (`SetThreadInformation` on Windows, `pthread_set_qos_class_self_np` on Apple).
 - **`stdlib/time.hpp`**: `localtime_s` vs `localtime_r`.
+- **libc++** (Android NDK, Apple): no `std::atomic<std::shared_ptr>`, so `detail/atomic_shared_ptr.hpp` keys on
+  `__cpp_lib_atomic_shared_ptr` and otherwise wraps the `std::atomic_load`/`std::atomic_store` overloads (the debugger's
+  breakpoint snapshot; never on the per-statement path). No floating-point `std::from_chars`: `parse_float_text`
+  (value.cpp) and `from_chars_double` (§3) key on `__cpp_lib_to_chars` and fall back to `strtod`. No `std::atomic_ref`
+  is used; the wrapper-slot offset `class_definition` caches is a `std::atomic<int32_t>`.
 - **Compiler attributes**: `__declspec(noinline)` vs `__attribute__((noinline))` in
   `vm/vm_backend.hpp` and the cold-path macros (`JAI_MATH_COLD`, `JAI_VM_COLD_PATH`);
   `vm_coverage.cpp` (a diagnostic build) uses `dbghelp` on MSVC.
@@ -88,6 +95,14 @@ and recursive assignment and type parsing are not covered by that counter.
   `memcpy` of its component words into the trivially-copyable `math_adapter<T>::native_type`.
   cpp-bound reads decode through `unchecked_as_int()/unchecked_as_float()` over pointers to
   genuinely-typed host variables.
+- **32-bit hosts**: `script_value` is two pointers and the 16-byte storage (24 bytes); the payload union is `alignas(8)`.
+  What must not depend on the pointer width is 64-bit there too: map key hashes (`map_key_mix`, the slot hashes and the
+  home slot), so a map keyed by numbers lays out and destroys its entries in the same order on every host; binary
+  widths and layout totals (`binary::width`, `binary::layout`), which span the script int range, with
+  `binary::allocation_size` failing an allocation past the address space as the allocation would; and a script count
+  that sizes a builtin's growth (`detail::saturating_count`: `repeat`, `pad_left`, `pad_right`, `pad_center`), so the memory
+  cap sees the real request. A 32-bit test binary reserves 32 MB stacks, not 128 MB: every thread reserves the image's
+  stack size, and a dozen 128 MB reserves exhaust the address space.
 
 ## 3. Compilers
 
@@ -97,6 +112,16 @@ windows-msvc, linux-gcc (g++-14) and linux-clang, each in Debug and Release, thr
 `serialization/json_archive.hpp` keys `from_chars_double` on `__cpp_lib_to_chars` and falls back
 to `strtod` (locale decimal point swapped in, ERANGE → `result_out_of_range`).
 GCC/Clang warn `-Winvalid-offsetof` at the one `strong_ptr` site (§2); the offset is correct.
+
+The Android NDK (r27c: Clang 18, libc++) builds every target for arm64-v8a, armeabi-v7a, x86_64 and x86;
+`tools/ci/gates.sh android` cross-compiles the library and the suites (targeted.sh picks it when the library changes).
+An NDK under a path with spaces needs `-DCMAKE_CXX_FLAGS=--driver-mode=g++`: CMake hands clang++ its 8.3 short name,
+which no longer selects the C++ driver, so libc++ goes unlinked (the gate adds it). A 32-bit Windows build (MSVC x86)
+runs the suites; it is the 32-bit runtime check while no Android device or emulator runs them.
+
+A member a host-visible template calls is defined in `class_definition.hpp` or out of line in the library, never only
+in `class_runtime.hpp`: GCC and Clang at -O2 inline the library's own uses and emit no copy, so a host (or a library
+file that does not include `class_runtime.hpp`) fails to link; MSVC hides this by keeping the COMDAT.
 
 ## 4. JAISCRIPT_WRAP_ON_OVERFLOW
 
@@ -109,7 +134,8 @@ full suite on both backends.
 ## 5. What is guaranteed vs Windows-only
 
 Guaranteed (standard C++20, built by CI on three compilers):
-- Everything in `include/jaiscript/` and `source/implementation/`, with the guarded sites of §1.
+- Everything in `include/jaiscript/` and `source/implementation/`, with the guarded sites of §1, on 64-bit and 32-bit
+  hosts (§2, §3).
 - jaibite files written on any conforming host load on any other (§2).
 
 Windows-only (all deliberate, all guarded):

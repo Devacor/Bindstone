@@ -26,7 +26,7 @@
 #include <jaiscript/core/types.hpp>   // script_int
 #include <cstdint>
 #include <limits>
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && defined(_M_X64)
 #include <intrin.h>                    // _mul128 for single-instruction signed-mul overflow
 #endif
 
@@ -61,7 +61,7 @@ namespace jai {
             const bool ov = __builtin_mul_overflow(static_cast<long long>(a), static_cast<long long>(b), &ll);
             out = static_cast<script_int>(ll);
             return ov;
-#elif defined(_MSC_VER)
+#elif defined(_MSC_VER) && defined(_M_X64)   // _mul128 is x64-only
             __int64 hi = 0;
             const __int64 lo = _mul128(a, b, &hi);  // 128-bit signed product (one imul)
             out = static_cast<script_int>(lo);

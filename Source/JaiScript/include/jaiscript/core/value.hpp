@@ -828,6 +828,9 @@ namespace detail {
 #define JAI_TYPED_ARRAY_VIEW_TEXT(script, cpp) \
             "array<" script "> is a typed buffer: the script_value vector view exists only for array<var> " \
             "(iterate with script_array::for_each, extract as<std::vector<" cpp ">>, or assign to an array<var> first)"
+#define JAI_VECTOR_ARRAY_VIEW_TEXT(script) \
+            "array<" script "> is a typed buffer: the script_value vector view exists only for array<var> " \
+            "(iterate with script_array::for_each, or assign to an array<var> first)"
         // The one error the array<var> view gives for a typed node, naming the node's element type
         static constexpr const char* typed_array_vector_view_message(script_array::kind_t kind) noexcept {
             switch (kind) {
@@ -841,10 +844,17 @@ namespace detail {
                 case script_array::kind_t::obj:
                     return "an array of a class type is a typed buffer: the script_value vector view exists only for array<var> "
                            "(iterate with script_array::for_each, or assign to an array<var> first)";
+                case script_array::kind_t::v2: return JAI_VECTOR_ARRAY_VIEW_TEXT("math::vec2");
+                case script_array::kind_t::iv2: return JAI_VECTOR_ARRAY_VIEW_TEXT("math::ivec2");
+                case script_array::kind_t::v3: return JAI_VECTOR_ARRAY_VIEW_TEXT("math::vec3");
+                case script_array::kind_t::iv3: return JAI_VECTOR_ARRAY_VIEW_TEXT("math::ivec3");
+                case script_array::kind_t::v4: return JAI_VECTOR_ARRAY_VIEW_TEXT("math::vec4");
+                case script_array::kind_t::rgba: return JAI_VECTOR_ARRAY_VIEW_TEXT("math::color");
                 case script_array::kind_t::hetero: break;
             }
             return "";
         }
+#undef JAI_VECTOR_ARRAY_VIEW_TEXT
 #undef JAI_TYPED_ARRAY_VIEW_TEXT
         // Unchecked array accessor - caller must verify is_array() AND that the node is
         // dynamic (array<var>) first: array<int>/array<float> are raw buffers by their
@@ -1927,8 +1937,8 @@ namespace detail {
         // Operators
         bool operator==(const script_value& other) const;
         // the map-key hash: equal for keys operator<=> calls equivalent (core/script_map.hpp)
-        size_t map_key_hash() const noexcept;
-        static size_t map_string_key_hash(std::string_view text) noexcept;
+        uint64_t map_key_hash() const noexcept;
+        static uint64_t map_string_key_hash(std::string_view text) noexcept;
         bool operator!=(const script_value& other) const { return !(*this == other); }
         
         // C++20 spaceship operator for complete ordering
@@ -2073,7 +2083,7 @@ namespace detail {
         struct reference_holder {
             type_info_ptr container_element_type = nullptr;  // For subscript/field refs: the element/field type constraint
 
-            static constexpr size_t cell_storage_size = 32;   // == sizeof(script_value), gated in value.cpp
+            static constexpr size_t cell_storage_size = 2 * sizeof(void*) + 16;   // == sizeof(script_value), gated in value.cpp
             alignas(8) unsigned char cell_storage[cell_storage_size];
             // Only an unresolved mixed-mode call uses this: cell() is its evaluated value snapshot, while this
             // retained source supplies reference/shared-handle binding after overload selection. Never script-visible.
@@ -2408,7 +2418,7 @@ namespace detail {
             template <typename T> JAI_FORCEINLINE const T& get() const noexcept { assert(index_ == index_of<T>()); return alt<index_of<T>()>(); }
 
         private:
-            union payload {
+            union alignas(8) payload {   // 8-aligned on 32-bit hosts too, where int64_t may align to 4
                 payload() noexcept {}
                 ~payload() noexcept {}
                 script_int i;
@@ -2784,9 +2794,9 @@ namespace detail {
     }
 
 
-    // 8B type_info_ + 8B engine_ + 16B variant (8B max payload + index)
-    static_assert(sizeof(script_value) == 32 && alignof(script_value) == 8,
-                  "script_value must stay 32 bytes / 8-aligned");
+    // type_info_ + engine_ + 16B variant (8B max payload + index): 32 bytes on a 64-bit host, 24 on a 32-bit one
+    static_assert(sizeof(script_value) == 2 * sizeof(void*) + 16 && alignof(script_value) == 8,
+                  "script_value must stay two pointers and a 16-byte variant, 8-aligned");
     static_assert(std::is_nothrow_move_constructible_v<script_value>);
 
     // ---- script_array kind-dispatched element access (script_value complete here) ----

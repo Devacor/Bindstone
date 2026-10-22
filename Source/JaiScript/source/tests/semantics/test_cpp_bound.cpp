@@ -727,8 +727,8 @@ public:
         });
 
         test("t2_static_gate_sizeof", [this]() {
-            static_assert(sizeof(jai::script_value) == 32 && alignof(jai::script_value) == 8, "script_value layout gate");
-            check_eq((size_t)32, sizeof(jai::script_value), "script_value is 32 bytes");
+            static_assert(sizeof(jai::script_value) == 2 * sizeof(void*) + 16 && alignof(jai::script_value) == 8, "script_value layout gate");
+            check_eq(2 * sizeof(void*) + 16, sizeof(jai::script_value), "script_value is two pointers and a 16-byte variant");
         });
 
         test("pin_unregistered_class_bound", [this]() {

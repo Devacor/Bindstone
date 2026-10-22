@@ -202,7 +202,7 @@ namespace jai::detail {
                 const size_t len = utf8::length(node(self), cache);
                 const script_int want = args[0].unchecked_as_int();
                 if (want <= static_cast<script_int>(len)) return R(self);
-                const size_t total = static_cast<size_t>(want) - len;
+                const size_t total = saturating_count(want) - len;
                 if (!builtin_memory_charge(ctx.get_engine(), total, fill.size())) [[unlikely]] { return builtin_memory_cap(ctx.get_engine()); }
                 const size_t left = pk.side < 0 ? total : pk.side > 0 ? 0 : total / 2;
                 std::string lhs, rhs;

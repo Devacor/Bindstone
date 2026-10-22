@@ -128,7 +128,7 @@ namespace stdlib {
                 detail::format_spec parsed;
                 bool index_ok = index_part.empty() || is_all_digits(index_part);
                 if (index_ok && detail::parse_format_spec(fmt_part, parsed)) {
-                    size_t arg_index;
+                    unsigned long long arg_index;   // a written index stays 64-bit until it is known to name an argument
                     if (index_part.empty()) {
                         arg_index = next_arg;
                         next_arg++;
@@ -136,7 +136,7 @@ namespace stdlib {
                         arg_index = std::stoull(index_part) + arg_offset;
                     }
                     if (arg_index < args.size()) {
-                        result += detail::format_value_with_spec(args[arg_index], parsed, fmt_part);
+                        result += detail::format_value_with_spec(args[static_cast<size_t>(arg_index)], parsed, fmt_part);
                     }
                 } else {
                     result += "{" + spec + "}";
@@ -144,9 +144,9 @@ namespace stdlib {
             } else {
                 // {n} - use positional argument
                 try {
-                    size_t arg_index = std::stoull(spec) + arg_offset;
+                    const unsigned long long arg_index = std::stoull(spec) + arg_offset;
                     if (arg_index < args.size()) {
-                        result += args[arg_index].to_string();
+                        result += args[static_cast<size_t>(arg_index)].to_string();
                     }
                 } catch (...) {
                     // Invalid index, ignore

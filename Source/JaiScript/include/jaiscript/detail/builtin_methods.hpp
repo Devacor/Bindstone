@@ -92,6 +92,10 @@ namespace jai {
         inline size_t saturating_text_size(size_t a_size, size_t a_count) noexcept {
             return a_size != 0 && a_count > SIZE_MAX / a_size ? SIZE_MAX : a_size * a_count;
         }
+        // a non-negative script count as a size, saturated where size_t is narrower than script_int (a 32-bit host)
+        inline size_t saturating_count(script_int a_count) noexcept {
+            return static_cast<uint64_t>(a_count) > SIZE_MAX ? SIZE_MAX : static_cast<size_t>(a_count);
+        }
     }
 
     namespace detail {

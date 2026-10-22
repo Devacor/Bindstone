@@ -23,8 +23,9 @@ public:
 	json(bool b) : kind_(kind::boolean), bool_(b) {}
 	json(int v) : kind_(kind::number), int_(v), is_int_(true) {}
 	json(int64_t v) : kind_(kind::number), int_(v), is_int_(true) {}
-	json(uint32_t v) : kind_(kind::number), int_(v), is_int_(true) {}
-	json(size_t v) : kind_(kind::number), int_(static_cast<int64_t>(v)), is_int_(true) {}
+	json(unsigned v) : kind_(kind::number), int_(v), is_int_(true) {}
+	json(unsigned long v) : kind_(kind::number), int_(static_cast<int64_t>(v)), is_int_(true) {}
+	json(unsigned long long v) : kind_(kind::number), int_(static_cast<int64_t>(v)), is_int_(true) {}
 	json(double v) : kind_(kind::number), double_(v) {}
 	json(const char* s) : kind_(kind::string), string_(s) {}
 	json(std::string s) : kind_(kind::string), string_(std::move(s)) {}

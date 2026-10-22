@@ -2494,13 +2494,13 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
 // The map-key hash (core/script_map.hpp): keys operator<=> calls equivalent hash alike. The type rank seeds it, then the payload
 // operator<=> compares: ints and chars by value, floats by value with every NaN and both zeros hashing alike (equality stays
 // operator<=>'s), strings and utf8_strings by bytes, bools, and every heavy kind by the identity operator<=> orders by.
-size_t script_value::map_string_key_hash(std::string_view text) noexcept {
-    return std::hash<std::string_view>{}(text) ^ (static_cast<size_t>(script_value_type::jai_string_type) * 0x9E3779B97F4A7C15ull);
+uint64_t script_value::map_string_key_hash(std::string_view text) noexcept {
+    return std::hash<std::string_view>{}(text) ^ (static_cast<uint64_t>(script_value_type::jai_string_type) * 0x9E3779B97F4A7C15ull);
 }
 
-size_t script_value::map_key_hash() const noexcept {
+uint64_t script_value::map_key_hash() const noexcept {
     const script_value_type t = type();
-    const size_t seed = static_cast<size_t>(t) * 0x9E3779B97F4A7C15ull;
+    const uint64_t seed = static_cast<uint64_t>(t) * 0x9E3779B97F4A7C15ull;
     auto mix = [t](uint64_t x) { return map_key_mix(t, x); };
     switch (t) {
         case script_value_type::jai_null_type: return mix(0);
@@ -2787,6 +2787,7 @@ int map_class_key_order(const script_value& a, const script_value& b) {
 namespace jai::detail {
 
 float_text_result parse_float_text(const char* text, size_t length) noexcept {
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
     const char* const last = text + length;
     const char* p = text + (length != 0 && text[0] == '-');
     const bool hex = p + 1 < last && p[0] == '0' && (p[1] == 'x' || p[1] == 'X');
@@ -2797,6 +2798,9 @@ float_text_result parse_float_text(const char* text, size_t length) noexcept {
         const auto [end, ec] = std::from_chars(text, last, value);
         if (ec == std::errc{}) { return { value, end, false }; }
     }
+#else
+    (void)length;   // libc++ ships integer-only std::from_chars
+#endif
     return parse_float_text_strtod(text);
 }
 

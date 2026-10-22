@@ -25,6 +25,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -35,8 +36,8 @@ namespace jai::binary {
 
 	struct width {
 		kind k = kind::int8;
-		size_t length = 0;
-		size_t size() const noexcept {
+		uint64_t length = 0;   // 64-bit on a 32-bit host too: a width spans the script int range
+		uint64_t size() const noexcept {
 			switch (k) {
 				case kind::int8: case kind::uint8: return 1;
 				case kind::int16: case kind::uint16: return 2;
@@ -68,7 +69,13 @@ namespace jai::binary {
 		bool is_float() const noexcept { return k == kind::float32 || k == kind::float64; }
 	};
 
-	inline std::string count_text(size_t n, const char* one, const char* many) { return std::to_string(n) + (n == 1 ? one : many); }
+	inline std::string count_text(uint64_t n, const char* one, const char* many) { return std::to_string(n) + (n == 1 ? one : many); }
+
+	// a 64-bit byte count as an allocation size: past the address space (a 32-bit host) it fails as that allocation would
+	inline size_t allocation_size(uint64_t n) {
+		if (n > SIZE_MAX) [[unlikely]] { throw std::bad_alloc(); }
+		return static_cast<size_t>(n);
+	}
 
 	inline std::string float_text(double v) {
 		if (std::isnan(v)) { return std::string(jai::detail::k_nan_text); }
@@ -146,7 +153,7 @@ namespace jai::binary {
 	}
 
 	inline void store_integer(kind k, script_int v, unsigned char* p, bool big) noexcept {
-		store_bits(p, static_cast<uint64_t>(v), width{k}.size(), big);
+		store_bits(p, static_cast<uint64_t>(v), static_cast<size_t>(width{k}.size()), big);
 	}
 
 	inline void store_float(kind k, script_float v, unsigned char* p, bool big) noexcept {
@@ -178,8 +185,8 @@ namespace jai::binary {
 	class layout {
 	public:
 		std::vector<field> fields;
-		size_t bytes = 0;
-		size_t size() const noexcept { return bytes; }
+		uint64_t bytes = 0;
+		uint64_t size() const noexcept { return bytes; }
 	};
 
 	[[noreturn]] JAI_NOINLINE inline void raise(const std::string& text) { throw std::runtime_error(text); }
@@ -195,7 +202,7 @@ namespace jai::binary {
 	}
 
 	// "" when s fits an n-byte text field (no NUL inside, at most n bytes), else why not
-	inline std::string text_field_misfit(const std::string& s, size_t n) {
+	inline std::string text_field_misfit(const std::string& s, uint64_t n) {
 		std::string why = embedded_nul(s);
 		if (why.empty() && s.size() > n) { why = "the text is " + count_text(s.size(), " byte", " bytes") + ", longer than text(" + std::to_string(n) + ")"; }
 		return why;
@@ -273,7 +280,7 @@ namespace jai::binary {
 				if (f.key.unchecked_as_string() == text) { raise(std::string(who) + " repeats the field name '" + text + "'"); }
 			}
 			// the total is a script int (layout.size()) and the bound every read and pack trusts: it must not wrap
-			if (w->size() > static_cast<size_t>(std::numeric_limits<script_int>::max()) - out.bytes) {
+			if (w->size() > static_cast<uint64_t>(std::numeric_limits<script_int>::max()) - out.bytes) {
 				raise(std::string(who) + " fields total more than " + std::to_string(std::numeric_limits<script_int>::max()) + " bytes");
 			}
 			out.fields.push_back(field{script_value(text, eng), *w});
@@ -310,12 +317,12 @@ namespace jai::binary {
 			pos_ = static_cast<size_t>(to);
 		}
 
-		[[noreturn]] JAI_NOINLINE void past_end(size_t n, std::string_view what) const {
+		[[noreturn]] JAI_NOINLINE void past_end(uint64_t n, std::string_view what) const {
 			const size_t left = remaining();
 			raise("Cannot read " + std::string(what) + " at position " + std::to_string(pos_) + ": " + count_text(n, " byte wanted, ", " bytes wanted, ") +
 				std::to_string(left) + (left == 1 ? " remains" : " remain"));
 		}
-		[[noreturn]] JAI_NOINLINE void past_end_counted(size_t c, const char* what, script_int n) const {
+		[[noreturn]] JAI_NOINLINE void past_end_counted(uint64_t c, const char* what, script_int n) const {
 			past_end(c, std::string(what) + "(" + std::to_string(n) + ")");
 		}
 		[[noreturn]] JAI_NOINLINE void past_end_field(const field& f) const {
@@ -332,31 +339,31 @@ namespace jai::binary {
 			return advance(n);
 		}
 		// a counted read (text, bytes): its name built only for the error
-		const unsigned char* take_counted(size_t c, const char* what, script_int n) {
+		const unsigned char* take_counted(uint64_t c, const char* what, script_int n) {
 			if (c > remaining()) { past_end_counted(c, what, n); }
-			return advance(c);
+			return advance(static_cast<size_t>(c));
 		}
 		const unsigned char* take_field(const field& f) {
 			if (f.w.size() > remaining()) { past_end_field(f); }
-			return advance(f.w.size());
+			return advance(static_cast<size_t>(f.w.size()));
 		}
-		size_t count_arg(script_int n, const char* what) const {
+		uint64_t count_arg(script_int n, const char* what) const {
 			if (n < 0) { raise(std::string("Cannot read ") + what + "(" + std::to_string(n) + "): a count cannot be negative"); }
-			return static_cast<size_t>(n);
+			return static_cast<uint64_t>(n);
 		}
 
 		script_int integer(kind k) {
 			static constexpr std::string_view names[] = {"int8", "int16", "int32", "int64", "uint8", "uint16", "uint32"};
 			const width w{k};
-			return load_integer(k, take(w.size(), names[static_cast<size_t>(k)]), big_);
+			return load_integer(k, take(static_cast<size_t>(w.size()), names[static_cast<size_t>(k)]), big_);
 		}
 		script_float floating(kind k) {
 			return load_float(k, take(k == kind::float32 ? 4 : 8, k == kind::float32 ? std::string_view("float32") : std::string_view("float64")), big_);
 		}
 		// an n-byte text field: the cursor moves n, the text is the bytes before the first NUL (all n when there is none)
 		std::string text(script_int n) {
-			const size_t c = count_arg(n, "text");
-			return load_text(take_counted(c, "text", n), c);
+			const uint64_t c = count_arg(n, "text");
+			return load_text(take_counted(c, "text", n), static_cast<size_t>(c));
 		}
 		// a C string at the cursor: the bytes before the next NUL, the cursor past the NUL. The scan reads at most the
 		// remaining bytes and the engine's binary_scan_limit (the host's; no script can raise it); no NUL in reach raises,
@@ -377,16 +384,16 @@ namespace jai::binary {
 			return std::string(p, len);
 		}
 		script_value bytes(script_int n) {
-			const size_t c = count_arg(n, "bytes");
+			const uint64_t c = count_arg(n, "bytes");
 			const unsigned char* p = take_counted(c, "bytes", n);
-			return byte_array(get_engine(), p, c);
+			return byte_array(get_engine(), p, static_cast<size_t>(c));
 		}
 
 		script_value read_field(const field& f) {
 			const unsigned char* p = take_field(f);
 			engine* eng = get_engine();
-			if (f.w.k == kind::text) { return script_value(load_text(p, f.w.length), eng); }
-			if (f.w.k == kind::bytes) { return byte_array(eng, p, f.w.length); }
+			if (f.w.k == kind::text) { return script_value(load_text(p, static_cast<size_t>(f.w.length)), eng); }
+			if (f.w.k == kind::bytes) { return byte_array(eng, p, static_cast<size_t>(f.w.length)); }
 			if (f.w.is_float()) { return script_value(load_float(f.w.k, p, big_), eng); }
 			return script_value(load_integer(f.w.k, p, big_), eng);
 		}
@@ -453,11 +460,11 @@ namespace jai::binary {
 
 		void integer(kind k, script_int v) {
 			if (!integer_fits(k, v)) [[unlikely]] { raise_write_misfit(k, v); }
-			store_integer(k, v, room(width{k}.size()), big_);
+			store_integer(k, v, room(static_cast<size_t>(width{k}.size())), big_);
 		}
 		void floating(kind k, script_float v) {
 			if (!float_fits(k, v)) [[unlikely]] { raise_write_misfit(k, v); }
-			store_float(k, v, room(width{k}.size()), big_);
+			store_float(k, v, room(static_cast<size_t>(width{k}.size())), big_);
 		}
 		// a C string: the text, then a NUL
 		void text(const std::string& s) {
@@ -469,9 +476,10 @@ namespace jai::binary {
 		// an n-byte text field: the text, then NULs to n (a text of exactly n bytes fills it); a longer text raises
 		void text(const std::string& s, script_int n) {
 			if (n < 0) { raise("Cannot write text(s, " + std::to_string(n) + "): a count cannot be negative"); }
-			const std::string why = text_field_misfit(s, static_cast<size_t>(n));
+			const std::string why = text_field_misfit(s, static_cast<uint64_t>(n));
 			if (!why.empty()) { raise("Cannot write text: " + why); }
-			store_text_field(room(static_cast<size_t>(n)), s, static_cast<size_t>(n));
+			const size_t length = allocation_size(static_cast<uint64_t>(n));
+			store_text_field(room(length), s, length);
 		}
 		// raw bytes as they are: a string's, or an array's (each 0 to 255)
 		void bytes(const script_value& b) {
@@ -488,7 +496,7 @@ namespace jai::binary {
 				if (!s) { why = value_kind_name(v) + " does not fit " + f.w.name(); return false; }
 				why = text_field_misfit(*s, f.w.length);
 				if (!why.empty()) { return false; }
-				store_text_field(p, *s, f.w.length);
+				store_text_field(p, *s, static_cast<size_t>(f.w.length));
 				return true;
 			}
 			if (f.w.is_bytes()) {
@@ -519,8 +527,9 @@ namespace jai::binary {
 			const script_value& m = values.deref();
 			if (!m.is_map()) { raise("pack expects a map of field values, got " + value_kind_name(m)); }
 			const script_map& map = m.as_map();
-			if (pos_ + l.bytes > charged_) { charge_growth(pos_ + l.bytes); }   // the staging is the growth: charged before it exists
-			std::string staged(l.bytes, '\0');
+			const size_t staging = allocation_size(l.bytes);
+			if (pos_ + staging > charged_) { charge_growth(pos_ + staging); }   // the staging is the growth: charged before it exists
+			std::string staged(staging, '\0');
 			unsigned char* p = reinterpret_cast<unsigned char*>(staged.data());
 			std::string why;
 			for (const auto& f : l.fields) {
@@ -528,7 +537,7 @@ namespace jai::binary {
 				auto it = map.find(map_string_key_probe{name});
 				if (it == map.end()) { raise("Cannot pack field '" + name + "': the map has no '" + name + "'"); }
 				if (!encode(f, it->second, p, big_, why)) { raise("Cannot pack field '" + name + "': " + why); }
-				p += f.w.size();
+				p += static_cast<size_t>(f.w.size());
 			}
 			put(staged.data(), staged.size());
 		}
@@ -709,7 +718,7 @@ namespace jai::binary {
 			auto ctor = global->get(std::string("binary::") + cls);
 			if (ctor) { ns->variables[eng.symbolize(cls)] = ctor.value(); }
 		}
-		auto width_value = [e](kind k, size_t length) { return e->make_object(std::make_shared<width>(width{k, length})); };
+		auto width_value = [e](kind k, uint64_t length) { return e->make_object(std::make_shared<width>(width{k, length})); };
 		const std::pair<const char*, kind> widths[] = {
 			{"int8", kind::int8}, {"int16", kind::int16}, {"int32", kind::int32}, {"int64", kind::int64}, {"uint8", kind::uint8},
 			{"uint16", kind::uint16}, {"uint32", kind::uint32}, {"float32", kind::float32}, {"float64", kind::float64}};
@@ -718,13 +727,13 @@ namespace jai::binary {
 			if (args.size() != 1 || !args[0].deref().is_int()) { raise("binary::text expects one int length"); }
 			const script_int n = args[0].deref().as_int();
 			if (n < 0) { raise("binary::text expects a length of 0 or more, got " + std::to_string(n)); }
-			return width_value(kind::text, static_cast<size_t>(n));
+			return width_value(kind::text, static_cast<uint64_t>(n));
 		}, &eng);
 		ns->variables[eng.symbolize("bytes")] = script_value::make_function([width_value](const std::vector<script_value>& args) -> checked_result<script_value> {
 			if (args.size() != 1 || !args[0].deref().is_int()) { raise("binary::bytes expects one int length"); }
 			const script_int n = args[0].deref().as_int();
 			if (n < 0) { raise("binary::bytes expects a length of 0 or more, got " + std::to_string(n)); }
-			return width_value(kind::bytes, static_cast<size_t>(n));
+			return width_value(kind::bytes, static_cast<uint64_t>(n));
 		}, &eng);
 		add_lanes(eng);
 		ns->variables[eng.symbolize("layout")] = script_value::make_function([e, width_id](const std::vector<script_value>& args) -> checked_result<script_value> {

@@ -62,11 +62,17 @@ target_include_directories(jaiscript_tests PRIVATE
 )
 
 # Platform-specific settings
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    # Every thread reserves the image's stack size: at 128 MB a dozen threads exhaust a 32-bit address space
+    set(JAISCRIPT_TEST_STACK_OPTIONS /STACK:33554432 /LARGEADDRESSAWARE)
+else()
+    set(JAISCRIPT_TEST_STACK_OPTIONS /STACK:134217728)
+endif()
 if(MSVC)
     target_compile_options(jaiscript_tests PRIVATE /W3)
     # Deep recursion exceeds the 1 MB default stack in Debug; a larger stack lets the
     # catchable depth-limit error actually fire.
-    target_link_options(jaiscript_tests PRIVATE /STACK:134217728)
+    target_link_options(jaiscript_tests PRIVATE ${JAISCRIPT_TEST_STACK_OPTIONS})
     # The Debug PDB passes MSVC's 4 GB limit at the default 4 KB page size (LNK1140); 8 KB pages raise it to 8 GB
     target_link_options(jaiscript_tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/PDBPAGESIZE:8192>)
 else()
@@ -143,7 +149,7 @@ target_include_directories(jaiscript_fuzz PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 if(MSVC)
     target_compile_options(jaiscript_fuzz PRIVATE /W3)
     # Same deep-recursion headroom as jaiscript_tests (catchable depth-limit errors).
-    target_link_options(jaiscript_fuzz PRIVATE /STACK:134217728)
+    target_link_options(jaiscript_fuzz PRIVATE ${JAISCRIPT_TEST_STACK_OPTIONS})
 else()
     target_compile_options(jaiscript_fuzz PRIVATE -Wall -Wextra)
 endif()

@@ -70,6 +70,9 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
   `source/tests/fuzz/fuzz_harness.hpp`, naming the backend at fault; fixing it removes the entry).
 - The example hash gates and the language-server tests, exactly as CI runs them:
   `BIN=build/bin bash tools/ci/gates.sh all` (or name gates: `tests-vm gloom crawler demoreel gatorquest lsp`).
+- A library or header change: `bash tools/ci/gates.sh android` cross-compiles the library and the suites with the
+  Android NDK (libc++, the standard library Apple platforms use, and 32-bit armeabi-v7a); it skips when no NDK is
+  installed, and targeted.sh picks it.
 - A compiler change: dump `jaiscript --manifest=<file> <script>` before and after over the affected programs; the
   manifests (every chunk field, exact constant bits) change only where the change intends.
 - A change to what the AST serializer writes bumps `k_jaibite_version` (`include/jaiscript/detail/ast_serializer.hpp`).

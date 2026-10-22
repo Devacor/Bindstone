@@ -15,6 +15,7 @@ public:
 		// m[k] op= v on present and missing keys of string (lengths 0 to 36), float and int maps, its value as an expression, ++/--, the zero texts, conversion into an int value, a var map's missing key, NaN and signed-zero float keys, string +=; keys found again through copies with their own nodes
 		test("compound_assignments_on_map_entries_and_string_keys_of_every_length", [this]() {
 			auto e = make_engine();
+			e->execution_budget(0);   // a Debug build runs these past the default budget
 			jai::stdlib::register_all(e);
 			const std::string got = e->execute(R"JAI(
 map<string, int> m = {};
@@ -65,6 +66,7 @@ out;
 		// to_json compact and indented over scalars, escapes, containers, tagged maps, math values, instances and handles; from_json of plain documents (duplicate keys keep the first), archive records, and documents whose maps share key strings
 		test("to_json_and_from_json_texts", [this]() {
 			auto e = make_engine();
+			e->execution_budget(0);   // a Debug build runs these past the default budget
 			jai::stdlib::register_all(e);
 			const std::string got = e->execute(R"JAI(
 class Pt { int x = 1; float y = 2.5; string name = "p\"q"; array<int> tags = [1, 2]; }
@@ -146,6 +148,7 @@ out;
 		// stable sorts across the block boundary (255..1500 elements): by-reference, by-value and int comparators make the same calls in the same number; a comparator that writes fields or reassigns its reference parameter
 		test("sort_comparators_merge_and_call_alike", [this]() {
 			auto e = make_engine();
+			e->execution_budget(0);   // a Debug build runs these past the default budget
 			jai::stdlib::register_all(e);
 			const std::string got = e->execute(R"JAI(
 class Item {

@@ -1081,6 +1081,32 @@ public:
             check_throws([this]() { auto engine = make_engine(); engine->execute("float f = 1e999;"); });
             check_throws([this]() { auto engine = make_engine(); engine->execute("float f = 1e-400;"); });
         });
+
+        test("raw_strings_hold_their_text_as_written", [this, es, ei]() {
+            check_eq(std::string("C:\\games\\save.dat"), es(R"JAI(R"(C:\games\save.dat)";)JAI"));
+            check_eq(std::string("\\d+\\.\\d*"), es(R"JAI(R"(\d+\.\d*)";)JAI"));
+            check_eq(std::string("say(\"hi\")"), es(R"JAI(R"js(say("hi"))js";)JAI"));
+            check_eq(std::string("a)\"b"), es(R"JAI(R"x(a)"b)x";)JAI"));
+            check_eq(std::string(""), es(R"JAI(R"()";)JAI"));
+            check_eq(std::string("one\ntwo\nthree"), es("R\"(one\r\ntwo\rthree)\";"));   // a line ending inside is one \n
+            check_eq(std::string("x\\ny"), es(R"JAI("x" + R"(\n)" + "y";)JAI"));
+            check_eq(script_int(6), ei("var R = 5; R + 1;"));   // R before anything but a quote is a name
+        });
+
+        test("raw_string_errors_name_the_problem", [this]() {
+            auto parse_text = [this](const std::string& src) {
+                auto engine = make_engine();
+                try { engine->execute(src); } catch (const std::exception& e) { return std::string(e.what()); }
+                return std::string("no error");
+            };
+            auto check_contains = [this](const std::string& text, const std::string& part) { check_true(text.find(part) != std::string::npos, text); };
+            check_contains(parse_text("string s = R\"(a\nb\nc)\";\nint x = \"no\";"), ":4:");   // the lines inside count
+            check_contains(parse_text("R\"(abc"), "Unterminated raw string literal: no )\" closes it");
+            check_contains(parse_text("R\"ab(abc)a\""), "Unterminated raw string literal: no )ab\" closes it");
+            check_contains(parse_text("R\"a b(x)a b\""), "Invalid raw string delimiter: up to 16 characters before '(', none a space, parenthesis, backslash or quote");
+            check_contains(parse_text("R\"12345678901234567(x)12345678901234567\""), "Invalid raw string delimiter");
+            check_contains(parse_text("R\"abc"), "Unterminated raw string literal");
+        });
     }
 };
 

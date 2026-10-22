@@ -119,6 +119,7 @@ namespace jai {
 
         token scan_number();
         token scan_string();
+        token scan_raw_string();
         token scan_char();
         token scan_identifier();
         void scan_template_string();

@@ -72,6 +72,15 @@
         var j2 = src.indexOf("*/", i + 2); j2 = j2 < 0 ? n : j2 + 2;
         push("tk-com", src.slice(i, j2)); i = j2; continue;
       }
+      // raw string: R"delim( ... )delim"
+      if (c === "R" && src[i + 1] === '"' && kw === JAI_KW && !(i > 0 && isIdent(src[i - 1]))) {
+        var open = src.indexOf("(", i + 2);
+        if (open >= 0 && open - (i + 2) <= 16) {
+          var close = src.indexOf(")" + src.slice(i + 2, open) + '"', open + 1);
+          var stop = close < 0 ? n : close + (open - i);
+          push("tk-str", src.slice(i, stop)); i = stop; continue;
+        }
+      }
       // string
       if (c === '"' || (c === "`" && kw === JAI_KW)) {
         var k = i + 1;

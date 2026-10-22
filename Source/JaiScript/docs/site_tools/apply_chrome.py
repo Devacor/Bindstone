@@ -68,6 +68,8 @@ GUIDE = [
      "The math value types: vec2, vec3, vec4, ivec2, ivec3 and color, their operators and value semantics, the component-wise and geometry libraries, perceptual color mixing, and packed vector arrays."),
     ("16-parallel.html", "Parallel Loops",
      "parallel_for, parallel_transform and parallel_reduce: what a parallel body may and may not do, the zip form, captured reads, index writes, constructing objects, C++ calls, and reductions that are bit-identical at every worker count."),
+    ("17-web.html", "The web:: Library",
+     "The opt-in web:: library: HTML escaping and unescaping, RFC 3986 and form percent-encoding, query strings parsed and built, and URLs split into a web::url and joined back."),
 ]
 
 EMBEDDING = [
@@ -149,7 +151,7 @@ SECTION_INDEX_DESC = {
     "bridges/index.html":
         "Language bridges for programmers arriving from JavaScript, C++ or C#, and code migrations for C++ code moving to JaiScript from Cereal, Boost.Signals2, ChaiScript, sol2, Squirrel, pybind11, nlohmann::json, Qt properties or C++20 coroutines.",
     "guide/index.html":
-        "Fifteen chapters covering the whole core language - every standalone sample runs on both backends, with the output it prints.",
+        "Seventeen chapters covering the whole core language and the opt-in web:: library - every standalone sample runs on both backends, with the output it prints.",
     "embedding/index.html":
         "Nineteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, editor support, host math types, a thread pool for host work, and a web application host.",
     "examples/index.html":

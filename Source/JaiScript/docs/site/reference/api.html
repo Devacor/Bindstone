@@ -564,16 +564,6 @@ print(w.size(), &quot; &quot;, to_json(w.to_string().to_bytes()));</code></pre><
 print(v[&quot;hp&quot;], &quot; &quot;, v[&quot;tags&quot;][0]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3 a</code></pre></div>
 </div>
-<div class="api-entry" data-provider="stdlib" data-search="html_escape(value: text) -&gt; same_text_kind copy writes &amp; &lt; &gt; &quot; &#x27; as &amp;amp; &amp;lt; &amp;gt; &amp;quot; &amp;#39; (htmlspecialchars with ent_quotes); every other byte, utf-8 included, is kept. register_all() or area registration"><h3 id="api-d797214909c6"><code>html_escape(value: text) -&gt; same_text_kind</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
-<p>Writes &amp; &lt; &gt; &quot; &#x27; as &amp;amp; &amp;lt; &amp;gt; &amp;quot; &amp;#39; (htmlspecialchars with ENT_QUOTES); every other byte, UTF-8 included, is kept.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(html_escape(&quot;&lt;a title=\&quot;Tom &amp; Jerry&#x27;s\&quot;&gt;&quot;));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&amp;lt;a title=&amp;quot;Tom &amp;amp; Jerry&amp;#39;s&amp;quot;&amp;gt;</code></pre></div>
-</div>
-<div class="api-entry" data-provider="stdlib" data-search="html_unescape(value: text) -&gt; same_text_kind copy reads the html5 named references (legacy names without the ;, longest match) and numeric ones as a browser does in text; 0, surrogates and values past u+10ffff become u+fffd; anything else is kept. register_all() or area registration"><h3 id="api-4b7ecce491fd"><code>html_unescape(value: text) -&gt; same_text_kind</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
-<p>Reads the HTML5 named references (legacy names without the ;, longest match) and numeric ones as a browser does in text; 0, surrogates and values past U+10FFFF become U+FFFD; anything else is kept.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(html_unescape(&quot;&amp;lt;b&amp;gt; &amp;copy &amp;#x41;&amp;#66; &amp;bogus;&quot;));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&lt;b&gt; © AB &amp;bogus;</code></pre></div>
-</div>
 <div class="api-entry" data-provider="core" data-search="import_recheck_interval() -&gt; float configure queries import polling window in seconds. every engine"><h3 id="api-0d92d601292e"><code>import_recheck_interval() -&gt; float</code></h3><p><strong>Every engine</strong> &middot; configure</p>
 <p>Queries import polling window in seconds.</p>
 </div>
@@ -1661,6 +1651,68 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 <div class="api-entry" data-provider="core" data-search="weak_ptr&lt;t&gt;.same_as(other: var) -&gt; bool observe  every engine"><h3 id="api-3dcbafae7ec3"><code>weak_ptr&lt;T&gt;.same_as(other: var) -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
 </section>
+<section class="api-group"><h2 id="group-web">web</h2>
+<div class="api-entry" data-provider="stdlib" data-search="web::build_query(fields: map) -&gt; string copy keys and values form-encoded in the map&#x27;s key order; a number or bool as to_string writes it, an array repeats its key, a null value is left out; anything else raises. register_web()"><h3 id="api-8b3aff6e4f58"><code>web::build_query(fields: map) -&gt; string</code></h3><p><strong>register_web()</strong> &middot; copy</p>
+<p>Keys and values form-encoded in the map&#x27;s key order; a number or bool as to_string writes it, an array repeats its key, a null value is left out; anything else raises.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(web::build_query({&quot;q&quot;: &quot;jai script&quot;, &quot;page&quot;: 2, &quot;tags&quot;: [&quot;a&quot;, &quot;b c&quot;], &quot;skip&quot;: null}));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">page=2&amp;q=jai+script&amp;tags=a&amp;tags=b+c</code></pre></div>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="web::form_decode(text: text) -&gt; string copy url_decode that also reads + as a space. register_web()"><h3 id="api-391b74933acf"><code>web::form_decode(text: text) -&gt; string</code></h3><p><strong>register_web()</strong> &middot; copy</p>
+<p>url_decode that also reads + as a space.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(web::form_decode(&quot;two+words+%26+more&quot;));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">two words &amp; more</code></pre></div>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="web::form_encode(text: text) -&gt; string copy application/x-www-form-urlencoded (urlencode): a-z a-z 0-9 * - . _ stay, a space is +, every other byte is %xx. register_web()"><h3 id="api-363f5c3a0809"><code>web::form_encode(text: text) -&gt; string</code></h3><p><strong>register_web()</strong> &middot; copy</p>
+<p>application/x-www-form-urlencoded (urlencode): A-Z a-z 0-9 * - . _ stay, a space is +, every other byte is %XX.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(web::form_encode(&quot;two words &amp; more&quot;));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">two+words+%26+more</code></pre></div>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="web::html_escape(value: text) -&gt; same_text_kind copy writes &amp; &lt; &gt; &quot; &#x27; as &amp;amp; &amp;lt; &amp;gt; &amp;quot; &amp;#39; (htmlspecialchars with ent_quotes); every other byte, utf-8 included, is kept. register_web()"><h3 id="api-cf3552f63d48"><code>web::html_escape(value: text) -&gt; same_text_kind</code></h3><p><strong>register_web()</strong> &middot; copy</p>
+<p>Writes &amp; &lt; &gt; &quot; &#x27; as &amp;amp; &amp;lt; &amp;gt; &amp;quot; &amp;#39; (htmlspecialchars with ENT_QUOTES); every other byte, UTF-8 included, is kept.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(web::html_escape(&quot;&lt;a title=\&quot;Tom &amp; Jerry&#x27;s\&quot;&gt;&quot;));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&amp;lt;a title=&amp;quot;Tom &amp;amp; Jerry&amp;#39;s&amp;quot;&amp;gt;</code></pre></div>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="web::html_unescape(value: text) -&gt; same_text_kind copy reads the html5 named references (legacy names without the ;, longest match) and numeric ones as a browser does in text; 0, surrogates and values past u+10ffff become u+fffd; anything else is kept. register_web()"><h3 id="api-6034af0da4d4"><code>web::html_unescape(value: text) -&gt; same_text_kind</code></h3><p><strong>register_web()</strong> &middot; copy</p>
+<p>Reads the HTML5 named references (legacy names without the ;, longest match) and numeric ones as a browser does in text; 0, surrogates and values past U+10FFFF become U+FFFD; anything else is kept.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(web::html_unescape(&quot;&amp;lt;b&amp;gt; &amp;copy &amp;#x41;&amp;#66; &amp;bogus;&quot;));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&lt;b&gt; © AB &amp;bogus;</code></pre></div>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="web::parse_query(query: text) -&gt; map&lt;string, string&gt; copy pairs split on &amp;, form-decoded; a leading ? is skipped, a key without = is empty, an empty key is dropped, a repeated key keeps its last value. register_web()"><h3 id="api-4490a0249fcb"><code>web::parse_query(query: text) -&gt; map&lt;string, string&gt;</code></h3><p><strong>register_web()</strong> &middot; copy</p>
+<p>Pairs split on &amp;, form-decoded; a leading ? is skipped, a key without = is empty, an empty key is dropped, a repeated key keeps its last value.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(to_json(web::parse_query(&quot;?page=2&amp;tag=a+b&amp;tag=c&amp;empty&quot;)));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;empty&quot;:&quot;&quot;,&quot;page&quot;:&quot;2&quot;,&quot;tag&quot;:&quot;c&quot;}</code></pre></div>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="web::parse_query_all(query: text) -&gt; map&lt;string, var&gt; copy parse_query keeping every value of a key, an array&lt;string&gt; in arrival order. register_web()"><h3 id="api-ca894546662b"><code>web::parse_query_all(query: text) -&gt; map&lt;string, var&gt;</code></h3><p><strong>register_web()</strong> &middot; copy</p>
+<p>parse_query keeping every value of a key, an array&lt;string&gt; in arrival order.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(to_json(web::parse_query_all(&quot;tag=a+b&amp;tag=c&quot;)));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;tag&quot;:[&quot;a b&quot;,&quot;c&quot;]}</code></pre></div>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="web::parse_url(url: text) -&gt; web::url copy an rfc 3986 uri reference split as written: scheme, user, password, host, port (0 for none), path, query, fragment; a malformed host or port raises. register_web()"><h3 id="api-f0114f6089c3"><code>web::parse_url(url: text) -&gt; web::url</code></h3><p><strong>register_web()</strong> &middot; copy</p>
+<p>An RFC 3986 URI reference split as written: scheme, user, password, host, port (0 for none), path, query, fragment; a malformed host or port raises.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">web::url u = web::parse_url(&quot;https://snapjaw.example:8443/posts/7?sort=new#comments&quot;);
+print(u.host, &quot; &quot;, u.port, &quot; &quot;, u.path, &quot; &quot;, u.query);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">snapjaw.example 8443 /posts/7 sort=new</code></pre></div>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="web::url_decode(text: text) -&gt; string copy each %xx becomes its byte; a % without two hex digits stays as written; + stays a +. register_web()"><h3 id="api-94db96044ea2"><code>web::url_decode(text: text) -&gt; string</code></h3><p><strong>register_web()</strong> &middot; copy</p>
+<p>Each %XX becomes its byte; a % without two hex digits stays as written; + stays a +.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(web::url_decode(&quot;Snap%20Jaw%2FSocial%3F&quot;));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Snap Jaw/Social?</code></pre></div>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="web::url_encode(text: text) -&gt; string copy rfc 3986 percent-encoding (rawurlencode): a-z a-z 0-9 - . _ ~ stay, every other byte is %xx in upper-case hex. register_web()"><h3 id="api-9557c73c5d48"><code>web::url_encode(text: text) -&gt; string</code></h3><p><strong>register_web()</strong> &middot; copy</p>
+<p>RFC 3986 percent-encoding (rawurlencode): A-Z a-z 0-9 - . _ ~ stay, every other byte is %XX in upper-case hex.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(web::url_encode(&quot;Snap Jaw/Social? &amp; more&quot;));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Snap%20Jaw%2FSocial%3F%20%26%20more</code></pre></div>
+</div>
+</section>
+<section class="api-group"><h2 id="group-web-url">web::url</h2>
+<div class="api-entry" data-provider="stdlib" data-search="web::url.to_string() -&gt; string observe the url the fields spell: // and the authority when there is a host, a user or a port; ? and # before a non-empty query and fragment. register_web()"><h3 id="api-fbdfdb39a01e"><code>web::url.to_string() -&gt; string</code></h3><p><strong>register_web()</strong> &middot; observe</p>
+<p>The URL the fields spell: // and the authority when there is a host, a user or a port; ? and # before a non-empty query and fragment.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">web::url u = web::parse_url(&quot;http://a.example/x?y=1&quot;);
+u.path = &quot;/z&quot;;
+print(u.to_string());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">http://a.example/z?y=1</code></pre></div>
+</div>
+</section>
 </div>
 <h2 id="fields-constants">Fields, constants, and tokens</h2>
 <div class="tablewrap"><table><thead><tr><th>Name</th><th>Type</th><th>Access / provider</th><th>Contract</th></tr></thead><tbody>
@@ -1736,6 +1788,14 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 <tr><td><code>time::date.weekday</code></td><td>int</td><td>read-only / stdlib</td><td></td></tr>
 <tr><td><code>time::date.year</code></td><td>int</td><td>read/write / stdlib</td><td>Validated calendar field.</td></tr>
 <tr><td><code>time::date.yearday</code></td><td>int</td><td>read-only / stdlib</td><td></td></tr>
+<tr><td><code>web::url.fragment</code></td><td>string</td><td>read/write / stdlib</td><td>web::parse_url&#x27;s part, as written</td></tr>
+<tr><td><code>web::url.host</code></td><td>string</td><td>read/write / stdlib</td><td>web::parse_url&#x27;s part, as written</td></tr>
+<tr><td><code>web::url.password</code></td><td>string</td><td>read/write / stdlib</td><td>web::parse_url&#x27;s part, as written</td></tr>
+<tr><td><code>web::url.path</code></td><td>string</td><td>read/write / stdlib</td><td>web::parse_url&#x27;s part, as written</td></tr>
+<tr><td><code>web::url.port</code></td><td>int</td><td>read/write / stdlib</td><td>0 when the URL names no port</td></tr>
+<tr><td><code>web::url.query</code></td><td>string</td><td>read/write / stdlib</td><td>web::parse_url&#x27;s part, as written</td></tr>
+<tr><td><code>web::url.scheme</code></td><td>string</td><td>read/write / stdlib</td><td>web::parse_url&#x27;s part, as written</td></tr>
+<tr><td><code>web::url.user</code></td><td>string</td><td>read/write / stdlib</td><td>web::parse_url&#x27;s part, as written</td></tr>
 </tbody></table></div>
 </article>
 </main>

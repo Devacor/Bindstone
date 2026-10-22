@@ -1,5 +1,7 @@
 #include <jaiscript/stdlib/web_text.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/utf8.hpp>
@@ -11,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -837,6 +840,165 @@ namespace web_text_detail {
 		return nullptr;
 	}
 
+	// web::url: the parts of a URL as written (web::parse_url), and the URL they spell (to_string); port 0 is no port
+	struct url_record {
+		std::string scheme;
+		std::string user;
+		std::string password;
+		std::string host;
+		script_int port = 0;
+		std::string path;
+		std::string query;
+		std::string fragment;
+
+		std::string to_string() const {
+			std::string result;
+			if (!scheme.empty()) { result += scheme + ":"; }
+			if (!host.empty() || !user.empty() || port != 0) {
+				result += "//";
+				if (!user.empty() || !password.empty()) { result += user + (password.empty() ? "" : ":" + password) + "@"; }
+				result += host;
+				if (port != 0) { result += ":" + std::to_string(port); }
+			}
+			result += path;
+			if (!query.empty()) { result += "?" + query; }
+			if (!fragment.empty()) { result += "#" + fragment; }
+			return result;
+		}
+	};
+
+	// RFC 3986 2.3: the unreserved characters stay as they are; the form encoding (WHATWG application/x-www-form-urlencoded)
+	// keeps A-Z a-z 0-9 * - . _ and writes a space as '+'; every other byte is %XX in upper-case hex
+	bool url_unreserved(unsigned char a_c) {
+		return ascii_alnum(static_cast<char>(a_c)) || a_c == '-' || a_c == '_' || a_c == '.' || a_c == '~';
+	}
+
+	bool form_unreserved(unsigned char a_c) {
+		return ascii_alnum(static_cast<char>(a_c)) || a_c == '*' || a_c == '-' || a_c == '_' || a_c == '.';
+	}
+
+	void append_percent_encoded(std::string_view a_text, bool a_form, std::string& a_out) {
+		static constexpr char k_hex[] = "0123456789ABCDEF";
+		for (unsigned char c : a_text) {
+			if (a_form ? form_unreserved(c) : url_unreserved(c)) {
+				a_out += static_cast<char>(c);
+			} else if (a_form && c == ' ') {
+				a_out += '+';
+			} else {
+				a_out += '%';
+				a_out += k_hex[c >> 4];
+				a_out += k_hex[c & 15];
+			}
+		}
+	}
+
+	// %XX becomes its byte; a '%' without two hex digits after it stays as written (as browsers read it); a_form also reads
+	// '+' as a space
+	std::string percent_decoded(std::string_view a_text, bool a_form) {
+		std::string result;
+		result.reserve(a_text.size());
+		for (size_t i = 0; i < a_text.size(); ++i) {
+			const char c = a_text[i];
+			if (c == '%' && i + 2 < a_text.size()) {
+				const int high = digit_value(a_text[i + 1], true);
+				const int low = digit_value(a_text[i + 2], true);
+				if (high >= 0 && low >= 0) {
+					result += static_cast<char>(high * 16 + low);
+					i += 2;
+					continue;
+				}
+			}
+			result += a_form && c == '+' ? ' ' : c;
+		}
+		return result;
+	}
+
+	// a=1&b=two+words (a leading '?' allowed): each pair form-decoded, a key without '=' has an empty value, an empty key is
+	// dropped; a_each sees the pairs in order
+	template <typename Each>
+	void for_each_query_pair(std::string_view a_text, Each&& a_each) {
+		if (!a_text.empty() && a_text.front() == '?') { a_text.remove_prefix(1); }
+		size_t start = 0;
+		while (start <= a_text.size()) {
+			size_t end = a_text.find('&', start);
+			if (end == std::string_view::npos) { end = a_text.size(); }
+			const std::string_view pair = a_text.substr(start, end - start);
+			const size_t equals = pair.find('=');
+			std::string key = percent_decoded(pair.substr(0, equals), true);
+			if (!key.empty()) { a_each(std::move(key), equals == std::string_view::npos ? std::string() : percent_decoded(pair.substr(equals + 1), true)); }
+			start = end + 1;
+		}
+	}
+
+	// One value of build_query as text: a string as it is, a number or bool as to_string spells it; false for anything else
+	bool query_value_text(const script_value& a_value, std::string& a_out, engine* a_engine) {
+		if (const std::string* text = a_value.text_bytes()) {
+			a_out = *text;
+			return true;
+		}
+		if (a_value.is_int() || a_value.is_float() || a_value.is_bool() || a_value.is_char()) {
+			auto spelled = a_engine->text_of(a_value);
+			if (!spelled) { return false; }
+			a_out = spelled.value();
+			return true;
+		}
+		return false;
+	}
+
+	// RFC 3986 3: scheme ":" ["//" [userinfo "@"] host [":" port]] path ["?" query] ["#" fragment]; a reference without a
+	// scheme or an authority parses too ("/a/b?c", "//cdn.example/x", "page.html#top"). The parts are kept as written.
+	bool split_url(std::string_view a_text, url_record& a_out) {
+		if (const size_t hash = a_text.find('#'); hash != std::string_view::npos) {
+			a_out.fragment = std::string(a_text.substr(hash + 1));
+			a_text = a_text.substr(0, hash);
+		}
+		if (const size_t question = a_text.find('?'); question != std::string_view::npos) {
+			a_out.query = std::string(a_text.substr(question + 1));
+			a_text = a_text.substr(0, question);
+		}
+		const size_t colon = a_text.find(':');
+		if (colon != std::string_view::npos && colon > 0 && ((a_text[0] >= 'A' && a_text[0] <= 'Z') || (a_text[0] >= 'a' && a_text[0] <= 'z'))) {
+			const std::string_view candidate = a_text.substr(0, colon);
+			if (candidate.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-.") == std::string_view::npos) {
+				a_out.scheme = std::string(candidate);
+				a_text = a_text.substr(colon + 1);
+			}
+		}
+		if (a_text.substr(0, 2) == "//") {
+			a_text.remove_prefix(2);
+			const size_t slash = a_text.find('/');
+			std::string_view authority = a_text.substr(0, slash);
+			a_text = slash == std::string_view::npos ? std::string_view() : a_text.substr(slash);
+			if (const size_t at = authority.rfind('@'); at != std::string_view::npos) {
+				const std::string_view userinfo = authority.substr(0, at);
+				authority = authority.substr(at + 1);
+				const size_t separator = userinfo.find(':');
+				a_out.user = std::string(userinfo.substr(0, separator));
+				if (separator != std::string_view::npos) { a_out.password = std::string(userinfo.substr(separator + 1)); }
+			}
+			std::string_view port_text;
+			if (!authority.empty() && authority.front() == '[') {
+				const size_t close = authority.find(']');
+				if (close == std::string_view::npos) { return false; }
+				a_out.host = std::string(authority.substr(0, close + 1));
+				authority = authority.substr(close + 1);
+				if (!authority.empty() && authority.front() != ':') { return false; }
+				if (!authority.empty()) { port_text = authority.substr(1); }
+			} else {
+				const size_t port_colon = authority.rfind(':');
+				a_out.host = std::string(authority.substr(0, port_colon));
+				if (port_colon != std::string_view::npos) { port_text = authority.substr(port_colon + 1); }
+			}
+			if (port_text.size() > 5 || port_text.find_first_not_of("0123456789") != std::string_view::npos) { return false; }
+			int port = 0;
+			for (char d : port_text) { port = port * 10 + (d - '0'); }
+			if (port > 65535) { return false; }
+			a_out.port = port;
+		}
+		a_out.path = std::string(a_text);
+		return true;
+	}
+
 	using function_result = checked_result<script_value>;
 
 	// The one text argument the overload set admits (a string, a utf8_string or a C++-bound string), else null
@@ -864,6 +1026,19 @@ namespace web_text_detail {
 		return function_result(make_error_code(runtime_error_code::file_not_found), "{0}", a_engine->park_error_text("Cannot read file '" + a_path + "': " + a_reason));
 	}
 
+	JAI_NOINLINE function_result build_query_refusal(engine* a_engine, const std::string* a_key, const script_value& a_value) {
+		std::string text = "web::build_query: a key is not text, a number or a bool";
+		if (a_key) {
+			text = "web::build_query: the value of '" + *a_key + "' is " + (a_value.is_map() ? "a map"
+				: a_value.is_array() ? "an array holding more than text, numbers and bools" : "not text, a number, a bool or an array of them");
+		}
+		return function_result(make_error_code(runtime_error_code::type_mismatch), "{0}", a_engine->park_error_text(text));
+	}
+
+	JAI_NOINLINE function_result parse_url_refusal(engine* a_engine, const std::string& a_url) {
+		return function_result(make_error_code(runtime_error_code::invalid_operation), "{0}", a_engine->park_error_text("web::parse_url: '" + a_url + "' has a malformed host or port"));
+	}
+
 } // namespace web_text_detail
 
 	void register_web_text_functions(engine& eng_ref) {
@@ -871,25 +1046,6 @@ namespace web_text_detail {
 		engine::library_registration library(eng_ref);
 		engine* eng = &eng_ref;
 		const std::vector<param_type_info> text_parameter {param_type_info(script_value_type::jai_string_type)};
-
-		eng_ref.add_function_with_arity_and_full_types("html_escape", [eng](const std::vector<script_value>& a_args) -> function_result {
-			const script_value* text = text_argument(a_args);
-			if (!text) { return text_argument_miss(eng, "html_escape", a_args); }
-			const std::string& bytes = text->unchecked_text();
-			const size_t growth = html_escape_growth(bytes);
-			if (growth == 0) { return unchanged_text(*text, eng); }
-			if (!detail::builtin_memory_charge(eng, bytes.size() + growth)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
-			return text_like(*text, html_escape_text(bytes, growth), eng);
-		}, 1, text_parameter);
-
-		eng_ref.add_function_with_arity_and_full_types("html_unescape", [eng](const std::vector<script_value>& a_args) -> function_result {
-			const script_value* text = text_argument(a_args);
-			if (!text) { return text_argument_miss(eng, "html_unescape", a_args); }
-			const std::string& bytes = text->unchecked_text();
-			if (bytes.find('&') == std::string::npos) { return unchanged_text(*text, eng); }
-			if (!detail::builtin_memory_charge(eng, html_unescape_bound(bytes))) [[unlikely]] { return detail::builtin_memory_cap(eng); }
-			return text_like(*text, html_unescape_text(bytes), eng);
-		}, 1, text_parameter);
 
 		eng_ref.add_function_with_arity_and_full_types("sha256", [eng](const std::vector<script_value>& a_args) -> function_result {
 			const script_value* text = text_argument(a_args);
@@ -906,6 +1062,150 @@ namespace web_text_detail {
 			if (const char* reason = sha256_file_hex(path->unchecked_text(), hex)) { return unreadable_file_error(eng, path->unchecked_text(), reason); }
 			return script_value(std::move(hex), eng);
 		}, privilege::filesystem), 1, text_parameter, script_value_type::jai_string_type);
+	}
+
+	void register_web(engine& eng_ref) {
+		using namespace web_text_detail;
+		using svt = script_value_type;
+		engine* eng = &eng_ref;
+
+		dynamic_binder<url_record>(eng_ref, "web::url")
+			.constructor<>()
+			.property("scheme", &url_record::scheme)
+			.property("user", &url_record::user)
+			.property("password", &url_record::password)
+			.property("host", &url_record::host)
+			.property("port", &url_record::port)
+			.property("path", &url_record::path)
+			.property("query", &url_record::query)
+			.property("fragment", &url_record::fragment)
+			.method("to_string", &url_record::to_string)
+			.build();
+
+		auto& ns = eng_ref.script_namespaces()[eng_ref.symbolize("web")];
+		if (!ns) { ns = std::make_shared<script_namespace_data>(); }
+		auto def = [&](const char* name, const char* count_refusal, svt param, svt result, bool follows_first, auto fn, const char* result_class = "") {
+			const uint64_t id = eng_ref.symbolize(name);
+			ns->variables[id] = script_value::make_function([fn, count_refusal](const std::vector<script_value>& a_args) -> function_result {
+				if (a_args.size() != 1) { return function_result(make_error_code(runtime_error_code::argument_count_mismatch), count_refusal); }
+				return fn(a_args[0].deref());
+			}, &eng_ref);
+			host_entry_signature signature;
+			signature.min_args = 1;
+			signature.max_args = 1;
+			signature.params = {param};
+			signature.result = result;
+			signature.result_follows_first = follows_first;
+			signature.result_class = result_class;
+			ns->signatures[id] = std::move(signature);
+		};
+		auto text_error = [](const char* a_text) { return function_result(make_error_code(runtime_error_code::type_mismatch), a_text); };   // static texts: the result holds a view
+
+		def("html_escape", "web::html_escape expects 1 argument", svt::jai_string_type, svt::jai_string_type, true, [eng, text_error](const script_value& a_text) -> function_result {
+			if (!a_text.is_text()) { return text_error("web::html_escape expects a string"); }
+			const std::string& bytes = a_text.unchecked_text();
+			const size_t growth = html_escape_growth(bytes);
+			if (growth == 0) { return unchanged_text(a_text, eng); }
+			if (!detail::builtin_memory_charge(eng, bytes.size() + growth)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
+			return text_like(a_text, html_escape_text(bytes, growth), eng);
+		});
+
+		def("html_unescape", "web::html_unescape expects 1 argument", svt::jai_string_type, svt::jai_string_type, true, [eng, text_error](const script_value& a_text) -> function_result {
+			if (!a_text.is_text()) { return text_error("web::html_unescape expects a string"); }
+			const std::string& bytes = a_text.unchecked_text();
+			if (bytes.find('&') == std::string::npos) { return unchanged_text(a_text, eng); }
+			if (!detail::builtin_memory_charge(eng, html_unescape_bound(bytes))) [[unlikely]] { return detail::builtin_memory_cap(eng); }
+			return text_like(a_text, html_unescape_text(bytes), eng);
+		});
+
+		auto encoder = [eng, text_error](bool a_form, const char* a_refusal) {
+			return [eng, text_error, a_form, a_refusal](const script_value& a_text) -> function_result {
+				if (!a_text.is_text()) { return text_error(a_refusal); }
+				const std::string& bytes = a_text.unchecked_text();
+				if (!detail::builtin_memory_charge(eng, bytes.size() * 3)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
+				std::string encoded;
+				encoded.reserve(bytes.size());
+				append_percent_encoded(bytes, a_form, encoded);
+				return script_value(std::move(encoded), eng);
+			};
+		};
+		auto decoder = [eng, text_error](bool a_form, const char* a_refusal) {
+			return [eng, text_error, a_form, a_refusal](const script_value& a_text) -> function_result {
+				if (!a_text.is_text()) { return text_error(a_refusal); }
+				const std::string& bytes = a_text.unchecked_text();
+				if (bytes.find('%') == std::string::npos && (!a_form || bytes.find('+') == std::string::npos)) { return script_value(bytes, eng); }
+				if (!detail::builtin_memory_charge(eng, bytes.size())) [[unlikely]] { return detail::builtin_memory_cap(eng); }
+				return script_value(percent_decoded(bytes, a_form), eng);
+			};
+		};
+		def("url_encode", "web::url_encode expects 1 argument", svt::jai_string_type, svt::jai_string_type, false, encoder(false, "web::url_encode expects a string"));
+		def("url_decode", "web::url_decode expects 1 argument", svt::jai_string_type, svt::jai_string_type, false, decoder(false, "web::url_decode expects a string"));
+		def("form_encode", "web::form_encode expects 1 argument", svt::jai_string_type, svt::jai_string_type, false, encoder(true, "web::form_encode expects a string"));
+		def("form_decode", "web::form_decode expects 1 argument", svt::jai_string_type, svt::jai_string_type, false, decoder(true, "web::form_decode expects a string"));
+
+		def("parse_query", "web::parse_query expects 1 argument", svt::jai_string_type, svt::jai_map_type, false, [eng, text_error](const script_value& a_text) -> function_result {
+			if (!a_text.is_text()) { return text_error("web::parse_query expects a string"); }
+			if (!detail::builtin_memory_charge(eng, a_text.unchecked_text().size())) [[unlikely]] { return detail::builtin_memory_cap(eng); }
+			script_value fields = script_value::make_map(eng->get_type_info_string(), eng->get_type_info_string(), eng);
+			auto& out = fields.as_map();
+			for_each_query_pair(a_text.unchecked_text(), [&](std::string&& a_key, std::string&& a_value) {
+				out[script_value(std::move(a_key), eng)] = script_value(std::move(a_value), eng);
+			});
+			return fields;
+		});
+
+		def("parse_query_all", "web::parse_query_all expects 1 argument", svt::jai_string_type, svt::jai_map_type, false, [eng, text_error](const script_value& a_text) -> function_result {
+			if (!a_text.is_text()) { return text_error("web::parse_query_all expects a string"); }
+			if (!detail::builtin_memory_charge(eng, a_text.unchecked_text().size() * 2)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
+			std::map<std::string, std::vector<std::string>> grouped;
+			for_each_query_pair(a_text.unchecked_text(), [&](std::string&& a_key, std::string&& a_value) { grouped[std::move(a_key)].push_back(std::move(a_value)); });
+			script_value fields = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+			auto& out = fields.as_map();
+			for (auto& [key, values] : grouped) { out[script_value(key, eng)] = eng->make_value(std::move(values)); }
+			return fields;
+		});
+
+		def("build_query", "web::build_query expects 1 argument", svt::jai_map_type, svt::jai_string_type, false, [eng](const script_value& a_fields) -> function_result {
+			if (!a_fields.is_map()) { return function_result(make_error_code(runtime_error_code::type_mismatch), "web::build_query expects a map"); }
+			std::string query;
+			std::string text;
+			auto append_pair = [&](const std::string& a_key, const std::string& a_value) {
+				if (!query.empty()) { query += '&'; }
+				append_percent_encoded(a_key, true, query);
+				query += '=';
+				append_percent_encoded(a_value, true, query);
+			};
+			for (const auto& [key, value] : a_fields.as_map()) {
+				std::string key_text;
+				if (!query_value_text(key, key_text, eng)) { return build_query_refusal(eng, nullptr, key); }
+				const script_value& item = value.deref();
+				if (item.is_null()) { continue; }
+				if (item.is_array()) {
+					bool refused = false;
+					item.unchecked_array_node()->for_each(eng, [&](const script_value& element) {
+						if (refused || element.is_null()) { return; }
+						if (!query_value_text(element, text, eng)) {
+							refused = true;
+							return;
+						}
+						append_pair(key_text, text);
+					});
+					if (refused) { return build_query_refusal(eng, &key_text, item); }
+					continue;
+				}
+				if (!query_value_text(item, text, eng)) { return build_query_refusal(eng, &key_text, item); }
+				append_pair(key_text, text);
+			}
+			if (!detail::builtin_memory_charge(eng, query.size())) [[unlikely]] { return detail::builtin_memory_cap(eng); }
+			return script_value(std::move(query), eng);
+		});
+
+		def("parse_url", "web::parse_url expects 1 argument", svt::jai_string_type, svt::jai_object_type, false, [eng, text_error](const script_value& a_text) -> function_result {
+			if (!a_text.is_text()) { return text_error("web::parse_url expects a string"); }
+			url_record parts;
+			if (!split_url(a_text.unchecked_text(), parts)) { return parse_url_refusal(eng, a_text.unchecked_text()); }
+			return detail::value_converter<url_record>::to(parts, eng);
+		}, "web::url");
 	}
 
 } // namespace stdlib

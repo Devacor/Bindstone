@@ -32,6 +32,7 @@
 #include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
+#include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/detail/thread_pool_access.hpp>
 #include <jaiscript/detail/ref_param_writes.hpp>
@@ -462,7 +463,18 @@ namespace {
 		state.worker_overhead_ns = best;
 	}
 
-	// The library builtins that stay parallel (parallel_pure_function): pure math, to_string and the pure text functions; the rest register serial
+	// A host function a script namespace holds (time::now, web::url_encode), or null for anything else under that name
+	const script_value* namespace_host_entry(engine& eng, std::string_view space, std::string_view member) {
+		auto& spaces = eng.script_namespaces();
+		const auto found = spaces.find(eng.symbolize(space));
+		if (found == spaces.end() || !found->second) { return nullptr; }
+		const uint64_t member_id = eng.symbolize(member);
+		if (found->second->functions.count(member_id)) { return nullptr; }
+		const auto value = found->second->variables.find(member_id);
+		return value != found->second->variables.end() && value->second.is_function() ? &value->second : nullptr;
+	}
+
+	// The library builtins that stay parallel (parallel_pure_function): pure math, to_string, sha256 and the web:: text functions; the rest register serial
 	bool parallel_host_whitelisted(std::string_view name) {
 		static constexpr std::string_view k_whitelist[] = {
 			"abs", "sign", "min", "max", "clamp",
@@ -474,7 +486,9 @@ namespace {
 			"lerp", "mix", "unmix", "mix_in", "mix_out", "mix_in_out", "mix_out_in",
 			"unmix_in", "unmix_out", "unmix_in_out", "unmix_out_in",
 			"saturate", "wrap", "remap", "is_nan", "is_inf",
-			"to_string", "html_escape", "html_unescape", "sha256",
+			"to_string", "sha256",
+			"web::html_escape", "web::html_unescape", "web::url_encode", "web::url_decode", "web::form_encode", "web::form_decode",
+			"web::parse_query", "web::parse_query_all", "web::build_query", "web::parse_url",
 		};
 		for (auto w : k_whitelist) {
 			if (name == w) { return true; }
@@ -2217,6 +2231,19 @@ namespace {
 					if (m->object && m->object->get_type() == node_type::identifier_expr &&
 					    static_cast<identifier_expr*>(m->object.get())->name == "time") {
 						return fail(m, "time:: calls are not allowed in a parallel body (engine-owned clock)");
+					}
+					if (!proof_mode && m->object && m->object->get_type() == node_type::identifier_expr) {
+						// a pure library namespace entry (web::url_encode): each worker calls its own copy, pinned at the barrier
+						auto* space = static_cast<identifier_expr*>(m->object.get());
+						if (parallel_host_whitelisted(std::string(space->name) + "::" + std::string(m->member)) && namespace_host_entry(eng, space->name, m->member)) {
+							if (space->symbol_id == UINT64_MAX) { space->symbol_id = sym.intern(space->name); }
+							if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }
+							adm.static_calls.push_back({ space->symbol_id, m->member_id });
+							for (const auto& a : call->arguments) {
+								if (!walk_expr(a)) { return false; }
+							}
+							return true;
+						}
 					}
 					if (!proof_mode && m->object && m->object->get_type() == node_type::identifier_expr) {
 						// A host class's static method runs on any thread unless it is marked serial
@@ -5160,8 +5187,10 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 				for (const auto& call : source->static_calls) {
 					const auto& host_classes = eng.get_class_registry().cpp_classes_;
 					const auto host = host_classes.find(std::string(eng.get_symbolizer()->get_string(call.class_name_id)));
-					if (host == host_classes.end()) { continue; }
-					const script_value shared_method = host->second->static_method_in_chain(call.name_id);
+					const script_value* entry = host == host_classes.end()
+						? namespace_host_entry(eng, eng.get_symbolizer()->get_string(call.class_name_id), eng.get_symbolizer()->get_string(call.name_id)) : nullptr;
+					if (host == host_classes.end() && !entry) { continue; }
+					const script_value shared_method = entry ? *entry : host->second->static_method_in_chain(call.name_id);
 					if (!shared_method.is_function() || slot->method_pins.find_static(call.class_name_id, call.name_id)) { continue; }
 					slot->method_pins.statics.push_back({ call.class_name_id, call.name_id,
 					                                      script_value::make_function(script_function(shared_method.as_function()), &eng) });

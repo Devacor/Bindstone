@@ -141,8 +141,10 @@ a catchable error at the import, and the program keeps its old code
 
 The full JaiScript stdlib is always registered (`jai::stdlib::register_all`): formatted
 `print` / `format` / `to_string` / `type_of`, math, `to_json` / `from_json`, container
-helpers, `html_escape` / `html_unescape`, `sha256(s)` and `sha256_file(path)` (a hex digest, the file
-streamed; it needs the `filesystem` privilege and raises `read_file`'s error below). (The bare engine only ships concatenating `print`, `thread_count`,
+helpers, `sha256(s)` and `sha256_file(path)` (a hex digest, the file
+streamed; it needs the `filesystem` privilege and raises `read_file`'s error below), and the opt-in `web::`
+library (`jai::stdlib::register_web`: `web::html_escape`, `web::url_encode`, `web::form_encode`,
+`web::parse_query`, `web::build_query`, `web::parse_url` and the rest). (The bare engine only ships concatenating `print`, `thread_count`,
 `parallel_transform`, `parallel_reduce` and the builtin container/string methods — the runner opts into
 everything.) On top, the host binds file IO so scripts can actually save things:
 

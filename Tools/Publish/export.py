@@ -45,6 +45,7 @@ build/
 build-*/
 .vs/
 .vscode/
+.cache/
 *.jaibite
 __pycache__/
 *.obj

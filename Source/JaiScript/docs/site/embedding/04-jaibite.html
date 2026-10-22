@@ -81,27 +81,42 @@ the bite adds determinism, with no cache eviction, and save/load.)</p>
 <h2 id="the-automatic-disk-cache">Instant boot: the automatic disk cache<a class="hlink" href="#the-automatic-disk-cache" aria-label="link">&#8203;</a></h2>
 <p>You usually don&#x27;t need to ship bites by hand at all. Whenever the engine loads a script
 <em>file</em> (<code>execute_file</code>, script-side <code>include</code> in all forms, script-side
-<code>import</code>), it keeps a sibling <code>foo.jaibite</code> next to <code>foo.jai</code> (default ON),
-and next launch loads that instead of parsing. The parse simply leaves the boot path: a measured game
+<code>import</code>), it keeps the parse in a <code>.cache</code> folder beside the source
+(<code>scripts/foo.jai</code> gets <code>scripts/.cache/foo.jai.jaibite</code>, the folder made when missing;
+default ON), and next launch loads that instead of parsing. The parse simply leaves the boot path: a measured game
 file&#x27;s load-and-run drops to well under half, the parse replaced by a small binary read (numbers in
 <a href="11-performance.html#embedding-costs">Performance</a>). Across a game&#x27;s whole script tree,
 that is the difference between a boot that parses and a boot that doesn&#x27;t.</p>
 <p>The cache is designed so you can forget it exists:</p>
-<ul><li><strong>Matching sibling</strong> (its header records the exact source text, by size and hash, <em>and</em>
+<ul><li><strong>Matching cache</strong> (its header records the exact source text, by size and hash, <em>and</em>
 the registration fingerprint matches): loaded instead of parsed, and the parse is skipped entirely. Mtimes
 never decide: a source copied into place with an older timestamp is judged by its bytes. A trusted
-checked-clean stamp also skips the static re-check, exactly like <code>jaibite_load</code>.</li><li><strong>Anything else</strong> (other source text, corrupt/truncated sibling, fingerprint mismatch)
-silently falls back to parsing the source and rewrites the sibling. The <code>.jai</code> on disk always
-wins; hot reload is unaffected. The sibling is written to a temporary file and renamed into place, so
+checked-clean stamp also skips the static re-check, exactly like <code>jaibite_load</code>.</li><li><strong>Anything else</strong> (other source text, corrupt/truncated cache, fingerprint mismatch)
+silently falls back to parsing the source and rewrites the cache. The <code>.jai</code> on disk always
+wins; hot reload is unaffected. The cache is written to a temporary file and renamed into place, so
 another engine or process never reads part of one.</li><li><strong>Write failures are silent and tolerated</strong> (read-only asset dirs, shipped games): the
-cache is an optimization, never an error. <code>eng-&gt;jaibite_cache_write_failures()</code> counts them
-for diagnostics.</li><li><strong>String executes never touch disk</strong>; hosts that read files through their own VFS can
+cache is an optimization, never an error, and a source text that could not write its cache does not try
+again on every load. <code>eng-&gt;jaibite_cache_write_failures()</code> counts them for diagnostics.</li><li><strong>String executes never touch disk</strong>; hosts that read files through their own VFS can
 route through <code>eng-&gt;execute_file_source(resolvedPath, content)</code> to keep the cache. Opt out
 per engine with <code>eng-&gt;jaibite_cache(false)</code>. An engine whose filesystem privilege is disabled (<code>eng-&gt;disable(jai::filesystem)</code>, <a href="05-safety-rails.html">Safety Rails</a>) skips the cache entirely, and an explicit <code>jaibite_load(path)</code> or <code>bite.save(path)</code> throws a <code>jai::runtime_error</code> reading <code>Insufficient privilege: filesystem.</code>; the byte forms (<code>save_bytes</code>, <code>jaibite_load_bytes</code>) still work.</li></ul>
 <p>The cache stores the parsed AST, so it is backend-agnostic: both backends skip the parse, and the VM
-reuses its lazily compiled chunk in-memory as always. The whole matrix (a matching sibling loading
+reuses its lazily compiled chunk in-memory as always. The whole matrix (a matching cache loading
 while the source is unparseable, older-mtime and same-mtime replacements, corrupt and truncated
-fallback and rewrite, fingerprint mismatch, unwritable siblings) is covered by the test suite.</p>
+fallback and rewrite, fingerprint mismatch, unwritable caches, a cache directory and a shipped
+<code>.cache</code>) is covered by the test suite. Add <code>.cache/</code> to your <code>.gitignore</code>.</p>
+<h3 id="cache-directory">Read-only sources: the cache directory<a class="hlink" href="#cache-directory" aria-label="link">&#8203;</a></h3>
+<p>Where the scripts ship read-only (an iOS app bundle, an Android APK, an installed game folder), point the
+cache at a folder the app can write:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;jaibite_cache_directory(eng-&gt;app_cache_dir(&quot;MyGame&quot;) + &quot;/scripts&quot;, bundle_root);
+eng-&gt;jaibite_cache_path(bundle_root + &quot;/scripts/foo.jai&quot;);   // &lt;cache dir&gt;/scripts/foo.jai.jaibite</code></pre></div>
+<ul><li>Every cache is written below the directory at the source&#x27;s path relative to the root. A source outside
+the root, or any source when no root is given, mirrors its own path (a relative path as given, a drive as the
+first folder), so a cache path depends only on the source path.</li><li>When the directory holds no valid cache for a source, a valid one in the <code>.cache</code> folder beside the
+source still loads, and is never rewritten there: a build step that runs the scripts once leaves <code>.cache</code>
+folders a bundle can ship, and the first launch skips the parse. Sources the engine cannot open as files (an APK&#x27;s
+assets, read by the host and passed to <code>execute_file_source</code>) have no readable <code>.cache</code>; their
+caches fill the directory on first launch.</li><li>An unwritable directory costs nothing: the parse runs in memory, the write is tried once per source text and
+counted, never reported. An empty directory restores the <code>.cache</code> folder beside each source.</li></ul>
 <h2 id="save-load-shipping-jaibite">Shipping <code>.jaibite</code> by hand<a class="hlink" href="#save-load-shipping-jaibite" aria-label="link">&#8203;</a></h2>
 <p>When you want explicit control (pack files, downloadable content, a bake step), save and load
 bites yourself. The canonical extension is <code>jai::k_jaibite_extension</code> (<code>.jaibite</code>);
@@ -128,7 +143,7 @@ mismatch, or corrupt data (<code>jaibite: failed to open file: level.jaibite</co
 <p>The format is <strong>versioned</strong>, and the number moves whenever the
 parser gains a node, so a bite is readable only by builds that share its format version. An explicit
 <code>jaibite_load*</code> of a file from another version throws <code>jaibite: unsupported format version M (expected N)</code>, where M is the file&#x27;s version and N the build&#x27;s, <code>jai::detail::k_jaibite_version</code>;
-a stale <em>sibling</em> in the automatic disk cache is simply reparsed and rewritten, silently. Practical
+a stale file in the automatic disk cache is simply reparsed and rewritten, silently. Practical
 rule: ship bites from the same build you ship the engine from, and never hand-carry a
 <code>.jaibite</code> across versions.</p>
 <p>The guarantee behind all of this is differential: for every script shape (functions, defaults, ref
@@ -175,9 +190,9 @@ AST, nothing you configure; see <a href="06-static-checking.html#proofs">Static 
 independent of the stamp: a loaded bite re-derives them, in every mode.</li>
 <li id="the-stamp-is-per-file">The stamp is <strong>per file, not per program</strong>. A leaf that checked clean inside one program
 (<a href="06-static-checking.html#programs">its names declared by a sibling unit</a>) loads from its stamped
-sibling without a re-check when a <em>different</em> program reaches it, so a name that program never
+cache without a re-check when a <em>different</em> program reaches it, so a name that program never
 declares surfaces at run time as the ordinary <code>Undefined variable</code>, not at load. Edit the source or
-delete the sibling to force a fresh check.</li></ul><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/03-backends.html"><span>&larr; previous</span>Backends: Interpreter vs VM</a><a class="next" rel="next" href="../embedding/05-safety-rails.html"><span>next &rarr;</span>Safety Rails</a></nav></article>
+delete its cache file to force a fresh check.</li></ul><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/03-backends.html"><span>&larr; previous</span>Backends: Interpreter vs VM</a><a class="next" rel="next" href="../embedding/05-safety-rails.html"><span>next &rarr;</span>Safety Rails</a></nav></article>
 </main>
 </div>
 <footer class="site-footer">

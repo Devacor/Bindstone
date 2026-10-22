@@ -68,4 +68,11 @@ inline const std::filesystem::path& test_temp_directory() {
     return owner.path();
 }
 
+// The jaibite cache an engine with no cache directory keeps for source (engine::jaibite_cache_path), spelled out on its own
+inline std::filesystem::path jaibite_cache_beside(const std::filesystem::path& source) {
+    std::filesystem::path name = source.filename();
+    name += ".jaibite";
+    return source.parent_path() / ".cache" / name;
+}
+
 } // namespace jai::foundry

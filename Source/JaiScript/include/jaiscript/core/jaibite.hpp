@@ -20,6 +20,8 @@ namespace jai {
     // paths (the convention is not enforced); the format keeps its "JBIT" magic
     // regardless of filename.
     inline constexpr const char* k_jaibite_extension = ".jaibite";
+    // The folder the automatic disk cache keeps beside each source folder (engine::jaibite_cache_path).
+    inline constexpr const char* k_jaibite_cache_folder = ".cache";
 
     // Engine-bound pre-parsed script: engine->jaibite("...") lexes and parses once,
     // then execute() re-runs without re-lexing/parsing (and the vm backend caches its

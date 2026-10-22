@@ -10,6 +10,10 @@
 #include "MV/Script/script.h"
 
 #include <cstdlib>
+#include <filesystem>
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/registrar.hpp>
@@ -122,6 +126,11 @@ namespace MV {
 		}
 		engine->memory_cap(a_memoryCapBytes);
 		engine->add_include_path("Assets");   // include "Creatures/Shared/status.script" from any script
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+		// bundled scripts are read-only (APK assets are not even files), so parse caches go to the app's writable folder
+		std::error_code ignored;
+		engine->jaibite_cache_directory(playerPreferencesPath() + "ScriptCache", std::filesystem::current_path(ignored).string());
+#endif
 		engine->static_checking(jai::check_mode::warn);   // engine default is strict; the live client stays at warn (-verifyassets runs the same scripts strict)
 		engine->set_script_error_handler([raw = engine.get()](const std::string& a_message) {
 			auto trace = raw->format_stack_trace();

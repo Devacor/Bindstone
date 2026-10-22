@@ -989,7 +989,7 @@ public:
                 engine->execute_file((dir / "main.jai").string());
                 check_eq(script_int(2), engine->execute("n;").as<script_int>());
                 check_eq(std::string("utf8_string"), engine->execute("k;").as<std::string>());
-                check_true(fs::exists(dir / "main.jaibite"));
+                check_true(fs::exists(dir / ".cache" / "main.jai.jaibite"));
             }
             fs::remove_all(dir, ec);
         });

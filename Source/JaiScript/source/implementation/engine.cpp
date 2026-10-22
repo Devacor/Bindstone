@@ -935,15 +935,17 @@ struct engine::implementation {
         bool closure_root = false;   // has literal top-level import/include paths
         bool closure_filesystem = true;   // permission under which dependencies were gathered
         std::vector<closure_stamp> closure_stamps;
-        std::vector<closure_stamp> spliced_stamps;   // files spliced into function bodies at parse time: a change re-parses this entry; such a unit writes no jaibite sibling
+        std::vector<closure_stamp> spliced_stamps;   // files spliced into function bodies at parse time: a change re-parses this entry; such a unit writes no jaibite cache
         // the unit's reload hook (hot_reload_migrate at its top level): kept off the program - never defined, never callable - and
         // run after a re-run of the unit; check_declarations = the program and the hook, what the checker and the proof pass walk
         std::shared_ptr<function_decl> reload_hook;
         std::vector<declaration_ptr> check_declarations;
-        // the jaibite sibling this entry last wrote or loaded, by its (mtime, size) stamp: while it stays in place the sibling
-        // holds this source, so a hit queries one stat; the source's identity is computed once, when a sibling first needs it
-        uint64_t sibling_mtime = 0, sibling_size = 0;
-        bool sibling_stamped = false;
+        // the jaibite cache file this entry last wrote or loaded, by its path and (mtime, size) stamp: while it stays in place
+        // it holds this source, so a hit queries one stat; the source's identity is computed once, when a cache first needs it
+        std::filesystem::path cache_file;
+        uint64_t cache_mtime = 0, cache_size = 0;
+        bool cache_stamped = false;
+        std::filesystem::path cache_write_failed;   // the cache file this source text could not write: never retried on every hit
         bool identity_known = false;
         detail::jaibite_source_identity identity;
         std::string closure_listing;                   // erroring units' listings, each against its own source + path
@@ -1058,24 +1060,27 @@ struct engine::implementation {
         return entry.reload_hook ? entry.check_declarations : entry.declarations;
     }
 
-    // The parse-cache entry for (sourcePath, content): a hit, a fresh jaibite sibling, or a
-    // fresh parse stored under that key. Throws parse_error. sibling/siblingFresh tell the
-    // caller whether to rewrite the sibling afterwards.
+    // The parse-cache entry for (sourcePath, content): a hit, a fresh jaibite cache file, or a
+    // fresh parse stored under that key. Throws parse_error. cacheFile/cacheFresh tell the
+    // caller whether to rewrite the cache afterwards.
     std::shared_ptr<script_cache_entry> acquire_entry(engine& self, const std::string& content, const std::string& sourcePath,
-                                                      std::filesystem::path& sibling, bool& siblingFresh) {
-        sibling.clear();
-        siblingFresh = false;
+                                                      std::filesystem::path& cacheFile, bool& cacheFresh) {
+        cacheFile.clear();
+        cacheFresh = false;
+        std::filesystem::path shipped;   // with a cache directory set, the .cache beside the source is read, never written
         if (jaibite_cache_enabled && sourcePath != "<script>" && self.is_enabled(privilege::filesystem)) {
-            sibling = jaibite_sibling_path(sourcePath);
+            cacheFile = jaibite_cache_file(sourcePath);
+            if (!cacheFile.empty() && !jaibite_cache_directory_.empty()) { shipped = jaibite_beside_file(sourcePath); }
         }
         auto cached = find_cached_script(sourcePath, content);
         std::optional<detail::jaibite_source_identity> identity;
         if (cached) {
-            siblingFresh = !sibling.empty() && sibling_holds(*cached, sibling, content);
-        } else if (!sibling.empty()) {
-            // a sibling loads only when it records this exact source; anything else parses below and is rewritten
-            cached = try_load_jaibite_entry(self, sibling, sourcePath, content, identity);
-            siblingFresh = cached != nullptr;
+            cacheFresh = !cacheFile.empty() && (cache_holds(*cached, cacheFile, content) || (!shipped.empty() && cache_holds(*cached, shipped, content)));
+        } else if (!cacheFile.empty()) {
+            // a cache loads only when it records this exact source; anything else parses below and is rewritten
+            cached = try_load_jaibite_entry(self, cacheFile, sourcePath, content, identity);
+            if (!cached && !shipped.empty()) { cached = try_load_jaibite_entry(self, shipped, sourcePath, content, identity); }
+            cacheFresh = cached != nullptr;
         }
         if (!cached) {
             lexer lex(content, &string_symbolizer_, sourcePath);
@@ -1118,9 +1123,9 @@ struct engine::implementation {
                 std::stringstream buffer;
                 buffer << file.rdbuf();
                 unit.source = buffer.str();
-                std::filesystem::path sibling;
-                bool siblingFresh = false;
-                unit.entry = acquire_entry(self, unit.source, unit.path, sibling, siblingFresh);
+                std::filesystem::path cacheFile;
+                bool cacheFresh = false;
+                unit.entry = acquire_entry(self, unit.source, unit.path, cacheFile, cacheFresh);
             } catch (const parse_error& e) {
                 parse_failures += e.what();
                 if (parse_failures.empty() || parse_failures.back() != '\n') { parse_failures += '\n'; }
@@ -1618,11 +1623,13 @@ struct engine::implementation {
             ? stamped_read::stable : stamped_read::torn;
     }
 
-    // Jaibite disk cache (engine.hpp doc): sibling <stem>.jaibite maintained beside every
-    // file-based load. std::filesystem only; every touch is best-effort via error_code.
+    // Jaibite disk cache (engine.hpp doc): <folder>/.cache/<file>.jaibite, or below the host's cache directory, maintained
+    // for every file-based load. std::filesystem only; every touch is best-effort via error_code.
     bool jaibite_cache_enabled = true;
     size_t jaibite_cache_write_failures_ = 0;
     uint64_t jaibite_temporary_serial_ = 0;
+    std::filesystem::path jaibite_cache_directory_;
+    std::filesystem::path jaibite_cache_source_root_;
 
     std::string root_source_file_;   // engine::root_source_file
     std::function<std::string(const std::string&)> app_data_resolver;    // engine::app_directory_resolvers
@@ -1668,60 +1675,85 @@ struct engine::implementation {
     uint64_t local_alias_binds_ = 0;
     bool local_alias_ = true;
 
-    // Empty result = caching inactive for this source (a .jaibite loaded as source
-    // must never overwrite itself).
-    static std::filesystem::path jaibite_sibling_path(const std::string& sourcePath) {
-        std::filesystem::path src(sourcePath);
-        if (src.extension() == k_jaibite_extension) {
-            return {};
+    static std::filesystem::path jaibite_cache_name(const std::filesystem::path& source) {
+        std::filesystem::path result = source.filename();
+        result += k_jaibite_extension;
+        return result;
+    }
+    static std::filesystem::path jaibite_beside_file(const std::filesystem::path& source) {
+        return source.parent_path() / k_jaibite_cache_folder / jaibite_cache_name(source);
+    }
+    // The source's folders below the host's cache directory: relative to the source root when it lies under it, else its
+    // whole path with a drive or share as the first folder; a ".." step stays inside the directory as "^"
+    std::filesystem::path jaibite_mirrored_file(const std::filesystem::path& source) const {
+        namespace fs = std::filesystem;
+        fs::path folders = source.lexically_normal().parent_path();
+        if (!jaibite_cache_source_root_.empty()) {
+            const fs::path relative = folders.lexically_relative(jaibite_cache_source_root_);
+            if (!relative.empty() && *relative.begin() != fs::path("..")) { folders = relative; }
         }
-        return src.replace_extension(k_jaibite_extension);
+        fs::path result = jaibite_cache_directory_;
+        std::string drive = folders.root_name().string();
+        drive.erase(std::remove_if(drive.begin(), drive.end(), [](char c) { return c == ':' || c == '/' || c == '\\'; }), drive.end());
+        if (!drive.empty()) { result /= drive; }
+        for (const auto& part : folders.relative_path()) {
+            if (part.empty() || part == fs::path(".")) { continue; }
+            result /= part == fs::path("..") ? fs::path("^") : part;
+        }
+        return result / jaibite_cache_name(source);
+    }
+    // Empty = no cache for this source: a .jaibite loaded as source keeps none
+    std::filesystem::path jaibite_cache_file(const std::string& sourcePath) const {
+        const std::filesystem::path source(sourcePath);
+        if (source.extension() == k_jaibite_extension) { return {}; }
+        return jaibite_cache_directory_.empty() ? jaibite_beside_file(source) : jaibite_mirrored_file(source);
     }
 
-    static bool stat_sibling(const std::filesystem::path& sibling, uint64_t& mtime, uint64_t& size) {
-        return stat_file(sibling.string(), mtime, size);
+    static bool stat_cache_file(const std::filesystem::path& cacheFile, uint64_t& mtime, uint64_t& size) {
+        return stat_file(cacheFile.string(), mtime, size);
     }
     const detail::jaibite_source_identity& identity_of(script_cache_entry& entry, const std::string& source) {
         if (!entry.identity_known) { entry.identity = detail::jaibite_identity_of(source); entry.identity_known = true; }
         return entry.identity;
     }
 
-    // An in-memory hit rewrites its sibling unless it is the file the entry last wrote or loaded, or a file whose header
+    // An in-memory hit rewrites its cache unless it is the file the entry last wrote or loaded, or a file whose header
     // records this source (another engine's write, adopted whatever its surface, so engines sharing a file never take
     // turns rewriting it on every hit; a miss still loads only under a matching fingerprint)
-    bool sibling_holds(script_cache_entry& entry, const std::filesystem::path& sibling, const std::string& source) {
+    bool cache_holds(script_cache_entry& entry, const std::filesystem::path& cacheFile, const std::string& source) {
         uint64_t mtime = 0, size = 0;
-        if (!stat_sibling(sibling, mtime, size)) { return false; }
-        if (entry.sibling_stamped && mtime == entry.sibling_mtime && size == entry.sibling_size) { return true; }
+        if (!stat_cache_file(cacheFile, mtime, size)) { return false; }
+        if (entry.cache_stamped && mtime == entry.cache_mtime && size == entry.cache_size && entry.cache_file == cacheFile) { return true; }
         uint8_t header[detail::k_jaibite_header_size];
-        std::ifstream file(sibling, std::ios::binary);
+        std::ifstream file(cacheFile, std::ios::binary);
         if (!file.read(reinterpret_cast<char*>(header), sizeof(header))) { return false; }
         uint64_t fingerprint = 0;
         detail::jaibite_source_identity recorded;
         if (!detail::read_jaibite_header(header, sizeof(header), fingerprint, recorded) || recorded != identity_of(entry, source)) {
             return false;
         }
-        entry.sibling_mtime = mtime;
-        entry.sibling_size = size;
-        entry.sibling_stamped = true;
+        entry.cache_file = cacheFile;
+        entry.cache_mtime = mtime;
+        entry.cache_size = size;
+        entry.cache_stamped = true;
         return true;
     }
 
-    // Load a sibling into the normal parse-entry pipeline when its header records exactly this source (size and hash,
+    // Load a cache file into the normal parse-entry pipeline when its header records exactly this source (size and hash,
     // compared for equality: a file put in place with an older mtime, or restored with its old one, is judged by its
     // bytes) and this engine's registration fingerprint. nullptr = parse instead (absent, corrupt, truncated, another
     // version, another source, another surface); never throws, the source is still in hand. The deserialized AST
     // carries its saved filename stamps, so stack traces and the debugger still name the .jai.
-    std::shared_ptr<script_cache_entry> try_load_jaibite_entry(engine& self, const std::filesystem::path& sibling,
+    std::shared_ptr<script_cache_entry> try_load_jaibite_entry(engine& self, const std::filesystem::path& cacheFile,
                                                                const std::string& sourcePath, const std::string& source,
                                                                std::optional<detail::jaibite_source_identity>& identity) {
         try {
-            uint64_t siblingMtime = 0, siblingSize = 0;
-            if (!stat_sibling(sibling, siblingMtime, siblingSize)) {
+            uint64_t cacheMtime = 0, cacheSize = 0;
+            if (!stat_cache_file(cacheFile, cacheMtime, cacheSize)) {
                 return nullptr;
             }
-            identity = detail::jaibite_identity_of(source);
-            std::ifstream file(sibling, std::ios::binary);
+            if (!identity) { identity = detail::jaibite_identity_of(source); }
+            std::ifstream file(cacheFile, std::ios::binary);
             if (!file.is_open()) {
                 return nullptr;
             }
@@ -1743,9 +1775,10 @@ struct engine::implementation {
             adopt_reload_hook(*entry, std::move(hook));
             entry->identity = *identity;
             entry->identity_known = true;
-            entry->sibling_mtime = siblingMtime;
-            entry->sibling_size = siblingSize;
-            entry->sibling_stamped = true;
+            entry->cache_file = cacheFile;
+            entry->cache_mtime = cacheMtime;
+            entry->cache_size = cacheSize;
+            entry->cache_stamped = true;
             if (detail::jaibite_stamped_clean(flags)) {
                 // Trusted stamp (fingerprint matched): skip the re-check exactly like a
                 // loaded bite does — check_result stays default (no diagnostics).
@@ -1758,16 +1791,15 @@ struct engine::implementation {
         }
     }
 
-    // Best-effort sibling write: failures are SILENT (cache is an optimization, never an
-    // error — read-only asset dirs, shipped games) and counted for diagnostics. The bytes go
-    // to a temporary file in the sibling's folder that is renamed over the sibling, so a
-    // reader (another engine, another process, a crash mid-write) sees the old file or the
-    // new one, never part of one. A failed write keeps the sibling it could not replace: its
-    // recorded source identity stops it standing in for other text, and deleting it threw away
-    // another engine's fresh write whenever two engines raced on one file.
-    void write_jaibite_sibling(engine& self, const std::filesystem::path& sibling, script_cache_entry& entry,
-                               const std::string& sourcePath, const std::string& source) noexcept {
-        if (!self.is_enabled(privilege::filesystem)) { return; }
+    // Best-effort cache write: failures are SILENT (cache is an optimization, never an error — read-only asset dirs,
+    // shipped games), counted for diagnostics and not retried for the same source text and file. The folder is created
+    // when missing; the bytes go to a temporary file beside the cache that is renamed over it, so a reader (another
+    // engine, another process, a crash mid-write) sees the old file or the new one, never part of one. A failed write
+    // keeps the cache it could not replace: its recorded source identity stops it standing in for other text, and
+    // deleting it threw away another engine's fresh write whenever two engines raced on one file.
+    void write_jaibite_cache(engine& self, const std::filesystem::path& cacheFile, script_cache_entry& entry,
+                             const std::string& sourcePath, const std::string& source) noexcept {
+        if (!self.is_enabled(privilege::filesystem) || entry.cache_write_failed == cacheFile) { return; }
         std::filesystem::path temporary;
         try {
             uint32_t flags = 0;
@@ -1777,7 +1809,7 @@ struct engine::implementation {
             }
             std::vector<uint8_t> bytes;
             {
-                detail::aggregate_source_view view(&entry.lowering);   // a sibling holds the parsed program
+                detail::aggregate_source_view view(&entry.lowering);   // a cache holds the parsed program
                 bytes = detail::serialize_jaibite(checked_declarations(entry), string_symbolizer_, self.registration_fingerprint(), flags, sourcePath,
                                                   identity_of(entry, source));
             }
@@ -1786,7 +1818,9 @@ struct engine::implementation {
 #else
             const uint64_t process = static_cast<uint64_t>(getpid());
 #endif
-            temporary = sibling;
+            std::error_code ec;
+            std::filesystem::create_directories(cacheFile.parent_path(), ec);
+            temporary = cacheFile;
             temporary += "." + std::to_string(process) + "-" + std::to_string(reinterpret_cast<uintptr_t>(this)) + "-" +
                          std::to_string(++jaibite_temporary_serial_) + ".tmp";
             bool written = false;
@@ -1798,20 +1832,21 @@ struct engine::implementation {
                     written = static_cast<bool>(file);
                 }
             }
-            std::error_code ec;
             if (written) {
-                std::filesystem::rename(temporary, sibling, ec);
+                std::filesystem::rename(temporary, cacheFile, ec);
                 if (!ec) {
-                    entry.sibling_stamped = stat_sibling(sibling, entry.sibling_mtime, entry.sibling_size);
+                    entry.cache_file = cacheFile;
+                    entry.cache_stamped = stat_cache_file(cacheFile, entry.cache_mtime, entry.cache_size);
                     return;
                 }
             }
         } catch (...) {
         }
         ++jaibite_cache_write_failures_;
-        entry.sibling_stamped = false;
+        entry.cache_stamped = false;
         std::error_code ec;
         if (!temporary.empty()) { std::filesystem::remove(temporary, ec); }
+        try { entry.cache_write_failed = cacheFile; } catch (...) {}
     }
 
     implementation();
@@ -2668,13 +2703,13 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         // cached compiled chunk) — same semantics as re-executing a jaibite. Keyed on
         // (sourcePath, content): the same text under two paths gets two ASTs, each
         // stamped with its own filename (breakpoints/traces stay distinct). The jaibite
-        // sibling is real-file-path only ("<script>" is the raw-content sentinel; string
-        // roots have no sibling; dependencies can still load files — engine.hpp doc).
-        // Disabling filesystem skips both sidecar probes and writes. A parse failure surfaces as
+        // cache is real-file-path only ("<script>" is the raw-content sentinel; string
+        // roots have no cache; dependencies can still load files — engine.hpp doc).
+        // Disabling filesystem skips both cache probes and writes. A parse failure surfaces as
         // parse_error carrying the interned detail (file:line:col + message per error).
-        std::filesystem::path sibling;
-        bool siblingFresh = false;
-        auto cached = impl->acquire_entry(*this, scriptContent, sourcePath, sibling, siblingFresh);
+        std::filesystem::path cacheFile;
+        bool cacheFresh = false;
+        auto cached = impl->acquire_entry(*this, scriptContent, sourcePath, cacheFile, cacheFresh);
         for (const auto& s : cached->spliced_stamps) { impl->note_closure_file(s.path, true, s.mtime, s.size); }
 
         // Static-check hook: one place, at the parse-cache entry — covers execute(),
@@ -2694,11 +2729,11 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
             if (!include_scope.empty()) { impl->warn_scoped_enums(*this, *cached, sourcePath, include_scope); }
         }
 
-        // Rewrite a missing/stale/rejected sibling AFTER the check hook so a clean check
+        // Rewrite a missing/stale/rejected cache AFTER the check hook so a clean check
         // stamps checked_clean, and BEFORE execution on purpose: a runtime error doesn't
         // invalidate a good parse.
-        if (!sibling.empty() && !siblingFresh && cached->spliced_stamps.empty()) {   // a unit with spliced includes keeps no sibling: the sibling's freshness knows only its own file
-            impl->write_jaibite_sibling(*this, sibling, *cached, sourcePath, scriptContent);
+        if (!cacheFile.empty() && !cacheFresh && cached->spliced_stamps.empty()) {   // a unit with spliced includes keeps no cache: its freshness knows only its own file
+            impl->write_jaibite_cache(*this, cacheFile, *cached, sourcePath, scriptContent);
         }
 
         // a textual include runs under the including unit and compiles once per such unit: the VM's chunk caches belong to one unit
@@ -3241,6 +3276,28 @@ bool engine::jaibite_cache() const {
 
 size_t engine::jaibite_cache_write_failures() const {
     return impl->jaibite_cache_write_failures_;
+}
+
+void engine::jaibite_cache_directory(const std::string& directory, const std::string& sourceRoot) {
+    // both resolve against the working directory once, here, so a cache path depends only on the source path afterwards
+    const auto settled = [](const std::string& path) {
+        if (path.empty()) { return std::filesystem::path(); }
+        std::error_code ec;
+        std::filesystem::path result = std::filesystem::absolute(path, ec);
+        result = (ec ? std::filesystem::path(path) : result).lexically_normal();
+        if (!result.has_filename() && result.has_relative_path()) { result = result.parent_path(); }
+        return result;
+    };
+    impl->jaibite_cache_directory_ = settled(directory);
+    impl->jaibite_cache_source_root_ = directory.empty() ? std::filesystem::path() : settled(sourceRoot);
+}
+
+std::string engine::jaibite_cache_directory() const {
+    return impl->jaibite_cache_directory_.string();
+}
+
+std::string engine::jaibite_cache_path(const std::string& sourcePath) const {
+    return impl->jaibite_cache_file(sourcePath).string();
 }
 
 void engine::add_global(const std::string& name, script_value value, bool is_serializable) {
@@ -5343,10 +5400,10 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             size_t failed = 0;
             std::exception_ptr first;
             for (size_t k = 0; k < idx.size(); ++k) {
-                std::filesystem::path sibling;
+                std::filesystem::path cacheFile;
                 bool fresh = false;
                 try {
-                    entries[k] = I.acquire_entry(*this, contents[k], units[idx[k]].resolved, sibling, fresh);
+                    entries[k] = I.acquire_entry(*this, contents[k], units[idx[k]].resolved, cacheFile, fresh);
                 } catch (const std::exception& e) {
                     record_failure(units[idx[k]]);
                     failures += std::string(failures.empty() ? "" : "\n") + e.what();

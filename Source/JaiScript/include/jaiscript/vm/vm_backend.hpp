@@ -2371,6 +2371,7 @@ namespace jai::vm {
         JAI_FORCEINLINE op_status exec_c_back_step(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);   // after a call: every site's container is the node resolved at entry, reached the same way
         JAI_FORCEINLINE void cell_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);   // one cell's payload back to its slot
         JAI_FORCEINLINE void env_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);    // an environment cell's payload back to the value its name resolves to
+        bool cell_cmp_text(frame& f, const vm_instruction& ins, bool& truthy);   // the string lane of the fused compare over string cells
         bool cell_cmp_any(frame& f, const vm_instruction& ins, bool& truthy);   // the general kernel's numeric compare rows on cells; false = a kind it does not take
         // checked: the per-read kind checks; false for the pinned forms, whose operand cells the emission proved hold the kind
         JAI_FORCEINLINE op_status exec_c_arith(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool checked);
@@ -2482,7 +2483,9 @@ namespace jai::vm {
         template <bool Lane> op_status exec_index_fused_decl(frame& f, const vm_instruction& ins);   // Lane: try the typed element read first
         op_status exec_index_store_fused(frame& f, const vm_instruction& ins);
         op_status exec_call_builtin(frame& f, const vm_instruction& ins);
-        op_status exec_concat_append(frame& f);
+        op_status exec_concat_append(frame& f, const vm_instruction& ins);
+        op_status concat_step(const script_value& right, uint32_t hint);
+        op_status exec_concat_operands(frame& f, const vm_instruction& ins);
         op_status exec_concat_pending(frame& f, const vm_instruction& ins);
         op_status exec_concat_store(frame& f, const vm_instruction& ins);
         op_status exec_concat_store_member(frame& f, const vm_instruction& ins);

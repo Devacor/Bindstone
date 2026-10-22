@@ -2,8 +2,8 @@
 // are DMX: u16 format(3), u16 sample rate, u32 length (incl. 16+16 pad
 // bytes), then 8-bit unsigned PCM — which is exactly WAV's 8-bit encoding,
 // so the samples pass through VERBATIM behind a minted 44-byte RIFF header.
-// The runner's play_wav does the playback (async, one voice, no-op off
-// Windows). Lumps convert lazily to cached .wav files on first play.
+// The runner's Sound does the playback (each loaded once, replays restart it,
+// silent off Windows). Lumps convert lazily to cached .wav files on first play.
 
 import "wad.jai";
 import "vid.jai";
@@ -14,7 +14,7 @@ extern float P_Y;
 extern float P_ANG;
 
 bool SND_ON = false;          // play() flips it on; gates and benches stay silent
-var SND_READY = {};           // lump name -> wav path ("" = missing/undecodable)
+var SND_READY = {};           // lump name -> its Sound (null = missing/undecodable)
 
 function snd_wav_bytes(string name) -> string {
 	int lu = lump_num(name);
@@ -45,15 +45,14 @@ function snd_play(string name) -> void {
 	if (!SND_ON) { return; }
 	if (!SND_READY.has(name)) {
 		var path = audio_cache_dir() + ("" + name).to_lower() + ".wav";   // copy first: to_lower mutates in place
-		if (file_exists(path)) { SND_READY[name] = path; }             // bootstrap (or an earlier run) already decoded it
-		else {
+		if (!file_exists(path)) {                                        // bootstrap (or an earlier run) already decoded it
 			var wav = snd_wav_bytes(name);
 			if (wav == "" || !write_file(path, wav)) { path = ""; }
-			SND_READY[name] = path;
 		}
+		SND_READY[name] = path != "" ? load_sound(path) : null;
 	}
-	var p = SND_READY[name];
-	if (p != "") { play_wav(p); }
+	var s = SND_READY[name];
+	if (s != null) { s.play(); }
 }
 
 // ---------------------------------------------------------- positional audio ---
@@ -62,7 +61,7 @@ function snd_play(string name) -> void {
 // cached STEREO wav variant whose per-ear gains were baked into the samples
 // at generation time. ~25 sounds x at most 9 variants, lazily created.
 
-var SND_POS_READY = {};       // "NAME_tN_pP" -> wav path ("" = missing/undecodable)
+var SND_POS_READY = {};       // "NAME_tN_pP" -> its Sound (null = missing/undecodable)
 int SPA_TIER = 0;             // 0 full <320, 1 mid <704, 2 far <1200
 int SPA_PAN = 0;              // 0 center, 1 left, 2 right (bearing beyond ±0.5 rad)
 
@@ -111,13 +110,10 @@ function snd_play_at(string name, float x, float y) -> void {
 		int ln = SPA_PAN == 2 ? g / 2 : g;
 		int rn = SPA_PAN == 1 ? g / 2 : g;
 		var wav = snd_wav_stereo(name, ln, rn, 16);
-		if (wav == "") { SND_POS_READY[key] = ""; }
-		else {
-			var path = audio_cache_dir() + ("" + key).to_lower() + ".wav";   // copy first: to_lower mutates in place
-			if (!write_file(path, wav)) { path = ""; }
-			SND_POS_READY[key] = path;
-		}
+		var path = wav == "" ? "" : audio_cache_dir() + ("" + key).to_lower() + ".wav";   // copy first: to_lower mutates in place
+		if (path != "" && !write_file(path, wav)) { path = ""; }
+		SND_POS_READY[key] = path != "" ? load_sound(path) : null;
 	}
-	var p = SND_POS_READY[key];
-	if (p != "") { play_wav(p); }
+	var s = SND_POS_READY[key];
+	if (s != null) { s.play(); }
 }

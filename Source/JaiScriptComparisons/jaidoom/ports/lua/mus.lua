@@ -191,42 +191,34 @@ function map_music(mapname)
 end
 MUSIC_CUR = ""
 MUSIC_READY = {}
+MUSIC_SOUND = false
 function music_want(name)
 	if ((not SND_ON) or (MUSIC_CUR == name)) then
 		return
 	end
 	if (not (MUSIC_READY[name] ~= nil)) then
 		local path = ((audio_cache_dir() .. string.lower(("" .. name))) .. ".mid")
-		if file_exists(path) then
-			MUSIC_READY[name] = path
-		else
+		if (not file_exists(path)) then
 			local mid = mus_midi_bytes(name)
 			if ((mid == "") or (not _j_truth(write_file(path, mid)))) then
 				path = ""
 			end
-			MUSIC_READY[name] = path
 		end
+		MUSIC_READY[name] = (path ~= "") and load_sound(path) or false
 	end
 	MUSIC_CUR = name
-	local p = MUSIC_READY[name]
-	if (p ~= "") then
-		play_midi(p)
-	else
-		stop_midi()
+	if MUSIC_SOUND then
+		MUSIC_SOUND:stop()
+	end
+	MUSIC_SOUND = MUSIC_READY[name]
+	if MUSIC_SOUND then
+		MUSIC_SOUND:play(true)
 	end
 end
 function music_stop()
 	MUSIC_CUR = ""
-	stop_midi()
-end
-function music_tick()
-	if ((not SND_ON) or (MUSIC_CUR == "")) then
-		return
+	if MUSIC_SOUND then
+		MUSIC_SOUND:stop()
 	end
-	if (midi_status() == "stopped") then
-		local p = _j_get(MUSIC_READY, MUSIC_CUR, "")
-		if (p ~= "") then
-			play_midi(p)
-		end
-	end
+	MUSIC_SOUND = false
 end

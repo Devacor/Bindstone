@@ -1,16 +1,18 @@
 // Gator Quest - sound and music with zero audio assets: every effect is
 // synthesized into an 8-bit WAV and every realm's theme is composed into a
 // MIDI file on first use, cached under the data folder. Playback is the
-// runner's play_wav / play_midi (a quiet no-op where unavailable).
+// runner's Sound: each effect loads once and replays, the theme loops on
+// its own (no sound where the runner has none).
 
 import "gq_render.jai";
 
 bool AUDIO_ON;
 string AUDIO_DIR;
 map<string, string> SFX_PATH;
+map<string, var> SFX_SOUND;     // name -> its loaded Sound, null when it will not load
 map<string, int> SFX_LAST;
+var MUSIC = null;               // the theme's Sound
 
-int MUSIC_POLL;
 int SFX_RATE = 11025;
 
 string le16(int v) { return "" + to_char(v & 255) + to_char((v >> 8) & 255); }
@@ -161,7 +163,9 @@ void sfx(string name) {
 	int last = SFX_LAST.get(name, -1000);
 	if (NOW_MS - last < 70) { return; }
 	SFX_LAST[name] = NOW_MS;
-	play_wav(SFX_PATH[name]);
+	if (!SFX_SOUND.has(name)) { SFX_SOUND[name] = load_sound(SFX_PATH[name]); }
+	var s = SFX_SOUND[name];
+	if (s != null) { s.play(); }
 }
 
 // sounds from the world: only what is near enough to hear
@@ -273,26 +277,22 @@ string midi_theme(int theme) {
 void music_play(int which) {
 	if (!AUDIO_ON || which == MUSIC_CUR) { return; }
 	MUSIC_CUR = which;
-	if (!MUSIC_ON) { stop_midi(); return; }
+	music_stop();
+	if (!MUSIC_ON) { return; }
 	int theme = which == -1 ? 8 : (which == -2 ? 9 : WORLDS[which].music);
 	string p = AUDIO_DIR + "/theme" + to_string(theme) + ".mid";
 	if (!file_exists(p)) { write_file(p, midi_theme(theme)); }
-	play_midi(p);
+	MUSIC = load_sound(p);
+	if (MUSIC != null) { MUSIC.play(true); }
 }
 
-void music_tick() {
-	if (!AUDIO_ON || !MUSIC_ON || MUSIC_CUR == -99) { return; }
-	MUSIC_POLL = MUSIC_POLL + 1;
-	if (MUSIC_POLL < 60) { return; }
-	MUSIC_POLL = 0;
-	if (midi_status() == "stopped") {
-		int theme = MUSIC_CUR == -1 ? 8 : (MUSIC_CUR == -2 ? 9 : WORLDS[MUSIC_CUR].music);
-		play_midi(AUDIO_DIR + "/theme" + to_string(theme) + ".mid");
-	}
+void music_stop() {
+	if (MUSIC != null) { MUSIC.stop(); }
+	MUSIC = null;
 }
 
 void music_toggle() {
 	MUSIC_ON = !MUSIC_ON;
-	if (!MUSIC_ON) { stop_midi(); }
+	if (!MUSIC_ON) { music_stop(); }
 	else { int cur = MUSIC_CUR; MUSIC_CUR = -99; music_play(cur); }
 }

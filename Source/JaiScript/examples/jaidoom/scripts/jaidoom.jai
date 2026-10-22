@@ -51,7 +51,6 @@ float TICK_MS = 1000.0 / 35.0;
 bool UNCAPPED = false;       // u / -- uncapped: render every frame the machine allows, the camera eased between tics
 float IP_X = 0.0; float IP_Y = 0.0; float IP_ANG = 0.0; float IP_Z = 41.0;   // the view at the previous tic
 bool RUN_TOGGLE = false;
-int MUS_POLL = 0;
 
 int GSTATE = 0;               // 0 title, 1 menu, 2 game, 3 intermission, 4 episode end
 int MENU_MODE = 0;            // 0 main, 1 skill pick
@@ -668,8 +667,6 @@ function play(string mapname) -> int {
 
 		if (GSTATE == 0 || GSTATE == 1) { music_want(MUS_TITLE); }
 		else if (GSTATE == 3 || GSTATE == 4) { music_want(MUS_INTER); }
-		MUS_POLL = MUS_POLL + 1;
-		if (MUS_POLL >= 90) { MUS_POLL = 0; music_tick(); }   // MCI has no loop flag: re-arm on runout
 
 		if (GSTATE == 2) {
 			// palette flash: pain/berserk reds beat pickup golds beat the radsuit green

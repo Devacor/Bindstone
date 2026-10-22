@@ -36,6 +36,8 @@ def main():
 		('include/jaiscript/stdlib/strings.hpp','string',r'(?:sign|def)\("([^"\n]+)"'),
 		('include/jaiscript/stdlib/json.hpp','global',r'add_(?:variadic_)?function\("([^"\n]+)"'),
 		('tools/jaiscript/fetch.hpp','Download',r'\.method\("([^"\n]+)"'),
+		('tools/jaiscript/sound.hpp','Sound',r'\.method\("([^"\n]+)"'),
+		('tools/jaiscript/sound.hpp','global',r'add_function\("([^"\n]+)"'),
 	]:
 		registered=set(re.findall(pattern,(PROJECT/relative).read_text(encoding='utf-8')))
 		listed={e['name'] for e in entries if e['owner']==owner}

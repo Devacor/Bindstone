@@ -25,10 +25,9 @@ int main(int argc,char**argv){
 		e->add_function("dir_exists",[](const std::string& path){return std::filesystem::is_directory(path);});
 		e->add_function("writable_dir",[](const std::string& path){return std::filesystem::is_directory(path);});
 		e->add_function("write_file",[](const std::string& path,const std::string& data){std::ofstream out(path,std::ios::binary);out.write(data.data(),data.size());return static_cast<bool>(out);});
-		e->add_function("play_wav",[](const std::string&){return false;});
-		e->add_function("play_midi",[](const std::string&){return false;});
-		e->add_function("stop_midi",[](){});
-		e->add_function("midi_status",[](){return std::string("stopped");});
+		e->add_function("load_sound",[eng=e.get()](const std::string&){return jai::script_value(std::monostate{},eng);});
+		e->add_function("play_sound",[eng=e.get()](const std::string&){return jai::script_value(std::monostate{},eng);});
+		e->add_function("stop_sounds",[](){});
 		e->add_function("host_checkpoint",[&](jai::script_int tic,jai::script_int state,const std::string& frame){
 			for(unsigned char c:frame){frame_hash^=c;frame_hash*=1099511628211ull;}
 			trace<<phase<<'\t'<<tic<<'\t'<<state<<'\t'<<frame.size()<<'\t'<<std::hex<<std::setw(16)<<std::setfill('0')<<frame_hash<<std::dec<<'\n';

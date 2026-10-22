@@ -443,7 +443,6 @@ void play_loop() {
 		check_dialog(CV);
 		process_events(CV);
 		particles_update();
-		music_tick();
 		size_check = size_check + 1;
 		if (size_check >= 30) {
 			size_check = 0;
@@ -468,7 +467,7 @@ void play_loop() {
 }
 
 void music_stop_all() {
-	if (AUDIO_ON) { stop_midi(); }
+	if (AUDIO_ON) { music_stop(); }
 }
 
 // --------------------------------------------------------- frame capture ---

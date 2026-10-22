@@ -1182,14 +1182,22 @@ namespace {
         }
     }
 
-    // A keyword after '.' / '->', or as a method's declared name, is a member name; a field keeps the keyword diagnostic
-    // (its bare name in a method body would read as the keyword)
+    // A reserved word is a name where a qualifier or a member declaration makes it one: after '.', '?.', '->' or '::', and as
+    // the declared name of a class member, a namespace member or an enum value; bare, it stays the keyword
     bool is_keyword_word(token_type type) {
-        return type >= token_type::bool_keyword && type <= token_type::extern_keyword;
+        return (type >= token_type::bool_keyword && type <= token_type::extern_keyword) || type == token_type::inline_keyword;
     }
 
+    // this and super name the receiver and its base, so neither is declared as a member
+    bool is_declarable_keyword_name(token_type type) {
+        return is_keyword_word(type) && type != token_type::this_keyword && type != token_type::super_keyword;
+    }
+
+    // a keyword as a member declaration's name: followed by '(' (a method), '=' or ';' (a field)
     bool keyword_member_name_at(const std::vector<token>& stream, size_t index) {
-        return index + 1 < stream.size() && is_keyword_word(stream[index].type) && stream[index + 1].type == token_type::left_paren;
+        if (index + 1 >= stream.size() || !is_declarable_keyword_name(stream[index].type)) { return false; }
+        const token_type next = stream[index + 1].type;
+        return next == token_type::left_paren || next == token_type::equal || next == token_type::semicolon;
     }
 
     std::string type_keyword_name_message(std::string_view lexeme, const char* what) {
@@ -1220,7 +1228,10 @@ namespace {
 }
 
 void parser::report_expected_name(const std::string& expected_message, const char* what) {
-    if (is_type_keyword_token(peek().type)) {
+    if (std::string_view(what) == "member" && (check(token_type::this_keyword) || check(token_type::super_keyword))) {
+        report_error("'" + std::string(check(token_type::this_keyword) ? "this" : "super") + "' is " +
+                     (check(token_type::this_keyword) ? "the receiver" : "the base class") + " and cannot be used as a " + what + " name", peek());
+    } else if (is_type_keyword_token(peek().type)) {
         report_error(type_keyword_name_message(peek().lexeme, what), peek());
     } else {
         report_error(expected_message, peek());
@@ -1432,7 +1443,8 @@ checked_result<expression_ptr> parser::primary() {
                 : "A base class method is called with super::name(args), not super.name", superToken);
             return make_error_code(parse_error_code::unexpected_token);
         }
-        JAISCRIPT_TRY_ASSIGN(token methodName, consume(token_type::identifier, "Expected method name after 'super::'"));
+        JAISCRIPT_TRY_ASSIGN(token methodName, is_keyword_word(peek().type) ? checked_result<token>(advance())
+                                                                            : consume(token_type::identifier, "Expected method name after 'super::'"));
 
         // Create a member access on super
         auto superExpr = std::make_shared<super_expr>(superToken.location);
@@ -2930,7 +2942,10 @@ checked_result<declaration_ptr> parser::declaration_body() {
 
         if (!check(token_type::right_brace)) {
             do {
-                JAISCRIPT_TRY_ASSIGN(token val_tok, consume(token_type::identifier, "Expected enum value name"));
+                const bool keyword_value = is_declarable_keyword_name(peek().type) && current_ + 1 < stream_->size() &&
+                                           ((*stream_)[current_ + 1].type == token_type::comma || (*stream_)[current_ + 1].type == token_type::right_brace ||
+                                            (*stream_)[current_ + 1].type == token_type::equal);
+                JAISCRIPT_TRY_ASSIGN(token val_tok, keyword_value ? checked_result<token>(advance()) : consume(token_type::identifier, "Expected enum value name"));
                 auto [val_id, val_view] = symbolizer_->intern_with_view(val_tok.lexeme);
                 decl->values.push_back({val_view, val_id});
                 if (check(token_type::equal)) {
@@ -4328,7 +4343,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
         if (match(token_type::const_keyword)) {
             member_const = true;
             if (match(token_type::static_keyword)) { const_static = true; }
-            if (untyped_declaration_ahead()) {   // const NAME = e;: const auto
+            if (untyped_member_declaration_ahead()) {   // const NAME = e;: const auto
                 token name = advance();
                 expression_ptr init;
                 if (match(token_type::equal)) {
@@ -4590,7 +4605,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
             // Currently no virtual destructor support
         } else if (check(token_type::function_keyword) &&
                    current_ + 2 < stream_->size() &&
-                   (*stream_)[current_ + 1].type == token_type::identifier &&
+                   ((*stream_)[current_ + 1].type == token_type::identifier || is_declarable_keyword_name((*stream_)[current_ + 1].type)) &&
                    (*stream_)[current_ + 1].lexeme != "operator" &&
                    ((*stream_)[current_ + 2].type == token_type::equal ||
                     (*stream_)[current_ + 2].type == token_type::semicolon)) {
@@ -5007,7 +5022,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
             // Function or variable declaration
             const bool function_spelling = check(token_type::function_keyword);
             type_info_ptr type;
-            if (!((inline_member || const_member) && untyped_declaration_ahead())) {
+            if (!((inline_member || const_member) && untyped_member_declaration_ahead())) {
                 auto type_result = parse_type();
                 if (!type_result) {
                     synchronize();
@@ -5018,8 +5033,12 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
             }
             const bool reference_member = type && type->base_type == script_value_type::jai_reference_type;
 
-            if (!check(token_type::identifier)) {
-                report_error("Expected member name in namespace", peek());
+            if (!check(token_type::identifier) && !keyword_member_name_at(*stream_, current_)) {
+                if (check(token_type::this_keyword) || check(token_type::super_keyword)) {
+                    report_expected_name("Expected member name in namespace", "member");
+                } else {
+                    report_error("Expected member name in namespace", peek());
+                }
                 synchronize();
                 continue;
             }
@@ -5336,6 +5355,12 @@ bool parser::untyped_declaration_ahead() const {
     if (!check(token_type::identifier) || current_ + 1 >= stream_->size()) { return false; }
     const token_type next = (*stream_)[current_ + 1].type;
     return next == token_type::semicolon || next == token_type::equal;
+}
+
+// a type keyword there reads as the declaration's type (const int = 1; stays an error)
+bool parser::untyped_member_declaration_ahead() const {
+    return untyped_declaration_ahead() ||
+           (!is_type_keyword_token(peek().type) && keyword_member_name_at(*stream_, current_) && (*stream_)[current_ + 1].type != token_type::left_paren);
 }
 
 // inline [type] name [= init];: the C++17 inline variable - one variable shared by every unit that declares it

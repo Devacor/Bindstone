@@ -3,7 +3,8 @@
 
   python lsp_test.py [--exe PATH] [--update] [--only fixtures|gatorquest|latency|robustness] [--verbose]
 
-fixtures    golden responses for every feature on tests/fixtures (--update rewrites golden/fixtures.json)
+fixtures    golden responses for every feature on tests/fixtures (--update rewrites golden/fixtures.json), and
+            definition/hover/completion/references on keyword-named members (tests/keyword_fixture)
 gatorquest  examples/gatorquest: zero diagnostics on the clean program, definition/references/hover/
             completion/rename spot checks
 latency     examples/gatorquest: time from an edit to its published diagnostics
@@ -337,6 +338,73 @@ def run_fixtures(exe, update, checks):
     for name in sorted(set(golden) | set(actual)):
         checks.check(golden.get(name) == actual.get(name), "golden " + name,
                      "expected " + json.dumps(golden.get(name))[:300] + "\n       got " + json.dumps(actual.get(name))[:300])
+
+
+def run_keyword_members(exe, checks):
+    print("keyword members")
+    root = HERE / "keyword_fixture"
+    client = Client(exe, root)
+    try:
+        uri = client.open(root / "keywords.jai")
+        client.settle()
+        checks.check(not client.wait_diagnostics(uri)["diagnostics"], "keyword members: no diagnostics", str(client.diagnostics.get(uri)))
+        text = client.texts[uri]
+        lines = text.split("\n")
+
+        def line_of(pattern):
+            return next(i for i, line in enumerate(lines) if re.search(pattern, line))
+
+        def at(needle, occurrence=1, delta=0):
+            return {"textDocument": {"uri": uri}, "position": position_of(text, needle, occurrence, delta)}
+
+        def definition(needle, occurrence=1, delta=0):
+            r = client.request("textDocument/definition", at(needle, occurrence, delta))
+            return r["range"]["start"]["line"] if r else None
+
+        def hover(needle, occurrence=1, delta=0):
+            r = client.request("textDocument/hover", at(needle, occurrence, delta))
+            return r["contents"]["value"] if r else ""
+
+        def completion(typed, needle):
+            pos = position_of(text, needle)
+            client.change(uri, pos, pos, typed)
+            end = {"line": pos["line"], "character": pos["character"] + len(typed)}
+            result = client.request("textDocument/completion", {"textDocument": {"uri": uri}, "position": end})
+            client.change(uri, pos, end, "")
+            return {item["label"]: item.get("kind") for item in result["items"]}
+
+        field = line_of(r"^\s+int default = 7;")
+        method = line_of(r"^\s+int catch\(int code\) \{")
+        override = line_of(r"^\s+override int catch")
+        ns_fn = line_of(r"^\s+string catch\(string url\)")
+        checks.check(definition("p.catch", 1, 2) == method, "keyword members: definition p.catch -> the method", str(definition("p.catch", 1, 2)))
+        checks.check(definition("p.default", 1, 2) == field, "keyword members: definition p.default -> the field", str(definition("p.default", 1, 2)))
+        checks.check(definition("this.default", 1, 5) == field, "keyword members: definition this.default -> the field")
+        checks.check(definition("r.catch", 1, 2) == override, "keyword members: definition r.catch -> the override", str(definition("r.catch", 1, 2)))
+        checks.check(definition("super::catch", 1, 7) == method, "keyword members: definition super::catch -> the base method", str(definition("super::catch", 1, 7)))
+        checks.check(definition("spider::catch(\"", 1, 8) == ns_fn, "keyword members: definition spider::catch -> the namespace function",
+                     str(definition("spider::catch(\"", 1, 8)))
+        checks.check(definition("spider::import", 1, 8) == line_of(r"^\s+int import = 3;"), "keyword members: definition spider::import")
+        checks.check(definition("Mode::for", 1, 6) == line_of(r"^enum Mode"), "keyword members: definition Mode::for -> the enum",
+                     str(definition("Mode::for", 1, 6)))
+        h = hover("p.catch", 1, 2)
+        checks.check("int catch(int code)" in h and "Promise" in h, "keyword members: hover p.catch shows the method", h)
+        h = hover("p.default", 1, 2)
+        checks.check("default" in h and "field" in h, "keyword members: hover p.default shows the field", h)
+        h = hover("spider::catch(\"", 1, 8)
+        checks.check("catch(string url)" in h, "keyword members: hover spider::catch shows the function", h)
+        sig = client.request("textDocument/signatureHelp", at("p.catch(1", 1, 8))
+        labels = [s["label"] for s in (sig or {}).get("signatures", [])]
+        checks.check(any("catch(int code)" in l for l in labels), "keyword members: signature help in p.catch(", str(labels))
+        members = completion("p.", "print(settled)")
+        checks.check(all(n in members for n in ("default", "catch", "new")), "keyword members: completion after p. lists them", str(sorted(members)))
+        scoped = completion("spider::", "print(settled)")
+        checks.check(all(n in scoped for n in ("catch", "import")), "keyword members: completion after spider:: lists them", str(sorted(scoped)))
+        refs = client.request("textDocument/references", dict(at("p.catch", 1, 2), context={"includeDeclaration": True}))
+        checks.check(sorted(r["range"]["start"]["line"] for r in refs or []).count(method) == 1 and len(refs or []) >= 2,
+                     "keyword members: references to Promise.catch", str(refs)[:300])
+    finally:
+        client.close()
 
 
 def run_gatorquest(exe, checks):
@@ -737,6 +805,7 @@ def main():
     checks = Checks(args.verbose)
     if args.only in (None, "fixtures"):
         run_fixtures(exe, args.update, checks)
+        run_keyword_members(exe, checks)
         run_malformed_headers(exe, checks)
     if args.only in (None, "gatorquest"):
         run_gatorquest(exe, checks)

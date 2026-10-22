@@ -118,6 +118,7 @@ namespace jai {
         bool finish_const(const declaration_ptr& decl, const token& at, bool class_constant);
         bool const_method_suffix();   // `) const`: JaiScript has no const methods
         bool untyped_declaration_ahead() const;   // IDENT followed by ';' or '='
+        bool untyped_member_declaration_ahead() const;   // the same, or a keyword other than a type naming a class or namespace member
         checked_result<uint8_t> check_mode_attribute();
         std::optional<std::string> parse_operator_method_symbol();
         

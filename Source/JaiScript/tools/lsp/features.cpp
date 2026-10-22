@@ -555,7 +555,13 @@ std::optional<signature_result> workspace::signature_help(unit& u, text_pos pos)
 		if (depth == 0 && t == jai::token_type::comma) { ++commas; }
 		if (depth == 0 && (t == jai::token_type::semicolon || t == jai::token_type::left_brace || t == jai::token_type::right_brace)) { return std::nullopt; }
 	}
-	if (open == SIZE_MAX || open == 0 || u.tokens[open - 1].type != jai::token_type::identifier) { return std::nullopt; }
+	if (open == SIZE_MAX || open == 0) { return std::nullopt; }
+	if (u.tokens[open - 1].type != jai::token_type::identifier) {
+		const auto before = open >= 2 ? u.tokens[open - 2].type : jai::token_type::eof;
+		const bool qualified = before == jai::token_type::dot || before == jai::token_type::arrow || before == jai::token_type::question_dot ||
+		                       before == jai::token_type::colon_colon || before == jai::token_type::super_keyword;
+		if (!qualified || !is_keyword(u.tokens[open - 1].lexeme)) { return std::nullopt; }   // p.catch( is a member call
+	}
 	const lex_token& callee = u.tokens[open - 1];
 
 	auto lookup = [&](const unit_model& m) -> const symbol* {

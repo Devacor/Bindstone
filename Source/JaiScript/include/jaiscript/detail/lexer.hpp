@@ -94,6 +94,7 @@ namespace jai {
         std::vector<token> tokenize();
         token next_token();
         bool is_at_end() const { return current_ >= source_.length(); }
+        static bool is_reserved_word(std::string_view word);
 
     private:
         std::string source_;

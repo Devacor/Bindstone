@@ -201,11 +201,16 @@ inline size_t token_at_or_after(const std::vector<lex_token>& tokens, text_pos p
 		[](const lex_token& t, text_pos p) { return t.pos < p; }) - tokens.begin());
 }
 
-// The first identifier token spelled `name` at or after pos, within `limit` tokens
+// a keyword token names a member declared or reached with its spelling (int default; p.catch())
+inline bool token_spells_name(const lex_token& t, std::string_view name) {
+	return t.lexeme == name && (t.type == jai::token_type::identifier || is_keyword(name));
+}
+
+// The first name token spelled `name` at or after pos, within `limit` tokens
 inline std::optional<text_span> find_name_after(const std::vector<lex_token>& tokens, text_pos pos, std::string_view name, size_t limit = 400) {
 	for (size_t i = token_at_or_after(tokens, pos), n = 0; i < tokens.size() && n < limit; ++i, ++n) {
 		const auto& t = tokens[i];
-		if (t.type == jai::token_type::identifier && t.lexeme == name) {
+		if (token_spells_name(t, name)) {
 			return text_span{t.pos, {t.pos.line, t.pos.col + static_cast<uint32_t>(name.size())}};
 		}
 	}
@@ -216,7 +221,7 @@ inline std::optional<text_span> find_name_before(const std::vector<lex_token>& t
 	size_t i = token_at_or_after(tokens, pos);
 	for (size_t n = 0; i > 0 && n < limit; ++n) {
 		const auto& t = tokens[--i];
-		if (t.type == jai::token_type::identifier && t.lexeme == name) {
+		if (token_spells_name(t, name)) {
 			return text_span{t.pos, {t.pos.line, t.pos.col + static_cast<uint32_t>(name.size())}};
 		}
 	}

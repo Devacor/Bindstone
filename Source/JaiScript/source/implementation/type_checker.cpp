@@ -5580,6 +5580,7 @@ private:
     void warn_member_shadows_global(std::string_view kind, std::string_view name,
                                     std::string_view cls, const source_location& loc) {
         if (global_var_names_.count(name) == 0 && functions_.count(name) == 0) { return; }
+        if (lexer::is_reserved_word(name)) { return; }   // bare, the word is the keyword: no member hides a global of it
         diag(diag_level::warning, loc,
              std::string(kind) + " '" + std::string(name) + "' of class '" + std::string(cls) +
              "' shadows the global '" + std::string(name) + "' - bare '" + std::string(name) +

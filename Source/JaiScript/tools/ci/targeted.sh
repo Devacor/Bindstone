@@ -50,7 +50,8 @@ classify() {
 		tools/ci/*) pick ci-scripts "the CI scripts ($p)" ;;
 		tools/lsp/*) pick lsp "the language server ($p)" ;;
 		tools/vscode-jaiscript/*) NOTES="$NOTES $p" ;;
-		tools/jaiscript/*) pick gatorquest "the runner ($p)"; pick verify-site "the runner runs the site's samples ($p)" ;;
+		tools/jaiscript/*) pick gatorquest "the runner ($p)"; pick verify-site "the runner runs the site's samples ($p)"; pick jaiweb "jaiweb shares the runner's file IO and sockets ($p)" ;;
+		tools/jaiweb/*) pick jaiweb "the web host ($p)" ;;
 		examples/gloom/*) pick gloom "the GLOOM example ($p)" ;;
 		examples/demoreel/*) pick demoreel "the demoreel ($p)" ;;
 		examples/crawler/*) pick crawler "the crawler ($p)" ;;
@@ -107,6 +108,7 @@ if [ "$BUILD" = 1 ]; then
 			verify-site) release_targets="$release_targets jaiscript_runner jaiscript_tests" ;;
 			lsp) release_targets="$release_targets jaiscript_lsp" ;;
 			embed-quickstart) release_targets="$release_targets embed_quickstart" ;;
+			jaiweb) release_targets="$release_targets jaiweb" ;;
 		esac
 	done
 	# shellcheck disable=SC2086

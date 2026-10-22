@@ -1,0 +1,465 @@
+#!/usr/bin/env python3
+"""jaiweb's gate: start the host on a free port over a copy of tests/app and drive it over HTTP.
+
+    python tools/jaiweb/tests/jaiweb_test.py --exe build/bin/jaiweb [--backend vm|interp|both] [--verbose]
+
+Covers routing, query/form/multipart/JSON parsing, headers and cookies, sessions, SQLite CRUD with bound parameters
+and transactions, script errors and the execution budget (500 with the process alive), hot reload between two
+requests, a rejected reload that keeps serving, state kept across a reload, static files (types, ETag, 304, HEAD,
+traversal), the limits (413, 431, 400), chunked bodies, keep-alive and pipelining, and the shutdown endpoint; then
+serves a copy of examples/guestbook and walks its pages, form, session and JSON API.
+"""
+import argparse
+import http.client
+import json
+import os
+import pathlib
+import queue
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+HERE = pathlib.Path(__file__).resolve().parent
+FIXTURE = HERE / "app"
+EXAMPLE = HERE.parent / "examples" / "guestbook"
+
+
+class Server:
+	def __init__(self, exe, app_dir, backend, extra):
+		self.lines = queue.Queue()
+		self.log = []
+		args = [exe, str(app_dir / "app.jai"), "--port", "0", "--allow-shutdown", "--backend", backend] + extra
+		self.process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=str(app_dir))
+		threading.Thread(target=self._pump, daemon=True).start()
+		self.port = None
+		deadline = time.time() + 60
+		while time.time() < deadline:
+			try:
+				line = self.lines.get(timeout=0.5)
+			except queue.Empty:
+				if self.process.poll() is not None:
+					break
+				continue
+			if line.startswith("jaiweb: serving") and " on http://" in line:
+				self.port = int(line.split(" on http://", 1)[1].split("/", 1)[0].rsplit(":", 1)[1])
+				break
+		if self.port is None:
+			raise RuntimeError("jaiweb did not start:\n" + "\n".join(self.log))
+
+	def _pump(self):
+		for raw in self.process.stdout:
+			line = raw.decode("utf-8", "replace").rstrip("\r\n")
+			self.log.append(line)
+			self.lines.put(line)
+
+	def log_text(self):
+		return "\n".join(self.log)
+
+	def stop(self):
+		if self.process.poll() is None:
+			self.process.kill()
+		self.process.wait(timeout=10)
+
+
+class Result:
+	def __init__(self, status, headers, body):
+		self.status = status
+		self.headers = headers
+		self.body = body
+
+	def header(self, name):
+		for key, value in self.headers:
+			if key.lower() == name.lower():
+				return value
+		return None
+
+	def all_headers(self, name):
+		return [value for key, value in self.headers if key.lower() == name.lower()]
+
+	def text(self):
+		return self.body.decode("utf-8", "replace")
+
+	def json(self):
+		return json.loads(self.body.decode("utf-8"))
+
+
+class Suite:
+	def __init__(self, server, app_dir, verbose):
+		self.server = server
+		self.app_dir = app_dir
+		self.verbose = verbose
+		self.failures = []
+		self.passed = 0
+		self.connection = None
+
+	def request(self, method, path, body=None, headers=None, fresh=False):
+		if fresh or self.connection is None:
+			if self.connection is not None:
+				self.connection.close()
+			self.connection = http.client.HTTPConnection("127.0.0.1", self.server.port, timeout=30)
+		if isinstance(body, str):
+			body = body.encode("utf-8")
+		try:
+			self.connection.request(method, path, body=body, headers=headers or {})
+			response = self.connection.getresponse()
+		except (http.client.HTTPException, OSError):
+			self.connection.close()
+			self.connection = http.client.HTTPConnection("127.0.0.1", self.server.port, timeout=30)
+			self.connection.request(method, path, body=body, headers=headers or {})
+			response = self.connection.getresponse()
+		data = response.read()
+		result = Result(response.status, response.getheaders(), data)
+		if response.will_close:
+			self.connection.close()
+			self.connection = None
+		return result
+
+	def raw(self, payload, read_until_close=True, timeout=10):
+		with socket.create_connection(("127.0.0.1", self.server.port), timeout=timeout) as s:
+			s.sendall(payload)
+			chunks = []
+			if not read_until_close:
+				time.sleep(0.5)
+				s.settimeout(0.5)
+			try:
+				while True:
+					chunk = s.recv(65536)
+					if not chunk:
+						break
+					chunks.append(chunk)
+			except socket.timeout:
+				pass
+			return b"".join(chunks)
+
+	def check(self, name, condition, detail=""):
+		if condition:
+			self.passed += 1
+			if self.verbose:
+				print("  ok   " + name)
+		else:
+			self.failures.append(name + (": " + detail if detail else ""))
+			print("  FAIL " + name + (": " + detail if detail else ""))
+
+	def wait_for_log(self, needle, timeout=5):
+		deadline = time.time() + timeout
+		while time.time() < deadline:
+			if needle in self.server.log_text():
+				return True
+			time.sleep(0.05)
+		return False
+
+	def write_module(self, name, text):
+		path = self.app_dir / name
+		path.write_text(text, encoding="utf-8")
+		# a stamp the reload check cannot miss, however coarse the file system's clock
+		stamp = time.time() + 2 + len(text)
+		os.utime(path, (stamp, stamp))
+
+	def run(self):
+		self.routing()
+		self.parsing()
+		self.cookies_and_sessions()
+		self.database()
+		self.errors()
+		self.hot_reload()
+		self.static_files()
+		self.limits_and_framing()
+
+	def routing(self):
+		r = self.request("GET", "/")
+		self.check("GET / answers the handler's page", r.status == 200 and r.text() == "<h1>home</h1>", r.text())
+		self.check("a string answer is HTML", (r.header("Content-Type") or "").startswith("text/html"))
+		r = self.request("GET", "/posts/42")
+		self.check(":id captures a segment", r.status == 200 and r.json() == {"id": "42"}, r.text())
+		r = self.request("GET", "/files/a/b/c.txt")
+		self.check("*rest captures the rest of the path", r.json() == {"rest": "a/b/c.txt"}, r.text())
+		r = self.request("GET", "/nowhere")
+		self.check("an unmatched path is 404", r.status == 404)
+		r = self.request("GET", "/only-post")
+		self.check("a path of another method is 405 with Allow", r.status == 405 and r.header("Allow") == "POST", str(r.status))
+		r = self.request("HEAD", "/")
+		self.check("HEAD takes the GET route and sends no body", r.status == 200 and r.body == b"" and r.header("Content-Length") == "13")
+		r = self.request("GET", "/redirect")
+		self.check("redirect is 303 with Location", r.status == 303 and r.header("Location") == "/target")
+		r = self.request("GET", "/null")
+		self.check("a null answer is 204", r.status == 204 and r.body == b"")
+		r = self.request("GET", "/status/418")
+		self.check("Response(status, body) keeps its status", r.status == 418 and r.text() == "custom status")
+
+	def parsing(self):
+		r = self.request("GET", "/echo?a=1&b=two%20words&c=x+y&empty&d=%26%3D", headers={"x-test-agent": "probe"})
+		got = r.json()
+		self.check("query parses: %XX, + as space, a bare key", got["query"] == {"a": "1", "b": "two words", "c": "x y", "empty": "", "d": "&="}, r.text())
+		self.check("header() reads any spelling of a name", got["agent"] == "probe", r.text())
+		r = self.request("GET", "/echo/caf%C3%A9?x=1")
+		self.check("the path is percent-decoded", r.status == 404)
+		r = self.request("POST", "/echo/form", "name=Ada+L&msg=%3Cb%3E&n=1", {"Content-Type": "application/x-www-form-urlencoded"})
+		self.check("form() parses an urlencoded body", r.json() == {"name": "Ada L", "msg": "<b>", "n": "1"}, r.text())
+		r = self.request("POST", "/echo/json", json.dumps({"a": [1, 2], "b": {"c": "d"}}), {"Content-Type": "application/json"})
+		self.check("json() reads the body", r.json() == {"got": {"a": [1, 2], "b": {"c": "d"}}}, r.text())
+		boundary = "----jaiwebBoundary7"
+		body = (
+			"--" + boundary + "\r\n"
+			"Content-Disposition: form-data; name=\"title\"\r\n\r\n"
+			"Hello there\r\n"
+			"--" + boundary + "\r\n"
+			"Content-Disposition: form-data; name=\"upload\"; filename=\"notes.txt\"\r\n"
+			"Content-Type: text/plain\r\n\r\n"
+			"line one\r\nline two\r\n"
+			"--" + boundary + "--\r\n")
+		r = self.request("POST", "/echo/files", body, {"Content-Type": "multipart/form-data; boundary=" + boundary})
+		got = r.json() if r.status == 200 else {}
+		self.check("multipart fields land in form()", got.get("fields") == {"title": "Hello there"}, r.text())
+		self.check("multipart files land in files()", got.get("files") == {"upload": {"filename": "notes.txt", "size": 18, "type": "text/plain", "data": "line one\r\nline two"}}, r.text())
+		r = self.request("POST", "/echo/body", "x" * 1000)
+		self.check("a Content-Length body arrives whole", r.json() == {"method": "POST", "body": "x" * 1000, "length": 1000})
+		chunked = b"POST /echo/body HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5;ext=1\r\nhello\r\n6\r\n world\r\n0\r\nX-Trailer: 1\r\n\r\n"
+		raw = self.raw(chunked)
+		self.check("a chunked body is decoded", b'"body":"hello world"' in raw, raw[:200].decode("latin-1"))
+
+	def cookies_and_sessions(self):
+		r = self.request("GET", "/cookies", headers={"Cookie": "a=1; b=two%20words; quoted=\"q\""})
+		self.check("cookies parse from the Cookie header", r.json() == {"a": "1", "b": "two words", "quoted": "q"}, r.text())
+		cookies = r.all_headers("Set-Cookie")
+		self.check("set_cookie writes one Set-Cookie per cookie", len(cookies) == 2, str(cookies))
+		self.check("set_cookie encodes the value and defaults HttpOnly, SameSite=Lax, Path=/",
+			"flavor=oat%20meal; Path=/; Max-Age=60; HttpOnly; SameSite=Lax" in cookies, str(cookies))
+		self.check("set_cookie options turn the defaults off", "plain=1; Path=/" in cookies, str(cookies))
+		r = self.request("GET", "/session")
+		session_cookie = (r.header("Set-Cookie") or "").split(";", 1)[0]
+		self.check("a new session starts at one", r.json() == {"seen": 1, "new": True} and session_cookie.startswith("session="), r.text())
+		self.check("the session id is 64 hex characters", len(session_cookie.split("=", 1)[1]) == 64, session_cookie)
+		r = self.request("GET", "/session", headers={"Cookie": session_cookie})
+		self.check("the session cookie brings the data back", r.json() == {"seen": 2, "new": False}, r.text())
+		r = self.request("GET", "/session", headers={"Cookie": "session=forged"})
+		self.check("an unknown session id starts a new session", r.json() == {"seen": 1, "new": True}, r.text())
+
+	def database(self):
+		hostile = "Robert'); DROP TABLE items;--"
+		r = self.request("POST", "/items", json.dumps({"name": hostile, "qty": 3, "price": 2.5, "note": None}), {"Content-Type": "application/json"})
+		self.check("INSERT through bound parameters", r.status == 201 and r.json().get("id") == 1, r.text())
+		r = self.request("POST", "/items", json.dumps({"name": "widget", "qty": 10, "price": 1, "note": "x"}), {"Content-Type": "application/json"})
+		r = self.request("GET", "/items")
+		rows = r.json()
+		self.check("a hostile value is stored as data", len(rows) == 2 and rows[0]["name"] == hostile, r.text())
+		self.check("columns come back typed (int, float, string, null)", rows[0]["qty"] == 3 and rows[0]["price"] == 2.5 and rows[0]["note"] is None, r.text())
+		r = self.request("GET", "/items/2")
+		self.check("query_one with a named parameter", r.json().get("name") == "widget", r.text())
+		r = self.request("PUT", "/items/2", json.dumps({"qty": 11}), {"Content-Type": "application/json"})
+		self.check("UPDATE reports the rows changed", r.json() == {"changed": 1}, r.text())
+		r = self.request("GET", "/items-search?name=" + "widget")
+		self.check("a parameter from the query string", r.json() == [{"name": "widget"}], r.text())
+		r = self.request("DELETE", "/items/2")
+		self.check("DELETE reports the rows changed", r.json() == {"changed": 1}, r.text())
+		r = self.request("GET", "/items/2")
+		self.check("a missing row is null", r.status == 404)
+		r = self.request("POST", "/items/rollback")
+		got = r.json()
+		self.check("a failing transaction rolls back and raises SQLite's message",
+			got.get("count") == 0 and "no such table: nowhere" in str(got.get("error")), r.text())
+		r = self.request("POST", "/items/nested")
+		self.check("a throw in a nested transaction rolls back to its savepoint only",
+			r.json() == {"thrown": "inner fails", "outer": 1, "inner": 0, "open": False}, r.text())
+		r = self.request("GET", "/sql-error")
+		self.check("an SQL error uncaught is a 500", r.status == 500 and b"no such table: missing_table" in r.body, r.text()[:200])
+
+	def errors(self):
+		r = self.request("GET", "/boom")
+		self.check("a run-time error is a 500 with the error for a local browser", r.status == 500 and b"Division by zero" in r.body, r.text()[:200])
+		self.check("the error is logged with its trace", self.wait_for_log("Division by zero") and "at <lambda>" in self.server.log_text())
+		r = self.request("GET", "/throw")
+		self.check("an uncaught throw is a 500", r.status == 500 and b"thrown from a handler" in r.body)
+		start = time.time()
+		r = self.request("GET", "/spin")
+		self.check("a runaway handler meets the budget", r.status == 500 and b"budget" in r.body and time.time() - start < 20, r.text()[:200])
+		r = self.request("GET", "/")
+		self.check("the process serves on after errors", r.status == 200)
+
+	def hot_reload(self):
+		r = self.request("GET", "/count")
+		r = self.request("GET", "/count")
+		self.check("state counts before a reload", r.text() == "2", r.text())
+		self.check("the module answers its first version", self.request("GET", "/greeting").text() == "version one")
+		self.write_module("greeting.jai", 'string greeting() { return "version two, edited"; }\n')
+		r = self.request("GET", "/greeting")
+		self.check("an edit applies to the next request", r.text() == "version two, edited", r.text())
+		self.check("the reload is logged", self.wait_for_log("reloaded greeting.jai"), self.server.log_text()[-400:])
+		self.write_module("greeting.jai", 'string greeting() { int n = "not an int"; return "broken"; }\n')
+		r = self.request("GET", "/greeting")
+		self.check("a rejected edit keeps serving the code the app had", r.status == 200 and r.text() == "version two, edited", r.text())
+		self.check("the rejected edit's listing is logged", self.wait_for_log("cannot initialize 'n' declared 'int'"), self.server.log_text()[-400:])
+		r = self.request("GET", "/greeting")
+		self.check("the app keeps serving while the edit stays broken", r.text() == "version two, edited", r.text())
+		self.write_module("greeting.jai", 'string greeting() { return "version three after the fix"; }\n')
+		r = self.request("GET", "/greeting")
+		self.check("the fixed edit applies", r.text() == "version three after the fix", r.text())
+		app_text = (self.app_dir / "app.jai").read_text(encoding="utf-8")
+		self.write_module("app.jai", app_text.replace('"<h1>home</h1>"', '"<h1>home, edited</h1>"'))
+		r = self.request("GET", "/")
+		self.check("an edit to the app itself applies", r.text() == "<h1>home, edited</h1>", r.text())
+		r = self.request("GET", "/count")
+		self.check("a variable declared without an initializer keeps its value across the app's reload", r.text() == "3", r.text())
+
+	def static_files(self):
+		r = self.request("GET", "/style.css")
+		self.check("a file under the root is served with its type", r.status == 200 and r.header("Content-Type") == "text/css; charset=utf-8" and r.text() == "body { color: #333; }\n", str(r.headers))
+		etag = r.header("ETag")
+		self.check("a file carries ETag, Last-Modified and Cache-Control", etag is not None and r.header("Last-Modified") is not None and r.header("Cache-Control") == "no-cache")
+		r = self.request("GET", "/style.css", headers={"If-None-Match": etag})
+		self.check("If-None-Match answers 304", r.status == 304 and r.body == b"")
+		r = self.request("HEAD", "/style.css")
+		self.check("HEAD of a file sends its length and no body", r.status == 200 and r.body == b"" and r.header("Content-Length") == "22")
+		r = self.request("GET", "/docs/")
+		self.check("a folder serves its index.html", r.status == 200 and b"docs index" in r.body)
+		(self.app_dir / "public" / ".hidden").write_text("secret", encoding="utf-8")
+		r = self.request("GET", "/.hidden")
+		self.check("a dot-file is never served", r.status == 404)
+		raw = self.raw(b"GET /../app.jai HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
+		self.check("a path that climbs out of the root is not served", raw.startswith(b"HTTP/1.1 404") and b"import" not in raw, raw[:80].decode("latin-1"))
+		raw = self.raw(b"GET /%2e%2e/app.jai HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
+		self.check("an encoded climb is not served either", raw.startswith(b"HTTP/1.1 404") and b"import" not in raw, raw[:80].decode("latin-1"))
+		r = self.request("GET", "/download")
+		self.check("file(path) streams a file with the type it was given", r.status == 200 and r.header("Content-Type") == "text/x-test" and r.text() == "body { color: #333; }\n", str(r.headers))
+		big = self.app_dir / "public" / "big.bin"
+		big.write_bytes(bytes(range(256)) * 8192)
+		r = self.request("GET", "/big.bin")
+		self.check("a large file streams whole", r.status == 200 and len(r.body) == 256 * 8192 and r.body == big.read_bytes())
+
+	def limits_and_framing(self):
+		raw = self.raw(b"GET / HTTP/1.1\r\nHost: t\r\n\r\nGET /posts/7 HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
+		self.check("pipelined requests are answered in order", raw.count(b"HTTP/1.1 200") == 2 and raw.index(b"home") < raw.index(b'"7"'), raw.decode("latin-1")[:300])
+		c = http.client.HTTPConnection("127.0.0.1", self.server.port, timeout=10)
+		c.request("GET", "/")
+		first = c.getresponse()
+		first.read()
+		c.request("GET", "/posts/1")
+		second = c.getresponse()
+		self.check("keep-alive serves two requests on one connection", first.status == 200 and second.status == 200 and second.read() == b'{"id":"1"}')
+		c.close()
+		raw = self.raw(b"POST /echo/body HTTP/1.1\r\nHost: t\r\nContent-Length: 70000\r\n\r\n" + b"x" * 1000)
+		self.check("a body over --max-body is 413", raw.startswith(b"HTTP/1.1 413"), raw[:80].decode("latin-1"))
+		chunk = b"%x\r\n" % 40000 + b"y" * 40000 + b"\r\n"
+		raw = self.raw(b"POST /echo/body HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\n" + chunk + chunk)
+		self.check("a chunked body over --max-body is 413", raw.startswith(b"HTTP/1.1 413"), raw[:80].decode("latin-1"))
+		raw = self.raw(b"GET / HTTP/1.1\r\nHost: t\r\nX-Big: " + b"z" * 70000 + b"\r\n\r\n")
+		self.check("a head over the limit is 431", raw.startswith(b"HTTP/1.1 431"), raw[:80].decode("latin-1"))
+		raw = self.raw(b"NOT A REQUEST\r\n\r\n")
+		self.check("a malformed request line is 400", raw.startswith(b"HTTP/1.1 400"), raw[:80].decode("latin-1"))
+		raw = self.raw(b"GET / HTTP/2.0\r\n\r\n")
+		self.check("an unknown version is 505", raw.startswith(b"HTTP/1.1 505"), raw[:80].decode("latin-1"))
+		raw = self.raw(b"POST /echo/body HTTP/1.1\r\nHost: t\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\n\r\nabc")
+		self.check("Content-Length with Transfer-Encoding is 400", raw.startswith(b"HTTP/1.1 400"), raw[:80].decode("latin-1"))
+		raw = self.raw(b"POST /echo/body HTTP/1.1\r\nHost: t\r\nContent-Length: 5\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n", read_until_close=False)
+		self.check("Expect: 100-continue is answered", raw.startswith(b"HTTP/1.1 100 Continue"), raw[:80].decode("latin-1"))
+		r = self.request("GET", "/", fresh=True)
+		self.check("the server serves on after malformed traffic", r.status == 200)
+
+
+def run_backend(exe, backend, verbose):
+	work = pathlib.Path(tempfile.mkdtemp(prefix="jaiweb_test_"))
+	app_dir = work / "app"
+	shutil.copytree(FIXTURE, app_dir)
+	server = Server(exe, app_dir, backend, ["--max-body", "64K", "--budget", "1", "--timeout", "10"])
+	suite = Suite(server, app_dir, verbose)
+	try:
+		suite.run()
+		r = suite.request("POST", "/__jaiweb/shutdown", fresh=True)
+		suite.check("POST /__jaiweb/shutdown stops the server", r.status == 200)
+		try:
+			code = server.process.wait(timeout=10)
+			suite.check("the process exits cleanly after the shutdown request", code == 0, "exit code " + str(code))
+		except subprocess.TimeoutExpired:
+			suite.check("the process exits cleanly after the shutdown request", False, "still running")
+	finally:
+		server.stop()
+		if suite.failures or verbose:
+			print("---- jaiweb log (" + backend + ")")
+			print(server.log_text())
+		shutil.rmtree(work, ignore_errors=True)
+	print("jaiweb " + backend + ": " + str(suite.passed) + " passed, " + str(len(suite.failures)) + " failed")
+	return not suite.failures
+
+
+def run_broken_start(exe, backend, verbose):
+	work = pathlib.Path(tempfile.mkdtemp(prefix="jaiweb_broken_"))
+	app_dir = work / "app"
+	shutil.copytree(FIXTURE, app_dir)
+	(app_dir / "greeting.jai").write_text('string greeting() { return missing_name; }\n', encoding="utf-8")
+	server = Server(exe, app_dir, backend, [])
+	suite = Suite(server, app_dir, verbose)
+	try:
+		suite.check("an app that does not load is reported at start", suite.wait_for_log("jaiweb: the app did not load:") and suite.wait_for_log("missing_name"))
+		r = suite.request("GET", "/greeting")
+		suite.check("an app that never loaded answers 500 with its listing", r.status == 500 and b"did not load" in r.body and b"missing_name" in r.body, r.text()[:300])
+		suite.write_module("greeting.jai", 'string greeting() { return "fixed"; }\n')
+		r = suite.request("GET", "/greeting")
+		suite.check("the fixed app serves on the next request", r.status == 200 and r.text() == "fixed", r.text()[:300])
+		suite.check("the recovery is logged", suite.wait_for_log("jaiweb: the app loads"))
+	finally:
+		server.stop()
+		if suite.failures or verbose:
+			print("---- broken start log (" + backend + ")")
+			print(server.log_text())
+		shutil.rmtree(work, ignore_errors=True)
+	print("broken start " + backend + ": " + str(suite.passed) + " passed, " + str(len(suite.failures)) + " failed")
+	return not suite.failures
+
+
+def run_guestbook(exe, backend, verbose):
+	work = pathlib.Path(tempfile.mkdtemp(prefix="jaiweb_guestbook_"))
+	app_dir = work / "guestbook"
+	shutil.copytree(EXAMPLE, app_dir, ignore=shutil.ignore_patterns("*.db", "*.db-*", ".cache"))
+	server = Server(exe, app_dir, backend, [])
+	suite = Suite(server, app_dir, verbose)
+	try:
+		r = suite.request("GET", "/")
+		suite.check("guestbook: the home page renders", r.status == 200 and b"No one has signed yet." in r.body, r.text()[:200])
+		r = suite.request("GET", "/style.css")
+		suite.check("guestbook: the stylesheet is served", r.status == 200 and r.header("Content-Type") == "text/css; charset=utf-8")
+		r = suite.request("POST", "/sign", "name=Ada&message=%3Cb%3Ehi%3C%2Fb%3E", {"Content-Type": "application/x-www-form-urlencoded"})
+		cookie = (r.header("Set-Cookie") or "").split(";", 1)[0]
+		suite.check("guestbook: signing redirects home with a session cookie", r.status == 303 and cookie.startswith("session="), str(r.headers))
+		r = suite.request("GET", "/", headers={"Cookie": cookie})
+		page = r.text()
+		suite.check("guestbook: the entry shows, escaped", "&lt;b&gt;hi&lt;/b&gt;" in page and "<b>hi</b>" not in page, page[:400])
+		suite.check("guestbook: the session remembers the name and the flash", 'value="Ada"' in page and "Thanks for signing, Ada." in page, page[:400])
+		r = suite.request("POST", "/api/entries", json.dumps({"name": "Bot", "message": "via the API"}), {"Content-Type": "application/json"})
+		suite.check("guestbook: the JSON API adds an entry", r.status == 201 and r.json().get("name") == "Bot", r.text())
+		r = suite.request("GET", "/api/entries")
+		suite.check("guestbook: the JSON API lists the entries", [e["name"] for e in r.json()] == ["Bot", "Ada"], r.text())
+		r = suite.request("GET", "/entries/1")
+		suite.check("guestbook: an entry has its own page", r.status == 200 and b"Ada signed the guestbook" in r.body)
+	finally:
+		server.stop()
+		if suite.failures or verbose:
+			print("---- guestbook log (" + backend + ")")
+			print(server.log_text())
+		shutil.rmtree(work, ignore_errors=True)
+	print("guestbook " + backend + ": " + str(suite.passed) + " passed, " + str(len(suite.failures)) + " failed")
+	return not suite.failures
+
+
+def main():
+	parser = argparse.ArgumentParser()
+	parser.add_argument("--exe", required=True)
+	parser.add_argument("--backend", default="both", choices=["vm", "interp", "both"])
+	parser.add_argument("--verbose", action="store_true")
+	args = parser.parse_args()
+	exe = args.exe
+	if not os.path.isfile(exe) and os.path.isfile(exe + ".exe"):
+		exe += ".exe"
+	backends = ["vm", "interp"] if args.backend == "both" else [args.backend]
+	results = []
+	for backend in backends:
+		results += [run_backend(exe, backend, args.verbose), run_broken_start(exe, backend, args.verbose), run_guestbook(exe, backend, args.verbose)]
+	ok = all(results)
+	print("jaiweb: " + ("every check holds" if ok else "FAILED"))
+	return 0 if ok else 1
+
+
+if __name__ == "__main__":
+	sys.exit(main())

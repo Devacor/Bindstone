@@ -65,6 +65,8 @@ public:
 
     // Get the resulting JSON string
     std::string str() const;
+    // The resulting JSON string, moved out (the writer is spent)
+    std::string take();
 
 private:
     enum class ContainerType { Object, Array };
@@ -114,25 +116,28 @@ private:
 
     // One line's indentation. A wide indent is the layout's amplifier (every line pays it): a script's to_json charges it
     // to the engine's memory cap.
-    std::string indentation();
+    void append_indentation();
 
     void write_value_key(std::string_view key, bool comma);
 
-    std::string escape_json_string_local(std::string_view str);
-    
+    void append_escaped(std::string_view str);
+
+    // A scalar's separator before it and its container's first-member flag after it
+    void begin_scalar();
+    void end_scalar();
+
     // A map whose keys are not all strings (or an empty one declared with such a key type) is written as {"$map": [[k, v], ...]}
     // so its keys keep their kind; from_json reads the tag back
     static bool map_needs_tag(const script_value& value);
 
     // Scalars and non-instance objects; write_value handles containers, handles and instances
-    std::string to_json_impl_fallback(const script_value& val);
-    
+    void write_leaf(const script_value& val);
+
     int indent_;
     bool charges_indentation_ = false;
     int json_depth_;  // JSON nesting depth (separate from serialization depth tracking in base)
     size_t open_records_ = 0;
-    // Behind a pointer so this header needs only <iosfwd>, not <sstream>
-    std::unique_ptr<std::ostringstream> stream_;
+    std::string out_;
     std::stack<ContainerType> container_stack_;
     std::stack<bool> first_in_container_;
 
@@ -148,8 +153,9 @@ private:
 
 class json_archive_reader : public archive_reader_impl<json_archive_reader> {
 public:
-    // Engine is REQUIRED for JSON reading since we need to create script_values
-    json_archive_reader(const std::string& json_string, engine* eng);
+    // Engine is REQUIRED for JSON reading since we need to create script_values. The text is parsed before the constructor
+    // returns; the reader keeps no reference to it.
+    json_archive_reader(std::string_view json_string, engine* eng);
 
     ~json_archive_reader();
 
@@ -207,6 +213,9 @@ public:
 
     script_value read_value();
 
+    // Some object member's key begins with '$': the text may hold archive records ($id, $type, $map, $char...)
+    bool has_archive_keys() const { return archive_keys_; }
+
 private:
     // ---- Flat arena DOM ----------------------------------------------------------------
     // Objects/arrays are 16-byte nodes in one contiguous arena; string bytes live in one
@@ -214,6 +223,7 @@ private:
     enum class JTag : uint8_t { Null, Bool, Int, Double, Str, Arr, Obj };
     struct JNode {
         JTag tag = JTag::Null;
+        uint32_t key = 0;   // an object member key's place among the distinct keys, plus one (0: not a key)
         union UVal {
             int64_t  i;                              // Int, Bool (0/1)
             double   d;                              // Double
@@ -222,8 +232,16 @@ private:
         } u{};
     };
 
-    std::string json_;        // parse source; cleared once the arena is built
+    std::string_view json_;   // parse source, during the constructor only
     size_t pos_ = 0;          // parse cursor
+    bool archive_keys_ = false;
+    // The distinct member keys: each key's text is in chars_ once (spans), found by its hash (an open-addressing table of
+    // places plus one); a materialized document's keys share one string value per distinct key
+    std::vector<std::pair<uint32_t, uint32_t>> key_spans_;
+    std::vector<uint32_t> key_table_;
+    std::vector<script_value> key_values_;
+    uint32_t intern_key(uint32_t off, uint32_t len);
+    const script_value& key_value(const JNode& k, engine* eng);
     std::vector<JNode> nodes_;   // value arena (root_ is the last element)
     std::string chars_;          // unescaped string-byte arena
     uint32_t root_ = 0;

@@ -2,11 +2,12 @@
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/math_values.hpp>
+#include <jaiscript/detail/text_hash.hpp>
+#include <array>
 #include <charconv>     // std::to_chars for shortest round-trippable float output
 #include <cmath>
-#include <iomanip>
+#include <cstring>
 #include <limits>
-#include <sstream>
 #if !(defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L)
 #include <jaiscript/detail/float_text.hpp>   // strtod fallback: libc++ ships integer-only std::from_chars
 #include <clocale>
@@ -16,58 +17,114 @@
 namespace jai::serialization {
 
 json_archive_writer::json_archive_writer(int indent) :
-    archive_writer_impl<json_archive_writer>(), indent_(indent), json_depth_(0), stream_(std::make_unique<std::ostringstream>()) {}
+    archive_writer_impl<json_archive_writer>(), indent_(indent), json_depth_(0) {}
 
 json_archive_writer::json_archive_writer(int indent, engine* eng) :
-    archive_writer_impl<json_archive_writer>(eng), indent_(indent), json_depth_(0), stream_(std::make_unique<std::ostringstream>()) {}
+    archive_writer_impl<json_archive_writer>(eng), indent_(indent), json_depth_(0) {}
 
 json_archive_writer::json_archive_writer(engine* eng) :
-    archive_writer_impl<json_archive_writer>(eng), indent_(2), json_depth_(0), stream_(std::make_unique<std::ostringstream>()) {}
+    archive_writer_impl<json_archive_writer>(eng), indent_(2), json_depth_(0) {}
 
 json_archive_writer::~json_archive_writer() = default;
 
 json_archive_reader::~json_archive_reader() = default;
 
-template<typename T>
-void json_archive_writer::write_json_value(T value) {
+namespace {
+
+    // A finite number in the shortest text that reads back exactly; a whole number keeps a ".0" so it reads back as a float
+    template<typename F>
+    void append_json_float(std::string& out, F value) {
+        char buf[64];
+        const auto res = std::to_chars(buf, buf + sizeof(buf), value);
+        const std::string_view text(buf, static_cast<size_t>(res.ptr - buf));
+        out.append(text);
+        if (text.find_first_of(".eE") == std::string_view::npos) { out.append(".0"); }
+    }
+
+    template<typename I>
+    void append_json_integer(std::string& out, I value) {
+        char buf[24];
+        const auto res = std::to_chars(buf, buf + sizeof(buf), value);
+        out.append(buf, static_cast<size_t>(res.ptr - buf));
+    }
+
+    // 0: the byte stands for itself; otherwise its escape's second character ('u' for \u00XX)
+    constexpr std::array<char, 256> json_escape_table() {
+        std::array<char, 256> table{};
+        for (int c = 0; c < 0x20; ++c) { table[static_cast<size_t>(c)] = 'u'; }
+        table['"'] = '"';
+        table['\\'] = '\\';
+        table['\b'] = 'b';
+        table['\f'] = 'f';
+        table['\n'] = 'n';
+        table['\r'] = 'r';
+        table['\t'] = 't';
+        return table;
+    }
+    constexpr std::array<char, 256> k_json_escape = json_escape_table();
+
+}
+
+// The text's bytes with JSON's escapes (UTF-8 at 0x80 and above passes through, valid JSON per RFC 8259); runs with nothing to
+// escape go in whole
+void json_archive_writer::append_escaped(std::string_view str) {
+    static const char hexd[] = "0123456789abcdef";
+    const char* p = str.data();
+    const size_t n = str.size();
+    size_t run = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const unsigned char c = static_cast<unsigned char>(p[i]);
+        const char e = k_json_escape[c];
+        if (e == 0) { continue; }
+        out_.append(p + run, i - run);
+        if (e == 'u') {
+            const char code[6] = {'\\', 'u', '0', '0', hexd[(c >> 4) & 0xF], hexd[c & 0xF]};
+            out_.append(code, 6);
+        } else {
+            const char code[2] = {'\\', e};
+            out_.append(code, 2);
+        }
+        run = i + 1;
+    }
+    out_.append(p + run, n - run);
+}
+
+void json_archive_writer::begin_scalar() {
     auto ctx = this->current_context();
     bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
     if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-        (*stream_) << ',';
+        out_ += ',';
         write_newline();
         write_indent();
     }
+}
 
-    if constexpr (std::is_same_v<T, bool>) {
-        (*stream_) << (value ? "true" : "false");
-    } else if constexpr (std::is_floating_point_v<T>) {
-        // Handle special float values
-        if (std::isnan(value)) {
-            (*stream_) << "null";
-        } else if (std::isinf(value)) {
-            (*stream_) << (value > 0 ? "1e999" : "-1e999");
-        } else {
-            // Shortest representation that round-trips exactly (default ostream
-            // precision is only 6 significant digits, which silently loses bits).
-            char buf[64];
-            auto res = std::to_chars(buf, buf + sizeof(buf), value);
-            std::string_view sv(buf, static_cast<size_t>(res.ptr - buf));
-            (*stream_) << sv;
-            // Keep it a JSON "float" on round-trip (e.g. 3 -> 3.0, not int 3).
-            if (sv.find('.') == std::string_view::npos &&
-                sv.find('e') == std::string_view::npos &&
-                sv.find('E') == std::string_view::npos) {
-                (*stream_) << ".0";
-            }
-        }
-    } else {
-        (*stream_) << value;
-    }
-
+void json_archive_writer::end_scalar() {
     if (in_container() && container_stack_.top() == ContainerType::Array) {
         first_in_container_.top() = false;
     }
+}
+
+template<typename T>
+void json_archive_writer::write_json_value(T value) {
+    begin_scalar();
+    if constexpr (std::is_same_v<T, bool>) {
+        out_.append(value ? "true" : "false");
+    } else if constexpr (std::is_floating_point_v<T>) {
+        if (std::isnan(value)) {
+            out_.append("null");
+        } else if (std::isinf(value)) {
+            out_.append(value > 0 ? "1e999" : "-1e999");
+        } else {
+            append_json_float(out_, value);
+        }
+    } else if constexpr (std::is_integral_v<T>) {
+        append_json_integer(out_, value);
+    } else {
+        out_.append(value);
+    }
+    end_scalar();
 }
 
 void json_archive_writer::write_int8(int8_t value) { write_json_value(value); }
@@ -92,27 +149,28 @@ void json_archive_writer::write_float64(double value) { write_json_value(value);
 
 void json_archive_writer::write_bool(bool value) { write_json_value(value); }
 
-void json_archive_writer::write_null() { write_json_value("null"); }
+void json_archive_writer::write_null() { write_json_value(std::string_view("null")); }
 
 void json_archive_writer::write_string(const std::string& value) {
-    write_json_value('"' + escape_json_string_local(value) + '"');
+    begin_scalar();
+    out_ += '"';
+    append_escaped(value);
+    out_ += '"';
+    end_scalar();
 }
 
 void json_archive_writer::write_binary(const void* data, size_t size) {
-    // Encode binary as a hex string. Build directly instead of streaming each byte
-    // through std::ostringstream with std::hex/setw/setfill (re-imbues stream state
-    // per byte).
     static const char hexd[] = "0123456789abcdef";
-    std::string s;
-    s.reserve(size * 2 + 2);
-    s += '"';
+    begin_scalar();
+    out_.reserve(out_.size() + size * 2 + 2);
+    out_ += '"';
     const uint8_t* bytes = static_cast<const uint8_t*>(data);
     for (size_t i = 0; i < size; ++i) {
-        s += hexd[(bytes[i] >> 4) & 0xF];
-        s += hexd[bytes[i] & 0xF];
+        out_ += hexd[(bytes[i] >> 4) & 0xF];
+        out_ += hexd[bytes[i] & 0xF];
     }
-    s += '"';
-    write_json_value(s);
+    out_ += '"';
+    end_scalar();
 }
 
 void json_archive_writer::begin_object() {
@@ -122,11 +180,11 @@ void json_archive_writer::begin_object() {
     bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
     if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-        (*stream_) << ',';
+        out_ += ',';
     }
     write_newline();
     write_indent();
-    (*stream_) << '{';
+    out_ += '{';
     json_depth_++;
     container_stack_.push(ContainerType::Object);
     first_in_container_.push(true);
@@ -139,11 +197,11 @@ void json_archive_writer::begin_object(const std::string& type_name, uint32_t ve
     bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
     if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-        (*stream_) << ',';
+        out_ += ',';
     }
     write_newline();
     write_indent();
-    (*stream_) << '{';
+    out_ += '{';
     json_depth_++;
     container_stack_.push(ContainerType::Object);
     first_in_container_.push(true);
@@ -165,7 +223,7 @@ void json_archive_writer::end_object() {
     first_in_container_.pop();
     write_newline();
     write_indent();
-    (*stream_) << '}';
+    out_ += '}';
     if (in_container()) {
         first_in_container_.top() = false;
     }
@@ -176,11 +234,11 @@ void json_archive_writer::begin_array(size_t size) {
     bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
     if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-        (*stream_) << ',';
+        out_ += ',';
     }
     write_newline();
     write_indent();
-    (*stream_) << '[';
+    out_ += '[';
     json_depth_++;
     container_stack_.push(ContainerType::Array);
     first_in_container_.push(true);
@@ -192,7 +250,7 @@ void json_archive_writer::end_array() {
     first_in_container_.pop();
     write_newline();
     write_indent();
-    (*stream_) << ']';
+    out_ += ']';
     if (in_container()) {
         first_in_container_.top() = false;
     }
@@ -200,11 +258,13 @@ void json_archive_writer::end_array() {
 
 void json_archive_writer::write_property_name(const std::string& name) {
     if (!first_in_container_.top()) {
-        (*stream_) << ',';
+        out_ += ',';
     }
     write_newline();
     write_indent();
-    (*stream_) << '"' << escape_json_string_local(name) << "\": ";
+    out_ += '"';
+    append_escaped(name);
+    out_.append("\": ");
     first_in_container_.top() = false;
     // Context is managed by base class serialize() which pushes PropertyValue after this
 }
@@ -214,11 +274,11 @@ void json_archive_writer::begin_map(size_t size) {
     bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
     if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-        (*stream_) << ',';
+        out_ += ',';
     }
     write_newline();
     write_indent();
-    (*stream_) << '{';
+    out_ += '{';
     json_depth_++;
     container_stack_.push(ContainerType::Object);
     first_in_container_.push(true);
@@ -230,7 +290,7 @@ void json_archive_writer::end_map() {
     first_in_container_.pop();
     write_newline();
     write_indent();
-    (*stream_) << '}';
+    out_ += '}';
     if (in_container()) {
         first_in_container_.top() = false;
     }
@@ -239,11 +299,13 @@ void json_archive_writer::end_map() {
 void json_archive_writer::write_map_key(const std::string& key) {
     // Same as write_property_name
     if (!first_in_container_.top()) {
-        (*stream_) << ',';
+        out_ += ',';
     }
     write_newline();
     write_indent();
-    (*stream_) << '"' << escape_json_string_local(key) << "\": ";
+    out_ += '"';
+    append_escaped(key);
+    out_.append("\": ");
     first_in_container_.top() = false;
     // Context is managed by base class which pushes MapValue after this
 }
@@ -269,7 +331,9 @@ void json_archive_writer::write_value(const script_value& root) {
     }
 }
 
-std::string json_archive_writer::str() const { return stream_->str(); }
+std::string json_archive_writer::str() const { return out_; }
+
+std::string json_archive_writer::take() { return std::move(out_); }
 
 void json_archive_writer::begin_value(const script_value& given, std::vector<write_frame>& frames) {
     const script_value& value = given.is_reference() ? given.deref() : given;
@@ -277,7 +341,7 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
         case script_value_type::jai_weak_ptr_type: {
             const auto shared = value.get_weak_ptr().lock();
             if (!shared) {
-                (*stream_) << "null";
+                out_.append("null");
                 return;
             }
             begin_handle("$ref", shared, frames);
@@ -287,7 +351,7 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
         case script_value_type::jai_shared_ptr_type: {
             const auto holder = value.get_object_holder();
             if (!holder) {
-                (*stream_) << "null";
+                out_.append("null");
                 return;
             }
             begin_handle("$id", holder, frames);
@@ -321,7 +385,7 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
 
         case script_value_type::jai_object_type: {
             if (!engine_ref_) {
-                (*stream_) << "null";
+                out_.append("null");
                 return;
             }
             if (std::shared_ptr<class_instance> instance = written_instance(value)) {
@@ -329,12 +393,12 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
                 begin_instance_members(value, std::move(instance), false, frames);
                 return;
             }
-            (*stream_) << to_json_impl_fallback(value);
+            write_leaf(value);
             return;
         }
 
         default:
-            (*stream_) << to_json_impl_fallback(value);
+            write_leaf(value);
             return;
     }
 }
@@ -351,7 +415,7 @@ void json_archive_writer::begin_handle(std::string_view id_key, const strong_ptr
     auto [id, is_new] = track_shared_ptr(holder.get());
     open_value('{');
     write_value_key(id_key, false);
-    (*stream_) << id;
+    append_json_integer(out_, id);
     if (is_new) {
         script_value object = weak_target_value(holder);
         if (std::shared_ptr<class_instance> instance = engine_ref_ ? written_instance(object) : nullptr) {
@@ -359,7 +423,7 @@ void json_archive_writer::begin_handle(std::string_view id_key, const strong_ptr
             return;
         }
         write_value_key("$val", true);
-        (*stream_) << (engine_ref_ ? to_json_impl_fallback(object) : std::string("null"));
+        if (engine_ref_) { write_leaf(object); } else { out_.append("null"); }
     }
     close_value('}', false);
 }
@@ -375,7 +439,9 @@ void json_archive_writer::begin_instance_members(const script_value& value, std:
         type_name = type_info ? type_info->type_name : "unknown";
     }
     write_value_key("$type", comma);
-    (*stream_) << '"' << escape_json_string_local(type_name) << '"';
+    out_ += '"';
+    append_escaped(type_name);
+    out_ += '"';
     write_value_key("$val", true);
     open_value('{');
     if (class_def) {
@@ -472,77 +538,40 @@ void json_archive_writer::end_frame(write_frame& f) {
 }
 
 void json_archive_writer::open_value(char bracket) {
-    (*stream_) << bracket;
+    out_ += bracket;
     ++json_depth_;
 }
 
 void json_archive_writer::close_value(char bracket, bool empty) {
     --json_depth_;
     if (indent_ > 0 && !empty) {
-        (*stream_) << '\n' << indentation();
+        out_ += '\n';
+        append_indentation();
     }
-    (*stream_) << bracket;
+    out_ += bracket;
 }
 
 void json_archive_writer::write_value_separator(bool comma) {
-    if (comma) (*stream_) << ',';
+    if (comma) { out_ += ','; }
     if (indent_ > 0) {
-        (*stream_) << '\n' << indentation();
+        out_ += '\n';
+        append_indentation();
     }
 }
 
-std::string json_archive_writer::indentation() {
+void json_archive_writer::append_indentation() {
     const size_t width = detail::saturating_text_size(static_cast<size_t>(json_depth_), static_cast<size_t>(indent_));
     if (charges_indentation_ && engine_ref_ && !engine_ref_->execution_limits().memory_charge_items(1, width)) [[unlikely]] {
         detail::throw_memory_cap(engine_ref_->execution_limits());
     }
-    return std::string(width, ' ');
+    out_.append(width, ' ');
 }
 
 void json_archive_writer::write_value_key(std::string_view key, bool comma) {
     write_value_separator(comma);
-    (*stream_) << '"' << escape_json_string_local(key) << (indent_ > 0 ? "\": " : "\":");
-}
-
-std::string json_archive_writer::escape_json_string_local(std::string_view str) {
-    // Build into a std::string instead of constructing a fresh std::ostringstream
-    // (heavy: stringbuf + locale imbue) for every key and every string value in the
-    // document. Also avoids the std::hex/setw/setfill stream-state churn for control
-    // characters. Fast path: a run with no escapes is bulk-appended.
-    std::string out;
-    out.reserve(str.size() + 2);
-    static const char hexd[] = "0123456789abcdef";
-    size_t runStart = 0;
-    for (size_t i = 0; i < str.size(); ++i) {
-        unsigned char c = static_cast<unsigned char>(str[i]);
-        const char* esc = nullptr;
-        char escbuf[7];
-        switch (c) {
-            case '"':  esc = "\\\""; break;
-            case '\\': esc = "\\\\"; break;
-            case '\b': esc = "\\b";  break;
-            case '\f': esc = "\\f";  break;
-            case '\n': esc = "\\n";  break;
-            case '\r': esc = "\\r";  break;
-            case '\t': esc = "\\t";  break;
-            default:
-                if (c < 0x20) {
-                    // Control characters below 0x20 (UTF-8 >= 0x80 passes through
-                    // unescaped, which is valid JSON per RFC 8259).
-                    escbuf[0] = '\\'; escbuf[1] = 'u'; escbuf[2] = '0'; escbuf[3] = '0';
-                    escbuf[4] = hexd[(c >> 4) & 0xF]; escbuf[5] = hexd[c & 0xF]; escbuf[6] = '\0';
-                    esc = escbuf;
-                }
-                break;
-        }
-        if (esc) {
-            if (i > runStart) out.append(str, runStart, i - runStart);
-            out += esc;
-            runStart = i + 1;
-        }
-    }
-    if (runStart < str.size()) out.append(str, runStart, str.size() - runStart);
-    return out;
+    out_ += '"';
+    append_escaped(key);
+    out_.append(indent_ > 0 ? "\": " : "\":");
 }
 
 bool json_archive_writer::map_needs_tag(const script_value& value) {
@@ -558,48 +587,38 @@ bool json_archive_writer::map_needs_tag(const script_value& value) {
            kt->base_type != script_value_type::jai_null_type;
 }
 
-std::string json_archive_writer::to_json_impl_fallback(const script_value& val) {
-    std::ostringstream oss;
-    
+void json_archive_writer::write_leaf(const script_value& val) {
     switch (val.type()) {
         case script_value_type::jai_null_type:
-            oss << "null";
-            break;
-            
-        case script_value_type::jai_bool_type:
-            oss << (val.as_bool() ? "true" : "false");
-            break;
-            
-        case script_value_type::jai_int_type:
-            oss << val.as_int();
-            break;
-            
-        case script_value_type::jai_float_type: {
-            double d = val.as_float();
-            if (std::isfinite(d)) {
-                // Shortest exact round-trip representation (setprecision(15) loses
-                // the trailing bits of a double, which has up to 17 sig digits).
-                char buf[64];
-                auto res = std::to_chars(buf, buf + sizeof(buf), d);
-                std::string_view sv(buf, static_cast<size_t>(res.ptr - buf));
-                oss << sv;
-                if (sv.find('.') == std::string_view::npos &&
-                    sv.find('e') == std::string_view::npos &&
-                    sv.find('E') == std::string_view::npos) {
-                    oss << ".0";
-                }
-            } else {
-                oss << "null";
-            }
-            break;
-        }
-            
-        case script_value_type::jai_string_type:
-            oss << '"' << escape_json_string_local(val.as_string()) << '"';
+            out_.append("null");
             break;
 
+        case script_value_type::jai_bool_type:
+            out_.append(val.as_bool() ? "true" : "false");
+            break;
+
+        case script_value_type::jai_int_type:
+            append_json_integer(out_, val.as_int());
+            break;
+
+        case script_value_type::jai_float_type: {
+            const double d = val.as_float();
+            if (std::isfinite(d)) { append_json_float(out_, d); } else { out_.append("null"); }
+            break;
+        }
+
+        case script_value_type::jai_string_type: {
+            const script_value& s = val.deref();
+            out_ += '"';
+            if (s.raw_storage_index() == script_value::TYPEID_STRING) { append_escaped(s.unchecked_as_string()); } else { append_escaped(val.as_string()); }
+            out_ += '"';
+            break;
+        }
+
         case script_value_type::jai_utf8_string_type:
-            oss << '"' << escape_json_string_local(val.deref().unchecked_as_utf8().bytes) << '"';
+            out_ += '"';
+            append_escaped(val.deref().unchecked_as_utf8().bytes);
+            out_ += '"';
             break;
 
         case script_value_type::jai_vec2_type:
@@ -611,55 +630,96 @@ std::string json_archive_writer::to_json_impl_fallback(const script_value& val) 
             // {"$type": "math::K", "$val": {canonical components}}: binary32 in the shortest round-tripping text
             const script_value& m = val.deref();
             const script_value_type kind = m.unchecked_vec_kind();
-            std::string body = std::string("{\"$type\":\"") + detail::math::kind_name(kind) + "\",\"$val\":{";
+            out_.append("{\"$type\":\"");
+            out_.append(detail::math::kind_name(kind));
+            out_.append("\",\"$val\":{");
             for (size_t k = 0; k < detail::math::dims(kind); ++k) {
-                if (k) body += ',';
-                body += '"'; body += detail::math::component_name(kind, k); body += "\":";
+                if (k) { out_ += ','; }
+                out_ += '"'; out_.append(detail::math::component_name(kind, k)); out_.append("\":");
                 if (detail::math::integral(kind)) {
-                    body += std::to_string(detail::math::i32_at(m, k));
+                    append_json_integer(out_, detail::math::i32_at(m, k));
                 } else {
                     const float c = detail::math::f32_at(m, k);
-                    if (std::isfinite(c)) { detail::math::append_f32(body, c); } else { body += "null"; }
+                    if (std::isfinite(c)) { detail::math::append_f32(out_, c); } else { out_.append("null"); }
                 }
             }
-            body += "}}";
-            oss << body;
+            out_.append("}}");
             break;
         }
 
         case script_value_type::jai_char_type:
-            oss << "{\"$char\":" << static_cast<int>(static_cast<unsigned char>(val.as_char())) << '}';
+            out_.append("{\"$char\":");
+            append_json_integer(out_, static_cast<int>(static_cast<unsigned char>(val.as_char())));
+            out_ += '}';
             break;
-            
+
         default:
-            oss << "null";
+            out_.append("null");
             break;
     }
-    
-    return oss.str();
 }
 
 bool json_archive_writer::in_container() const { return !container_stack_.empty(); }
 
 void json_archive_writer::write_indent() {
     if (indent_ > 0) {
-        (*stream_) << indentation();
+        append_indentation();
     }
 }
 
 void json_archive_writer::write_newline() {
     if (indent_ > 0) {
-        (*stream_) << '\n';
+        out_ += '\n';
     }
 }
-json_archive_reader::json_archive_reader(const std::string& json_string, engine* eng) : archive_reader_impl<json_archive_reader>(eng) {
+json_archive_reader::json_archive_reader(std::string_view json_string, engine* eng) : archive_reader_impl<json_archive_reader>(eng) {
     if (!eng) {
         throw serialization_error("json_archive_reader requires a valid engine reference");
     }
     json_ = json_string;
     parse_into_arena();   // builds the flat arena DOM (nodes_/chars_); root_ is the last node
-    json_.clear();        // source no longer needed — the flat DOM is self-contained
-    json_.shrink_to_fit();
+    json_ = {};           // the flat DOM is self-contained
+    key_table_.clear();
+    key_table_.shrink_to_fit();
+}
+
+uint32_t json_archive_reader::intern_key(uint32_t off, uint32_t len) {
+    const std::string_view text(chars_.data() + off, len);
+    if (key_spans_.size() * 2 >= key_table_.size()) {
+        std::vector<uint32_t> table(key_table_.empty() ? 64 : key_table_.size() * 2, 0);
+        const size_t mask = table.size() - 1;
+        for (uint32_t slot = 0; slot < key_spans_.size(); ++slot) {
+            const auto [o, l] = key_spans_[slot];
+            size_t i = detail::text_hash(std::string_view(chars_.data() + o, l)) & mask;
+            while (table[i]) { i = (i + 1) & mask; }
+            table[i] = slot + 1;
+        }
+        key_table_.swap(table);
+    }
+    const size_t mask = key_table_.size() - 1;
+    for (size_t i = detail::text_hash(text) & mask;; i = (i + 1) & mask) {
+        const uint32_t place = key_table_[i];
+        if (!place) {
+            key_spans_.emplace_back(off, len);
+            key_table_[i] = static_cast<uint32_t>(key_spans_.size());
+            return static_cast<uint32_t>(key_spans_.size() - 1);
+        }
+        const auto [o, l] = key_spans_[place - 1];
+        if (l == len && std::memcmp(chars_.data() + o, text.data(), len) == 0) {
+            if (off + len == chars_.size()) { chars_.resize(off); }   // the key's text was just appended: the earlier copy serves
+            return place - 1;
+        }
+    }
+}
+
+const script_value& json_archive_reader::key_value(const JNode& k, engine* eng) {
+    const uint32_t slot = k.key - 1;
+    if (key_values_.size() <= slot) { key_values_.resize(key_spans_.size(), script_value(std::monostate{}, eng)); }
+    script_value& made = key_values_[slot];
+    if (made.raw_storage_index() != script_value::TYPEID_STRING) {
+        made = script_value(script_string(chars_.data() + k.u.str.off, k.u.str.len), eng);
+    }
+    return made;
 }
 
 int8_t json_archive_reader::read_int8() { return static_cast<int8_t>(read_value().as<script_int>()); }
@@ -957,6 +1017,7 @@ script_value json_archive_reader::materialize(uint32_t idx) {
                 return true;
             }
             frames.push_back({n, 0, script_value::make_map(eng->get_type_info_string(), nullptr, eng)});
+            const_cast<script_map&>(frames.back().container.as_map()).reserve(node.u.agg.count);
             return false;
         }
         if (node.tag == JTag::Arr) {
@@ -973,7 +1034,7 @@ script_value json_archive_reader::materialize(uint32_t idx) {
         const JNode& node = nodes_[parent.node];
         if (node.tag == JTag::Obj) {
             const JNode& k = nodes_[node.u.agg.first + 2 * (parent.next - 1)];
-            const_cast<script_map&>(parent.container.as_map()).emplace(script_value(script_string(chars_.data() + k.u.str.off, k.u.str.len), eng), std::move(child));
+            const_cast<script_map&>(parent.container.as_map()).emplace(key_value(k, eng), std::move(child));
         } else {
             const_cast<std::vector<script_value>&>(parent.container.as_array()).push_back(std::move(child));
         }
@@ -1065,7 +1126,7 @@ void json_archive_reader::parse_value_flat() {
         } else {
             size_t start = (pos_ > 20) ? pos_ - 20 : 0;
             size_t len = std::min(size_t(40), json_.length() - start);
-            std::string context = json_.substr(start, len);
+            std::string context(json_.substr(start, len));
             throw serialization_error("Unexpected character '" + std::string(1, c) +
                 "' in JSON at position " + std::to_string(pos_) +
                 ", near: ..." + context + "...");
@@ -1089,7 +1150,7 @@ void json_archive_reader::parse_value_flat() {
             }
             size_t start = (pos_ > 20) ? pos_ - 20 : 0;
             size_t len = std::min(size_t(40), json_.length() - start);
-            std::string context = json_.substr(start, len);
+            std::string context(json_.substr(start, len));
             throw serialization_error(std::string(top.tag == JTag::Obj ? "Expected ',' or '}' in JSON object at position " : "Expected ',' or ']' in JSON array at position ") +
                 std::to_string(pos_) + ", got '" + std::string(1, next) + "', near: ..." + context + "...");
         }
@@ -1099,6 +1160,10 @@ void json_archive_reader::parse_value_flat() {
 void json_archive_reader::parse_member_key() {
     JNode k; k.tag = JTag::Str;
     parse_string_into(k.u.str.off, k.u.str.len);
+    if (k.u.str.len != 0 && chars_[k.u.str.off] == '$') { archive_keys_ = true; }
+    const uint32_t slot = intern_key(k.u.str.off, k.u.str.len);
+    k.u.str.off = key_spans_[slot].first;
+    k.key = slot + 1;
     scratch_.push_back(k);
     expect(':');
 }

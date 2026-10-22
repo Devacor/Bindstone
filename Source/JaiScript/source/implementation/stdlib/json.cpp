@@ -552,13 +552,13 @@ namespace stdlib {
             if (args.size() == 1) {
                 serialization::json_archive_writer writer(-1, eng); // No indentation, with engine ref
                 writer.write_value(args[0]);
-                return script_value(writer.str(), eng);
+                return script_value(writer.take(), eng);
             } else if (args.size() == 2) {
                 int indent = static_cast<int>(args[1].as_int());
                 serialization::json_archive_writer writer(indent, eng);
                 writer.charge_indentation();
                 writer.write_value(args[0]);
-                return script_value(writer.str(), eng);
+                return script_value(writer.take(), eng);
             } else {
                 throw runtime_error("to_json expects 1 or 2 arguments, got " + std::to_string(args.size()));
             }
@@ -567,7 +567,9 @@ namespace stdlib {
 		eng_ref.add_function("from_json", [eng](const std::string& json) -> script_value {
 			engine::load_session session(eng);
 			serialization::json_archive_reader reader(json, eng);
-			script_value result = load_archive_value(eng, reader.read_value(), true);
+			script_value parsed = reader.read_value();
+			// a text with no '$' key holds no archive record: the parse is the value the rebuild would copy out
+			script_value result = reader.has_archive_keys() ? load_archive_value(eng, parsed, true) : std::move(parsed);
 			session.complete();
 			return result;
 		});

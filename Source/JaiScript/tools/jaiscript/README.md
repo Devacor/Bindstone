@@ -118,7 +118,8 @@ world per save); because of that, the DAP listener is off in watch mode.
 
 The full JaiScript stdlib is always registered (`jai::stdlib::register_all`): formatted
 `print` / `format` / `to_string` / `type_of`, math, `to_json` / `from_json`, container
-helpers. (The bare engine only ships concatenating `print`, `thread_count`,
+helpers, `html_escape` / `html_unescape`, `sha256(s)` and `sha256_file(path)` (a hex digest, the file
+streamed; it needs the `filesystem` privilege and raises `read_file`'s error below). (The bare engine only ships concatenating `print`, `thread_count`,
 `parallel_transform`, `parallel_reduce` and the builtin container/string methods — the runner opts into
 everything.) On top, the host binds file IO so scripts can actually save things:
 
@@ -128,8 +129,7 @@ file_exists(path) -> bool      delete_file(path) -> bool
 move_file(from, to) -> bool    (replaces `to`; false when `from` is not a file)
 dir_exists(path) -> bool       make_dirs(path) -> bool           list_dir(path) -> array<string>
 writable_dir(path) -> bool     (creates the folder if missing, writes and removes a probe)
-sha256_file(path) -> string    zip_entries(zip) -> array<string>
-zip_extract(zip, entry, dest) -> bool                             (CRC-32 verified)
+zip_entries(zip) -> array<string>  zip_extract(zip, entry, dest) -> bool   (CRC-32 verified)
 ```
 
 `move_file` is the last step of a safe save: write `save.tmp`, check it, then

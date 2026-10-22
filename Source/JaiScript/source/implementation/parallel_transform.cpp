@@ -462,7 +462,7 @@ namespace {
 		state.worker_overhead_ns = best;
 	}
 
-	// The library builtins that stay parallel (parallel_pure_function): pure math and to_string; the rest register serial
+	// The library builtins that stay parallel (parallel_pure_function): pure math, to_string and the pure text functions; the rest register serial
 	bool parallel_host_whitelisted(std::string_view name) {
 		static constexpr std::string_view k_whitelist[] = {
 			"abs", "sign", "min", "max", "clamp",
@@ -474,7 +474,7 @@ namespace {
 			"lerp", "mix", "unmix", "mix_in", "mix_out", "mix_in_out", "mix_out_in",
 			"unmix_in", "unmix_out", "unmix_in_out", "unmix_out_in",
 			"saturate", "wrap", "remap", "is_nan", "is_inf",
-			"to_string",
+			"to_string", "html_escape", "html_unescape", "sha256",
 		};
 		for (auto w : k_whitelist) {
 			if (name == w) { return true; }

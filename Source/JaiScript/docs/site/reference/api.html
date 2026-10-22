@@ -564,6 +564,16 @@ print(w.size(), &quot; &quot;, to_json(w.to_string().to_bytes()));</code></pre><
 print(v[&quot;hp&quot;], &quot; &quot;, v[&quot;tags&quot;][0]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3 a</code></pre></div>
 </div>
+<div class="api-entry" data-provider="stdlib" data-search="html_escape(value: text) -&gt; same_text_kind copy writes &amp; &lt; &gt; &quot; &#x27; as &amp;amp; &amp;lt; &amp;gt; &amp;quot; &amp;#39; (htmlspecialchars with ent_quotes); every other byte, utf-8 included, is kept. register_all() or area registration"><h3 id="api-d797214909c6"><code>html_escape(value: text) -&gt; same_text_kind</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
+<p>Writes &amp; &lt; &gt; &quot; &#x27; as &amp;amp; &amp;lt; &amp;gt; &amp;quot; &amp;#39; (htmlspecialchars with ENT_QUOTES); every other byte, UTF-8 included, is kept.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(html_escape(&quot;&lt;a title=\&quot;Tom &amp; Jerry&#x27;s\&quot;&gt;&quot;));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&amp;lt;a title=&amp;quot;Tom &amp;amp; Jerry&amp;#39;s&amp;quot;&amp;gt;</code></pre></div>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="html_unescape(value: text) -&gt; same_text_kind copy reads the html5 named references (legacy names without the ;, longest match) and numeric ones as a browser does in text; 0, surrogates and values past u+10ffff become u+fffd; anything else is kept. register_all() or area registration"><h3 id="api-4b7ecce491fd"><code>html_unescape(value: text) -&gt; same_text_kind</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
+<p>Reads the HTML5 named references (legacy names without the ;, longest match) and numeric ones as a browser does in text; 0, surrogates and values past U+10FFFF become U+FFFD; anything else is kept.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(html_unescape(&quot;&amp;lt;b&amp;gt; &amp;copy &amp;#x41;&amp;#66; &amp;bogus;&quot;));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&lt;b&gt; © AB &amp;bogus;</code></pre></div>
+</div>
 <div class="api-entry" data-provider="core" data-search="import_recheck_interval() -&gt; float configure queries import polling window in seconds. every engine"><h3 id="api-0d92d601292e"><code>import_recheck_interval() -&gt; float</code></h3><p><strong>Every engine</strong> &middot; configure</p>
 <p>Queries import polling window in seconds.</p>
 </div>
@@ -636,7 +646,13 @@ auto&amp; r = a;
 print(same_object(a, b), &quot; &quot;, same_object(a, r), &quot; &quot;, a == b);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">false true true</code></pre></div>
 </div>
-<div class="api-entry" data-provider="runner" data-search="sha256_file(path: string) -&gt; string filesystem  standalone jaiscript.exe"><h3 id="api-19bf92b8990f"><code>sha256_file(path: string) -&gt; string</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
+<div class="api-entry" data-provider="stdlib" data-search="sha256(bytes: text) -&gt; string observe the sha-256 digest of the bytes (a utf8_string&#x27;s utf-8 bytes), 64 lowercase hex digits. register_all() or area registration"><h3 id="api-737d6570505f"><code>sha256(bytes: text) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>The SHA-256 digest of the bytes (a utf8_string&#x27;s UTF-8 bytes), 64 lowercase hex digits.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(sha256(&quot;abc&quot;));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad</code></pre></div>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="sha256_file(path: string) -&gt; string filesystem the sha-256 digest of the file&#x27;s bytes, streamed in chunks; a file it cannot read raises cannot read file &#x27;&lt;path&gt;&#x27;: &lt;reason&gt;. register_all() or area registration"><h3 id="api-75fd3ab86357"><code>sha256_file(path: string) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; filesystem</p>
+<p>The SHA-256 digest of the file&#x27;s bytes, streamed in chunks; a file it cannot read raises Cannot read file &#x27;&lt;path&gt;&#x27;: &lt;reason&gt;.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="shared_from_this() -&gt; shared_ptr&lt;t&gt; observe method context only. every engine"><h3 id="api-0cb76b5518ef"><code>shared_from_this() -&gt; shared_ptr&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Method context only.</p>

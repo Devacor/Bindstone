@@ -821,6 +821,8 @@ namespace jai {
         void add_overloaded_function(const std::string& name, size_t argCount, script_function func);
         void add_overloaded_function_with_full_types(const std::string& name, size_t argCount, script_function func, const std::vector<param_type_info>& paramTypes);
         void add_function_with_arity_and_full_types(const std::string& name, script_function func, size_t arity, const std::vector<param_type_info>& paramTypes);
+        // the same, declaring the scalar result the checker sees (add_function reads it from the C++ return type)
+        void add_function_with_arity_and_full_types(const std::string& name, script_function func, size_t arity, const std::vector<param_type_info>& paramTypes, script_value_type result);
         
         // Class registration
         // Register a class with its type information

@@ -5259,8 +5259,10 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             // rhs keeps the Strong Types raise (string += int stays an
                             // error, unlike binary +, by pinned design). KEEP
                             // BYTE-PARALLEL with the VM exec_compound_store.
-                            JAISCRIPT_TRY_ASSIGN(script_value joined, evaluate_arithmetic(target, token_type::plus, derefRight, 0));
-                            JAISCRIPT_TRY(compound_typed_store_back(target, std::move(joined), identifier->name));
+                            if (!limits_->memory_charge(sizeof(script_value) + target.unchecked_as_string().size() + 1)) [[unlikely]] {
+                                return detail::raise_memory_cap(*limits_);
+                            }
+                            target.unchecked_as_string_ref().push_back(derefRight.unchecked_as_char());
                         } else {
                             return detail::compound_mismatch(0, target, derefRight, engine_);
                         }

@@ -980,13 +980,16 @@ namespace jai::detail {
 		return t ? t->declared_kind : uint8_t{0};
 	}
 
-	// x op= v through a declared reference whose value has T's kind and keeps it (int op int, float op number): the storage's
-	// in-place path applies
+	// x op= v through a declared reference whose value has T's kind and keeps it (int op int, float op number, string += string or
+	// char): the storage's in-place path applies
 	inline bool ref_declared_compound_keeps(uint8_t kind, const script_value& current, const script_value& right, token_type base_op) {
 		const size_t ci = current.raw_storage_index();
 		const size_t ri = right.raw_storage_index();
 		if (kind == script_value::TYPEID_INT) {
 			return ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT;
+		}
+		if (kind == script_value::TYPEID_STRING) {
+			return base_op == token_type::plus && ci == script_value::TYPEID_STRING && (ri == script_value::TYPEID_STRING || ri == script_value::TYPEID_CHAR);
 		}
 		if (kind == script_value::TYPEID_FLOAT) {
 			return ci == script_value::TYPEID_FLOAT && (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT) &&
@@ -1084,6 +1087,56 @@ namespace jai::detail {
 		return {};
 	}
 
+	// `x += text` through a field, element or map-entry reference whose storage still holds the string the compound read (`current`,
+	// released here): the bytes append to that storage's own node under the concatenation's charge, a node another holder shares copied
+	// first, leaving what the computed concatenation and the reference's store would leave (the store's identity rows: a string, var
+	// or untyped slot; a declared field stamps its type). Both backends run it, so it keeps their parity by construction. nullopt for
+	// any other shape: a property, a string element or a component, a constraint that converts, storage holding another value.
+	inline std::optional<checked_result<script_value>> ref_text_append_in_place(script_value& refLocal, script_value& current, const script_value& right,
+	                                                                           type_info* declared_static, engine* eng) {
+		const size_t ri = right.raw_storage_index();
+		if (!eng || current.raw_storage_index() != script_value::TYPEID_STRING || (ri != script_value::TYPEID_STRING && ri != script_value::TYPEID_CHAR)) {
+			return std::nullopt;
+		}
+		auto* holder = refLocal.get_reference_holder();
+		if (!holder || holder->property || holder->string_element() || holder->component_element() || holder->has_cell) { return std::nullopt; }
+		auto texty = [](const type_info* t) {
+			return !t || t->base_type == script_value_type::jai_any_type || t->base_type == script_value_type::jai_string_type;
+		};
+		const type_info* constraint = holder->container_element_type.get();
+		if (!texty(constraint) || !texty(declared_static ? declared_static : ref_declared_type(refLocal))) { return std::nullopt; }
+		strong_ptr<script_string>* handle = nullptr;
+		script_value* target = nullptr;
+		if (holder->typed_element()) {
+			if (holder->container->kind() != script_array::kind_t::str || holder->container_index >= holder->container->size()) { return std::nullopt; }
+			handle = &holder->container->strs()[holder->container_index];
+			if (!*handle || handle->get() != current.unchecked_string_handle().get()) { return std::nullopt; }
+		} else {
+			target = holder->owner_instance ? holder->field_cell() : holder->resolve_target();
+			if (!target || target->raw_storage_index() != script_value::TYPEID_STRING ||
+			    target->unchecked_string_handle().get() != current.unchecked_string_handle().get()) {
+				return std::nullopt;
+			}
+		}
+		execution_limits& limits = eng->execution_limits();
+		const size_t added = ri == script_value::TYPEID_CHAR ? 1 : right.unchecked_as_string().size();
+		if (!limits.memory_charge(sizeof(script_value) + current.unchecked_as_string().size() + added)) [[unlikely]] {
+			return checked_result<script_value>(raise_memory_cap(limits));
+		}
+		const std::string appended = ri == script_value::TYPEID_CHAR ? std::string(1, right.unchecked_as_char()) : std::string();
+		const std::string& text = ri == script_value::TYPEID_CHAR ? appended : right.unchecked_as_string();
+		current = script_value(std::monostate{}, eng);
+		if (holder->has_elem_scratch) { *holder->cell() = script_value(std::monostate{}, eng); }   // the scratch's hold on the node released too
+		strong_ptr<script_string>& node = handle ? *handle : target->unchecked_get_string_storage();
+		if (!node.unique()) { node = make_strong<script_string>(*node); }   // the concatenation's copy, which its charge counts
+		if (&text == node.get()) { node->append(std::string(text)); } else { node->append(text); }
+		if (handle) { return script_value(*handle, eng); }
+		type_info* tag = holder->owner_instance && constraint && constraint->base_type == script_value_type::jai_string_type
+			? const_cast<type_info*>(constraint) : eng->get_type_info_string();
+		if (target->type_info_raw() != tag) { target->set_type_info(type_info_ptr{tag}); }
+		return script_value(*target);
+	}
+
 	// Constrained-ref compound assignment (x op= v where x is bound to a typed element
 	// or field): mirrors the subscript-compound semantics - custom operator first, then
 	// arithmetic, then constraint check + convert + write-through. `arith` is the
@@ -1107,6 +1160,9 @@ namespace jai::detail {
 		const script_value& rightValue = rightBound ? rightNorm : rightDeref;
 		script_value resultValue(std::monostate{}, eng);
 		const script_value* opFunc = op_table ? op_table->entry(binary_op_slot(op)) : nullptr;
+		if (!opFunc && op == token_type::plus) {
+			if (auto appended = ref_text_append_in_place(refLocal, currentValue, rightValue, declared_static, eng)) { return std::move(*appended); }
+		}
 		if (opFunc) {
 			const script_function& func = opFunc->as_function();
 			std::vector<script_value> args = {currentValue, rightValue};

@@ -58,7 +58,8 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 				break;
 			}
 			case opcode::op_store:
-			case opcode::op_compound_store: {
+			case opcode::op_compound_store:
+			case opcode::op_concat_store: {
 				out << " slot=";
 				if (ins.b == k_invalid_u32) out << "env";
 				else out << ins.b;

@@ -378,6 +378,8 @@ namespace detail {
         // reference into a temporary map keeps the map alive. entry: the key's value as the site found it (null when absent).
         static script_value make_map_entry_reference(const strong_ptr<script_map>& map_storage, const script_value& key,
                                                      const script_value* entry, engine* eng, type_info_ptr value_type);
+        // the memory charge a map-entry reference's mint takes: a site that elides the mint charges it in its place
+        static size_t map_entry_reference_charge() noexcept;
         // CPP-MEMBER reference (a binder member-pointer property the cpp_bound box can decode):
         // the referent IS the C++ member at `address`; object_pin keeps the object alive,
         // `receiver` is the handle the property was bound on (internal/reference_model.md).

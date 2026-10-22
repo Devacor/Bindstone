@@ -531,6 +531,8 @@ void script_value::unshare_vec_node() {
     node = std::move(fresh);
 }
 
+size_t script_value::map_entry_reference_charge() noexcept { return sizeof(reference_holder); }
+
 script_value script_value::make_cell_reference(script_value&& boxed, engine* eng) {
     static_assert(sizeof(script_value) == reference_holder::cell_storage_size &&
                   alignof(script_value) <= 8, "cell inline storage must fit a script_value");

@@ -601,6 +601,7 @@ std::vector<std::pair<std::string, script_value>> vm_backend::frame_slot_locals(
 		case opcode::op_store:
 		case opcode::op_compound_store:
 		case opcode::op_incdec:
+		case opcode::op_concat_store:
 			if (ins.b != k_invalid_u32 && ins.a < f->code->symbols.size()) {
 				slot_names.emplace_back(ins.b, symbolizer_->get_string(f->code->symbols[ins.a]));
 			}
@@ -1500,6 +1501,88 @@ bool vm_backend::is_truthy(const script_value& value) {
 			return is_truthy(value.deref());
 		default: return true;
 	}
+}
+
+// The kinds a text `+=` appends in place: a string target takes a string or a char, a utf8_string target any text or a char (a string
+// target's utf8_string operand changes the stored kind, which the store decides)
+static bool text_append_kinds(size_t target, size_t operand) noexcept {
+	if (operand != script_value::TYPEID_STRING && operand != script_value::TYPEID_CHAR && operand != script_value::TYPEID_UTF8_STRING) return false;
+	return target == script_value::TYPEID_UTF8_STRING || (target == script_value::TYPEID_STRING && operand != script_value::TYPEID_UTF8_STRING);
+}
+
+// The storage a store through a reference writes as it is when the value is a string: a plain cell's value, or a map entry's value or a
+// var array's element whose constraint takes a string unconverted (re-resolved; null when it is gone). Null for every other reference
+// (a typed buffer's scratch, a field, a property, a string element, a component). `retag`: the store leaves the value's own tag (a
+// container's element), not the variable's.
+static script_value* text_store_referent(script_value& ref, bool& retag) {
+	auto* holder = ref.get_reference_holder();
+	retag = false;
+	if (!holder) return nullptr;
+	if (holder->plain_cell()) { return holder->container_element_type ? nullptr : holder->cell(); }
+	const type_info* constraint = holder->container_element_type.get();
+	if (holder->scratch_backed() || holder->property || holder->owner_instance || holder->has_cell || !(holder->has_map_key || holder->container) ||
+	    (constraint && constraint->base_type != script_value_type::jai_any_type && constraint->base_type != script_value_type::jai_string_type)) {
+		return nullptr;
+	}
+	retag = true;
+	return holder->resolve_target();
+}
+
+// The tag a field store leaves on a text value it takes as-is (declared_slot_write and typed_store_convert's text rows): the declared
+// type, the value's own on a var or untyped field; null where the store would convert (the caller stores instead)
+static type_info* text_field_store_tag(const type_info* declared, const script_value& cell, type_info* own) {
+	if (!declared) {
+		const type_info* tag = cell.type_info_raw();
+		if (!tag || tag->base_type == script_value_type::jai_any_type || tag->base_type == script_value_type::jai_null_type) { return own; }
+		declared = tag;
+	} else if (declared->base_type == script_value_type::jai_any_type) {
+		return own;
+	}
+	return declared->base_type == own->base_type ? const_cast<type_info*>(declared) : nullptr;
+}
+
+// A text `+=` row's memory charge (a string or utf8_string target, a string, utf8_string or char operand): a string onto a string
+// charges the bytes it appends, every other pairing the concatenation its row builds (the formulas the rows always charged, so a
+// cap trips where it did)
+bool vm_backend::charge_text_append(const script_value& target, const script_value& rhs) {
+	if (target.raw_storage_index() == script_value::TYPEID_STRING && rhs.raw_storage_index() == script_value::TYPEID_STRING) {
+		return limits_->memory_charge(rhs.unchecked_as_string().size());
+	}
+	return charge_text_concat(target, rhs);
+}
+// The concatenation's charge (concat_text's result) for a text target and a text or char operand: the rows that compute `x + y` and
+// store it charge this, so their in-place twins do
+bool vm_backend::charge_text_concat(const script_value& target, const script_value& rhs) {
+	const size_t added = rhs.raw_storage_index() == script_value::TYPEID_CHAR ? 1 : rhs.unchecked_text().size();
+	return limits_->memory_charge(sizeof(script_value) + target.unchecked_text().size() + added);
+}
+
+// The storage an in-place twin of `target = target + x` writes: the target's own node, a node another holder shares copied first. The
+// copy is the one the computed concatenation made, which its charge already counts, so it takes none of the write gate's own.
+static std::string& replacing_text_storage(script_value& target) {
+	if (target.raw_storage_index() == script_value::TYPEID_STRING) {
+		strong_ptr<script_string>& node = target.unchecked_get_string_storage();
+		if (!node.unique()) [[unlikely]] { node = make_strong<script_string>(*node); }
+		return *node;
+	}
+	return target.unchecked_as_utf8_ref().bytes;
+}
+
+// A text target takes a text or char operand's bytes in place: a node another holder shares is copied first (through the write gate,
+// or as the concatenation a `replacing` row stands for), so the storage that appends is the target's alone, and an append of the
+// target's own node reads a copy
+void vm_backend::append_text_in_place(script_value& target, const script_value& rhs, bool replacing) {
+	std::string& out = replacing ? replacing_text_storage(target) : target.unchecked_text_ref();
+	if (rhs.raw_storage_index() == script_value::TYPEID_CHAR) {
+		out.push_back(rhs.unchecked_as_char());
+		return;
+	}
+	const std::string& text = rhs.unchecked_text();
+	if (&text == &out) {
+		out.append(std::string(text));
+		return;
+	}
+	out += text;
 }
 
 // String + x (either side a string): the text of each operand joined, the left operand's first (the interpreter's
@@ -3820,7 +3903,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				script_float& t = slot->unchecked_as_float_ref();
 				t = kind == compound_plus ? t + r : kind == compound_minus ? t - r : t * r;
 				done = true;
-			} else if (kind == compound_plus && ti == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
+			} else if (kind == compound_plus && ti == script_value::TYPEID_STRING && (ri == script_value::TYPEID_STRING || ri == script_value::TYPEID_CHAR)) {
 				return compound_append_string(*slot, ins);
 			}
 			if (done) {
@@ -3833,14 +3916,14 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 	return exec_compound_store_full(f, ins);
 }
 
-// the full path's string append row over a string slot and a string right operand on the stack: the memory charge, then the append
-// through the copy-on-write gate
+// the full path's string append rows over a string slot and a string or char right operand on the stack: the row's memory charge, then
+// the append through the copy-on-write gate
 JAI_NOINLINE op_status vm_backend::compound_append_string(script_value& slot, const vm_instruction& ins) {
-	if (!limits_->memory_charge(stack_.back().unchecked_as_string().size())) [[unlikely]] {
+	if (!charge_text_append(slot, stack_.back())) [[unlikely]] {
 		stack_.pop_back();
 		return raise_from(detail::raise_memory_cap(*limits_));
 	}
-	slot.unchecked_as_string_ref() += stack_.back().unchecked_as_string();
+	append_text_in_place(slot, stack_.back(), stack_.back().raw_storage_index() == script_value::TYPEID_CHAR);
 	stack_.pop_back();
 	if (!(ins.c & compound_flag_no_result)) { stack_.push_back(slot); }
 	return {};
@@ -4076,6 +4159,14 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 		// ladder and takes the general arithmetic path as int64 0..255, storing back
 		// like the %= case does. KEEP BYTE-PARALLEL with the interpreter's in-place switch.
 		if (detail::char_operands_promote(leftIdx, rightIdx) || detail::utf8_operands(leftIdx, rightIdx) || detail::math::owns_arithmetic(leftIdx, rightIdx)) [[unlikely]] {
+			if (kind == compound_plus && leftIdx == script_value::TYPEID_UTF8_STRING &&
+			    (rightIdx == script_value::TYPEID_UTF8_STRING || rightIdx == script_value::TYPEID_STRING || rightIdx == script_value::TYPEID_CHAR)) {
+				// a utf8_string target keeps its kind whatever text it takes: the bytes append in place under the concatenation's charge
+				if (!charge_text_append(target, derefRight)) [[unlikely]] { return raise_from(detail::raise_memory_cap(*limits_)); }
+				append_text_in_place(target, derefRight, true);
+				if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
+				return {};
+			}
 			token_type baseOp = token_type::plus;
 			switch (kind) {
 				case compound_plus: baseOp = token_type::plus; break;
@@ -4116,8 +4207,8 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 					// rhs keeps the Strong Types raise (string += int stays an
 					// error, unlike binary +, by pinned design). KEEP
 					// BYTE-PARALLEL with the interpreter's in-place switch.
-					VM_TRY_ASSIGN(script_value joined, evaluate_arithmetic(target, token_type::plus, derefRight, 0));
-					VM_TRY(compound_typed_store_back(target, std::move(joined), sym));
+					if (!charge_text_append(target, derefRight)) [[unlikely]] { return raise_from(detail::raise_memory_cap(*limits_)); }
+					append_text_in_place(target, derefRight, true);
 				} else {
 					return raise_from(detail::compound_mismatch(0, target, derefRight, engine_));
 				}
@@ -4266,6 +4357,13 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 	script_value resultValue = make_null();
 	const detail::compound_text text_pair = kind == compound_plus ? detail::compound_plus_text(currentValue, rightValue) : detail::compound_text::none;
 	if (text_pair == detail::compound_text::mismatch) { return raise_from(detail::compound_mismatch(0, currentValue, rightValue, engine_)); }
+	if (text_pair == detail::compound_text::append && !prop_getter && !parallel_worker_ && text_append_kinds(ci, ri)) {
+		if (auto appended = field_cell_text_append(instance->find_field_value(sym), instance->get_class_definition(), sym, currentValue, rightValue, true)) {
+			if (*appended == op_status::failed) { return op_status::failed; }
+			if (!no_result) { stack_.push_back(std::move(currentValue)); }
+			return {};
+		}
+	}
 	if (text_pair == detail::compound_text::append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the interpreter)
 		VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
 	} else
@@ -5605,8 +5703,60 @@ bool vm_backend::store_slot_raw(frame& f, const vm_instruction& ins, size_t kind
 	return true;
 }
 
+// The text a string `+` appends for an operand whose text runs no user code (concat_text's rows): a string's bytes, an int's digits,
+// a char, a float or a bool as to_string writes it; false for anything else (an object's to_string, a utf8_string's kind change)
+static bool plain_concat_text(const script_value& v, char (&digits)[24], std::string& scratch, std::string_view& out) {
+	switch (v.raw_storage_index()) {
+	case script_value::TYPEID_STRING: out = v.unchecked_as_string(); return true;
+	case script_value::TYPEID_INT: {
+		const auto res = std::to_chars(digits, digits + sizeof(digits), v.unchecked_as_int());
+		out = std::string_view(digits, static_cast<size_t>(res.ptr - digits));
+		return true;
+	}
+	case script_value::TYPEID_FLOAT: case script_value::TYPEID_BOOL: case script_value::TYPEID_CHAR:
+		scratch = v.to_string();
+		out = scratch;
+		return true;
+	default: return false;
+	}
+}
+
+// `s = s + x;` over a frame slot holding a string, x a constant or a value read that runs no user code: the concatenation's text
+// appends to the slot's own node, the value the store would leave there, under the concatenation's charge. false = the shape is
+// another (the caller computes and stores); a refused charge raises the concatenation's error.
+JAI_NOINLINE bool vm_backend::self_concat_store(frame& f, const fused_binary_dst_proto& dp, op_status& st) {
+	const fused_binary_proto& p = f.code->fused_binary_protos[dp.binary_proto];
+	if (!f.locals || f.top_level || has_custom_numeric_ops_ || (operator_table_ && operator_table_->any()) ||
+	    p.left.const_index != k_invalid_u32 || p.left.is_subscript() || (p.left.load_flags & (load_flag_type_ctor | load_flag_global_only))) return false;
+	script_value* slot = frame_slot(f, dp.slot);
+	bool retag = false;
+	if (slot && slot->raw_storage_index() == script_value::TYPEID_REFERENCE) { slot = text_store_referent(*slot, retag); }   // a reference parameter or alias
+	if (!slot || slot->raw_storage_index() != script_value::TYPEID_STRING || p.right.is_subscript()) return false;
+	const script_value* rp = fused_cmp_operand(f, p.right, f.ip * 3 + 1);
+	if (!rp) return false;
+	char digits[24];
+	std::string scratch;
+	std::string_view text;
+	if (!plain_concat_text(*rp, digits, scratch, text)) return false;
+	if (!limits_->memory_charge(sizeof(script_value) + slot->unchecked_as_string().size() + text.size())) [[unlikely]] {
+		st = raise_from(detail::raise_memory_cap(*limits_));
+		return true;
+	}
+	std::string& out = replacing_text_storage(*slot);
+	if (text.data() >= out.data() && text.data() < out.data() + out.size()) { out.append(std::string(text)); }   // s = s + s
+	else { out.append(text); }
+	if (retag && slot->type_info_raw() != engine_->get_type_info_string()) { slot->set_type_info(type_info_ptr{engine_->get_type_info_string()}); }
+	st = {};
+	return true;
+}
+
 op_status vm_backend::exec_binary_fused_store(frame& f, const vm_instruction& ins) {
 	const fused_binary_dst_proto& dp = f.code->fused_binary_dst_protos[ins.a];
+	if (dp.slot != k_invalid_u32 && f.code->fused_binary_protos[dp.binary_proto].op == static_cast<uint8_t>(token_type::plus) &&
+	    f.code->fused_binary_protos[dp.binary_proto].left.slot == dp.slot) {
+		op_status st{};
+		if (self_concat_store(f, dp, st)) return st;
+	}
 	const vm_instruction store_ins{opcode::op_store, dp.symbol, dp.slot, dp.flags};
 	struct store_lane_sink {
 		vm_backend* vm;
@@ -9655,16 +9805,34 @@ bool vm_backend::cells_store_string(frame& f, const chunk::cell_loop& loop, uint
 // its temp as its sink leaves it; any other instruction or operand, a temp that takes no string or a refused charge is the caller's miss
 bool vm_backend::cells_concat(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint32_t left, uint32_t right, uint32_t origin) {
 	const vm_instruction& oi = f.code->code[origin];
-	if (oi.op != opcode::op_binary_fused_temp || oi.b != loop.cells[dk].slot) return false;
 	const cell_state& cs = *f.cells;
 	auto text = [&](uint32_t o) -> const script_string* {
 		if (o & k_typed_const_bit) { const script_value& c = f.code->constants[o & ~k_typed_const_bit]; return c.raw_storage_index() == script_value::TYPEID_STRING ? c.unchecked_string_handle().get() : nullptr; }
 		return cs.kind[o] == static_cast<uint8_t>(script_value::TYPEID_STRING) ? reinterpret_cast<const script_string*>(cs.payload[o]) : nullptr;
 	};
+	if (oi.op == opcode::op_binary_fused_store && dk == left) { return cells_self_concat(f, loop, dk, text(right)); }
+	if (oi.op != opcode::op_binary_fused_temp || oi.b != loop.cells[dk].slot) return false;
 	const script_string* a = text(left);
 	const script_string* b = a ? text(right) : nullptr;
 	if (!b || !cell_takes_string(f, loop, dk) || !limits_->memory_charge(sizeof(script_value) + a->size() + b->size())) return false;
 	cell_land_string(f, loop, dk, script_value(*a + *b, engine_));
+	return true;
+}
+// `s = s + x;` standing for a BINARY_FUSED_STORE whose target is the left operand's slot: the general form's self_concat_store over the
+// slot's node, which the cell borrows (its identity unchanged by the append, so the borrow stays valid); a node another holder shares,
+// a target that is not the slot's own string or a refused charge is the caller's miss, where the general form copies or raises
+bool vm_backend::cells_self_concat(frame& f, const chunk::cell_loop& loop, uint32_t dk, const script_string* b) {
+	const chunk::cell_loop::cell& cl = loop.cells[dk];
+	if (!b || cl.temp || cl.env_operand != k_invalid_u32 || f.cells->kind[dk] != static_cast<uint8_t>(script_value::TYPEID_STRING) ||
+	    has_custom_numeric_ops_ || (operator_table_ && operator_table_->any())) return false;
+	script_value* s = frame_slot(f, cl.slot);
+	if (!s || s->raw_storage_index() != script_value::TYPEID_STRING) return false;
+	const strong_ptr<script_string>& h = s->unchecked_string_handle();
+	if (reinterpret_cast<int64_t>(h.get()) != f.cells->payload[dk] || !h.unique()) return false;
+	if (!limits_->memory_charge(sizeof(script_value) + h->size() + b->size())) return false;
+	script_string& out = s->unchecked_as_string_ref();
+	if (b == &out) { out.append(script_string(*b)); }
+	else { out += *b; }
 	return true;
 }
 
@@ -10689,6 +10857,25 @@ JAI_NOINLINE op_status vm_backend::dyn_string_add(frame& f, const vm_instruction
 		const type_info* stamp = dst == k_typed_dst_decl ? f.code->typed_sites[f.ip].stamp : nullptr;
 		// a declaration the string lands in as the decl lane lands it (its type the string's or var); anything else replays
 		if (dst != k_typed_dst_decl || variable_decl::identity_payload(script_value::TYPEID_STRING, stamp)) {
+			script_value* own = (dst == k_typed_dst_temp || dst == k_typed_dst_store) && (ins.a & k_typed_slot_mask) == ins.b && !(ins.b & k_typed_const_bit)
+				? frame_slot(f, ins.b) : nullptr;
+			bool retag = false;
+			if (own && own != lp && dst == k_typed_dst_store && own->raw_storage_index() == script_value::TYPEID_REFERENCE) {
+				own = text_store_referent(*own, retag);   // a reference parameter or alias: the referent a store through it writes
+			}
+			if (own && own == lp) {
+				// `t = t + x` into the temp or the variable the left operand is: its node takes the bytes in place (a chain's accumulator,
+				// self_concat_store's row over a store)
+				script_value& t = *own;
+				if (!limits_->memory_charge(sizeof(script_value) + lp->unchecked_as_string().size() + rp->unchecked_as_string().size())) [[unlikely]] {
+					landed = true;
+					return raise_from(detail::raise_memory_cap(*limits_));
+				}
+				append_text_in_place(t, *rp, true);
+				if (retag && t.type_info_raw() != engine_->get_type_info_string()) { t.set_type_info(type_info_ptr{engine_->get_type_info_string()}); }
+				landed = true;
+				return {};
+			}
 			std::optional<script_value> out;
 			if (fused_string_add(*lp, *rp, out) == op_status::failed) { landed = true; return op_status::failed; }
 			switch (dst) {
@@ -11417,6 +11604,77 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 // no registered operator override) reads, computes, and writes in place. Everything else
 // replays INDEX(shape)+INDEX_COMPOUND byte-identically (string concat routing, S8 bound
 // decode, object operator methods, rvalue-target errors).
+// `a[i] += text` / `m[k] += text` on an element or entry holding text, the index in range or the key present: the bytes append to the
+// element's own node under the concatenation's charge, as the compound's store leaves it (a string buffer keeps its handle's node, a
+// var element or entry takes the value's own tag); stack [container, index, rhs] -> [the stored text]. nullopt = any other shape (the
+// general compound runs and its texts stand).
+JAI_NOINLINE std::optional<op_status> vm_backend::index_text_append(frame& f) {
+	const script_value& rhs = stack_.back().deref();
+	const size_t ri = rhs.raw_storage_index();
+	script_value& container = stack_[stack_.size() - 3].deref();
+	const script_value& key = stack_[stack_.size() - 2].deref();
+	const size_t ki = key.raw_storage_index();
+	script_value* target = nullptr;
+	strong_ptr<script_string>* handle = nullptr;
+	type_info_ptr element_type;
+	bool entry_reference = false;   // a map entry: the general compound mints its reference, charged as a holder
+	if (container.raw_storage_index() == script_value::TYPEID_ARRAY) {
+		script_array* storage = container.unchecked_get_array_storage().get();
+		if (!storage || ki != script_value::TYPEID_INT) return std::nullopt;
+		const script_int index = key.unchecked_as_int();
+		if (index < 0 || index >= static_cast<script_int>(storage->size())) return std::nullopt;
+		if (storage->kind() == script_array::kind_t::str) {
+			handle = &storage->strs()[static_cast<size_t>(index)];
+			if (!*handle || !text_append_kinds(script_value::TYPEID_STRING, ri)) return std::nullopt;
+		} else if (!storage->is_typed()) {
+			target = &storage->values()[static_cast<size_t>(index)];
+			const auto tag = container.get_type_info();
+			element_type = tag ? tag->element_type() : nullptr;
+		} else {
+			return std::nullopt;
+		}
+	} else if (container.raw_storage_index() == script_value::TYPEID_MAP && (ki == script_value::TYPEID_STRING || ki == script_value::TYPEID_INT)) {
+		script_map& map = *container.unchecked_get_map_storage();
+		auto it = map.find(key);
+		if (it == map.end()) return std::nullopt;
+		target = &it->second;
+		const auto tag = container.get_type_info();
+		element_type = tag ? tag->value_type() : nullptr;
+		entry_reference = true;
+	} else {
+		return std::nullopt;
+	}
+	(void)f;
+	if (handle) {
+		strong_ptr<script_string>& h = *handle;
+		if (!limits_->memory_charge(sizeof(script_value) + h->size() + (ri == script_value::TYPEID_CHAR ? 1 : rhs.unchecked_as_string().size()))) [[unlikely]] {
+			return raise_from(detail::raise_memory_cap(*limits_));
+		}
+		if (!h.unique()) { h = make_strong<script_string>(*h); }   // the concatenation's copy, the buffer's handle being the storage
+		if (ri == script_value::TYPEID_CHAR) { h->push_back(rhs.unchecked_as_char()); }
+		else if (&rhs.unchecked_as_string() == h.get()) { h->append(script_string(*h)); }
+		else { h->append(rhs.unchecked_as_string()); }
+		script_value stored(h, engine_);
+		stack_.pop_back();
+		stack_.pop_back();
+		stack_.back() = std::move(stored);
+		return op_status{};
+	}
+	const size_t ti = target->raw_storage_index();
+	if (!text_append_kinds(ti, ri)) return std::nullopt;
+	type_info* own = ti == script_value::TYPEID_STRING ? engine_->get_type_info_string() : engine_->get_type_info_utf8_string();
+	if (element_type && element_type->base_type != script_value_type::jai_any_type && element_type->base_type != own->base_type) return std::nullopt;
+	if (entry_reference) { limits_->memory_charge_deferred(script_value::map_entry_reference_charge()); }
+	if (!charge_text_concat(*target, rhs)) [[unlikely]] { return raise_from(detail::raise_memory_cap(*limits_)); }
+	append_text_in_place(*target, rhs, true);
+	if (target->type_info_raw() != own) { target->set_type_info(type_info_ptr{own}); }
+	script_value stored(*target);
+	stack_.pop_back();
+	stack_.pop_back();
+	stack_.back() = std::move(stored);
+	return op_status{};
+}
+
 op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& ins) {
 	if (ins.a & compound_flag_value_first) {
 		// [rhs, container, index] -> [container, index, rhs]
@@ -11441,6 +11699,9 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 	if ((ins.b & index_flag_lvalue_shape) != 0 && stack_.size() >= 3 &&
 	    (ins.a & compound_flag_old_result) == 0 &&
 	    !(operator_table_ && operator_table_->any())) {
+		if ((ins.a & compound_kind_mask) == compound_plus && !parallel_worker_) {
+			if (auto appended = index_text_append(f)) { return *appended; }
+		}
 		const script_value& rhs = stack_.back();
 		const size_t rhs_idx = rhs.raw_storage_index();
 		script_value& container = stack_[stack_.size() - 3].deref();
@@ -16131,6 +16392,103 @@ op_status vm_backend::exec_set_static(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+// The instance and field slot a member store at `ins_index` writes as a plain slot store: the proven field write, or the store site's
+// armed field row (a public script field with no user accessor); null for any other store, which runs its own path
+class_instance* vm_backend::plain_member_store_slot(frame& f, size_t ins_index, member_expr* member, const script_value& object, uint32_t& slot) {
+	if (parallel_worker_ || member->member_id == UINT64_MAX) return nullptr;
+	if (member->proven_class && member->proven_field_write && cached_global_env_ && !detail::by_value_class_type(member->proven_field_type)) {
+		if (class_instance* inst = detail::proven_field_instance(object, member->proven_class, member->proven_epoch)) {
+			slot = member->proven_slot;
+			return inst;
+		}
+	}
+	if (object.raw_storage_index() != script_value::TYPEID_OBJECT) return nullptr;
+	const std::vector<chunk::member_ic_entry>* rows = member_ic_rows(*f.code);
+	auto& holder = const_cast<script_value&>(object).unchecked_get_object_storage();
+	if (!rows || ins_index >= rows->size() || !holder || !holder->is_class_instance_wrapper || !holder->data) return nullptr;
+	class_instance* candidate = static_cast<class_instance*>(holder->data.get());
+	const chunk::member_ic_entry& entry = (*rows)[ins_index];
+	const class_definition* cd = candidate->get_class_definition();
+	if (!cd || entry.cd != cd || entry.epoch != cd->method_epoch() || entry.slot == UINT32_MAX || entry.scalar_type) return nullptr;
+	slot = entry.slot;
+	return candidate;
+}
+
+// `obj.f += text` where the store is a plain slot store and the field still holds the node the compound read: the bytes append to the
+// field's own node under the concatenation's charge, the tag the store would leave stamped on it. nullopt = another shape (the caller
+// computes and stores). `current` is the compound's copy of the field: released first, so the field's node is unshared unless someone
+// else holds it.
+JAI_NOINLINE std::optional<op_status> vm_backend::member_text_append(frame& f, size_t ins_index, member_expr* member, const script_value& object,
+                                                                    script_value& current, const script_value& right) {
+	if (!text_append_kinds(current.raw_storage_index(), right.raw_storage_index())) return std::nullopt;
+	uint32_t slot = UINT32_MAX;
+	class_instance* inst = plain_member_store_slot(f, ins_index, member, object, slot);
+	if (!inst) return std::nullopt;
+	return field_cell_text_append(inst->field_slot_value(slot), inst->get_class_definition(), member->member_id, current, right, true);
+}
+
+// `C::s += text` onto a class's own static holding the node the compound read: store_static_member's rows over the class the store
+// resolves (a namespace cell, a constant, a missing static or a converting declared type leave it to the store)
+JAI_NOINLINE std::optional<op_status> vm_backend::static_text_append(frame& f, member_expr* member, script_value& current, const script_value& right) {
+	if (parallel_worker_ || member->member_id == UINT64_MAX || !text_append_kinds(current.raw_storage_index(), right.raw_storage_index())) return std::nullopt;
+	if (detail::resolve_namespace_store(*engine_, member, *symbolizer_)) return std::nullopt;
+	auto cls = detail::resolve_static_store_class(member, *environment_, *symbolizer_, frame_access_context(f));
+	if (!cls) return std::nullopt;
+	class_definition& cd = *cls.value();
+	const uint64_t id = member->member_id;
+	if (!cd.has_static_field(id) || cd.is_const_static(id)) return std::nullopt;
+	script_value* cell = cd.get_static_field_ptr(id);
+	const size_t ci = current.raw_storage_index();
+	if (!cell || cell->raw_storage_index() != ci ||
+	    (ci == script_value::TYPEID_STRING ? cell->unchecked_string_handle().get() != current.unchecked_string_handle().get()
+	                                       : &cell->unchecked_as_utf8() != &current.unchecked_as_utf8())) {
+		return std::nullopt;
+	}
+	type_info* own = ci == script_value::TYPEID_STRING ? engine_->get_type_info_string() : engine_->get_type_info_utf8_string();
+	const type_info_ptr declared = cd.get_static_declared_type(id);
+	type_info* tag = declared ? text_field_store_tag(declared.get(), *cell, own) : own;
+	if (!tag) return std::nullopt;
+	if (!charge_text_concat(current, right)) [[unlikely]] { return raise_from(detail::raise_memory_cap(*limits_)); }
+	current = make_null();
+	append_text_in_place(*cell, right, true);
+	if (cell->type_info_raw() != tag) { cell->set_type_info(type_info_ptr{tag}); }
+	current = *cell;
+	return op_status{};
+}
+
+// A field cell still holding the text node a compound read (`current`) takes the right operand's bytes in place under the
+// concatenation's charge, stamped with the tag the field store would leave; `current` becomes the stored value. nullopt when the cell
+// holds another value (a getter's answer) or the store would convert, the shapes the caller computes and stores.
+std::optional<op_status> vm_backend::field_cell_text_append(script_value* cell, const class_definition* cd, uint64_t field_id,
+                                                            script_value& current, const script_value& right, bool charge) {
+	const size_t ci = current.raw_storage_index();
+	bool through = false;
+	if (cell && cell->raw_storage_index() == script_value::TYPEID_REFERENCE) {
+		// a field holding a reference (a map pair's `second`): the store writes the referent as it is (field_slot_write's write-through),
+		// so the referent holding the node takes the bytes under the value's own tag
+		auto* holder = cell->get_reference_holder();
+		if (!holder || holder->scratch_backed() || holder->property || holder->owner_instance) return std::nullopt;
+		const type_info* declared = cd ? cd->get_field_declared_type(field_id).get() : nullptr;
+		if (declared && declared->base_type != script_value_type::jai_any_type) return std::nullopt;
+		cell = holder->has_cell ? holder->cell() : holder->resolve_target();
+		through = true;
+	}
+	if (!cell || cell->raw_storage_index() != ci) return std::nullopt;
+	if (ci == script_value::TYPEID_STRING ? cell->unchecked_string_handle().get() != current.unchecked_string_handle().get()
+	                                      : &cell->unchecked_as_utf8() != &current.unchecked_as_utf8()) {
+		return std::nullopt;
+	}
+	type_info* own = ci == script_value::TYPEID_STRING ? engine_->get_type_info_string() : engine_->get_type_info_utf8_string();
+	type_info* tag = through ? own : text_field_store_tag(cd ? cd->get_field_declared_type(field_id).get() : nullptr, *cell, own);
+	if (!tag) return std::nullopt;
+	if (charge &&!charge_text_concat(current, right)) [[unlikely]] { return raise_from(detail::raise_memory_cap(*limits_)); }
+	current = make_null();
+	append_text_in_place(*cell, right, true);
+	if (cell->type_info_raw() != tag) { cell->set_type_info(type_info_ptr{tag}); }
+	current = *cell;
+	return op_status{};
+}
+
 op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, size_t ins_index) {
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	const uint32_t kind = ins.c & compound_kind_mask;
@@ -16206,6 +16564,21 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 	script_value resultValue = make_null();
 	const detail::compound_text text_pair = kind == compound_plus ? detail::compound_plus_text(currentValue, rightValue) : detail::compound_text::none;
 	if (text_pair == detail::compound_text::mismatch) { return raise_from(detail::compound_mismatch(0, currentValue, rightValue, engine_)); }
+	if (text_pair == detail::compound_text::append && member->is_static && !old_result) {
+		if (auto appended = static_text_append(f, member, currentValue, rightValue)) {
+			if (*appended == op_status::failed) { return op_status::failed; }
+			stack_.push_back(result_needed ? clone_for_assignment(currentValue) : std::move(currentValue));
+			return {};
+		}
+	}
+	if (text_pair == detail::compound_text::append && !member->is_static && !old_result && !detail::class_temporary_member_store(member, objectValueRaw)) {
+		if (auto appended = member_text_append(f, ins_index, member, objectValueRaw.deref(), currentValue, rightValue)) {
+			if (*appended == op_status::failed) { return op_status::failed; }
+			if (result_needed) { return land_member_store_result(f, objectValueRaw.deref(), member, std::move(currentValue)); }
+			stack_.push_back(std::move(currentValue));
+			return {};
+		}
+	}
 	if (text_pair == detail::compound_text::append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the interpreter)
 		VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
 	} else if (detail::math::owns_arithmetic(ci, ri)) [[unlikely]] {   // a math field or component operand takes the math rows (KEEP BYTE-PARALLEL with the interpreter's member compound)
@@ -16593,6 +16966,211 @@ op_status vm_backend::exec_concat_append(frame& f) {
 	if (!result) { return raise_from(result); }
 	stack_.push_back(std::move(result.value()));
 	return {};
+}
+
+// One operand of `s = s + x1 + ... + xn;` (vm_compiler::try_emit_text_builder_store). While the chain holds plain text the stack is
+// [snapshot, tail], the chain's value being snapshot + tail: the operand's text joins the tail under the charge the step's concatenation
+// takes, raising where it would. Any other step (an operand whose text is user code or another kind, a snapshot that is no string, a
+// registered operator) materializes the value and runs the general `+`, leaving [null, value] for every later step.
+op_status vm_backend::exec_concat_pending(frame& f, const vm_instruction& ins) {
+	(void)f;
+	const bool first = ins.a != 0;
+	script_value operand_raw = std::move(stack_.back());
+	stack_.pop_back();
+	const script_value& operand = operand_raw.deref();
+	const size_t snapshot_at = first ? stack_.size() - 1 : stack_.size() - 2;
+	const bool pending = stack_[snapshot_at].raw_storage_index() == script_value::TYPEID_STRING;
+	if (pending && !(operator_table_ && operator_table_->any())) {
+		char digits[24];
+		std::string scratch;
+		std::string_view text;
+		if (plain_concat_text(operand, digits, scratch, text)) {
+			const size_t tail = first ? 0 : stack_.back().unchecked_as_string().size();
+			if (!limits_->memory_charge(sizeof(script_value) + stack_[snapshot_at].unchecked_as_string().size() + tail + text.size())) [[unlikely]] {
+				return raise_from(detail::raise_memory_cap(*limits_));
+			}
+			if (first) { stack_.push_back(script_value(script_string(text), engine_)); }
+			else { stack_.back().unchecked_as_string_ref().append(text); }
+			return {};
+		}
+	}
+	// the chain's value so far, as the general form holds it: the snapshot, or snapshot + tail, or the value a general step left
+	script_value left = make_null();
+	if (first) {
+		left = stack_.back().deref();
+	} else if (pending) {
+		left = script_value(stack_[snapshot_at].unchecked_as_string() + stack_.back().unchecked_as_string(), engine_);
+	} else {
+		left = std::move(stack_.back());
+	}
+	auto result = binary_general(token_type::plus, left.deref(), operand);
+	if (!result) { return raise_from(result); }
+	stack_[snapshot_at] = make_null();
+	if (first) { stack_.push_back(std::move(result.value())); }
+	else { stack_.back() = std::move(result.value()); }
+	return {};
+}
+
+// The storage `s = s + ...;` appends its tail to in place: the target's own string when the store would write it plainly (a frame slot,
+// a plain cell a reference holds, an environment cell the lookup cache answers, a bare field the store site's this-field row answers)
+// and it still holds the snapshot's node; null otherwise. A field's store stamps its tag, which `field_tag` takes (null: the tag stays).
+script_value* vm_backend::text_builder_target(frame& f, const vm_instruction& ins, const script_value& snapshot, type_info*& field_tag) {
+	script_value* target = nullptr;
+	field_tag = nullptr;
+	if (ins.b != k_invalid_u32 && f.locals && !f.top_level) {
+		target = frame_slot(f, ins.b);
+	} else if (!(ins.c & store_flag_global_only) && (cached_global_env_ || parallel_worker_)) {
+		bool plain = !f.locals || f.top_level;
+		if (!plain) {
+			ensure_frame_member_scope(f, environment_.get());
+			plain = !frame_scope_active(f);
+		}
+		const uint64_t sym = f.code->symbols[ins.a];
+		if (plain) {
+			target = env_store_cell(f, f.ip * 3 + 2, sym);
+		} else if (!parallel_worker_) {
+			type_info* declared = nullptr;
+			if ((target = this_field_store_probe(f, f.ip * 3, sym, declared)) != nullptr) {
+				if (target->raw_storage_index() != script_value::TYPEID_STRING) return nullptr;
+				field_tag = text_field_store_tag(declared, *target, engine_->get_type_info_string());
+				if (!field_tag) return nullptr;
+			}
+		}
+	}
+	if (target && target->raw_storage_index() == script_value::TYPEID_REFERENCE) {
+		bool retag = false;
+		target = text_store_referent(*target, retag);
+		if (retag) { field_tag = engine_->get_type_info_string(); }
+	}
+	if (!target || target->raw_storage_index() != script_value::TYPEID_STRING ||
+	    target->unchecked_string_handle().get() != snapshot.unchecked_string_handle().get()) {
+		return nullptr;
+	}
+	return target;
+}
+
+// The store of `s = s + x1 + ... + xn;`: [snapshot, tail] with the target still holding the snapshot's node appends the tail to that node
+// (the snapshot released first, so the node is copied only when another holder shares it); any other target takes snapshot + tail through
+// op_store's tail, and [null, value] stores the value. The steps charged the chain's concatenations, so the store charges nothing.
+op_status vm_backend::exec_concat_store(frame& f, const vm_instruction& ins) {
+	const uint32_t mode = ins.c >> concat_store_mode_shift;
+	if (mode == concat_store_member) { return exec_concat_store_member(f, ins); }
+	if (mode == concat_store_index) { return exec_concat_store_index(f, ins); }
+	script_value tail = std::move(stack_.back());
+	stack_.pop_back();
+	script_value snapshot = std::move(stack_.back());
+	stack_.pop_back();
+	const vm_instruction store_ins{opcode::op_store, ins.a, ins.b, ins.c};
+	if (snapshot.raw_storage_index() != script_value::TYPEID_STRING) {
+		return store_popped_value(f, store_ins, std::move(tail));
+	}
+	type_info* field_tag = nullptr;
+	if (script_value* target = text_builder_target(f, ins, snapshot, field_tag)) {
+		snapshot = make_null();
+		replacing_text_storage(*target).append(tail.unchecked_as_string());
+		if (field_tag && target->type_info_raw() != field_tag) { target->set_type_info(type_info_ptr{field_tag}); }
+		return {};
+	}
+	script_value joined(snapshot.unchecked_as_string() + tail.unchecked_as_string(), engine_);
+	return store_popped_value(f, store_ins, std::move(joined));
+}
+
+// `recv.f = recv.f + ...;`: [snapshot, tail, receiver]; a plain field store whose field still holds the snapshot's node takes the tail
+// in place (the store's tag stamped), any other store is op_set_member's over the joined value. a = member node, b = the store proof.
+JAI_NOINLINE op_status vm_backend::exec_concat_store_member(frame& f, const vm_instruction& ins) {
+	const size_t ins_index = static_cast<size_t>(&ins - f.code->code.data());
+	script_value receiver = std::move(stack_.back());
+	stack_.pop_back();
+	script_value tail = std::move(stack_.back());
+	stack_.pop_back();
+	script_value snapshot = std::move(stack_.back());
+	stack_.pop_back();
+	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
+	if (snapshot.raw_storage_index() != script_value::TYPEID_STRING) {
+		return store_member(f, ins_index, ins.a, ins.b, std::move(receiver), std::move(tail), true);
+	}
+	if (!detail::class_temporary_member_store(member, receiver)) {
+		const script_value& object = receiver.deref();
+		uint32_t slot = UINT32_MAX;
+		if (class_instance* inst = plain_member_store_slot(f, ins_index, member, object, slot)) {
+			if (field_cell_text_append(inst->field_slot_value(slot), inst->get_class_definition(), member->member_id, snapshot, tail, false)) {
+				return land_member_store_result(f, object, member, std::move(snapshot));
+			}
+		}
+	}
+	script_value joined(snapshot.unchecked_as_string() + tail.unchecked_as_string(), engine_);
+	return store_member(f, ins_index, ins.a, ins.b, std::move(receiver), std::move(joined), true);
+}
+
+// `a[i] = a[i] + ...;`: [snapshot, tail, container, index]; an element or entry still holding the snapshot's node takes the tail in
+// place (index_text_append's rows), any other store is op_index_store's over the joined value. a = the index flags, b = the string site.
+JAI_NOINLINE op_status vm_backend::exec_concat_store_index(frame& f, const vm_instruction& ins) {
+	script_value& snapshot = stack_[stack_.size() - 4];
+	if (snapshot.raw_storage_index() == script_value::TYPEID_STRING && (ins.a & index_flag_lvalue_shape)) {
+		script_value& container = stack_[stack_.size() - 2].deref();
+		const script_value& key = stack_.back().deref();
+		const size_t ki = key.raw_storage_index();
+		const script_string* node = snapshot.unchecked_string_handle().get();
+		script_value* target = nullptr;
+		strong_ptr<script_string>* handle = nullptr;
+		type_info_ptr element_type;
+		if (container.raw_storage_index() == script_value::TYPEID_ARRAY && ki == script_value::TYPEID_INT) {
+			script_array* storage = container.unchecked_get_array_storage().get();
+			const script_int index = key.unchecked_as_int();
+			if (storage && index >= 0 && index < static_cast<script_int>(storage->size())) {
+				if (storage->kind() == script_array::kind_t::str) {
+					handle = &storage->strs()[static_cast<size_t>(index)];
+				} else if (!storage->is_typed()) {
+					target = &storage->values()[static_cast<size_t>(index)];
+					const auto tag = container.get_type_info();
+					element_type = tag ? tag->element_type() : nullptr;
+				}
+			}
+		} else if (container.raw_storage_index() == script_value::TYPEID_MAP && (ki == script_value::TYPEID_STRING || ki == script_value::TYPEID_INT)) {
+			script_map& map = *container.unchecked_get_map_storage();
+			auto it = map.find(key);
+			if (it != map.end()) {
+				target = &it->second;
+				const auto tag = container.get_type_info();
+				element_type = tag ? tag->value_type() : nullptr;
+			}
+		}
+		const bool held = handle ? handle->get() == node
+		                         : target && target->raw_storage_index() == script_value::TYPEID_STRING && target->unchecked_string_handle().get() == node &&
+		                               (!element_type || element_type->base_type == script_value_type::jai_any_type || element_type->base_type == script_value_type::jai_string_type);
+		if (held) {
+			script_value tail = std::move(stack_[stack_.size() - 3]);
+			stack_[stack_.size() - 4] = make_null();   // the snapshot's hold released: the storage's node is unshared unless another holder has it
+			if (handle) {
+				strong_ptr<script_string>& h = *handle;
+				if (!h.unique()) { h = make_strong<script_string>(*h); }   // the concatenation's copy, the buffer's handle being the storage
+				h->append(tail.unchecked_as_string());
+				stack_[stack_.size() - 4] = script_value(h, engine_);
+			} else {
+				replacing_text_storage(*target).append(tail.unchecked_as_string());
+				if (target->type_info_raw() != engine_->get_type_info_string()) { target->set_type_info(type_info_ptr{engine_->get_type_info_string()}); }
+				stack_[stack_.size() - 4] = *target;
+			}
+			stack_.truncate(stack_.size() - 3);
+			return {};
+		}
+	}
+	// [snapshot, tail, container, index] -> [value, container, index] for the store
+	script_value index = std::move(stack_.back());
+	stack_.pop_back();
+	script_value container = std::move(stack_.back());
+	stack_.pop_back();
+	script_value tail = std::move(stack_.back());
+	stack_.pop_back();
+	script_value& first = stack_.back();
+	if (first.raw_storage_index() == script_value::TYPEID_STRING) {
+		first = script_value(first.unchecked_as_string() + tail.unchecked_as_string(), engine_);
+	} else {
+		first = std::move(tail);
+	}
+	stack_.push_back(std::move(container));
+	stack_.push_back(std::move(index));
+	return exec_index_store(f, vm_instruction{opcode::op_index_store, ins.a, 0, ins.b});
 }
 
 // A receiver the checker left open (rule 4, rule 5 with the string builtins too): the builtin its kind names, if the name has one
@@ -19305,6 +19883,8 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_call_method: return exec_call_method(f, ins);
 		case opcode::op_call_builtin: return exec_call_builtin(f, ins);
 		case opcode::op_concat_append: return exec_concat_append(f);
+		case opcode::op_concat_pending: return exec_concat_pending(f, ins);
+		case opcode::op_concat_store: return exec_concat_store(f, ins);
 		case opcode::op_push_fused: return exec_push_fused(f, ins);
 		case opcode::op_new: return exec_new(f, ins);
 		case opcode::op_class_decl: return exec_class_decl(f, ins);
@@ -20792,6 +21372,8 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_take_temp:
 			case opcode::op_const_guard:
 			case opcode::op_regex_constant:
+			case opcode::op_concat_pending:
+			case opcode::op_concat_store:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or

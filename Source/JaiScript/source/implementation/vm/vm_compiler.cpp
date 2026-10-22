@@ -238,6 +238,8 @@ namespace {
 			case opcode::op_call_method:
 			case opcode::op_call_builtin:
 			case opcode::op_concat_append:
+			case opcode::op_concat_pending:
+			case opcode::op_concat_store:
 			case opcode::op_push_fused:
 			case opcode::op_this:
 			case opcode::op_super:
@@ -458,6 +460,8 @@ namespace {
 			case opcode::op_call_method:
 			case opcode::op_call_builtin:
 			case opcode::op_concat_append:
+			case opcode::op_concat_pending:
+			case opcode::op_concat_store:
 			case opcode::op_push_fused:
 			case opcode::op_this:
 			case opcode::op_super:
@@ -2082,12 +2086,124 @@ void vm_compiler::compile_store_arm(identifier_expr* ident, assignment_expr* ass
 	note_ident_node(store_ip, assign->target);
 }
 
+// `s = s + x1 + ... + xn;` with a right side the checker typed a string and the target its leftmost operand: the target's value is read
+// first, as the chain reads it, each operand joins a pending tail at its own step (op_concat_pending: the step's charge, error and user
+// code where the chain has them) and the store appends the tail to the target's own node (op_concat_store), so a loop that builds a
+// string this way copies no head. One plain operand onto a frame slot stays the fused store, which appends in place itself.
+// a string `+` chain's operators, outermost first, and its leftmost operand (null when the value is not a `+` the checker typed a string)
+const expression* vm_compiler::text_builder_chain(assignment_expr* assign, std::vector<const binary_expr*>& chain) {
+	if (assign->static_operand_class != operand_class_string_string || assign->value->get_type() != node_type::binary_expr) return nullptr;
+	const expression* e = assign->value.get();
+	while (e->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::plus) {
+		chain.push_back(static_cast<const binary_expr*>(e));
+		e = static_cast<const binary_expr*>(e)->left.get();
+	}
+	return chain.empty() ? nullptr : e;
+}
+
+// the chain's head (its target's read, the snapshot), then each operand and its pending step
+void vm_compiler::emit_text_builder_chain(const std::vector<const binary_expr*>& chain) {
+	compile_expression(chain.back()->left);
+	for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+		compile_expression((*it)->right);
+		emit(opcode::op_concat_pending, it == chain.rbegin() ? 1u : 0u);
+	}
+}
+
+// the same place twice, as an lvalue the store resolves again: one name, or `this`
+bool vm_compiler::same_receiver(const expression* a, const expression* b) {
+	if (a->get_type() == node_type::this_expr) return b->get_type() == node_type::this_expr;
+	if (a->get_type() != node_type::identifier_expr || b->get_type() != node_type::identifier_expr) return false;
+	auto* x = static_cast<identifier_expr*>(const_cast<expression*>(a));
+	auto* y = static_cast<identifier_expr*>(const_cast<expression*>(b));
+	return x->symbol_id == y->symbol_id && x->global_qualified == y->global_qualified && identifier_slot_operand(x) == identifier_slot_operand(y);
+}
+
+bool vm_compiler::try_emit_text_builder_store(identifier_expr* ident, assignment_expr* assign) {
+	std::vector<const binary_expr*> chain;
+	const expression* e = text_builder_chain(assign, chain);
+	if (!e || e->get_type() != node_type::identifier_expr) return false;
+	auto* head = static_cast<identifier_expr*>(const_cast<expression*>(e));
+	const uint32_t slot = identifier_slot_operand(ident);
+	if (head->symbol_id != ident->symbol_id || head->global_qualified != ident->global_qualified || identifier_slot_operand(head) != slot) return false;
+	if (chain.size() == 1 && slot != k_invalid_u32) {
+		const node_type rt = chain[0]->right->get_type();
+		if (rt == node_type::literal_expr || rt == node_type::identifier_expr) return false;
+	}
+	emit_text_builder_chain(chain);
+	uint32_t flags = store_flag_no_result;
+	if (!ident->names_value_decl) flags |= store_flag_ref_alias;
+	else if (assign->typed_store_provable) flags |= store_flag_type_provable;
+	if (ident->global_qualified) flags |= store_flag_global_only;
+	if (assign->static_store_proof == proof_same_type) flags |= store_flag_same_type;
+	const size_t store_ip = emit(opcode::op_concat_store, add_symbol(ident->symbol_id), slot, flags);
+	note_ident_node(store_ip, assign->target);
+	return true;
+}
+
+// `recv.f = recv.f + ...;` (recv a name or `this`): the builder over the field, the receiver evaluated for the store after the value
+// as the plain store has it
+bool vm_compiler::try_emit_text_builder_member(const std::shared_ptr<member_expr>& member, assignment_expr* assign) {
+	std::vector<const binary_expr*> chain;
+	const expression* e = text_builder_chain(assign, chain);
+	if (!e || e->get_type() != node_type::member_expr || member->is_static || !member->object) return false;
+	auto* head = static_cast<const member_expr*>(e);
+	if (head->is_static || !head->object || head->member != member->member || !same_receiver(head->object.get(), member->object.get())) return false;
+	emit_text_builder_chain(chain);
+	compile_expression(member->object);
+	const uint32_t node = add_node(member);
+	note_component_base(node, member.get());
+	emit(opcode::op_concat_store, node, assign->static_store_proof, concat_store_member << concat_store_mode_shift);
+	return true;
+}
+
+// `a[i] = a[i] + ...;` (a a name, i a name or a literal): the builder over the element, the container and index evaluated for the
+// store after the value as the plain store has them
+bool vm_compiler::try_emit_text_builder_index(binary_expr* sub, assignment_expr* assign, uint32_t string_site) {
+	std::vector<const binary_expr*> chain;
+	const expression* e = text_builder_chain(assign, chain);
+	if (!e || e->get_type() != node_type::binary_expr) return false;
+	auto* head = static_cast<const binary_expr*>(e);
+	if (head->op.type != token_type::left_bracket || !same_receiver(head->left.get(), sub->left.get())) return false;
+	const expression* hi = head->right.get();
+	const expression* ti = sub->right.get();
+	if (hi->get_type() == node_type::literal_expr) {
+		if (ti->get_type() != node_type::literal_expr) return false;
+		const script_value& hv = static_cast<const literal_expr*>(hi)->value;
+		const script_value& tv = static_cast<const literal_expr*>(ti)->value;
+		const size_t k = hv.raw_storage_index();
+		if (k != tv.raw_storage_index()) return false;
+		if (k == script_value::TYPEID_INT ? hv.unchecked_as_int() != tv.unchecked_as_int()
+		    : k == script_value::TYPEID_STRING ? hv.unchecked_as_string() != tv.unchecked_as_string() : true) return false;
+	} else if (!same_receiver(hi, ti) || hi->get_type() != node_type::identifier_expr) {
+		return false;
+	}
+	emit_text_builder_chain(chain);
+	compile_expression(sub->left);
+	compile_expression(sub->right);
+	const uint32_t shape = is_lvalue_shaped(sub->left.get()) ? index_flag_lvalue_shape : 0;
+	emit(opcode::op_concat_store, shape, string_site, concat_store_index << concat_store_mode_shift);
+	return true;
+}
+
 bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 	if (detail::const_site_of(expr.get())) return false;   // compile_expression emits its guard first
 	if (expr->get_type() == node_type::assignment_expr) {
 		auto* assign = static_cast<assignment_expr*>(expr.get());
+		if (assign->op.type == token_type::equal && assign->target->get_type() == node_type::member_expr &&
+		    try_emit_text_builder_member(std::static_pointer_cast<member_expr>(assign->target), assign)) {
+			emit(opcode::op_pop);
+			return true;
+		}
+		if (assign->op.type == token_type::equal && assign->target->get_type() == node_type::binary_expr &&
+		    static_cast<binary_expr*>(assign->target.get())->op.type == token_type::left_bracket &&
+		    try_emit_text_builder_index(static_cast<binary_expr*>(assign->target.get()), assign, string_target_site_for(assign->target))) {
+			emit(opcode::op_pop);
+			return true;
+		}
 		if (assign->target->get_type() == node_type::identifier_expr) {
 			auto* ident = static_cast<identifier_expr*>(assign->target.get());
+			if (assign->op.type == token_type::equal && try_emit_text_builder_store(ident, assign)) return true;
 			if (assign->op.type == token_type::equal && callable_.active && ident->names_value_decl && !ident->global_qualified &&
 			    value_temp_operand(assign->value.get())) {
 				// `x = a[i];`, `x = -e;` or `x = math::f(e);` in statement position: the value lands in a compiler temp (the T_LOAD
@@ -7132,6 +7248,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 		auto* sub = static_cast<binary_expr*>(expr->target.get());
 		uint32_t shape = is_lvalue_shaped(sub->left.get()) ? index_flag_lvalue_shape : 0;
 		const uint32_t string_site = string_target_site_for(expr->target);
+		if (!compound && as_statement && try_emit_text_builder_index(sub, expr.get(), string_site)) return;
 		if (!compound) {
 			// Fused store: the array fast path writes in place (no reference mint);
 			// other shapes replay the INDEX(lvalue_write)+INDEX_ASSIGN semantics inside
@@ -7160,6 +7277,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 
 	if (expr->target->get_type() == node_type::member_expr) {
 		auto member = std::static_pointer_cast<member_expr>(expr->target);
+		if (!compound && as_statement && try_emit_text_builder_member(member, expr.get())) return;
 		if (!compound) {
 			compile_expression(expr->value);
 			if (member->is_static) {

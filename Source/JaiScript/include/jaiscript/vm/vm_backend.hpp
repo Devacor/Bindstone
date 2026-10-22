@@ -2109,6 +2109,17 @@ namespace jai::vm {
         op_status exec_compound_store(frame& f, const vm_instruction& ins);
         op_status exec_compound_store_full(frame& f, const vm_instruction& ins);
         op_status compound_append_string(script_value& slot, const vm_instruction& ins);
+        bool charge_text_append(const script_value& target, const script_value& rhs);
+        bool charge_text_concat(const script_value& target, const script_value& rhs);
+        std::optional<op_status> index_text_append(frame& f);
+        bool self_concat_store(frame& f, const fused_binary_dst_proto& dp, op_status& st);
+        std::optional<op_status> member_text_append(frame& f, size_t ins_index, member_expr* member, const script_value& object,
+                                                    script_value& current, const script_value& right);
+        std::optional<op_status> static_text_append(frame& f, member_expr* member, script_value& current, const script_value& right);
+        std::optional<op_status> field_cell_text_append(script_value* cell, const class_definition* cd, uint64_t field_id,
+                                                        script_value& current, const script_value& right, bool charge);
+        class_instance* plain_member_store_slot(frame& f, size_t ins_index, member_expr* member, const script_value& object, uint32_t& slot);
+        void append_text_in_place(script_value& target, const script_value& rhs, bool replacing);
         op_status exec_incdec(frame& f, const vm_instruction& ins);
         op_status exec_decl_var(frame& f, const vm_instruction& ins);
         op_status exec_decl_var_full(frame& f, const vm_instruction& ins);
@@ -2387,6 +2398,7 @@ namespace jai::vm {
         void cell_land_string(frame& f, const chunk::cell_loop& loop, uint32_t dk, script_value&& v);
         bool cells_store_string(frame& f, const chunk::cell_loop& loop, uint32_t dk, script_value& v);
         bool cells_concat(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint32_t left, uint32_t right, uint32_t origin);
+        bool cells_self_concat(frame& f, const chunk::cell_loop& loop, uint32_t dk, const script_string* b);
         JAI_FORCEINLINE op_status exec_c_load(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool adopted);
         JAI_FORCEINLINE op_status exec_c_index_store(frame& f, const vm_instruction& ins, const cell_regs& cr);
         JAI_FORCEINLINE op_status exec_c_back(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
@@ -2471,6 +2483,11 @@ namespace jai::vm {
         op_status exec_index_store_fused(frame& f, const vm_instruction& ins);
         op_status exec_call_builtin(frame& f, const vm_instruction& ins);
         op_status exec_concat_append(frame& f);
+        op_status exec_concat_pending(frame& f, const vm_instruction& ins);
+        op_status exec_concat_store(frame& f, const vm_instruction& ins);
+        op_status exec_concat_store_member(frame& f, const vm_instruction& ins);
+        op_status exec_concat_store_index(frame& f, const vm_instruction& ins);
+        script_value* text_builder_target(frame& f, const vm_instruction& ins, const script_value& snapshot, type_info*& field_tag);
         op_status exec_size_temp(frame& f, const vm_instruction& ins);
         const builtin_method* open_receiver_builtin(const call_site& site, size_t kind, uint32_t receiver_rule) const;
         static bool open_receiver_inline_fits(uint32_t inline_op, size_t kind);

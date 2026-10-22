@@ -277,6 +277,12 @@ namespace jai::vm {
         // Statement-position stores/incdecs whose result is discarded compile to a
         // no-result form (no push, no op_pop). Returns false if the shape doesn't apply.
         bool compile_no_result_expression(const expression_ptr& expr);
+        bool try_emit_text_builder_store(identifier_expr* ident, assignment_expr* assign);
+        bool try_emit_text_builder_member(const std::shared_ptr<member_expr>& member, assignment_expr* assign);
+        bool try_emit_text_builder_index(binary_expr* sub, assignment_expr* assign, uint32_t string_site);
+        const expression* text_builder_chain(assignment_expr* assign, std::vector<const binary_expr*>& chain);
+        void emit_text_builder_chain(const std::vector<const binary_expr*>& chain);
+        bool same_receiver(const expression* a, const expression* b);
         // Fused subscript store shared by the expression and statement (no_result) forms;
         // false = the shape doesn't fuse and the caller compiles the unfused sequence
         bool try_emit_fused_index_store(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site, uint32_t compound = k_invalid_u32);

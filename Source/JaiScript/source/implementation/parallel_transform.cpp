@@ -29,6 +29,7 @@
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/integer_ops.hpp>
+#include <jaiscript/detail/const_rules.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/core/execution_backend.hpp>
@@ -1077,6 +1078,16 @@ namespace {
 			}
 			capture_touches.push_back({ n->symbol_id, loop_variable_position(index), n });
 		}
+		// A use of the captured value itself: a captured handle refuses it (a worker reads its own copy of the object)
+		void note_bare_capture(identifier_expr* n) {
+			auto& entry = adm.captures[capture_index[n->symbol_id]];
+			if (!entry.bare_use) { entry.bare_use = n; }
+		}
+		// A method on a chain rooted at a captured name: pinned like an element's, judged at the barrier against the value
+		void note_captured_method_call(identifier_expr* root, const member_expr* m, const call_expr* call) {
+			adm.captured_method_calls.push_back({ root->symbol_id, m->member_id, m->member, m });
+			collect_element_method(m->member_id, m->member, m, call);
+		}
 
 		// Every touch of a captured name, with the loop variable that indexes it (SIZE_MAX: not indexed by one): an index-written
 		// name may be touched as out[i] alone
@@ -1217,8 +1228,13 @@ namespace {
 				return fail(m, std::string(what) + " must root at a local variable in a parallel body");
 			}
 			if (root && !is_local(root->symbol_id) && !self_field(root->symbol_id)) {
-				return fail(m, std::string(what) + " reaches captured state '" + std::string(root->name) +
-				               "' (captured reads are read-only, and objects cannot be captured)");
+				// a captured object reads through its fields; the barrier proves what it holds and gives each worker its own view
+				if (proof_mode || std::string_view(what) != "member access") {
+					return fail(m, std::string(what) + " reaches captured state '" + std::string(root->name) + "' (captured reads are read-only)");
+				}
+				touch_capture(root, false);
+				auto& entry = adm.captures[capture_index[root->symbol_id]];
+				if (!entry.member_use) { entry.member_use = m; }
 			}
 			if (proof_mode && root && !proof_chain_type(m)) { root_escaped = true; }   // an unknown receiver or a user accessor
 			if (root) { note_const_ref_whole(root->symbol_id); }
@@ -1519,6 +1535,7 @@ namespace {
 		}
 		// A method the barrier resolves writes a loop variable through a reference parameter: the body's own walk could not see it
 		const parallel_admission* region_body = nullptr;
+		std::vector<const class_definition*> captured_classes;   // the classes of the instances the region's captured objects hold
 		std::string_view counted_variable;   // the counted form's variable (parallel_for_stmt::counted), empty otherwise
 		bool admit_loop_variable_write(size_t position, const ast_node* site) {
 			if (!region_body) { return true; }
@@ -1824,6 +1841,7 @@ namespace {
 			auto note_class = [&](const class_definition* cls) {
 				if (std::find(classes.begin(), classes.end(), cls) == classes.end()) { classes.push_back(cls); }
 			};
+			for (const class_definition* cls : captured_classes) { note_class(cls); }
 			size_t levels_seen = 0;
 			auto note_destructor_classes = [&] {
 				for (; levels_seen < destructor_levels.size(); ++levels_seen) { note_class(destructor_levels[levels_seen]); }
@@ -2135,6 +2153,7 @@ namespace {
 				// Captured read (whole-value use): the barrier classifies and provisions
 				// it per worker; writes to it are rejected at walk_target / the wall
 				touch_capture(n, false);
+				note_bare_capture(n);
 				return true;
 			}
 			case node_type::binary_expr: {
@@ -2410,6 +2429,15 @@ namespace {
 					const bool callback_find = m->member == "find" &&
 					    (builtin_runs_script(m->member, proof_chain_type(m->object.get())) ||
 					     std::any_of(call->arguments.begin(), call->arguments.end(), [](const expression_ptr& a) { return a && a->get_type() == node_type::lambda_expr; }));
+					if (!proof_mode && !callback_find && m->object->get_type() == node_type::identifier_expr && !parallel_readonly_method(m->member)) {
+						// a method of a captured object (or a container's mutator): the barrier judges it against the captured value
+						touch_capture(root, false);
+						note_captured_method_call(root, m, call);
+						for (const auto& a : call->arguments) {
+							if (!walk_expr(a)) { return false; }
+						}
+						return true;
+					}
 					if (!parallel_readonly_method(m->member) || callback_find) {
 						return fail(m, "method '" + std::string(m->member) + "' may mutate captured state '" +
 						               std::string(root->name) + "'");
@@ -2423,7 +2451,13 @@ namespace {
 					// Element / worker-local receiver: record the name for the barrier's
 					// class-method admission (the receiver's class is a runtime fact; names
 					// no element class defines are builtins and simply never match)
-					collect_element_method(m->member_id, m->member, m, call);
+					identifier_expr* chain_root = proof_mode ? nullptr : chain_root_identifier(m->object.get());
+					if (chain_root && !is_local(chain_root->symbol_id) && !self_field(chain_root->symbol_id) && !is_element_symbol(chain_root->symbol_id) &&
+					    !parallel_readonly_method(m->member)) {
+						note_captured_method_call(chain_root, m, call);   // a method of an object a captured one holds
+					} else {
+						collect_element_method(m->member_id, m->member, m, call);
+					}
 					if (chain_root_is_element(m->object) && !parallel_readonly_method(m->member)) { adm.element_mutated = true; }
 					if (proof_mode && !chain_root_is_element(m->object) && (!parallel_readonly_method(m->member) || builtin_runs_script(m->member, proof_chain_type(m->object.get())))) {
 						if (global_rooted(m->object.get())) { return fail(m, "method '" + std::string(m->member) + "' may mutate program state"); }
@@ -2518,6 +2552,7 @@ namespace {
 							if (arg == root) {
 								const size_t use = const_ref_use_index(payload->fn->body.get(), i);
 								touch_capture(root, use != SIZE_MAX);
+								note_bare_capture(root);
 								if (use != SIZE_MAX) { const_ref_touches.emplace_back(capture_index[root->symbol_id], use); }
 								forwarded_arguments.push_back(arg);
 							}
@@ -4165,7 +4200,101 @@ namespace {
 		parallel_capture_kind kind = parallel_capture_kind::scalar;
 		bool shares_slots = false;           // written: its slots hold objects, so worker copies share them (written_slot_copy)
 		bool sliced = false;                 // borrow: the plan's sliced input, its elements' handles handed out (proven below)
+		bool host = false;                   // object: a C++ class's instance (each worker's view shares its C++ object)
+		std::vector<const class_definition*> classes;   // object: the classes of the instances it holds
 	};
+
+	// A captured class instance, or a handle to one, a body reads through a worker's own view: a script class whose value
+	// tree is flat (fields of values only, no script destructor), or a C++ class's instance held directly. Lists the
+	// identities of the instances it holds (no element may be one of them) and their classes; null when admitted, else
+	// what the value holds that keeps it out
+	struct captured_object_shape {
+		bool host = false;
+		std::vector<const class_definition*> classes;
+		std::vector<const void*> objects;
+	};
+	const char* captured_object_refusal(const script_value& v, captured_object_shape& shape, bool top) {
+		const auto& holder = v.unchecked_object_handle();
+		if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return "a bound host object"; }
+		const auto* inst = static_cast<const class_instance*>(holder->data.get());
+		const class_definition* cd = inst->get_class_definition();
+		if (!cd) { return "an object of no class"; }
+		if (cd->is_cpp_class()) {
+			const script_value* native = inst->native();
+			const auto native_holder = native ? native->get_object_holder() : nullptr;
+			if (!top) { return "a C++ object inside a script object"; }
+			if (!native_holder || !native_holder->data) { return "a C++ object the script does not own"; }
+			shape.host = true;
+			shape.classes.push_back(cd);
+			shape.objects.push_back(element_object_key(*inst));
+			return nullptr;
+		}
+		if (cd->find_cpp_base_class()) { return "a script class over a C++ class"; }
+		if (!cd->flat_value_semantics() || inst->has_user_overflow_fields()) { return "an object holding a handle, a function, a var field or a C++ object"; }
+		if (cd->value_tree_runs_destructor()) { return "an object whose class runs a destructor"; }
+		if (std::find(shape.classes.begin(), shape.classes.end(), cd) == shape.classes.end()) { shape.classes.push_back(cd); }
+		shape.objects.push_back(inst);
+		const char* result = nullptr;
+		const_cast<class_instance*>(inst)->for_each_field([&](uint64_t, script_value& field) {
+			const script_value& value = field.deref();
+			if (!result && value.raw_storage_index() == script_value::TYPEID_OBJECT) { result = captured_object_refusal(value, shape, false); }
+		});
+		return result;
+	}
+	// A worker's view of a captured object: a detached copy of a script value (its strings and containers its own), or a new
+	// instance sharing the C++ object, so no handle a worker copies is another thread's
+	script_value captured_object_view(const script_value& source, bool host, engine& eng, std::vector<type_info*>& types) {
+		if (host) { return source.parallel_host_view(); }
+		script_value result = source.clone();
+		normalize_element_inplace(result, eng, reach_filter{}, false, nullptr, &types);
+		return result;
+	}
+	// The class chain's script overloads of a method, nearest first (the override hides its base's)
+	bool script_method_in_chain(const class_definition* cls, uint64_t name_id) {
+		std::vector<const class_definition*> stack{ cls };
+		while (!stack.empty()) {
+			const class_definition* c = stack.back();
+			stack.pop_back();
+			auto it = c->script_method_overloads().find(name_id);
+			if (it != c->script_method_overloads().end() && !it->second.empty()) { return true; }
+			for (const auto& parent : c->get_parent_classes()) { if (parent) { stack.push_back(parent.get()); } }
+		}
+		return false;
+	}
+	// The first instance an element's value reaches that is one of `objects` (sorted), null when none is
+	const void* element_reaches_object(const script_value& v_in, const std::vector<const void*>& objects, engine& eng) {
+		const script_value& v = v_in.deref();
+		switch (v.raw_storage_index()) {
+		case script_value::TYPEID_OBJECT: {
+			const auto& holder = v.unchecked_object_handle();
+			if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return nullptr; }
+			auto* inst = static_cast<class_instance*>(holder->data.get());
+			const void* key = element_object_key(*inst);
+			if (std::binary_search(objects.begin(), objects.end(), key) ||
+			    std::binary_search(objects.begin(), objects.end(), static_cast<const void*>(inst))) { return key; }
+			const void* result = nullptr;
+			inst->for_each_field([&](uint64_t, script_value& field) { if (!result) { result = element_reaches_object(field, objects, eng); } });
+			return result;
+		}
+		case script_value::TYPEID_ARRAY: {
+			const script_array* node = v.unchecked_array_node();
+			if (!node || (node->is_typed() && node->kind() != script_array::kind_t::obj)) { return nullptr; }
+			for (size_t i = 0; i < node->size(); ++i) {
+				if (const void* hit = element_reaches_object(node->get(i, &eng), objects, eng)) { return hit; }
+			}
+			return nullptr;
+		}
+		case script_value::TYPEID_MAP: {
+			for (const auto& [key, value] : v.unchecked_as_map()) {
+				(void)key;
+				if (const void* hit = element_reaches_object(value, objects, eng)) { return hit; }
+			}
+			return nullptr;
+		}
+		default:
+			return nullptr;
+		}
+	}
 
 	std::vector<size_t> partition_flat(size_t n, size_t chunks) {
 		std::vector<size_t> bounds(chunks + 1);
@@ -4586,6 +4715,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 		return false;
 	};
+	std::vector<std::pair<const void*, std::string_view>> captured_objects;   // every instance a captured object holds, by its name
 	auto classify_and_add = [&](const parallel_admission::capture_entry& entry, bool method_scope = false) -> checked_result<void> {
 		// a local of the frame the statement runs in reads from that frame's slot: no environment
 		// chain can see it, and a global of the same name must not shadow it; a method's capture
@@ -4662,8 +4792,31 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		case script_value::TYPEID_FUNCTION:
 			return usage("captured name '" + std::string(entry.name) +
 			             "' is a function value (only direct calls to statically-known functions are allowed in a parallel body)");
+		case script_value::TYPEID_OBJECT: {
+			if (!cap.source->unchecked_object_handle()) {   // a null handle copies no count
+				cap.kind = parallel_capture_kind::scalar;
+				break;
+			}
+			captured_object_shape shape;
+			if (const char* refusal = captured_object_refusal(*cap.source, shape, true)) {
+				return usage("captured name '" + std::string(entry.name) + "' is not value-semantic (" + refusal + ")");
+			}
+			if (cap.source->is_shared_ptr_type() && entry.bare_use) {
+				return usage("captured handle '" + std::string(entry.name) + "' is read through its members and methods only (a worker reads its own view of the object) at " +
+				             std::to_string(entry.bare_use->location.line) + ":" + std::to_string(entry.bare_use->location.column));
+			}
+			cap.kind = parallel_capture_kind::object;
+			cap.host = shape.host;
+			cap.classes = std::move(shape.classes);
+			for (const void* object : shape.objects) { captured_objects.emplace_back(object, entry.name); }
+			break;
+		}
 		default:
 			return usage("captured name '" + std::string(entry.name) + "' is not value-semantic (object/shared_ptr/weak_ptr)");
+		}
+		if (entry.member_use && cap.kind != parallel_capture_kind::object) {
+			return usage("member access reaches captured state '" + std::string(entry.name) + "' (captured reads are read-only, and only a captured object has members) at " +
+			             std::to_string(entry.member_use->location.line) + ":" + std::to_string(entry.member_use->location.column));
 		}
 		state.faults.checkpoint("region.capture_metadata", captures.size());
 		bool listed = false;
@@ -4673,10 +4826,36 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		captures.push_back(std::move(cap));
 		return {};
 	};
+	// No captured object may be one an element reaches: the element's lane writes it while every worker reads its own view.
+	// Walked before the element proof (which would part an aliased element from its object), and only when objects are captured
+	size_t scanned_objects = 0;
+	auto refuse_captured_aliases = [&]() -> checked_result<void> {
+		if (captured_objects.size() == scanned_objects || !plan.inplace) { return {}; }
+		scanned_objects = captured_objects.size();
+		std::vector<const void*> objects;
+		for (const auto& [object, name] : captured_objects) { objects.push_back(object); }
+		std::sort(objects.begin(), objects.end());
+		for (size_t j = 0; j < containers.size(); ++j) {
+			const script_value& cj = containers[j].is_reference() ? containers[j].deref() : containers[j];
+			if (!cj.is_array()) { continue; }
+			const script_array* node = cj.unchecked_array_node();
+			if (node->is_typed() && node->kind() != script_array::kind_t::obj) { continue; }
+			for (size_t i = 0; i < node->size(); ++i) {
+				const void* hit = element_reaches_object(node->get(i, &eng), objects, eng);
+				if (!hit) { continue; }
+				std::string_view name;
+				for (const auto& [object, captured] : captured_objects) { if (object == hit) { name = captured; break; } }
+				return usage((j == 0 ? std::string("element ") : "zipped array " + std::to_string(j + 1) + " element ") + std::to_string(i) +
+				             " reaches the object captured as '" + std::string(name) + "' (a captured object is read-only, and an element's lane may write it)");
+			}
+		}
+		return {};
+	};
 	for (const auto& entry : adm->captures) {
 		auto classified = classify_and_add(entry);
 		if (!classified) { return classified; }
 	}
+	if (auto checked = refuse_captured_aliases(); !checked) { return checked; }
 
 	// THE RANGE. A primitive-kind typed range the body may write demotes IN PLACE at the
 	// barrier (node identity preserved; internal/typed_array_design.md) so the hetero kernel
@@ -4901,7 +5080,19 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	}
 	std::vector<type_info*> written_raw;
 	for (const auto& t : written_types) { written_raw.push_back(t.get()); }
-	method_admission_record* record = admissions->find(adm->generation, plan.prefix, element_classes, written_raw, element_methods, program_destructors, plan.inplace,
+	// a captured object's classes: their methods are pinned like a constructed object's (the record keys them after a null)
+	std::vector<const class_definition*> captured_classes;
+	for (const auto& cap : captures) {
+		for (const class_definition* cd : cap.classes) {
+			if (std::find(captured_classes.begin(), captured_classes.end(), cd) == captured_classes.end()) { captured_classes.push_back(cd); }
+		}
+	}
+	std::vector<const class_definition*> record_classes = element_classes;
+	if (!captured_classes.empty()) {
+		record_classes.push_back(nullptr);
+		record_classes.insert(record_classes.end(), captured_classes.begin(), captured_classes.end());
+	}
+	method_admission_record* record = admissions->find(adm->generation, plan.prefix, record_classes, written_raw, element_methods, program_destructors, plan.inplace,
 	                                                   registry_key, eng.definition_epoch());
 	if (record && !admission_graph_current(eng, record->builder->adm)) {
 		admissions->records.erase(std::find_if(admissions->records.begin(), admissions->records.end(), [record](const auto& r) { return r.get() == record; }));
@@ -4909,7 +5100,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	}
 	const bool admitted_before = record != nullptr;
 	if (!record) {
-		record = &admissions->make(adm->generation, plan.prefix, element_classes, written_raw, element_methods, program_destructors, plan.inplace, registry_key, eng.definition_epoch(), eng);
+		record = &admissions->make(adm->generation, plan.prefix, record_classes, written_raw, element_methods, program_destructors, plan.inplace, registry_key, eng.definition_epoch(), eng);
 		record->builder->inplace_root = true;
 		record->builder->prefix = plan.prefix;
 		record->builder->host_names = &state.host_method_names;
@@ -4920,10 +5111,11 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		return checked_result<void>(record->code, std::string_view(state.error_text));
 	}
 	if (element_methods || !adm->constructions.empty() || !element_classes.empty() || !written_types.empty() ||
-	    !adm->element_method_calls.empty() || !adm->element_reached_members.empty()) {
+	    !adm->element_method_calls.empty() || !adm->element_reached_members.empty() || !captured_classes.empty()) {
 		if (!admitted_before) {
 			method_adm.adm.element_method_calls = adm->element_method_calls;
 			method_adm.adm.constructions = adm->constructions;
+			method_adm.captured_classes = captured_classes;
 			method_adm.region_body = adm;
 			method_adm.counted_variable = plan.counted_variable;
 			// the methods' captures are their own set: the same name is the body's capture in the
@@ -4937,7 +5129,9 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 				state.error_text = method_adm.adm.message;
 				return checked_result<void>(method_adm.adm.code, std::string_view(state.error_text));
 			}
-			admit_region_extras(method_adm, *adm, element_classes, element_methods, written_types, program_destructors);
+			std::vector<const class_definition*> object_classes = element_classes;
+			object_classes.insert(object_classes.end(), captured_classes.begin(), captured_classes.end());
+			admit_region_extras(method_adm, *adm, object_classes, element_methods, written_types, program_destructors);
 			method_adm.finish_const_ref_touches();
 			record->ok = true;
 		}
@@ -4946,6 +5140,36 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			if (!classified) { return classified; }
 		}
 	}
+	// A method called on a captured object reads it: one that writes its object (a worker's view of it) is refused, and so is a
+	// container's mutating builtin
+	auto check_captured_calls = [&](const std::vector<parallel_admission::captured_method_call>& calls, bool method_scope) -> checked_result<void> {
+		for (const auto& call : calls) {
+			const resolved_capture* cap = nullptr;
+			for (const auto& c : captures) { if (c.entry->name_id == call.capture_id && c.method_scope == method_scope) { cap = &c; break; } }
+			if (!cap) { continue; }
+			auto at = [&call]() { return " at " + std::to_string(call.site->location.line) + ":" + std::to_string(call.site->location.column); };
+			bool method_of_object = false;
+			if (cap->kind == parallel_capture_kind::object) {
+				for (const class_definition* cd : cap->classes) {
+					if (admission_builder::host_method_owner(cd, call.name_id)) { method_of_object = true; continue; }
+					if (!script_method_in_chain(cd, call.name_id)) { continue; }
+					method_of_object = true;
+					detail::receiver_write_analysis analysis(detail::runtime_receiver_view(&eng, eng.get_symbolizer()));
+					if (analysis.analyze_methods(cd->get_name(), call.name).writes) {
+						return usage("method '" + std::string(call.name) + "' of '" + cd->get_name() + "' writes its object, and captured '" +
+						             std::string(cap->entry->name) + "' is read-only (write a local copy, or the element)" + at());
+					}
+				}
+			}
+			if (!method_of_object && !parallel_readonly_method(call.name)) {
+				return usage("method '" + std::string(call.name) + "' may mutate captured state '" + std::string(cap->entry->name) + "'" + at());
+			}
+		}
+		return {};
+	};
+	if (auto checked = check_captured_calls(adm->captured_method_calls, false); !checked) { return checked; }
+	if (auto checked = check_captured_calls(method_adm.adm.captured_method_calls, true); !checked) { return checked; }
+	if (auto checked = refuse_captured_aliases(); !checked) { return checked; }
 
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t pf_adm1 = __rdtsc();
@@ -5200,6 +5424,9 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
 					provisioned = script_value::make_parallel_borrow(*cap.source, &eng, cap.sliced);
 					break;
+				case parallel_capture_kind::object:
+					provisioned = captured_object_view(*cap.source, cap.host, eng, value_types);
+					break;
 				case parallel_capture_kind::written:   // a fresh copy each region: the join reads back what this worker wrote
 					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
 					provisioned = cap.shares_slots ? shared_slot_copy(*cap.source, eng) : cap.source->parallel_detached_copy();
@@ -5408,6 +5635,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		for (const auto& c : method_adm.constructed_classes) { made.push_back(c.cls.get()); }
 		for (const class_definition* cd : method_adm.destructor_levels) { made.push_back(const_cast<class_definition*>(cd)); }
 		for (const class_definition* cd : element_classes) { made.push_back(const_cast<class_definition*>(cd)); }
+		for (const class_definition* cd : captured_classes) { made.push_back(const_cast<class_definition*>(cd)); }
 		// a C++ call can hand a chunk an object of any bound class (a result, a method's receiver)
 		if (!adm->host_functions.empty() || !method_adm.adm.host_functions.empty() || !method_adm.host_pins.empty() ||
 		    !adm->static_calls.empty() || !method_adm.adm.static_calls.empty()) {

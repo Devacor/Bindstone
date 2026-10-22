@@ -1715,6 +1715,29 @@ namespace {
     }
 }
 
+script_value script_value::parallel_host_view() const {
+    const auto& holder = storage_.get<strong_ptr<object_holder>>();
+    if (!holder || !holder->is_class_instance_wrapper || !holder->data) { throw runtime_error("parallel_host_view: not a class instance"); }
+    const auto* inst = static_cast<const class_instance*>(holder->data.get());
+    class_definition* cd = inst->get_class_definition();
+    const script_value* native = inst->native();
+    const auto native_holder = native ? native->get_object_holder() : nullptr;
+    if (!cd || !native_holder || !native_holder->data) { throw runtime_error("parallel_host_view: the instance owns no C++ object"); }
+    auto view = cd->allocate_instance();
+    view->set_class_definition(cd);
+    view->set_native(make_cpp_object(native_holder->type_name, native_holder->type_id, native_holder->data, engine_));
+    cd->register_live_instance(view.get());
+    auto view_holder = acquire_object_holder(engine_);
+    view_holder->type_name = holder->type_name;
+    view_holder->type_id = holder->type_id;
+    view_holder->data = std::move(view);
+    view_holder->is_class_instance_wrapper = true;
+    script_value result(std::monostate{}, engine_);
+    result.type_info_ = type_info_;
+    result.storage_ = view_holder;
+    return result;
+}
+
 script_value script_value::parallel_detached_copy(std::vector<type_info*>* collected_types,
                                                   std::vector<const void*>* collected_nodes) const {
     detail::deep_copy_work work;

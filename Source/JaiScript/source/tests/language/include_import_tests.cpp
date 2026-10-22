@@ -2242,6 +2242,82 @@ public:
             cleanup_temp_file((dir / "ia_state.jai").string());
         });
 
+        test("an_imported_namespace_class_is_named_by_its_qualified_spelling", [=, this]() {
+            // the importer never saw `namespace nq { class Box }`: nq::Box types its declarations, parameters, returns, fields,
+            // containers, handles and references, default-constructs and converts as the bare name does, the checker reads it as
+            // Box, and after a re-import the spelling reaches the redefined class
+            const auto dir = jai::foundry::test_temp_directory();
+            const auto path = dir / "nq_mod.jai";
+            int tick = 400;
+            auto write_module = [&](const std::string& body) {
+                { std::ofstream(path, std::ios::binary | std::ios::trunc) << body; }
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            const std::string module_v1 =
+                "namespace nq {\nclass Box {\n\tint n = 3;\n\tBox() {}\n\tBox(int v) { n = v; }\n}\n"
+                "class Holder {\n\tnq::Box box;\n\tHolder() {}\n\tHolder(int v) { box = nq::Box(v); }\n}\n}\n"
+                "namespace nq::deep { class Leaf { int d = 7; } }\n";
+            const std::string uses =
+                "import \"nq_mod.jai\";\n"
+                "nq::Box a = nq::Box(5);\n"
+                "nq::Holder h = nq::Holder(6);\n"
+                "nq::Box d;\n"
+                "nq::Box twice(nq::Box b) { return nq::Box(b.n * 2); }\n"
+                "class Bag { nq::Box b; }\n"
+                "Bag bag;\n"
+                "bag.b = nq::Box(9);\n"
+                "array<nq::Box> boxes = [nq::Box(1), nq::Box(2)];\n"
+                "boxes.push(nq::Box(3));\n"
+                "int sum = 0;\n"
+                "for (auto& e : boxes) { sum += e.n; }\n"
+                "map<string, nq::Box> named;\n"
+                "named[\"k\"] = nq::Box(12);\n"
+                "shared_ptr<nq::Box> handle = new nq::Box(11);\n"
+                "weak_ptr<nq::Box> weak = handle;\n"
+                "nq::Box& ref = a;\n"
+                "ref.n += 1;\n"
+                "nq::Box converted = 8;\n"
+                "Box bare = nq::Box(4);\n"
+                "nq::deep::Leaf leaf;\n"
+                "array<int> got = [a.n, h.box.n, d.n, twice(a).n, bag.b.n, sum, named[\"k\"].n, weak.lock()->n, converted.n, cast<nq::Box>(bare).n, leaf.d];\n"
+                "string out = \"\";\n"
+                "for (int v : got) { out += to_string(v) + \" \"; }\n"
+                "out + type_of(a) + \" \" + type_of(handle);\n";
+            for (bool proofs : {true, false}) {
+                write_module(module_v1);
+                auto eng = make_engine();
+                jai::stdlib::register_all(*eng);
+                eng->type_proofs(proofs);
+                eng->add_include_path(dir.string());
+                check_eq(std::string("6 6 3 12 9 6 12 11 8 4 7 Box Box"), eng->execute(uses).to_string(), "every qualified spelling of an imported class");
+                check_eq(std::string("Cannot initialize 'bad' (declared nq::Box) with string|Cannot convert string to nq::Box (no suitable single-argument constructor)"),
+                         eng->execute("var s = \"s\";\nstring r = \"\";\ntry { nq::Box bad = s; } catch (e) { r = e; }\n"
+                                      "void take(nq::Box b) { }\ntry { take(s); } catch (e) { r += \"|\" + e; }\nr;").to_string(),
+                         "a value the class does not take is still refused");
+                for (const auto& [source, text] : std::vector<std::pair<std::string, std::string>>{
+                         {"nq::Box bad2 = \"s\";", "cannot initialize 'bad2' declared 'nq::Box' with 'string'"},
+                         {"nq::Box b2 = nq::Box(1);\nb2.nope;", "no member 'nope' in class 'Box'"},
+                         {"nq::Box b3 = nq::Box(1);\nb3.n = \"x\";", "cannot assign 'string' to field 'n' declared 'int'"}}) {
+                    auto fresh = make_engine();
+                    jai::stdlib::register_all(*fresh);
+                    fresh->type_proofs(proofs);
+                    fresh->add_include_path(dir.string());
+                    std::string listing;
+                    try { fresh->execute("import \"nq_mod.jai\";\n" + source); } catch (const std::exception& ex) { listing = ex.what(); }
+                    check_true(listing.find(text) != std::string::npos, "the checker reads nq::Box as the module's Box before it runs: " + listing);
+                }
+                std::string module_v2 = module_v1;
+                module_v2.replace(module_v2.find("int n = 3;"), 10, "int n = 30;");
+                module_v2.replace(module_v2.find("n = v;"), 6, "n = v + 100;");
+                write_module(module_v2);
+                check_eq(std::string("30 101 102 6"), eng->execute("import \"nq_mod.jai\";\nnq::Box fresh_box;\nnq::Box made = nq::Box(1);\nnq::Box conv = 2;\n"
+                                                                  "to_string(fresh_box.n) + \" \" + to_string(made.n) + \" \" + to_string(conv.n) + \" \" + to_string(a.n);").to_string(),
+                         "the re-imported class is what nq::Box reaches; a live instance keeps its value");
+            }
+            std::filesystem::remove(path);
+        });
+
         test("a_leaf_the_vm_inlines_is_replaced_by_its_modules_rerun_inside_the_hot_loop", [=, this]() {
             // the loop's own import re-runs the touched module mid-loop: the call that was grafted sees the new body from the
             // next iteration on, on both backends

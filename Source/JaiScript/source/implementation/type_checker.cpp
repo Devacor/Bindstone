@@ -164,7 +164,7 @@ ctype math_ctype(script_value_type kind) {
 	return ctype{ctype::math_k, math_type_name(kind)};
 }
 
-ctype ctype_from_type_info(const type_info* ti) {
+ctype spelled_ctype_from_type_info(const type_info* ti) {
 	if (!ti) {
 		return {};
 	}
@@ -190,7 +190,7 @@ ctype ctype_from_type_info(const type_info* ti) {
 			t = ctype::object(ti->type_name);
 			break;
 		case script_value_type::jai_reference_type:
-			return ctype_from_type_info(ti->type_params.empty() ? nullptr : ti->type_params[0].get());
+			return spelled_ctype_from_type_info(ti->type_params.empty() ? nullptr : ti->type_params[0].get());
 		case script_value_type::jai_vec2_type:
 		case script_value_type::jai_vec3_type:
 		case script_value_type::jai_vec4_type:
@@ -204,11 +204,6 @@ ctype ctype_from_type_info(const type_info* ti) {
 	}
 	t.ti = ti;
 	return t;
-}
-
-// Function-variable spelling is checker metadata; the runtime slot remains auto.
-ctype declared_variable_type(const variable_decl* decl) {
-	return decl->function_spelling ? ctype::make(ctype::function_k) : ctype_from_type_info(decl->type.get());
 }
 
 std::string declared_variable_type_name(const variable_decl* decl) {
@@ -1189,6 +1184,25 @@ private:
         return 2;   // src class not visible: relationship unknowable
     }
 
+    // `ns::C` from a unit that did not declare it names the class C a script namespace declares, as a same-unit spelling parses
+    std::string_view canonical_class(std::string_view cls) {
+        if (cls.find("::") == std::string_view::npos) { return cls; }
+        if (auto def = eng_.get_class_definition(std::string(cls))) { return def->get_name() == cls ? cls : def->interned_name(); }
+        if (program_classes_) {
+            if (auto it = program_classes_->find(std::string(cls)); it != program_classes_->end() && it->second) { return it->second->name; }
+        }
+        return cls;
+    }
+    ctype ctype_from_type_info(const type_info* ti) {
+        ctype t = spelled_ctype_from_type_info(ti);
+        if (t.kind == ctype::object_k) { t.cls = canonical_class(t.cls); }
+        return t;
+    }
+    // Function-variable spelling is checker metadata; the runtime slot remains auto.
+    ctype declared_variable_type(const variable_decl* decl) {
+        return decl->function_spelling ? ctype::make(ctype::function_k) : ctype_from_type_info(decl->type.get());
+    }
+
     std::shared_ptr<class_definition> engine_class(std::string_view name) {
         std::string n(name);
         auto def = eng_.get_class_definition(n);
@@ -1423,7 +1437,7 @@ private:
 
     // A field's declared type as the checker types it: certain from this unit or a registered
     // class, tentative (never a proof source) while it is known from the program table alone.
-	static ctype member_type(const member_hit& hit) {
+	ctype member_type(const member_hit& hit) {
 		ctype t = declared_variable_type(hit.field);
 		if (!hit.provable) { t.tentative = true; }
 		return t;
@@ -2308,7 +2322,7 @@ private:
 		return result;
 	}
 
-	static ctype container_value_type(const ctype& container) {
+	ctype container_value_type(const ctype& container) {
 		if (!container.ti) { return {}; }
 		const type_info* element = container.kind == ctype::array_k
 			? container.ti->element_type().get()
@@ -6177,16 +6191,25 @@ void collect_unit_enums(const std::vector<declaration_ptr>& decls, const std::st
     }
 }
 
-void collect_unit_classes(const std::vector<declaration_ptr>& decls, program_class_map& out) {
+namespace {
+// a namespace's class lists under its bare name and its qualified spelling too, the one another unit writes
+void collect_classes_in(const std::vector<declaration_ptr>& decls, std::string_view ns, program_class_map& out) {
     for (const auto& d : decls) {
         if (!d) { continue; }
         if (d->get_type() == node_type::class_decl) {
             auto cd = std::static_pointer_cast<class_decl>(d);
+            if (!ns.empty()) { out[std::string(ns) + "::" + std::string(cd->name)] = cd; }
             out[std::string(cd->name)] = std::move(cd);
         } else if (d->get_type() == node_type::namespace_decl) {
-            collect_unit_classes(static_cast<const namespace_decl*>(d.get())->declarations, out);
+            const auto* n = static_cast<const namespace_decl*>(d.get());
+            collect_classes_in(n->declarations, n->name, out);
         }
     }
+}
+}
+
+void collect_unit_classes(const std::vector<declaration_ptr>& decls, program_class_map& out) {
+    collect_classes_in(decls, {}, out);
 }
 
 } // namespace detail

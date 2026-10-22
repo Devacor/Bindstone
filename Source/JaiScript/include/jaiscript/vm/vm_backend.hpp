@@ -2115,6 +2115,8 @@ namespace jai::vm {
         bool self_concat_store(frame& f, const fused_binary_dst_proto& dp, op_status& st);
         std::optional<op_status> member_text_append(frame& f, size_t ins_index, member_expr* member, const script_value& object,
                                                     script_value& current, const script_value& right);
+        std::optional<op_status> host_member_text_append(frame& f, size_t ins_index, member_expr* member, const script_value& object,
+                                                         script_value& current, const script_value& right);
         std::optional<op_status> static_text_append(frame& f, member_expr* member, script_value& current, const script_value& right);
         std::optional<op_status> field_cell_text_append(script_value* cell, const class_definition* cd, uint64_t field_id,
                                                         script_value& current, const script_value& right, bool charge);

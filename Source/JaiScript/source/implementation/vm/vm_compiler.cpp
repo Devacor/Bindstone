@@ -6812,7 +6812,10 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			const bool name = piece->get_type() == node_type::identifier_expr;
 			if (literal || name) {
 				fused_operand o = make_fused_operand(piece);
-				if (name && (o.load_flags & load_flag_type_ctor)) { flush(); compile_expression(piece); emit(opcode::op_concat_append, first_hint); first_hint = 0; continue; }
+				// a type-constructor name, or a compiler temp (a grafted leaf's result), reads through its own LOAD, which names the slot
+				if (name && ((o.load_flags & load_flag_type_ctor) || (o.slot != k_invalid_u32 && o.slot >= chunk_->first_temp_slot))) {
+					flush(); compile_expression(piece); emit(opcode::op_concat_append, first_hint); first_hint = 0; continue;
+				}
 				if (o.slot == k_invalid_u32 && o.const_index == k_invalid_u32 && run_env == 3) { flush(); }   // three environment reads per op (the lookup cache's roles)
 				if (o.slot == k_invalid_u32 && o.const_index == k_invalid_u32) { ++run_env; }
 				run.pieces.push_back(std::move(o));

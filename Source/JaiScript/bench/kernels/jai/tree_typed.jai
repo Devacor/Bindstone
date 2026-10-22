@@ -8,6 +8,8 @@ class Node {
 	shared_ptr<Node> right = null;
 }
 
+random PRIORITIES(1);   // the treap's node priorities
+
 void merge(shared_ptr<Node> lower, shared_ptr<Node> greater, shared_ptr<Node>& result) {
 	if (lower == null) {
 		result = greater;
@@ -59,7 +61,7 @@ void insert(shared_ptr<Node>& root, int x) {
 	if (equal == null) {
 		equal = new Node();
 		equal.x = x;
-		equal.y = math::random_int(0, 2147483647);
+		equal.y = PRIORITIES.next_int(0, 2147483647);
 	}
 	shared_ptr<Node> tmp = null;
 	merge(lower, equal, tmp);

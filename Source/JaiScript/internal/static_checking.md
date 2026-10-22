@@ -182,8 +182,8 @@ identifier uses (`[this]` inside a method reaches the class); `weak_from_this()`
 **Language namespaces** — `math::<fn>(...)` is the intrinsic lane (`detail/
 math_intrinsics.hpp`, the same shape gate both backends use): typed by the kernel's result
 (`int` for `itrunc`/`ifloor`/`wrap_*`, `float` for the transcendental and interpolation
-families, operand-typed for `abs`/`min`/`max`/`clamp`/`random` — uniform int → `int`,
-uniform float → `float`, mixed or unknown → unknown; `random_seed` unknown). Arity is the
+families, operand-typed for `abs`/`min`/`max`/`clamp` — uniform int → `int`,
+uniform float → `float`, mixed or unknown → unknown). Arity is the
 kernel's runtime error, not a static one. A host namespace entry that carries a signature
 (`script_namespace_data::signatures`: the arity range, each argument's kind, the result) is
 checked against it - the `string::` library declares one per function, so

@@ -587,6 +587,9 @@ public:
     // Cached against engine::class_definition_epoch (a nested field class redefining
     // must invalidate containing classes). Defined out of line in class_registry.cpp.
     bool flat_value_semantics() const;
+    // Flat apart from fields (at any depth) holding objects of bound C++ classes by value: a parallel element proves each such
+    // object its own by identity at the barrier. Memoized like flat_value_semantics.
+    bool flat_over_host_values() const;
     // The flat slots whose declared type can reach a refcount (strings, containers, objects);
     // a parallel fork visits only these when normalizing an element of this class. Scalar-only
     // classes answer an empty list. Memoized under the class-definition epoch like flat_value_semantics.
@@ -1331,12 +1334,14 @@ private:
     // flat_value_semantics() cache + recursion internals (class_registry.cpp)
     mutable bool flat_value_cached_ = false;
     mutable uint64_t flat_value_epoch_ = 0;
-    bool flat_value_semantics_impl(std::vector<const class_definition*>& in_progress) const;
+    mutable bool flat_host_cached_ = false;
+    mutable uint64_t flat_host_epoch_ = UINT64_MAX;
+    bool flat_value_semantics_impl(std::vector<const class_definition*>& in_progress, bool host_values = false) const;
     mutable std::vector<uint32_t> handle_slots_cached_;
     mutable std::vector<uint32_t> string_slots_cached_;
     mutable uint64_t string_slots_epoch_ = 0;
     mutable uint64_t handle_slots_epoch_ = 0;
-    bool flat_field_type(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
+    bool flat_field_type(const type_info_ptr& t, std::vector<const class_definition*>& in_progress, bool host_values = false) const;
     bool value_tree_runs_destructor_impl(std::vector<const class_definition*>& in_progress) const;
 
     inline void recompute_property_getters(const std::unordered_map<uint64_t, script_value>& new_methods, engine* engine_ref);

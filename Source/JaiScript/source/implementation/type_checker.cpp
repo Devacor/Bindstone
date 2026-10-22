@@ -2619,17 +2619,10 @@ private:
                 if (all(ctype::int_k)) { return ctype::make(ctype::int_k); }
                 if (all(ctype::float_k)) { return ctype::make(ctype::float_k); }
                 return {};
-            case math_fn::random_: case math_fn::random_range:
-                if (args.empty()) { return ctype::make(ctype::float_k); }
-                if (all(ctype::int_k)) { return ctype::make(ctype::int_k); }
-                for (const auto& a : args) { if (!is_numeric(a.kind)) { return {}; } }
-                return ctype::make(ctype::float_k);
-            case math_fn::random_seed:
-                return {};
             case math_fn::vec2_: return math_ctype(script_value_type::jai_vec2_type);
             case math_fn::vec3_: return math_ctype(script_value_type::jai_vec3_type);
             case math_fn::ivec2_: return math_ctype(script_value_type::jai_ivec2_type);
-            case math_fn::sign_: case math_fn::random_int_: return ctype::make(ctype::int_k);
+            case math_fn::sign_: return ctype::make(ctype::int_k);
             case math_fn::is_nan_: case math_fn::is_inf_: return ctype::make(ctype::bool_k);
             case math_fn::ivec3_: return math_ctype(script_value_type::jai_ivec3_type);
             case math_fn::vec4_: return math_ctype(script_value_type::jai_vec4_type);
@@ -3174,6 +3167,12 @@ private:
             return {};
         }
         return agree && result ? *result : ctype{};
+    }
+
+    // a host class that opted into strict signatures holds its constructions to the constructors its binder registered
+    void check_strict_host_constructor(const std::string& cls, const std::vector<ctype>& args, const source_location& loc) {
+        auto def = engine_class(cls);
+        if (def && def->is_cpp_class() && def->strict_signatures() && !def->extended_ever()) { check_host_call(cls, args, loc); }
     }
 
     // -------------------------------------------------------------- calls
@@ -3777,6 +3776,8 @@ private:
 				if (t.kind == ctype::object_k) {
 					if (const sclass* c = find_sclass(t.cls)) {
 						check_ctor_call(t.cls, *c, args, n->location);
+					} else {
+						check_strict_host_constructor(std::string(t.cls), args, n->location);
 					}
 				}
 				return t;
@@ -4351,7 +4352,8 @@ private:
 			if (extra_global(name)) { note_global_use(id->name); return {}; }
 			if (name == "regex") { check_regex_constant(c); }
 			if (eng_.is_type_name(name) || eng_.get_class_registry().find_script_class(name)) {
-				return object_of(id->name);   // registered class ctor: args lenient
+				check_strict_host_constructor(name, args, c->location);
+				return object_of(id->name);   // registered class ctor: args lenient unless the host class is strict
 			}
 			if (eng_.has_function(name)) {
 				note_global_use(id->name);

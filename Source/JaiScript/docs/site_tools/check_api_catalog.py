@@ -36,6 +36,9 @@ def main():
 		('include/jaiscript/stdlib/strings.hpp','string',r'(?:sign|def)\("([^"\n]+)"'),
 		('include/jaiscript/stdlib/json.hpp','global',r'add_(?:variadic_)?function\("([^"\n]+)"'),
 		('source/implementation/stdlib/web_text.cpp','global',r'add_function_with_arity_and_full_types\("([^"\n]+)"'),
+		('source/implementation/stdlib/crypto.cpp','crypto',r'\{"([a-z0-9_]+)", "crypto::'),
+		('source/implementation/stdlib/crypto.cpp','crypto',r'define\("([a-z0-9_]+)"'),
+		('source/implementation/stdlib/random.cpp','random',r'(?:\.method|add_method)\("([a-z][a-z_]*)"'),
 		('tools/jaiscript/fetch.hpp','Download',r'\.method\("([^"\n]+)"'),
 		('tools/jaiscript/sound.hpp','Sound',r'\.method\("([^"\n]+)"'),
 		('tools/jaiscript/sound.hpp','global',r'add_function\("([^"\n]+)"'),
@@ -48,7 +51,7 @@ def main():
 	listed={e['name'] for e in entries if e['owner']=='array' and e['form']=='namespace'}
 	for missing in sorted(registered-listed):errors.append('array::'+missing+' absent from catalog')
 	math=(PROJECT/'include/jaiscript/detail/math_intrinsics.hpp').read_text(encoding='utf-8')
-	lookup=math[math.index('inline math_fn math_intrinsic_from_name'):math.index('// seed():')]
+	lookup=math[math.index('inline math_fn math_intrinsic_from_name'):math.index('// Shared call-shape recognition')]
 	public={name for name in re.findall(r'name == "([^"]+)"',lookup) if '$' not in name}
 	listed={e['name'] for e in entries if e['owner']=='math'}
 	for missing in sorted(public-listed):errors.append('math::'+missing+' absent from catalog')

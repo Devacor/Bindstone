@@ -2,12 +2,13 @@
 // nightmare, tics } where tics is one flat 6-int tuple per game_tic
 // (CMD_FWD/SIDE/TURN quantized x10000, USE, FIRE, CUR_WEAPON). Recording
 // quantizes the live CMDs IN PLACE so the recorded run consumes exactly what
-// playback will feed; math::random_seed pins the engine RNG at both ends and
+// playback will feed; SIM_RANDOM.seed pins the sim's generator at both ends and
 // GAME_TIC restarts at 0 (floor damage phases on GAME_TIC & 31). All sim
-// randomness flows through math::random — the HUD face rolls its own LCG so
+// randomness flows through SIM_RANDOM — the HUD face rolls its own LCG so
 // presentation never perturbs the stream. game.jai globals (CMD_*, P_*,
 // GAME_TIC) resolve at call time — importing game.jai here would cycle.
 
+import "sim_random.jai";
 import "map.jai";
 import "things.jai";
 
@@ -34,7 +35,7 @@ function demo_rec_begin(string mapname, int skill, int seed) -> void {
 	DEMO_TICS = [];
 	DEMO_REC = true;
 	GAME_TIC = 0;
-	math::random_seed(seed);
+	SIM_RANDOM.seed(seed);
 }
 
 // one tuple per tic; the quantized values are written back so record == replay

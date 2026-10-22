@@ -344,35 +344,13 @@ public:
             check(std::abs(result.as<double>() - 6.28318530717958647692) < 0.0001);
         });
 
-        // ============================================================
-        // Random (just test they don't crash - values are random)
-        // ============================================================
-
-        test("random_in_unit_range", [this]() {
+        test("math_holds_no_randomness", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-
-            script_value result = engine->execute("math::random();");
-            double val = result.as<double>();
-            check(val >= 0.0 && val < 1.0);
-        });
-
-        test("random_int_in_range", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-
-            script_value result = engine->execute("math::random_int(1, 10);");
-            script_int val = result.as<script_int>();
-            check(val >= 1 && val <= 10);
-        });
-
-        test("random_range_in_bounds", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-
-            script_value result = engine->execute("math::random_range(5.0, 10.0);");
-            double val = result.as<double>();
-            check(val >= 5.0 && val < 10.0);
+            for (const char* name : {"random", "random_int", "random_range", "random_seed"}) {
+                const std::string source = std::string("string m = \"\"; try { var f = math::") + name + "; } catch (e) { m = e; } m;";
+                check_eq(std::string("Undefined variable 'math::") + name + "'", engine->execute(source).as<std::string>(), name);
+            }
         });
     }
 };

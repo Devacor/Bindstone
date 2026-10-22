@@ -6,7 +6,7 @@
 // before touching the shareware episode (free to redistribute, not open source);
 // `jaidoom.jai -- bootstrap` does the same without a screen for scripts and CI.
 //
-// Host API used (runner): Download, zip_extract, write_file, file_exists; sha256_file is the stdlib's.
+// Host API used (runner): Download, zip_extract, write_file, file_exists; crypto::sha256_file is the stdlib's.
 
 import "wad.jai";
 import "sound.jai";
@@ -31,7 +31,7 @@ var BOOT_INTERACTIVE = false;
 var BOOT_ABORT = false;
 
 function boot_wad_ok(string path, string sha) -> bool {
-	return file_exists(path) && sha256_file(path) == sha;
+	return file_exists(path) && crypto::sha256_file(path) == sha;
 }
 function boot_have_freedoom() -> bool {
 	return boot_wad_ok(wad_path("freedoom1"), BOOT_FREEDOOM1_SHA) && boot_wad_ok(wad_path("freedoom2"), BOOT_FREEDOOM2_SHA);
@@ -124,7 +124,7 @@ function boot_fetch(string label, string url, string dest) -> bool {
 function boot_verify(string label, string path, string sha) -> bool {
 	BOOT_ACTIVE = "verifying " + label;
 	boot_draw();
-	string got = sha256_file(path);
+	string got = crypto::sha256_file(path);
 	if (got != sha) {
 		delete_file(path);
 		boot_settle("FAILED  " + label + ": checksum mismatch, file discarded");
@@ -136,7 +136,7 @@ function boot_verify(string label, string path, string sha) -> bool {
 
 function boot_freedoom() -> bool {
 	if (boot_have_freedoom()) { boot_settle("ok      Freedoom " + BOOT_FREEDOOM_VERSION + " already present and verified"); return true; }
-	if (!(file_exists(boot_zip()) && sha256_file(boot_zip()) == BOOT_FREEDOOM_ZIP_SHA)) {
+	if (!(file_exists(boot_zip()) && crypto::sha256_file(boot_zip()) == BOOT_FREEDOOM_ZIP_SHA)) {
 		if (!boot_fetch("Freedoom " + BOOT_FREEDOOM_VERSION + " (freedoom.github.io, BSD 3-Clause)", BOOT_FREEDOOM_URL, boot_zip())) { return false; }
 		if (!boot_verify("freedoom-" + BOOT_FREEDOOM_VERSION + ".zip", boot_zip(), BOOT_FREEDOOM_ZIP_SHA)) { return false; }
 	}

@@ -125,7 +125,7 @@ classic typed cheats (iddqd/idkfa/idfa/idclip/idclev/idbehold*/iddt), whole-sim 
   the title, a DEMO badge shows while it rolls; tape runout hands the controls to the player).
   Default name "demo.json" both ways, so record-then-play round-trips with zero typing. A
   demo = seed, map, skill, nightmare flag + one 6-int tuple per tic (FWD/SIDE/TURN x10000,
-  USE, FIRE, weapon). `math::random_seed` pins the engine RNG at both ends, GAME_TIC restarts
+  USE, FIRE, weapon). `SIM_RANDOM.seed` pins the sim's generator at both ends, GAME_TIC restarts
   at 0, recording quantizes CMDs in place so record == replay bit-exactly; the HUD face rolls
   its own LCG so presentation can't perturb the sim stream. flowtest records 200 scripted
   tics, replays them, and asserts the mix32 state hash (positions/hp/tic/sectors) is
@@ -233,7 +233,7 @@ client). Decor is not shootable and does not block shots.
 Presentation: level exits melt — the classic screen wipe (vid.jai wipe_begin/tic/overlay:
 the departing frame slides down in ragged, neighbor-correlated columns over the fresh
 intermission/end screen). It runs only in play()'s draw path on its own LCG; gates and the
-sim never see it (flowtest pins termination, monotonic fall, and math::random isolation).
+sim never see it (flowtest pins termination, monotonic fall, and SIM_RANDOM isolation).
 
 ## Verification culture
 

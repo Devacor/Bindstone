@@ -17,6 +17,7 @@
 // READY, and START moves the whole session together. The host quitting ends
 // the session for everyone.
 
+import "sim_random.jai";
 import "wad.jai";
 import "map.jai";
 import "vid.jai";
@@ -614,8 +615,8 @@ class Session {
 		int pellets = w.pellets;
 		for (int p = 0; p < pellets; ++p) {
 			float aim = ang;
-			if (w.spread > 0.0) { aim = aim + (math::random() - 0.5) * w.spread; }
-			shoot_hitscan(x, y, z, aim, w.dmg_mul * math::random(1, w.dmg_roll), shooter.ghost, w.range);
+			if (w.spread > 0.0) { aim = aim + (SIM_RANDOM.unit() - 0.5) * w.spread; }
+			shoot_hitscan(x, y, z, aim, w.dmg_mul * SIM_RANDOM.between(1, w.dmg_roll), shooter.ghost, w.range);
 		}
 	}
 

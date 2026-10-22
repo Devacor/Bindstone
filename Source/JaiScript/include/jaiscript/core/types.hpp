@@ -178,6 +178,7 @@ namespace jai {
         inline void pop_back();
         inline void erase_at(size_t i);
         inline void reverse();
+        inline void swap_elements(size_t i, size_t j);
         inline script_value get(size_t i, engine* eng) const;
         // A boxed view of slot i that already holds the slot's handle (obj/str kinds): a by-ref
         // range-for touches its element several times per iteration, and only a replaced slot

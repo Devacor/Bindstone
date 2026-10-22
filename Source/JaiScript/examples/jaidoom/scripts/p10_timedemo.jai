@@ -9,6 +9,7 @@
 //   jaiscript p10_timedemo.jai -- mytape.json 200x140
 //   jaiscript p10_timedemo.jai -- simonly            (playsim isolated, no render)
 
+import "sim_random.jai";
 import "wad.jai";
 import "map.jai";
 import "vid.jai";
@@ -68,7 +69,7 @@ function main() -> int {
 	FAST_MONSTERS = DEMO_NM;
 	td_player_reset();
 	GAME_TIC = 0;
-	math::random_seed(DEMO_SEED);
+	SIM_RANDOM.seed(DEMO_SEED);
 	DEMO_POS = 0;
 	DEMO_PLAY = true;
 	if (!game_start_map(DEMO_MAP)) { print(`no map ${DEMO_MAP}`); return 1; }

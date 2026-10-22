@@ -2,7 +2,7 @@
 // the library's spider::Response, the class spider::catch answers too. The host imports this file before the app and
 // calls spider_host_serve once per request; the app hands its handler to spider::spin.
 //
-// The host functions it stands on: parse_cookies, parse_multipart, random_token, read_file and write_file;
+// The host functions it stands on: parse_cookies, parse_multipart, read_file and write_file;
 // web::parse_query is the web library's.
 
 namespace spider {

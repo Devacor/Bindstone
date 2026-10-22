@@ -8,17 +8,13 @@
 #include <jaiscript/detail/web_kernels.hpp>
 #include <algorithm>
 #include <array>
-#include <cerrno>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <iterator>
 #include <map>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <vector>
 
 namespace jai {
@@ -735,112 +731,6 @@ namespace web_text_detail {
 		return result;
 	}
 
-	// SHA-256 (FIPS 180-4)
-	class sha256_digest {
-	public:
-		void update(const unsigned char* a_data, size_t a_size) {
-			total += a_size;
-			if (pending != 0) {
-				const size_t take = std::min(a_size, sizeof(block) - pending);
-				std::memcpy(block + pending, a_data, take);
-				pending += take;
-				a_data += take;
-				a_size -= take;
-				if (pending < sizeof(block)) { return; }
-				compress(block);
-				pending = 0;
-			}
-			for (; a_size >= sizeof(block); a_data += sizeof(block), a_size -= sizeof(block)) { compress(a_data); }
-			std::memcpy(block, a_data, a_size);
-			pending = a_size;
-		}
-
-		std::string hex() {
-			const uint64_t bits = total * 8;
-			unsigned char tail[sizeof(block) * 2] = {0x80};
-			const size_t padded = pending < 56 ? 64 : 128;
-			for (int i = 0; i < 8; ++i) { tail[padded - pending - 1 - i] = static_cast<unsigned char>(bits >> (8 * i)); }
-			update(tail, padded - pending);
-			static constexpr char k_hex_digits[] = "0123456789abcdef";
-			std::string result(64, '0');
-			for (size_t i = 0; i < 64; ++i) { result[i] = k_hex_digits[(state[i / 8] >> (28 - 4 * (i % 8))) & 15]; }
-			return result;
-		}
-
-	private:
-		static uint32_t rotr(uint32_t a_x, int a_n) { return (a_x >> a_n) | (a_x << (32 - a_n)); }
-
-		void compress(const unsigned char* a_block) {
-			static constexpr uint32_t k_round_constants[64] = {
-				0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-				0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-				0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-				0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-				0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-				0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-				0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-				0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-			};
-			uint32_t w[64];
-			for (int i = 0; i < 16; ++i) {
-				w[i] = (uint32_t {a_block[i * 4]} << 24) | (uint32_t {a_block[i * 4 + 1]} << 16) | (uint32_t {a_block[i * 4 + 2]} << 8) | uint32_t {a_block[i * 4 + 3]};
-			}
-			for (int i = 16; i < 64; ++i) {
-				const uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
-				const uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
-				w[i] = w[i - 16] + s0 + w[i - 7] + s1;
-			}
-			uint32_t a = state[0], b = state[1], c = state[2], d = state[3], e = state[4], f = state[5], g = state[6], h = state[7];
-			for (int i = 0; i < 64; ++i) {
-				const uint32_t t1 = h + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + k_round_constants[i] + w[i];
-				const uint32_t t2 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c));
-				h = g;
-				g = f;
-				f = e;
-				e = d + t1;
-				d = c;
-				c = b;
-				b = a;
-				a = t1 + t2;
-			}
-			state[0] += a;
-			state[1] += b;
-			state[2] += c;
-			state[3] += d;
-			state[4] += e;
-			state[5] += f;
-			state[6] += g;
-			state[7] += h;
-		}
-
-		uint32_t state[8] {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
-		unsigned char block[64] {};
-		size_t pending {0};
-		uint64_t total {0};
-	};
-
-	// The file streamed through the digest in 64 KiB chunks into a_hex; null, else why it cannot be read (read_file's reasons)
-	const char* sha256_file_hex(const std::string& a_path, std::string& a_hex) {
-		std::error_code error;
-		const std::filesystem::file_status status = std::filesystem::status(a_path, error);
-		if (status.type() == std::filesystem::file_type::not_found) { return "not found"; }
-		if (error) { return error == std::errc::permission_denied ? "permission denied" : "cannot be opened"; }
-		if (!std::filesystem::is_regular_file(status)) { return "not a file"; }
-		errno = 0;
-		std::ifstream in(a_path, std::ios::binary);
-		if (!in) { return errno == EACCES ? "permission denied" : "cannot be opened"; }
-		constexpr size_t k_chunk = size_t {1} << 16;
-		const auto chunk = std::make_unique<char[]>(k_chunk);
-		sha256_digest digest;
-		while (in) {
-			in.read(chunk.get(), static_cast<std::streamsize>(k_chunk));
-			digest.update(reinterpret_cast<const unsigned char*>(chunk.get()), static_cast<size_t>(in.gcount()));
-		}
-		if (in.bad()) { return "read failed"; }
-		a_hex = digest.hex();
-		return nullptr;
-	}
-
 	// RFC 3986 2.3: the unreserved characters stay as they are; the form encoding (WHATWG application/x-www-form-urlencoded)
 	// keeps A-Z a-z 0-9 * - . _ and writes a space as '+'; every other byte is %XX in upper-case hex
 	bool url_unreserved(unsigned char a_c) {
@@ -975,16 +865,6 @@ namespace web_text_detail {
 
 	using function_result = checked_result<script_value>;
 
-	// The one text argument the overload set admits (a string, a utf8_string or a C++-bound string), else null
-	const script_value* text_argument(const std::vector<script_value>& a_args) {
-		return a_args.size() == 1 && a_args[0].is_text() ? &a_args[0].deref() : nullptr;
-	}
-
-	JAI_NOINLINE function_result text_argument_miss(engine* a_engine, std::string_view a_name, const std::vector<script_value>& a_args) {
-		const auto name_id = a_engine->get_symbolizer()->find(a_name);
-		return detail::overload_miss(make_error_code(runtime_error_code::type_mismatch), name_id ? *name_id : 0, a_args.data(), a_args.size(), a_engine, false);
-	}
-
 	// The argument itself when nothing changes: a string shares its bytes, a C++-bound one is copied out of the host's storage
 	script_value unchanged_text(const script_value& a_text, engine* a_engine) {
 		const size_t storage = a_text.raw_storage_index();
@@ -994,10 +874,6 @@ namespace web_text_detail {
 
 	script_value text_like(const script_value& a_argument, std::string&& a_bytes, engine* a_engine) {
 		return a_argument.is_utf8_string() ? script_value::make_utf8(std::move(a_bytes), a_engine) : script_value(std::move(a_bytes), a_engine);
-	}
-
-	JAI_NOINLINE function_result unreadable_file_error(engine* a_engine, const std::string& a_path, const char* a_reason) {
-		return function_result(make_error_code(runtime_error_code::file_not_found), "{0}", a_engine->park_error_text("Cannot read file '" + a_path + "': " + a_reason));
 	}
 
 	JAI_NOINLINE function_result build_query_refusal(engine* a_engine, const std::string* a_key, const script_value& a_value) {
@@ -1014,29 +890,6 @@ namespace web_text_detail {
 	}
 
 } // namespace web_text_detail
-
-	void register_web_text_functions(engine& eng_ref) {
-		using namespace web_text_detail;
-		engine::library_registration library(eng_ref);
-		engine* eng = &eng_ref;
-		const std::vector<param_type_info> text_parameter {param_type_info(script_value_type::jai_string_type)};
-
-		eng_ref.add_function_with_arity_and_full_types("sha256", [eng](const std::vector<script_value>& a_args) -> function_result {
-			const script_value* text = text_argument(a_args);
-			if (!text) { return text_argument_miss(eng, "sha256", a_args); }
-			sha256_digest digest;
-			digest.update(reinterpret_cast<const unsigned char*>(text->unchecked_text().data()), text->unchecked_text().size());
-			return script_value(digest.hex(), eng);
-		}, 1, text_parameter, script_value_type::jai_string_type);
-
-		eng_ref.add_function_with_arity_and_full_types("sha256_file", eng_ref.guard_function([eng](const std::vector<script_value>& a_args) -> function_result {
-			const script_value* path = text_argument(a_args);
-			if (!path) { return text_argument_miss(eng, "sha256_file", a_args); }
-			std::string hex;
-			if (const char* reason = sha256_file_hex(path->unchecked_text(), hex)) { return unreadable_file_error(eng, path->unchecked_text(), reason); }
-			return script_value(std::move(hex), eng);
-		}, privilege::filesystem), 1, text_parameter, script_value_type::jai_string_type);
-	}
 
 	void register_web(engine& eng_ref) {
 		using namespace web_text_detail;

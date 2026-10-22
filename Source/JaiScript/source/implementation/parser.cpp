@@ -408,7 +408,7 @@ namespace {
                     return a == static_numeric_class(c->arguments[2].get()) ? a : cls_unknown;
                 }
                 default:
-                    return cls_unknown;   // random_/random_seed/none: arg-dependent or n/a
+                    return cls_unknown;
             }
         }
 

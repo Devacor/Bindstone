@@ -3112,30 +3112,6 @@
     },
     {
       "owner": "math",
-      "name": "random_int",
-      "signature": "random_int(minimum: int, maximum: int) -> int",
-      "provider": "core",
-      "effect": "random",
-      "notes": "Inclusive integer range using the engine-owned deterministic RNG; shares math::random_seed state.",
-      "source": "include/jaiscript/detail/math_intrinsics.hpp",
-      "form": "namespace",
-      "availability": "Every engine",
-      "display": "math::random_int(minimum: int, maximum: int) -> int"
-    },
-    {
-      "owner": "math",
-      "name": "random_range",
-      "signature": "random_range(minimum: number, maximum: number) -> float",
-      "provider": "core",
-      "effect": "random",
-      "notes": "Engine-owned deterministic RNG, inclusive range; always returns float. Shares math::random_seed state.",
-      "source": "include/jaiscript/detail/math_intrinsics.hpp",
-      "form": "namespace",
-      "availability": "Every engine",
-      "display": "math::random_range(minimum: number, maximum: number) -> float"
-    },
-    {
-      "owner": "math",
       "name": "floor",
       "signature": "floor(value: number or vector) -> float or vector",
       "provider": "core",
@@ -3337,42 +3313,6 @@
       "form": "function",
       "availability": "Every engine",
       "display": "math::degrees_to_radians(angle: number or vector) -> float or vector"
-    },
-    {
-      "owner": "math",
-      "name": "random",
-      "signature": "random() -> float",
-      "provider": "core",
-      "effect": "random",
-      "notes": "Deterministic engine-owned RNG; unit range includes both ends.",
-      "source": "include/jaiscript/detail/math_intrinsics.hpp",
-      "form": "function",
-      "availability": "Every engine",
-      "display": "math::random() -> float"
-    },
-    {
-      "owner": "math",
-      "name": "random",
-      "signature": "random(minimum: number, maximum: number) -> number",
-      "provider": "core",
-      "effect": "random",
-      "notes": "Inclusive range; integer pair gives an integer.",
-      "source": "include/jaiscript/detail/math_intrinsics.hpp",
-      "form": "function",
-      "availability": "Every engine",
-      "display": "math::random(minimum: number, maximum: number) -> number"
-    },
-    {
-      "owner": "math",
-      "name": "random_seed",
-      "signature": "random_seed(seed: int) -> void",
-      "provider": "core",
-      "effect": "configure",
-      "notes": "",
-      "source": "include/jaiscript/detail/math_intrinsics.hpp",
-      "form": "function",
-      "availability": "Every engine",
-      "display": "math::random_seed(seed: int) -> void"
     },
     {
       "owner": "math",
@@ -6635,34 +6575,6 @@
       "display": "string::append(value: text, part: text, parts: text...) -> Self"
     },
     {
-      "owner": "global",
-      "name": "sha256",
-      "signature": "sha256(bytes: text) -> string",
-      "provider": "stdlib",
-      "effect": "observe",
-      "notes": "The SHA-256 digest of the bytes (a utf8_string's UTF-8 bytes), 64 lowercase hex digits.",
-      "source": "include/jaiscript/stdlib/web_text.hpp",
-      "form": "function",
-      "availability": "register_all() or area registration",
-      "display": "sha256(bytes: text) -> string",
-      "example": {
-        "code": "print(sha256(\"abc\"));",
-        "output": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-      }
-    },
-    {
-      "owner": "global",
-      "name": "sha256_file",
-      "signature": "sha256_file(path: string) -> string",
-      "provider": "stdlib",
-      "effect": "filesystem",
-      "notes": "The SHA-256 digest of the file's bytes, streamed in chunks; a file it cannot read raises Cannot read file '<path>': <reason>.",
-      "source": "include/jaiscript/stdlib/web_text.hpp",
-      "form": "function",
-      "availability": "register_all() or area registration",
-      "display": "sha256_file(path: string) -> string"
-    },
-    {
       "owner": "web",
       "name": "html_escape",
       "signature": "html_escape(value: text) -> same_text_kind",
@@ -7185,6 +7097,362 @@
       "form": "method",
       "availability": "Every engine",
       "display": "regex::match.size() -> int"
+    },
+    {
+      "owner": "global",
+      "name": "random",
+      "signature": "random() -> random",
+      "provider": "stdlib",
+      "effect": "random",
+      "notes": "A generator seeded from the operating system's secure generator: its draws differ every run. `random r;` declares one.",
+      "source": "include/jaiscript/stdlib/random.hpp",
+      "form": "function",
+      "availability": "register_all() or area registration",
+      "display": "random() -> random"
+    },
+    {
+      "owner": "global",
+      "name": "random",
+      "signature": "random(seed: int) -> random",
+      "provider": "stdlib",
+      "effect": "construct",
+      "notes": "A generator whose draws are fixed by the seed on every platform and backend. `random r(seed);` declares one.",
+      "source": "include/jaiscript/stdlib/random.hpp",
+      "form": "function",
+      "availability": "register_all() or area registration",
+      "display": "random(seed: int) -> random",
+      "example": {
+        "code": "random r(42);\nprint(r.next_int(1, 6), \" \", r.next_int(1, 6), \" \", r.next_int(1, 6));",
+        "output": "1 3 5"
+      }
+    },
+    {
+      "owner": "random",
+      "name": "next_int",
+      "signature": "next_int(lo: int, hi: int) -> int",
+      "provider": "stdlib",
+      "effect": "random",
+      "notes": "Uniform over lo..hi, both inclusive, unbiased; an inverted range raises.",
+      "source": "include/jaiscript/stdlib/random.hpp",
+      "form": "method",
+      "availability": "register_all() or area registration",
+      "display": "random.next_int(lo: int, hi: int) -> int"
+    },
+    {
+      "owner": "random",
+      "name": "next_float",
+      "signature": "next_float() -> float",
+      "provider": "stdlib",
+      "effect": "random",
+      "notes": "Uniform in [0, 1): the top 53 bits of a draw over 2^53.",
+      "source": "include/jaiscript/stdlib/random.hpp",
+      "form": "method",
+      "availability": "register_all() or area registration",
+      "display": "random.next_float() -> float"
+    },
+    {
+      "owner": "random",
+      "name": "next_float",
+      "signature": "next_float(lo: float, hi: float) -> float",
+      "provider": "stdlib",
+      "effect": "random",
+      "notes": "Uniform in [lo, hi); the bounds must be finite and in order.",
+      "source": "include/jaiscript/stdlib/random.hpp",
+      "form": "method",
+      "availability": "register_all() or area registration",
+      "display": "random.next_float(lo: float, hi: float) -> float"
+    },
+    {
+      "owner": "random",
+      "name": "next_bool",
+      "signature": "next_bool() -> bool",
+      "provider": "stdlib",
+      "effect": "random",
+      "notes": "The top bit of a draw.",
+      "source": "include/jaiscript/stdlib/random.hpp",
+      "form": "method",
+      "availability": "register_all() or area registration",
+      "display": "random.next_bool() -> bool"
+    },
+    {
+      "owner": "random",
+      "name": "pick",
+      "signature": "pick(values: array) -> var",
+      "provider": "stdlib",
+      "effect": "random",
+      "notes": "One element, each equally likely; an empty array raises.",
+      "source": "include/jaiscript/stdlib/random.hpp",
+      "form": "method",
+      "availability": "register_all() or area registration",
+      "display": "random.pick(values: array) -> var"
+    },
+    {
+      "owner": "random",
+      "name": "shuffle",
+      "signature": "shuffle(values: array&) -> void",
+      "provider": "stdlib",
+      "effect": "random",
+      "notes": "Shuffles the array in place (Fisher-Yates from the last element down).",
+      "source": "include/jaiscript/stdlib/random.hpp",
+      "form": "method",
+      "availability": "register_all() or area registration",
+      "display": "random.shuffle(values: array&) -> void"
+    },
+    {
+      "owner": "random",
+      "name": "next_bytes",
+      "signature": "next_bytes(count: int) -> string",
+      "provider": "stdlib",
+      "effect": "random",
+      "notes": "count bytes, eight per draw, low byte first.",
+      "source": "include/jaiscript/stdlib/random.hpp",
+      "form": "method",
+      "availability": "register_all() or area registration",
+      "display": "random.next_bytes(count: int) -> string"
+    },
+    {
+      "owner": "random",
+      "name": "seed",
+      "signature": "seed(seed: int) -> void",
+      "provider": "stdlib",
+      "effect": "configure",
+      "notes": "Restarts the generator as random(seed) would.",
+      "source": "include/jaiscript/stdlib/random.hpp",
+      "form": "method",
+      "availability": "register_all() or area registration",
+      "display": "random.seed(seed: int) -> void"
+    },
+    {
+      "owner": "crypto",
+      "name": "sha256",
+      "signature": "sha256(bytes: text) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "The SHA-256 digest (FIPS 180-4) of the bytes (a utf8_string's UTF-8 bytes), 64 lowercase hex digits.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::sha256(bytes: text) -> string",
+      "example": {
+        "code": "print(crypto::sha256(\"abc\"));",
+        "output": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+      }
+    },
+    {
+      "owner": "crypto",
+      "name": "sha256_bytes",
+      "signature": "sha256_bytes(bytes: text) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "The 32 raw digest bytes.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::sha256_bytes(bytes: text) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "sha256_file",
+      "signature": "sha256_file(path: string) -> string",
+      "provider": "stdlib",
+      "effect": "filesystem",
+      "notes": "The SHA-256 digest of the file's bytes, streamed in chunks; a file it cannot read raises Cannot read file '<path>': <reason>.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::sha256_file(path: string) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "sha512",
+      "signature": "sha512(bytes: text) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "The SHA-512 digest (FIPS 180-4), 128 lowercase hex digits.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::sha512(bytes: text) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "sha512_bytes",
+      "signature": "sha512_bytes(bytes: text) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "The 64 raw digest bytes.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::sha512_bytes(bytes: text) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "sha1",
+      "signature": "sha1(bytes: text) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "SHA-1, 40 hex digits: for interoperability with formats that name it, never for security.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::sha1(bytes: text) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "sha1_bytes",
+      "signature": "sha1_bytes(bytes: text) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "The 20 raw digest bytes.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::sha1_bytes(bytes: text) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "md5",
+      "signature": "md5(bytes: text) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "MD5 (RFC 1321), 32 hex digits: for interoperability only, never for security.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::md5(bytes: text) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "md5_bytes",
+      "signature": "md5_bytes(bytes: text) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "The 16 raw digest bytes.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::md5_bytes(bytes: text) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "hmac_sha256",
+      "signature": "hmac_sha256(key: text, message: text) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "HMAC-SHA-256 (RFC 2104), hex.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::hmac_sha256(key: text, message: text) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "hmac_sha256_bytes",
+      "signature": "hmac_sha256_bytes(key: text, message: text) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "The 32 raw MAC bytes.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::hmac_sha256_bytes(key: text, message: text) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "hmac_sha512",
+      "signature": "hmac_sha512(key: text, message: text) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "HMAC-SHA-512 (RFC 2104), hex.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::hmac_sha512(key: text, message: text) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "hmac_sha512_bytes",
+      "signature": "hmac_sha512_bytes(key: text, message: text) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "The 64 raw MAC bytes.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::hmac_sha512_bytes(key: text, message: text) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "equals",
+      "signature": "equals(a: text, b: text) -> bool",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "Equal bytes, compared in time that depends only on the length.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::equals(a: text, b: text) -> bool"
+    },
+    {
+      "owner": "crypto",
+      "name": "random_bytes",
+      "signature": "random_bytes(count: int) -> string",
+      "provider": "stdlib",
+      "effect": "random",
+      "notes": "count bytes from the operating system's secure generator; never seedable.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::random_bytes(count: int) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "random_hex",
+      "signature": "random_hex(count: int) -> string",
+      "provider": "stdlib",
+      "effect": "random",
+      "notes": "count secure random bytes as 2 * count lowercase hex digits.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::random_hex(count: int) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "random_int",
+      "signature": "random_int(lo: int, hi: int) -> int",
+      "provider": "stdlib",
+      "effect": "random",
+      "notes": "A secure random int over lo..hi, both inclusive, unbiased.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::random_int(lo: int, hi: int) -> int"
+    },
+    {
+      "owner": "crypto",
+      "name": "password_hash",
+      "signature": "password_hash(password: text, cost: int = 12) -> string",
+      "provider": "stdlib",
+      "effect": "random",
+      "notes": "bcrypt as PHP's password_hash writes it ($2y$, a fresh 16-byte salt, cost 4 to 31); the first 72 bytes count.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::password_hash(password: text, cost: int = 12) -> string"
+    },
+    {
+      "owner": "crypto",
+      "name": "password_verify",
+      "signature": "password_verify(password: text, hash: string) -> bool",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "Checks a $2y$, $2b$, $2a$ or $2x$ bcrypt hash; any other text is false.",
+      "source": "include/jaiscript/stdlib/crypto.hpp",
+      "form": "namespace",
+      "availability": "register_all() or area registration",
+      "display": "crypto::password_verify(password: text, hash: string) -> bool"
     }
   ],
   "fields": [
@@ -7900,6 +8168,15 @@
       "access": "read-only",
       "notes": "",
       "source": "source/implementation/regex/regex_library.cpp"
+    },
+    {
+      "owner": "random",
+      "name": "state",
+      "type": "string",
+      "provider": "stdlib",
+      "access": "read/write",
+      "notes": "The generator's state as 64 hex digits; storing it resumes the stream exactly.",
+      "source": "include/jaiscript/stdlib/random.hpp"
     }
   ]
 }

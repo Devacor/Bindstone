@@ -210,9 +210,8 @@ string element concatenates.
 
 One checked kernel (`detail/numeric_conversion.hpp`) owns the range check and text
 for scalar typed slots (declarations, assignments, fields, parameters, returns and
-`to_int()` results), `cast<int>`, `math::itrunc`, `math::ifloor`, and floating-point
-`math::random_seed` arguments. These errors are catchable and identical on both
-backends; a failed conversion does not write the scalar destination or seed the RNG.
+`to_int()` results), `cast<int>`, `math::itrunc` and `math::ifloor`. These errors are catchable
+and identical on both backends; a failed conversion does not write the scalar destination.
 
 Signed conversion truncates toward zero and requires a finite result in
 `[-2^63, 2^63)`. `ifloor` floors first. Integer inputs to the intrinsics remain

@@ -36,6 +36,7 @@
 //           jaiscript jaidoom.jai -- host [port] coop   (co-op: host runs the monsters,
 //           jaiscript jaidoom.jai -- join <host> [port]  joiners adopt map/skill/mode)
 
+import "sim_random.jai";
 import "wad.jai";
 import "map.jai";
 import "vid.jai";
@@ -101,7 +102,7 @@ function demo_play_start() -> void {
 	FAST_MONSTERS = DEMO_NM;
 	player_reset();
 	GAME_TIC = 0;                                    // recording started at 0 too
-	math::random_seed(DEMO_SEED);
+	SIM_RANDOM.seed(DEMO_SEED);
 	DEMO_POS = 0;
 	DEMO_PLAY = true;
 	game_start_map(DEMO_MAP);
@@ -1181,7 +1182,7 @@ function flowtest() -> int {
 	FAST_MONSTERS = DEMO_NM;
 	player_reset();
 	GAME_TIC = 0;
-	math::random_seed(DEMO_SEED);
+	SIM_RANDOM.seed(DEMO_SEED);
 	DEMO_POS = 0;
 	game_start_map(DEMO_MAP);
 	int fed = 0;
@@ -1193,10 +1194,10 @@ function flowtest() -> int {
 
 	// ---- screen melt: bounded, monotonic, and sim-RNG-isolated ----
 	pix_clear(rgb_idx(255, 0, 0));
-	math::random_seed(777);
-	int wr1 = math::random(0, 1000000);
-	int wr2 = math::random(0, 1000000);
-	math::random_seed(777);
+	SIM_RANDOM.seed(777);
+	int wr1 = SIM_RANDOM.between(0, 1000000);
+	int wr2 = SIM_RANDOM.between(0, 1000000);
+	SIM_RANDOM.seed(777);
 	wipe_begin();
 	if (WIPE_TICS != 1 || WIPE_COL.size() != VW) { fails = fails + 1; print("FAIL wipe_begin staging"); }
 	int wprev = WIPE_COL[VW / 2];
@@ -1211,8 +1212,8 @@ function flowtest() -> int {
 	}
 	if (!wdone) { fails = fails + 1; print(`FAIL wipe never finished (${wticks} tics)`); }
 	else { print(`wipe completed in ${wticks} tics at ${VW}x${VH}`); }
-	int wr1b = math::random(0, 1000000);
-	int wr2b = math::random(0, 1000000);
+	int wr1b = SIM_RANDOM.between(0, 1000000);
+	int wr2b = SIM_RANDOM.between(0, 1000000);
 	if (wr1b != wr1 || wr2b != wr2) { fails = fails + 1; print("FAIL wipe leaked into the sim RNG stream"); }
 	WIPE_TICS = 0;
 

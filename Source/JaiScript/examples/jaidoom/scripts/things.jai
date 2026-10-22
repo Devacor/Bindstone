@@ -4,6 +4,7 @@
 // monster is driven by a per-mobj brain coroutine (monster_brain) whose
 // frame holds the behavior phase; MO_STATE stays the observable state enum.
 
+import "sim_random.jai";
 import "wad.jai";
 import "map.jai";
 import "vid.jai";
@@ -255,7 +256,7 @@ function mobj_spawn(float x, float y, int type, float ang, int state, string spr
 	MO_STATE.push(state);
 	MO_HP.push(hp);
 	MO_FRAME.push(0);
-	MO_TIC.push(4 + (math::random(0, 6)));
+	MO_TIC.push(4 + (SIM_RANDOM.between(0, 6)));
 	MO_COOL.push(0);
 	MO_TARGET.push(-1);
 	MO_CHARGE.push(0);
@@ -526,7 +527,7 @@ function mobj_damage(int m, int dmg, int attacker) -> void {
 		mobj_drop(m);
 		return;
 	}
-	if (MINFO.has(MO_TYPE[m]) && MO_STATE[m] != 9 && math::random(0, 255) < MINFO[MO_TYPE[m]][5]) {
+	if (MINFO.has(MO_TYPE[m]) && MO_STATE[m] != 9 && SIM_RANDOM.between(0, 255) < MINFO[MO_TYPE[m]][5]) {
 		MO_STATE[m] = 4;
 		MO_ANIM[m] = MINFO[MO_TYPE[m]][8];
 		MO_FRAME[m] = 0;
@@ -677,7 +678,7 @@ function projectile_tic(int m) -> void {
 		float dy = ny - P_Y;
 		if (dx * dx + dy * dy < (16.0 + MO_RAD[m]) * (16.0 + MO_RAD[m])
 				&& shot_z_hit(nz, P_FLOORZ, P_HEIGHT)) {
-			player_damage_from(rocket ? 20 * math::random(1, 8) : 8 * math::random(1, 3), MO_X[m], MO_Y[m]);
+			player_damage_from(rocket ? 20 * SIM_RANDOM.between(1, 8) : 8 * SIM_RANDOM.between(1, 3), MO_X[m], MO_Y[m]);
 			projectile_explode(m);
 			return;
 		}
@@ -696,7 +697,7 @@ function projectile_tic(int m) -> void {
 		if (odx * odx + ody * ody >= orr * orr) { continue; }
 		if (!shot_z_hit(nz, MO_Z[o], mobj_height(o))) { continue; }
 		if (cosmetic) { projectile_explode(m); return; } // visual pop, host owns the numbers
-		int pdmg = rocket ? 20 * math::random(1, 8) : 8 * math::random(1, 3);
+		int pdmg = rocket ? 20 * SIM_RANDOM.between(1, 8) : 8 * SIM_RANDOM.between(1, 3);
 		if (st == 11) { np_ghost_hit_mobj(o, pdmg, MO_X[m], MO_Y[m]); }
 		else { mobj_damage(o, pdmg, shooter); }
 		projectile_explode(m);
@@ -786,7 +787,7 @@ function charge_start(int m) -> void {
 	var mi = MINFO[MO_TYPE[m]];
 	MO_ANIM[m] = mi[7];
 	MO_FRAME[m] = 0;
-	MO_COOL[m] = 40 + math::random(0, 20);
+	MO_COOL[m] = 40 + SIM_RANDOM.between(0, 20);
 	if (FAST_MONSTERS) { MO_COOL[m] = MO_COOL[m] / 2; }
 }
 
@@ -800,7 +801,7 @@ function charge_tic(int m) -> void {
 		float dy = TGT_Y - MO_Y[m];
 		float rr = MO_RAD[m] + tr + 8.0;
 		if (dx * dx + dy * dy < rr * rr) {
-			int dmg = math::random(1, 8) + math::random(1, 8) + math::random(1, 8);
+			int dmg = SIM_RANDOM.between(1, 8) + SIM_RANDOM.between(1, 8) + SIM_RANDOM.between(1, 8);
 			if (t >= 0) { mobj_damage(t, dmg, m); } else { player_damage_from(dmg, MO_X[m], MO_Y[m]); }
 			bit = true;
 		}
@@ -994,7 +995,7 @@ function monster_attack(int m) -> void {
 	float dx = TGT_X - MO_X[m];
 	float dy = TGT_Y - MO_Y[m];
 	float dist = math::sqrt(dx * dx + dy * dy);
-	MO_COOL[m] = 25 + math::random(0, 20);
+	MO_COOL[m] = 25 + SIM_RANDOM.between(0, 20);
 	if (FAST_MONSTERS) { MO_COOL[m] = MO_COOL[m] / 2; }
 	MO_MOMX[m] = 0.0;                                // lunge spent
 	MO_MOMY[m] = 0.0;
@@ -1003,7 +1004,7 @@ function monster_attack(int m) -> void {
 	float melee_r = kind == 1 ? 1.0 * mi[12] : 64.0;
 	if ((kind == 1 || kind == 3) && dist < melee_r + 24.0) {
 		snd_play_at(kind == 1 ? "DSSGTATK" : "DSCLAW", MO_X[m], MO_Y[m]);
-		int mdmg = mi[11] + math::random(0, mi[11]);
+		int mdmg = mi[11] + SIM_RANDOM.between(0, mi[11]);
 		if (t >= 0 && MO_STATE[t] == 11) { np_ghost_hit_mobj(t, mdmg, MO_X[m], MO_Y[m]); }   // bite lands on that ghost's player
 		else if (t >= 0) { mobj_damage(t, mdmg, m); }
 		else { player_damage_from(mdmg, MO_X[m], MO_Y[m]); }
@@ -1014,12 +1015,12 @@ function monster_attack(int m) -> void {
 	float wob = t < 0 && P_INVIS > 0 ? 0.9 : 0.12;
 	if (kind == 0) {
 		snd_play_at(MO_TYPE[m] == 9 ? "DSSHOTGN" : "DSPISTOL", MO_X[m], MO_Y[m]);
-		float aim = math::atan2(dy, dx) + (math::random() - 0.5) * wob;
+		float aim = math::atan2(dy, dx) + (SIM_RANDOM.unit() - 0.5) * wob;
 		ATK_AIM = aim;
-		shoot_hitscan(MO_X[m], MO_Y[m], eyez, aim, 3 * math::random(1, 5), m, 2048.0);
+		shoot_hitscan(MO_X[m], MO_Y[m], eyez, aim, 3 * SIM_RANDOM.between(1, 5), m, 2048.0);
 	} else if (kind == 2 || kind == 3) {
 		float maim = math::atan2(dy, dx);
-		if (t < 0 && P_INVIS > 0) { maim = maim + (math::random() - 0.5) * 0.9; }
+		if (t < 0 && P_INVIS > 0) { maim = maim + (SIM_RANDOM.unit() - 0.5) * 0.9; }
 		ATK_AIM = maim;
 		var bspr = "BAL1";
 		if (MISSILE_SPR.has(MO_TYPE[m])) { bspr = "" + MISSILE_SPR[MO_TYPE[m]]; }

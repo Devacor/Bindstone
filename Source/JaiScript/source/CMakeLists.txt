@@ -27,8 +27,10 @@ set(JAISCRIPT_SOURCES
     implementation/serialization/json_archive.cpp
     implementation/serialization/polymorphic.cpp
     implementation/stdlib/containers.cpp
+    implementation/stdlib/crypto.cpp
     implementation/stdlib/io.cpp
     implementation/stdlib/json.cpp
+    implementation/stdlib/random.cpp
     implementation/stdlib/reflection.cpp
     implementation/stdlib/stdlib.cpp
     implementation/stdlib/strings.cpp
@@ -149,9 +151,9 @@ set_target_properties(jaiscript PROPERTIES
     VISIBILITY_INLINES_HIDDEN ON
 )
 
-# The DAP connector uses Winsock. MSVC picks it up via connector.cpp's
+# The DAP connector uses Winsock and crypto:: the system's BCryptGenRandom. MSVC picks them up via
 # #pragma comment(lib) - GCC/Clang GNU drivers ignore that mechanism, so the
-# dependency must live here (PUBLIC: the static lib's consumers do the final link).
+# dependencies must live here (PUBLIC: the static lib's consumers do the final link).
 if(WIN32)
-    target_link_libraries(jaiscript PUBLIC ws2_32)
+    target_link_libraries(jaiscript PUBLIC ws2_32 bcrypt)
 endif()

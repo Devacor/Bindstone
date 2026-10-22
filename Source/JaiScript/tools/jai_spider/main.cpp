@@ -30,8 +30,6 @@
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>
-#include <bcrypt.h>
-#pragma comment(lib, "bcrypt.lib")
 #else
 #include <unistd.h>
 #endif
@@ -216,18 +214,6 @@ std::string html_text(std::string_view text) {
 	return result;
 }
 
-bool random_bytes(unsigned char* out, size_t count) {
-#ifdef _WIN32
-	return BCryptGenRandom(nullptr, out, static_cast<ULONG>(count), BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
-#else
-	std::FILE* source = std::fopen("/dev/urandom", "rb");
-	if (!source) { return false; }
-	const bool ok = std::fread(out, 1, count, source) == count;
-	std::fclose(source);
-	return ok;
-#endif
-}
-
 jai::script_value script_map_of(jai::engine* eng, std::vector<std::pair<std::string, jai::script_value>> entries) {
 	jai::script_value result = jai::script_value::make_map(nullptr, nullptr, eng);
 	auto& fields = result.as_map();
@@ -251,18 +237,6 @@ void register_http_text(jai::engine& eng) {
 				{"data", jai::script_value(std::move(part.data), engine_pointer)},
 				{"is_file", jai::script_value(part.has_filename, engine_pointer)},
 			}));
-		}
-		return result;
-	});
-	eng.add_function("random_token", [](jai::script_int byte_count) {
-		if (byte_count < 1 || byte_count > 1024) { throw std::runtime_error("random_token takes 1 to 1024 bytes"); }
-		std::vector<unsigned char> bytes(static_cast<size_t>(byte_count));
-		if (!random_bytes(bytes.data(), bytes.size())) { throw std::runtime_error("random_token: the system random source failed"); }
-		static const char hex[] = "0123456789abcdef";
-		std::string result;
-		for (unsigned char b : bytes) {
-			result += hex[b >> 4];
-			result += hex[b & 15];
 		}
 		return result;
 	});

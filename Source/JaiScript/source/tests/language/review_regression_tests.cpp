@@ -3943,31 +3943,32 @@ public:
 
         test("random_determinism_and_ranges", [this]() {
             auto e = make_engine();
-            // Same seed -> exact same sequence (mt19937_64 is standard-specified)
+            jai::stdlib::register_all(*e);
+            // Same seed -> exact same sequence
             auto r = e->execute(R"(
-                math::random_seed(1234);
-                auto a1 = math::random();
-                auto a2 = math::random(0, 100);
-                auto a3 = math::random(-2.5, 2.5);
-                math::random_seed(1234);
-                auto b1 = math::random();
-                auto b2 = math::random(0, 100);
-                auto b3 = math::random(-2.5, 2.5);
+                random a(1234);
+                auto a1 = a.next_float();
+                auto a2 = a.next_int(0, 100);
+                auto a3 = a.next_float(-2.5, 2.5);
+                random b(1234);
+                auto b1 = b.next_float();
+                auto b2 = b.next_int(0, 100);
+                auto b3 = b.next_float(-2.5, 2.5);
                 a1 == b1 && a2 == b2 && a3 == b3;
             )");
             check(r.as_bool());
-            // Inclusive endpoints: degenerate range returns its endpoint; unit range in [0,1]
-            check_eq((int64_t)7, e->execute("math::random(7, 7)").as_int());
+            // Inclusive int endpoints: a degenerate range returns its endpoint; floats stay in [lo, hi)
+            check_eq((int64_t)7, e->execute("random(1).next_int(7, 7)").as_int());
             auto bounds = e->execute(R"(
-                math::random_seed(42);
+                random g(42);
                 auto ok = true;
                 for (int i = 0; i < 200; ++i) {
-                    auto u = math::random();
-                    if (u < 0.0 || u > 1.0) { ok = false; }
-                    auto n = math::random(1, 6);
+                    auto u = g.next_float();
+                    if (u < 0.0 || u >= 1.0) { ok = false; }
+                    auto n = g.next_int(1, 6);
                     if (n < 1 || n > 6) { ok = false; }
-                    auto f = math::random(-1.0, 1.0);
-                    if (f < -1.0 || f > 1.0) { ok = false; }
+                    auto f = g.next_float(-1.0, 1.0);
+                    if (f < -1.0 || f >= 1.0) { ok = false; }
                 }
                 ok;
             )");
@@ -3978,7 +3979,6 @@ public:
             auto e = make_engine();
             check_throws([&]() { e->execute("math::floor(\"nope\");"); });          // type
             check_throws([&]() { e->execute("math::floor(1.0, 2.0);"); });          // arity
-            check_throws([&]() { e->execute("math::random(5, 1);"); });             // inverted range
             // Engine stays usable after an intrinsic error
             check_eq((int64_t)3, e->execute("1 + 2").as_int());
         });
@@ -4003,8 +4003,8 @@ public:
             check_eq(std::string("12.0|10.0|2.0|2.0"), r.as_string());
         });
 
-        // Parallel bodies admit math:: intrinsics (admission-time resolution doubles as the AST-cache prewarm); random draws
-        // read the region's counter stream, and math::random_seed is refused
+        // Parallel bodies admit math:: intrinsics (admission-time resolution doubles as the AST-cache prewarm); reseeding a
+        // captured random is refused
         test("intrinsics_in_parallel_bodies", [this]() {
             auto e = make_engine();
             jai::stdlib::register_all(*e);
@@ -4018,7 +4018,8 @@ public:
             check_throws([&]() {
                 e->execute(R"(
                     var ys = [1.0, 2.0];
-                    float rbody(float y) { math::random_seed(7); return y; }
+                    random shared(3);
+                    float rbody(float y) { shared.seed(7); return y; }
                     parallel_transform(ys, rbody);
                 )");
             });
@@ -4058,6 +4059,7 @@ public:
         // must agree with wrap_mul across seeded full-range operands and edge pairs.
         test("wrap_mul_matches_limb_multiply", [this]() {
             auto e = make_engine();
+            jai::stdlib::register_all(*e);
             auto r = e->execute(R"(
                 function limb_mul(int a, int b) -> int {
                     int a0 = a & 0xFFFF; int a1 = (a >> 16) & 0xFFFF; int a2 = (a >> 32) & 0xFFFF; int a3 = (a >> 48) & 0xFFFF;
@@ -4071,13 +4073,13 @@ public:
                     int r2 = t2 & 0xFFFF; int t3 = c3 + (t2 >> 16);
                     return r0 | (r1 << 16) | (r2 << 32) | ((t3 & 0xFFFF) << 48);
                 }
-                math::random_seed(666);
+                random operands(666);
                 auto ok = limb_mul(9223372036854775807, 2) == math::wrap_mul(9223372036854775807, 2) &&
                           limb_mul(-1, -1) == math::wrap_mul(-1, -1) &&
                           limb_mul(-9223372036854775807 - 1, 3) == math::wrap_mul(-9223372036854775807 - 1, 3);
                 for (int i = 0; i < 20; ++i) {
-                    auto a = math::random(-9223372036854775807 - 1, 9223372036854775807);
-                    auto b = math::random(-9223372036854775807 - 1, 9223372036854775807);
+                    auto a = operands.next_int(-9223372036854775807 - 1, 9223372036854775807);
+                    auto b = operands.next_int(-9223372036854775807 - 1, 9223372036854775807);
                     if (limb_mul(a, b) != math::wrap_mul(a, b)) { ok = false; }
                 }
                 ok;

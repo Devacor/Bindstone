@@ -339,7 +339,7 @@ cast itself is covered in the <a href="../guide/02-type-ladder.html#cast-the-exp
 <h3 id="namespaces-and-recovery">Namespaces, and recovery<a class="hlink" href="#namespaces-and-recovery" aria-label="link">&#8203;</a></h3>
 <p><code>math::&lt;fn&gt;(...)</code> is typed by its kernel's result (<code>int</code> for
 <code>itrunc</code>/<code>ifloor</code>/<code>wrap_*</code>, <code>float</code> for the transcendental and
-interpolation families, operand-typed for <code>math::abs</code>/<code>math::min</code>/<code>math::max</code>/<code>math::clamp</code>/<code>math::random</code>);
+interpolation families, operand-typed for <code>math::abs</code>/<code>math::min</code>/<code>math::max</code>/<code>math::clamp</code>);
 arity there is the kernel's run-time error. A user namespace path <code>a::b::c</code> is lenient at every
 depth.</p>
 <p>An erroring expression assumes its declared or expected type afterwards, so one bad line produces one

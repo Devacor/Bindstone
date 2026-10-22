@@ -20,7 +20,7 @@ namespace MV {
 	// builds surface the diagnostics through Script::eval as MV::warning; -verifyassets
 	// re-arms its engine to strict so a typed mistake in any shipped script is a [FAIL]).
 	// Parse caches (.jaibite) live in a .cache folder beside each script on desktop; on Android/iOS,
-	// where the bundle is read-only, below playerPreferencesPath()/ScriptCache.
+	// where the bundle is read-only, below playerCachePath()/ScriptCache.
 	// Callers still connect the engine into their Services themselves.
 	std::shared_ptr<jai::engine> makeScriptEngine(const Services& a_services, size_t a_memoryCapBytes = 256 * 1024 * 1024);
 

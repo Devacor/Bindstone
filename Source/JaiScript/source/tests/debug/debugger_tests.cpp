@@ -521,6 +521,54 @@ public:
         }
     }
 
+    // a reserved word naming a method or a field is a member like any other: the frame names it, its reads show in the locals
+    void keyword_named_members_in_frames_and_locals(jai::backend_type type) {
+        auto eng = make_backend_engine(type);
+        auto& dbg = eng->debugger();
+        stop_waiter stops(dbg);
+        dbg.set_breakpoints("<script>", {5});
+        dbg.set_enabled(true);
+
+        const std::string src =
+            "class Promise {\n"                         // line 1
+            "    int default = 7;\n"                    // line 2
+            "    int catch(int code) {\n"               // line 3
+            "        int settled = this.default;\n"     // line 4
+            "        return code + settled;\n"          // line 5  (breakpoint)
+            "    }\n"                                   // line 6
+            "}\n"                                       // line 7
+            "Promise p;\n"                              // line 8
+            "auto r = p.catch(3);\n";                   // line 9
+        std::string script_error;
+        std::thread script([&] {
+            try { eng->execute(src); } catch (const std::exception& e) { script_error = e.what(); }
+        });
+
+        const auto stop = stops.wait();
+        std::optional<stack_view> in_catch;
+        if (stop) {
+            in_catch = parked_read(dbg, [&] { return read_stack(dbg); });
+            dbg.resume();
+        }
+        dbg.detach();
+        script.join();
+
+        check_eq(std::string(), script_error);
+        check_true(in_catch.has_value());
+        if (in_catch) {
+            const auto& s = *in_catch;
+            check_eq(size_t(2), s.frames.size());
+            if (s.frames.size() == 2) {
+                check_eq(std::string("catch"), s.frames[0].name);
+                check_eq(5, s.frames[0].line);
+                check_eq(9, s.frames[1].line);
+                check_eq(std::string("3"), value_named(s.locals[0], "code"));
+                check_eq(std::string("7"), value_named(s.locals[0], "settled"));
+            }
+        }
+        check_eq(static_cast<int64_t>(10), eng->get_variable("r").as_int());
+    }
+
     // Parallel regions are ATOMIC to the debugger. A breakpoint inside the
     // body never fires while the body runs as part of a region — including chunk 0 on
     // the calling thread (structural: every region context is a fresh slot backend the
@@ -848,6 +896,12 @@ public:
         });
         test("vm_stack_trace_lists_every_frame_with_its_locals", [this]() {
             stack_trace_lists_every_frame_with_its_locals(jai::backend_type::vm);
+        });
+        test("keyword_named_members_in_frames_and_locals", [this]() {
+            keyword_named_members_in_frames_and_locals(jai::backend_type::interpreter);
+        });
+        test("vm_keyword_named_members_in_frames_and_locals", [this]() {
+            keyword_named_members_in_frames_and_locals(jai::backend_type::vm);
         });
         test("parallel_region_atomic_to_debugger", [this]() {
             parallel_region_atomic_to_debugger(jai::backend_type::interpreter);

@@ -10,6 +10,8 @@
     { "include": "#template-strings" },
     { "include": "#chars" },
     { "include": "#numbers" },
+    { "include": "#member-names" },
+    { "include": "#keyword-member-declaration" },
     { "include": "#constants" },
     { "include": "#keywords" },
     { "include": "#storage" },
@@ -101,6 +103,7 @@
         { "include": "#strings" },
         { "include": "#chars" },
         { "include": "#numbers" },
+        { "include": "#member-names" },
         { "include": "#constants" },
         { "include": "#keywords" },
         { "include": "#storage" },
@@ -154,6 +157,40 @@
         {
           "name": "constant.numeric.decimal.jaiscript",
           "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "member-names": {
+      "comment": "after . ?. -> or :: every word is a member name, a reserved word included (p.catch(f), obj.default, spider::catch(url))",
+      "patterns": [
+        {
+          "match": "(?<=\\.|->|::)\\s*([A-Za-z_][A-Za-z0-9_]*)(?=\\s*\\()",
+          "captures": {
+            "1": { "name": "entity.name.function.member.jaiscript" }
+          }
+        },
+        {
+          "match": "(?<=\\.|->|::)\\s*([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "variable.other.property.jaiscript" }
+          }
+        }
+      ]
+    },
+    "keyword-member-declaration": {
+      "comment": "a reserved word declared as a class or namespace member's name after its type (int default = 0; void catch(function f) {})",
+      "patterns": [
+        {
+          "match": "(?<=[A-Za-z0-9_>&])(?<!\\breturn|\\belse|\\bthrow|\\byield|\\bdo|\\bnew|\\bcase)\\s+(bool|break|char|class|const|continue|else|false|float|for|function|if|int|map|array|namespace|null|nullptr|override|private|public|return|static|string|true|void|while|auto|var|let|weak_ptr|shared_ptr|try|catch|throw|switch|case|default|fallthrough|include|import|coroutine|yield|enum|new|protected|parallel_for|nocopy|cast|extern|inline)(?=\\s*\\()",
+          "captures": {
+            "1": { "name": "entity.name.function.member.jaiscript" }
+          }
+        },
+        {
+          "match": "(?<=[A-Za-z0-9_>&])(?<!\\breturn|\\belse|\\bthrow|\\byield|\\bdo|\\bnew|\\bcase)\\s+(bool|break|char|class|const|continue|else|false|float|for|function|if|int|map|array|namespace|null|nullptr|override|private|public|return|static|string|true|void|while|auto|var|let|weak_ptr|shared_ptr|try|catch|throw|switch|case|default|fallthrough|include|import|coroutine|yield|enum|new|protected|parallel_for|nocopy|cast|extern|inline)(?=\\s*(?:=(?!=)|;))",
+          "captures": {
+            "1": { "name": "variable.other.property.jaiscript" }
+          }
         }
       ]
     },

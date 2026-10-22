@@ -392,25 +392,36 @@ print("field = {}, t.target = {}", t.backing(), t.target);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">t.target = 200
 field = 6, t.target = 60</code></pre></div>
 <p>The checker types <code>obj.x</code> from the accessor when the declaration is unambiguous: one parameterless getter with a declared (non-<code>var</code>) return type gives reads that type, one single-parameter by-value setter gives writes theirs, so <code>t.target = "warm";</code> is the load error <code>cannot assign 'string' to property 'target' declared 'int'</code>, and <code>char c = t.target;</code> fails the same way. Anything murkier (two overloads, a <code>var</code>/<code>auto</code> getter, a getter with parameters, a reference or untyped setter parameter, an accessor on a class the engine registered from C++) leaves the member unchecked and the run-time conversion does the work. A property the host binds with <a href="../embedding/02-dynamic-binder.html">dynamic_binder</a> arrives in script as an accessor pair of this kind.</p>
-<h2 id="reference-returns-and-keyword-names">Reference returns and keyword method names<a class="hlink" href="#reference-returns-and-keyword-names" aria-label="link">&#8203;</a></h2>
+<h2 id="reference-returns-and-keyword-names">Reference returns and keyword member names<a class="hlink" href="#reference-returns-and-keyword-names" aria-label="link">&#8203;</a></h2>
 <p>A method declared with a reference return type (<code>int&amp; slot(int i)</code>, <code>Box&amp; pick()</code>, <code>int&amp; operator[](int i)</code>) returns the storage itself, so its call is an assignment target: <code>=</code>, every compound assignment and <code>++</code>/<code>--</code> store through it, as in C++. A call that returns by value is not: <code>s.get() = 4</code> raises <code>Cannot assign to a call result: 's.get' returns by value</code>. A free function returns by reference the same way. The returned expression may be any lvalue: a variable, a field, an element, a map's existing entry by any key (<code>int&amp; count(string k) { return counts[k]; }</code>), a member reached through a computed index or key (<code>return units[i + 1].hp;</code>), or another call that returns <code>T&amp;</code>. One that names no storage (a temporary, a by-value call's result, a key with no entry, since a read never inserts) raises <code>Function with reference return type must return an lvalue reference</code> when the return runs.</p>
-<p>A keyword names a method: <code>delete</code>, <code>default</code>, <code>for</code> and the rest are method names in a class body and member names after a dot (or <code>?.</code>, <code>-&gt;</code>), so a host API or a data shape that uses one keeps its spelling. A field cannot take a keyword name.</p>
+<p>A reserved word is a name wherever a qualifier or a member declaration makes it one: after a dot (or <code>?.</code>, <code>-&gt;</code>) and after <code>::</code> (<code>p.catch(f)</code>, <code>obj.default</code>, <code>spider::catch(url)</code>, <code>Mode::default</code>, <code>super::catch()</code>), and as the declared name of a field, a method, a namespace member or an enum value. A host API or a data shape that uses one keeps its spelling: a bound C++ method named <code>catch</code>, <code>to_json</code>'s keys and <code>reflect::get(obj, "default")</code> all see the word as written. Bare, it stays the keyword, so nothing that parsed before changes meaning: inside the class the member is <code>this.default</code> or <code>this.catch(f)</code>, a statement <code>catch(x);</code> is a parse error, and so is a program-scope <code>void catch() {}</code>. <code>this</code> and <code>super</code> name the receiver and the base, so neither is declared as a member (<code>'this' is the receiver and cannot be used as a member name</code>). <code>delete</code> is not reserved at all, so it is a name everywhere.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Slots {
     array&lt;int&gt; items = [0, 0, 0];
+    int default = 7;                         // a keyword names a field
     int&amp; slot(int i) { return items[i]; }    // a reference return: the call is an lvalue
-    void delete(int i) { items[i] = -1; }    // a keyword is a method name
-    int default() { return 7; }
-    void clear_all() { delete(1); this.delete(2); }   // bare or through this
+    int catch(int i) { return items[i] + this.default; }   // and a method; inside, reach it through this
+    void delete(int i) { items[i] = -1; }
+    void clear_all() { delete(1); this.delete(2); }
 }
+namespace spider {
+    string catch(string url) { return "fetched " + url; }
+}
+enum Mode { default, strict }
 Slots s;
 s.slot(1) = 5;
-s.slot(2) += s.default();
+s.slot(2) += s.default;
 s.delete(0);
 print(to_json(s.items));
+print(s.catch(1));
 s.clear_all();
-print(to_json(s.items));</code></pre></div>
+print(to_json(s));
+print(spider::catch("a.com"));
+print(Mode::default == Mode::strict);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[-1,5,7]
-[-1,-1,-1]</code></pre></div>
+12
+{"$type":"Slots","$val":{"items":[-1,-1,-1],"default":7}}
+fetched a.com
+false</code></pre></div>
 <h2 id="statics">Statics<a class="hlink" href="#statics" aria-label="link">&#8203;</a></h2>
 <p>Static fields and methods belong to the class and are reached with <code>Class::name</code>. Instance constructors/methods see them directly:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter {

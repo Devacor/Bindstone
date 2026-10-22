@@ -19,6 +19,7 @@
 #include "fuzz_block_band.hpp"
 #include "fuzz_local_alias_band.hpp"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -483,6 +484,27 @@ namespace jai::fuzz {
 
 		// ---------- helpers ----------
 		std::string fresh(const char* prefix) { return std::string(prefix) + std::to_string(names_++); }
+		// a reserved word as a member's name, reached only qualified (o.default, this.catch); fresh when the class holds them all.
+		// Picked from the name counter, never the rng, so a seed's program keeps its shape and only its member names change
+		static const std::vector<std::string>& keyword_member_words() {
+			static const std::vector<std::string> words {"default", "catch", "new", "for", "if", "import", "class", "return", "switch", "map", "string", "inline"};
+			return words;
+		}
+		std::string keyword_member_name(const class_info& a_class, const char* a_prefix) {
+			const auto& words = keyword_member_words();
+			const size_t start = static_cast<size_t>(names_);
+			for (size_t i = 0; i < words.size(); ++i) {
+				const std::string& word = words[(start + i) % words.size()];
+				const bool field_taken = std::any_of(a_class.fields.begin(), a_class.fields.end(), [&](const auto& f) { return f.first == word; });
+				const bool method_taken = std::any_of(a_class.methods.begin(), a_class.methods.end(), [&](const auto& m) { return m.name == word; });
+				if (!field_taken && !method_taken) { return word; }
+			}
+			return fresh(a_prefix);
+		}
+		static std::string bare_member(const std::string& a_name) {
+			const auto& words = keyword_member_words();
+			return std::find(words.begin(), words.end(), a_name) != words.end() ? "this." + a_name : a_name;
+		}
 		std::string join() const {
 			std::string out;
 			for (const auto& l : lines_) { out += l; out += '\n'; }
@@ -1023,7 +1045,9 @@ namespace jai::fuzz {
 			std::string first_int_field;
 			for (int i = 0; i < n_fields; ++i) {
 				std::string fname = fresh("m");
-				switch (pick_weighted({45, 15, 15, 10, 15})) {
+				const int field_kind = pick_weighted({45, 15, 15, 10, 15});
+				if (!(field_kind == 0 && first_int_field.empty()) && names_ % 4 == 0) { fname = keyword_member_name(ci, "m"); }
+				switch (field_kind) {
 					case 0:
 						lines_.push_back("int " + fname + " = " + std::to_string(rng_.range(0, 20)) + ";");
 						ci.fields.push_back({fname, vt::i});
@@ -1114,7 +1138,7 @@ namespace jai::fuzz {
 				ci.methods.push_back({a, vt::any, 1});
 			}
 			if (rng_.chance(30)) {
-				std::string d = fresh("desc");
+				std::string d = names_ % 4 == 0 ? keyword_member_name(ci, "desc") : fresh("desc");
 				lines_.push_back("string " + d + "() { return \"<\" + to_string(" + first_int_field + ") + \">\"; }");
 				ci.methods.push_back({d, vt::s, 0});
 			}
@@ -1170,7 +1194,7 @@ namespace jai::fuzz {
 			std::string newf = fresh("m");
 			lines_.push_back("int " + newf + " = " + std::to_string(rng_.range(50, 99)) + ";");
 			if (!keep_method.empty() && !keep_field.empty())
-				lines_.push_back("int " + keep_method + "() { return " + keep_field + " + " + newf + "; }");
+				lines_.push_back("int " + keep_method + "() { return " + bare_member(keep_field) + " + " + newf + "; }");
 			lines_.push_back("}");
 		}
 

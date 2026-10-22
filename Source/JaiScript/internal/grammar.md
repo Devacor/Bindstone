@@ -35,6 +35,12 @@ Notes:
 - `extern` declares a name defined outside the program to the static checker (see "extern
   declarations" below); at run time it defines nothing.
 - `inline` on a variable is the C++17 inline variable (see "inline variables" below).
+- A keyword is a name where a qualifier or a member declaration makes it one. `MEMBER_NAME` (after
+  `.`, `?.`, `->`, `::`, `super::`) is an IDENTIFIER or any keyword; `DECLARED_NAME` (a field, method,
+  class constant, namespace member or enum value) is an IDENTIFIER or any keyword but `this` and `super`,
+  followed by `(`, `=` or `;` (an enum value by `,` or `}`). An untyped `const NAME = e;` member takes no
+  type keyword as its name. Bare, a keyword stays the keyword, so a class reaches its own keyword member
+  as `this.name` (`is_keyword_word` / `keyword_member_name_at` in `parser.cpp`).
 - `[[warn_mode]]` / `[[strict_mode]]` before a statement set the static checker's mode for a
   unit (first declaration of a file), a block (first statement of a block) or that one statement
   (see "check-mode attributes" below); both backends run them as nothing.
@@ -212,18 +218,18 @@ destructorDeclaration = "~" IDENTIFIER "(" ")" blockStatement
 
 // `coroutine` prefixes every method spelling and may sit anywhere in the leading
 // static/override run (`static coroutine int f()` reads as `coroutine static int f()`).
-methodDeclaration = "coroutine"? "static"? "override"? type (IDENTIFIER | operatorName) "(" parameterList? ")" ("->" type)? "override"? blockStatement
-                  | "coroutine"? "function" ("static" | "override")* (IDENTIFIER | operatorName) "(" parameterList? ")" ("->" type)? blockStatement
-                  | "coroutine" ("static" | "override")* (IDENTIFIER | operatorName) "(" parameterList? ")" ("->" type)? blockStatement
+methodDeclaration = "coroutine"? "static"? "override"? type (DECLARED_NAME | operatorName) "(" parameterList? ")" ("->" type)? "override"? blockStatement
+                  | "coroutine"? "function" ("static" | "override")* (DECLARED_NAME | operatorName) "(" parameterList? ")" ("->" type)? blockStatement
+                  | "coroutine" ("static" | "override")* (DECLARED_NAME | operatorName) "(" parameterList? ")" ("->" type)? blockStatement
 
 operatorName = "operator" ("=" | "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>" | "~"
                           | "[]" | "()" | "<" | ">" | "<=" | ">=" | "==" | "!=" | "<=>")
 
-fieldDeclaration = "static"? type IDENTIFIER ("=" expression)? ";"
+fieldDeclaration = "static"? type DECLARED_NAME ("=" expression)? ";"
                  | classConstant
 
 // a class-level constant (internal/const.md): static, one value for every instance, initialized where it is declared
-classConstant = ("const" "static"? | "static" "const") (type IDENTIFIER | IDENTIFIER) "=" expression ";"
+classConstant = ("const" "static"? | "static" "const") (type DECLARED_NAME | DECLARED_NAME) "=" expression ";"
 
 // Function declarations. `type` is ANY type — builtin, container, or a user class
 // name (`Point mk() {...}` works at top level, in namespaces, and in classes).
@@ -262,7 +268,7 @@ destructuringDeclaration = "const"? ("auto" | "var") "[" IDENTIFIER ("," IDENTIF
 namespaceDeclaration = "namespace" NAME ("::" NAME)* "{" declaration* "}"
 
 // Enums (plain value lists; values are namespaced: Color::red)
-enumDeclaration = "enum" IDENTIFIER "{" IDENTIFIER ("," IDENTIFIER)* "}"
+enumDeclaration = "enum" IDENTIFIER "{" DECLARED_NAME ("," DECLARED_NAME)* "}"
 
 // Include / import ("#" prefix optional; trailing ";" optional)
 includeDirective = "#"? "include" (STRING_LITERAL | "<" path ">" | "(" expression ")") ";"?
@@ -406,10 +412,10 @@ postfixExpression = primaryExpression (postfixOperator)*
 
 postfixOperator = "++"
                 | "--"
-                | "." IDENTIFIER
-                | "?." IDENTIFIER              // null-safe member access
-                | "->" IDENTIFIER
-                | "::" IDENTIFIER              // static / namespace / enum member access
+                | "." MEMBER_NAME
+                | "?." MEMBER_NAME             // null-safe member access
+                | "->" MEMBER_NAME
+                | "::" MEMBER_NAME             // static / namespace / enum member access
                 | "[" expression "]"
                 | "(" argumentList? ")"
                 | "{" argumentList? "}"        // brace construction (type names only)

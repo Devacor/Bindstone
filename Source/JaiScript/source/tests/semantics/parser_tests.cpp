@@ -227,12 +227,8 @@ public:
                 }
                 return false;
             };
-            auto fieldErrs = collect_parse_errors("class C { var map = {}; }");
-            check(contains(fieldErrs, "'map' is a type keyword"), "field: " + (fieldErrs.empty() ? "<none>" : fieldErrs[0]));
-            check(contains(fieldErrs, "member name"), "field what");
-
-            auto arrayErrs = collect_parse_errors("class C { var array = []; }");
-            check(contains(arrayErrs, "'array' is a type keyword"), "array field");
+            // a member declaration makes a keyword a name: fields reached qualified (c.map)
+            check(collect_parse_errors("class C { var map = {}; var array = []; }").empty(), "keyword field names");
 
             auto globalErrs = collect_parse_errors("int map = 5;");
             check(contains(globalErrs, "'map' is a type keyword"), "global: " + (globalErrs.empty() ? "<none>" : globalErrs[0]));
@@ -262,10 +258,10 @@ public:
         test("class_recovery_stays_in_class", [this]() {
             const std::string code =
                 "class Level {\n"              // 1
-                "\tstring map = \"\";\n"       // 2  <- true site #1 (field name)
+                "\tstring map = \"\";\n"       // 2  a keyword field name (reached as this.map)
                 "\tint kills = 0;\n"           // 3
                 "\tLevel(string m) {\n"        // 4
-                "\t\tmap = m;\n"               // 5  <- true site #2 (use in ctor body)
+                "\t\tmap = m;\n"               // 5  <- the true site (bare, map is the keyword)
                 "\t}\n"                        // 6
                 "\tvoid report() {\n"          // 7
                 "\t\tkills = kills + 0;\n"     // 8
@@ -275,13 +271,10 @@ public:
                 "\t}\n"                        // 12
                 "}\n";                         // 13 <- no error may land here
             auto errs = collect_parse_errors(code);
-            check_eq((size_t)2, errs.size());
-            check(errs.size() == 2 && errs[0].find("2:") != std::string::npos &&
-                  errs[0].find("'map' is a type keyword") != std::string::npos,
-                  "first error at the field: " + (errs.empty() ? "<none>" : errs[0]));
-            check(errs.size() == 2 && errs[1].find("5:") != std::string::npos &&
-                  errs[1].find("built-in map type keyword") != std::string::npos,
-                  "second error at the ctor-body use: " + (errs.size() > 1 ? errs[1] : "<none>"));
+            check_eq((size_t)1, errs.size());
+            check(errs.size() == 1 && errs[0].find("5:") != std::string::npos &&
+                  errs[0].find("built-in map type keyword") != std::string::npos,
+                  "the error at the ctor-body use: " + (errs.empty() ? "<none>" : errs[0]));
             for (const auto& e : errs) {
                 check(e.find("Expected expression") == std::string::npos, "no downstream cascade: " + e);
                 check(e.find("13:") == std::string::npos, "no error at the class close: " + e);

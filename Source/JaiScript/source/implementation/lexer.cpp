@@ -951,6 +951,10 @@ source_location lexer::current_location() const {
     return loc;
 }
 
+bool lexer::is_reserved_word(std::string_view word) {
+    return keywords_.count(std::string(word)) != 0;
+}
+
 // token method implementations
 std::string token::to_string() const {
     std::stringstream ss;
@@ -959,7 +963,7 @@ std::string token::to_string() const {
 }
 
 bool token::is_keyword() const {
-    return type >= token_type::bool_keyword && type <= token_type::enum_keyword;
+    return (type >= token_type::bool_keyword && type <= token_type::extern_keyword) || type == token_type::inline_keyword;
 }
 
 } // namespace jai

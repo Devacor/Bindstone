@@ -869,6 +869,7 @@ namespace jai {
         uint64_t handle_reset_id_ = 0;
         uint64_t done_id_;
         uint64_t advance_id_ = 0;
+        uint64_t result_id_ = 0;
         uint64_t same_as_id_;
         uint64_t eq_method_id_ = 0;   // "==" interned at construction (worker probes must not intern)
         uint64_t to_bool_id_ = 0;

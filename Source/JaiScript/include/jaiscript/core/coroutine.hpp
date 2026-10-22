@@ -34,6 +34,10 @@ public:
     // stored into v, or false when the body ran to its end or had ended (v untouched, the return value dropped). Both backends
     // dispatch here with the call site armed, so the argument resolves as a T& parameter binds it
     checked_result<script_value> advance_from_script(engine* eng, const std::vector<script_value>& a_args);
+    // h.result(): a copy of the return value the body finished with (null for none, and for a body that failed), once done()
+    checked_result<script_value> result_from_script(size_t a_argCount) const;
+    // The backends finish a body here: the status and a copy of its return value, which next() also hands out
+    void complete(const script_value& a_returned);
     bool done() const { return status_ == status::completed || status_ == status::failed; }
     status get_status() const { return status_; }
     // A later step of one host next(n): the backend keeps the entry's deadline instead of arming its own
@@ -75,6 +79,7 @@ private:
     status status_ = status::created;
     bool continues_host_entry_ = false;
     script_value yield_value_;
+    script_value result_;
 
     std::shared_ptr<function_decl> function_;
     std::vector<script_value> initial_args_;

@@ -2758,14 +2758,15 @@ private:
         diag(diag_level::error, m->location, "no member '" + std::string(m->member) + "' on '" + ctype_name(recv) + "'" +
              (best.empty() ? std::string() : " (did you mean '" + best + "'?)"));
     }
-	// A coroutine handle answers next(), done() and advance() only (the runtime's texts); resume is the retired spelling of next
+	// A coroutine handle answers next(), done(), advance() and result() only (the runtime's texts); resume is the retired spelling
+	// of next
 	void coroutine_member_missing(const member_expr* a_member) {
 		std::string best;
 		if (a_member->member == "resume") {
 			best = "next";
 		} else {
 			size_t bestDistance = 3;
-			for (const std::string_view name : {std::string_view{"advance"}, std::string_view{"done"}, std::string_view{"next"}}) {
+			for (const std::string_view name : {std::string_view{"advance"}, std::string_view{"done"}, std::string_view{"next"}, std::string_view{"result"}}) {
 				const size_t distance = edit_distance(a_member->member, name);
 				if (distance < bestDistance) { bestDistance = distance; best = std::string(name); }
 			}
@@ -2786,6 +2787,13 @@ private:
 				diag(diag_level::error, a_call->arguments[0]->location, "next() count must be an integer");
 			}
 			return {};
+		}
+		if (a_member->member == "result") {
+			if (!a_args.empty()) { diag(diag_level::error, a_call->location, "result() takes no arguments"); }
+			// the declared return type, tentative: a body that falls off its end or fails gives null
+			ctype result = a_receiver.yields ? ctype_from_type_info(a_receiver.yields) : ctype{};
+			result.tentative = !result.is_unknown();
+			return result;
 		}
 		if (a_member->member == "advance") {
 			if (a_args.size() != 1) {
@@ -4017,7 +4025,7 @@ private:
 			return c;
 		}
 		if (recv.kind == ctype::coroutine_k) {
-			if (!recv.tentative && m->member != "next" && m->member != "done" && m->member != "advance") { coroutine_member_missing(m); }
+			if (!recv.tentative && m->member != "next" && m->member != "done" && m->member != "advance" && m->member != "result") { coroutine_member_missing(m); }
 			return {};
 		}
 		if (recv.is_unknown() && !m->is_static) {

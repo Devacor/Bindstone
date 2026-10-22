@@ -2140,11 +2140,23 @@
       "signature": "advance(v: var&) -> bool",
       "provider": "core",
       "effect": "advance, callback",
-      "notes": "Resumes once: true when the body yielded, with the yielded value stored into v (converted to v's declared type); false when the body ran to its end, or had already ended, leaving v as it was. The final return value is not delivered (next() delivers it). v binds as a T& parameter does: a temporary raises Cannot pass non-lvalue to reference parameter before anything runs.",
+      "notes": "Resumes once: true when the body yielded, with the yielded value stored into v (converted to v's declared type); false when the body ran to its end, or had already ended, leaving v as it was; the return value is then result(). v binds as a T& parameter does: a temporary raises Cannot pass non-lvalue to reference parameter before anything runs.",
       "source": "source/implementation/coroutine.cpp",
       "form": "method",
       "availability": "Every engine",
       "display": "coroutine.advance(v: var&) -> bool"
+    },
+    {
+      "owner": "coroutine",
+      "name": "result",
+      "signature": "result() -> var",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "A copy of the value the body returned, once done() is true, however the body was driven (advance, next() or range-for); null for a body that returns nothing or failed. Before then it raises Coroutine has not finished: result() is available once done() is true. The checker types it as the coroutine's declared type.",
+      "source": "source/implementation/coroutine.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "coroutine.result() -> var"
     },
     {
       "owner": "coroutine",

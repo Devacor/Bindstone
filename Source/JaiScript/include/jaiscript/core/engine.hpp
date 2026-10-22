@@ -380,6 +380,20 @@ namespace jai {
         // string); false when a registration returns anything else or registrations disagree
         bool host_function_result(const std::string& name, script_value_type& out) const;
 
+        // Constant arguments: a host function ("name") or a bound method ("Class.method") whose argument `index` only the
+        // program's own constants may fill: a string literal, a const holding one, a ternary or + of them, an array literal of
+        // them. Register before loading scripts. The checker refuses any other argument at load with "argument N of 'name' is
+        // not a constant: <refusal>"; each unit's constant texts for the argument are gathered as it loads, in every check
+        // mode, and constant_argument_admits says whether a run-time text is one of them (one the program does not spell, or
+        // a unit that was never gathered, is refused: the host raises the refusal).
+        void constant_argument(const std::string& callable, size_t index, std::string refusal);
+        bool constant_argument_admits(const std::string& callable, size_t index, std::string_view text) const;
+        // the indexes and refusals registered for a callable (empty for most): what the checker asks at a call
+        std::vector<std::pair<size_t, const std::string*>> constant_argument_indexes(const std::string& callable) const;
+        bool has_constant_arguments() const;
+        // the program's const texts by name, as the units gathered so far declare them (detail::constant_texts reads it)
+        const std::unordered_map<std::string, std::vector<std::string>>& constant_texts_by_name() const;
+
         // Global registration
         void add_global(const std::string& name, script_value value, bool is_serializable = true);
         

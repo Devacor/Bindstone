@@ -33,6 +33,7 @@
 #include <cctype>
 #include <jaiscript/detail/return_flow.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/constant_arguments.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -4067,6 +4068,17 @@ private:
 		return {};
 	}
 
+    // engine::constant_argument: an argument only the program's constants may fill must be a constant form
+    void check_constant_arguments(const std::string& callable, const std::string& shown, const call_expr* c) {
+        if (!eng_.has_constant_arguments()) { return; }
+        for (const auto& [index, refusal] : eng_.constant_argument_indexes(callable)) {
+            if (index >= c->arguments.size()) { continue; }
+            std::vector<std::string> texts;
+            if (detail::constant_texts(c->arguments[index].get(), eng_.constant_texts_by_name(), texts)) { continue; }
+            diag(diag_level::error, c->arguments[index]->location, "argument " + std::to_string(index + 1) + " of '" + shown + "' is not a constant: " + *refusal);
+        }
+    }
+
     ctype infer_call(call_expr* c) {
         std::vector<ctype> args;
         args.reserve(c->arguments.size());
@@ -4255,6 +4267,7 @@ private:
 			}
 			if (eng_.has_function(name)) {
 				note_global_use(id->name);
+				check_constant_arguments(name, name, c);
 				check_host_call(name, args, c->location);
 				if (name == "parallel_reduce") { check_reduce_callbacks(c); }
 				// a stdlib math alias yields the builtin's float wherever its name binds the builtin: a proof every consumer guards at run time
@@ -4289,6 +4302,9 @@ private:
 				if (namespace_path_receiver(m)) { return check_namespace_entry(m, args, c->location); }
 			}
 			ctype recv = declared_container_receiver(m->object.get(), infer(m->object.get()));
+			if (!m->is_static && recv.kind == ctype::object_k && !recv.cls.empty() && eng_.has_constant_arguments()) {
+				check_constant_arguments(std::string(recv.cls) + "." + std::string(m->member), std::string(m->member), c);
+			}
 			if (recv.kind == ctype::math_k && !m->is_static) {
 				// a vector's method: the free function with the receiver first (detail::vec_method_fn); anything else is the
 				// runtime's no-member text

@@ -176,7 +176,7 @@ namespace jai {
         
         
         // Primary API - execute methods
-        virtual script_value execute(const std::string& scriptContent);
+        script_value execute(const std::string& scriptContent);
         script_value execute(const std::string& scriptContent, const instance_variables& instanceVars);
 
         // Literal fast lane: execute(script_source("...")) re-executes through a

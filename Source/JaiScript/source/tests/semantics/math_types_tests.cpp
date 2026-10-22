@@ -619,6 +619,10 @@ public:
             script_value arr = e->execute("array<math::vec3> a = [math::vec3(1, 2, 3)]; a");
             const script_array* node = arr.unchecked_array_node();
             check(node->kind() == script_array::kind_t::v3 && node->bytes().size() == 12, "array<math::vec3> is a 12-byte-stride buffer");
+            std::string view_error;
+            try { (void)arr.as_array(); } catch (const std::exception& ex) { view_error = ex.what(); }
+            check_eq(std::string("array<math::vec3> is a typed buffer: the script_value vector view exists only for array<var> "
+                                 "(iterate with script_array::for_each, or assign to an array<var> first)"), view_error);
             check(e->execute("array<math::color> c = [math::color()]; c").unchecked_array_node()->kind() == script_array::kind_t::rgba, "array<math::color> is a color buffer");
         });
 

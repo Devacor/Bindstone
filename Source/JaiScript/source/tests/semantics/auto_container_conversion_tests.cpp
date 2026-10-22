@@ -19,7 +19,9 @@ struct Widget {
     Widget(const std::string& n, int v) : name(n), value(v) {}
 };
 
-// Animal hierarchy for inheritance test (moved outside lambda for MSVC compatibility)
+// Animal hierarchy for inheritance test (moved outside lambda for MSVC compatibility; unnamed: other suites name a Cat)
+namespace {
+
 struct Animal {
     std::string name;
     virtual ~Animal() = default;
@@ -37,6 +39,8 @@ struct Cat : Animal {
     Cat(const std::string& n) { name = n; }
     std::string speak() const override { return "Meow!"; }
 };
+
+}
 
 class auto_container_conversion_tests : public suite {
 public:

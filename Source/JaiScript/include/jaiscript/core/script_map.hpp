@@ -31,23 +31,24 @@
 
 namespace jai {
 
-    // the payload mix of script_value::map_key_hash (seeded by the type rank)
-    inline size_t map_key_mix(script_value_type t, uint64_t x) noexcept {
+    // the payload mix of script_value::map_key_hash (seeded by the type rank); hashes stay 64-bit on a 32-bit host, so a map
+    // keyed by numbers lays out (and destroys its entries) in the same order there
+    inline uint64_t map_key_mix(script_value_type t, uint64_t x) noexcept {
         x ^= static_cast<uint64_t>(t) * 0x9E3779B97F4A7C15ull;
         x ^= x >> 33; x *= 0xff51afd7ed558ccdull; x ^= x >> 33; x *= 0xc4ceb9fe1a85ec53ull; x ^= x >> 33;
-        return static_cast<size_t>(x);
+        return x;
     }
 
     struct script_value_hash {
         using is_transparent = void;
-        size_t operator()(const script_value& v) const noexcept {
+        uint64_t operator()(const script_value& v) const noexcept {
             const size_t k = v.raw_storage_index();   // the two common key kinds inline, the rows map_key_hash gives them
             JAI_CENSUS_F(map_key_hash, k);
             if (k == script_value::TYPEID_INT) return map_key_mix(script_value_type::jai_int_type, static_cast<uint64_t>(v.unchecked_as_int()));
             if (k == script_value::TYPEID_STRING) return script_value::map_string_key_hash(v.unchecked_as_string());
             return v.map_key_hash();
         }
-        size_t operator()(const map_string_key_probe& p) const noexcept { JAI_CENSUS_F(map_key_hash, 0x80); return script_value::map_string_key_hash(p.text); }
+        uint64_t operator()(const map_string_key_probe& p) const noexcept { JAI_CENSUS_F(map_key_hash, 0x80); return script_value::map_string_key_hash(p.text); }
     };
 
     struct script_value_key_eq {
@@ -104,11 +105,11 @@ namespace jai {
         }
         static short_key short_of(const map_string_key_probe& p) noexcept { return short_of(p.text); }
         struct entry {
-            size_t hash;
+            uint64_t hash;
             short_key brief;
             value_type kv;
             template <typename K, typename... V>
-            entry(size_t h, K&& k, V&&... v) : hash(h), kv(std::piecewise_construct, std::forward_as_tuple(std::forward<K>(k)), std::forward_as_tuple(std::forward<V>(v)...)) {
+            entry(uint64_t h, K&& k, V&&... v) : hash(h), kv(std::piecewise_construct, std::forward_as_tuple(std::forward<K>(k)), std::forward_as_tuple(std::forward<V>(v)...)) {
                 brief = short_of(kv.first);
             }
         };
@@ -157,11 +158,11 @@ namespace jai {
             }
             void destroy(entry* e) noexcept { e->~entry(); auto* n = reinterpret_cast<free_node*>(e); n->next = free_; free_ = n; }
         };
-        struct slot { size_t hash; entry* e; };
+        struct slot { uint64_t hash; entry* e; };
         struct class_key_index;
         struct class_key_index_deleter { void operator()(class_key_index* index) const noexcept; };
         // where a class key is (found) or goes (run, at) among its class's keys
-        struct class_probe { entry* found = nullptr; size_t run = 0; size_t at = 0; size_t hash = 0; script_int key_hash = 0; };
+        struct class_probe { entry* found = nullptr; size_t run = 0; size_t at = 0; uint64_t hash = 0; script_int key_hash = 0; };
         static constexpr size_t min_capacity = 8;
 
         entry_pool pool_;
@@ -196,13 +197,13 @@ namespace jai {
             --size_;
             changed();
         }
-        size_t home(size_t h) const noexcept { return static_cast<size_t>((static_cast<uint64_t>(h) * 0x9E3779B97F4A7C15ull) >> shift_); }
+        size_t home(uint64_t h) const noexcept { return static_cast<size_t>((h * 0x9E3779B97F4A7C15ull) >> shift_); }
         size_t mask() const noexcept { return slots_.size() - 1; }
 
         template <typename K>
         entry* find_entry(const K& key) const {
             if (size_ == 0) return nullptr;
-            size_t h;
+            uint64_t h;
             if constexpr (std::is_same_v<K, script_value>) {
                 const size_t k = key.raw_storage_index();
                 if (k == script_value::TYPEID_INT) return find_int_entry(key.unchecked_as_int(), &key, nullptr);
@@ -226,7 +227,7 @@ namespace jai {
         }
         // an int key's probe: an int entry compares its payload in place; any other kind under the same hash takes the key equality
         entry* find_int_entry(script_int x, const script_value* key, engine* eng) const {
-            const size_t h = map_key_mix(script_value_type::jai_int_type, static_cast<uint64_t>(x));
+            const uint64_t h = map_key_mix(script_value_type::jai_int_type, static_cast<uint64_t>(x));
             for (size_t i = home(h);; i = (i + 1) & mask()) {
                 const slot& s = slots_[i];
                 if (!s.e) return nullptr;
@@ -253,7 +254,7 @@ namespace jai {
         // the entry for key, inserted (made by make(hash, key)) when absent
         template <typename K, typename Make>
         std::pair<entry*, bool> find_or_insert(K&& key, Make&& make) {
-            size_t h;
+            uint64_t h;
             if constexpr (std::is_same_v<std::decay_t<K>, script_value>) {
                 const size_t k = key.raw_storage_index();
                 if (k == script_value::TYPEID_INT) {
@@ -308,7 +309,7 @@ namespace jai {
                     return gone;
                 }
             }
-            const size_t h = script_value_hash{}(key);
+            const uint64_t h = script_value_hash{}(key);
             size_t i = home(h);
             for (;; i = (i + 1) & mask()) {
                 const slot& s = slots_[i];
@@ -520,7 +521,7 @@ namespace jai {
                 entry* e = static_cast<entry*>(const_cast<void*>(memo.e));
                 if (same_key(e, short_of(key), key)) return &e->kv;
             }
-            entry* e = find_or_insert(key, [this](size_t h, const script_value& k) { return pool_.make(h, k); }).first;
+            entry* e = find_or_insert(key, [this](uint64_t h, const script_value& k) { return pool_.make(h, k); }).first;
             memo = entry_memo{this, gen_, e};
             return &e->kv;
         }
@@ -548,10 +549,10 @@ namespace jai {
         bool contains(const script_value& k) const { return find_entry(k) != nullptr; }
 
         script_value& operator[](const script_value& k) {
-            return find_or_insert(k, [this](size_t h, const script_value& key) { return pool_.make(h, key); }).first->kv.second;
+            return find_or_insert(k, [this](uint64_t h, const script_value& key) { return pool_.make(h, key); }).first->kv.second;
         }
         script_value& operator[](script_value&& k) {
-            return find_or_insert(std::move(k), [this](size_t h, script_value&& key) { return pool_.make(h, std::move(key)); }).first->kv.second;
+            return find_or_insert(std::move(k), [this](uint64_t h, script_value&& key) { return pool_.make(h, std::move(key)); }).first->kv.second;
         }
         script_value& at(const script_value& k) {
             entry* e = find_entry(k);
@@ -566,13 +567,13 @@ namespace jai {
 
         template <typename K, typename V>
         std::pair<iterator, bool> emplace(K&& k, V&& v) {
-            auto [e, inserted] = find_or_insert(script_value(std::forward<K>(k)), [&](size_t h, script_value&& key) { return pool_.make(h, std::move(key), std::forward<V>(v)); });
+            auto [e, inserted] = find_or_insert(script_value(std::forward<K>(k)), [&](uint64_t h, script_value&& key) { return pool_.make(h, std::move(key), std::forward<V>(v)); });
             return {iterator(this, &e->kv, npos, gen_, false), inserted};
         }
         template <typename K, typename V>
         std::pair<iterator, bool> insert_or_assign(K&& k, V&& v) {
             bool fresh = false;
-            auto [e, inserted] = find_or_insert(script_value(std::forward<K>(k)), [&](size_t h, script_value&& key) { fresh = true; return pool_.make(h, std::move(key), std::forward<V>(v)); });
+            auto [e, inserted] = find_or_insert(script_value(std::forward<K>(k)), [&](uint64_t h, script_value&& key) { fresh = true; return pool_.make(h, std::move(key), std::forward<V>(v)); });
             if (!fresh) { e->kv.second = std::forward<V>(v); }
             return {iterator(this, &e->kv, npos, gen_, false), inserted};
         }

@@ -8,6 +8,7 @@
 
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/engine_time.hpp>
+#include <jaiscript/detail/atomic_shared_ptr.hpp>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -182,7 +183,7 @@ private:
     // The existing snapshot/version handoff carries the latest edit per raw key,
     // not a request queue. Retained keys are bounded by distinct spellings since
     // clear_breakpoints(). No engine state is read on the publishing thread.
-    std::atomic<std::shared_ptr<const breakpoint_snapshot>> breakpoints_{std::make_shared<breakpoint_snapshot>()};
+    detail::atomic_shared_ptr<const breakpoint_snapshot> breakpoints_{std::make_shared<breakpoint_snapshot>()};
     std::atomic<uint64_t> bp_version_{0};
 
     // ---- script-thread hot cache ----

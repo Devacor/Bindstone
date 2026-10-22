@@ -244,14 +244,6 @@ inline script_value class_definition::find_user_accessor(uint64_t id) const {
     return found ? *found : script_value::make_invalid(engine_);
 }
 
-inline bool class_definition::script_declares_user_accessor(uint64_t id) const {
-    if (!is_script_class()) { return false; }
-    const script_value* found = user_accessor(id);
-    if (!found) { return false; }
-    auto cpp_base = find_cpp_base_class();
-    return !(cpp_base && cpp_base->user_accessor(id) == found);
-}
-
 inline bool class_definition::is_auto_accessor(uint64_t id) const { return user_accessor(id) == nullptr; }
 
 inline bool class_definition::owns_auto_accessor(uint64_t id) const { return auto_accessor_ids_.find(id) != auto_accessor_ids_.end(); }
@@ -1012,14 +1004,7 @@ inline std::vector<std::weak_ptr<class_instance>> class_definition::registered_i
     return out;
 }
 
-inline void class_definition::add_native_method(uint64_t id, native_method fn) { native_entry& e = native_methods_[id]; e.plain = fn; e.lane = nullptr; e.state.reset(); restamp_native_methods(); }
-
 inline bool class_definition::has_native_methods() const noexcept { return !native_methods_.empty(); }
-
-inline auto class_definition::find_native_method(uint64_t id) const -> const native_entry* {
-    auto it = native_methods_.find(id);
-    return it == native_methods_.end() ? nullptr : &it->second;
-}
 
 inline void class_definition::restamp_native_methods() {
     if (engine_) { engine_->bump_class_definition_epoch(); native_stamp_ = engine_->class_definition_epoch(); }
@@ -2890,11 +2875,10 @@ inline bool class_definition::wrapped_object_has_layer(const class_instance& ins
     if (!script_slot_hooks_.slot || is_script_class()) { return false; }
     const char* object = static_cast<const char*>(inst.cpp_object_pointer());
     if (!object) { return false; }
-    std::atomic_ref<int32_t> offset(wrapper_slot_offset_);
-    int32_t at = offset.load(std::memory_order_relaxed);
+    int32_t at = wrapper_slot_offset_.load(std::memory_order_relaxed);
     if (at == INT32_MIN) [[unlikely]] {
         at = static_cast<int32_t>(reinterpret_cast<const char*>(script_slot_hooks_.slot(object)) - object);
-        offset.store(at, std::memory_order_relaxed);
+        wrapper_slot_offset_.store(at, std::memory_order_relaxed);
     }
     return reinterpret_cast<const script_extensible*>(object + at)->has_script_layer();
 }

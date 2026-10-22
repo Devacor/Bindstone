@@ -3,6 +3,7 @@
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>

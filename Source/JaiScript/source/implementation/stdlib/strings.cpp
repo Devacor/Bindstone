@@ -172,8 +172,8 @@ namespace stdlib {
             if (!a[1]->is_int()) return type_error("string::repeat count must be an integer");
             const std::string& s = a[0]->unchecked_text(); const script_int n = a[1]->unchecked_as_int();
             if (n < 0) return R(make_error_code(runtime_error_code::invalid_operation), "string::repeat count cannot be negative");
-            if (!detail::builtin_memory_charge(e, s.size(), static_cast<size_t>(n))) [[unlikely]] { return detail::builtin_memory_cap(e); }
-            std::string out; out.reserve(detail::saturating_text_size(s.size(), static_cast<size_t>(n)));
+            if (!detail::builtin_memory_charge(e, s.size(), detail::saturating_count(n))) [[unlikely]] { return detail::builtin_memory_cap(e); }
+            std::string out; out.reserve(detail::saturating_text_size(s.size(), detail::saturating_count(n)));
             for (script_int k = 0; k < n; ++k) out += s;
             return a[0]->is_utf8_string() ? script_value::make_utf8(std::move(out), e) : script_value(std::move(out), e);
         });
@@ -191,7 +191,7 @@ namespace stdlib {
                 size_t len = s.size();
                 if (a[0]->is_utf8_string()) { len = 0; for (size_t at = 0; at < s.size(); ++len) { at += detail::utf8::decode(s, at).length; } }   // a utf8_string pads to a width in characters
                 if (w > static_cast<script_int>(len)) {
-                    const size_t pad = static_cast<size_t>(w) - len;
+                    const size_t pad = detail::saturating_count(w) - len;
                     if (!detail::builtin_memory_charge(e, pad)) [[unlikely]] { return detail::builtin_memory_cap(e); }
                     if (pt.left) s.insert(0, pad, fill); else s.append(pad, fill);
                 }

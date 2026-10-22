@@ -5,10 +5,12 @@ one, read the anchor first.
 
 ## 1. script_value layout gates
 
-`value.hpp` static_asserts `sizeof(script_value) == 32`, `alignof == 8` and nothrow move.
+`value.hpp` static_asserts `sizeof(script_value) == 2 * sizeof(void*) + 16` (32 on a 64-bit host, 24 on a 32-bit one),
+`alignof == 8` and nothrow move.
 `script_value::storage` is a hand-written tagged union (8-byte payload plus index byte, 16 bytes),
-with asserts pinning its size and nothrow move (the noexcept move contract depends on it). Layout is
-8B `type_info_ptr` + 8B `engine*` + 16B storage. The `engine_` and
+with asserts pinning its size and nothrow move (the noexcept move contract depends on it); the payload union is
+`alignas(8)` so a 32-bit host, where `int64_t` may align to 4, keeps the 16-byte storage. Layout is
+`type_info_ptr` + `engine*` + 16B storage. The `engine_` and
 `type_info_` members are **the language**, not fat: zero-statics/multi-engine and the
 var/auto/int type ladder live in them — never evict either to buy payload bytes. A new storage
 alternative must be pointer-sized and nothrow-move or the asserts fire. The math vectors are one

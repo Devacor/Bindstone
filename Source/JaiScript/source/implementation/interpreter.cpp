@@ -1771,8 +1771,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
             auto& str = self.unchecked_text_ref();
             if (target_len > static_cast<script_int>(str.size())) {
-                if (!detail::builtin_memory_charge(ctx.get_engine(), static_cast<size_t>(target_len) - str.size())) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
-                str.insert(0, static_cast<size_t>(target_len) - str.size(), pad_char);
+                if (!detail::builtin_memory_charge(ctx.get_engine(), detail::saturating_count(target_len) - str.size())) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
+                str.insert(0, detail::saturating_count(target_len) - str.size(), pad_char);
             }
             return self;
         }},
@@ -1803,8 +1803,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
             auto& str = self.unchecked_text_ref();
             if (target_len > static_cast<script_int>(str.size())) {
-                if (!detail::builtin_memory_charge(ctx.get_engine(), static_cast<size_t>(target_len) - str.size())) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
-                str.append(static_cast<size_t>(target_len) - str.size(), pad_char);
+                if (!detail::builtin_memory_charge(ctx.get_engine(), detail::saturating_count(target_len) - str.size())) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
+                str.append(detail::saturating_count(target_len) - str.size(), pad_char);
             }
             return self;
         }},
@@ -2054,12 +2054,12 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
             auto& str = self.unchecked_text_ref();
             // engine::memory_cap chokepoint: deny the growth before it exists
-            if (count > 1 && !detail::builtin_memory_charge(ctx.get_engine(), str.size(), static_cast<size_t>(count - 1))) [[unlikely]] {
+            if (count > 1 && !detail::builtin_memory_charge(ctx.get_engine(), str.size(), detail::saturating_count(count - 1))) [[unlikely]] {
                 return detail::builtin_memory_cap(ctx.get_engine());
             }
             std::string original = str;
             str.clear();
-            str.reserve(detail::saturating_text_size(original.size(), static_cast<size_t>(count)));
+            str.reserve(detail::saturating_text_size(original.size(), detail::saturating_count(count)));
             for (script_int i = 0; i < count; ++i) {
                 str += original;
             }
@@ -7295,7 +7295,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
         script_value value = make_value();
         if (decl->initializer) {
             JAISCRIPT_TRY_ROOT(decl, decl->initializer.get());
-            value = std::move(pop_value());
+            value = pop_value();
             if (is_unwinding_) { return {}; }   // a raising initializer (missing member) wins over the declared-type check; the vm's run loop sees the flag before exec_decl_var
 
             // Decl fast path (construction-stamped flags): a scalar or string payload
@@ -8016,7 +8016,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                     if constexpr (Replaying) { if (rs) arguments = rs->partial; }
                     for (size_t ai = arguments.size(); ai < expr->arguments.size(); ++ai) {
                         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_call_string, ai, arguments);
-                        arguments.emplace_back(std::move(pop_value()));
+                        arguments.emplace_back(pop_value());
                         if (is_unwinding_) {
                             push_value(make_value());
                             return {};
@@ -8117,7 +8117,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         for (size_t ai = arguments.size(); ai < expr->arguments.size(); ++ai) {
                             const auto& argExpr = expr->arguments[ai];
                             JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(argExpr.get(), rs, ai), expr, rp_call_direct, ai, arguments);
-                            arguments.emplace_back(std::move(pop_value()));
+                            arguments.emplace_back(pop_value());
                             if (is_unwinding_) {
                                 push_value(make_value());
                                 return {};
@@ -8282,7 +8282,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                     const auto& argExpr = expr->arguments[ai];
                     try {
                         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(argExpr.get(), rs, ai), expr, rp_call_direct, ai, arguments);
-                        arguments.emplace_back(std::move(pop_value()));
+                        arguments.emplace_back(pop_value());
                         if (is_unwinding_) {
                             push_value(make_value());
                             return {};
@@ -8469,7 +8469,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
         try {
             JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(argExpr.get(), rs, ai + 1), expr, rp_call_generic, ai + 1,
                                   parked_with_head(callee, arguments));
-            arguments.emplace_back(std::move(pop_value()));
+            arguments.emplace_back(pop_value());
             if (is_unwinding_) {
                 push_value(make_value());
                 return {};
@@ -10336,7 +10336,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
         if constexpr (Replaying) { if (rs) args = rs->partial; }
         for (size_t ai = args.size(); ai < expr->arguments.size(); ++ai) {
             JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_new_shared, ai, args);
-            args.push_back(std::move(pop_value()));
+            args.push_back(pop_value());
             if (auto taken = capture_call_argument(expr->arg_captures, ai, args.back(), [&] {
                     auto ctor = environment_->get(innerTypeName, *string_symbolizer_);
                     return ctor ? detail::callee_binding(ctor.value(), ai, false, expr->arguments.size()) : detail::arg_binding::opaque;
@@ -10375,7 +10375,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
     if constexpr (Replaying) { if (rs) args = rs->partial; }
     for (size_t ai = args.size(); ai < expr->arguments.size(); ++ai) {
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_new_class, ai, args);
-        args.push_back(std::move(pop_value()));
+        args.push_back(pop_value());
         if (auto taken = capture_call_argument(expr->arg_captures, ai, args.back(), [&] {
                 auto ctor = environment_->get(className, *string_symbolizer_);
                 return ctor ? detail::callee_binding(ctor.value(), ai, false, expr->arguments.size()) : detail::arg_binding::opaque;
@@ -12203,7 +12203,7 @@ std::optional<checked_result<script_value>> interpreter::named_storage_reference
             }
         }
         if (storage) { return checked_result<script_value>(share_boxed_slot(*storage)); }
-        if (auto minted = bind_bare_cpp_property_ref(ident->symbol_id, ident->global_qualified)) { return std::move(minted); }
+        if (auto minted = bind_bare_cpp_property_ref(ident->symbol_id, ident->global_qualified)) { return minted; }
         if (auto method = bare_method_reference_error(ident)) { return checked_result<script_value>(method->error_value()); }
         return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable),
             environment_->undefined_text(ident->symbol_id, "Cannot take reference of undefined variable"), ident->symbol_id);

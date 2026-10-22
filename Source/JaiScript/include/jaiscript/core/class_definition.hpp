@@ -484,7 +484,7 @@ public:
     inline script_value find_user_accessor(uint64_t id) const;
     // A user accessor the script chain declared, never a host .property() reached through the
     // C++ base: the archive walks propagate its errors, which are the program's
-    inline bool script_declares_user_accessor(uint64_t id) const;
+    bool script_declares_user_accessor(uint64_t id) const;
 
     // No user accessor anywhere in the chain: the accessor for id (if any) is the synthesized
     // field accessor, whose body is verbatim get_field / enforce+set_field, so member-site
@@ -948,7 +948,7 @@ public:
             return plain ? plain(self, receiver, args, argc, out) : lane(state.get(), self, receiver, args, argc, out);
         }
     };
-    inline void add_native_method(uint64_t id, native_method fn);
+    void add_native_method(uint64_t id, native_method fn);
     // An overload's claim on a call: every argument is exactly its parameter's kind (an int for an integral parameter in range,
     // a float for a floating one, a bool, a string). A call exactly one overload claims is the one the ordinary call's scorer
     // picks with cost 0; a call no overload or several claim takes the ordinary call.
@@ -964,7 +964,10 @@ public:
     void add_native_lane(uint64_t id, native_lane fn, std::shared_ptr<const void> state, native_exact exact = nullptr);
     void withdraw_native_lane(uint64_t id);
     inline bool has_native_methods() const noexcept;
-    inline const native_entry* find_native_method(uint64_t id) const;
+    const native_entry* find_native_method(uint64_t id) const {
+        auto it = native_methods_.find(id);
+        return it == native_methods_.end() ? nullptr : &it->second;
+    }
     // Moves on every change to the native lanes (and on extend) to a value unique in the engine, so a call site that
     // cached an entry of this class can never match a recycled class_definition at the same address
     uint64_t native_stamp() const noexcept { return native_stamp_; }
@@ -1259,9 +1262,9 @@ private:
     std::shared_ptr<class_definition> cpp_base_class_;
     script_slot_hooks script_slot_hooks_;
     bool extended_ever_ = false;
-    // the script_extensible slot's offset in this class's objects, measured on the first plain wrapper asked (read and written
-    // through atomic_ref: workers may ask first)
-    mutable int32_t wrapper_slot_offset_ = INT32_MIN;
+    // the script_extensible slot's offset in this class's objects, measured on the first plain wrapper asked (atomic: workers
+    // may ask first)
+    mutable std::atomic<int32_t> wrapper_slot_offset_{INT32_MIN};
 
     std::unordered_map<uint64_t, uint64_t> property_setter_ids_;
     std::unordered_map<uint64_t, uint64_t> property_getter_ids_;

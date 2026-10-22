@@ -11,8 +11,6 @@
 namespace MV {
 
 	namespace {
-		constexpr size_t MAX_REDIRECTS = 32;
-
 		std::string trimmedHeaderValue(const std::string& a_line, size_t a_colon) {
 			auto first = a_line.find_first_not_of(" \t", a_colon + 1);
 			if (first == std::string::npos) {
@@ -100,6 +98,7 @@ namespace MV {
 
 	void HttpResponse::readHeader(std::istream& a_stream) {
 		headerValues.clear();
+		headerLines.clear();
 
 		a_stream >> version;
 		std::string statusCode;
@@ -119,7 +118,8 @@ namespace MV {
 		while (getline_platform_agnostic(a_stream, header) && !header.empty()) {
 			auto index = header.find_first_of(':');
 			if (index != std::string::npos && index > 0) {
-				headerValues[MV::toLower(header.substr(0, index))] = trimmedHeaderValue(header, index);
+				headerLines.emplace_back(header.substr(0, index), trimmedHeaderValue(header, index));
+				headerValues[MV::toLower(header.substr(0, index))] = headerLines.back().second;
 			}
 		}
 	}
@@ -154,16 +154,40 @@ namespace MV {
 		return a_is;
 	}
 
+	std::string HttpRequest::verb() const {
+		return !method.empty() ? method : (type == HttpRequest::Type::POST ? "POST" : "GET");
+	}
+
 	void HttpRequest::writeRequest(std::ostream& a_os, const MV::Url& a_url) const {
-		a_os << (type == HttpRequest::Type::POST ? "POST" : "GET") << " " << a_url.pathAndQuery() << " " << version << "\r\n";
-		a_os << "Host: " << a_url.host() << "\r\n";
-		if (type == HttpRequest::Type::POST) {
-			a_os << "Content-Type: " << (postContentType.empty() ? "application/x-www-form-urlencoded" : postContentType) << "\r\n";
+		const bool hasBody = type == HttpRequest::Type::POST || !postBody.empty();
+		a_os << verb() << " " << a_url.pathAndQuery() << " " << version << "\r\n";
+		a_os << "Host: " << a_url.host();
+		if (a_url.portString() != "0") {
+			a_os << ":" << a_url.port();
+		}
+		a_os << "\r\n";
+		bool typed = false;
+		bool accepting = false;
+		for (auto&& [name, value] : headers) {
+			auto key = MV::toLower(name);
+			if (key == "host" || key == "connection" || key == "content-length" || key == "transfer-encoding") {
+				continue;
+			}
+			typed = typed || key == "content-type";
+			accepting = accepting || key == "accept";
+			a_os << name << ": " << value << "\r\n";
+		}
+		if (hasBody) {
+			if (!typed) {
+				a_os << "Content-Type: " << (postContentType.empty() ? "application/x-www-form-urlencoded" : postContentType) << "\r\n";
+			}
 			a_os << "Content-Length: " << postBody.size() << "\r\n";
 		}
-		a_os << "Accept: */*\r\n";
+		if (!accepting) {
+			a_os << "Accept: */*\r\n";
+		}
 		a_os << "Connection: close\r\n\r\n";
-		if (type == HttpRequest::Type::POST) {
+		if (hasBody) {
 			a_os << postBody;
 		}
 	}
@@ -413,13 +437,18 @@ namespace MV {
 		auto transferEncoding = response.headerValues.find("transfer-encoding");
 		chunkedBody = transferEncoding != response.headerValues.end() && MV::toLower(transferEncoding->second).find("chunked") != std::string::npos;
 		auto location = response.headerValues.find("location");
-		if (response.status >= 300 && response.status < 400 && location != response.headerValues.end()) {
-			if (ourResult.redirects.size() >= MAX_REDIRECTS) {
-				fail(DownloadError::TOO_MANY_REDIRECTS, "Download stopped after " + std::to_string(MAX_REDIRECTS) + " redirects.");
+		if (response.status >= 300 && response.status < 400 && location != response.headerValues.end() && options.maxRedirects > 0) {
+			if (ourResult.redirects.size() >= options.maxRedirects) {
+				fail(DownloadError::TOO_MANY_REDIRECTS, "Download stopped after " + std::to_string(options.maxRedirects) + " redirects.");
 				return;
 			}
 			ourResult.redirects.push_back(ourResult.finalUrl);
 			initiateRequest(MV::Url(ourResult.finalUrl, location->second));
+		} else if (ourRequest.verb() == "HEAD" || response.status == 204 || response.status == 304 || response.status < 200) {
+			expectedBodyBytes = 0;
+			chunkedBody = false;
+			stream.consume(stream.input().size());
+			finishBody();
 		} else {
 			continueReadingContent(false);
 		}

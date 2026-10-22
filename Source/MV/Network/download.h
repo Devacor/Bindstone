@@ -25,6 +25,8 @@ namespace MV {
 
 		// Keys are lower case.
 		std::map<std::string, std::string> headerValues;
+		// Every header line as it arrived, repeated names kept (Set-Cookie).
+		std::vector<std::pair<std::string, std::string>> headerLines;
 		std::string body;
 
 		static HttpResponse make200(const std::string &a_content = "", const std::string& a_contentType = "text/html;charset=utf-8") {
@@ -101,6 +103,8 @@ namespace MV {
 			writeRequest(a_os, url);
 		}
 		void writeRequest(std::ostream& a_os, const MV::Url& a_url) const;
+		// The method the request line sends.
+		std::string verb() const;
 
 		void readHeaderFromStream(std::istream& a_is);
 
@@ -109,6 +113,10 @@ namespace MV {
 
 		MV::Url url;
 		Type type = Type::GET;
+		// Any method; empty sends GET, or POST for Type::POST. A body goes with any method that has one.
+		std::string method;
+		// Sent as given after Host; a Content-Type or Accept here replaces the default one.
+		std::vector<std::pair<std::string, std::string>> headers;
 		std::string version = "HTTP/1.1";
 		std::string postBody;
 		std::string postContentType;
@@ -148,6 +156,8 @@ namespace MV {
 		std::chrono::milliseconds timeout {std::chrono::seconds(60)};
 		// A longer body fails with BODY_TOO_LARGE; 0 accepts any length.
 		size_t maxBodyBytes = 0;
+		// More redirects than this fail with TOO_MANY_REDIRECTS; 0 answers with the redirect itself.
+		size_t maxRedirects = 32;
 		// https only: trust just this CA (PEM) instead of the system's root certificates.
 		std::string trustedCaFile;
 		// (total bytes, fraction arrived) after each read, once the length is known.

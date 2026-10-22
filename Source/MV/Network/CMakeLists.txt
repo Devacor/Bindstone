@@ -9,6 +9,8 @@ target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/networkReactor.h
   ${CMAKE_CURRENT_SOURCE_DIR}/networkStream.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/networkStream.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/scriptHttp.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/scriptHttp.h
   ${CMAKE_CURRENT_SOURCE_DIR}/socket.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/socket.h
   ${CMAKE_CURRENT_SOURCE_DIR}/tls.cpp

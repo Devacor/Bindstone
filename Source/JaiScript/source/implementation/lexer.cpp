@@ -128,6 +128,11 @@ token lexer::next_token() {
         return scan_number();
     }
     
+    // C++ raw string literals: R"(...)" and R"delim(...)delim"
+    if (c == 'R' && peek() == '"') {
+        return scan_raw_string();
+    }
+
     // Identifiers and keywords
     if (is_alpha(c) || c == '_') {
         current_--;  // Back up to rescan
@@ -754,6 +759,53 @@ token lexer::scan_string() {
     // Use string_view into source_ for the raw lexeme (includes quotes)
     std::string_view lexeme_view(source_.data() + start, current_ - start);
     token tok(token_type::string_literal, lexeme_view, loc);
+    tok.string_value = std::move(value);
+    return tok;
+}
+
+// The text between R"delim( and )delim" as it stands, no escapes; a line ending inside is one '\n' (CRLF and a lone CR
+// included), as in a template string
+token lexer::scan_raw_string() {
+    const size_t start = current_ - 1;
+    const size_t startColumn = column_ - 1;
+    const size_t startLine = line_;
+    advance();   // the quote
+    std::string delimiter;
+    while (!is_at_end() && peek() != '(') {
+        const char d = peek();
+        if (d == ' ' || d == ')' || d == '\\' || d == '"' || d == '\t' || d == '\v' || d == '\f' || d == '\n' || d == '\r' || delimiter.size() == 16) {
+            return error_token("Invalid raw string delimiter: up to 16 characters before '(', none a space, parenthesis, backslash or quote");
+        }
+        delimiter += advance();
+    }
+    if (is_at_end()) { return error_token("Unterminated raw string literal"); }
+    advance();   // '('
+    const std::string close = ")" + delimiter + "\"";
+    const size_t end = source_.find(close, current_);
+    if (end == std::string::npos) {
+        while (!is_at_end()) {
+            if (advance() == '\n') { line_++; column_ = 1; }
+        }
+        return error_token("Unterminated raw string literal: no )" + delimiter + "\" closes it");
+    }
+    std::string value;
+    value.reserve(end - current_);
+    while (current_ < end) {
+        const char ch = advance();
+        if (ch == '\r' || ch == '\n') {
+            if (ch == '\r' && current_ < end && peek() == '\n') { advance(); }
+            value += '\n';
+            line_++;
+            column_ = 1;
+        } else {
+            value += ch;
+        }
+    }
+    for (size_t k = 0; k < close.size(); ++k) { advance(); }
+    source_location loc = current_location();
+    loc.line = startLine;
+    loc.column = startColumn;
+    token tok(token_type::string_literal, std::string_view(source_.data() + start, current_ - start), loc);
     tok.string_value = std::move(value);
     return tok;
 }

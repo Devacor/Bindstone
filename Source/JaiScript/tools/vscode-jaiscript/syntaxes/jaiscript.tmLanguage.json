@@ -5,6 +5,7 @@
   "fileTypes": ["jai", "jaiscript"],
   "patterns": [
     { "include": "#comments" },
+    { "include": "#raw-strings" },
     { "include": "#strings" },
     { "include": "#template-strings" },
     { "include": "#chars" },
@@ -33,6 +34,17 @@
           "end": "\\*/"
         }
       ]
+    },
+    "raw-strings": {
+      "name": "string.quoted.raw.jaiscript",
+      "begin": "R\"([^()\\\\ \"\\t\\n]{0,16})\\(",
+      "end": "\\)\\1\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.jaiscript" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.jaiscript" }
+      }
     },
     "strings": {
       "name": "string.quoted.double.jaiscript",
@@ -85,6 +97,7 @@
       "patterns": [
         { "include": "#comments" },
         { "include": "#template-strings" },
+        { "include": "#raw-strings" },
         { "include": "#strings" },
         { "include": "#chars" },
         { "include": "#numbers" },

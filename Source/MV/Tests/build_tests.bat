@@ -11,9 +11,9 @@ if "%ENGINE_LIBDIR%"=="" set ENGINE_LIBDIR=%ROOT%\Builds\Windows\x64\Release
 
 REM defines match the engine lib's (no NDEBUG, JAISCRIPT_ENABLE_DEBUGGER): JaiScript's header classes change layout with them
 cl /nologo /O2 /std:c++20 /EHsc /MD /bigobj /DJAISCRIPT_ENABLE_DEBUGGER ^
-  /DASIO_STANDALONE /D_WIN32_WINNT=0x0602 /DNOMINMAX /DSDL_MAIN_HANDLED ^
+  /D_WIN32_WINNT=0x0602 /DNOMINMAX /DSDL_MAIN_HANDLED ^
   /I"%ROOT%\Source" /I"%ROOT%\External" /I"%ROOT%\External\glm" ^
-  /I"%ROOT%\External\gl3w\include" /I"%ROOT%\External\asio\include" ^
+  /I"%ROOT%\External\gl3w\include" ^
   /I"%ROOT%\External\openssl\openssl-3.5.9\include" /I"%ROOT%\Source\JaiScript\include" ^
   /I"%ROOT%\VSProjects\SDL2\include" /I"%ROOT%\VSProjects\SDL2_ttf\include" ^
   matrix_tests.cpp scene_tests.cpp atlas_tests.cpp rhi_tests.cpp scriptdebug_tests.cpp ^

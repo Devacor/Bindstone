@@ -1,10 +1,8 @@
-#define ASIO_STANDALONE
 #include <SDL.h>
 #include <SDL_image.h>
 #include <filesystem>
 #include <iostream>
 #include <string>
-#include <asio.hpp>
 
 #include "MV/Utility/log.h"
 #include "MV/Utility/generalUtility.h"

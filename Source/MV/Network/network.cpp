@@ -1,8 +1,11 @@
 #include "network.h"
-#include "MV/Network/tlsAsio.h"
+#include "MV/Network/networkStream.h"
 #include "dynamicVariable.h"
 #include "MV/Utility/stopwatch.h"
 #include "MV/Utility/scopeGuard.hpp"
+
+#include <algorithm>
+#include <cstring>
 
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
@@ -60,86 +63,45 @@ static jai::registrar<MV::Client, MV::Services> _hookClient("Client",
 namespace MV {
 
 	namespace {
-		void closeSocket(std::shared_ptr<TlsStream> &a_stream) {
-			if (a_stream) {
-				auto& socket = a_stream->lowest_layer();
-				if (socket.is_open()) {
-					asio::error_code ignored;
-					socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignored);
-					socket.close(ignored);
-				}
-				a_stream.reset();
-			}
+		size_t unreadCost(const NetworkMessage& a_message) {
+			return sizeof(NetworkMessage) + a_message.content.size();
 		}
+
+		// Moves the first four bytes of a_stream's input into a new message's header.
+		std::shared_ptr<NetworkMessage> takeHeader(NetworkStream& a_stream) {
+			auto result = std::make_shared<NetworkMessage>();
+			std::memcpy(result->headerBuffer.data(), a_stream.input().data(), result->headerBuffer.size());
+			a_stream.consume(result->headerBuffer.size());
+			return result;
+		}
+
+		// Moves what a_stream holds of a_message's content into it; true once the content is whole.
+		bool takeContent(NetworkStream& a_stream, NetworkMessage& a_message, uint32_t a_contentSize) {
+			auto available = a_stream.input();
+			auto taking = std::min(static_cast<size_t>(a_contentSize) - a_message.content.size(), available.size());
+			a_message.content.append(available.data(), taking);
+			a_stream.consume(taking);
+			return a_message.content.size() == a_contentSize;
+		}
+
+		const size_t PROTOCOL_FRAME_FIXED_BYTES = 5;
 	}
-
-	struct Client::AsioConnection {
-		explicit AsioConnection(Client& a_client) :
-			client(a_client),
-			resolver(ioService),
-			handshakeDeadline(ioService) {
-		}
-
-		void connectTo(const std::shared_ptr<TlsStream>& a_attempt, asio::ip::tcp::resolver::iterator a_endpoints);
-		void handleConnect(const std::shared_ptr<TlsStream>& a_attempt, const asio::error_code& a_err, asio::ip::tcp::resolver::iterator a_nextEndpoint);
-		void handshake(const std::shared_ptr<TlsStream>& a_attempt);
-
-		Client& client;
-		// Built by the first connection attempt, so a missing certificate fails that attempt instead of the constructor.
-		std::shared_ptr<asio::ssl::context> tlsContext;
-		asio::io_context ioService;
-		asio::ip::tcp::resolver resolver;
-		std::shared_ptr<TlsStream> socket;
-		asio::steady_timer handshakeDeadline;
-		std::unique_ptr<asio::io_context::work> work {std::make_unique<asio::io_context::work>(ioService)};
-	};
-
-	struct ConnectionSocket::AsioSocket {
-		AsioSocket(asio::io_context& a_ioService, std::shared_ptr<asio::ssl::context> a_tlsContext, asio::ip::tcp::socket&& a_socket) :
-			ioService(a_ioService),
-			tlsContext(std::move(a_tlsContext)),
-			socket(std::make_shared<TlsStream>(std::move(a_socket), *tlsContext)),
-			closeDeadline(a_ioService),
-			deadline(a_ioService) {
-		}
-
-		asio::io_context& ioService;
-		std::shared_ptr<asio::ssl::context> tlsContext;
-		std::shared_ptr<TlsStream> socket;
-		asio::steady_timer closeDeadline;
-		asio::steady_timer deadline;
-	};
-
-	struct Server::AsioAcceptor {
-		explicit AsioAcceptor(const TlsConfig& a_tls) :
-			tlsContext(makeTlsServerContext(a_tls)),
-			acceptor(ioService) {
-		}
-
-		std::shared_ptr<asio::ssl::context> tlsContext;
-		asio::io_context ioService;
-		asio::ip::tcp::acceptor acceptor;
-		std::unique_ptr<asio::io_context::work> work {std::make_unique<asio::io_context::work>(ioService)};
-	};
 
 	Client::Client(const MV::Url& a_url, const TlsConfig& a_tls, const std::function<void(const std::string &)> &a_onMessageGet, const std::function<void(const std::string &)> &a_onConnectionFail, const std::function<void()> &a_onInitialized, const MessageLimits& a_limits) :
 		url(a_url),
 		ourLimits(a_limits),
 		tlsConfig(a_tls),
-		asioConnection(std::make_unique<AsioConnection>(*this)),
+		network(std::make_unique<NetworkContext>(1)),
 		onMessageGet(a_onMessageGet),
 		onConnectionFail(a_onConnectionFail),
 		onInitialized(a_onInitialized),
 		ourServerMaxMessageBytes(a_limits.unauthenticatedMaxMessageBytes) {
 	}
 
+	// The network thread ends before the stream and inbox it uses go away.
 	Client::~Client() {
 		ourConnectionState = DISCONNECTED;
-		asioConnection->ioService.stop();
-		if (worker && worker->joinable()) {
-			worker->join();
-		}
-		closeNow();
+		network.reset();
 	}
 
 	void Client::disconnect() {
@@ -164,17 +126,21 @@ namespace MV {
 	}
 
 	void Client::closeOnNetworkThread() {
-		if (asioConnection->ioService.get_executor().running_in_this_thread()) {
+		if (network->reactor().runningInThisThread()) {
 			closeNow();
 		} else {
-			asio::post(asioConnection->ioService, [this] { closeNow(); });
+			network->post([this] { closeNow(); });
 		}
 	}
 
 	void Client::closeNow() {
-		closeSocket(asioConnection->socket);
-		asioConnection->handshakeDeadline.cancel();
-		outbox.clear();
+		if (stream) {
+			stream->close();
+			stream.reset();
+		}
+		network->reactor().cancel(handshakeDeadline);
+		handshakeDeadline = 0;
+		incoming.reset();
 	}
 
 	void Client::initiateConnection() {
@@ -189,142 +155,130 @@ namespace MV {
 				failMessage.clear();
 				ourTlsSession.clear();
 			}
-			if (!asioConnection->tlsContext) {
+			if (!tlsContext) {
 				try {
-					asioConnection->tlsContext = makeTlsClientContext(tlsConfig);
+					tlsContext = makeTlsClientContext(tlsConfig);
 				} catch (std::exception &e) {
 					error("[tls] -> ", e.what());
 					closeConnection(e.what());
 					return;
 				}
 			}
-			asio::post(asioConnection->ioService, [this, context = asioConnection->tlsContext] {
+			network->post([this] {
 				if (ourConnectionState != CONNECTING) {
 					return;
 				}
-				auto attempt = std::make_shared<TlsStream>(asioConnection->ioService, *context);
-				asioConnection->socket = attempt;
-				asio::ip::tcp::resolver::query query(url.host(), std::to_string(url.port()), asio::ip::tcp::resolver::query::canonical_name);
-				asioConnection->resolver.async_resolve(query, [this, attempt](const asio::error_code& a_err, asio::ip::tcp::resolver::iterator a_endpoints) {
-					if (attempt != asioConnection->socket) {
+				if (stream) {
+					stream->close();
+				}
+				auto attempt = NetworkStream::make(network->reactor());
+				stream = attempt;
+				network->reactor().resolve(url.host(), std::to_string(url.port()), [this, attempt](const std::error_code& a_err, std::vector<SocketAddress> a_addresses) {
+					if (attempt != stream) {
 						return;
 					}
 					if (a_err) {
 						handleError(a_err, "resolve");
 					} else {
-						asioConnection->connectTo(attempt, a_endpoints);
+						connectTo(attempt, std::move(a_addresses));
 					}
 				});
 			});
 		}
 	}
 
-	void Client::AsioConnection::connectTo(const std::shared_ptr<TlsStream>& a_attempt, asio::ip::tcp::resolver::iterator a_endpoints) {
-		asio::ip::tcp::endpoint endpoint = *a_endpoints;
-		a_attempt->lowest_layer().async_connect(endpoint, [this, a_attempt, next = ++a_endpoints](const asio::error_code& a_err) {
-			handleConnect(a_attempt, a_err, next);
+	void Client::connectTo(const std::shared_ptr<NetworkStream>& a_attempt, std::vector<SocketAddress> a_addresses) {
+		a_attempt->connect(std::move(a_addresses), [this, a_attempt](const std::error_code& a_err) {
+			if (a_attempt != stream) {
+				return;
+			}
+			if (a_err) {
+				handleError(a_err, "connect");
+			} else {
+				handshake(a_attempt);
+			}
 		});
 	}
 
-	void Client::AsioConnection::handleConnect(const std::shared_ptr<TlsStream>& a_attempt, const asio::error_code& a_err, asio::ip::tcp::resolver::iterator a_nextEndpoint) {
-		if (a_attempt != socket) {
-			return;
-		}
-		if (!a_err) {
-			handshake(a_attempt);
-		} else if (a_nextEndpoint != asio::ip::tcp::resolver::iterator()) {
-			info("Trying next endpoint: ", a_err.message());
-			auto retry = std::make_shared<TlsStream>(ioService, *tlsContext);
-			socket = retry;
-			connectTo(retry, a_nextEndpoint);
-		} else {
-			client.handleError(a_err, "connect");
-		}
-	}
-
-	void Client::AsioConnection::handshake(const std::shared_ptr<TlsStream>& a_attempt) {
+	void Client::handshake(const std::shared_ptr<NetworkStream>& a_attempt) {
+		ssl_st* ssl = nullptr;
 		try {
-			verifyTlsPeerAs(*a_attempt, client.url.host());
+			ssl = a_attempt->beginTls(*tlsContext);
+			verifyTlsPeerAs(ssl, url.host());
 		} catch (std::exception &e) {
 			error("[handshake] -> ", e.what());
-			client.closeConnection(e.what());
+			closeConnection(e.what());
 			return;
 		}
-		handshakeDeadline.expires_after(client.ourLimits.handshakeTimeout);
-		handshakeDeadline.async_wait([this, a_attempt](const asio::error_code& a_err) {
-			if (!a_err && a_attempt == socket && client.ourConnectionState == CONNECTING) {
-				auto reason = "No TLS handshake from " + client.url.host() + " within " + std::to_string(client.ourLimits.handshakeTimeout.count()) + " ms.";
+		handshakeDeadline = network->reactor().scheduleAfter(ourLimits.handshakeTimeout, [this, a_attempt] {
+			handshakeDeadline = 0;
+			if (a_attempt == stream && ourConnectionState == CONNECTING) {
+				auto reason = "No TLS handshake from " + url.host() + " within " + std::to_string(ourLimits.handshakeTimeout.count()) + " ms.";
 				error("[handshake] -> ", reason);
-				client.closeConnection(reason);
+				closeConnection(reason);
 			}
 		});
-		a_attempt->async_handshake(asio::ssl::stream_base::client, [this, a_attempt](const asio::error_code& a_err) {
-			if (a_attempt != socket) {
+		a_attempt->handshake([this, a_attempt, ssl](const std::error_code& a_err) {
+			if (a_attempt != stream) {
 				return;
 			}
-			handshakeDeadline.cancel();
+			network->reactor().cancel(handshakeDeadline);
+			handshakeDeadline = 0;
 			if (a_err) {
-				auto reason = "TLS handshake with " + client.url.host() + " failed: " + describeTlsFailure(a_err, *a_attempt);
+				auto reason = "TLS handshake with " + url.host() + " failed: " + describeTlsFailure(a_err, ssl);
 				error("[handshake] -> ", reason);
-				client.closeConnection(reason);
-				return;
-			}
-			{
-				std::lock_guard<std::mutex> guard(client.errorLock);
-				client.ourTlsSession = tlsSessionDescription(*a_attempt);
-			}
-			auto expected = CONNECTING;
-			if (client.ourConnectionState.compare_exchange_strong(expected, CONNECTING_SUCCESS)) {
-				client.initiateRead();
-			}
-		});
-	}
-
-	void Client::initiateRead() {
-		auto message = std::make_shared<NetworkMessage>();
-		auto reading = asioConnection->socket;
-		asio::async_read(*reading, asio::buffer(message->headerBuffer), [this, message, reading](const asio::error_code& a_err, size_t) {
-			if (reading != asioConnection->socket) {
-				return;
-			}
-			if (a_err) {
-				handleError(a_err, "header");
-				return;
-			}
-			auto header = message->headerValue();
-			message->protocol = (header & PROTOCOL_FRAME_BIT) != 0;
-			auto contentSize = header & ~PROTOCOL_FRAME_BIT;
-			auto maxMessageBytes = message->protocol ? MAX_PROTOCOL_FRAME_BYTES : ourLimits.authenticatedMaxMessageBytes;
-			if (contentSize > maxMessageBytes) {
-				auto reason = "Received a " + std::to_string(contentSize) + " byte " + (message->protocol ? "protocol frame" : "message") + ", over the " + std::to_string(maxMessageBytes) + " byte limit.";
-				error("[header] -> ", reason);
 				closeConnection(reason);
 				return;
 			}
-			message->content.resize(contentSize);
-			asio::async_read(*reading, asio::buffer(message->content), [this, message, reading](const asio::error_code& a_err, size_t) {
-				if (reading != asioConnection->socket) {
+			{
+				std::lock_guard<std::mutex> guard(errorLock);
+				ourTlsSession = tlsSessionDescription(ssl);
+			}
+			auto expected = CONNECTING;
+			if (ourConnectionState.compare_exchange_strong(expected, CONNECTING_SUCCESS)) {
+				a_attempt->onInput([this, a_attempt] { readMessages(a_attempt); });
+				a_attempt->onClosed([this, a_attempt](const std::error_code& a_closeErr) {
+					if (a_attempt == stream) {
+						handleError(a_closeErr, incoming ? "content" : "header");
+					}
+				});
+				a_attempt->reading(true);
+			}
+		});
+	}
+
+	void Client::readMessages(const std::shared_ptr<NetworkStream>& a_attempt) {
+		while (a_attempt == stream && ourConnectionState != DISCONNECTED) {
+			if (!incoming) {
+				if (a_attempt->input().size() < 4) {
 					return;
 				}
-				if (a_err) {
-					handleError(a_err, "content");
-				} else if (ourConnectionState != DISCONNECTED) {
-					{
-						std::lock_guard<std::mutex> guard(inboxLock);
-						inbox.push_back(message);
-					}
-					initiateRead();
+				auto message = takeHeader(*a_attempt);
+				auto header = message->headerValue();
+				message->protocol = (header & PROTOCOL_FRAME_BIT) != 0;
+				auto contentSize = header & ~PROTOCOL_FRAME_BIT;
+				auto maxMessageBytes = message->protocol ? MAX_PROTOCOL_FRAME_BYTES : ourLimits.authenticatedMaxMessageBytes;
+				if (contentSize > maxMessageBytes) {
+					auto reason = "Received a " + std::to_string(contentSize) + " byte " + (message->protocol ? "protocol frame" : "message") + ", over the " + std::to_string(maxMessageBytes) + " byte limit.";
+					error("[header] -> ", reason);
+					closeConnection(reason);
+					return;
 				}
-			});
-		});
+				message->content.reserve(contentSize);
+				incoming = message;
+			}
+			if (!takeContent(*a_attempt, *incoming, incoming->headerValue() & ~PROTOCOL_FRAME_BIT)) {
+				return;
+			}
+			std::lock_guard<std::mutex> guard(inboxLock);
+			inbox.push_back(std::move(incoming));
+			incoming.reset();
+		}
 	}
 
 	void Client::initialize() {
 		try {
 			initiateConnection();
-			if (!worker) {
-				worker = std::make_unique<std::thread>([this] { asioConnection->ioService.run(); });
-			}
 		} catch (std::exception &e) {
 			disconnect();
 			error("Exception caught in Client: ", e.what());
@@ -393,28 +347,9 @@ namespace MV {
 			error(exception.what());
 			throw exception;
 		}
-		auto message = NetworkMessage::make(a_content);
-		asio::post(asioConnection->ioService, [this, message] {
-			if (asioConnection->socket) {
-				outbox.push_back(message);
-				if (outbox.size() == 1) { writeNext(); }
-			}
-		});
-	}
-
-	// One async_write in flight per socket: overlapping writes interleave their bytes on the wire.
-	void Client::writeNext() {
-		auto message = outbox.front();
-		auto writing = asioConnection->socket;
-		asio::async_write(*writing, asio::buffer(message->wire()), [this, message, writing](asio::error_code a_err, size_t) {
-			if (writing != asioConnection->socket) {
-				return;
-			}
-			outbox.pop_front();
-			if (a_err) {
-				handleError(a_err, "write");
-			} else if (!outbox.empty()) {
-				writeNext();
+		network->post([this, message = NetworkMessage::make(a_content)] {
+			if (stream && stream->open()) {
+				stream->write(message->wire());
 			}
 		});
 	}
@@ -435,31 +370,21 @@ namespace MV {
 
 	Server::Server(const std::string& a_address, uint16_t a_port, const TlsConfig& a_tls, std::function<std::unique_ptr<ConnectionStateBase>(const std::shared_ptr<Connection> &)> a_connectionStateFactory, const MessageLimits& a_limits) :
 		ourLimits(a_limits),
-		asioAcceptor(std::make_unique<AsioAcceptor>(a_tls)),
+		tlsContext(makeTlsServerContext(a_tls)),
+		network(std::make_unique<NetworkContext>(1)),
 		connectionStateFactory(a_connectionStateFactory) {
-		const asio::ip::tcp::endpoint endpoint(asio::ip::make_address(a_address), a_port);
-		auto& acceptor = asioAcceptor->acceptor;
-		acceptor.open(endpoint.protocol());
-#ifdef _WIN32
-		// asio's endpoint constructor would set SO_REUSEADDR, which on Windows lets another process
-		// bind a specific address over this wildcard port and capture its loopback connections
-		acceptor.set_option(asio::detail::socket_option::boolean<SOL_SOCKET, SO_EXCLUSIVEADDRUSE>(true));
-#else
-		acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(true));
-#endif
-		acceptor.bind(endpoint);
-		acceptor.listen();
-		ourPort = acceptor.local_endpoint().port();
+
+		auto address = SocketAddress::parse(a_address, a_port);
+		require<ResourceException>(address.has_value(), "Server: [", a_address, "] is not an IPv4 or IPv6 address");
+		listener = NetworkListener::make(network->reactor(), *address, [this](Socket a_socket) { accept(std::move(a_socket)); });
+		ourPort = listener->port();
 		info("Server Startup: TLS on port ", ourPort, a_tls.requirePeerCertificate ? ", client certificates required" : "");
-		acceptClients();
-		info("Accept Clients");
-		worker = std::make_unique<std::thread>([this] { asioAcceptor->ioService.run(); });
 	}
 
+	// The network thread stops first; the connections then post their closes to a reactor that only discards them.
 	Server::~Server() {
 		info("Server::~Server");
-		asioAcceptor->ioService.stop();
-		if (worker && worker->joinable()) { worker->join(); }
+		network->stop();
 	}
 
 	void Server::sendAll(const std::string &a_message) {
@@ -480,20 +405,13 @@ namespace MV {
 		}
 	}
 
-	void Server::acceptClients() {
-		auto socket = std::make_shared<asio::ip::tcp::socket>(asioAcceptor->ioService);
-		asioAcceptor->acceptor.async_accept(*socket, [this, socket](asio::error_code ec) {
-			if (!ec) {
-				auto asioSocket = std::make_unique<ConnectionSocket::AsioSocket>(asioAcceptor->ioService, asioAcceptor->tlsContext, std::move(*socket));
-				auto connectionSocket = std::make_shared<ConnectionSocket>(std::move(asioSocket), ourLimits, [this](const std::shared_ptr<ConnectionSocket> &a_ready) {
-					std::lock_guard<std::mutex> guard(acceptedLock);
-					accepted.push_back(a_ready);
-				});
-				connectionSocket->start();
-			}
-
-			acceptClients();
+	void Server::accept(Socket a_socket) {
+		auto stream = NetworkStream::make(network->reactor(), std::move(a_socket));
+		auto connectionSocket = std::make_shared<ConnectionSocket>(network->reactor(), tlsContext, stream, ourLimits, [this](const std::shared_ptr<ConnectionSocket> &a_ready) {
+			std::lock_guard<std::mutex> guard(acceptedLock);
+			accepted.push_back(a_ready);
 		});
+		connectionSocket->start();
 	}
 
 	void Server::adoptAcceptedConnections() {
@@ -561,32 +479,15 @@ namespace MV {
 		return receivedAmount;
 	}
 
-	namespace {
-		bool remoteIsLoopback(const asio::ip::tcp::socket& a_socket) {
-			asio::error_code error;
-			auto endpoint = a_socket.remote_endpoint(error);
-			return !error && endpoint.address().is_loopback();
-		}
-
-		std::string remoteAddress(const asio::ip::tcp::socket& a_socket) {
-			asio::error_code error;
-			auto endpoint = a_socket.remote_endpoint(error);
-			return error ? std::string("unknown peer") : endpoint.address().to_string() + ":" + std::to_string(endpoint.port());
-		}
-
-		size_t unreadCost(const NetworkMessage& a_message) {
-			return sizeof(NetworkMessage) + a_message.content.size();
-		}
-
-		const size_t PROTOCOL_FRAME_FIXED_BYTES = 5;
-	}
-
-	ConnectionSocket::ConnectionSocket(std::unique_ptr<AsioSocket> a_asioSocket, const MessageLimits& a_limits, std::function<void(const std::shared_ptr<ConnectionSocket> &)> a_onReady) :
-		asioSocket(std::move(a_asioSocket)),
+	ConnectionSocket::ConnectionSocket(NetworkReactor &a_reactor, std::shared_ptr<TlsContext> a_tlsContext, std::shared_ptr<NetworkStream> a_stream, const MessageLimits& a_limits, std::function<void(const std::shared_ptr<ConnectionSocket> &)> a_onReady) :
+		reactor(a_reactor),
+		mailbox(a_reactor.mailbox()),
+		tlsContext(std::move(a_tlsContext)),
+		stream(std::move(a_stream)),
 		onReady(std::move(a_onReady)),
 		ourLimits(a_limits),
-		ourPeerAddress(remoteAddress(asioSocket->socket->next_layer())),
-		ourLoopback(remoteIsLoopback(asioSocket->socket->next_layer())) {
+		ourPeerAddress(stream->peer() ? stream->peer()->to_string() : std::string("unknown peer")),
+		ourLoopback(stream->peer() && stream->peer()->loopback()) {
 	}
 
 	ConnectionSocket::~ConnectionSocket() = default;
@@ -594,29 +495,35 @@ namespace MV {
 	void ConnectionSocket::start() {
 		handshaking = true;
 		armDeadline(ourLimits.handshakeTimeout);
-		auto stream = asioSocket->socket;
-		stream->async_handshake(asio::ssl::stream_base::server, [self = shared_from_this(), stream](const asio::error_code& a_err) {
-			if (stream == self->asioSocket->socket) {
-				self->handshakeComplete(a_err);
-			}
-		});
+		try {
+			stream->beginTls(*tlsContext);
+		} catch (std::exception &e) {
+			error("[handshake] ", ourPeerAddress, " -> ", e.what());
+			ourFailed = true;
+			closeNow();
+			return;
+		}
+		stream->handshake([self = shared_from_this()](const std::error_code& a_err) { self->handshakeComplete(a_err); });
 	}
 
 	void ConnectionSocket::handshakeComplete(const std::error_code &a_err) {
 		handshaking = false;
 		disarmDeadline();
 		if (a_err) {
-			error("[handshake] ", ourPeerAddress, " -> ", describeTlsFailure(a_err, *asioSocket->socket));
+			error("[handshake] ", ourPeerAddress, " -> ", describeTlsFailure(a_err, stream->tls()));
 			ourFailed = true;
 			closeNow();
 			return;
 		}
-		ourPeerCertificate = tlsPeerCertificate(*asioSocket->socket);
-		ourTlsSession = tlsSessionDescription(*asioSocket->socket);
+		ourPeerCertificate = tlsPeerCertificate(stream->tls());
+		ourTlsSession = tlsSessionDescription(stream->tls());
 		info("[handshake] ", ourPeerAddress, " -> ", ourTlsSession, ourPeerCertificate ? " certificate " + ourPeerCertificate->describe() : std::string());
-		initiateRead();
+		auto self = shared_from_this();
+		stream->onInput([self] { self->readMessages(); });
+		stream->onClosed([self](const std::error_code& a_closeErr) { self->handleError(a_closeErr, self->incoming ? "content" : "header"); });
+		stream->reading(true);
 		auto ready = std::move(onReady);
-		ready(shared_from_this());
+		ready(self);
 	}
 
 	void ConnectionSocket::send(const std::string &a_content) {
@@ -624,96 +531,43 @@ namespace MV {
 	}
 
 	void ConnectionSocket::queue(const std::shared_ptr<NetworkMessage> &a_message) {
-		asio::post(asioSocket->ioService, [self = shared_from_this(), a_message] {
-			if (self->asioSocket->socket && !self->closing) {
+		mailbox->post([self = shared_from_this(), a_message] {
+			if (self->stream->open() && !self->closing) {
 				self->push(a_message);
 			}
 		});
 	}
 
 	void ConnectionSocket::push(const std::shared_ptr<NetworkMessage> &a_message) {
-		outbox.push_back(a_message);
-		if (outbox.size() == 1) {
-			writeNext();
-		}
+		stream->write(a_message->wire());
 	}
 
 	void ConnectionSocket::close() {
-		asio::post(asioSocket->ioService, [self = shared_from_this()] { self->beginClose(); });
+		mailbox->post([self = shared_from_this()] { self->beginClose(); });
 	}
 
 	// Messages queued before the close still go out (a kick or a rejection says why), then TLS sends its
 	// close_notify and incoming bytes are discarded until the peer closes, so the peer reads the reason
 	// instead of a reset; the deadline bounds a peer that stops reading or keeps sending.
 	void ConnectionSocket::beginClose() {
-		if (closing || !asioSocket->socket) {
+		if (closing || !stream->open()) {
 			return;
 		}
 		closing = true;
-		asioSocket->deadline.cancel();
-		asioSocket->closeDeadline.expires_after(std::chrono::seconds(2));
-		asioSocket->closeDeadline.async_wait([self = shared_from_this()](const asio::error_code& a_err) {
-			if (!a_err) {
-				self->closeNow();
-			}
+		disarmDeadline();
+		closeDeadline = reactor.scheduleAfter(std::chrono::seconds(2), [self = shared_from_this()] {
+			self->closeDeadline = 0;
+			self->closeNow();
 		});
-		if (outbox.empty()) {
-			linger();
-		}
-	}
-
-	// A pending read is cancelled first: the TLS shutdown reads too, and a stream allows one read at a time.
-	void ConnectionSocket::linger() {
-		if (lingering || !asioSocket->socket) {
-			return;
-		}
-		lingering = true;
-		if (reading) {
-			asio::error_code ignored;
-			asioSocket->socket->lowest_layer().cancel(ignored);
-		} else {
-			shutdownTls();
-		}
-	}
-
-	// OpenSSL fails the shutdown when data arrives after its close_notify, which is out by then: drain at the TCP level.
-	void ConnectionSocket::shutdownTls() {
-		auto closingStream = asioSocket->socket;
-		closingStream->async_shutdown([self = shared_from_this(), closingStream](const asio::error_code& a_err) {
-			if (closingStream != self->asioSocket->socket) {
-				return;
-			}
-			if (!a_err) {
-				self->closeNow();
-				return;
-			}
-			asio::error_code ignored;
-			self->asioSocket->socket->lowest_layer().shutdown(asio::ip::tcp::socket::shutdown_send, ignored);
-			self->discarded.resize(16 * 1024);
-			self->discardNext();
-		});
-	}
-
-	void ConnectionSocket::discardNext() {
-		auto discarding = asioSocket->socket;
-		discarding->next_layer().async_read_some(asio::buffer(discarded), [self = shared_from_this(), discarding](const asio::error_code& a_err, size_t) {
-			if (discarding != self->asioSocket->socket) {
-				return;
-			}
-			if (a_err) {
-				self->closeNow();
-			} else {
-				self->discardNext();
-			}
-		});
+		stream->finish([self = shared_from_this()] { self->closeNow(); });
 	}
 
 	void ConnectionSocket::closeNow() {
-		closeSocket(asioSocket->socket);
-		outbox.clear();
-		discarded = {};
-		asioSocket->closeDeadline.cancel();
-		asioSocket->deadline.cancel();
+		stream->close();
+		reactor.cancel(closeDeadline);
+		closeDeadline = 0;
+		disarmDeadline();
+		incoming.reset();
 	}
 
 	void ConnectionSocket::authenticate() {
@@ -744,84 +598,39 @@ namespace MV {
 			}
 			readingPaused = false;
 		}
-		asio::post(asioSocket->ioService, [self = shared_from_this()] { self->resumeReading(); });
+		mailbox->post([self = shared_from_this()] { self->resumeReading(); });
 	}
 
-	void ConnectionSocket::writeNext() {
-		auto message = outbox.front();
-		auto writing = asioSocket->socket;
-		asio::async_write(*writing, asio::buffer(message->wire()), [self = shared_from_this(), message, writing](asio::error_code a_err, size_t) {
-			if (writing != self->asioSocket->socket) {
-				return;
-			}
-			self->outbox.pop_front();
-			if (a_err) {
-				self->handleError(a_err, "write");
-				self->outbox.clear();
-			}
-			if (!self->outbox.empty()) {
-				self->writeNext();
-			} else if (self->closing) {
-				self->linger();
-			}
-		});
-	}
-
-	void ConnectionSocket::initiateRead() {
-		reading = true;
-		auto message = std::make_shared<NetworkMessage>();
-		auto readSocket = asioSocket->socket;
-		asio::async_read(*readSocket, asio::buffer(message->headerBuffer), [self = shared_from_this(), message, readSocket](const asio::error_code& a_err, size_t) {
-			if (readSocket != self->asioSocket->socket) {
-				return;
-			}
-			if (self->closing) {
-				self->stopReading();
-				return;
-			}
-			if (a_err) {
-				self->reading = false;
-				self->handleError(a_err, "header");
-				return;
-			}
-			auto contentSize = message->headerValue();
-			auto maxMessageBytes = self->ourLimits.maxMessageBytes(self->ourAuthenticated);
-			if (contentSize > maxMessageBytes) {
-				self->reading = false;
-				self->reject(ProtocolCode::MESSAGE_TOO_LARGE, maxMessageBytes, "A " + std::to_string(contentSize) + " byte message exceeds the " + std::to_string(maxMessageBytes) + " byte limit.");
-				return;
-			}
-			message->content.resize(contentSize);
-			self->awaitingContent = true;
-			self->armDeadline(self->ourLimits.unreadTimeout);
-			asio::async_read(*readSocket, asio::buffer(message->content), [self, message, readSocket](const asio::error_code& a_err, size_t) {
-				if (readSocket != self->asioSocket->socket) {
+	void ConnectionSocket::readMessages() {
+		while (stream->open() && !closing) {
+			if (!incoming) {
+				if (stream->input().size() < 4) {
 					return;
 				}
-				self->awaitingContent = false;
-				if (self->closing) {
-					self->stopReading();
+				auto message = takeHeader(*stream);
+				auto contentSize = message->headerValue();
+				auto maxMessageBytes = ourLimits.maxMessageBytes(ourAuthenticated);
+				if (contentSize > maxMessageBytes) {
+					reject(ProtocolCode::MESSAGE_TOO_LARGE, maxMessageBytes, "A " + std::to_string(contentSize) + " byte message exceeds the " + std::to_string(maxMessageBytes) + " byte limit.");
 					return;
 				}
-				self->disarmDeadline();
-				if (a_err) {
-					self->reading = false;
-					self->handleError(a_err, "content");
-					return;
-				}
-				self->receive(message);
-			});
-		});
-	}
-
-	void ConnectionSocket::stopReading() {
-		reading = false;
-		if (lingering) {
-			shutdownTls();
+				message->content.reserve(contentSize);
+				incoming = message;
+				armDeadline(ourLimits.unreadTimeout);
+			}
+			if (!takeContent(*stream, *incoming, incoming->headerValue())) {
+				return;
+			}
+			disarmDeadline();
+			auto message = std::move(incoming);
+			incoming.reset();
+			if (!receive(message)) {
+				return;
+			}
 		}
 	}
 
-	void ConnectionSocket::receive(const std::shared_ptr<NetworkMessage> &a_message) {
+	bool ConnectionSocket::receive(const std::shared_ptr<NetworkMessage> &a_message) {
 		bool paused = false;
 		{
 			std::lock_guard<std::mutex> guard(inboxLock);
@@ -831,32 +640,32 @@ namespace MV {
 			paused = readingPaused;
 		}
 		if (paused) {
-			reading = false;
+			stream->reading(false);
 			armDeadline(ourLimits.unreadTimeout);
-		} else {
-			initiateRead();
 		}
+		return !paused;
 	}
 
 	void ConnectionSocket::resumeReading() {
-		if (asioSocket->socket && !closing) {
+		if (stream->open() && !closing) {
 			disarmDeadline();
-			initiateRead();
+			stream->reading(true);
 		}
 	}
 
 	void ConnectionSocket::armDeadline(std::chrono::milliseconds a_timeout) {
-		asioSocket->deadline.expires_after(a_timeout);
-		asioSocket->deadline.async_wait([self = shared_from_this()](const asio::error_code& a_err) {
-			// A deadline that was moved after it fired is not the one that fired.
-			if (!a_err && self->asioSocket->socket && !self->closing && self->asioSocket->deadline.expiry() <= asio::steady_timer::clock_type::now()) {
+		reactor.cancel(deadline);
+		deadline = reactor.scheduleAfter(a_timeout, [self = shared_from_this()] {
+			self->deadline = 0;
+			if (self->stream->open() && !self->closing) {
 				self->deadlineReached();
 			}
 		});
 	}
 
 	void ConnectionSocket::disarmDeadline() {
-		asioSocket->deadline.expires_at(asio::steady_timer::time_point::max());
+		reactor.cancel(deadline);
+		deadline = 0;
 	}
 
 	void ConnectionSocket::deadlineReached() {
@@ -867,7 +676,7 @@ namespace MV {
 			return;
 		}
 		auto timeout = static_cast<uint32_t>(ourLimits.unreadTimeout.count());
-		if (awaitingContent) {
+		if (incoming) {
 			reject(ProtocolCode::MESSAGE_TIMEOUT, timeout, "A message did not finish arriving within " + std::to_string(timeout) + " ms.");
 			return;
 		}
@@ -884,13 +693,13 @@ namespace MV {
 	void ConnectionSocket::reject(ProtocolCode a_code, uint32_t a_value, const std::string &a_reason) {
 		error("[rejected] -> ", a_reason);
 		ourFailed = true;
-		if (asioSocket->socket && !closing) {
+		if (stream->open() && !closing) {
 			push(NetworkMessage::make(ProtocolFrame {a_code, a_value, a_reason}));
 			beginClose();
 		}
 	}
 
-	void ConnectionSocket::handleError(const asio::error_code &a_err, const std::string &a_section) {
+	void ConnectionSocket::handleError(const std::error_code &a_err, const std::string &a_section) {
 		error("[", a_section, "] -> ", a_err.message());
 		ourFailed = true;
 	}

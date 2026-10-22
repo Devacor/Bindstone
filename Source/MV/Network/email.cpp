@@ -1,11 +1,9 @@
 #include "MV/Network/email.h"
-#include "MV/Network/networkContextAsio.h"
-#include "MV/Network/tlsAsio.h"
+#include "MV/Network/networkReactor.h"
+#include "MV/Network/networkStream.h"
 #include "MV/Utility/log.h"
 #include "MV/Utility/require.hpp"
 
-#include <asio.hpp>
-#include <asio/ssl.hpp>
 #include <jaiscript/serialization/convenience.hpp>
 #include <optional>
 #include <sstream>
@@ -13,8 +11,6 @@
 namespace MV {
 
 	namespace {
-		using tcp = asio::ip::tcp;
-
 		// Every line ends in CRLF, and a line that starts with '.' gets a second one so it cannot end the DATA section early
 		std::string smtpBody(const std::string& a_message) {
 			std::string result;
@@ -45,30 +41,26 @@ namespace MV {
 		}
 	}
 
-	struct Email::AsioSmtp {
-		AsioSmtp(std::shared_ptr<NetworkContext> a_context, const std::string& a_trustedCaFile) :
+	struct Email::Transport {
+		Transport(std::shared_ptr<NetworkContext> a_context, const std::string& a_trustedCaFile) :
 			sharedContext(std::move(a_context)),
-			ioContext(sharedContext->asio().ioContext),
-			resolver(ioContext),
-			tlsContext(makePublicTlsClientContext(a_trustedCaFile)),
-			stream(ioContext, *tlsContext) {
+			reactor(&sharedContext->reactor()),
+			tlsContext(makePublicTlsClientContext(a_trustedCaFile)) {
 		}
 
-		explicit AsioSmtp(const std::string& a_trustedCaFile) :
-			ownedContext(std::in_place),
-			ioContext(*ownedContext),
-			resolver(ioContext),
-			tlsContext(makePublicTlsClientContext(a_trustedCaFile)),
-			stream(ioContext, *tlsContext) {
+		// sendBlocking runs this reactor on the calling thread until the conversation ends.
+		explicit Transport(const std::string& a_trustedCaFile) :
+			ownedReactor(std::make_unique<NetworkReactor>(1)),
+			reactor(ownedReactor.get()),
+			tlsContext(makePublicTlsClientContext(a_trustedCaFile)) {
 		}
 
 		std::shared_ptr<NetworkContext> sharedContext;
-		std::optional<asio::io_context> ownedContext;
-		asio::io_context& ioContext;
-		tcp::resolver resolver;
-		std::shared_ptr<asio::ssl::context> tlsContext;
-		TlsStream stream;
-		asio::streambuf response;
+		std::unique_ptr<NetworkReactor> ownedReactor;
+		NetworkReactor* reactor;
+		std::shared_ptr<TlsContext> tlsContext;
+		std::shared_ptr<NetworkStream> stream;
+		NetworkReactor::TimerId quitDeadline = 0;
 	};
 
 	Email::Email(const std::string& a_host, const std::string &a_port, const Credentials &a_credentials) :
@@ -83,11 +75,14 @@ namespace MV {
 		return std::shared_ptr<Email>(new Email(a_host, a_port, a_credentials));
 	}
 
-
+	// The reactor dies here, after its run, so no stream or posted work of this send keeps the Email alive.
 	EmailResult Email::sendBlocking(const Addresses &a_addresses, const std::string &a_title, const std::string &a_message) {
 		begin(nullptr, a_addresses, a_title, a_message);
-		if (asioSmtp) {
-			asioSmtp->ownedContext->run();
+		if (transport && transport->ownedReactor) {
+			transport->ownedReactor->run();
+			transport->stream.reset();
+			transport->ownedReactor.reset();
+			transport->reactor = nullptr;
 		}
 		return result();
 	}
@@ -106,9 +101,9 @@ namespace MV {
 		}
 		addresses = a_addresses;
 		try {
-			asioSmtp = a_context ? std::make_unique<AsioSmtp>(a_context, ourTrustedCaFile) : std::make_unique<AsioSmtp>(ourTrustedCaFile);
+			transport = a_context ? std::make_unique<Transport>(a_context, ourTrustedCaFile) : std::make_unique<Transport>(ourTrustedCaFile);
 			storeMessageString(a_title, a_message);
-			initiateConnection();
+			transport->reactor->post([self = shared_from_this()] { self->initiateConnection(); });
 		} catch (std::exception& e) {
 			fail(EmailError::START, std::string("Email failed to start: ") + e.what());
 		} catch (...) {
@@ -137,42 +132,55 @@ namespace MV {
 
 	void Email::initiateConnection() {
 		auto self = shared_from_this();
-		asioSmtp->resolver.async_resolve(host, port, [this, self](const asio::error_code& a_err, tcp::resolver::results_type a_endpoints) {
+		transport->stream = NetworkStream::make(*transport->reactor);
+		auto stream = transport->stream;
+		transport->reactor->resolve(host, port, [this, self, stream](const std::error_code& a_err, std::vector<SocketAddress> a_addresses) {
 			if (a_err) {
 				fail(EmailError::RESOLVE, a_err, "Email Resolve Failure");
 				return;
 			}
-			asio::async_connect(asioSmtp->stream.lowest_layer(), a_endpoints, [this, self](const asio::error_code& a_connectErr, const tcp::endpoint&) {
+			stream->connect(std::move(a_addresses), [this, self, stream](const std::error_code& a_connectErr) {
 				if (a_connectErr) {
 					fail(EmailError::CONNECT, a_connectErr, "Email Connection Failure");
-				} else {
-					smtpHandshake();
+					return;
 				}
+				stream->onInput([this, self] { readReplies(); });
+				stream->onClosed([this, self, stream](const std::error_code& a_closeErr) {
+					if (stream->writing()) {
+						fail(EmailError::WRITE, a_closeErr, "Email Write Failure");
+					} else {
+						fail(EmailError::READ, a_closeErr, "Email Read Failure");
+					}
+				});
+				stream->reading(true);
+				smtpHandshake();
 			});
 		});
 	}
 
 	void Email::smtpHandshake() {
 		auto self = shared_from_this();
-		readReply({220}, [this, self] {
+		expectReply({220}, [this, self] {
 			command("EHLO " + domainFromEmail(addresses.from) + "\r\n", {250}, [this, self] {
 				command("STARTTLS\r\n", {220}, [this, self] {
+					ssl_st* ssl = nullptr;
 					try {
-						verifyTlsPeerAs(asioSmtp->stream, host);
+						ssl = transport->stream->beginTls(*transport->tlsContext);
+						verifyTlsPeerAs(ssl, host);
 					} catch (std::exception& e) {
 						fail(EmailError::TLS, e.what());
 						return;
 					}
-					asioSmtp->stream.async_handshake(asio::ssl::stream_base::client, [this, self](const asio::error_code& a_err) {
+					transport->stream->handshake([this, self, ssl](const std::error_code& a_err) {
 						if (a_err) {
-							fail(EmailError::TLS, "TLS handshake with " + host + " failed: " + describeTlsFailure(a_err, asioSmtp->stream));
+							fail(EmailError::TLS, "TLS handshake with " + host + " failed: " + describeTlsFailure(a_err, ssl));
 						} else {
 							secureLogin();
 						}
 					});
-				}, false);
-			}, false);
-		}, false);
+				});
+			});
+		});
 	}
 
 	void Email::secureLogin() {
@@ -182,10 +190,10 @@ namespace MV {
 				command(jai::base64_encode(credentials.name) + "\r\n", {334}, [this, self] {
 					command(jai::base64_encode(credentials.password) + "\r\n", {235}, [this, self] {
 						sendMessageAndQuit();
-					}, true);
-				}, true);
-			}, true);
-		}, true);
+					});
+				});
+			});
+		});
 	}
 
 	void Email::sendMessageAndQuit() {
@@ -196,79 +204,77 @@ namespace MV {
 					command(message, {250}, [this, self] {
 						succeed();
 						info("Email Complete [", addresses.from, "] -> [", addresses.to, "]");
-						command("QUIT\r\n", {}, {}, true);
-					}, true);
-				}, true);
-			}, true);
-		}, true);
+						command("QUIT\r\n", {}, {});
+					});
+				});
+			});
+		});
 	}
 
-	void Email::command(const std::string &a_content, std::vector<int> a_validResponses, std::function<void()> a_onReply, bool a_secure) {
-		auto self = shared_from_this();
-		auto payload = std::make_shared<std::string>(a_content);
-		auto onWritten = [this, self, payload, a_validResponses, a_onReply, a_secure](const asio::error_code& a_err, size_t) {
-			if (a_err) {
-				fail(EmailError::WRITE, a_err, "Email Write Failure");
-			} else if (a_onReply) {
-				readReply(a_validResponses, a_onReply, a_secure);
-			}
-		};
-		if (a_secure) {
-			asio::async_write(asioSmtp->stream, asio::buffer(*payload), onWritten);
-		} else {
-			asio::async_write(asioSmtp->stream.next_layer(), asio::buffer(*payload), onWritten);
+	// The last command ends the conversation: TLS close_notify, then the server's close, or 2 s.
+	void Email::command(const std::string &a_content, std::vector<int> a_validResponses, std::function<void()> a_onReply) {
+		transport->stream->write(a_content);
+		if (a_onReply) {
+			expectReply(std::move(a_validResponses), std::move(a_onReply));
+			return;
 		}
+		auto self = shared_from_this();
+		transport->stream->finish([this, self] { closeTransport(); });
+		transport->quitDeadline = transport->reactor->scheduleAfter(std::chrono::seconds(2), [this, self] {
+			transport->quitDeadline = 0;
+			closeTransport();
+		});
+	}
+
+	void Email::expectReply(std::vector<int> a_validResponses, std::function<void()> a_onReply) {
+		expectedReplies = std::move(a_validResponses);
+		onReply = std::move(a_onReply);
+		readReplies();
 	}
 
 	// A reply is any number of "ddd-text" lines and one final "ddd text" line, possibly split across reads.
-	void Email::readReply(std::vector<int> a_validResponses, std::function<void()> a_onReply, bool a_secure) {
-		auto self = shared_from_this();
-		auto onLines = [this, self, a_validResponses, a_onReply, a_secure](const asio::error_code& a_err, size_t) {
-			if (a_err) {
-				fail(EmailError::READ, a_err, "Email Read Failure");
-				return;
-			}
-			auto& buffer = asioSmtp->response;
-			std::string available(asio::buffers_begin(buffer.data()), asio::buffers_end(buffer.data()));
-			size_t consumed = 0;
-			bool final = false;
-			for (auto lineEnd = available.find("\r\n"); lineEnd != std::string::npos && !final; lineEnd = available.find("\r\n", consumed)) {
-				auto line = available.substr(consumed, lineEnd - consumed);
-				consumed = lineEnd + 2;
-				info("SMTP: ", line);
-				final = line.size() < 4 || line[3] != '-';
-				if (final) {
-					try {
-						pendingReply.status = std::stoi(line.substr(0, 3));
-					} catch (...) {
-						pendingReply.status = 0;
-					}
-					pendingReply.message = line.size() > 4 ? line.substr(4) : "";
-				} else {
-					pendingReply.lines.push_back(line.substr(4));
+	void Email::readReplies() {
+		if (!onReply || !transport->stream) {
+			return;
+		}
+		auto& stream = *transport->stream;
+		auto available = stream.input();
+		size_t consumed = 0;
+		bool final = false;
+		for (auto lineEnd = available.find("\r\n"); lineEnd != std::string_view::npos && !final; lineEnd = available.find("\r\n", consumed)) {
+			auto line = std::string(available.substr(consumed, lineEnd - consumed));
+			consumed = lineEnd + 2;
+			info("SMTP: ", line);
+			final = line.size() < 4 || line[3] != '-';
+			if (final) {
+				try {
+					pendingReply.status = std::stoi(line.substr(0, 3));
+				} catch (...) {
+					pendingReply.status = 0;
 				}
-			}
-			buffer.consume(consumed);
-			if (!final) {
-				readReply(a_validResponses, a_onReply, a_secure);
-				return;
-			}
-			auto reply = std::move(pendingReply);
-			pendingReply = {};
-			{
-				std::lock_guard<std::mutex> guard(lock);
-				ourResult.lastReply = reply;
-			}
-			if (a_validResponses.empty() || std::find(a_validResponses.begin(), a_validResponses.end(), reply.status) != a_validResponses.end()) {
-				a_onReply();
+				pendingReply.message = line.size() > 4 ? line.substr(4) : "";
 			} else {
-				fail(EmailError::REJECTED, "SMTP server replied " + std::to_string(reply.status) + " " + reply.message);
+				pendingReply.lines.push_back(line.size() > 4 ? line.substr(4) : "");
 			}
-		};
-		if (a_secure) {
-			asio::async_read_until(asioSmtp->stream, asioSmtp->response, "\r\n", onLines);
+		}
+		stream.consume(consumed);
+		if (!final) {
+			return;
+		}
+		auto reply = std::move(pendingReply);
+		pendingReply = {};
+		{
+			std::lock_guard<std::mutex> guard(lock);
+			ourResult.lastReply = reply;
+		}
+		auto valid = std::move(expectedReplies);
+		auto callback = std::move(onReply);
+		expectedReplies.clear();
+		onReply = nullptr;
+		if (valid.empty() || std::find(valid.begin(), valid.end(), reply.status) != valid.end()) {
+			callback();
 		} else {
-			asio::async_read_until(asioSmtp->stream.next_layer(), asioSmtp->response, "\r\n", onLines);
+			fail(EmailError::REJECTED, "SMTP server replied " + std::to_string(reply.status) + " " + reply.message);
 		}
 	}
 
@@ -288,17 +294,21 @@ namespace MV {
 	}
 
 	void Email::fail(EmailError a_error, const std::string &a_reason) {
+		bool failing = false;
 		{
 			std::lock_guard<std::mutex> guard(lock);
-			if (done) {
-				return;
+			if (!done) {
+				done = true;
+				failing = true;
+				ourResult.error = a_error;
+				ourResult.errorMessage = a_reason;
 			}
-			done = true;
-			ourResult.error = a_error;
-			ourResult.errorMessage = a_reason;
 		}
-		error("Email failed [", addresses.from, "] -> [", addresses.to, "]: ", a_reason);
-		finish();
+		if (failing) {
+			error("Email failed [", addresses.from, "] -> [", addresses.to, "]: ", a_reason);
+			finish();
+		}
+		closeTransport();
 	}
 
 	void Email::finish() {
@@ -310,6 +320,21 @@ namespace MV {
 			callbackQueue->then([self, callback = onComplete] { callback(self); });
 		} else {
 			onComplete(self);
+		}
+	}
+
+	// Network thread only once the stream exists; before that (a send that failed to start) only the stop applies.
+	void Email::closeTransport() {
+		if (!transport) {
+			return;
+		}
+		if (transport->stream) {
+			transport->stream->close();
+			transport->reactor->cancel(transport->quitDeadline);
+			transport->quitDeadline = 0;
+		}
+		if (transport->ownedReactor) {
+			transport->ownedReactor->stop();
 		}
 	}
 

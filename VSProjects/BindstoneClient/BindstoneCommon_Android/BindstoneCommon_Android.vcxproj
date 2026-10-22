@@ -222,7 +222,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -238,7 +238,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;$(SolutionDir)VSProjects\SDL2_ttf\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;$(SolutionDir)VSProjects\SDL2_ttf\include</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -254,7 +254,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -270,7 +270,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -286,11 +286,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>CompileAsCpp</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
@@ -303,11 +303,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>CompileAsCpp</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
@@ -320,11 +320,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>CompileAsCpp</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
@@ -337,11 +337,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);USE_FAST_MATH;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>CompileAsCpp</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>

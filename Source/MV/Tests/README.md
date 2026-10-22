@@ -67,8 +67,8 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
   what tasks and posted work throw (std and non-std); a decode on the pool continues on the main
   thread at the next `run_posted()`, even when it throws (the texture streaming shape); the lobby's
   one-worker database pool runs queries one at a time in order and drains each continuation once on
-  the lobby thread; `io_context` workers block in `run()` until the context stops and the pool then
-  joins. The pool's own contract is JaiScript's `thread_pool continuations` suite.
+  the lobby thread; a `NetworkContext` runs posted work in order on its one network thread and its
+  last owner may let go on that thread. The pool's own contract is JaiScript's `thread_pool continuations` suite.
 - **MV Emitter** — the particle pipeline (`simulateWhileHeadless` runs it under the headless test
   renderer): particles spawn, age and die with four points and six in-range indices each, the
   population respects `maximumParticles`, a headless renderer skips it unless asked; the

@@ -1,10 +1,10 @@
-// The linked OpenSSL and a loopback TLS handshake through asio, Foundry framework.
+// The linked OpenSSL and a loopback TLS handshake through MV's network stream, Foundry framework.
 // Built into mv_tests.exe (see build_tests.bat); auto-registers with the Foundry runner.
 
 #include <jaiscript/testing/foundry.hpp>
 
-#include <asio.hpp>
-#include <asio/ssl.hpp>
+#include "MV/Network/networkStream.h"
+
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/opensslv.h>
@@ -55,8 +55,10 @@ Identity makeSelfSignedIdentity(const char* a_commonName) {
 }
 
 struct HandshakeOutcome {
-	asio::error_code serverError {asio::error::would_block};
-	asio::error_code clientError {asio::error::would_block};
+	bool serverDone = false;
+	std::string serverError;
+	bool clientDone = false;
+	std::string clientError;
 	int serverProtocol = 0;
 	std::string clientProtocol;
 	std::string cipher;
@@ -65,61 +67,68 @@ struct HandshakeOutcome {
 };
 
 HandshakeOutcome loopbackHandshake(const Identity& a_serverIdentity, const Identity& a_clientTrusts) {
-	asio::io_context io;
+	MV::TlsContext serverContext(true);
+	SSL_CTX_set_min_proto_version(serverContext.native(), TLS1_3_VERSION);
+	SSL_CTX_use_certificate(serverContext.native(), a_serverIdentity.certificate.get());
+	SSL_CTX_use_PrivateKey(serverContext.native(), a_serverIdentity.key.get());
 
-	asio::ssl::context serverContext(asio::ssl::context::tls_server);
-	SSL_CTX_set_min_proto_version(serverContext.native_handle(), TLS1_3_VERSION);
-	SSL_CTX_use_certificate(serverContext.native_handle(), a_serverIdentity.certificate.get());
-	SSL_CTX_use_PrivateKey(serverContext.native_handle(), a_serverIdentity.key.get());
-
-	asio::ssl::context clientContext(asio::ssl::context::tls_client);
-	X509_STORE_add_cert(SSL_CTX_get_cert_store(clientContext.native_handle()), a_clientTrusts.certificate.get());
-	clientContext.set_verify_mode(asio::ssl::verify_peer);
-
-	asio::ip::tcp::acceptor acceptor(io, asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), 0));
-	asio::ssl::stream<asio::ip::tcp::socket> server(io, serverContext);
-	asio::ssl::stream<asio::ip::tcp::socket> client(io, clientContext);
-	SSL_set_tlsext_host_name(client.native_handle(), "localhost");
-	SSL_set1_host(client.native_handle(), "localhost");
+	MV::TlsContext clientContext(false);
+	X509_STORE_add_cert(SSL_CTX_get_cert_store(clientContext.native()), a_clientTrusts.certificate.get());
+	SSL_CTX_set_verify(clientContext.native(), SSL_VERIFY_PEER, nullptr);
 
 	HandshakeOutcome result;
-	std::string serverBuffer(5, '\0');
-	acceptor.async_accept(server.lowest_layer(), [&](const asio::error_code& a_acceptError) {
-		if (a_acceptError) {
-			result.serverError = a_acceptError;
-			return;
-		}
-		server.async_handshake(asio::ssl::stream_base::server, [&](const asio::error_code& a_handshakeError) {
-			result.serverError = a_handshakeError;
-			if (!a_handshakeError) {
-				result.serverProtocol = SSL_version(server.native_handle());
-				asio::async_read(server, asio::buffer(serverBuffer), [&](const asio::error_code& a_readError, std::size_t) {
-					if (!a_readError) {
-						result.received = serverBuffer;
-					}
-				});
+	MV::NetworkReactor reactor;
+	std::shared_ptr<MV::NetworkStream> server;
+	auto listener = MV::NetworkListener::make(reactor, *MV::SocketAddress::parse("127.0.0.1"), [&](MV::Socket a_socket) {
+		server = MV::NetworkStream::make(reactor, std::move(a_socket));
+		server->beginTls(serverContext);
+		server->handshake([&](const std::error_code& a_error) {
+			result.serverDone = true;
+			result.serverError = a_error ? a_error.message() : std::string();
+			if (a_error) {
+				return;
 			}
+			result.serverProtocol = SSL_version(server->tls());
+			server->onInput([&] {
+				if (server->input().size() >= 5) {
+					result.received = std::string(server->input().substr(0, 5));
+					reactor.stop();
+				}
+			});
+			server->reading(true);
 		});
 	});
-	client.lowest_layer().async_connect(acceptor.local_endpoint(), [&](const asio::error_code& a_connectError) {
+	auto client = MV::NetworkStream::make(reactor);
+	client->connect({*MV::SocketAddress::parse("127.0.0.1", listener->port())}, [&](const std::error_code& a_connectError) {
 		if (a_connectError) {
-			result.clientError = a_connectError;
+			result.clientDone = true;
+			result.clientError = a_connectError.message();
+			reactor.stop();
 			return;
 		}
-		client.async_handshake(asio::ssl::stream_base::client, [&](const asio::error_code& a_handshakeError) {
-			result.clientError = a_handshakeError;
-			if (!a_handshakeError) {
-				asio::async_write(client, asio::buffer(std::string_view("hello")), [](const asio::error_code&, std::size_t) {});
+		auto* ssl = client->beginTls(clientContext);
+		SSL_set_tlsext_host_name(ssl, "localhost");
+		SSL_set1_host(ssl, "localhost");
+		client->handshake([&](const std::error_code& a_handshakeError) {
+			result.clientDone = true;
+			result.clientError = a_handshakeError ? a_handshakeError.message() : std::string();
+			if (a_handshakeError) {
+				reactor.stop();
+			} else {
+				client->write("hello");
 			}
 		});
 	});
-	io.run_for(std::chrono::seconds(10));
+	reactor.scheduleAfter(std::chrono::seconds(10), [&] { reactor.stop(); });
+	reactor.run();
 
-	result.clientProtocol = SSL_get_version(client.native_handle());
-	if (const SSL_CIPHER* cipher = SSL_get_current_cipher(client.native_handle())) {
-		result.cipher = SSL_CIPHER_get_name(cipher);
+	if (client->tls()) {
+		result.clientProtocol = SSL_get_version(client->tls());
+		if (const SSL_CIPHER* cipher = SSL_get_current_cipher(client->tls())) {
+			result.cipher = SSL_CIPHER_get_name(cipher);
+		}
+		result.clientVerifyResult = SSL_get_verify_result(client->tls());
 	}
-	result.clientVerifyResult = SSL_get_verify_result(client.native_handle());
 	return result;
 }
 
@@ -136,12 +145,13 @@ public:
 			check(OpenSSL_version_num() >= 0x30000000UL);
 		});
 
-		test("a loopback handshake through asio negotiates TLS 1.3, verifies the server and carries data", [this]() {
+		test("a loopback handshake through MV's network stream negotiates TLS 1.3, verifies the server and carries data", [this]() {
 			auto identity = openssl_detail::makeSelfSignedIdentity("localhost");
 			auto outcome = openssl_detail::loopbackHandshake(identity, identity);
 			std::cout << "    negotiated: " << outcome.clientProtocol << " " << outcome.cipher << std::endl;
-			check_eq(std::string(), outcome.clientError ? outcome.clientError.message() : std::string());
-			check(!outcome.serverError);
+			check(outcome.clientDone && outcome.serverDone);
+			check_eq(std::string(), outcome.clientError);
+			check_eq(std::string(), outcome.serverError);
 			check_eq(static_cast<int>(TLS1_3_VERSION), outcome.serverProtocol);
 			check_eq(std::string("TLSv1.3"), outcome.clientProtocol);
 			check_eq(static_cast<long>(X509_V_OK), outcome.clientVerifyResult);
@@ -152,8 +162,7 @@ public:
 			auto serverIdentity = openssl_detail::makeSelfSignedIdentity("localhost");
 			auto otherIdentity = openssl_detail::makeSelfSignedIdentity("localhost");
 			auto outcome = openssl_detail::loopbackHandshake(serverIdentity, otherIdentity);
-			check(static_cast<bool>(outcome.clientError));
-			check(outcome.clientError != asio::error::would_block);
+			check(outcome.clientDone && !outcome.clientError.empty());
 			check(outcome.clientVerifyResult != X509_V_OK);
 			check(outcome.received.empty());
 		});

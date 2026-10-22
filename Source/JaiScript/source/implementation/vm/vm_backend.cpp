@@ -7599,6 +7599,18 @@ op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
 #endif
 namespace {
 	inline int64_t cell_bits_of_float(script_float d) { int64_t b; std::memcpy(&b, &d, sizeof b); return b; }
+	// a raw call's verbatim argument push (the instruction at ip): a scalar constant's kind (0: anything else, which the door pushes) and its cell bits
+	inline uint8_t raw_constant_kind(const chunk& code, uint32_t ip) {
+		const vm_instruction& oi = code.code[ip];
+		if (oi.op != opcode::op_const) return 0;
+		const size_t k = code.constants[oi.a].raw_storage_index();
+		return k == script_value::TYPEID_INT || k == script_value::TYPEID_FLOAT || k == script_value::TYPEID_BOOL ? static_cast<uint8_t>(k) : 0;
+	}
+	inline int64_t raw_constant_bits(const chunk& code, uint32_t ip) {
+		const script_value& k = code.constants[code.code[ip].a];
+		const size_t kind = k.raw_storage_index();
+		return kind == script_value::TYPEID_INT ? static_cast<int64_t>(k.unchecked_as_int()) : kind == script_value::TYPEID_FLOAT ? cell_bits_of_float(k.unchecked_as_float()) : (k.unchecked_as_bool() ? 1 : 0);
+	}
 	template <class Regs> JAI_FORCEINLINE void cell_put_float(const Regs& r, uint32_t dk, script_float v) { r.payload[dk] = cell_bits_of_float(v); r.kinds[dk] = static_cast<uint8_t>(script_value::TYPEID_FLOAT); r.dirty->set(dk); }
 	inline script_float cell_float_of_bits(int64_t b) { script_float d; std::memcpy(&d, &b, sizeof d); return d; }
 }
@@ -8806,6 +8818,9 @@ template <bool Raw>
 op_status vm_backend::cells_run_frame(frame*& fp, const chunk::cell_loop& entry_loop) {
 	const chunk::cell_loop* lp = &entry_loop;
 next_frame:
+#if !defined(JAISCRIPT_VM_PROFILE) && !defined(JAISCRIPT_VM_COVERAGE) && !defined(JAISCRIPT_MISS_INJECTION)
+	if constexpr (Raw) { cells_run_lean(fp, lp); }   // the frame programs' common operations and their raw calls; this loop takes the first other one
+#endif
 	frame& f = *fp;
 	const chunk::cell_loop& loop = *lp;
 	cell_state& cs = *f.cells;
@@ -8884,13 +8899,13 @@ next_frame:
 		case opcode::op_c_add_ff: cell_put_float(hot, ci.a, cell_float_of_bits(hot.payload[ci.b]) + cell_float_of_bits(hot.payload[ci.c])); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_sub_ff: cell_put_float(hot, ci.a, cell_float_of_bits(hot.payload[ci.b]) - cell_float_of_bits(hot.payload[ci.c])); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_mul_ff: cell_put_float(hot, ci.a, cell_float_of_bits(hot.payload[ci.b]) * cell_float_of_bits(hot.payload[ci.c])); ++ip; JAI_CELL_NEXT;
-		case opcode::op_c_add_ffk: cell_put_float(hot, ci.a, cell_float_of_bits(hot.payload[ci.b]) + hot.consts[ci.c].unchecked_as_float()); ++ip; JAI_CELL_NEXT;
-		case opcode::op_c_sub_ffk: cell_put_float(hot, ci.a, cell_float_of_bits(hot.payload[ci.b]) - hot.consts[ci.c].unchecked_as_float()); ++ip; JAI_CELL_NEXT;
-		case opcode::op_c_mul_ffk: cell_put_float(hot, ci.a, cell_float_of_bits(hot.payload[ci.b]) * hot.consts[ci.c].unchecked_as_float()); ++ip; JAI_CELL_NEXT;
+		case opcode::op_c_add_ffk: cell_put_float(hot, ci.a, cell_float_of_bits(hot.payload[ci.b]) + hot.consts[ci.c].unchecked_float_payload()); ++ip; JAI_CELL_NEXT;
+		case opcode::op_c_sub_ffk: cell_put_float(hot, ci.a, cell_float_of_bits(hot.payload[ci.b]) - hot.consts[ci.c].unchecked_float_payload()); ++ip; JAI_CELL_NEXT;
+		case opcode::op_c_mul_ffk: cell_put_float(hot, ci.a, cell_float_of_bits(hot.payload[ci.b]) * hot.consts[ci.c].unchecked_float_payload()); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: {
 			const script_int a = static_cast<script_int>(hot.payload[ci.b]);
 			const bool konst = ci.op == opcode::op_c_add_iik || ci.op == opcode::op_c_sub_iik;
-			const script_int r2 = konst ? hot.consts[ci.c].unchecked_as_int() : static_cast<script_int>(hot.payload[ci.c]);
+			const script_int r2 = konst ? hot.consts[ci.c].unchecked_int_payload() : static_cast<script_int>(hot.payload[ci.c]);
 			script_int r;
 			if (!(ci.op == opcode::op_c_add_ii || ci.op == opcode::op_c_add_iik ? ints::try_add(a, r2, r) : ints::try_sub(a, r2, r))) [[unlikely]] { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); break; }
 			hot.payload[ci.a] = static_cast<int64_t>(r); hot.kinds[ci.a] = static_cast<uint8_t>(script_value::TYPEID_INT); hot.dirty->set(ci.a);
@@ -8918,18 +8933,18 @@ next_frame:
 		case opcode::op_c_jle_ff: if ((cell_float_of_bits(hot.payload[ci.a]) <= cell_float_of_bits(hot.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
 		case opcode::op_c_jgt_ff: if ((cell_float_of_bits(hot.payload[ci.a]) > cell_float_of_bits(hot.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
 		case opcode::op_c_jge_ff: if ((cell_float_of_bits(hot.payload[ci.a]) >= cell_float_of_bits(hot.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
-		case opcode::op_c_jlt_ffk: if ((cell_float_of_bits(hot.payload[ci.a]) < hot.consts[ci.b].unchecked_as_float()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
-		case opcode::op_c_jle_ffk: if ((cell_float_of_bits(hot.payload[ci.a]) <= hot.consts[ci.b].unchecked_as_float()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
-		case opcode::op_c_jgt_ffk: if ((cell_float_of_bits(hot.payload[ci.a]) > hot.consts[ci.b].unchecked_as_float()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
-		case opcode::op_c_jge_ffk: if ((cell_float_of_bits(hot.payload[ci.a]) >= hot.consts[ci.b].unchecked_as_float()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
+		case opcode::op_c_jlt_ffk: if ((cell_float_of_bits(hot.payload[ci.a]) < hot.consts[ci.b].unchecked_float_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
+		case opcode::op_c_jle_ffk: if ((cell_float_of_bits(hot.payload[ci.a]) <= hot.consts[ci.b].unchecked_float_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
+		case opcode::op_c_jgt_ffk: if ((cell_float_of_bits(hot.payload[ci.a]) > hot.consts[ci.b].unchecked_float_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
+		case opcode::op_c_jge_ffk: if ((cell_float_of_bits(hot.payload[ci.a]) >= hot.consts[ci.b].unchecked_float_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
 		case opcode::op_c_jlt_ii: if ((static_cast<script_int>(hot.payload[ci.a]) < static_cast<script_int>(hot.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
 		case opcode::op_c_jle_ii: if ((static_cast<script_int>(hot.payload[ci.a]) <= static_cast<script_int>(hot.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
 		case opcode::op_c_jgt_ii: if ((static_cast<script_int>(hot.payload[ci.a]) > static_cast<script_int>(hot.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
 		case opcode::op_c_jge_ii: if ((static_cast<script_int>(hot.payload[ci.a]) >= static_cast<script_int>(hot.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
-		case opcode::op_c_jlt_iik: if ((static_cast<script_int>(hot.payload[ci.a]) < hot.consts[ci.b].unchecked_as_int()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
-		case opcode::op_c_jle_iik: if ((static_cast<script_int>(hot.payload[ci.a]) <= hot.consts[ci.b].unchecked_as_int()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
-		case opcode::op_c_jgt_iik: if ((static_cast<script_int>(hot.payload[ci.a]) > hot.consts[ci.b].unchecked_as_int()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
-		case opcode::op_c_jge_iik: if ((static_cast<script_int>(hot.payload[ci.a]) >= hot.consts[ci.b].unchecked_as_int()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
+		case opcode::op_c_jlt_iik: if ((static_cast<script_int>(hot.payload[ci.a]) < hot.consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
+		case opcode::op_c_jle_iik: if ((static_cast<script_int>(hot.payload[ci.a]) <= hot.consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
+		case opcode::op_c_jgt_iik: if ((static_cast<script_int>(hot.payload[ci.a]) > hot.consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
+		case opcode::op_c_jge_iik: if ((static_cast<script_int>(hot.payload[ci.a]) >= hot.consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } JAI_CELL_NEXT;
 		case opcode::op_c_cos_f: cell_put_float(hot, ci.a, std::cos(cell_float_of_bits(hot.payload[ci.b]))); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_sqrt_f: cell_put_float(hot, ci.a, std::sqrt(cell_float_of_bits(hot.payload[ci.b]))); ++ip; JAI_CELL_NEXT;
 		case opcode::op_c_mov_k: {
@@ -9014,16 +9029,43 @@ next_frame:
 		// a frame program's calls and returns: on the raw loop's switch; a raw call or a raw return leaves f (its ip set by the switch)
 		case opcode::op_c_probe:
 			if constexpr (Raw) {
-				const chunk::cell_loop::cell_call& pc = loop.calls[ci.a];
-				if (pc.raw && loop.plans[ci.a].epoch == raw_epoch_ && cs.raw_call == 0) { cs.raw_call = static_cast<uint16_t>(ci.a + 1); ++ip; break; }   // the site's plan holds: nothing to resolve
+				// a raw site whose plan holds (no general code ran since the probe validated it) resolves nothing
+				if (loop.plans.data()[ci.a].epoch == raw_epoch_ && loop.calls[ci.a].raw && cs.raw_call == 0) { cs.raw_call = static_cast<uint16_t>(ci.a + 1); ++ip; JAI_CELL_NEXT; }
 				f.ip = ip; st = exec_c_probe(f, ci); ip = f.ip; break;
 			}
 			[[fallthrough]];
 		case opcode::op_c_args:
-			if constexpr (Raw) { f.ip = ip; st = exec_c_args(f, ci); if (raw_switch_) { if (raw_follow(fp, lp, st)) goto next_frame; return st; } ip = f.ip; break; }
+			if constexpr (Raw) {
+				if (cs.raw_call == ci.a + 1) {
+					// the probe found a raw callee: entered here, its frame program run next in this loop. A proven site under every limit with the next
+					// record prepared for the body enters inline; anything else takes raw_call_enter's checks
+					f.ip = ip;
+					if (frame* callee = raw_enter_lean(f, loop, ci.a)) { lp = loop.plans.data()[ci.a].program; fp = callee; cells_frame_ = callee; goto next_frame; }
+					frame* callee = nullptr;
+					if (raw_call_enter(f, loop, ci, st, &callee)) {
+						if (callee) { lp = loop.plans.data()[ci.a].program; fp = callee; cells_frame_ = callee; goto next_frame; }
+						ip = f.ip;   // a limit raised at the call instruction
+						break;
+					}
+				}
+				f.ip = ip; st = exec_c_args(f, ci); if (raw_switch_) { if (raw_follow(fp, lp, st)) goto next_frame; return st; } ip = f.ip; break;
+			}
 			[[fallthrough]];
 		case opcode::op_c_ret:
-			if constexpr (Raw) { st = exec_c_ret(f, ip, ci, regs); if (raw_switch_) { if (raw_follow(fp, lp, st)) goto next_frame; return st; } break; }
+			if constexpr (Raw) {
+				// a raw-entered frame returning its declared kind to a frame-program caller parked on the call, no general code run since the entry, a
+				// landing that converts nothing: popped and landed inline; anything else is exec_c_ret's
+				if (!(ci.a & k_typed_const_bit)) {
+					const chunk::cell_loop* back_loop = nullptr;
+					if (frame* back = raw_return_lean(f, hot.kinds[ci.a], hot.payload[ci.a], back_loop)) { lp = back_loop; fp = back; cells_frame_ = back; goto next_frame; }
+				}
+				frame* back = nullptr;
+				const chunk::cell_loop* back_loop = nullptr;
+				st = exec_c_ret(f, ip, ci, regs, back, back_loop);
+				if (back) { fp = back; lp = back_loop; cells_frame_ = back; goto next_frame; }
+				if (raw_switch_) { if (raw_follow(fp, lp, st)) goto next_frame; return st; }
+				break;
+			}
 			[[fallthrough]];
 		default: f.ip = ip; st = cells_run_cold(f, loop, ci); ip = f.ip; if (switch_to_) return st; break;   // the call door (a callee runs in the dispatcher, or raw; the block resumes at the landing)
 		}
@@ -9058,6 +9100,81 @@ op_status vm_backend::cells_run(frame& entry, const chunk::cell_loop& entry_loop
 	const op_status st = cells_run_frame<false>(ep, entry_loop);
 	if (!raw_switch_) [[likely]] return st;
 	return cells_run_raw(entry, st, false);   // a raw call from the block: the raw chain runs from here
+}
+// the frame-program loop's lean lane: the scalar operations, branches and raw calls and returns a frame program spends its time in, each the
+// block loop's case verbatim, in a loop small enough to keep its state in registers. Any other instruction, and any of these that would miss or
+// decline (an overflow, a probe without a plan, a call or return that is not raw), leaves fp at that instruction for the block loop, which runs
+// it on its own case
+void vm_backend::cells_run_lean(frame*& fp, const chunk::cell_loop*& lp) {
+	for (;;) {
+		frame& f = *fp;
+		const chunk::cell_loop& loop = *lp;
+		cell_state& cs = *f.cells;
+		int64_t* const payload = cs.payload.data();
+		uint8_t* const kinds = cs.kind.data();
+		cell_dirty& dirty = cs.dirty;
+		const script_value* const consts = parallel_worker_ ? block_constants(*f.code) : f.code->constants.data();
+		const vm_instruction* const code = f.code->code.data();
+		size_t ip = f.ip;
+		for (;;) {
+			const vm_instruction& ci = code[ip];
+			switch (ci.op) {
+			case opcode::op_c_jlt_ii: ip = (static_cast<script_int>(payload[ci.a]) < static_cast<script_int>(payload[ci.b])) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jle_ii: ip = (static_cast<script_int>(payload[ci.a]) <= static_cast<script_int>(payload[ci.b])) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jgt_ii: ip = (static_cast<script_int>(payload[ci.a]) > static_cast<script_int>(payload[ci.b])) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jge_ii: ip = (static_cast<script_int>(payload[ci.a]) >= static_cast<script_int>(payload[ci.b])) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jlt_iik: ip = (static_cast<script_int>(payload[ci.a]) < consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jle_iik: ip = (static_cast<script_int>(payload[ci.a]) <= consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jgt_iik: ip = (static_cast<script_int>(payload[ci.a]) > consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jge_iik: ip = (static_cast<script_int>(payload[ci.a]) >= consts[ci.b].unchecked_int_payload()) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jlt_ff: ip = (cell_float_of_bits(payload[ci.a]) < cell_float_of_bits(payload[ci.b])) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jle_ff: ip = (cell_float_of_bits(payload[ci.a]) <= cell_float_of_bits(payload[ci.b])) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jgt_ff: ip = (cell_float_of_bits(payload[ci.a]) > cell_float_of_bits(payload[ci.b])) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jge_ff: ip = (cell_float_of_bits(payload[ci.a]) >= cell_float_of_bits(payload[ci.b])) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jlt_ffk: ip = (cell_float_of_bits(payload[ci.a]) < consts[ci.b].unchecked_float_payload()) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jle_ffk: ip = (cell_float_of_bits(payload[ci.a]) <= consts[ci.b].unchecked_float_payload()) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jgt_ffk: ip = (cell_float_of_bits(payload[ci.a]) > consts[ci.b].unchecked_float_payload()) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_jge_ffk: ip = (cell_float_of_bits(payload[ci.a]) >= consts[ci.b].unchecked_float_payload()) != ((ci.c & 0x80000000u) != 0) ? ip + 1 : (ci.c & 0x7FFFFFFFu); continue;
+			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: {
+				const script_int a = static_cast<script_int>(payload[ci.b]);
+				const bool konst = ci.op == opcode::op_c_add_iik || ci.op == opcode::op_c_sub_iik;
+				const script_int r2 = konst ? consts[ci.c].unchecked_int_payload() : static_cast<script_int>(payload[ci.c]);
+				script_int r;
+				if (!(ci.op == opcode::op_c_add_ii || ci.op == opcode::op_c_add_iik ? ints::try_add(a, r2, r) : ints::try_sub(a, r2, r))) [[unlikely]] break;   // the block loop's case misses
+				payload[ci.a] = static_cast<int64_t>(r); kinds[ci.a] = static_cast<uint8_t>(script_value::TYPEID_INT); dirty.set(ci.a);
+				++ip;
+				continue;
+			}
+			case opcode::op_c_add_ff: payload[ci.a] = cell_bits_of_float(cell_float_of_bits(payload[ci.b]) + cell_float_of_bits(payload[ci.c])); kinds[ci.a] = static_cast<uint8_t>(script_value::TYPEID_FLOAT); dirty.set(ci.a); ++ip; continue;
+			case opcode::op_c_sub_ff: payload[ci.a] = cell_bits_of_float(cell_float_of_bits(payload[ci.b]) - cell_float_of_bits(payload[ci.c])); kinds[ci.a] = static_cast<uint8_t>(script_value::TYPEID_FLOAT); dirty.set(ci.a); ++ip; continue;
+			case opcode::op_c_mul_ff: payload[ci.a] = cell_bits_of_float(cell_float_of_bits(payload[ci.b]) * cell_float_of_bits(payload[ci.c])); kinds[ci.a] = static_cast<uint8_t>(script_value::TYPEID_FLOAT); dirty.set(ci.a); ++ip; continue;
+			case opcode::op_c_add_ffk: payload[ci.a] = cell_bits_of_float(cell_float_of_bits(payload[ci.b]) + consts[ci.c].unchecked_float_payload()); kinds[ci.a] = static_cast<uint8_t>(script_value::TYPEID_FLOAT); dirty.set(ci.a); ++ip; continue;
+			case opcode::op_c_sub_ffk: payload[ci.a] = cell_bits_of_float(cell_float_of_bits(payload[ci.b]) - consts[ci.c].unchecked_float_payload()); kinds[ci.a] = static_cast<uint8_t>(script_value::TYPEID_FLOAT); dirty.set(ci.a); ++ip; continue;
+			case opcode::op_c_mul_ffk: payload[ci.a] = cell_bits_of_float(cell_float_of_bits(payload[ci.b]) * consts[ci.c].unchecked_float_payload()); kinds[ci.a] = static_cast<uint8_t>(script_value::TYPEID_FLOAT); dirty.set(ci.a); ++ip; continue;
+			case opcode::op_c_mov_p: payload[ci.a] = payload[ci.b]; kinds[ci.a] = kinds[ci.b]; dirty.set(ci.a); ++ip; continue;
+			case opcode::op_c_jump: if (ci.c == 1) break; ip = ci.a; continue;   // a back edge polls the budget on the block loop's case
+			case opcode::op_c_probe:
+				if (loop.plans.data()[ci.a].epoch == raw_epoch_ && loop.calls.data()[ci.a].raw && cs.raw_call == 0) { cs.raw_call = static_cast<uint16_t>(ci.a + 1); ++ip; continue; }
+				break;
+			case opcode::op_c_args:
+				if (cs.raw_call == ci.a + 1) {
+					f.ip = ip;
+					if (frame* callee = raw_enter_lean(f, loop, ci.a)) { lp = loop.plans.data()[ci.a].program; fp = callee; cells_frame_ = callee; goto next; }
+				}
+				break;
+			case opcode::op_c_ret:
+				if (!(ci.a & k_typed_const_bit)) {
+					const chunk::cell_loop* back_loop = nullptr;
+					if (frame* back = raw_return_lean(f, kinds[ci.a], payload[ci.a], back_loop)) { lp = back_loop; fp = back; cells_frame_ = back; goto next; }
+				}
+				break;
+			default: break;
+			}
+			f.ip = ip;   // the block loop runs this instruction
+			return;
+		}
+	next:;
+	}
 }
 // the raw chain: each frame the block loop is handed runs next (a frame program in the raw loop, any other block in the block loop); the
 // dispatcher takes the frame the chain ends in, and a C++ exception converts at the frame running when it escaped
@@ -9255,8 +9372,14 @@ bool vm_backend::raw_probe(frame& f, const chunk::cell_loop& loop, uint32_t inde
 	if (!body || body->frame_program == k_invalid_u32) return false;
 	const chunk::cell_loop& program = body->cell_loops[body->frame_program];
 	if (!program.raw_enterable || program.param_cells.size() != cc.args.size() || cc.args.size() > 8 || program.param_kinds != cc.raw_kinds) return false;
-	loop.plans[index].epoch = raw_epoch_;   // the plan: until general code runs, this site's callee is this body's frame program
-	loop.plans[index].body = body;
+	chunk::cell_loop::call_plan& plan = loop.plans[index];   // until general code runs, this site's callee is this body's frame program
+	plan.epoch = raw_epoch_;
+	plan.body = body;
+	plan.program = &program;
+	plan.fn = &fn;
+	if (cc.consumer == 0) { plan.land = call_record::k_raw_land_drop; }
+	else if (const chunk::cell_loop::cell& dc = loop.cells[cc.dst]; dc.temp) { plan.land = dc.kind; }
+	else { plan.land = call_record::k_raw_land_rule; }
 	return true;
 }
 // a raw call's probe ran without parking the callee: the general form resumes inside the call's argument zone with it parked, as the general
@@ -9276,35 +9399,27 @@ void vm_backend::park_raw_callee(frame& f, const chunk::cell_loop& loop) {
 // from its head in this block loop; the caller parks on its call instruction exactly as the door leaves it, so a callee that leaves its cells
 // returns through the general return and the door's landing. A depth or budget limit raises at the caller's call instruction, as the general push
 // raises it. false: the callee is parked and the general door runs
-bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm_instruction& ins, op_status& st) {
+bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm_instruction& ins, op_status& st, frame** in_loop) {
 	JAI_CELL_COST(5)
 	cell_state& cs = *f.cells;
 	if (cs.raw_call != ins.a + 1) return false;   // the probe parked the callee
 	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
-	const call_site& site = f.code->call_sites[f.code->code[cc.probe_ip].a];
-	const script_defined_function& fn = *site.ic_fn;
-	chunk* body = loop.plans[ins.a].body;   // the probe's plan, of this epoch
-	const uint32_t program = body->frame_program;
-	const chunk::cell_loop& callee_loop = body->cell_loops[program];
+	const chunk::cell_loop::call_plan& plan = loop.plans[ins.a];   // the probe's, of this epoch
+	const script_defined_function& fn = *plan.fn;
+	chunk* body = plan.body;
+	const chunk::cell_loop& callee_loop = *plan.program;
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL);
 	const size_t argc = cc.args.size();
-	int64_t bits[8];
-	for (size_t i = 0; i < argc; ++i) {
-		const chunk::cell_loop::call_arg& a = cc.args[i];
-		uint8_t kind;
-		if (a.kind == 1) {
-			kind = cs.kind[a.v]; bits[i] = cs.payload[a.v];
-		} else {
-			const vm_instruction& oi = f.code->code[a.v];
-			const script_value* k = oi.op == opcode::op_const ? &f.code->constants[oi.a] : nullptr;   // an environment name: its load runs at the door
-			const size_t ck = k ? k->raw_storage_index() : script_value::TYPEID_NULL;
-			if (ck == script_value::TYPEID_INT) { kind = kint; bits[i] = static_cast<int64_t>(k->unchecked_as_int()); }
-			else if (ck == script_value::TYPEID_FLOAT) { kind = kflt; bits[i] = cell_bits_of_float(k->unchecked_as_float()); }
-			else if (ck == script_value::TYPEID_BOOL) { kind = kbool; bits[i] = k->unchecked_as_bool() ? 1 : 0; }
-			else { park_raw_callee(f, loop); return false; }
+	// a proven site's arguments are its parameters' kinds by construction (the plan compared the callee's); any other converts in the binder, as
+	// does an argument that is neither a cell nor a scalar constant (an environment name: its load runs at the door)
+	if (!cc.raw_proven) {
+		for (size_t i = 0; i < argc; ++i) {
+			const chunk::cell_loop::call_arg& a = cc.args[i];
+			const uint8_t want = static_cast<uint8_t>((callee_loop.param_kinds >> (4 * i)) & 0xFu);
+			if (a.kind == 1 ? cs.kind[a.v] != want : raw_constant_kind(*f.code, a.v) != want) { park_raw_callee(f, loop); return false; }
 		}
-		// a proven site's arguments are its parameters' kinds by construction (the plan compared the callee's); any other converts in the binder
-		if (!cc.raw_proven && kind != ((callee_loop.param_kinds >> (4 * i)) & 0xFu)) { park_raw_callee(f, loop); return false; }
+	} else {
+		for (size_t i = 0; i < argc; ++i) { if (cc.args[i].kind != 1 && raw_constant_kind(*f.code, cc.args[i].v) == 0) { park_raw_callee(f, loop); return false; } }
 	}
 	cs.raw_call = 0;
 	if (current_call_depth_ >= limits_->vm_depth_gate) [[unlikely]] {
@@ -9326,72 +9441,140 @@ bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm
 	}
 	if (call_records_top_ == call_records_.size()) { call_records_.push_back(std::make_unique<call_record>()); }
 	call_record& rec = *call_records_[call_records_top_];
+	if (rec.raw_prepared != body) {
+		// what a raw entry of this body writes the same way every time: written once, kept while only raw entries of the body use the record
+		// (every other push, and the general pop, clear raw_prepared)
+		cell_state& ncs = rec.cells;
+		const size_t n = callee_loop.cells.size();
+		rec.raw_prepared = body;
+		rec.return_type = fn.return_type;
+		if (fn.backend_return_conv == 0) { fn.backend_return_conv = static_cast<uint8_t>(classify_return_conv(fn.return_type)); }
+		rec.return_conv_class = fn.backend_return_conv;
+		const auto conv = static_cast<return_conv>(rec.return_conv_class);
+		rec.raw_ret_kind = conv == return_conv::prim_int ? kint : conv == return_conv::prim_float ? kflt : conv == return_conv::prim_bool ? kbool : 0;
+		rec.locals.function_name = fn.name;
+		rec.locals.reset_member_scope();
+		rec.locals.scope_state = static_cast<uint8_t>(detail::member_scope_state::none);   // a plain function without a closure: no member scope (compute_member_scope's answer)
+		rec.f.cells = &ncs;
+		rec.env_lazy = true;
+		rec.env_untouched = true;
+		rec.f.locals = &rec.locals;
+		if (rec.f.entry_env) { rec.f.entry_env = nullptr; }
+		rec.f.window_backed = true;
+		rec.f.top_level = false;
+		rec.f.unit = fn.unit;
+		if (ncs.payload.size() < n || ncs.payload.size() < k_raw_small_cells) { const size_t m = std::max(n, k_raw_small_cells); ncs.payload.resize(m); ncs.kind.resize(m); ncs.stamp.resize(m); }
+		std::fill(ncs.stamp.begin(), ncs.stamp.end(), nullptr);   // after this a raw run of the body stamps a cell only where writes_stamps says
+	}
+	frame& callee = raw_push(f, loop, ins.a, plan);
+	st = op_status::ok;
+	if (in_loop) { *in_loop = &callee; return true; }
+	raw_switch_ = &callee;
+	switch_to_ = &callee;   // the block loop returns on it (its door check); the raw chain clears it and runs the callee in place
+	return true;
+}
+// a raw entry's writes, every check passed, the limits ticked and the next record prepared for the body (raw_prepared): the record pushed, the
+// callee's cells cleared and its parameters written, the caller parked on its call instruction (f.ip is the arguments instruction's)
+JAI_FORCEINLINE vm_backend::frame& vm_backend::raw_push(frame& f, const chunk::cell_loop& loop, uint32_t index, const chunk::cell_loop::call_plan& plan) {
+	cell_state& cs = *f.cells;
+	const chunk::cell_loop::cell_call& cc = loop.calls[index];
+	chunk* body = plan.body;
+	const chunk::cell_loop& callee_loop = *plan.program;
+	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
+	cell_state& ncs = rec.cells;
 	rec.caller = &f;
-	rec.return_type = fn.return_type;
-	if (fn.backend_return_conv == 0) { fn.backend_return_conv = static_cast<uint8_t>(classify_return_conv(fn.return_type)); }
-	rec.return_conv_class = fn.backend_return_conv;
 	rec.try_base = try_records_.size();
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
 	rec.pending_base = pending_callees_.size();
-	rec.locals.function_name = fn.name;
-	rec.locals.reset_member_scope();
-	rec.locals.scope_state = static_cast<uint8_t>(detail::member_scope_state::none);   // a plain function without a closure: no member scope (compute_member_scope's answer)
-	rec.cells.reset_call(body->max_cells);
-	rec.f.cells = &rec.cells;
-	rec.env_lazy = true;
-	rec.env_untouched = true;
-	rec.cells.raw_landing = 0; rec.cells.raw_call = 0;   // the entry the frame's cells_enter would have made
+	ncs.dirty.reset(body->max_cells);   // reset_call's, the loop set below
+	ncs.refused_loops = 0; ncs.park_at = k_invalid_u32; ncs.env_loop = nullptr;
+	ncs.raw_landing = 0; ncs.raw_call = 0;   // the entry the frame's cells_enter would have made
 	++current_call_depth_;
 	rec.f.code = body;
 	rec.f.ip = callee_loop.copy_head;
-	rec.f.locals = &rec.locals;
-	rec.f.entry_env = nullptr;
-	rec.f.window_backed = true;
 	rec.f.window_base = std::max(stack_.size(), f.window_base + f.code->local_count);   // above the caller's window, built or not
 	rec.f.stack_base = rec.f.window_base;
-	rec.f.top_level = false;
-	rec.f.unit = fn.unit;
-	enter_unit(fn.unit);
+	enter_unit(plan.fn->unit);
 	frames_.push_back(&rec.f);
 	// the window is reserved here and built the first time the general form needs it (materialize_raw_window: a flush, a door call); the values
 	// are the cells, and the parameters' cells are dirty so a flush writes them
-	assert(fn.local_count <= body->local_count);
 	rec.f.window_live = 0;
 	rec.f.raw = true;
-	cell_state& ncs = rec.cells;
 	const size_t n = callee_loop.cells.size();
-	constexpr size_t small = 16;   // a small program's cells clear with fixed-size stores (the vectors keep at least this many)
-	if (ncs.payload.size() < n || ncs.payload.size() < small) { const size_t m = std::max(n, small); ncs.payload.resize(m); ncs.kind.resize(m); ncs.stamp.resize(m); }
 	if (n <= 8) {
 		std::memset(ncs.kind.data(), 0, 8);
-		std::memset(static_cast<void*>(ncs.stamp.data()), 0, 8 * sizeof(type_info*));
-	} else if (n <= small) {
-		std::memset(ncs.kind.data(), 0, small);
-		std::memset(static_cast<void*>(ncs.stamp.data()), 0, small * sizeof(type_info*));
+		if (callee_loop.writes_stamps) { std::memset(static_cast<void*>(ncs.stamp.data()), 0, 8 * sizeof(type_info*)); }
+	} else if (n <= k_raw_small_cells) {
+		std::memset(ncs.kind.data(), 0, k_raw_small_cells);
+		if (callee_loop.writes_stamps) { std::memset(static_cast<void*>(ncs.stamp.data()), 0, k_raw_small_cells * sizeof(type_info*)); }
 	} else {
 		std::fill_n(ncs.kind.begin(), n, uint8_t{0});
-		std::fill_n(ncs.stamp.begin(), n, nullptr);
+		if (callee_loop.writes_stamps) { std::fill_n(ncs.stamp.begin(), n, nullptr); }
 	}
+	const size_t argc = cc.args.size();
 	for (size_t i = 0; i < argc; ++i) {
+		const chunk::cell_loop::call_arg& a = cc.args[i];
 		const uint32_t k = callee_loop.param_cells[i];
-		ncs.payload[k] = bits[i]; ncs.kind[k] = static_cast<uint8_t>((callee_loop.param_kinds >> (4 * i)) & 0xFu); ncs.dirty.set(k);
+		ncs.payload[k] = a.kind == 1 ? cs.payload[a.v] : raw_constant_bits(*f.code, a.v); ncs.kind[k] = static_cast<uint8_t>((callee_loop.param_kinds >> (4 * i)) & 0xFu); ncs.dirty.set(k);
 	}
-	ncs.loop = program;
-	cs.raw_landing = static_cast<uint16_t>(ins.a + 1);
+	ncs.loop = body->frame_program;
+	cs.raw_call = 0;
+	cs.raw_landing = static_cast<uint16_t>(index + 1);
 	rec.raw_mark = raw_epoch_;
 	f.ip = f.ip + 1;   // parked on the call instruction (the door's C_CALL follows its C_ARGS)
-	raw_switch_ = &rec.f;
-	switch_to_ = &rec.f;   // the block loop returns on it (its door check); the raw chain clears it and runs the callee in place
-	st = op_status::ok;
-	return true;
+	rec.raw_caller_loop = &loop;
+	rec.raw_dst = cc.dst;
+	rec.raw_parked_ip = f.ip;
+	rec.raw_landing = static_cast<uint16_t>(index + 1);
+	rec.raw_land = plan.land;
+	return rec.f;
+}
+// the raw return's pop (the landing and the caller's resume are the caller's): the window truncated, the record and its frame popped
+JAI_FORCEINLINE void vm_backend::raw_pop(call_record& rec) {
+	if (stack_.size() > rec.f.stack_base) { stack_.truncate(rec.f.stack_base); }
+	if (rec.direct_pin) [[unlikely]] { rec.direct_pin = {}; }
+	rec.f.raw = false;
+	rec.f.code = nullptr;
+	rec.cells.loop = k_invalid_u32;   // the next push clears what its body reads
+	--current_call_depth_;
+	frames_.pop_back();
+	vm_backend::sync_unit();
+	--call_records_top_;
+}
+// a raw call the frame-program loop enters with nothing to decide: a proven site (its arguments its parameters' kinds) under every limit, the
+// next record prepared for the body; nullptr leaves the call to raw_call_enter's checks
+vm_backend::frame* vm_backend::raw_enter_lean(frame& f, const chunk::cell_loop& loop, uint32_t index) {
+	const chunk::cell_loop::call_plan& plan = loop.plans.data()[index];
+	if (!loop.calls.data()[index].raw_proven || current_call_depth_ >= limits_->vm_depth_gate || budget_tick_ + 1 >= 1024 || limits_->memory_tripped() ||
+	    call_records_top_ >= call_records_.size() || call_records_.data()[call_records_top_]->raw_prepared != plan.body) return nullptr;
+	++budget_tick_;
+	return &raw_push(f, loop, index, plan);
+}
+// a raw-entered frame's return of its declared kind to a frame-program caller parked on the call, no general code run since the entry, landing
+// what converts nothing: popped and landed, the caller (and its loop) returned to run next; nullptr leaves the return to exec_c_ret
+vm_backend::frame* vm_backend::raw_return_lean(frame& f, uint8_t kind, int64_t bits, const chunk::cell_loop*& back_loop) {
+	if (call_records_top_ == 0) return nullptr;
+	call_record& rec = *call_records_.data()[call_records_top_ - 1];
+	if (&rec.f != &f || kind != rec.raw_ret_kind || rec.raw_mark != raw_epoch_) return nullptr;
+	frame& caller = *rec.caller;
+	cell_state& ccs = *caller.cells;
+	const uint8_t land = rec.raw_land;
+	if (ccs.raw_landing == 0 || ccs.raw_landing != rec.raw_landing || ccs.loop == k_invalid_u32 || caller.ip != rec.raw_parked_ip || !rec.raw_caller_loop->frame_program ||
+	    !(land == call_record::k_raw_land_drop || land == 0 || land == kind)) return nullptr;
+	raw_pop(rec);
+	if (land != call_record::k_raw_land_drop) { ccs.payload[rec.raw_dst] = bits; ccs.kind[rec.raw_dst] = kind; ccs.dirty.set(rec.raw_dst); }
+	ccs.raw_landing = 0;
+	caller.ip += 2;   // past the landing
+	back_loop = rec.raw_caller_loop;
+	return &caller;
 }
 // a frame program's return: from a raw-entered frame whose result kind is its declared return kind, the record pops (the window truncated, the
 // pin released; nothing else moved) and the payload lands in the caller's destination cell by the declared-type rule, the caller continuing past
 // its landing; when a general call ran during the raw call or the landing converts, the door's landing takes the boxed result. Any other frame
 // (entered by a general call, a native entry, a result the declared type converts) boxes the result and runs the general return at the pad
-op_status vm_backend::exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr) {
+op_status vm_backend::exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, frame*& back, const chunk::cell_loop*& back_loop) {
 	JAI_CELL_COST(6)
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL);
 	uint8_t kind;
@@ -9410,15 +9593,10 @@ op_status vm_backend::exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins
 	// every landing clear it, and a door call never sets it)
 	call_record* rec = call_records_top_ ? call_records_[call_records_top_ - 1].get() : nullptr;
 	bool raw = false;
-	if (rec && &rec->f == &f) {
+	if (rec && &rec->f == &f && kind == rec->raw_ret_kind) {
 		const frame& caller = *rec->caller;
 		const cell_state* ccs = caller.cells;
-		if (ccs && ccs->raw_landing != 0 && ccs->loop != k_invalid_u32) {
-			const vm_instruction& parked = caller.code->code[caller.ip];
-			const auto conv = static_cast<return_conv>(rec->return_conv_class);
-			raw = parked.op == opcode::op_c_call && parked.a + 1 == ccs->raw_landing &&
-			      ((conv == return_conv::prim_int && kind == kint) || (conv == return_conv::prim_float && kind == kflt) || (conv == return_conv::prim_bool && kind == kbool));
-		}
+		raw = ccs && ccs->raw_landing == rec->raw_landing && rec->raw_landing != 0 && ccs->loop != k_invalid_u32 && caller.ip == rec->raw_parked_ip;
 	}
 	if (!raw) {
 		materialize_raw_window(f);   // the boxed result goes above this frame's window
@@ -9433,26 +9611,29 @@ op_status vm_backend::exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins
 	}
 	frame& caller = *rec->caller;
 	const bool no_general_call = rec->raw_mark == raw_epoch_;
-	if (stack_.size() > rec->f.stack_base) { stack_.truncate(rec->f.stack_base); }
-	rec->direct_pin = {};
-	rec->return_type = nullptr;
-	rec->f.raw = false;
-	rec->f.code = nullptr;
-	rec->cells.loop = k_invalid_u32;   // the next push clears what its body reads
-	--current_call_depth_;
-	frames_.pop_back();
-	sync_unit();
-	--call_records_top_;
-	const vm_instruction& call_ins = caller.code->code[caller.ip];
-	const chunk::cell_loop& cl = caller.code->cell_loops[call_ins.b];
-	const chunk::cell_loop::cell_call& cc = cl.calls[call_ins.a];
+	const chunk::cell_loop& cl = *rec->raw_caller_loop;
+	const chunk::cell_loop::cell_call& cc = cl.calls[rec->raw_landing - 1];
+	const uint8_t land = rec->raw_land;
+	raw_pop(*rec);
 	cell_state& ccs = *caller.cells;
-	raw_switch_ = &caller;
-	if (no_general_call && (cc.consumer == 0 || cell_land(caller, cl, cc.dst, kind, bits))) {
-		ccs.raw_landing = 0;
-		caller.ip += 2;   // past the landing
-		return {};
+	if (no_general_call) {
+		bool landed = land == call_record::k_raw_land_drop;
+		if (!landed) {
+			if (land != call_record::k_raw_land_rule && (land == 0 || land == kind)) {
+				ccs.payload[cc.dst] = bits; ccs.kind[cc.dst] = kind; ccs.dirty.set(cc.dst);   // a compiler value its contract admits
+				landed = true;
+			} else {
+				landed = cell_land_fast(caller, cl, cc.dst, kind, bits);
+			}
+		}
+		if (landed) {
+			ccs.raw_landing = 0;
+			caller.ip += 2;   // past the landing
+			if (cl.frame_program) { back = &caller; back_loop = &cl; } else { raw_switch_ = &caller; }
+			return {};
+		}
 	}
+	raw_switch_ = &caller;
 	materialize_raw_window(caller);   // the boxed result goes above the caller's window, where a miss at its consumer leaves it
 	if (cc.consumer != 0) { stack_.push_back(boxed()); }
 	++caller.ip;   // the landing instruction
@@ -13989,6 +14170,7 @@ bool vm_backend::push_plain_frame(frame& caller, const call_site& site, const sc
 	}
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
+	rec.raw_prepared = nullptr;
 	rec.caller = &caller;
 	rec.return_type = function.return_type;
 	rec.return_conv_class = function.backend_return_conv;
@@ -14076,6 +14258,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
+	rec.raw_prepared = nullptr;
 #ifdef JAISCRIPT_VM_PROFILE
 	rec.profile_entry_tsc = __rdtsc();
 #endif
@@ -22407,6 +22590,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
+	rec.raw_prepared = nullptr;
 #ifdef JAISCRIPT_VM_PROFILE
 	rec.profile_entry_tsc = __rdtsc();
 #endif
@@ -22594,6 +22778,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
+	rec.raw_prepared = nullptr;
 #ifdef JAISCRIPT_VM_PROFILE
 	rec.profile_entry_tsc = __rdtsc();
 #endif
@@ -22757,6 +22942,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
+	rec.raw_prepared = nullptr;
 #ifdef JAISCRIPT_VM_PROFILE
 	rec.profile_entry_tsc = __rdtsc();
 #endif
@@ -22928,6 +23114,7 @@ op_status vm_backend::push_static_method_frame(frame& caller, script_value&& met
 	}
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
+	rec.raw_prepared = nullptr;
 #ifdef JAISCRIPT_VM_PROFILE
 	rec.profile_entry_tsc = __rdtsc();
 #endif
@@ -23096,6 +23283,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	rec.ctor_result_stamp = nullptr;
 	rec.ctor_frame = false;
 	rec.f.code = nullptr;   // record frames borrow the chunk (chunk_cache_ pins it), no f.pin
+	rec.raw_prepared = nullptr;
 	--current_call_depth_;
 	frames_.pop_back();
 	sync_unit();   // the caller's unit again (a store only while a name has versions)

@@ -363,28 +363,32 @@ clock. The implementation:
 
 - **The per-statement path reads plain script-thread memory only.** `dispatch_stmt`/
   `dispatch_decl` test one cached plain pointer (`interpreter::debug_hook_`, null unless a
-  session is enabled). When it is non-null, `controller::wants_statement(line)` reads a plain
-  step/pause flag, one relaxed atomic (`sync_requested_`) and an 8 KB **line bloom** (bit =
-  breakpoint line mod 65536). No mutexes, no `shared_ptr` loads, no string hashing; with no
-  session armed nothing past the plain gate runs.
+  session is enabled). When it is non-null, `controller::wants_statement(line)` reads the
+  step/pause flag (an atomic bool read relaxed: the same byte load) and an 8 KB **line bloom**
+  (bit = breakpoint line mod 65536). No mutexes, no `shared_ptr` loads, no string hashing;
+  with no session armed nothing past the plain gate runs.
 - **Debug sync points (the off-cycle pattern).** The script thread pulls transport-side state
   (attach/detach, breakpoint edits, pause requests) into its cache only at: (a) **`execute()`
-  entry** (`prepare_for_execution` → `sync_debug_hook`), (b) **host entries**
-  (`begin_host_call`: a host call of a script function or method, a coroutine resume — one
-  relaxed load when no debugger was ever constructed), (c) **`time::sleep`/`time::sleep_ms`
-  returns** (a frame loop paced by sleeps runs a handful of ticks per frame), (d) **the
-  every-1024-ticks budget sample** (`execution_budget_exhausted` cold block — the same sampling
-  the script-timeout clock uses; the tick counts even for budget-0 hosts so a long-running
-  script still syncs), (e) **an armed session's next statement** after a transport change
-  (every control-side call raises `sync_requested_`; `wants_statement` lets it through and
-  `on_statement` runs the backend's `sync_debug_hook`), and (f) **park exit** (resume/step/detach
-  re-sync before the next statement runs, so stepping is exact). Cost of a steady-state sync:
+  entry** (`prepare_for_execution` → `sync_debug_hook`), (b) **the every-1024-ticks budget
+  sample** (`execution_budget_exhausted` cold block — the same sampling the script-timeout
+  clock uses; the tick counts even for budget-0 hosts so a long-running script still syncs),
+  (c) **a sleep** (`engine_time::sleep_for` → `controller::sleep_for` once a debugger exists:
+  the thread waits on the controller's cv with the sleep's deadline; a transport change wakes
+  it, it syncs outside the lock, a pending pause parks it at the statement that sleeps, and it
+  sleeps on for the remaining time; a host sleep source keeps its own sleep), (d) **an armed
+  session's next statement** after a transport change (`raise_sync` sets `sync_requested_`
+  and then the step/pause gate flag, so `wants_statement` takes the slow path with no extra
+  load; `on_statement` runs the backend's `sync_debug_hook`, and `sync_hot_state` re-raises the
+  gate if a change landed between its flag exchange and its gate store), and (e) **park exit**
+  (resume/step/detach re-sync before the next statement runs, so stepping is exact). No
+  dispatch loop, back edge, call or host entry does any new work. Cost of a steady-state sync:
   three relaxed loads + a version compare; the breakpoint table/bloom rebuild runs only when
   `setBreakpoints` actually changed something (`bp_version_`).
 - **Consequence (documented latency):** while a session is armed, a breakpoint edit or pause
-  binds at the next statement. An attach binds at the first of (a)-(d): the next host entry,
-  sleep return, or within 1024 back edges and calls. Anything done while parked (the normal IDE
-  flow) is exact and immediate.
+  binds at the next statement, or inside the sleep the script is in. An attach binds at the
+  first of (a)-(c). A host-driven frame loop with no execute and no sleep binds an attach within
+  1024 back edges and calls. Anything done while parked (the normal IDE flow) is exact and
+  immediate.
 - **Transport side stays lock-based/atomic** — `set_breakpoints` publishes an immutable
   snapshot + bumps `bp_version_` (release); the script thread re-caches on version mismatch
   (acquire). The hand-off is the sync point; the hot path never touches the shared table.

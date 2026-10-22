@@ -786,8 +786,6 @@ bool vm_backend::has_variable(const std::string& name) const {
 
 void vm_backend::begin_host_call() {
 	if (engine_) { limits_ = &engine_->execution_limits(); }
-	// a host entry is a debug sync point: a host-paced frame loop picks up attach, breakpoints and pause
-	if (debug_controller_.load(std::memory_order_relaxed) || debug_hook_) [[unlikely]] { sync_debug_hook(); }
 	arm_execution_deadline();
 	limits_->reset_for_execute();
 }

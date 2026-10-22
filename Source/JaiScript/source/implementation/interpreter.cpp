@@ -3265,8 +3265,8 @@ std::shared_ptr<environment> interpreter::get_global_environment() const {
     return global_env ? global_env : environment_;
 }
 
-// Debug sync point: execute entry, host entries, time::sleep, every 1024 budget ticks and an
-// armed session's pending change, always on the script thread. Mirrors the transport-writable
+// Debug sync point: execute entry, every 1024 budget ticks, a sleep and an armed session's
+// pending change, always on the script thread. Mirrors the transport-writable
 // controller state into the plain per-statement gate (debug_hook_) and the controller's hot
 // cache; a session that just ended gets a fresh budget deadline (the armed one is long past
 // after any pause).
@@ -3279,8 +3279,6 @@ void interpreter::sync_debug_hook() {
 
 void interpreter::begin_host_call() {
     if (engine_) { limits_ = &engine_->execution_limits(); }
-    // a host entry is a debug sync point: a host-paced frame loop picks up attach, breakpoints and pause
-    if (debugger_.load(std::memory_order_relaxed) || debug_hook_) [[unlikely]] { sync_debug_hook(); }
     arm_execution_deadline();
     limits_->reset_for_execute();
 }

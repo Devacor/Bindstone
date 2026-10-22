@@ -1,7 +1,6 @@
 #include <jaiscript/stdlib/time.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/engine_time.hpp>
-#include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/script_namespace.hpp>
@@ -16,13 +15,6 @@
 
 namespace jai {
 namespace stdlib {
-
-    // A sleep is a debug sync point: a frame loop paced by sleeps picks up an attach, breakpoint edits and a pause right
-    // after each one, however little it runs between them
-    static void sleep_then_sync(engine* e, std::chrono::nanoseconds duration) {
-        if (duration.count() > 0) { e->time().sleep_for(duration); }
-        if (!e->parallel_region_active()) { e->get_execution_backend()->sync_debug_hook(); }
-    }
 
     // Expands ${name} / ${name:spec} placeholders (the template-string spec mini-language); an empty result
     // means success, else the error text
@@ -309,14 +301,14 @@ namespace stdlib {
             if (a.size() != 1) return count_error("time::sleep expects exactly 1 argument (seconds)");
             double seconds = 0.0;
             if (!number(a[0], seconds)) return type_error("time::sleep expects a number of seconds");
-            sleep_then_sync(e, seconds > 0.0 ? std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(seconds > 1e9 ? 1e9 : seconds)) : std::chrono::nanoseconds{});
+            if (seconds > 0.0) { e->time().sleep_for(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(seconds > 1e9 ? 1e9 : seconds))); }
             return script_value(std::monostate{}, e);
         });
         def("sleep_ms", sig(1, 1, {svt::jai_float_type}, svt::jai_null_type), [=](engine* e, const args_t& a) -> R {
             if (a.size() != 1) return count_error("time::sleep_ms expects exactly 1 argument (milliseconds)");
             double ms = 0.0;
             if (!number(a[0], ms)) return type_error("time::sleep_ms expects a number of milliseconds");
-            sleep_then_sync(e, ms > 0.0 ? std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double, std::milli>(ms > 1e12 ? 1e12 : ms)) : std::chrono::nanoseconds{});
+            if (ms > 0.0) { e->time().sleep_for(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double, std::milli>(ms > 1e12 ? 1e12 : ms))); }
             return script_value(std::monostate{}, e);
         });
 

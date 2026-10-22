@@ -107,6 +107,8 @@ EMBEDDING = [
      "The rest of the engine's host API: functions and direct entries, live bindings to C++ variables and what writes through them, running files, per-execution variables, calling script and reading its state back, every error surface, and the time source."),
     ("18-build-integration.html", "Building JaiScript into a Host",
      "Every way into a project in full: CMake, Visual Studio and MSBuild, Xcode and an installed package, with the sources, flags and defines each needs, one file or per file, and Debug and Release notes."),
+    ("19-web-host.html", "jaiweb: a Web Application Host",
+     "jaiweb serves a JaiScript program over HTTP/1.1: a handler per request, Request, Response and a Router in script, SQLite bound as a class, cookie sessions, static files, and modules that reload on the request after they are saved."),
 ]
 
 LANGUAGE_BRIDGES = [
@@ -149,7 +151,7 @@ SECTION_INDEX_DESC = {
     "guide/index.html":
         "Fifteen chapters covering the whole core language - every standalone sample runs on both backends, with the output it prints.",
     "embedding/index.html":
-        "Sixteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, editor support, host math types, and a thread pool for host work.",
+        "Nineteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, editor support, host math types, a thread pool for host work, and a web application host.",
     "examples/index.html":
         "Complete, playable programs written in JaiScript - a raycast shooter, a dungeon crawler, a demoscene reel, an online RPG and a DOOM port - and what each one proves.",
     "reference/index.html":

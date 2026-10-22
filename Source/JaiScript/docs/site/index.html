@@ -106,7 +106,9 @@ print("hp = {}", h.hp);</code></pre></div>
 run <code>jaiscript hello.jai</code>. Strict checking and the VM backend are the defaults, <code>jaiscript</code>
 alone is a REPL, and <code>jaiscript --watch hello.jai</code> re-runs on every save.
 <a href="guide/01-hello.html#try-it-from-a-terminal">Building the runner</a> is one CMake target;
-<a href="reference/index.html#command-line-runner">its flags</a> are on the reference page.</p>
+<a href="reference/index.html#command-line-runner">its flags</a> are on the reference page.
+A web application is a host away too: <code>jaiweb app.jai</code> serves the app over HTTP, with SQLite, cookie sessions and
+static files, and applies each saved edit to the next request (<a href="embedding/19-web-host.html">jaiweb</a>).</p>
 </div>
 
 <div class="home-section">

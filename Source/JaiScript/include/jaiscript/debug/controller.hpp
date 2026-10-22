@@ -7,6 +7,7 @@
 // engine*; no sockets, no DAP. See internal/DEBUGGER_DESIGN.md (Concurrency & lifecycle).
 
 #include <jaiscript/core/value.hpp>
+#include <jaiscript/core/engine_time.hpp>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -67,11 +68,12 @@ public:
 // on the parked script thread (post them via post_command()).
 //
 // Cost model (internal/DEBUGGER_DESIGN.md "Debugger performance"): with no session armed the
-// backends never call in here per statement; armed, the per-statement gate reads the plain
-// hot cache plus one relaxed flag, with no locks and no string hashing. Transport-side writes
-// (enable, breakpoints, pause) land in atomics, raise sync_requested_, and are pulled into the
-// cache by sync_hot_state() at the debug sync points: host entries, time::sleep returns, the
-// 1024-tick budget sample, park exit and, while a session is armed, the next statement.
+// backends never call in here per statement; armed, the per-statement gate reads the hot cache
+// below, with no locks and no string hashing. Transport-side writes (enable, breakpoints,
+// pause) land in atomics, raise sync_requested_ (which also forces the gate's slow path and
+// wakes a sleeping script thread), and are pulled into the cache by sync_hot_state() at the
+// debug sync points: execute entry, the 1024-tick budget sample, a sleep, park exit and, while
+// a session is armed, the next statement.
 class controller {
 public:
     explicit controller(engine* eng);
@@ -119,9 +121,9 @@ public:
     // Per-statement gate of an armed session, checked BEFORE on_statement. Step/pause and a
     // pending transport change (on_statement syncs it) force the slow path; breakpoints filter
     // through a 64 Kbit line bloom (bit = line mod 65536), so a statement whose line matches no
-    // breakpoint line costs a few predictable branches. Bloom collisions just miss on the slow path.
+    // breakpoint line costs two predictable branches. Bloom collisions just miss on the slow path.
     bool wants_statement(uint32_t line) const noexcept {
-        if (hot_step_or_pause_ || sync_requested_.load(std::memory_order_relaxed)) return true;
+        if (hot_step_or_pause_.load(std::memory_order_relaxed)) return true;
         const uint64_t* bloom = hot_line_bloom_;
         if (!bloom) return false;
         const uint32_t b = line & (line_bloom_bits - 1);
@@ -140,7 +142,13 @@ public:
     // only when set_breakpoints actually changed something.
     bool sync_hot_state();
 
+    // The script thread's sleep while a debugger exists (engine_time::sleep_for): a transport
+    // change wakes it to sync, a pause parks it at the statement that sleeps, and the rest of
+    // the sleep runs after.
+    void sleep_for(std::chrono::nanoseconds duration);
+
 private:
+    void raise_sync();
     void park(const stop_info& si);
     bool should_stop(const ast_node* node, int depth, std::string& reason_out) const;
     bool breakpoint_hit(const std::string& file, int line) const;
@@ -165,7 +173,8 @@ private:
     std::atomic<bool> enabled_{false};
     std::atomic<bool> paused_{false};
     std::atomic<int> pending_pause_{0};
-    // Raised by every transport-side change: an armed session's next statement syncs on it.
+    // Raised by every transport-side change: an armed session's next statement and a sleeping
+    // script thread sync on it.
     std::atomic<bool> sync_requested_{false};
     std::atomic<int> step_mode_{static_cast<int>(step_mode::none)};
     std::atomic<int> step_base_depth_{0};
@@ -178,9 +187,11 @@ private:
 
     // ---- script-thread hot cache ----
     // Plain members: written only by sync_hot_state()/park() on the script thread, read
-    // per statement by wants_statement()/should_stop() with no synchronization.
+    // per statement by wants_statement()/should_stop() with no synchronization. The one
+    // exception is the slow-path flag: raise_sync sets it from the transport too (a relaxed
+    // load is the plain byte load the gate always read).
     static constexpr uint32_t line_bloom_bits = 65536;   // 8 KB bitmap when breakpoints exist
-    bool hot_step_or_pause_ = false;
+    std::atomic<bool> hot_step_or_pause_{false};
     const uint64_t* hot_line_bloom_ = nullptr;           // null = no breakpoints
     std::vector<uint64_t> hot_line_bloom_storage_;
     std::shared_ptr<const breakpoint_table> hot_bps_;    // installed table; retained across disable/rearm

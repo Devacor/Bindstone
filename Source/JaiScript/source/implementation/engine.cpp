@@ -4833,6 +4833,8 @@ std::chrono::nanoseconds engine_time::wall_now() {
 void engine_time::sleep_for(std::chrono::nanoseconds duration) {
     auto& impl = owner_->impl;
     if (impl->sleep_clock) { impl->sleep_clock(duration); }
+    // with a debugger, the sleep is a debug sync point: a frame loop paced by sleeps takes an attach, breakpoints and a pause at once
+    else if (impl->debugger_ && !owner_->parallel_region_active()) { impl->debugger_->sleep_for(duration); }
     else if (duration.count() > 0) { std::this_thread::sleep_for(duration); }
     if (!impl->monotonic_clock && !owner_->parallel_region_active()) { impl->limits_.note_clock_sample(std::chrono::steady_clock::now()); }
 }

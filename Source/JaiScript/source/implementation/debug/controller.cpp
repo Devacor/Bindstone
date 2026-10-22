@@ -34,9 +34,9 @@ controller::controller(engine* eng) : engine_(eng) {}
 void controller::set_enabled(bool on) {
     bool was = enabled_.exchange(on, std::memory_order_acq_rel);
     if (on == was) return;
-    sync_requested_.store(true, std::memory_order_release);
-    // The backend notices at its next debug sync point (execute or host entry, a
-    // time::sleep, the 1024-tick budget sample). While its hook is armed it suspends wall-clock deadline
+    raise_sync();
+    // The backend notices at its next debug sync point (execute entry, a sleep, the
+    // 1024-tick budget sample). While its hook is armed it suspends wall-clock deadline
     // checks itself and re-arms a fresh deadline when the session ends — a script parked
     // for minutes is never killed by the budget, and nothing here touches engine state
     // cross-thread. Leaving a session must never strand a parked thread or a live step mode.
@@ -60,7 +60,16 @@ void controller::publish_breakpoints(const std::string& file, std::vector<int> l
     records[file] = breakpoint_record{std::move(lines), ++next->sequence};
     breakpoints_.store(std::move(next), std::memory_order_release);
     bp_version_.fetch_add(1, std::memory_order_release);   // after publication: sync sees an at-least-as-new snapshot
-    sync_requested_.store(true, std::memory_order_release);
+    raise_sync();
+}
+
+// The flag first, then the gate: a sync that cleared the flag before this store re-raises the gate after its own write
+// (sync_hot_state), so neither a sleeping thread nor an armed statement gate misses the change
+void controller::raise_sync() {
+    sync_requested_.store(true);
+    hot_step_or_pause_.store(true);
+    { std::lock_guard<std::mutex> lk(mtx_); }   // a sleeper between its predicate check and its wait gets the notify
+    cv_.notify_all();
 }
 
 void controller::set_on_source_loaded(std::function<void(const std::string&)> cb) {
@@ -94,12 +103,12 @@ void controller::clear_breakpoints() {
     next->clear_sequence = next->sequence;
     breakpoints_.store(std::move(next), std::memory_order_release);
     bp_version_.fetch_add(1, std::memory_order_release);
-    sync_requested_.store(true, std::memory_order_release);
+    raise_sync();
 }
 
 void controller::request_pause() {
     pending_pause_.store(1, std::memory_order_relaxed);
-    sync_requested_.store(true, std::memory_order_release);
+    raise_sync();
 }
 
 void controller::resume() {
@@ -142,7 +151,8 @@ void controller::detach() {
     std::lock_guard<std::mutex> lk(mtx_);
     step_mode_.store(static_cast<int>(step_mode::none), std::memory_order_relaxed);
     pending_pause_.store(0, std::memory_order_relaxed);
-    sync_requested_.store(true, std::memory_order_release);
+    sync_requested_.store(true);
+    hot_step_or_pause_.store(true);
     resume_requested_ = true;
     cv_.notify_all();
 }
@@ -249,17 +259,18 @@ bool controller::breakpoint_hit(const std::string& file, int line) const {
 }
 
 bool controller::sync_hot_state() {
-    sync_requested_.exchange(false, std::memory_order_acquire);   // before the reads: a change raised after it syncs again
+    sync_requested_.exchange(false);   // before the reads: a change raised after it syncs again
     if (!enabled_.load(std::memory_order_acquire)) {
-        hot_step_or_pause_ = false;
+        hot_step_or_pause_.store(false, std::memory_order_relaxed);   // the gate is not consulted while disarmed
         hot_line_bloom_ = nullptr;
         hot_line_bloom_storage_.clear();
         // Disarming hides the hot cache, not the installed table or pending edits.
         hot_bp_version_ = ~0ull;   // a re-armed session rebuilds even an unchanged bloom
         return false;
     }
-    hot_step_or_pause_ = pending_pause_.load(std::memory_order_relaxed) != 0
-        || step_mode_.load(std::memory_order_relaxed) != static_cast<int>(step_mode::none);
+    hot_step_or_pause_.store(pending_pause_.load(std::memory_order_relaxed) != 0
+        || step_mode_.load(std::memory_order_relaxed) != static_cast<int>(step_mode::none));
+    if (sync_requested_.load()) { hot_step_or_pause_.store(true); }   // raised between the exchange and the store above
     normalize_sources_.store(engine_->is_enabled(jai::filesystem), std::memory_order_relaxed);
     const uint64_t version = bp_version_.load(std::memory_order_acquire);
     if (version != hot_bp_version_) {
@@ -398,6 +409,26 @@ void controller::park(const stop_info& si) {
     // breakpoints edited during the pause must be live from the very next statement,
     // and a detach during the pause disarms the backend's gate at once.
     engine_->get_execution_backend()->sync_debug_hook();
+}
+
+void controller::sleep_for(std::chrono::nanoseconds duration) {
+    using clock = std::chrono::steady_clock;
+    auto until = clock::now() + duration;
+    for (;;) {
+        {
+            std::unique_lock<std::mutex> lk(mtx_);
+            if (!cv_.wait_until(lk, until, [&] { return sync_requested_.load(); })) return;
+        }
+        auto* backend = engine_->get_execution_backend();
+        backend->sync_debug_hook();
+        if (in_command_ || !enabled_.load(std::memory_order_relaxed) || !backend->is_executing()) continue;
+        if (!pending_pause_.exchange(0, std::memory_order_relaxed)) continue;
+        const auto remaining = until - clock::now();
+        const auto frames = backend->debug_frames();
+        park({"pause", frames.empty() ? std::string() : frames.front().file,
+              frames.empty() ? 0 : static_cast<int>(frames.front().line), backend->debug_depth()});
+        until = clock::now() + remaining;   // the pause does not eat into the sleep
+    }
 }
 
 } // namespace jai::debug

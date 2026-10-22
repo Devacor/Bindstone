@@ -385,6 +385,45 @@ public:
         check_true(eng->get_variable("frames").as_int() < 400, "the paused loop was released through quit");
     }
 
+    // A pause while the script sleeps parks it inside the sleep, at the statement that sleeps; the rest of the sleep runs
+    // after the resume
+    void pause_wakes_a_sleeping_script(jai::backend_type type) {
+        auto eng = make_backend_engine(type);
+        eng->execution_budget(0);
+        jai::stdlib::register_all(eng);
+        auto& dbg = eng->debugger();
+        stop_waiter stops(dbg);
+        dbg.set_enabled(true);
+
+        const std::string src =
+            "int done = 0;\n"                           // line 1
+            "time::sleep_ms(1500);\n"                   // line 2
+            "done = 1;\n";                              // line 3
+        std::string script_error;
+        std::thread script([&] {
+            try { eng->execute(src); } catch (const std::exception& e) { script_error = e.what(); }
+        });
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        dbg.request_pause();
+        const auto pause = stops.wait();
+        std::optional<int64_t> done_at_pause;
+        if (pause) {
+            done_at_pause = parked_read(dbg, [&] { return eng->get_variable("done").as_int(); });
+            dbg.resume();
+        }
+        dbg.detach();
+        script.join();
+
+        check_eq(std::string(), script_error);
+        check_true(pause.has_value(), "a pause reaches a sleeping script");
+        if (pause) {
+            check_eq(std::string("pause"), pause->reason);
+            check_eq(2, pause->line);
+        }
+        check_true(done_at_pause.has_value() && *done_at_pause == 0, "parked inside the sleep, before the next statement");
+        check_eq(int64_t(1), eng->get_variable("done").as_int());
+    }
+
     struct stack_view {
         std::vector<jai::debug::frame_info> frames;
         std::vector<std::vector<jai::debug::variable_info>> locals;
@@ -797,6 +836,12 @@ public:
         });
         test("vm_sleep_paced_loop_stops_promptly", [this]() {
             sleep_paced_loop_stops_promptly(jai::backend_type::vm);
+        });
+        test("pause_wakes_a_sleeping_script", [this]() {
+            pause_wakes_a_sleeping_script(jai::backend_type::interpreter);
+        });
+        test("vm_pause_wakes_a_sleeping_script", [this]() {
+            pause_wakes_a_sleeping_script(jai::backend_type::vm);
         });
         test("stack_trace_lists_every_frame_with_its_locals", [this]() {
             stack_trace_lists_every_frame_with_its_locals(jai::backend_type::interpreter);

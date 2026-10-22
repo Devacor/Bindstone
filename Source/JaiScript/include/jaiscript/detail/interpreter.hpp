@@ -527,6 +527,7 @@ namespace jai {
         // Debugger: named slot-locals (params + reached body decls) of a call frame, reconstructed
         // from the frame's function AST. Empty at global scope / for foreign frames.
         std::vector<std::pair<std::string, script_value>> get_frame_locals(size_t frame) const override;
+        int debug_depth() const override { return static_cast<int>(call_stack_.size()); }
         // Debug sync point (out of line: needs the controller type). Refreshes
         // debug_hook_ + the controller's hot cache, and hands a session-end a fresh
         // budget deadline (the armed one is long past after a pause).

@@ -186,6 +186,8 @@ public:
     // Named slot-based locals of debug_frames()[frame] — params + reached body locals, which the environment's flat map
     // does not hold. Empty for the top level and an inlined call (its slots belong to its caller's frame).
     virtual std::vector<std::pair<std::string, script_value>> get_frame_locals(size_t frame) const = 0;
+    // The call depth the statement hook reports for a stop here (the step-over/out base)
+    virtual int debug_depth() const = 0;
     // A debug sync point (script thread only): pull the controller's transport state into the statement gate
     virtual void sync_debug_hook() = 0;
 

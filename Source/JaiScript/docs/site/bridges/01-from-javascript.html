@@ -199,12 +199,13 @@ print(a.size(), " ", b.size(), " ", h.hp, " ", s.hp, " ", bag.size());</code></p
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3 4 10 99 1</code></pre></div>
 <p><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a> is the chapter to read first.</p>
 <h3 id="equality">== compares contents, and never converts<a class="hlink" href="#equality" aria-label="link">&#8203;</a></h3>
-<p>Two arrays, maps or instances are equal when their contents are; <code>same_object(x, y)</code> asks whether they are one object. There is no <code>===</code> (writing one is an error that points to <code>==</code>) and nothing to need it: <code>==</code> never turns a string into a number.</p>
+<p>Two arrays, maps or instances are equal when their contents are; <code>same_object(x, y)</code> asks whether they are one object. There is no <code>===</code> (writing one is an error that points to <code>==</code>) and nothing to need it: <code>==</code> never turns a string into a number. Comparing an <code>int</code> with a <code>string</code> the checker can see is a load error (<a href="../guide/13-strict-checking.html#comparisons">Types That Fail Early</a>); through <code>var</code> it is simply false.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print([1, 2] == [1, 2], " ", {"a": 1} == {"a": 1});
 var a = [1, 2];
 var b = a;
 print(same_object(a, b));      // b is a separate array with equal contents
-print(1 == "1", " ", 1 == 1.0);</code></pre></div>
+var one = "1";
+print(1 == one, " ", 1 == 1.0);   // a var operand: false, never a conversion</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">true true
 false
 false true</code></pre></div>

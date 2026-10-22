@@ -2440,7 +2440,7 @@ public:
             check_quad_error(q("var n = null; m.add(n)").c_str(), "var-sourced null into a typed int parameter raises identically");
         });
 
-        test("null_compare_battery", [check_quad]() {
+        test("null_compare_battery", [this, check_quad]() {
             // Null compares (`x == null` / `x != null`) on both backends: every row is the
             // exact pre-lane output of both backends. The vm branch lane answers a null
             // operand from storage (handle_equal's verdict); weak_ptr, cpp-bound and
@@ -2454,13 +2454,27 @@ public:
             check_quad(q("null == null").c_str(), "true", "null == null");
             check_quad(q("null != null").c_str(), "false", "null != null");
             check_quad(q("v == null").c_str(), "true", "unset var");
-            check_quad(q("i == null").c_str(), "false", "int vs null");
-            check_quad(q("fl != null").c_str(), "true", "float != null");
-            check_quad(q("s == null").c_str(), "false", "string vs null");
-            check_quad(q("c == null").c_str(), "false", "char vs null (no promotion)");
-            check_quad(q("b != null").c_str(), "true", "bool != null");
-            check_quad(q("arr == null").c_str(), "false", "array vs null");
-            check_quad(q("m != null").c_str(), "true", "map != null");
+            // a typed slot that never holds null: strict rejects the compare (C++ `5 == nullptr`); with the checker off the
+            // run time's verdict stands on both backends
+            const auto check_off = [this, &q](const char* tail, const std::string& expected, const char* what) {
+                const std::string src = q(tail);
+                check_true(jai::engine::make()->check(src).has_errors(), std::string("strict rejects: ") + what);
+                for (bool use_vm : {false, true}) {
+                    auto e = jai::engine::make();
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+                    e->execution_budget(0);
+                    e->static_checking(check_mode::off);
+                    jai::stdlib::register_all(e);
+                    check_eq(expected, e->execute(src).to_string(), std::string(use_vm ? "vm/off: " : "interp/off: ") + what);
+                }
+            };
+            check_off("i == null", "false", "int vs null");
+            check_off("fl != null", "true", "float != null");
+            check_off("s == null", "false", "string vs null");
+            check_off("c == null", "false", "char vs null (no promotion)");
+            check_off("b != null", "true", "bool != null");
+            check_off("arr == null", "false", "array vs null");
+            check_off("m != null", "true", "map != null");
             check_quad(q("fn == null").c_str(), "false", "function vs null");
             check_quad(q("e == null").c_str(), "false", "class operator== is NOT consulted for a null operand");
             check_quad(q("e != null").c_str(), "true", "class operator!= is NOT consulted for a null operand");

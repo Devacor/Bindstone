@@ -4483,8 +4483,9 @@ public:
         });
         test("char_equals_string_stays_false", [this]() {
             auto e = make_engine();
-            // Promotion never crosses into the string domain.
-            check_false(e->execute("'a' == \"a\"").as_bool());
+            // Promotion never crosses into the string domain: the run time says false, the checker rejects the visible pair
+            check_false(e->execute("var c = 'a'; var s = \"a\"; c == s").as_bool());
+            check_true(e->check("'a' == \"a\"").has_errors());
         });
         test("char_ordered_vs_int", [this]() {
             auto e = make_engine();

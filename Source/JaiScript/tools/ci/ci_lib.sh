@@ -5,7 +5,8 @@
 #                                    package root unless absolute). Each binary lives in <dir>/bin.
 #   JAI_CMAKE_ARGS_DEBUG/_RELEASE    extra arguments for a first configure
 #   JAI_BUILD_JOBS                   parallel build jobs (default 4)
-#   JAI_CI_LOG_DIR                   where build and check logs go (default jaiscript-ci in the system temp directory)
+#   JAI_CI_LOG_DIR                   where build and check logs go (default jaiscript-ci-<checkout id> in the system temp
+#                                    directory: one folder per checkout, so worktrees running checks at once keep their logs apart)
 #   VSDEVCMD                         on Windows, the VsDevCmd.bat a build runs under when cl is not on PATH (default: the
 #                                    latest Visual Studio vswhere reports)
 
@@ -21,7 +22,7 @@ jai_abs() {
 
 JAI_DEBUG_DIR="$(jai_abs "${JAI_DEBUG_DIR:-build-debug}")"
 JAI_RELEASE_DIR="$(jai_abs "${JAI_RELEASE_DIR:-build}")"
-JAI_CI_LOG_DIR="${JAI_CI_LOG_DIR:-$(lockq_temp_dir)/jaiscript-ci}"
+JAI_CI_LOG_DIR="${JAI_CI_LOG_DIR:-$(lockq_temp_dir)/jaiscript-ci-$(printf '%s' "$JAI_ROOT" | cksum | cut -d' ' -f1)}"
 mkdir -p "$JAI_CI_LOG_DIR"
 
 jai_python() {

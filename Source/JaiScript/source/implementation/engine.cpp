@@ -817,6 +817,7 @@ struct engine::implementation {
         bool failed = false;
         uint64_t failed_mtime = 0;
         uint64_t failed_size = 0;
+        std::vector<closure_stamp> failed_closure;   // other files the failure involved (a dependent it broke, a file its parse read): a change to one lets it try again
         bool missing = false;   // its file was gone at a check (raised once): it waits until a check finds the file again
         uint64_t runs = 0;      // runs started: a nested module queued to re-run is skipped when something ran it meanwhile
         // the rest of the module's closure: every file its last run included (top level, nested, spliced into a function
@@ -899,8 +900,12 @@ struct engine::implementation {
             if (std::find(children.begin(), children.end(), c) == children.end()) { children.push_back(c); }
         }
     }
-    bool closure_moved(const import_record& record) {
-        for (const auto& s : record.closure) {
+    bool closure_moved(const import_record& record) { return stamps_moved(record.closure); }
+    bool held_failure(const import_record& record, uint64_t mtime, uint64_t size) {
+        return record.failed && mtime == record.failed_mtime && size == record.failed_size && !stamps_moved(record.failed_closure);
+    }
+    bool stamps_moved(const std::vector<closure_stamp>& stamps) {
+        for (const auto& s : stamps) {
             ++import_stats_;
             uint64_t mtime = 0, size = 0;
             if (!stat_mtime_size(s.path, mtime, size) || mtime != s.mtime || size != s.size) { return true; }
@@ -920,6 +925,7 @@ struct engine::implementation {
         uint64_t epoch = 0;
         uint64_t last_used = 0;
         uint32_t unit = 0;   // shadowing unit (the path for a file, the content for a literal); 0 until first run
+        bool loaded_noted = false;   // run_unit looked at it for loaded_units_ (which holds the entry each unit last ran)
         // Static-check result, cached beside the parse (amortized once per unique
         // source); re-run when the registration surface epoch moves.
         bool checked = false;
@@ -1360,8 +1366,9 @@ struct engine::implementation {
 
     // The one cache-hit execution tail (execute_file fast lane + the literal lane):
     // mirrors execute_source's hit path — prepare, static-check hook, execute_parsed.
-    script_value execute_cache_hit(engine& self, script_cache_entry& entry,
+    script_value execute_cache_hit(engine& self, const std::shared_ptr<script_cache_entry>& held,
                                    const instance_variables& instanceVars, std::string_view source) {
+        script_cache_entry& entry = *held;
         has_executed_ = true;
         self.backend()->prepare_for_execution();
         entry.last_used = ++script_cache_clock;
@@ -1373,7 +1380,96 @@ struct engine::implementation {
                 gate_checked(check_with_instance_vars(self, entry, instanceVars), source);
             }
         }
-        return run_unit(self, entry, entry.compiled, instanceVars.empty() ? nullptr : &instanceVars, source, false);
+        return run_unit(self, held, entry.compiled, instanceVars.empty() ? nullptr : &instanceVars, source, false);
+    }
+
+    // Every unit that ran, at the entry it last ran: a module's reload re-checks them against the declarations it brings before
+    // any of it runs (reload_dependents_listing). A string unit is kept only when it declares something that outlives its run.
+    struct loaded_unit {
+        std::shared_ptr<script_cache_entry> entry;
+        std::string source;
+    };
+    std::unordered_map<uint32_t, loaded_unit> loaded_units_;
+    static bool declares_lasting_code(const std::vector<declaration_ptr>& decls) {
+        for (const auto& d : decls) {
+            if (!d) { continue; }
+            switch (d->get_type()) {
+                case node_type::function_decl: case node_type::class_decl: case node_type::namespace_decl:
+                case node_type::variable_decl: case node_type::destructuring_decl:
+                    return true;
+                default:
+                    break;
+            }
+        }
+        return false;
+    }
+    void note_loaded_unit(const std::shared_ptr<script_cache_entry>& held, std::string_view source) {
+        held->loaded_noted = true;
+        if (held->source_path == "<script>" && !declares_lasting_code(held->declarations)) { return; }
+        loaded_unit& slot = loaded_units_[unit_of(*held, source)];
+        if (slot.entry) { slot.entry->loaded_noted = false; }
+        slot.entry = held;
+        slot.source.assign(source);
+    }
+
+    // A reload's dependents: every loaded unit but the re-running ones, checked again (never run again) against the program as
+    // the reload would leave it, its new declarations pooled. A gating diagnostic the unit's own last check did not raise is the
+    // reload's; the listing names the unit's file and line, and the files that failed land in failing_files (unstamped).
+    std::string reload_dependents_listing(engine& self, const std::unordered_set<uint32_t>& rerunning, std::vector<closure_stamp>& failing_files) {
+        std::vector<uint32_t> units;
+        for (const auto& [unit, loaded] : loaded_units_) {
+            if (!rerunning.count(unit) && loaded.entry->checked) { units.push_back(unit); }
+        }
+        std::sort(units.begin(), units.end());
+        std::string listing;
+        for (const uint32_t unit : units) {
+            const loaded_unit& loaded = loaded_units_[unit];
+            script_cache_entry& entry = *loaded.entry;
+            const bool lowered = entry.lowering.lowered_view;
+            detail::set_aggregate_view(entry.lowering, false);
+            detail::check_options o;
+            o.proofs = detail::check_options::proofs_t::leave;
+            o.program_names = &program_names_;
+            o.program_classes = &program_classes_; o.program_enums = &program_enums_;
+            o.program_functions = &program_functions_;
+            o.program_globals = &program_globals_;
+            const check_report recheck = detail::run_static_check(self, checked_declarations(entry), nullptr, o);
+            detail::set_aggregate_view(entry.lowering, lowered);
+            check_report broken;
+            for (const auto& d : recheck.diagnostics) {
+                if (d.severity != check_diagnostic::level::error || (static_check_mode_ != check_mode::strict && !d.strict_region)) { continue; }
+                const auto& before = entry.check_result.diagnostics;
+                const bool known = std::any_of(before.begin(), before.end(), [&](const check_diagnostic& b) {
+                    return b.line == d.line && b.column == d.column && b.message == d.message;
+                });
+                if (!known) { broken.diagnostics.push_back(d); }
+            }
+            if (broken.diagnostics.empty()) { continue; }
+            listing += broken.format(loaded.source, entry.source_path);
+            if (entry.source_path != "<script>") { failing_files.push_back({entry.source_path, 0, 0}); }
+        }
+        return listing;
+    }
+    uint32_t loaded_unit_of(const std::string& path) const {
+        auto it = unit_index_.find(std::filesystem::path(path).lexically_normal().string());
+        return it != unit_index_.end() ? it->second : 0;
+    }
+
+    // The program pools as a reload found them: a reload whose checks fail puts them back, so nothing of it stays
+    struct program_pools {
+        std::unordered_set<std::string> names;
+        detail::program_class_map classes;
+        detail::program_enum_map enums;
+        detail::program_function_map functions;
+        detail::program_global_map globals;
+    };
+    program_pools save_program_pools() const { return {program_names_, program_classes_, program_enums_, program_functions_, program_globals_}; }
+    void restore_program_pools(program_pools&& saved) {
+        program_names_ = std::move(saved.names);
+        program_classes_ = std::move(saved.classes);
+        program_enums_ = std::move(saved.enums);
+        program_functions_ = std::move(saved.functions);
+        program_globals_ = std::move(saved.globals);
     }
 
     // A unit's run. A re-run of a unit whose source declares a reload hook snapshots the unit's program-scope variables first and
@@ -1408,8 +1504,9 @@ struct engine::implementation {
         }
         if (!result) { throw runtime_error(self.format_error(result)); }
     }
-    script_value run_unit(engine& self, script_cache_entry& entry, std::shared_ptr<void>& compiled_slot,
+    script_value run_unit(engine& self, const std::shared_ptr<script_cache_entry>& held, std::shared_ptr<void>& compiled_slot,
                           const instance_variables* instanceVars, std::string_view source, bool textual) {
+        script_cache_entry& entry = *held;
         std::optional<script_value> previous;
         uint32_t runner = 0;
         if (textual) {
@@ -1420,6 +1517,7 @@ struct engine::implementation {
             runner = unit_of(entry, source);
             previous = unit_snapshot(self, runner);
         }
+        if (!entry.loaded_noted) { note_loaded_unit(held, source); }   // after the re-run test: noting numbers the unit
         script_value result = self.execute_parsed(entry.declarations, compiled_slot, instanceVars, unit_of(entry, source), textual);
         if (previous) { run_reload_hook(self, *entry.reload_hook, runner, std::move(*previous)); }
         return result;
@@ -2672,7 +2770,7 @@ script_value engine::execute(script_source source) {
         if (it != impl->literal_script_cache.end()) {
             if (it->second->epoch == impl->script_cache_epoch && !impl->spliced_changed(*it->second)) {   // a spliced include's change re-parses on this tier too
                 auto entry = it->second;
-                return impl->execute_cache_hit(*this, *entry, instance_variables{},
+                return impl->execute_cache_hit(*this, entry, instance_variables{},
                                                std::string_view(source.data(), source.size()));
             }
             impl->literal_script_cache.erase(it);
@@ -2738,7 +2836,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
 
         // a textual include runs under the including unit and compiles once per such unit: the VM's chunk caches belong to one unit
         std::shared_ptr<void>& compiled_slot = textual ? cached->textual_compiled[backend()->current_unit().id] : cached->compiled;
-        return impl->run_unit(*this, *cached, compiled_slot, instanceVars.empty() ? nullptr : &instanceVars, scriptContent, textual);
+        return impl->run_unit(*this, cached, compiled_slot, instanceVars.empty() ? nullptr : &instanceVars, scriptContent, textual);
 
     } catch (const parse_error&) {
         // Parse errors should propagate as-is (don't wrap compilation errors)
@@ -3220,7 +3318,7 @@ script_value engine::execute_file(const std::string& scriptPath, const instance_
                 }
             }
             if (stampValid) {
-                return impl->execute_cache_hit(*this, *node.entry, instanceVars, node.source);
+                return impl->execute_cache_hit(*this, node.entry, instanceVars, node.source);
             }
             impl->file_script_cache.erase(it);
         }
@@ -5312,7 +5410,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
                 walking.insert(walking.end(), crec->second.children.rbegin(), crec->second.children.rend());
                 continue;
             }
-            if (!same && crec->second.failed && u.mtime == crec->second.failed_mtime && u.size == crec->second.failed_size) { continue; }
+            if (!same && I.held_failure(crec->second, u.mtime, u.size)) { continue; }
             nested_changed.push_back(std::move(u));
         }
     };
@@ -5352,7 +5450,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         if (rec->second.missing) { changed.push_back(i); continue; }
         const bool same = m.mtime == rec->second.mtime && m.size == rec->second.size;
         if (same && !I.closure_moved(rec->second)) { walk(rec->second); continue; }
-        if (!same && rec->second.failed && m.mtime == rec->second.failed_mtime && m.size == rec->second.failed_size) { held = true; continue; }
+        if (!same && I.held_failure(rec->second, m.mtime, m.size)) { held = true; continue; }
         changed.push_back(i);
     }
     for (const auto& m : mods) { I.note_import_child(m.resolved); }
@@ -5375,70 +5473,184 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         rec->second.failed = true;
         rec->second.failed_mtime = m.mtime;
         rec->second.failed_size = m.size;
+        rec->second.failed_closure.clear();
     };
-    // reads, checks and runs units[idx...] as one decision; false = nothing ran (a module that ran before was saved mid-read)
-    const auto apply = [&](std::vector<import_unit>& units, const std::vector<size_t>& idx) -> bool {
-        // a module runs only from text read under its stamp: a save landing mid-read holds a module that ran before until
-        // the next pass (its record keeps the old stamp), and a first load reads again at once (bounded)
-        std::vector<std::string> contents(idx.size());
-        for (size_t k = 0; k < idx.size(); ++k) {
-            import_unit& m = units[idx[k]];
-            const bool loaded_before = I.import_cache.count(m.resolved) != 0;
-            for (int attempt = 0; ; ++attempt) {
-                const auto read = impl->read_under_stamp(m.resolved, m.stamped, m.mtime, m.size, contents[k]);
-                if (read == implementation::stamped_read::missing) { throw runtime_error("Failed to open import file: " + m.resolved); }
-                if (read == implementation::stamped_read::stable) { break; }
-                if (loaded_before) { return false; }
-                if (attempt == 3) { break; }
-                ++I.import_stats_;
-                m.stamped = impl->stat_mtime_size(m.resolved, m.mtime, m.size);
+    // a failure before the run waits on every file it involved, each stamped now: the module's closure, what its parse read,
+    // the dependents it broke
+    const auto involve_in_failure = [&](const import_unit& m, const std::vector<implementation::closure_stamp>& files) {
+        auto rec = I.import_cache.find(m.resolved);
+        if (rec == I.import_cache.end() || !rec->second.failed) { return; }
+        auto& involved = rec->second.failed_closure;
+        const auto add = [&](const std::string& path) {
+            for (const auto& s : involved) { if (s.path == path) { return; } }
+            implementation::closure_stamp stamp{path, 0, 0};
+            ++I.import_stats_;
+            if (impl->stat_mtime_size(path, stamp.mtime, stamp.size)) { involved.push_back(std::move(stamp)); }
+        };
+        for (const auto& s : rec->second.closure) { add(s.path); }
+        for (const auto& s : files) { add(s.path); }
+    };
+    // a module runs only from text read under its stamp: a save landing mid-read holds a module that ran before until the next
+    // pass (its record keeps the old stamp), and a first load reads again at once (bounded); false = held
+    const auto read_module = [&](import_unit& m, std::string& content) -> bool {
+        const bool loaded_before = I.import_cache.count(m.resolved) != 0;
+        for (int attempt = 0; ; ++attempt) {
+            const auto read = impl->read_under_stamp(m.resolved, m.stamped, m.mtime, m.size, content);
+            if (read == implementation::stamped_read::missing) { throw runtime_error("Failed to open import file: " + m.resolved); }
+            if (read == implementation::stamped_read::stable) { return true; }
+            if (loaded_before) { return false; }
+            if (attempt == 3) { return true; }
+            ++I.import_stats_;
+            m.stamped = impl->stat_mtime_size(m.resolved, m.mtime, m.size);
+        }
+    };
+    // parses and checks a group (the names its modules declare known to each other), then, for a re-run, its dependents: every
+    // loaded unit outside the group, against the new declarations. The group's first `originals` modules are the ones reached:
+    // a failure is recorded on them and puts the program pools back (the files it involved come back with it); a pass leaves
+    // only their declarations pooled.
+    struct group_verdict {
+        size_t failed = 0;
+        std::exception_ptr first;
+        std::string failures;
+        std::vector<implementation::closure_stamp> involved;
+    };
+    const auto check_group = [&](std::vector<import_unit>& group, const std::vector<std::string>& contents, size_t originals, bool rerun) {
+        group_verdict v;
+        std::vector<std::shared_ptr<implementation::script_cache_entry>> entries(group.size());
+        const auto fail = [&](size_t k, const std::exception& e) {
+            if (k < originals) { record_failure(group[k]); }
+            v.failures += std::string(v.failures.empty() ? "" : "\n") + e.what();
+            if (!v.failed++) { v.first = std::current_exception(); }
+        };
+        auto pools = I.save_program_pools();
+        I.import_frames_.emplace_back();   // what the parses read: a failure waits on those files too
+        struct frame_scope {
+            implementation& impl;
+            bool open = true;
+            ~frame_scope() { if (open) { impl.end_import_frame(); } }
+        } parse_frame{I};
+        for (size_t k = 0; k < group.size(); ++k) {
+            std::filesystem::path cacheFile;
+            bool fresh = false;
+            try {
+                entries[k] = I.acquire_entry(*this, contents[k], group[k].resolved, cacheFile, fresh);
+            } catch (const std::exception& e) {
+                fail(k, e);
             }
         }
-
-        // two or more: every one parsed and checked (the names they declare known to each other) before any runs
-        if (idx.size() > 1 && I.static_check_mode_ != check_mode::off) {
-            std::vector<std::shared_ptr<implementation::script_cache_entry>> entries(idx.size());
-            std::string failures;
-            size_t failed = 0;
-            std::exception_ptr first;
-            for (size_t k = 0; k < idx.size(); ++k) {
-                std::filesystem::path cacheFile;
-                bool fresh = false;
-                try {
-                    entries[k] = I.acquire_entry(*this, contents[k], units[idx[k]].resolved, cacheFile, fresh);
-                } catch (const std::exception& e) {
-                    record_failure(units[idx[k]]);
-                    failures += std::string(failures.empty() ? "" : "\n") + e.what();
-                    if (!failed++) { first = std::current_exception(); }
-                }
+        for (size_t k = 0; k < group.size(); ++k) {
+            if (!entries[k]) { continue; }
+            detail::collect_unit_names(entries[k]->declarations, I.program_names_);
+            detail::collect_unit_classes(entries[k]->declarations, I.program_classes_);
+            detail::collect_unit_enums(entries[k]->declarations, group[k].resolved, I.program_enums_);
+            detail::collect_unit_functions(entries[k]->declarations, group[k].resolved, I.program_functions_);
+            detail::collect_unit_globals(entries[k]->declarations, group[k].resolved, I.program_globals_);
+        }
+        for (size_t k = 0; k < group.size(); ++k) {
+            if (!entries[k]) { continue; }
+            const std::string& path = group[k].resolved;
+            I.importing_.insert(path);
+            if (originals < group.size()) { entries[k]->checked = false; }   // a cached verdict never knew the pending modules' text
+            try {
+                I.gate_checked(I.checked_report(*this, *entries[k], true), contents[k], path);
+            } catch (const std::exception& e) {
+                fail(k, e);
             }
-            for (size_t k = 0; k < idx.size(); ++k) {
-                if (!entries[k]) { continue; }
+            I.importing_.erase(path);
+        }
+        if (!v.failed && rerun) {
+            std::unordered_set<uint32_t> rerunning;
+            for (const auto& m : group) { rerunning.insert(I.loaded_unit_of(m.resolved)); }
+            const std::string listing = I.reload_dependents_listing(*this, rerunning, v.involved);
+            if (!listing.empty()) {
+                for (size_t k = 0; k < originals; ++k) { record_failure(group[k]); }
+                v.failures = "static check failed:\n" + listing;
+                v.failed = 2;
+            }
+        }
+        parse_frame.open = false;
+        const auto reads = I.end_import_frame();
+        if (originals < group.size()) {   // a verdict that knew pending text is checked again where it is next needed
+            for (size_t k = v.failed ? 0 : originals; k < group.size(); ++k) { if (entries[k]) { entries[k]->checked = false; } }
+        }
+        if (v.failed) {
+            I.restore_program_pools(std::move(pools));
+            v.involved.insert(v.involved.end(), reads.files.begin(), reads.files.end());
+            for (const auto& e : entries) { if (e) { v.involved.insert(v.involved.end(), e->spliced_stamps.begin(), e->spliced_stamps.end()); } }
+        } else if (originals < group.size()) {
+            I.restore_program_pools(std::move(pools));
+            for (size_t k = 0; k < originals; ++k) {
                 detail::collect_unit_names(entries[k]->declarations, I.program_names_);
                 detail::collect_unit_classes(entries[k]->declarations, I.program_classes_);
-                detail::collect_unit_enums(entries[k]->declarations, units[idx[k]].resolved, I.program_enums_);
-                detail::collect_unit_functions(entries[k]->declarations, units[idx[k]].resolved, I.program_functions_);
-                detail::collect_unit_globals(entries[k]->declarations, units[idx[k]].resolved, I.program_globals_);
+                detail::collect_unit_enums(entries[k]->declarations, group[k].resolved, I.program_enums_);
+                detail::collect_unit_functions(entries[k]->declarations, group[k].resolved, I.program_functions_);
+                detail::collect_unit_globals(entries[k]->declarations, group[k].resolved, I.program_globals_);
             }
-            for (size_t k = 0; k < idx.size(); ++k) {
-                if (!entries[k]) { continue; }
-                const std::string& path = units[idx[k]].resolved;
-                I.importing_.insert(path);
-                try {
-                    I.gate_checked(I.checked_report(*this, *entries[k], true), contents[k], path);
-                } catch (const std::exception& e) {
-                    record_failure(units[idx[k]]);
-                    failures += std::string(failures.empty() ? "" : "\n") + e.what();
-                    if (!failed++) { first = std::current_exception(); }
-                }
-                I.importing_.erase(path);
-            }
-            if (failed == 1) { std::rethrow_exception(first); }
-            if (failed > 1) { throw static_check_error(failures); }
+        }
+        return v;
+    };
+    // the loaded modules outside the group whose files changed and have not re-run yet, by path
+    const auto pending_modules = [&](const std::vector<import_unit>& group) {
+        std::vector<import_unit> result;
+        for (const auto& [path, record] : I.import_cache) {
+            if (I.importing_.count(path) || record.missing) { continue; }
+            bool grouped = false;
+            for (const auto& m : group) { grouped = grouped || m.resolved == path; }
+            if (grouped) { continue; }
+            import_unit u;
+            u.resolved = path;
+            u.runs = record.runs;
+            ++I.import_stats_;
+            u.stamped = impl->stat_mtime_size(path, u.mtime, u.size);
+            if (!u.stamped || (u.mtime == record.mtime && u.size == record.size)) { continue; }
+            result.push_back(std::move(u));
+        }
+        std::sort(result.begin(), result.end(), [](const import_unit& a, const import_unit& b) { return a.resolved < b.resolved; });
+        return result;
+    };
+    // reads, checks and runs units[idx...] as one decision; false = nothing ran (a module that ran before was saved mid-read). A
+    // re-run that fails its checks is checked again knowing every pending module's new text (a loaded module whose file changed
+    // and whose import has not been reached yet): when that passes, the reached modules run now and each pending one still runs
+    // at its own import.
+    const auto apply = [&](std::vector<import_unit>& units, const std::vector<size_t>& idx) -> bool {
+        std::vector<import_unit> group;
+        for (const size_t i : idx) { group.push_back(units[i]); }
+        std::vector<std::string> contents(group.size());
+        for (size_t k = 0; k < group.size(); ++k) {
+            if (!read_module(group[k], contents[k])) { return false; }
         }
 
-        for (size_t k = 0; k < idx.size(); ++k) {
-            const import_unit& m = units[idx[k]];
+        bool rerun = false;
+        for (const auto& m : group) { rerun = rerun || I.import_cache.count(m.resolved) != 0; }
+        if ((group.size() > 1 || rerun) && I.static_check_mode_ != check_mode::off) {
+            const size_t originals = group.size();
+            group_verdict verdict = check_group(group, contents, originals, rerun);
+            if (verdict.failed && rerun) {
+                std::vector<import_unit> pending = pending_modules(group);
+                std::vector<import_unit> widened = group;
+                std::vector<std::string> widened_contents = contents;
+                for (auto& m : pending) {
+                    std::string content;
+                    if (!read_module(m, content)) { continue; }
+                    widened.push_back(m);
+                    widened_contents.push_back(std::move(content));
+                }
+                if (widened.size() > originals) {
+                    group_verdict together = check_group(widened, widened_contents, originals, true);
+                    for (size_t k = originals; k < widened.size(); ++k) { together.involved.push_back({widened[k].resolved, 0, 0}); }
+                    together.involved.insert(together.involved.end(), verdict.involved.begin(), verdict.involved.end());
+                    verdict = std::move(together);
+                }
+            }
+            if (verdict.failed) {
+                for (size_t k = 0; k < originals; ++k) { involve_in_failure(group[k], verdict.involved); }
+                if (verdict.failed == 1) { std::rethrow_exception(verdict.first); }
+                throw static_check_error(verdict.failures);
+            }
+        }
+
+        for (size_t k = 0; k < group.size(); ++k) {
+            const import_unit& m = group[k];
             auto rec = I.import_cache.find(m.resolved);
             if (rec != I.import_cache.end()) {   // stamped before it runs: a module that fails waits for its next change
                 rec->second.mtime = m.mtime;

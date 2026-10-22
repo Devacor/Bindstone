@@ -9,6 +9,7 @@ namespace jai {
 coroutine_handle::coroutine_handle(engine* eng)
     : engine_(eng)
     , yield_value_(std::monostate{}, eng)
+    , result_(std::monostate{}, eng)
     , receiver_(std::monostate{}, eng) {
 }
 
@@ -51,6 +52,15 @@ JAI_NOINLINE checked_result<script_value> advance_argument_count_error() {
 
 JAI_NOINLINE checked_result<script_value> advance_non_lvalue_error() {
     return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Cannot pass non-lvalue to reference parameter");
+}
+
+JAI_NOINLINE checked_result<script_value> result_argument_count_error() {
+    return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "result() takes no arguments");
+}
+
+JAI_NOINLINE checked_result<script_value> result_unfinished_error() {
+    return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation),
+        "Coroutine has not finished: result() is available once done() is true");
 }
 
 } // namespace
@@ -102,6 +112,17 @@ checked_result<script_value> coroutine_handle::advance_from_script(engine* eng, 
         return stored.error_value();
     }
     return script_value(true, eng);
+}
+
+void coroutine_handle::complete(const script_value& a_returned) {
+    status_ = status::completed;
+    result_ = a_returned.deref().clone_element();
+}
+
+checked_result<script_value> coroutine_handle::result_from_script(size_t a_argCount) const {
+    if (a_argCount != 0) { return result_argument_count_error(); }
+    if (!done()) { return result_unfinished_error(); }
+    return result_.clone_element();
 }
 
 checked_result<script_value> coroutine_handle::resume_refusal() const {

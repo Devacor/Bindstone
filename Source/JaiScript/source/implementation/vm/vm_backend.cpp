@@ -344,6 +344,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		handle_reset_id_ = symbolizer_->intern("reset");
 		done_id_ = symbolizer_->intern("done");
 		advance_id_ = symbolizer_->intern("advance");
+		result_id_ = symbolizer_->intern("result");
 		class_definition_type_id_ = symbolizer_->intern("class_definition");
 		hot_reload_migrate_id_ = symbolizer_->intern("hot_reload_migrate");
 		base_type_ids_.intern(*symbolizer_);
@@ -1185,12 +1186,13 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 		return body_result->error_value();
 	}
 
-	handle.set_status(coroutine_handle::status::completed);
 	if (!completed) {
 		// Falling off the end returns null and (like call_script_function) skips return-type
 		// conversion, so a typed coroutine driven to completion by range-for does not error.
+		handle.complete(make_null());
 		return make_null();
 	}
+	handle.complete(completed->value());
 	return std::move(*completed);
 }
 
@@ -12787,7 +12789,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 	if (receiver_type == script_value::TYPEID_OBJECT || receiver_type == script_value::TYPEID_SHARED_PTR) {
 		const auto holder = objectValue.get_object_holder();
 		if (holder && holder->type_id == coroutine_handle_type_id_) {
-			if (member_id == next_id_ || member_id == done_id_ || member_id == advance_id_) { return {}; }
+			if (member_id == next_id_ || member_id == done_id_ || member_id == advance_id_ || member_id == result_id_) { return {}; }
 			return raise_(make_error_code(runtime_error_code::member_not_found),
 				"coroutine_handle has no member '{0}'", member_id);
 		}
@@ -14501,6 +14503,15 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 					return captured_handle->advance_from_script(eng, a_args);
 				};
 				out = script_value::make_function(advance_method, engine_);
+				return {};
+			}
+			if (expr->member_id == result_id_) {
+				if (!as_callee) { return raise_method_value(expr, objectValue, false); }
+				auto captured_handle = handle;
+				script_function result_method = [captured_handle](const std::vector<script_value>& a_args) -> checked_result<script_value> {
+					return captured_handle->result_from_script(a_args.size());
+				};
+				out = script_value::make_function(result_method, engine_);
 				return {};
 			}
 			return raise_(make_error_code(runtime_error_code::member_not_found),
@@ -17057,6 +17068,10 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					~pending_restore() { vm->pending_site_ctx_ = saved; }
 				} restore_pending{this, saved_pending};
 				return guarded_native_call([&] { return handle->advance_from_script(engine_, arguments); });
+			}
+			if (holder && holder->type_id == coroutine_handle_type_id_ && holder->data && member->member_id == result_id_) {
+				auto handle = std::static_pointer_cast<coroutine_handle>(holder->data);
+				return guarded_native_call([&] { return handle->result_from_script(arguments.size()); });
 			}
 			// A user class method WINS over a same-named builtin handle method:
 			// the sp-builtin only applies when the class does NOT define it.

@@ -1797,6 +1797,41 @@ public:
             load_error("coroutine int g() { yield 1; }\nauto h = g(); h.advanse(c);", "no member 'advanse' on 'coroutine_handle' (did you mean 'advance'?)", "the suggestion knows advance");
         });
 
+        test("result_reads_the_return_value_once_done", [this, check_both, check_executes, both_backends]() {
+            check_both("coroutine int g() { yield 1; yield 2; return 3; }\nauto h = g(); int v = 0; string s = \"\"; "
+                       "while (h.advance(v)) { s += to_string(v) + \",\"; } s + to_string(h.result()) + \"|\" + to_string(h.result())",
+                       "1,2,3|3", "after the advance that finished the body, as often as asked");
+            check_both("coroutine int g() { yield 1; return 2.9; }\nauto h = g(); var a = h.next(); var b = h.next(); "
+                       "to_string(a) + \"|\" + to_string(b) + \"|\" + to_string(h.result()) + \"|\" + to_string(h.done())",
+                       "1|2|2|true", "after the next() that finished the body: the same converted value");
+            check_both("coroutine int g() { yield 1; }\nauto h = g(); for (auto v : h) { } to_string(h.result())",
+                       "null", "a body that returns nothing gives null, here after a range-for");
+            check_both("coroutine int g() { yield 1; return 5; }\nauto h = g(); string t = \"\"; try { h.result(); } catch (e) { t = to_string(e); } "
+                       "h.next(); try { h.result(); } catch (e) { t += \"|\" + to_string(e); } t + \"|\" + to_string(h.next()) + \"|\" + to_string(h.result())",
+                       "Coroutine has not finished: result() is available once done() is true|"
+                       "Coroutine has not finished: result() is available once done() is true|5|5",
+                       "before completion, created or suspended, it raises");
+            check_both("coroutine int g() { yield 1; throw \"bad\"; }\nauto h = g(); h.next(); try { h.next(); } catch (e) { } to_string(h.done()) + \"|\" + to_string(h.result())",
+                       "true|null", "a failed body gives null");
+            check_both("coroutine array<int> g() { array<int> a = [1, 2]; yield a; return a; }\nauto h = g(); h.next(); var n = h.next(); n.push(3); "
+                       "var r = h.result(); r.push(4); to_json(n) + to_json(r) + to_json(h.result())",
+                       "[1,2,3][1,2,4][1,2]", "each read is a copy: neither next()'s value nor an earlier result() shares it");
+            check_both("class K { int base = 7; coroutine int g() { yield 0; return base * 2; } }\nK k; auto h = k.g(); h.next(); h.next(); to_string(h.result())",
+                       "14", "a method coroutine");
+            check_both("coroutine int g() { return 1; }\nvar h = g(); h.next(); string t = \"\"; try { h.result(1); } catch (e) { t = to_string(e); } t",
+                       "result() takes no arguments", "the arity error");
+            check_executes("coroutine int g() { yield 1; return 9; } auto h = g(); int v = 0;",
+                           {"h.advance(v);", "h.advance(v);", "h.result();"}, "true|false|9", "across separate executes");
+            const auto load_error = [this, both_backends](const char* src, const std::string& text, const char* what) {
+                auto [i_out, v_out] = both_backends(src);
+                check_true(i_out.find(text) != std::string::npos, std::string("interp: ") + what + " (got: " + i_out + ")");
+                check_true(v_out.find(text) != std::string::npos, std::string("vm: ") + what + " (got: " + v_out + ")");
+            };
+            load_error("coroutine int g() { return 1; }\nauto h = g(); h.result(1);", "error: result() takes no arguments", "the checker knows the arity");
+            load_error("coroutine string g() { return \"a\"; }\nauto h = g(); h.next(); array<int> a = h.result();", "cannot initialize 'a'", "the checker knows the declared return type");
+            load_error("coroutine int g() { return 1; }\nauto h = g(); h.resul();", "no member 'resul' on 'coroutine_handle' (did you mean 'result'?)", "the suggestion knows result");
+        });
+
         test("next_and_next_count", [this, check_both, check_executes]() {
             const std::string gen = "coroutine int g() { yield 1; yield 2; yield 3; yield 4; return 5; }\n";
             check_both((gen + "auto h = g(); string s = to_string(h.next()); s += \"|\" + to_string(h.next(2)); s += \"|\" + to_string(h.next()); "

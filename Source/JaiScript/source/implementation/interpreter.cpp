@@ -3064,6 +3064,7 @@ interpreter::interpreter()
     handle_reset_id_ = string_symbolizer_->intern("reset");
     done_id_ = string_symbolizer_->intern("done");
     advance_id_ = string_symbolizer_->intern("advance");
+    result_id_ = string_symbolizer_->intern("result");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
     to_bool_id_ = string_symbolizer_->intern("to_bool");
@@ -3138,6 +3139,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     handle_reset_id_ = string_symbolizer_->intern("reset");
     done_id_ = string_symbolizer_->intern("done");
     advance_id_ = string_symbolizer_->intern("advance");
+    result_id_ = string_symbolizer_->intern("result");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
     to_bool_id_ = string_symbolizer_->intern("to_bool");
@@ -3212,6 +3214,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     handle_reset_id_ = string_symbolizer_->intern("reset");
     done_id_ = string_symbolizer_->intern("done");
     advance_id_ = string_symbolizer_->intern("advance");
+    result_id_ = string_symbolizer_->intern("result");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
     to_bool_id_ = string_symbolizer_->intern("to_bool");
@@ -9134,6 +9137,15 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
                 push_value(script_value::make_function(advance_method, engine_));
                 return {};
             }
+            if (expr->member_id == result_id_) {
+	            if (!as_callee) { return method_value_error(expr, objectValue, false); }
+                auto captured_handle = handle;
+                script_function result_method = [captured_handle](const std::vector<script_value>& a_args) -> checked_result<script_value> {
+                    return captured_handle->result_from_script(a_args.size());
+                };
+                push_value(script_value::make_function(result_method, engine_));
+                return {};
+            }
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
                 "coroutine_handle has no member '{0}'", expr->member_id);
         }
@@ -14705,8 +14717,8 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
             // keeps propagating to the caller through the unwinding flag
             handle.set_status(coroutine_handle::status::failed);
         } else {
-            handle.set_status(coroutine_handle::status::completed);
             handle.yield_value_ = std::move(call_result.value());
+            handle.complete(handle.yield_value_);
         }
 
     } else {
@@ -14836,20 +14848,20 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
                 state.saved_member_scope = member_scope_;
                 handle.set_status(coroutine_handle::status::suspended);
             } else if (hasReturnValue_) {
-                handle.set_status(coroutine_handle::status::completed);
                 if (returnValue_) {
                     // call_function epilogue parity: the return site already converted; deref
                     handle.yield_value_ = returnValue_.value().is_reference()
                         ? returnValue_.value().deref()
                         : std::move(returnValue_.value());
                 }
+                handle.complete(returnValue_ ? handle.yield_value_ : make_value());
                 state.saved_environment.reset();
                 detach_frames(dying_frames);
             } else {
                 // Ran past the final yield: completion yields null (vm run_fiber parity),
                 // never a replay of the stale last-yielded value.
-                handle.set_status(coroutine_handle::status::completed);
                 handle.yield_value_ = make_value();
+                handle.complete(handle.yield_value_);
                 state.saved_environment.reset();
                 detach_frames(dying_frames);
             }

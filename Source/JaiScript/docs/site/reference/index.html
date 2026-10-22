@@ -439,6 +439,8 @@ try {
 <tr id="err-next-count-must-be-integer"><td><code>next() count must be an integer</code></td><td><code>next(n)</code> gets a count that is not an int.</td><td>Pass an int count.</td></tr>
 <tr id="err-next-count-at-least-1"><td><code>next() count must be at least 1</code></td><td><code>next(n)</code> gets a count below 1.</td><td>Pass a count of 1 or more.</td></tr>
 <tr id="err-advance-takes-1-argument"><td><code>advance() takes 1 argument (the variable that receives the yielded value)</code></td><td><code>advance</code> gets no argument, or more than one.</td><td>Pass the one variable the yielded value goes into: <code>while (h.advance(v))</code>.</td></tr>
+<tr id="err-coroutine-has-not-finished"><td><code>Coroutine has not finished: result() is available once done() is true</code></td><td><code>result()</code> on a handle whose body has not run to its end.</td><td>Drive it to the end first (<code>while (h.advance(v))</code>, a range-for), or test <code>done()</code>.</td></tr>
+<tr id="err-result-takes-no-arguments"><td><code>result() takes no arguments</code></td><td><code>result()</code> gets arguments.</td><td>Call it with no arguments.</td></tr>
 <tr id="err-done-takes-no-arguments"><td><code>done() takes no arguments</code></td><td><code>done()</code> gets arguments.</td><td>Call it with no arguments.</td></tr>
 <tr id="err-coroutine-handle-has-no-member"><td><code>coroutine_handle has no member 'resume'</code></td><td>A coroutine handle is called with a method it lacks, such as <code>resume</code>.</td><td>Resume it with <code>next()</code>.</td></tr>
 </tbody></table></div>

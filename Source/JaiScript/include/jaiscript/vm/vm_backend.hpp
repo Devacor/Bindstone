@@ -1195,6 +1195,7 @@ namespace jai::vm {
         uint64_t handle_reset_id_ = 0;
         uint64_t done_id_ = 0;
         uint64_t advance_id_ = 0;
+        uint64_t result_id_ = 0;
         uint64_t class_definition_type_id_ = 0;
         uint64_t hot_reload_migrate_id_ = 0;
         base_type_symbols base_type_ids_;   // scalar_member_message spellings, interned at init

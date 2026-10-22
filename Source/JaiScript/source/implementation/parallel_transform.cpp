@@ -547,7 +547,8 @@ namespace {
 	// ============================== ADMISSION ==============================
 
 	// At namespace scope: a nested class's default member initializers are unusable in its enclosing class's default arguments
-	struct admission_local_info { type_info_ptr type; bool primitive = false; bool reference = false; bool param = false; type_info_ptr referent; };   // referent: a reference's declared target type
+	// referent: a reference's declared target type; const_ref_use: a const T& parameter's slot in admission_builder::const_ref_uses
+	struct admission_local_info { type_info_ptr type; bool primitive = false; bool reference = false; bool param = false; type_info_ptr referent; size_t const_ref_use = SIZE_MAX; };
 
 	struct admission_builder {
 		engine& eng;
@@ -1203,6 +1204,7 @@ namespace {
 				               "' (captured reads are read-only, and objects cannot be captured)");
 			}
 			if (proof_mode && root && !proof_chain_type(m)) { root_escaped = true; }   // an unknown receiver or a user accessor
+			if (root) { note_const_ref_whole(root->symbol_id); }
 			for (const expression_ptr* idx : indexes) {
 				if (!walk_expr(*idx)) { return false; }
 			}
@@ -1265,6 +1267,58 @@ namespace {
 		}
 		static local_info typed_local(const type_info_ptr& t) { return { t, primitive_or_string(t) }; }
 
+		// A const T& parameter of a walked function: enclosing state passed to it is a captured read, and stays a subscript read
+		// (the borrow tier) when the function only subscripts the parameter, directly or through further const T& parameters
+		struct const_ref_use { const void* body = nullptr; size_t index = 0; bool whole = false; };
+		std::vector<const_ref_use> const_ref_uses;
+		// A parameter handed on to another const T& parameter is used whole when that one is; a captured name passed to one
+		// stays a subscript read unless it is. Both settle once the walk is done (recursion reaches parameters mid-walk)
+		std::vector<std::pair<size_t, size_t>> const_ref_forwards;   // (caller's use, callee's use)
+		std::vector<std::pair<size_t, size_t>> const_ref_touches;    // (adm.captures slot, callee's use)
+		size_t const_ref_use_index(const void* body, size_t index) const {
+			for (size_t k = 0; k < const_ref_uses.size(); ++k) {
+				if (const_ref_uses[k].body == body && const_ref_uses[k].index == index) { return k; }
+			}
+			return SIZE_MAX;
+		}
+		void finish_const_ref_touches() {
+			for (bool changed = true; changed;) {
+				changed = false;
+				for (const auto& [caller, callee] : const_ref_forwards) {
+					if (const_ref_uses[callee].whole && !const_ref_uses[caller].whole) { const_ref_uses[caller].whole = changed = true; }
+				}
+			}
+			for (const auto& [capture, use] : const_ref_touches) {
+				if (const_ref_uses[use].whole) { adm.captures[capture].borrow_eligible = false; }
+			}
+		}
+		std::vector<const expression*> forwarded_arguments;   // const T& arguments whose touch walk_call recorded
+		static bool borrow_count_call(const member_expr* m, const call_expr* call) {
+			return call->arguments.empty() && jai::detail::parallel_borrow_count_method(m->member);
+		}
+		void note_const_ref_whole(uint64_t id) {
+			if (const local_info* l = local(id); l && l->const_ref_use != SIZE_MAX) { const_ref_uses[l->const_ref_use].whole = true; }
+		}
+		bool const_ref_local(const expression* e) const {
+			if (!e || e->get_type() != node_type::identifier_expr) { return false; }
+			const local_info* l = local(static_cast<const identifier_expr*>(e)->symbol_id);
+			return l && l->const_ref_use != SIZE_MAX;
+		}
+		// The refusal of enclosing state passed to a script callee's non-const reference parameter, with the fix when the
+		// callee never writes through it
+		std::string reference_argument_refusal(const identifier_expr* root, const parameter& p, std::string_view callee, bool callee_reads_only) {
+			std::string result = "argument passes enclosing state '" + std::string(root->name) + "' to reference parameter '" + p.name +
+			                     "' of '" + std::string(callee) + "'";
+			if (callee_reads_only) {
+				const type_info_ptr referent = referent_type(p.type);
+				result += " (captured reads are read-only; '" + std::string(callee) + "' only reads it: declare it const " +
+				          (referent ? referent->canonical_name() : std::string("var")) + "& " + p.name + ")";
+			} else {
+				result += ", which writes it (captured reads are read-only; pass a copy, or take it as const T& where it is only read)";
+			}
+			return result;
+		}
+
 		// Root-parameter contract for the region's entry body: transform requires a
 		// by-value unary param; parallel_for takes either (auto& mutates in place,
 		// plain auto is a side-effect-free worker copy)
@@ -1311,6 +1365,10 @@ namespace {
 				info.reference = p.is_reference;
 				info.param = true;
 				if (p.is_reference) { info.referent = referent_type(p.type); }
+				if (!proof_mode && p.is_reference && p.is_const) {
+					info.const_ref_use = const_ref_uses.size();
+					const_ref_uses.push_back({ fn->body.get(), size_t(&p - fn->parameters().data()) });
+				}
 				declare(p.symbol_id, info);
 				if (!p.is_reference && !is_element_symbol(p.symbol_id)) { note_death(p.type); }   // the parameter's copy dies with the call
 				if (param_mode != root_param::none) {
@@ -1420,6 +1478,23 @@ namespace {
 			return ok;
 		}
 
+		// Enclosing state the body passes a method was walked as a captured read: a const T& parameter reads it, a non-const one
+		// would write a worker's private copy
+		bool admit_method_reference_arguments(const class_definition* cls, const parallel_admission::element_method_call& callrec) {
+			for (const auto& m : admitted_methods) {
+				if (m.cls != cls || m.name_id != callrec.name_id || !m.decl) { continue; }
+				const auto& params = m.decl->parameters;
+				for (size_t i = 0; i < params.size() && i < 64; ++i) {
+					if (!((callrec.enclosing_arguments >> i) & 1) || !params[i].is_reference || params[i].is_const) { continue; }
+					const auto* root = static_cast<const identifier_expr*>(callrec.enclosing_site);
+					const bool reads_only = ref_parameter_takes_temporary(eng, params, m.decl->body.get(), i, true);
+					return fail(callrec.enclosing_site, reference_argument_refusal(root, params[i], cls->get_name() + "::" + std::string(callrec.name), reads_only));
+				}
+				return true;
+			}
+			return true;
+		}
+
 		// Barrier entry: resolve the body's collected element-method names against the
 		// live element classes. Names no class defines are builtins — ignored (runtime
 		// precedence is unchanged for them).
@@ -1433,6 +1508,7 @@ namespace {
 					if (!admit_class_method(cls, callrec.name_id, callrec.name, callrec.site)) {
 						return false;
 					}
+					if (callrec.enclosing_arguments && !admit_method_reference_arguments(cls, callrec)) { return false; }
 				}
 				if (!admit_host_methods(callrec.name_id, callrec)) { return false; }
 			}
@@ -2011,7 +2087,7 @@ namespace {
 			case node_type::identifier_expr: {
 				auto* n = static_cast<identifier_expr*>(e.get());
 				if (is_element_symbol(n->symbol_id)) { note_element_whole(); if (proof_mode) { root_escaped = true; } }
-				if (is_local(n->symbol_id)) { return true; }
+				if (is_local(n->symbol_id)) { note_const_ref_whole(n->symbol_id); return true; }
 				if (self_field(n->symbol_id)) { return true; }   // element-rooted field read
 				if (method_class && method_class->defines_method(n->symbol_id)) {
 					return fail(n, "method '" + std::string(n->name) + "' cannot be captured as a value in a parallel body");
@@ -2038,7 +2114,8 @@ namespace {
 						if (!is_local(root->symbol_id)) {
 							touch_capture(root, true, n->right.get());
 							return walk_expr(n->right);
-					}
+						}
+						if (const_ref_local(root)) { return walk_expr(n->right); }
 					}
 					if (proof_mode && chain_root_is_element(e)) { return proof_chain_value(e); }
 				}
@@ -2165,7 +2242,7 @@ namespace {
 				auto* n = static_cast<identifier_expr*>(t.get());
 				if (is_element_symbol(n->symbol_id)) { note_element_whole(); if (proof_mode && aliasing) { root_escaped = true; } }   // replaced: the old element releases every handle
 				if (is_element_symbol(n->symbol_id)) { written_loop_variables.push_back(n->symbol_id); }
-				if (is_local(n->symbol_id)) { return true; }
+				if (is_local(n->symbol_id)) { note_const_ref_whole(n->symbol_id); return true; }
 				if (!aliasing && self_field(n->symbol_id)) { return true; }   // element field store (chunk-exclusive)
 				if (aliasing) {
 					return fail(n, std::string(what) + " would alias enclosing state '" + std::string(n->name) +
@@ -2297,7 +2374,7 @@ namespace {
 						               std::string(root->name) + "'");
 					}
 					if (m->object->get_type() == node_type::identifier_expr) {
-						touch_capture(root, false);   // whole-container method receiver
+						touch_capture(root, borrow_count_call(m, call));   // whole-container method receiver: the count builtins read a borrow
 					} else if (!walk_expr(m->object)) {
 						return false;   // subscript-chain receiver: subscript walk records the touch
 					}
@@ -2321,7 +2398,7 @@ namespace {
 						                                        rt->base_type == script_value_type::jai_map_type ||
 						                                        rt->base_type == script_value_type::jai_string_type);
 						if (!container_or_string || !parallel_readonly_method(m->member) || builtin_runs_script(m->member, rt)) { root_escaped = true; }
-					} else if (!walk_expr(m->object)) {
+					} else if (!(const_ref_local(m->object.get()) && borrow_count_call(m, call)) && !walk_expr(m->object)) {
 						return false;
 					}
 				}
@@ -2396,15 +2473,34 @@ namespace {
 					}
 					if (!admit_function(payload->fn, callee->symbol_id, root_param::none, callee)) { return false; }
 					note_death(payload->fn->return_type);   // the call's result is a temporary
-					// A by-ref parameter receiving captured state is a write channel
-					// (the callee may store through it) - reject the alias statically
+					// A non-const by-ref parameter receiving captured state is a write channel (the callee may store through it):
+					// refused statically. A const T& one is a captured read, a subscript read when the callee only subscripts it
 					const auto& params = payload->fn->parameters();
 					for (size_t i = 0; i < call->arguments.size() && i < params.size(); ++i) {
 						if (proof_mode && !params[i].is_reference && conversion_may_run_code(params[i].type, call->arguments[i])) { root_escaped = true; }
 						if (!params[i].is_reference) { continue; }
+						const expression* arg = call->arguments[i].get();
+						const bool const_ref = !proof_mode && params[i].is_const;
 						if (identifier_expr* root = enclosing_root(call->arguments[i])) {
-							return fail(root, "argument passes enclosing state '" + std::string(root->name) +
-							                  "' by reference (captured reads are read-only)");
+							if (!const_ref) {
+								const bool reads_only = !proof_mode && ref_parameter_takes_temporary(eng, params, payload->fn->body.get(), i, true);
+								return fail(root, proof_mode ? "argument passes enclosing state '" + std::string(root->name) + "' by reference (captured reads are read-only)"
+								                             : reference_argument_refusal(root, params[i], callee_name, reads_only));
+							}
+							if (arg == root) {
+								const size_t use = const_ref_use_index(payload->fn->body.get(), i);
+								touch_capture(root, use != SIZE_MAX);
+								if (use != SIZE_MAX) { const_ref_touches.emplace_back(capture_index[root->symbol_id], use); }
+								forwarded_arguments.push_back(arg);
+							}
+							continue;
+						}
+						if (const_ref && const_ref_local(arg)) {
+							if (const size_t use = const_ref_use_index(payload->fn->body.get(), i); use != SIZE_MAX) {
+								const_ref_forwards.emplace_back(local(static_cast<const identifier_expr*>(arg)->symbol_id)->const_ref_use, use);
+								forwarded_arguments.push_back(arg);
+								continue;
+							}
 						}
 						// A callee that writes through the parameter writes the argument's place
 						if (proof_mode && !ref_parameter_takes_temporary(eng, params, payload->fn->body.get(), i, true)) {
@@ -2439,6 +2535,7 @@ namespace {
 			}
 			for (const auto& a : call->arguments) {
 				if (proof_mode && converts_like_host && maybe_object(a)) { root_escaped = true; }
+				if (std::find(forwarded_arguments.begin(), forwarded_arguments.end(), a.get()) != forwarded_arguments.end()) { continue; }
 				if (!walk_expr(a)) { return false; }
 			}
 			return callee_ok;
@@ -2661,6 +2758,7 @@ namespace {
 		                           inplace_root ? admission_builder::root_param::unary
 		                                        : admission_builder::root_param::unary_value,
 		                           nullptr) && builder.check_index_writes()) {
+			builder.finish_const_ref_touches();
 			builder.adm.admitted = true;
 		}
 		return std::move(builder.adm);
@@ -4806,6 +4904,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 				return checked_result<void>(method_adm.adm.code, std::string_view(state.error_text));
 			}
 			admit_region_extras(method_adm, *adm, element_classes, element_methods, written_types, program_destructors);
+			method_adm.finish_const_ref_touches();
 			record->ok = true;
 		}
 		for (const auto& entry : method_adm.adm.captures) {
@@ -6145,6 +6244,24 @@ const script_string* parallel_borrow_string_source(const script_value& borrow, c
 	const script_value& elem = arr->values()[static_cast<size_t>(i)];
 	if (elem.raw_storage_index() != script_value::TYPEID_STRING) { return nullptr; }
 	return elem.unchecked_string_handle().get();
+}
+
+bool parallel_borrow_count_method(std::string_view name) noexcept {
+	return name == "size" || name == "length" || name == "empty";
+}
+
+std::optional<script_value> parallel_borrow_count(const script_value& borrow, std::string_view name, size_t argc, engine* eng) {
+	if (argc != 0 || !parallel_borrow_count_method(name)) { return std::nullopt; }
+	size_t count = 0;
+	if (const auto* arr = borrow.parallel_borrow_array()) { count = arr->size(); }
+	else if (const auto* map = borrow.parallel_borrow_map()) { count = map->size(); }
+	else { return std::nullopt; }
+	return name == "empty" ? script_value(count == 0, eng) : script_value(static_cast<script_int>(count), eng);
+}
+
+JAI_NOINLINE checked_result<script_value> parallel_borrow_method_refusal() {
+	return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+		"parallel borrow method other than size, length or empty (internal)");
 }
 
 checked_result<script_value> parallel_borrow_subscript_read(const script_value& borrow,

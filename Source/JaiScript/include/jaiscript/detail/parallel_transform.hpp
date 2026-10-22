@@ -22,6 +22,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -475,6 +476,13 @@ namespace jai::detail {
     // read runs the kernel above. Lets a worker serve repeated reads of the same table cell
     // from its own copy (validated against these bytes) instead of allocating per read.
     const script_string* parallel_borrow_string_source(const script_value& borrow, const script_value& index) noexcept;
+
+    // size(), length() and empty() with no arguments: the builtins a borrowed container answers in place (the count is frozen
+    // for the region). parallel_borrow_count gives the call's result, null when the name is not one of them
+    bool parallel_borrow_count_method(std::string_view name) noexcept;
+    std::optional<script_value> parallel_borrow_count(const script_value& borrow, std::string_view name, size_t argc, engine* eng);
+    // Any other method on a borrow (admission borrows a method receiver only for the count builtins)
+    checked_result<script_value> parallel_borrow_method_refusal();
 
     // Read-only by-value parameter elision. Bit i of the result: the body of `fn` (and every
     // script function it calls) would be admitted in a parallel body - so it writes nothing

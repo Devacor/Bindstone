@@ -511,7 +511,9 @@ The admission walk does NOT prove read-onlyness — it only **collects the enclo
 the body touches** (touch-collection; interned ids, one flag per name) and rejects, as
 *free static diagnostics with line:col*, every write shape it can already see: direct
 assigns, subscript/compound/incdec stores rooted at an enclosing name, `var&` alias
-declarations, by-reference arguments into script callees, by-reference iteration over a
+declarations, arguments to non-const reference parameters of script callees and methods (the
+text names the parameter, and the `const T&` to declare when `ref_parameter_takes_temporary`
+says the callee never writes it), by-reference iteration over a
 captured container, and any method on a captured receiver that is not a known read-only
 builtin (a mutating method on a worker's private snapshot would silently diverge across
 worker counts — so unknown = rejected, fail-closed). Soundness never depends on the
@@ -532,7 +534,12 @@ keep their binding (the body reads one, the method the other):
 - **string** — per-worker detached copy (string storage is shared under plain copy).
 - **borrow** — the raw-read fast tier: every element of the container is a **primitive or
   a string** (typed `array<string>` included; by declared type or by a content walk) AND
-  every body touch is a **subscript read**. Workers get ONE tagged raw pointer
+  every body touch is a **subscript read** or a count builtin (`size()`, `length()`,
+  `empty()`, answered in place by `detail::parallel_borrow_count`). A `const T&` parameter
+  receiving the name is a touch of the same kind when the callee only subscripts or counts it,
+  directly or by handing it to another `const T&` (`admission_builder::const_ref_uses`; the
+  forwards settle to a fixpoint after the walk, so recursion meeting a parameter mid-walk is
+  sound); any other use of the parameter makes it a whole-value touch. Workers get ONE tagged raw pointer
   (`parallel_borrow_tag`, storage index 15) whose copies touch no refcount; element reads
   mint worker-local values — a primitive is read from the buffer, a string read copies
   the BYTES into a fresh worker-owned string and never touches the live handle's count.

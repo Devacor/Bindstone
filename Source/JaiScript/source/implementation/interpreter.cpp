@@ -9151,6 +9151,16 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         }
     }
 
+    // A captured container's count in a parallel body (KEEP BYTE-PARALLEL with vm_backend::exec_call_method)
+    if (as_callee && objectValue.raw_storage_index() == script_value::TYPEID_PARALLEL_BORROW) [[unlikely]] {
+        script_function counted = [borrow = objectValue, name = expr->member, eng = engine_](const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (auto count = detail::parallel_borrow_count(borrow, name, args.size(), eng)) { return std::move(*count); }
+            return detail::parallel_borrow_method_refusal();
+        };
+        push_value(script_value::make_function(counted, engine_));
+        return {};
+    }
+
     // Handle string methods
     if (objectValue.is_string() || objectValue.is_utf8_string()) {
         if (!as_callee) {   // a caught error's own members and a thrown object's fields before the string methods (KEEP BYTE-PARALLEL with vm_backend::member_access_value)

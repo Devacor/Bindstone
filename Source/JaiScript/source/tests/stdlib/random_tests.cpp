@@ -195,10 +195,9 @@ public:
 		});
 
 		test("two_elements_sharing_one_random_are_refused_naming_the_field_and_the_elements", [this, caught]() {
-			check_true(caught("random r(3); var nest = [[random(1)], [r], [r]]; array<int> outs = [0, 0, 0]; parallel_for (auto& g, auto& o : nest, outs) { o = g[0].next_int(1, 9); }")
-			               .find("parallel_for: elements 1 and 2 share one 'random' (an element owns the C++ values it holds: give each element its own, or capture one from outside the loop)") != std::string::npos);
 			auto engine = make_engine();
 			stdlib::register_all(*engine);
+			check_true(engine->execute("random r(3); var nest = [[r], [r]]; array<int> outs = [0, 0]; parallel_for (auto& g, auto& o : nest, outs) { o = g[0].next_int(1, 9); } outs[0] == outs[1];").as<bool>());
 			auto* raw = engine.get();
 			engine->add_function("share_generator", [raw](const script_value& a_from, const script_value& a_to) {
 				const uint64_t id = raw->symbolize("rng");

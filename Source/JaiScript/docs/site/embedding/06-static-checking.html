@@ -377,7 +377,7 @@ get:</p>
 .../rules.jai:1:38: error: use of undeclared identifier 'G'
     int damage(int hits) { return hits * G.power; }
                                          ^</code></pre></div>
-<p>If you try this in the runner after running the full program, delete <code>rules.jaibite</code> first: the
+<p>If you try this in the runner after running the full program, delete <code>.cache/rules.jai.jaibite</code> first: the
 automatic disk cache keeps a per-file checked-clean stamp, so a leaf that checked clean inside one program is
 not re-checked when another program reaches it (see <a href="04-jaibite.html#the-stamp-is-per-file">jaibite,
 &quot;The stamp is per file&quot;</a>).</p>

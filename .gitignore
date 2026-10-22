@@ -85,7 +85,8 @@ Source/JaiScriptComparisons/third_party/sol2/
 Source/JaiScriptComparisons/third_party/lua/
 Source/JaiScriptComparisons/out/
 
-# JaiScript sibling parse caches (auto-written next to .jai script files)
+# JaiScript parse caches (auto-written to a .cache folder beside each script; stray old ones beside the scripts)
+.cache/
 *.jaibite
 
 # Python bytecode cache (gloom python port + any tooling)

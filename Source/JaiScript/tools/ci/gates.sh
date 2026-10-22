@@ -79,11 +79,11 @@ gate_timedemo() {
 	[ -f "$dir/p10_timedemo.jai" ] || { echo "timedemo: examples/jaidoom is not in this checkout, skipped"; return 0; }
 	cd "$dir"
 	for backend in vm interp; do
-		rm -f ./*.jaibite
+		rm -rf ./.cache
 		run_logged "$BIN/jaiscript" --no-debug --no-pause --backend="$backend" p10_timedemo.jai -- 120x78
 		want "timedemo $backend: expected STATE_HASH $TIMEDEMO_STATE" "STATE_HASH: $TIMEDEMO_STATE\\b"
 	done
-	rm -f ./*.jaibite
+	rm -rf ./.cache
 }
 
 # source/jaiscript.cpp (the one-file build) includes every implementation file the library's CMake list names

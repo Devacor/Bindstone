@@ -1,4 +1,5 @@
 # runtime caches and captures — everything here regenerates on demand
+.cache/
 *.jaibite
 *.wav
 *.mid

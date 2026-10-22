@@ -188,8 +188,7 @@ public:
             auto eng = make_engine();
             filesystem_enabled(*eng, false);
             const auto path = test_temp_directory() / "privilege_virtual.jai";
-            auto sibling = path;
-            sibling.replace_extension(".jaibite");
+            const auto sibling = jaibite_cache_beside(path);
             check_eq(script_int(42), eng->execute_file_source(path.string(), "40 + 2;").as_int());
             check_false(std::filesystem::exists(sibling));
             check_eq(size_t(0), eng->jaibite_cache_write_failures());
@@ -197,8 +196,8 @@ public:
 
         test("restricted_source_ignores_fresh_disk_sibling", [this]() {
             const auto path = fixture("privilege_stale.jai", "40 + 2;");
-            auto sibling = path;
-            sibling.replace_extension(".jaibite");
+            const auto sibling = jaibite_cache_beside(path);
+            std::filesystem::create_directories(sibling.parent_path());
             auto eng = make_engine();
             eng->jaibite("7;").save(sibling.string());
             std::filesystem::last_write_time(sibling,

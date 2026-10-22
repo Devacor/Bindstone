@@ -34,6 +34,7 @@
 - examples/gloom_idiomatic/**
 
 # Never shipped, whatever the include
+- **/.cache/**
 - **/*.jaibite
 - **/*.exe
 - **/*.dll

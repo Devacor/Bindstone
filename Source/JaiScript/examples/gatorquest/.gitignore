@@ -3,5 +3,6 @@ harness/
 saves/
 cache/
 shots/
+.cache/
 *.jaibite
 scripts/.gq_reload*.jai

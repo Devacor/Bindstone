@@ -442,7 +442,7 @@ public:
         });
 
         test("jaibite_siblings_name_their_files_after_the_folder_moves", [this]() {
-            // The sibling cache marks the unit's own file instead of storing its path, so a
+            // The jaibite cache marks the unit's own file instead of storing its path, so a
             // copied or moved folder loads its bites and every frame still names the file
             // where it now lives (stack traces, breakpoints, current_source_file).
             namespace fs = std::filesystem;
@@ -459,12 +459,12 @@ public:
             first->add_function("probe", [rawFirst]() -> std::string { return rawFirst->current_source_file(); });
             first->add_include_path(a.string());
             first->execute_file((a / "main.jai").string());
-            check_true(fs::exists(a / "main.jaibite"));
-            check_true(fs::exists(a / "lib" / "mod.jaibite"));
+            check_true(fs::exists(a / ".cache" / "main.jai.jaibite"));
+            check_true(fs::exists(a / "lib" / ".cache" / "mod.jai.jaibite"));
 
             fs::copy(a, b, fs::copy_options::recursive, ec);
             check_false(bool(ec));
-            const auto mainBiteBefore = fs::last_write_time(b / "main.jaibite", ec);
+            const auto mainBiteBefore = fs::last_write_time(b / ".cache" / "main.jai.jaibite", ec);
             auto second = make_engine();
             jai::engine* rawSecond = second.get();
             second->add_function("probe", [rawSecond]() -> std::string { return rawSecond->current_source_file(); });
@@ -473,7 +473,7 @@ public:
             auto seen = second->execute("seen");
             check_eq((b / "main.jai").lexically_normal(), fs::path(seen.as_array()[0].as_string()).lexically_normal());
             check_eq((b / "lib" / "mod.jai").lexically_normal(), fs::path(seen.as_array()[1].as_string()).lexically_normal());
-            check_true(fs::last_write_time(b / "main.jaibite", ec) == mainBiteBefore);   // loaded, not rewritten
+            check_true(fs::last_write_time(b / ".cache" / "main.jai.jaibite", ec) == mainBiteBefore);   // loaded, not rewritten
             fs::remove_all(a, ec);
             fs::remove_all(b, ec);
         });

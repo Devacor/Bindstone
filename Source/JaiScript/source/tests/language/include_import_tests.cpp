@@ -639,12 +639,17 @@ public:
             cleanup_temp_file(counter_file);
         });
 
-        // === jaibite disk cache: every file-based load maintains a sibling <stem>.jaibite; a
-        // sibling whose header records the exact source (size + hash) and the registration
+        // === jaibite disk cache: every file-based load maintains <folder>/.cache/<file>.jaibite; a
+        // cache whose header records the exact source (size + hash) and the registration
         // fingerprint loads instead of parsing; anything else reparses and rewrites.
 
         auto sibling_of = [](const std::string& src) {
-            return std::filesystem::path(src).replace_extension(".jaibite").string();
+            return jai::foundry::jaibite_cache_beside(src).string();
+        };
+        auto planted_sibling_of = [](const std::string& src) {   // a test writing its own cache first makes the folder
+            const auto result = jai::foundry::jaibite_cache_beside(src);
+            std::filesystem::create_directories(result.parent_path());
+            return result.string();
         };
         auto starts_with_jbit = [](const std::string& path) {
             std::ifstream f(path, std::ios::binary);
@@ -654,6 +659,17 @@ public:
         };
         // the sibling's recorded source identity rewritten to the file's current text: a load then proves the parse was
         // skipped, since that text need not parse
+        auto relabel_cache = [](const std::string& src, const std::string& cache) {
+            std::ifstream in(src);
+            std::stringstream text;
+            text << in.rdbuf();
+            const auto id = jai::detail::jaibite_identity_of(text.str());
+            std::fstream f(cache, std::ios::in | std::ios::out | std::ios::binary);
+            f.seekp(20);
+            for (uint64_t v : {id.size, id.hash}) {
+                for (int i = 0; i < 8; ++i) { f.put(char(uint8_t(v >> (8 * i)))); }
+            }
+        };
         auto relabel_sibling = [sibling_of](const std::string& src) {
             std::ifstream in(src);
             std::stringstream text;
@@ -772,7 +788,7 @@ public:
             for (bool use_vm : {false, true}) {
                 auto src = create_temp_file("cache_corrupt.jai", "7;");
                 {
-                    std::ofstream f(sibling_of(src), std::ios::binary | std::ios::trunc);
+                    std::ofstream f(planted_sibling_of(src), std::ios::binary | std::ios::trunc);
                     f << "JBITgarbage-not-a-real-bite";
                 }
                 auto eng = engine::make();
@@ -846,7 +862,7 @@ public:
             for (bool use_vm : {false, true}) {
                 auto src = create_temp_file("cache_ver.jai", "42;");
                 {   // valid magic, WRONG version, then padding past the header minimum
-                    std::ofstream f(sibling_of(src), std::ios::binary | std::ios::trunc);
+                    std::ofstream f(planted_sibling_of(src), std::ios::binary | std::ios::trunc);
                     const uint8_t magic[4] = { 'J', 'B', 'I', 'T' };
                     const uint32_t bad_version = 0x7FFFFFFF;
                     const uint32_t flags = 0;
@@ -898,7 +914,7 @@ public:
             for (bool use_vm : {false, true}) {
                 auto src = create_temp_file("cache_ro.jai", "9;");
                 std::filesystem::remove(sibling_of(src));
-                std::filesystem::create_directory(sibling_of(src));   // sibling path unwritable
+                std::filesystem::create_directory(planted_sibling_of(src));   // sibling path unwritable
                 auto eng = engine::make();
                 eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
@@ -923,13 +939,110 @@ public:
             return count;
         };
 
+        test("the_cache_lives_in_a_cache_folder_beside_the_source", [=, this]() {
+            // <folder>/.cache/<file>.jaibite, the folder made when missing; sources that differ only in extension keep two caches
+            const auto dir = jai::foundry::test_temp_directory() / "cache_folder";
+            std::filesystem::remove_all(dir);
+            std::filesystem::create_directories(dir);
+            put_file(dir / "unit.jai", "int unit_v() { return 3; }\nunit_v();\n");
+            put_file(dir / "unit.script", "4;");
+            auto eng = make_engine();
+            check_eq(script_int(3), eng->execute_file((dir / "unit.jai").string()).as_int());
+            check_eq(script_int(4), eng->execute_file((dir / "unit.script").string()).as_int());
+            check_true(std::filesystem::is_directory(dir / ".cache"), "the .cache folder is made");
+            check_true(starts_with_jbit((dir / ".cache" / "unit.jai.jaibite").string()), "unit.jai's cache");
+            check_true(starts_with_jbit((dir / ".cache" / "unit.script.jaibite").string()), "unit.script's own cache");
+            check_false(std::filesystem::exists(dir / "unit.jaibite"), "nothing is written beside the source");
+            check_eq((dir / ".cache" / "unit.jai.jaibite").string(), eng->jaibite_cache_path((dir / "unit.jai").string()));
+            check_eq(std::string(), eng->jaibite_cache_path((dir / "unit.jaibite").string()), "a .jaibite source keeps no cache");
+            check_eq(std::string(), eng->jaibite_cache_directory(), "no cache directory by default");
+            std::filesystem::remove_all(dir);
+        });
+
+        test("a_cache_directory_takes_every_cache_at_the_source_path_mirrored_below_it", [=, this]() {
+            const auto base = jai::foundry::test_temp_directory() / "cache_mirror";
+            std::filesystem::remove_all(base);
+            const auto project = base / "project";
+            const auto caches = base / "caches";
+            std::filesystem::create_directories(project / "scripts");
+            std::filesystem::create_directories(project / "lib");
+            put_file(project / "lib" / "helper.jai", "int helper_v() { return 20; }\n");
+            const auto mainSource = project / "scripts" / "main.jai";
+            put_file(mainSource, "import \"../lib/helper.jai\";\nhelper_v() + 1;\n");
+            auto eng = make_engine();
+            eng->jaibite_cache_directory(caches.string(), project.string());
+            check_eq(caches.string(), eng->jaibite_cache_directory());
+            check_eq(script_int(21), eng->execute_file(mainSource.string()).as_int());
+            const auto mainCache = caches / "scripts" / "main.jai.jaibite";
+            check_true(starts_with_jbit(mainCache.string()), "the root file's cache mirrors its folder");
+            check_true(starts_with_jbit((caches / "lib" / "helper.jai.jaibite").string()), "an import's cache mirrors its folder");
+            check_false(std::filesystem::exists(project / "scripts" / ".cache"), "nothing beside the source");
+            check_false(std::filesystem::exists(project / "lib" / ".cache"), "nothing beside the import");
+
+            put_file(mainSource, "%%% not a script %%%");
+            relabel_cache(mainSource.string(), mainCache.string());
+            auto reader = make_engine();
+            reader->jaibite_cache_directory(caches.string(), project.string());
+            check_eq(script_int(21), reader->execute_file(mainSource.string()).as_int(), "a valid cache in the directory loads: the parse is skipped");
+
+            const std::string outside = (base / "elsewhere" / "x.jai").string();
+            check_true(reader->jaibite_cache_path(outside).rfind((caches / "").string(), 0) == 0, "a source outside the root mirrors its whole path below the directory");
+            check_eq((caches / "assets" / "y.jai.jaibite").string(), reader->jaibite_cache_path("assets/y.jai"), "a relative source mirrors as given");
+            check_eq((caches / "^" / "z.jai.jaibite").string(), reader->jaibite_cache_path("../z.jai"), "a .. step stays inside the directory");
+            reader->jaibite_cache_directory("");
+            check_eq(jai::foundry::jaibite_cache_beside(outside).string(), reader->jaibite_cache_path(outside), "empty restores the folder beside the source");
+            std::filesystem::remove_all(base);
+        });
+
+        test("an_unwritable_cache_directory_runs_from_memory_and_tries_once_per_text", [=, this]() {
+            const auto base = jai::foundry::test_temp_directory() / "cache_blocked";
+            std::filesystem::remove_all(base);
+            std::filesystem::create_directories(base);
+            put_file(base / "not_a_folder", "a file where the cache directory's parent would be");
+            const std::string src = (base / "blocked.jai").string();
+            const std::string text = "int blocked_v() { return 8; }\nblocked_v();\n";
+            put_file(src, text);
+            auto eng = make_engine();
+            eng->jaibite_cache_directory((base / "not_a_folder" / "caches").string());
+            for (int i = 0; i < 4; ++i) {
+                check_eq(script_int(8), eng->execute_file_source(src, text).as_int(), "the source runs, no error");
+            }
+            check_eq(size_t(1), eng->jaibite_cache_write_failures(), "one attempt for one text, never one per run");
+            check_eq(script_int(9), eng->execute_file_source(src, "int blocked_v() { return 9; }\nblocked_v();\n").as_int());
+            check_eq(size_t(2), eng->jaibite_cache_write_failures(), "a new text tries once more");
+            check_false(std::filesystem::exists(base / ".cache"), "nothing is written beside the source instead");
+            std::filesystem::remove_all(base);
+        });
+
+        test("a_valid_cache_beside_the_source_loads_under_a_cache_directory", [=, this]() {
+            // a bundle ships its .cache folders read-only: read when the directory holds no cache for the source, never copied
+            const auto base = jai::foundry::test_temp_directory() / "cache_shipped";
+            std::filesystem::remove_all(base);
+            std::filesystem::create_directories(base);
+            const std::string src = (base / "shipped.jai").string();
+            put_file(src, "int shipped_v() { return 30; }\nshipped_v();\n");
+            check_eq(script_int(30), make_engine()->execute_file(src).as_int());
+            const auto shipped = jai::foundry::jaibite_cache_beside(src);
+            check_true(starts_with_jbit(shipped.string()), "the build step leaves a cache beside the source");
+            const std::string unparseable = "%%% not a script %%%";
+            put_file(src, unparseable);
+            relabel_cache(src, shipped.string());
+            auto eng = make_engine();
+            eng->jaibite_cache_directory((base / "caches").string(), base.string());
+            check_eq(script_int(30), eng->execute_file(src).as_int(), "the shipped cache loads: the parse is skipped");
+            check_eq(script_int(30), eng->execute_file_source(src, unparseable).as_int(), "and holds on an in-memory hit");
+            check_eq(size_t(0), eng->jaibite_cache_write_failures());
+            check_false(std::filesystem::exists(base / "caches"), "a cache that loaded is not written again");
+            std::filesystem::remove_all(base);
+        });
+
         test("a_reimport_runs_the_saved_source_whatever_its_mtime", [=, this]() {
             // a revision put in place with an older mtime (a copy keeping its source file's time), with the same size, or
             // with the same mtime runs its own definitions on the re-run: the sibling written for the version before it
             // records another source, so it never stands in for this one
             const auto dir = jai::foundry::test_temp_directory();
             const auto path = dir / "hr_flight.jai";
-            const auto sibling = std::filesystem::path(path).replace_extension(".jaibite");
+            const auto sibling = jai::foundry::jaibite_cache_beside(path);
             struct revision { const char* name; const char* text; int value; int shift; };   // shift: new mtime - old, seconds
             const revision cases[] = {
                 {"older mtime, other size", "flight_ran();\nint flight() { return 22; }\n", 22, -3600},
@@ -971,7 +1084,7 @@ public:
             // restoring a file with its old time), the sibling never loads for the new text and is rewritten for it; a bite
             // saved without a source never loads as a sibling
             const auto path = jai::foundry::test_temp_directory() / "hr_restored.jai";
-            const auto sibling = std::filesystem::path(path).replace_extension(".jaibite");
+            const auto sibling = jai::foundry::jaibite_cache_beside(path);
             auto bytes_of = [](const std::filesystem::path& p) {
                 std::ifstream f(p, std::ios::binary);
                 return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -1014,14 +1127,14 @@ public:
             std::filesystem::last_write_time(path, before - std::chrono::hours(1));
             check_eq(script_int(22), eng->execute_file(path.string()).as_int(), "an older stamp re-reads the file");
             std::filesystem::remove(path);
-            std::filesystem::remove(std::filesystem::path(path).replace_extension(".jaibite"));
+            std::filesystem::remove(jai::foundry::jaibite_cache_beside(path));
         });
 
         test("a_sibling_that_cannot_be_replaced_is_kept", [=, this]() {
             // a sibling the rename cannot replace (read-only here; another engine holding it open in a race) stays: the write gives
             // up and leaves it, and its identity keeps it from standing in for the new text
             const auto path = jai::foundry::test_temp_directory() / "hr_keep.jai";
-            const auto sibling = std::filesystem::path(path).replace_extension(".jaibite");
+            const auto sibling = jai::foundry::jaibite_cache_beside(path);
             std::filesystem::remove(sibling);
             put_file(path, "int keep_v() { return 5; }\nkeep_v();\n");
             check_eq(script_int(5), make_engine()->execute_file(path.string()).as_int());
@@ -1043,7 +1156,7 @@ public:
             // and is replaced whole, a sibling that cannot be replaced never stands in for the new text, and no temporary
             // file outlives a write, failed or not
             const auto path = jai::foundry::test_temp_directory() / "hr_atomic.jai";
-            const auto sibling = std::filesystem::path(path).replace_extension(".jaibite");
+            const auto sibling = jai::foundry::jaibite_cache_beside(path);
             std::filesystem::remove(sibling);
             put_file(path, "int atomic_v() { return 5; }\natomic_v();\n");
             check_eq(script_int(5), make_engine()->execute_file(path.string()).as_int());
@@ -1125,7 +1238,7 @@ public:
             }
             for (const char* f : {"cl_main.jai", "cl_a.jai", "cl_b.jai", "cl_s.jai"}) {
                 std::filesystem::remove(dir / f);
-                std::filesystem::remove((dir / f).replace_extension(".jaibite"));
+                std::filesystem::remove(jai::foundry::jaibite_cache_beside(dir / f));
             }
         });
 
@@ -1199,7 +1312,7 @@ public:
             check_eq(script_int(133), eng->execute("big_value();").as_int());
             for (const char* f : {"nm_big.jai", "nm_side.jai", "nm_mod.jai", "nm_inc.jai"}) {
                 std::filesystem::remove(dir / f);
-                std::filesystem::remove((dir / f).replace_extension(".jaibite"));
+                std::filesystem::remove(jai::foundry::jaibite_cache_beside(dir / f));
             }
         });
 
@@ -1275,7 +1388,7 @@ public:
             check_eq(script_int(11), eng->execute("y_value();").as_int(), "y stays loaded");
             for (const char* f : {"tr_a.jai", "tr_y.jai", "tr_w.jai", "tr_z.jai", "tr_q.jai"}) {
                 std::filesystem::remove(dir / f);
-                std::filesystem::remove((dir / f).replace_extension(".jaibite"));
+                std::filesystem::remove(jai::foundry::jaibite_cache_beside(dir / f));
             }
         });
 
@@ -1310,7 +1423,7 @@ public:
                 check_eq(std::string(), pass(), "the first frame loads" + label);
                 check_eq(1, mod_runs, label);
                 std::filesystem::remove(dir / "ms_mod.jai");
-                std::filesystem::remove(dir / "ms_mod.jaibite");
+                std::filesystem::remove(jai::foundry::jaibite_cache_beside(dir / "ms_mod.jai"));
                 const std::string first = pass();
                 check_true(first.find("Failed to open import file") != std::string::npos, "the pass that finds it gone raises: " + first + label);
                 for (int i = 0; i < 3; ++i) { check_eq(std::string(), pass(), "then it waits quietly" + label); }
@@ -1333,7 +1446,7 @@ public:
             }
             for (const char* f : {"ms_outer.jai", "ms_mod.jai"}) {
                 std::filesystem::remove(dir / f);
-                std::filesystem::remove((dir / f).replace_extension(".jaibite"));
+                std::filesystem::remove(jai::foundry::jaibite_cache_beside(dir / f));
             }
         });
 
@@ -1383,7 +1496,7 @@ public:
                 check_eq(2, runs, label);
             }
             std::filesystem::remove(path);
-            std::filesystem::remove(std::filesystem::path(path).replace_extension(".jaibite"));
+            std::filesystem::remove(jai::foundry::jaibite_cache_beside(path));
         });
 
         test("a_unit_reload_hook_receives_its_previous_values_after_a_re_run", [=, this]() {
@@ -1456,7 +1569,7 @@ public:
             check_true(bad.find("void hot_reload_migrate(map<string, var> previous)") != std::string::npos, "a wrong signature is a load error naming the shape: " + bad);
             for (const char* f : {"rh_mod.jai", "rh_bad.jai"}) {
                 std::filesystem::remove(dir / f);
-                std::filesystem::remove((dir / f).replace_extension(".jaibite"));
+                std::filesystem::remove(jai::foundry::jaibite_cache_beside(dir / f));
             }
         });
 
@@ -1516,7 +1629,7 @@ public:
             check_eq(std::string("f:1:7"), hooks.back(), "execute_file of the same file again is a re-run");
             for (const char* f : {"rh_a.jai", "rh_b.jai", "rh_file.jai"}) {
                 std::filesystem::remove(dir / f);
-                std::filesystem::remove((dir / f).replace_extension(".jaibite"));
+                std::filesystem::remove(jai::foundry::jaibite_cache_beside(dir / f));
             }
         });
 

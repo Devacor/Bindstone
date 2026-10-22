@@ -44,7 +44,7 @@ $hash = ($check | Select-String "STATE_HASH").ToString()
 if ($LASTEXITCODE -ne 0 -or $hash -eq "") { $check; throw "the dist smoke failed" }
 
 # leave no run artifacts behind (parse caches and test folders are made on first use)
-Get-ChildItem $game -Recurse -Filter *.jaibite | Remove-Item -Force
+Get-ChildItem $game -Recurse -Directory -Force -Filter .cache | Remove-Item -Recurse -Force
 if (Test-Path (Join-Path $game "saves")) { Remove-Item -Recurse -Force (Join-Path $game "saves") }
 
 $files = Get-ChildItem $game -Recurse -File

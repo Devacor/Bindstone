@@ -117,8 +117,8 @@ public:
 			constexpr int k_threads = 8;
 			for (int wave = 0; wave < 3; ++wave) {
 				std::error_code ec;
-				std::filesystem::remove(dir / "mt_lib.jaibite", ec);
-				std::filesystem::remove(dir / "mt_more.jaibite", ec);
+				std::filesystem::remove(jai::foundry::jaibite_cache_beside(dir / "mt_lib.jai"), ec);
+				std::filesystem::remove(jai::foundry::jaibite_cache_beside(dir / "mt_more.jai"), ec);
 				std::vector<script_int> results(k_threads, 0);
 				std::vector<std::string> errors(k_threads);
 				std::atomic<int> ready{0};

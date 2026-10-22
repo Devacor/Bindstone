@@ -194,22 +194,32 @@ namespace jai {
         script_value execute_file(const std::string& scriptPath, const instance_variables& instanceVars);
 
         // Automatic jaibite disk cache (default ON). Every FILE-based load — execute_file,
-        // script include (all forms), script import — transparently maintains a sibling
-        // cache next to the source (foo.jai -> foo.jaibite): a sibling whose header records
-        // the exact source text (its size and hash, compared for equality - mtimes never
-        // decide) and a matching registration fingerprint loads instead of parsing;
-        // otherwise the source parses and the sibling is rewritten. A write goes to a
-        // temporary file renamed over the sibling, so no reader sees part of one.
-        // Cache writes are best-effort and SILENT on failure (read-only asset dirs,
-        // shipped games) — jaibite_cache_write_failures() counts them for diagnostics.
-        // Raw string roots have no disk sibling, but include/import dependencies can
-        // access files. Disabling filesystem also skips all automatic disk caching.
-        // Backend-agnostic: the sibling holds the parsed
+        // script include (all forms), script import — transparently maintains a cache file
+        // for the source (jaibite_cache_path: scripts/foo.jai -> scripts/.cache/foo.jai.jaibite):
+        // a cache whose header records the exact source text (its size and hash, compared for
+        // equality - mtimes never decide) and a matching registration fingerprint loads instead
+        // of parsing; otherwise the source parses and the cache is rewritten. A write creates
+        // the folder when missing and goes to a temporary file renamed over the cache, so no
+        // reader sees part of one. Cache writes are best-effort and SILENT on failure (read-only
+        // asset dirs, shipped games), tried once per source text — jaibite_cache_write_failures()
+        // counts them for diagnostics. Raw string roots have no cache, but include/import
+        // dependencies can access files. Disabling filesystem also skips all automatic disk caching.
+        // Backend-agnostic: the cache holds the parsed
         // AST (filename stamps included, so traces still name the .jai); the vm compiles
         // its chunk lazily and reuses it in-memory as usual.
         void jaibite_cache(bool enabled);
         bool jaibite_cache() const;
         size_t jaibite_cache_write_failures() const;
+        // Hosts whose sources are read-only (a mobile app bundle) send the cache elsewhere: with a
+        // directory set, every cache is written below it at the source's path relative to sourceRoot
+        // (a source outside sourceRoot, or with no root given, mirrors its whole path, a drive as its
+        // first folder). When the directory holds no valid cache for a source, a valid one in the .cache
+        // folder beside it still loads (never rewritten there), so a bundle can ship its caches. Empty
+        // restores the folder beside each source.
+        void jaibite_cache_directory(const std::string& directory, const std::string& sourceRoot = {});
+        std::string jaibite_cache_directory() const;
+        // The cache file the engine writes for sourcePath (empty for a .jaibite source, which keeps none)
+        std::string jaibite_cache_path(const std::string& sourcePath) const;
 
         // Execute already-read script file contents with jaibite disk-cache maintenance
         // keyed beside resolvedPath — for hosts that read files through their own VFS but

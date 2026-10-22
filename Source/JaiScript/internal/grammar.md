@@ -750,12 +750,12 @@ import(pathExpression);   // computed paths work for both; so does `#include <li
 ```
 
 Every file-based load (include in all forms, import, `engine::execute_file`) transparently
-maintains a sibling parse cache: `foo.jai` keeps a `foo.jaibite` (its pre-parsed AST) next to
-it. A sibling records the source it was parsed from (its size and a hash of its bytes); it loads
+maintains a parse cache: `foo.jai` keeps `.cache/foo.jai.jaibite` (its pre-parsed AST) beside it, or
+below the host's `jaibite_cache_directory`. A cache records the source it was parsed from (its size and a hash of its bytes); it loads
 instead of parsing only when that record equals the text just read and the host registrations
 match. Anything else (any other text, whatever its mtime; corrupt or truncated data; different
 host registrations) reparses and rewrites it — so the `.jai` on disk always wins and hot reload
-is unaffected. A sibling is written to a temporary file and renamed into place, so a reader never
+is unaffected. A cache is written to a temporary file and renamed into place, so a reader never
 sees part of one. Cache writes are silent best-effort (read-only script dirs are fine, the write is
 just skipped); disable per engine with `engine->jaibite_cache(false)`.
 

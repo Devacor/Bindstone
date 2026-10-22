@@ -21,9 +21,11 @@ namespace jai::foundry::tests {
 
 namespace value_text_fixtures {
 
-std::string run_output(const std::string& source) {
+// unbudgeted: the large-value test's loops outlast the 5 s default in a loaded Debug build
+std::string run_output(const std::string& source, bool unbudgeted = false) {
 	auto e = make_engine();
 	stdlib::register_all(*e);
+	if (unbudgeted) { e->execution_budget(0.0); }
 	auto out = std::make_shared<std::ostringstream>();
 	e->set_output_stream(out);
 	try {
@@ -259,7 +261,7 @@ public:
 				var nested = [];
 				for (int i = 0; i < 2000; ++i) { nested = [nested]; }
 				print(to_string(big).size(), " ", deep.size(), " ", to_string(maps).size(), " ", deep.find("null"), " ", to_string([nested]).size());
-			)JAI"));
+			)JAI", true));
 		});
 
 		test("host_objects_use_their_bound_to_string_else_their_type_name", [this]() {

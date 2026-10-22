@@ -343,6 +343,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		next_id_ = symbolizer_->intern("next");
 		handle_reset_id_ = symbolizer_->intern("reset");
 		done_id_ = symbolizer_->intern("done");
+		advance_id_ = symbolizer_->intern("advance");
 		class_definition_type_id_ = symbolizer_->intern("class_definition");
 		hot_reload_migrate_id_ = symbolizer_->intern("hot_reload_migrate");
 		base_type_ids_.intern(*symbolizer_);
@@ -12786,7 +12787,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 	if (receiver_type == script_value::TYPEID_OBJECT || receiver_type == script_value::TYPEID_SHARED_PTR) {
 		const auto holder = objectValue.get_object_holder();
 		if (holder && holder->type_id == coroutine_handle_type_id_) {
-			if (member_id == next_id_ || member_id == done_id_) { return {}; }
+			if (member_id == next_id_ || member_id == done_id_ || member_id == advance_id_) { return {}; }
 			return raise_(make_error_code(runtime_error_code::member_not_found),
 				"coroutine_handle has no member '{0}'", member_id);
 		}
@@ -14490,6 +14491,16 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 					return script_value(captured_handle->done(), eng);
 				};
 				out = script_value::make_function(done_method, engine_);
+				return {};
+			}
+			if (expr->member_id == advance_id_) {
+				if (!as_callee) { return raise_method_value(expr, objectValue, false); }
+				auto captured_handle = handle;
+				auto* eng = engine_;
+				script_function advance_method = [captured_handle, eng](const std::vector<script_value>& a_args) -> checked_result<script_value> {
+					return captured_handle->advance_from_script(eng, a_args);
+				};
+				out = script_value::make_function(advance_method, engine_);
 				return {};
 			}
 			return raise_(make_error_code(runtime_error_code::member_not_found),
@@ -17035,6 +17046,17 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				}
 				stack_.push_back(script_value(handle->done(), engine_));
 				return {};
+			}
+			if (holder && holder->type_id == coroutine_handle_type_id_ && holder->data && member->member_id == advance_id_) {
+				auto handle = std::static_pointer_cast<coroutine_handle>(holder->data);
+				// the argument binds as a T& parameter does: through the call site the handle reads (host_reference_argument)
+				pending_call_site saved_pending = pending_site_ctx_;
+				pending_site_ctx_ = arguments.empty() ? saved_pending : pending_call_site{&site, &f, f.code, &arguments};
+				struct pending_restore {
+					vm_backend* vm; pending_call_site saved;
+					~pending_restore() { vm->pending_site_ctx_ = saved; }
+				} restore_pending{this, saved_pending};
+				return guarded_native_call([&] { return handle->advance_from_script(engine_, arguments); });
 			}
 			// A user class method WINS over a same-named builtin handle method:
 			// the sp-builtin only applies when the class does NOT define it.

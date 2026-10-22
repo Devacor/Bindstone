@@ -2,6 +2,7 @@
 #include "../../include/jaiscript/core/engine.hpp"
 #include "../../include/jaiscript/core/execution_backend.hpp"
 #include "../../include/jaiscript/detail/arg_capture.hpp"
+#include "../../include/jaiscript/core/function_binder.hpp"
 
 namespace jai {
 
@@ -44,6 +45,14 @@ JAI_NOINLINE checked_result<script_value> next_count_range_error() {
     return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "next() count must be at least 1");
 }
 
+JAI_NOINLINE checked_result<script_value> advance_argument_count_error() {
+    return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "advance() takes 1 argument (the variable that receives the yielded value)");
+}
+
+JAI_NOINLINE checked_result<script_value> advance_non_lvalue_error() {
+    return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Cannot pass non-lvalue to reference parameter");
+}
+
 } // namespace
 
 checked_result<script_value> coroutine_handle::next(engine* eng, script_int a_count) {
@@ -78,6 +87,21 @@ checked_result<script_value> coroutine_handle::next_from_script(engine* eng, con
     if (a_argCount > 1) { return next_argument_count_error(); }
     if (!a_args[0].is_int()) { return next_count_type_error(); }
     return next(eng, a_args[0].as_int());
+}
+
+checked_result<script_value> coroutine_handle::advance_from_script(engine* eng, const std::vector<script_value>& a_args) {
+    if (a_args.size() != 1) { return advance_argument_count_error(); }
+    if (status_ == status::running) { return resume_refusal(); }
+    detail::host_reference out = detail::host_reference_argument(eng, a_args, 0, 0);
+    if (!out.target.is_reference() && !out.slot.frame) { return advance_non_lvalue_error(); }
+    if (done()) { return script_value(false, eng); }
+    checked_result<script_value> resumed = resume_once(eng);
+    if (!resumed || eng->get_execution_backend()->is_unwinding()) { return resumed; }
+    if (status_ != status::suspended) { return script_value(false, eng); }
+    if (auto stored = detail::host_reference_store(eng, out.slot, out.target, std::move(resumed.value())); !stored) {
+        return stored.error_value();
+    }
+    return script_value(true, eng);
 }
 
 checked_result<script_value> coroutine_handle::resume_refusal() const {

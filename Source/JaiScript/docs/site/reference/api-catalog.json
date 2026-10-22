@@ -2136,6 +2136,18 @@
     },
     {
       "owner": "coroutine",
+      "name": "advance",
+      "signature": "advance(v: var&) -> bool",
+      "provider": "core",
+      "effect": "advance, callback",
+      "notes": "Resumes once: true when the body yielded, with the yielded value stored into v (converted to v's declared type); false when the body ran to its end, or had already ended, leaving v as it was. The final return value is not delivered (next() delivers it). v binds as a T& parameter does: a temporary raises Cannot pass non-lvalue to reference parameter before anything runs.",
+      "source": "source/implementation/coroutine.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "coroutine.advance(v: var&) -> bool"
+    },
+    {
+      "owner": "coroutine",
       "name": "done",
       "signature": "done() -> bool",
       "provider": "core",

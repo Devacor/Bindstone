@@ -128,6 +128,7 @@ struct ctype {
     // read it, while the receiver keeps the proof pass's view (internal/static_checking.md "References")
     bool diagnostic_only = false;
 	const expression* origin = nullptr; // this use's expression, for literal-only checks
+	const type_info* yields = nullptr;  // coroutine_k: the declared type each yield converts to (null: undeclared)
 
     bool is_unknown() const { return kind == unknown; }
     static ctype make(kind_t k) { return ctype{k, {}}; }
@@ -2757,14 +2758,14 @@ private:
         diag(diag_level::error, m->location, "no member '" + std::string(m->member) + "' on '" + ctype_name(recv) + "'" +
              (best.empty() ? std::string() : " (did you mean '" + best + "'?)"));
     }
-	// A coroutine handle answers next() and done() only (the runtime's texts); resume is the retired spelling of next
+	// A coroutine handle answers next(), done() and advance() only (the runtime's texts); resume is the retired spelling of next
 	void coroutine_member_missing(const member_expr* a_member) {
 		std::string best;
 		if (a_member->member == "resume") {
 			best = "next";
 		} else {
 			size_t bestDistance = 3;
-			for (const std::string_view name : {std::string_view{"done"}, std::string_view{"next"}}) {
+			for (const std::string_view name : {std::string_view{"advance"}, std::string_view{"done"}, std::string_view{"next"}}) {
 				const size_t distance = edit_distance(a_member->member, name);
 				if (distance < bestDistance) { bestDistance = distance; best = std::string(name); }
 			}
@@ -2785,6 +2786,31 @@ private:
 				diag(diag_level::error, a_call->arguments[0]->location, "next() count must be an integer");
 			}
 			return {};
+		}
+		if (a_member->member == "advance") {
+			if (a_args.size() != 1) {
+				diag(diag_level::error, a_call->location, "advance() takes 1 argument (the variable that receives the yielded value)");
+				return ctype::make(ctype::bool_k);
+			}
+			const expression* out = a_call->arguments[0].get();
+			const node_type k = out->get_type();
+			if (k == node_type::literal_expr || k == node_type::array_literal_expr || k == node_type::map_literal_expr) {
+				diag(diag_level::error, out->location, "advance() writes the yielded value through its argument; pass a variable");
+				return ctype::make(ctype::bool_k);
+			}
+			if (const const_hit h = const_path(out); h.verdict == const_raises) {
+				const std::string text = detail::const_argument_text(out, h.root, "v", "advance", 0);
+				stamp_const(const_cast<call_expr*>(a_call)->const_check, const_raises, [&] { return text; });
+				diag(diag_level::error, out->location, detail::const_lowercase(text), h.line, h.column);
+				return ctype::make(ctype::bool_k);
+			}
+			if (a_receiver.yields && !a_args[0].is_unknown() && !a_args[0].tentative) {
+				const ctype yielded = ctype_from_type_info(a_receiver.yields);
+				if (!yielded.is_unknown() && !assignable(yielded, a_args[0])) {
+					diag(diag_level::error, out->location, "advance() cannot store the yielded '" + ctype_name(yielded) + "' into '" + ctype_name(a_args[0]) + "'");
+				}
+			}
+			return ctype::make(ctype::bool_k);
 		}
 		coroutine_member_missing(a_member);
 		return {};
@@ -3152,6 +3178,7 @@ private:
         }
         if (viable_count == 1) {
             out.result = only_viable->is_coroutine ? ctype::make(ctype::coroutine_k) : ctype_from_type_info(only_viable->return_type.get());
+            if (only_viable->is_coroutine) { out.result.yields = only_viable->return_type.get(); }
         }
         if (viable_count > 1 && scored) { report_ambiguous_call(fname, overloads, args, loc); }
         return out;
@@ -3990,7 +4017,7 @@ private:
 			return c;
 		}
 		if (recv.kind == ctype::coroutine_k) {
-			if (!recv.tentative && m->member != "next" && m->member != "done") { coroutine_member_missing(m); }
+			if (!recv.tentative && m->member != "next" && m->member != "done" && m->member != "advance") { coroutine_member_missing(m); }
 			return {};
 		}
 		if (recv.is_unknown() && !m->is_static) {

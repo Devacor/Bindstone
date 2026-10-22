@@ -627,6 +627,12 @@ print(v[&quot;hp&quot;], &quot; &quot;, v[&quot;tags&quot;][0]);</code></pre></d
 <div class="api-entry" data-provider="runner" data-search="read_key() -&gt; string input nonblocking; consumes one queued edge; empty string if idle; named arrows and lowercase letters. standalone jaiscript.exe"><h3 id="api-12416cbcb301"><code>read_key() -&gt; string</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; input</p>
 <p>Nonblocking; consumes one queued edge; empty string if idle; named arrows and lowercase letters.</p>
 </div>
+<div class="api-entry" data-provider="core" data-search="regex(pattern: string = &quot;&quot;, flags: string = &quot;&quot;) -&gt; regex construct flags i, m, s, x; literal texts compile once at load and an invalid one fails the load. every engine"><h3 id="api-7ad407136269"><code>regex(pattern: string = &quot;&quot;, flags: string = &quot;&quot;) -&gt; regex</code></h3><p><strong>Every engine</strong> &middot; construct</p>
+<p>Flags i, m, s, x; literal texts compile once at load and an invalid one fails the load.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">regex r = regex(R&quot;((\w+)@(\w+))&quot;, &quot;i&quot;);
+print(r.pattern, &quot; &quot;, r.search(&quot;mail BOB@example now&quot;)[2]);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(\w+)@(\w+) example</code></pre></div>
+</div>
 <div class="api-entry" data-provider="core" data-search="resolve_path(path: string) -&gt; string filesystem uses import&#x27;s search ladder. every engine"><h3 id="api-49cd61dfe221"><code>resolve_path(path: string) -&gt; string</code></h3><p><strong>Every engine</strong> &middot; filesystem</p>
 <p>Uses import&#x27;s search ladder.</p>
 </div>
@@ -1176,6 +1182,61 @@ print(reflect::invoke(Orc(), &quot;add&quot;, 2, 3));</code></pre></div>
 <div class="api-entry" data-provider="stdlib" data-search="reflect::set(object: var, field: string, value: var) -&gt; void mutate, callback  register_all() or area registration"><h3 id="api-e5b9ac9bcd76"><code>reflect::set(object: var, field: string, value: var) -&gt; void</code></h3><p><strong>register_all() or area registration</strong> &middot; mutate, callback</p>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="reflect::type_name(value: var) -&gt; string observe  register_all() or area registration"><h3 id="api-3fc8abef3afe"><code>reflect::type_name(value: var) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+</div>
+</section>
+<section class="api-group"><h2 id="group-regex">regex</h2>
+<div class="api-entry" data-provider="core" data-search="regex::escape(text: string) -&gt; string copy a pattern matching the text literally; keeps a utf8_string&#x27;s kind. every engine"><h3 id="api-169335b4e193"><code>regex::escape(text: string) -&gt; string</code></h3><p><strong>Every engine</strong> &middot; copy</p>
+<p>A pattern matching the text literally; keeps a utf8_string&#x27;s kind.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="regex.find_all(text: string) -&gt; array&lt;regex::match&gt; observe left to right; an empty match moves the next search one character on. every engine"><h3 id="api-4d80ce70d925"><code>regex.find_all(text: string) -&gt; array&lt;regex::match&gt;</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>Left to right; an empty match moves the next search one character on.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="regex.matches(text: string) -&gt; bool observe the whole text, any way through the pattern. every engine"><h3 id="api-36cf2d60830a"><code>regex.matches(text: string) -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>The whole text, any way through the pattern.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="regex.replace(text: string, replacement: (regex::match) -&gt; string) -&gt; string copy, callback called once per match, in order. every engine"><h3 id="api-10cf6f0dc821"><code>regex.replace(text: string, replacement: (regex::match) -&gt; string) -&gt; string</code></h3><p><strong>Every engine</strong> &middot; copy, callback</p>
+<p>Called once per match, in order.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="regex.replace(text: string, replacement: string) -&gt; string copy $1..$99, ${n}, ${name}, $0, $$. every engine"><h3 id="api-d3cdbf497108"><code>regex.replace(text: string, replacement: string) -&gt; string</code></h3><p><strong>Every engine</strong> &middot; copy</p>
+<p>$1..$99, ${n}, ${name}, $0, $$.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(regex(R&quot;((\w+) (\w+))&quot;).replace(&quot;ada lovelace&quot;, &quot;$2, $1&quot;));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">lovelace, ada</code></pre></div>
+</div>
+<div class="api-entry" data-provider="core" data-search="regex.replace_first(text: string, replacement: (regex::match) -&gt; string) -&gt; string copy, callback  every engine"><h3 id="api-1a3fada9cb9f"><code>regex.replace_first(text: string, replacement: (regex::match) -&gt; string) -&gt; string</code></h3><p><strong>Every engine</strong> &middot; copy, callback</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="regex.replace_first(text: string, replacement: string) -&gt; string copy the first match only. every engine"><h3 id="api-6f60b34f0b72"><code>regex.replace_first(text: string, replacement: string) -&gt; string</code></h3><p><strong>Every engine</strong> &middot; copy</p>
+<p>The first match only.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="regex.search(text: string) -&gt; regex::match observe the leftmost match, or null. every engine"><h3 id="api-bbddaec29c14"><code>regex.search(text: string) -&gt; regex::match</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>The leftmost match, or null.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="regex.search(text: string, start: int) -&gt; regex::match observe from a position (bytes, or characters on a utf8_string); the text before it is the assertions&#x27; context. every engine"><h3 id="api-a9c173ad1085"><code>regex.search(text: string, start: int) -&gt; regex::match</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>From a position (bytes, or characters on a utf8_string); the text before it is the assertions&#x27; context.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="regex.split(text: string) -&gt; array&lt;string&gt; copy ecmascript&#x27;s split; each split&#x27;s groups follow its piece. every engine"><h3 id="api-f84f7811f3d7"><code>regex.split(text: string) -&gt; array&lt;string&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
+<p>ECMAScript&#x27;s split; each split&#x27;s groups follow its piece.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(to_json(regex(R&quot;(\s*,\s*)&quot;).split(&quot;a , b,c&quot;)));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[&quot;a&quot;,&quot;b&quot;,&quot;c&quot;]</code></pre></div>
+</div>
+<div class="api-entry" data-provider="core" data-search="regex.split(text: string, max_splits: int) -&gt; array&lt;string&gt; copy the rest stays in the last piece; a negative count is no limit. every engine"><h3 id="api-d260b338694f"><code>regex.split(text: string, max_splits: int) -&gt; array&lt;string&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
+<p>The rest stays in the last piece; a negative count is no limit.</p>
+</div>
+</section>
+<section class="api-group"><h2 id="group-regex-match">regex::match</h2>
+<div class="api-entry" data-provider="core" data-search="regex::match[group: int | string] -&gt; string observe a group by number or name; null when it took no part. every engine"><h3 id="api-bc7328b83552"><code>regex::match[group: int | string] -&gt; string</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>A group by number or name; null when it took no part.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="regex::match.end(group: int | string = 0) -&gt; int observe -1 for a group that took no part. every engine"><h3 id="api-14877b26fc12"><code>regex::match.end(group: int | string = 0) -&gt; int</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>-1 for a group that took no part.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="regex::match.size() -&gt; int observe the whole match and every group. every engine"><h3 id="api-23d744a7b23e"><code>regex::match.size() -&gt; int</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>The whole match and every group.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="regex::match.start(group: int | string = 0) -&gt; int observe -1 for a group that took no part. every engine"><h3 id="api-71e7c4910e0f"><code>regex::match.start(group: int | string = 0) -&gt; int</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>-1 for a group that took no part.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="regex::match.text() -&gt; string observe the whole match (as m[0]). every engine"><h3 id="api-5a14fd167954"><code>regex::match.text() -&gt; string</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>The whole match (as m[0]).</p>
 </div>
 </section>
 <section class="api-group"><h2 id="group-shared-ptr-t">shared_ptr&lt;T&gt;</h2>
@@ -1786,6 +1847,8 @@ print(u.to_string());</code></pre></div>
 <tr><td><code>math::vec4.z</code></td><td>float</td><td>read/write / core</td><td>Component narrows to int32 or float32.</td></tr>
 <tr><td><code>pair.first</code></td><td>var</td><td>read/write / stdlib</td><td>Map iteration keys remain protected from mutation.</td></tr>
 <tr><td><code>pair.second</code></td><td>var</td><td>read/write / stdlib</td><td>Map iteration keys remain protected from mutation.</td></tr>
+<tr><td><code>regex.flags</code></td><td>string</td><td>read-only / core</td><td></td></tr>
+<tr><td><code>regex.pattern</code></td><td>string</td><td>read-only / core</td><td>Saved by to_json and from_json.</td></tr>
 <tr><td><code>string::whitespace</code></td><td>string</td><td>constant / stdlib</td><td>Space, tab, LF, VT, FF, CR; split() whitespace sentinel.</td></tr>
 <tr><td><code>time::date.day</code></td><td>int</td><td>read/write / stdlib</td><td>Validated calendar field.</td></tr>
 <tr><td><code>time::date.hour</code></td><td>int</td><td>read/write / stdlib</td><td>Validated calendar field.</td></tr>

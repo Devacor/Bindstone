@@ -22,7 +22,8 @@ namespace jai {
     class declaration;
     struct script_defined_function;   // environment.hpp; node mint caches hold it opaquely
     class class_definition;           // class_definition.hpp; proof stamps hold it by raw pointer
-    
+    namespace detail::regex { class compiled; }   // detail/regex.hpp; a constant pattern's compile, engine-independent
+
     using ast_node_ptr = std::shared_ptr<ast_node>;
     using expression_ptr = std::shared_ptr<expression>;
     using statement_ptr = std::shared_ptr<statement>;
@@ -353,6 +354,9 @@ namespace jai {
         mutable method_site_cache sibling_cache;   // interpreter: a bare call of a method of this frame's receiver
         // a method that writes its receiver called on a const, or a const passed to a writing reference parameter
         mutable const_site const_check;
+        // regex(pattern[, flags]) with literal texts while `regex` names the engine's constructor: the pattern compiled at load
+        // (the checker's stamp, never serialized); both backends make the value from it while the name still binds the constructor
+        mutable std::shared_ptr<const detail::regex::compiled> regex_constant;
 
         call_expr(const source_location& loc, expression_ptr c, std::vector<expression_ptr> args)
             : expression(loc, node_type::call_expr), callee(c), arguments(std::move(args)) {}    };

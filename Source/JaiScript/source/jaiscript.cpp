@@ -36,6 +36,8 @@
 #include "implementation/parallel_transform.cpp"
 #include "implementation/thread_pool.cpp"
 #include "implementation/debug/controller.cpp"
+#include "implementation/regex/regex_engine.cpp"
+#include "implementation/regex/regex_library.cpp"
 #include "implementation/stdlib/json.cpp"
 #include "implementation/stdlib/io.cpp"
 #include "implementation/stdlib/containers.cpp"

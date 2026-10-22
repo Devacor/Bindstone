@@ -197,6 +197,9 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			case opcode::op_probe_callee:
 				out << " site=" << ins.a << " argc=" << ins.b;
 				break;
+			case opcode::op_regex_constant:
+				out << " site=" << ins.a << " regex=" << ins.b << " argc=" << ins.c;
+				break;
 			case opcode::op_call_from_scratch:
 			case opcode::op_call_typed:
 				out << " argc=" << ins.a << " site=" << ins.b;

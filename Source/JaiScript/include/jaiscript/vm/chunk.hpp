@@ -421,6 +421,10 @@ namespace jai::vm {
         mutable std::vector<uint32_t> debug_innermost;   // per instruction: 1 + the innermost span holding it, 0 for none
 
         std::vector<script_value> constants;               // engine-less AST-literal templates
+        // regex(pattern[, flags]) sites with literal texts (op_regex_constant): the pattern the checker compiled, and how many
+        // texts the call passes should `regex` bind something else
+        struct regex_constant { std::shared_ptr<const detail::regex::compiled> re; uint32_t argc = 1; };
+        std::vector<regex_constant> regex_constants;
         // Instruction ranges [begin, end) evaluating call arguments; consulted only on the
         // C++-exception path (interpreter parity: visit_call converts arg-eval throws into
         // script unwinding at the frame making the call, so its own try/catch can fire)

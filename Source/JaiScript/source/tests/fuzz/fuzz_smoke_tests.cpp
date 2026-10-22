@@ -123,6 +123,15 @@ public:
 			run_seed_range(300, 40, true, fuzz::band_mode::never, fuzz::band_mode::always, 2);
 			run_seed_range(300, 40, true, fuzz::band_mode::never, fuzz::band_mode::always, 1);
 		});
+		test("regex_band_seeds_no_new_divergence", [this]() {
+			// every program carries the regex band: generated patterns through every regex call, literal and built at run time
+			using fuzz::band_mode;
+			for (uint64_t seed = 500; seed < 560; ++seed) {
+				const fuzz::program p = fuzz::generate_program(seed, 3, band_mode::never, band_mode::never, band_mode::never, band_mode::never, band_mode::never, band_mode::always);
+				const fuzz::compare_result cr = fuzz::compare_program(p, 5.0);
+				check_true(cr.kind != fuzz::compare_result::diverge, "regex band seed " + std::to_string(seed) + ": " + cr.diff);
+			}
+		});
 		test("a_budget_spent_inside_a_block_ends_the_run", [this]() {
 			// seed 2004797 with the call-argument band (jaiscript_fuzz's default rolls otherwise): a loop whose body is a closed inner loop ran
 			// past every budget on the vm while the interpreter raised at once; both backends must end the run with the same outcome

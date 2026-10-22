@@ -6691,7 +6691,7 @@
       "display": "web::html_unescape(value: text) -> same_text_kind",
       "example": {
         "code": "print(web::html_unescape(\"&lt;b&gt; &copy &#x41;&#66; &bogus;\"));",
-        "output": "<b> © AB &bogus;"
+        "output": "<b> \u00a9 AB &bogus;"
       }
     },
     {
@@ -6837,6 +6837,222 @@
         "code": "web::url u = web::parse_url(\"http://a.example/x?y=1\");\nu.path = \"/z\";\nprint(u.to_string());",
         "output": "http://a.example/z?y=1"
       }
+    },
+    {
+      "owner": "global",
+      "name": "regex",
+      "signature": "regex(pattern: string = \"\", flags: string = \"\") -> regex",
+      "provider": "core",
+      "effect": "construct",
+      "notes": "Flags i, m, s, x; literal texts compile once at load and an invalid one fails the load.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "function",
+      "availability": "Every engine",
+      "display": "regex(pattern: string = \"\", flags: string = \"\") -> regex",
+      "example": {
+        "code": "regex r = regex(R\"((\\w+)@(\\w+))\", \"i\");\nprint(r.pattern, \" \", r.search(\"mail BOB@example now\")[2]);",
+        "output": "(\\w+)@(\\w+) example"
+      }
+    },
+    {
+      "owner": "regex",
+      "name": "escape",
+      "signature": "escape(text: string) -> string",
+      "provider": "core",
+      "effect": "copy",
+      "notes": "A pattern matching the text literally; keeps a utf8_string's kind.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "function",
+      "availability": "Every engine",
+      "display": "regex::escape(text: string) -> string"
+    },
+    {
+      "owner": "regex",
+      "name": "matches",
+      "signature": "matches(text: string) -> bool",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "The whole text, any way through the pattern.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex.matches(text: string) -> bool"
+    },
+    {
+      "owner": "regex",
+      "name": "search",
+      "signature": "search(text: string) -> regex::match",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "The leftmost match, or null.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex.search(text: string) -> regex::match"
+    },
+    {
+      "owner": "regex",
+      "name": "search",
+      "signature": "search(text: string, start: int) -> regex::match",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "From a position (bytes, or characters on a utf8_string); the text before it is the assertions' context.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex.search(text: string, start: int) -> regex::match"
+    },
+    {
+      "owner": "regex",
+      "name": "find_all",
+      "signature": "find_all(text: string) -> array<regex::match>",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "Left to right; an empty match moves the next search one character on.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex.find_all(text: string) -> array<regex::match>"
+    },
+    {
+      "owner": "regex",
+      "name": "replace",
+      "signature": "replace(text: string, replacement: string) -> string",
+      "provider": "core",
+      "effect": "copy",
+      "notes": "$1..$99, ${n}, ${name}, $0, $$.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex.replace(text: string, replacement: string) -> string",
+      "example": {
+        "code": "print(regex(R\"((\\w+) (\\w+))\").replace(\"ada lovelace\", \"$2, $1\"));",
+        "output": "lovelace, ada"
+      }
+    },
+    {
+      "owner": "regex",
+      "name": "replace",
+      "signature": "replace(text: string, replacement: (regex::match) -> string) -> string",
+      "provider": "core",
+      "effect": "copy, callback",
+      "notes": "Called once per match, in order.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex.replace(text: string, replacement: (regex::match) -> string) -> string"
+    },
+    {
+      "owner": "regex",
+      "name": "replace_first",
+      "signature": "replace_first(text: string, replacement: string) -> string",
+      "provider": "core",
+      "effect": "copy",
+      "notes": "The first match only.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex.replace_first(text: string, replacement: string) -> string"
+    },
+    {
+      "owner": "regex",
+      "name": "replace_first",
+      "signature": "replace_first(text: string, replacement: (regex::match) -> string) -> string",
+      "provider": "core",
+      "effect": "copy, callback",
+      "notes": "",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex.replace_first(text: string, replacement: (regex::match) -> string) -> string"
+    },
+    {
+      "owner": "regex",
+      "name": "split",
+      "signature": "split(text: string) -> array<string>",
+      "provider": "core",
+      "effect": "copy",
+      "notes": "ECMAScript's split; each split's groups follow its piece.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex.split(text: string) -> array<string>",
+      "example": {
+        "code": "print(to_json(regex(R\"(\\s*,\\s*)\").split(\"a , b,c\")));",
+        "output": "[\"a\",\"b\",\"c\"]"
+      }
+    },
+    {
+      "owner": "regex",
+      "name": "split",
+      "signature": "split(text: string, max_splits: int) -> array<string>",
+      "provider": "core",
+      "effect": "copy",
+      "notes": "The rest stays in the last piece; a negative count is no limit.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex.split(text: string, max_splits: int) -> array<string>"
+    },
+    {
+      "owner": "regex::match",
+      "name": "text",
+      "signature": "text() -> string",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "The whole match (as m[0]).",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex::match.text() -> string"
+    },
+    {
+      "owner": "regex::match",
+      "name": "[]",
+      "signature": "[](group: int | string) -> string",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "A group by number or name; null when it took no part.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex::match[group: int | string] -> string"
+    },
+    {
+      "owner": "regex::match",
+      "name": "start",
+      "signature": "start(group: int | string = 0) -> int",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "-1 for a group that took no part.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex::match.start(group: int | string = 0) -> int"
+    },
+    {
+      "owner": "regex::match",
+      "name": "end",
+      "signature": "end(group: int | string = 0) -> int",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "-1 for a group that took no part.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex::match.end(group: int | string = 0) -> int"
+    },
+    {
+      "owner": "regex::match",
+      "name": "size",
+      "signature": "size() -> int",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "The whole match and every group.",
+      "source": "source/implementation/regex/regex_library.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "regex::match.size() -> int"
     }
   ],
   "fields": [
@@ -7489,6 +7705,24 @@
       "access": "read/write",
       "notes": "web::parse_url's part, as written",
       "source": "include/jaiscript/stdlib/web_text.hpp"
+    },
+    {
+      "owner": "regex",
+      "name": "pattern",
+      "type": "string",
+      "provider": "core",
+      "access": "read-only",
+      "notes": "Saved by to_json and from_json.",
+      "source": "source/implementation/regex/regex_library.cpp"
+    },
+    {
+      "owner": "regex",
+      "name": "flags",
+      "type": "string",
+      "provider": "core",
+      "access": "read-only",
+      "notes": "",
+      "source": "source/implementation/regex/regex_library.cpp"
     }
   ]
 }

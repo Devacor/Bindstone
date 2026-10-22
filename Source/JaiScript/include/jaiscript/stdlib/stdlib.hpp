@@ -30,6 +30,8 @@ namespace stdlib {
     inline void register_string_functions(engine* e) { register_string_functions(*e); }
     inline void register_web_text_functions(const std::shared_ptr<engine>& e) { register_web_text_functions(*e); }
     inline void register_web_text_functions(engine* e) { register_web_text_functions(*e); }
+    inline void register_web(const std::shared_ptr<engine>& e) { register_web(*e); }
+    inline void register_web(engine* e) { register_web(*e); }
     // time.hpp (the stopwatch and calendar internals, with <chrono>) is the library's; hosts need only the registration
     void register_time_functions(engine& eng_ref);
     inline void register_time_functions(const std::shared_ptr<engine>& e) { register_time_functions(*e); }

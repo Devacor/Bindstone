@@ -6612,38 +6612,6 @@
     },
     {
       "owner": "global",
-      "name": "html_escape",
-      "signature": "html_escape(value: text) -> same_text_kind",
-      "provider": "stdlib",
-      "effect": "copy",
-      "notes": "Writes & < > \" ' as &amp; &lt; &gt; &quot; &#39; (htmlspecialchars with ENT_QUOTES); every other byte, UTF-8 included, is kept.",
-      "source": "include/jaiscript/stdlib/web_text.hpp",
-      "form": "function",
-      "availability": "register_all() or area registration",
-      "display": "html_escape(value: text) -> same_text_kind",
-      "example": {
-        "code": "print(html_escape(\"<a title=\\\"Tom & Jerry's\\\">\"));",
-        "output": "&lt;a title=&quot;Tom &amp; Jerry&#39;s&quot;&gt;"
-      }
-    },
-    {
-      "owner": "global",
-      "name": "html_unescape",
-      "signature": "html_unescape(value: text) -> same_text_kind",
-      "provider": "stdlib",
-      "effect": "copy",
-      "notes": "Reads the HTML5 named references (legacy names without the ;, longest match) and numeric ones as a browser does in text; 0, surrogates and values past U+10FFFF become U+FFFD; anything else is kept.",
-      "source": "include/jaiscript/stdlib/web_text.hpp",
-      "form": "function",
-      "availability": "register_all() or area registration",
-      "display": "html_unescape(value: text) -> same_text_kind",
-      "example": {
-        "code": "print(html_unescape(\"&lt;b&gt; &copy &#x41;&#66; &bogus;\"));",
-        "output": "<b> © AB &bogus;"
-      }
-    },
-    {
-      "owner": "global",
       "name": "sha256",
       "signature": "sha256(bytes: text) -> string",
       "provider": "stdlib",
@@ -6669,6 +6637,182 @@
       "form": "function",
       "availability": "register_all() or area registration",
       "display": "sha256_file(path: string) -> string"
+    },
+    {
+      "owner": "web",
+      "name": "html_escape",
+      "signature": "html_escape(value: text) -> same_text_kind",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "Writes & < > \" ' as &amp; &lt; &gt; &quot; &#39; (htmlspecialchars with ENT_QUOTES); every other byte, UTF-8 included, is kept.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "function",
+      "availability": "register_web()",
+      "display": "web::html_escape(value: text) -> same_text_kind",
+      "example": {
+        "code": "print(web::html_escape(\"<a title=\\\"Tom & Jerry's\\\">\"));",
+        "output": "&lt;a title=&quot;Tom &amp; Jerry&#39;s&quot;&gt;"
+      }
+    },
+    {
+      "owner": "web",
+      "name": "html_unescape",
+      "signature": "html_unescape(value: text) -> same_text_kind",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "Reads the HTML5 named references (legacy names without the ;, longest match) and numeric ones as a browser does in text; 0, surrogates and values past U+10FFFF become U+FFFD; anything else is kept.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "function",
+      "availability": "register_web()",
+      "display": "web::html_unescape(value: text) -> same_text_kind",
+      "example": {
+        "code": "print(web::html_unescape(\"&lt;b&gt; &copy &#x41;&#66; &bogus;\"));",
+        "output": "<b> © AB &bogus;"
+      }
+    },
+    {
+      "owner": "web",
+      "name": "url_encode",
+      "signature": "url_encode(text: text) -> string",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "RFC 3986 percent-encoding (rawurlencode): A-Z a-z 0-9 - . _ ~ stay, every other byte is %XX in upper-case hex.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "function",
+      "availability": "register_web()",
+      "display": "web::url_encode(text: text) -> string",
+      "example": {
+        "code": "print(web::url_encode(\"Snap Jaw/Social? & more\"));",
+        "output": "Snap%20Jaw%2FSocial%3F%20%26%20more"
+      }
+    },
+    {
+      "owner": "web",
+      "name": "url_decode",
+      "signature": "url_decode(text: text) -> string",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "Each %XX becomes its byte; a % without two hex digits stays as written; + stays a +.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "function",
+      "availability": "register_web()",
+      "display": "web::url_decode(text: text) -> string",
+      "example": {
+        "code": "print(web::url_decode(\"Snap%20Jaw%2FSocial%3F\"));",
+        "output": "Snap Jaw/Social?"
+      }
+    },
+    {
+      "owner": "web",
+      "name": "form_encode",
+      "signature": "form_encode(text: text) -> string",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "application/x-www-form-urlencoded (urlencode): A-Z a-z 0-9 * - . _ stay, a space is +, every other byte is %XX.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "function",
+      "availability": "register_web()",
+      "display": "web::form_encode(text: text) -> string",
+      "example": {
+        "code": "print(web::form_encode(\"two words & more\"));",
+        "output": "two+words+%26+more"
+      }
+    },
+    {
+      "owner": "web",
+      "name": "form_decode",
+      "signature": "form_decode(text: text) -> string",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "url_decode that also reads + as a space.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "function",
+      "availability": "register_web()",
+      "display": "web::form_decode(text: text) -> string",
+      "example": {
+        "code": "print(web::form_decode(\"two+words+%26+more\"));",
+        "output": "two words & more"
+      }
+    },
+    {
+      "owner": "web",
+      "name": "parse_query",
+      "signature": "parse_query(query: text) -> map<string, string>",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "Pairs split on &, form-decoded; a leading ? is skipped, a key without = is empty, an empty key is dropped, a repeated key keeps its last value.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "function",
+      "availability": "register_web()",
+      "display": "web::parse_query(query: text) -> map<string, string>",
+      "example": {
+        "code": "print(to_json(web::parse_query(\"?page=2&tag=a+b&tag=c&empty\")));",
+        "output": "{\"empty\":\"\",\"page\":\"2\",\"tag\":\"c\"}"
+      }
+    },
+    {
+      "owner": "web",
+      "name": "parse_query_all",
+      "signature": "parse_query_all(query: text) -> map<string, var>",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "parse_query keeping every value of a key, an array<string> in arrival order.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "function",
+      "availability": "register_web()",
+      "display": "web::parse_query_all(query: text) -> map<string, var>",
+      "example": {
+        "code": "print(to_json(web::parse_query_all(\"tag=a+b&tag=c\")));",
+        "output": "{\"tag\":[\"a b\",\"c\"]}"
+      }
+    },
+    {
+      "owner": "web",
+      "name": "build_query",
+      "signature": "build_query(fields: map) -> string",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "Keys and values form-encoded in the map's key order; a number or bool as to_string writes it, an array repeats its key, a null value is left out; anything else raises.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "function",
+      "availability": "register_web()",
+      "display": "web::build_query(fields: map) -> string",
+      "example": {
+        "code": "print(web::build_query({\"q\": \"jai script\", \"page\": 2, \"tags\": [\"a\", \"b c\"], \"skip\": null}));",
+        "output": "page=2&q=jai+script&tags=a&tags=b+c"
+      }
+    },
+    {
+      "owner": "web",
+      "name": "parse_url",
+      "signature": "parse_url(url: text) -> web::url",
+      "provider": "stdlib",
+      "effect": "copy",
+      "notes": "An RFC 3986 URI reference split as written: scheme, user, password, host, port (0 for none), path, query, fragment; a malformed host or port raises.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "function",
+      "availability": "register_web()",
+      "display": "web::parse_url(url: text) -> web::url",
+      "example": {
+        "code": "web::url u = web::parse_url(\"https://snapjaw.example:8443/posts/7?sort=new#comments\");\nprint(u.host, \" \", u.port, \" \", u.path, \" \", u.query);",
+        "output": "snapjaw.example 8443 /posts/7 sort=new"
+      }
+    },
+    {
+      "owner": "web::url",
+      "name": "to_string",
+      "signature": "to_string() -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "The URL the fields spell: // and the authority when there is a host, a user or a port; ? and # before a non-empty query and fragment.",
+      "source": "include/jaiscript/stdlib/web_text.hpp",
+      "form": "method",
+      "availability": "register_web()",
+      "display": "web::url.to_string() -> string",
+      "example": {
+        "code": "web::url u = web::parse_url(\"http://a.example/x?y=1\");\nu.path = \"/z\";\nprint(u.to_string());",
+        "output": "http://a.example/z?y=1"
+      }
     }
   ],
   "fields": [
@@ -7249,6 +7393,78 @@
       "provider": "runner",
       "access": "receiver view",
       "notes": "Payload starts with client id, then bytes or reason where applicable."
+    },
+    {
+      "owner": "web::url",
+      "name": "scheme",
+      "type": "string",
+      "provider": "stdlib",
+      "access": "read/write",
+      "notes": "web::parse_url's part, as written",
+      "source": "include/jaiscript/stdlib/web_text.hpp"
+    },
+    {
+      "owner": "web::url",
+      "name": "user",
+      "type": "string",
+      "provider": "stdlib",
+      "access": "read/write",
+      "notes": "web::parse_url's part, as written",
+      "source": "include/jaiscript/stdlib/web_text.hpp"
+    },
+    {
+      "owner": "web::url",
+      "name": "password",
+      "type": "string",
+      "provider": "stdlib",
+      "access": "read/write",
+      "notes": "web::parse_url's part, as written",
+      "source": "include/jaiscript/stdlib/web_text.hpp"
+    },
+    {
+      "owner": "web::url",
+      "name": "host",
+      "type": "string",
+      "provider": "stdlib",
+      "access": "read/write",
+      "notes": "web::parse_url's part, as written",
+      "source": "include/jaiscript/stdlib/web_text.hpp"
+    },
+    {
+      "owner": "web::url",
+      "name": "port",
+      "type": "int",
+      "provider": "stdlib",
+      "access": "read/write",
+      "notes": "0 when the URL names no port",
+      "source": "include/jaiscript/stdlib/web_text.hpp"
+    },
+    {
+      "owner": "web::url",
+      "name": "path",
+      "type": "string",
+      "provider": "stdlib",
+      "access": "read/write",
+      "notes": "web::parse_url's part, as written",
+      "source": "include/jaiscript/stdlib/web_text.hpp"
+    },
+    {
+      "owner": "web::url",
+      "name": "query",
+      "type": "string",
+      "provider": "stdlib",
+      "access": "read/write",
+      "notes": "web::parse_url's part, as written",
+      "source": "include/jaiscript/stdlib/web_text.hpp"
+    },
+    {
+      "owner": "web::url",
+      "name": "fragment",
+      "type": "string",
+      "provider": "stdlib",
+      "access": "read/write",
+      "notes": "web::parse_url's part, as written",
+      "source": "include/jaiscript/stdlib/web_text.hpp"
     }
   ]
 }

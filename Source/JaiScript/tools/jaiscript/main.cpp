@@ -228,8 +228,9 @@ void print_usage() {
 		"           (message + stack trace on stderr), usage errors exit 2.\n"
 		"\n"
 		"environment: the full JaiScript stdlib is always registered (print/format/to_string/\n"
-		"  type_of, math, to_json/from_json, containers, html_escape/html_unescape(s), sha256(s),\n"
-		"  sha256_file(path)) plus host file IO: read_file(path),\n"
+		"  type_of, math, to_json/from_json, containers, sha256(s), sha256_file(path)), the web::\n"
+		"  library (html_escape, url_encode, form_encode, parse_query, build_query, parse_url, ...)\n"
+		"  plus host file IO: read_file(path),\n"
 		"  write_file(path, text) (creates missing folders), file_exists(path), delete_file(path), Download,\n"
 		"  zip_entries(zip), zip_extract(zip, entry, dest), dir_exists(path),\n"
 		"  make_dirs(path), list_dir(path), writable_dir(path). Locations are language builtins:\n"
@@ -1045,6 +1046,7 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 		eng->set_output_stream(std::shared_ptr<std::ostream>(engine_out, [](std::ostream*) {}));
 	}
 	jai::stdlib::register_all(eng);
+	jai::stdlib::register_web(eng);
 
 	// Host file IO — a runner without it can't save anything (same shapes as the example games).
 	register_file_io(*eng);

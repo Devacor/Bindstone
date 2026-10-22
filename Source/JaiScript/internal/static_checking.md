@@ -408,6 +408,24 @@ checker cannot catch. The class table rides the engine the same way; a class re-
 a different shape replaces its entry at the next gather (the last unit gathered wins), and a
 unit's own declaration always wins over the table's.
 
+**Reload dependents** (`engine::import_modules`, `check_group`): a module that ran before is
+re-checked, before it re-runs, against the program as its new text would leave it. Its new
+declarations go into the pools, its own check runs (with its closure), then every **loaded
+unit** outside the re-running set is checked again with diagnostics only (`proofs_t::leave`,
+parsed bodies in view) and never run again. `loaded_units_` holds the entry each unit last ran
+(`run_unit` notes it once per entry): every file unit, and a string unit that declares a
+function, class, namespace or variable. A gating error the unit's own last check did not
+report (same line, column and text) is the reload's: one `static_check_error`, each unit's
+listing against its own source and path. Any failure restores the pools to what the reload
+found. A failing re-run is checked once more with every **pending** module's new text pooled
+(a loaded module whose stamp moved and whose import has not been reached); a pass applies the
+reached modules only, and a pending module re-runs at its own import, its entry left unchecked
+so that import checks it again. A rejected reload's record keeps `failed_closure`: the module's
+closure, the files its parse read and the failing dependents' files, each stamped at the
+failure; a move of any of them releases the hold. The checker's coverage bounds the guarantee:
+a receiver typed off an engine global's tag, which is tentative while its class is
+mid-redefinition, is not member-checked.
+
 A unit that fails to **parse** stops the program there: its parse error (the unit's path, line
 and column, exactly the text executing that file directly gives) is the whole report, and no
 unit is checked (the names it would declare are unknown, so any check would only list them as

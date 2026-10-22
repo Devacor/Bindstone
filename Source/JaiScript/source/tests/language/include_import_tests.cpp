@@ -2035,6 +2035,118 @@ public:
             for (const char* f : {"gi_a.jai", "gi_b.jai"}) { cleanup_temp_file((dir / f).string()); }
         });
 
+        test("a_reload_that_breaks_code_that_is_not_changing_is_rejected", [=, this]() {
+            // a reload re-checks every loaded unit against the declarations it brings (the root file, a string that declared
+            // functions): one that would break is the reload's error, nothing applies and the edit waits; a compatible edit
+            // applies and migrates the class's globals and live locals
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 1100;
+            auto write_module = [&](const std::string& name, const std::string& body) {
+                const auto path = dir / name;
+                { std::ofstream(path, std::ios::binary | std::ios::trunc) << body; }
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            const std::string root = (dir / "dr_root.jai").generic_string();
+            for (bool use_vm : {false, true}) {
+                const std::string be = use_vm ? " (vm)" : " (interpreter)";
+                auto eng = engine::make();
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+                jai::stdlib::register_all(*eng);
+                eng->add_include_path(dir.string());
+                eng->import_recheck_interval(0);
+                write_module("dr_c.jai", "class C { int a = 1; int get() { return a + 100; } }\n");
+                eng->execute_file_source(root,
+                    "import(\"dr_c.jai\");\nC g;\nint across() { C loc; loc.a = 5; import(\"dr_c.jai\"); return loc.get(); }\n"
+                    "int ga() { C loc; return loc.a + g.a; }\n");
+                eng->execute("int s_read() { C sc; return sc.a; }");
+                write_module("dr_c.jai", "class C { int a = 1; int b = 7; int get() { return a + b + 100; } }\n");
+                check_eq(std::string("112|108"), eng->execute("to_string(across()) + \"|\" + to_string(g.get());").to_string(),
+                         "a compatible edit applies; the live local and the global migrate" + be);
+                write_module("dr_c.jai", "class C { int b = 7; int get() { return b; } }\n");
+                const std::string failed = eng->execute("string m = \"\";\ntry { import(\"dr_c.jai\"); } catch (e) { m = e; }\nm;").to_string();
+                check_true(failed.rfind("static check failed:\n", 0) == 0, "one check error" + be + ": " + failed);
+                check_true(failed.find(root + ":3:27: error: no member 'a' in class 'C'") != std::string::npos, "the root file's uses are named" + be + ": " + failed);
+                check_true(failed.find(root + ":4:30: error: no member 'a' in class 'C'") != std::string::npos, "4:30" + be + ": " + failed);
+                check_true(failed.find(root + ":4:36: error: no member 'a' in class 'C'") != std::string::npos, "4:36" + be + ": " + failed);
+                check_true(failed.find("<script>:1:32: error: no member 'a' in class 'C'") != std::string::npos, "and the string's" + be + ": " + failed);
+                check_eq(std::string("108|2|1"), eng->execute("to_string(g.get()) + \"|\" + to_string(ga()) + \"|\" + to_string(s_read());").to_string(),
+                         "nothing applied: the old class stands" + be);
+                check_eq(std::string("false"), eng->execute("to_string(import(\"dr_c.jai\"));").to_string(), "the edit waits until a file it involved changes" + be);
+                write_module("dr_c.jai", "class C { int a = 1; int b = 7; int c = 3; int get() { return a + c; } }\n");
+                check_eq(std::string("true|4|2"), eng->execute("bool r = import(\"dr_c.jai\");\nto_string(r) + \"|\" + to_string(g.get()) + \"|\" + to_string(ga());").to_string(),
+                         "the fixed edit applies" + be);
+            }
+            for (const char* f : {"dr_c.jai", "dr_c.jaibite"}) { cleanup_temp_file((dir / f).string()); }
+        });
+
+        test("a_reload_is_checked_against_the_pending_edits_of_the_modules_it_would_break", [=, this]() {
+            // a dependent in a sibling module: unchanged, it rejects the reload until it changes (the edit then tries again); with
+            // its file already edited, the reload is checked against its new text and passes, whichever import is reached first.
+            // Every module still re-runs at its own import, as before; a group import runs its modules in the listed order
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 1300;
+            auto write_module = [&](const std::string& name, const std::string& body) {
+                const auto path = dir / name;
+                { std::ofstream(path, std::ios::binary | std::ios::trunc) << body; }
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            const auto module_x = [](const std::string& fields) { return "class X { " + fields + " }\nLOG = LOG + \"x\";\n"; };
+            const auto module_y = [](const std::string& field) { return "X yx;\nint y_read() { return yx." + field + "; }\nLOG = LOG + \"y\";\n"; };
+            for (bool use_vm : {false, true}) {
+                const std::string be = use_vm ? " (vm)" : " (interpreter)";
+                auto eng = engine::make();
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+                jai::stdlib::register_all(*eng);
+                eng->add_include_path(dir.string());
+                eng->import_recheck_interval(0);
+                write_module("dp_x.jai", module_x("int a = 1; int b = 2;"));
+                write_module("dp_y.jai", module_y("a"));
+                eng->execute(
+                    "string LOG = \"\";\nimport(\"dp_x.jai\");\nimport(\"dp_y.jai\");\n"
+                    "void frame() { import(\"dp_x.jai\"); LOG = LOG + \"|\"; import(\"dp_y.jai\"); }\n"
+                    "void frame_yx() { import(\"dp_y.jai\"); LOG = LOG + \"|\"; import(\"dp_x.jai\"); }\n"
+                    "string attempt(bool yx) { LOG = \"\"; string m = \"\"; try { if (yx) { frame_yx(); } else { frame(); } } catch (e) { m = e; } return m + \"#\" + LOG; }\n");
+                const auto attempt = [&](bool yx) { return eng->execute(yx ? "attempt(true);" : "attempt(false);").to_string(); };
+                const auto y_read = [&]() { return eng->execute("y_read();").as_int(); };
+                check_eq(std::string("xy"), eng->execute("LOG;").to_string());
+
+                write_module("dp_x.jai", module_x("int b = 2; int c = 3;"));
+                write_module("dp_y.jai", module_y("b"));
+                check_eq(std::string("#x|y"), attempt(false), "the dependent saved before the reload: each runs at its own import" + be);
+                check_eq((int64_t)2, y_read());
+
+                write_module("dp_x.jai", module_x("int c = 3;"));
+                const std::string rejected = attempt(false);
+                check_true(rejected.rfind("static check failed:\n", 0) == 0 && rejected.find("dp_y.jai:2:26: error: no member 'b' in class 'X'") != std::string::npos,
+                           "an unchanged dependent rejects the reload" + be + ": " + rejected);
+                check_true(rejected.size() > 1 && rejected.substr(rejected.size() - 1) == "#", "nothing ran" + be + ": " + rejected);
+                check_eq((int64_t)2, y_read(), "the old code stands" + be);
+                check_eq(std::string("#|"), attempt(false), "the reload waits" + be);
+                write_module("dp_y.jai", module_y("c"));
+                check_eq(std::string("#x|y"), attempt(false), "editing the dependent lets the waiting reload try again" + be);
+                check_eq((int64_t)3, y_read());
+
+                write_module("dp_x.jai", module_x("int d = 4;"));
+                write_module("dp_y.jai", module_y("d"));
+                check_eq(std::string("#y|x"), attempt(true), "the dependent's import reached first: each still runs at its own import" + be);
+                check_eq((int64_t)4, y_read());
+
+                write_module("dp_x.jai", module_x("int e = 5;"));
+                write_module("dp_y.jai", module_y("e"));
+                check_eq(std::string("xy"), eng->execute("LOG = \"\";\nimport(\"dp_x.jai\", \"dp_y.jai\");\nLOG;").to_string(), "a group import runs in the listed order" + be);
+                write_module("dp_x.jai", module_x("int f = 6;"));
+                const std::string group = eng->execute("LOG = \"\";\nstring m = \"\";\ntry { import(\"dp_y.jai\", \"dp_x.jai\"); } catch (e) { m = e; }\nm + \"#\" + LOG;").to_string();
+                check_true(group.find("dp_y.jai:2:26: error: no member 'e' in class 'X'") != std::string::npos && group.substr(group.size() - 1) == "#",
+                           "a group whose change breaks an unchanged dependent applies nothing" + be + ": " + group);
+                write_module("dp_y.jai", module_y("f"));
+                check_eq(std::string("yx"), eng->execute("LOG = \"\";\nimport(\"dp_y.jai\", \"dp_x.jai\");\nLOG;").to_string(), "and applies in the listed order once fixed" + be);
+                check_eq((int64_t)6, y_read());
+            }
+            for (const char* f : {"dp_x.jai", "dp_y.jai", "dp_x.jaibite", "dp_y.jaibite"}) { cleanup_temp_file((dir / f).string()); }
+        });
+
         test("a_reload_whose_class_definition_would_fail_applies_nothing", [=, this]() {
             // the errors a class or namespace definition raises (a base nothing knows, override with nothing to override, a method
             // redefining a base method without override, a namespace reopening that redefines a function) are the check's: a group

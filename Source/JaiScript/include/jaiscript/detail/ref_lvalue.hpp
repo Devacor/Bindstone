@@ -132,6 +132,15 @@ namespace jai::detail {
 					return tag->type_name == declared->type_name || class_derives_from(eng, tag->id, declared->id);
 				}
 				if (!value.is_object()) { return false; }
+				if (value.raw_storage_index() == script_value::TYPEID_OBJECT) {
+					// an instance of exactly the declared class, read in place (no handle copies)
+					const auto& holder = value.unchecked_object_handle();
+					if (holder && holder->is_class_instance_wrapper && holder->data) {
+						const auto* inst = static_cast<const class_instance*>(holder->data.get());
+						const class_definition* def = inst->get_class_definition();
+						if (def && def->get_type_id() == declared->id && !def->wrapped_object_has_layer(*inst)) { return true; }
+					}
+				}
 				auto view = resolve_slot_class(value, eng);
 				if (!view.def) { return true; }
 				return view.def->get_name() == declared->type_name || class_derives_from(eng, view.def->get_type_id(), declared->id);

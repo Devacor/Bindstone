@@ -55,6 +55,7 @@ cmake --build build --target jaiscript_runner</code></pre></div>
 <div class="codeblock cb-shell"><span class="cb-label">shell</span><pre><code class="lang-shell">jaiscript hello.jai            # run a file, then exit
 jaiscript                      # interactive REPL (:help inside)
 jaiscript --watch hello.jai    # re-run the file every time you save it</code></pre></div>
+<p>The REPL runs each entry as one <code>execute()</code> into a persistent engine, and an entry&#x27;s last statement needs no <code>;</code>, whatever its kind, just as the last expression of an <code>execute()</code> needs none: <code>int hp = 100</code>, <code>hp += 1</code> and <code>import &quot;rules.jai&quot;</code> each run as typed. Statements inside braces keep the language&#x27;s rule. An expression prints its value; a declaration prints nothing.</p>
 <p>Three flags matter for the rest of these docs:</p>
 <div class="tablewrap"><table><thead><tr><th>Flag</th><th>What it does</th></tr></thead><tbody>
 <tr><td><code>--backend=vm|interp</code></td><td>Which backend executes the script. The runner defaults to <code>vm</code>; <code>interp</code> is the tree-walking interpreter. Both must produce the same answer. Running a script twice, once per backend, is how these pages are checked.</td></tr>

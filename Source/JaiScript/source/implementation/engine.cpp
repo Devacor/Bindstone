@@ -35,6 +35,8 @@
 #include <jaiscript/detail/math_component_store.hpp>
 #include <jaiscript/detail/release_machine.hpp>
 #include <jaiscript/detail/constant_arguments.hpp>
+#include <jaiscript/detail/run_record.hpp>
+#include <jaiscript/core/script_run.hpp>
 #ifdef JAISCRIPT_VM_COVERAGE
 #include <jaiscript/vm/coverage.hpp>
 #include <deque>
@@ -92,7 +94,7 @@ script_exception without_category_suffix(const script_exception& e) {
     const std::string_view text = e.what();
     const auto& errors = runtime_error_category();
     // matched as a whole suffix: a category text may itself hold ": "
-    for (int ev = 1; ev <= static_cast<int>(runtime_error_code::coroutine_suspended); ++ev) {
+    for (int ev = 1; ev <= static_cast<int>(runtime_error_code::run_cancelled); ++ev) {
         const std::string category = errors.message(ev);
         if (text.size() > category.size() + 2 && text.ends_with(category) &&
             text.substr(text.size() - category.size() - 2, 2) == ": ") {
@@ -104,7 +106,18 @@ script_exception without_category_suffix(const script_exception& e) {
 
 }
 
-checked_result<script_value> script_callable_thunk::operator()(const std::vector<script_value>& args) const {
+checked_result<script_value> detail::call_function_value(const script_function& function, const std::vector<script_value>& args) {
+    if (const auto* thunk = function.target<script_callable_thunk>()) { return thunk->call(args, false); }
+    if (const auto* method = function.target<script_method_dispatch>()) {
+        if (args.empty()) { return method->operator()(args); }
+        return method->invoke(args[0], args, 1, false);
+    }
+    if (const auto* static_method = function.target<script_static_method_dispatch>()) { return static_method->call(args, false); }
+    if (const auto* bound = function.target<bound_method_fn>()) { return bound->call(args, false); }
+    return function(args);
+}
+
+checked_result<script_value> script_callable_thunk::call(const std::vector<script_value>& args, bool host_call) const {
     // bound_method: make_bound_method's EXACT opaque behavior (prepend the receiver,
     // call the dispatch value, anchor a non-owning result on the receiver) — no
     // host-boundary wrapping, matching the anonymous-lambda mint this replaces. Hot
@@ -117,7 +130,7 @@ checked_result<script_value> script_callable_thunk::operator()(const std::vector
         method_args.insert(method_args.end(), args.begin(), args.end());
 
         const auto& method_func = payload.bound_dispatch->as_function();
-        auto result = method_func(method_args);
+        auto result = host_call ? method_func(method_args) : detail::call_function_value(method_func, method_args);
 
         if (result && this_obj.is_object()) {
             script_value& rv = result.value();
@@ -139,16 +152,19 @@ checked_result<script_value> script_callable_thunk::operator()(const std::vector
     return eng->checked_host_entry([](execution_backend& be, void* ctx) {
         auto* cc = static_cast<call*>(ctx);
         return be.execute_callable(cc->payload, cc->args);
-    }, &c);
+    }, &c, host_call);
 }
 
-checked_result<script_value> engine::checked_host_entry(host_entry_body run, void* context) {
+checked_result<script_value> engine::checked_host_entry(host_entry_body run, void* context, bool host_call) {
     execution_backend* backend = calling_backend();
     if (!backend) {
         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
     }
     // Mid-script host callbacks keep the latched unwinding flag: the calling script's catch must still see the thrown VALUE
-    if (backend->is_executing() || backend->is_unwinding()) { return run(*backend, context); }
+    if (backend->is_executing() || backend->is_unwinding()) {
+        run_pin pin(host_call ? this : nullptr);
+        return run(*backend, context);
+    }
     note_host_entry();
     backend->begin_host_call();
     const auto failure = [&](const char* text) {
@@ -1548,6 +1564,7 @@ struct engine::implementation {
                                                                 shared_parameters_for(&hook), hook.return_type, hook.body, nullptr, hook.local_count);
         payload.fn->unit = unit_stamp{unit, string_symbolizer_.next_execution()};
         execution_backend* be = self.backend();
+        engine::run_pin pin(&self);
         auto result = script_callable_thunk{&self, std::move(payload)}({std::move(previous)});
         if (be->is_unwinding()) {
             if (be->is_executing()) { be->park_nested_failure(); }
@@ -1790,8 +1807,10 @@ struct engine::implementation {
     std::chrono::nanoseconds system_origin = std::chrono::steady_clock::now().time_since_epoch();
     std::chrono::nanoseconds entry_start{};
     uint64_t entry_generation = 0;
+    uint64_t entry_generations_issued = 0;   // every entry takes the next: a suspended run's entry keeps its own number
     uint64_t stamped_generation = UINT64_MAX;
     bool entry_stamps = false;
+    detail::run_registry runs;
     void note_root_source(const std::string& path) {
         if (path.empty() || path == "<script>") return;
         if (!backend || !backend->is_executing()) root_source_file_ = path;
@@ -2384,6 +2403,11 @@ engine::~engine() {
             impl->debug_transport_->stop();
             impl->debug_transport_.reset();
         }
+        // A run still suspended ends here: its sleep raises the cancel, its frames unwind and its destructors run
+        cancel_suspended_runs();
+        impl->runs.release_pools();
+        impl->runs.sleep_function = script_value(std::monostate{}, nullptr);
+        impl->runs.sleep_identity = nullptr;
         // Program-scope variables die in reverse construction order while the engine still runs their destructors;
         // a destructor's error is reported through the script error handler, never propagated
         if (impl->backend && destructors_armed_ && impl->global_environment_) {
@@ -2763,6 +2787,14 @@ void engine::initialize_engine_reference() {
     add_function("thread_count", [this]() -> script_int {
         return static_cast<script_int>(parallel_thread_count());
     });
+    // sleep(seconds): a call the backends see binding this function runs engine::sleep_builtin in place (VM op_sleep)
+    add_function_with_arity_and_full_types("sleep", [this](const std::vector<script_value>& args) -> checked_result<script_value> {
+        return sleep_builtin(args.size() == 1 ? args[0] : script_value(std::monostate{}, this));   // the overload set admits one argument
+    }, 1, {param_type_info(script_value_type::jai_float_type)});
+    if (auto bound = impl->global_environment_->get(impl->string_symbolizer_.intern("sleep")); bound && bound.value().is_function()) {
+        impl->runs.sleep_function = bound.value();
+        impl->runs.sleep_identity = &impl->runs.sleep_function.unchecked_as_function();
+    }
     add_variadic_function("parallel_transform", [this](const std::vector<script_value>& args) -> checked_result<script_value> {
         return detail::run_parallel_transform(*this, args);
     });
@@ -2913,7 +2945,9 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
     }
     try {
         execution_backend* be = backend();
-        if (!be->is_executing()) { note_host_entry(); }
+        const bool nested = be->is_executing();
+        if (!nested) { note_host_entry(); }
+        run_pin pin(nested ? this : nullptr);   // an include, an import or a host's execute inside running script
 
         // Push scope for instance variables if any
         bool hasInstanceVars = instanceVars && !instanceVars->empty();
@@ -5078,7 +5112,7 @@ bool engine::unit_rerun(unit_stamp unit) const {
 }
 
 void engine::note_host_entry() {
-    ++impl->entry_generation;
+    impl->entry_generation = ++impl->entry_generations_issued;
     if (impl->entry_stamps) {
         impl->entry_start = time().monotonic_now();
         impl->stamped_generation = impl->entry_generation;
@@ -5087,6 +5121,38 @@ void engine::note_host_entry() {
 
 void engine::note_execute_elapsed_use() {
     impl->entry_stamps = true;
+}
+
+detail::run_registry& engine::run_registry() { return impl->runs; }
+
+void engine::debug_sync_point() {
+    if (impl->debugger_ && !parallel_region_active()) [[unlikely]] { impl->debugger_->service(); }
+}
+
+bool engine::sleep_callee(const void* function) const noexcept {
+    return function && function == impl->runs.sleep_identity;
+}
+
+void engine::swap_run_entry_state(detail::run_entry_state& s) noexcept {
+    using std::swap;
+    auto& m = *impl;
+    swap(m.entry_generation, s.entry_generation);
+    swap(m.entry_start, s.entry_start);
+    swap(m.stamped_generation, s.stamped_generation);
+    const unit_stamp unit = m.string_symbolizer_.current_unit();
+    m.string_symbolizer_.set_current_unit(s.unit);
+    s.unit = unit;
+    swap(load_depth_, s.load_depth);
+    swap(deferred_post_loads_, s.deferred_post_loads);
+    detail::execution_limits& l = m.limits_;
+    swap(l.terminal_error, s.terminal_error);
+    swap(l.steps_taken, s.steps_taken);
+    swap(l.vm_depth_gate, s.vm_depth_gate);
+    swap(l.vm_frame_bytes, s.vm_frame_bytes);
+    swap(l.memory_used, s.memory_used);
+    swap(l.memory_raises, s.memory_raises);
+    swap(l.import_pass_open, s.import_pass_open);
+    if (m.debugger_) { m.debugger_->swap_step_state(s.step_mode, s.step_base_depth, s.stop_depth); }
 }
 
 void engine::register_location_builtins() {
@@ -5241,11 +5307,13 @@ void engine::report_script_warning(const std::string& a_message) {
 }
 
 void engine::push_external_call_scope() {
+    pin_run();
     backend()->push_external_call_scope();
 }
 
 void engine::pop_external_call_scope() {
     backend()->pop_external_call_scope();
+    unpin_run();
 }
 
 conversions::conversion_manager engine::get_conversion_manager() {

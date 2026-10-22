@@ -735,7 +735,7 @@ function play(string mapname) -> int {
 		print(home + blit_half(), skip_newline);
 
 		float rest = math::itrunc(TICK_MS) - frame.elapsed() * 1000;
-		if (rest > 0 && !UNCAPPED) { time::sleep_ms(rest); }
+		if (rest > 0 && !UNCAPPED) { sleep(rest / 1000.0); }
 	}
 	demo_finish();                                   // quitting mid-level still writes the tape
 	music_stop();

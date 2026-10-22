@@ -22,6 +22,8 @@ std::string runtime_error_category_impl::message(int ev) const {
             return "Script memory cap exceeded";
         case runtime_error_code::coroutine_suspended:
             return "Coroutine suspended inside an expression the replay does not cover";
+        case runtime_error_code::run_cancelled:
+            return "Run cancelled";
 
         // Type errors
         case runtime_error_code::type_mismatch:

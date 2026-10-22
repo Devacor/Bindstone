@@ -63,7 +63,9 @@ struct script_callable {
 struct script_callable_thunk {
     engine* eng = nullptr;
     script_callable payload;
-    checked_result<script_value> operator()(const std::vector<script_value>& args) const;
+    checked_result<script_value> operator()(const std::vector<script_value>& args) const { return call(args, true); }
+    // host_call: native code calls it (a run's sleep inside blocks); false: running script calls it (detail::call_function_value)
+    checked_result<script_value> call(const std::vector<script_value>& args, bool host_call) const;
 };
 
 // Named dispatcher for script-class instance methods, stored in
@@ -97,8 +99,8 @@ struct script_method_dispatch {
     checked_result<script_value> operator()(const std::vector<script_value>& args) const;
     // The overload the arguments args[first..] call
     checked_result<const std::shared_ptr<function_decl>*> resolve(const std::vector<script_value>& args, size_t first) const;
-    // The method on this_obj with the arguments args[first..]
-    checked_result<script_value> invoke(const script_value& this_obj, const std::vector<script_value>& args, size_t first) const;
+    // The method on this_obj with the arguments args[first..] (host_call: script_callable_thunk::call's)
+    checked_result<script_value> invoke(const script_value& this_obj, const std::vector<script_value>& args, size_t first, bool host_call = true) const;
 };
 
 // Script static overloads retain their identity through aliases, so argument capture can distinguish them from host calls.
@@ -111,8 +113,15 @@ struct script_static_method_dispatch {
     // the vm's compiled-body slot for the overload last entered in-loop, keyed by its body (script_method_dispatch's)
     mutable std::shared_ptr<void> body_cache;
     mutable const void* body_cache_key = nullptr;
-    checked_result<script_value> operator()(const std::vector<script_value>& args) const;
+    checked_result<script_value> operator()(const std::vector<script_value>& args) const { return call(args, true); }
+    checked_result<script_value> call(const std::vector<script_value>& args, bool host_call) const;
 };
+
+namespace detail {
+    // A function value running script calls (a call expression, an operator, an accessor): a script callable enters as the
+    // script call it is and pins no run; anything else is host code, whose own calls into script pin
+    checked_result<script_value> call_function_value(const script_function& function, const std::vector<script_value>& args);
+}
 
 namespace detail {
     struct parallel_method_pin_table;
@@ -129,6 +138,12 @@ namespace detail {
         std::vector<stack_frame> trace;
     };
 }
+
+// A suspendable run's own execution state on a backend (engine::start): what the backend changes as script runs, held apart so
+// a suspended run and every other entry keep theirs (each backend derives its own)
+struct backend_run_state {
+    virtual ~backend_run_state() = default;
+};
 
 // A builtin's script callback (sort's comparator, filter's predicate) prepared once per builtin call: each call binds its
 // arguments and runs the body on one reused frame, with the function value's observable behavior
@@ -318,6 +333,13 @@ public:
 
     // Coroutine resume
     virtual checked_result<script_value> resume_coroutine(coroutine_handle& handle) = 0;
+
+    // Suspendable runs (engine::start): a fresh state, the O(1) exchange of the live state with a run's at every switch, a
+    // finished run's state made fresh again for reuse, and a failed run's stack trace taken into the live state
+    virtual std::unique_ptr<backend_run_state> make_run_state() = 0;
+    virtual void swap_run_state(backend_run_state& state) noexcept = 0;
+    virtual void reset_run_state(backend_run_state& state) = 0;
+    virtual void adopt_run_trace(backend_run_state& state) = 0;
 
     // Backend name for debugging/logging
     virtual std::string get_backend_name() const = 0;

@@ -2236,6 +2236,18 @@
     },
     {
       "owner": "global",
+      "name": "sleep",
+      "signature": "sleep(seconds: number) -> void",
+      "provider": "core",
+      "effect": "wait",
+      "notes": "Waits seconds on the engine's time source: inside a run engine::start began, the run suspends and returns to the host until then; elsewhere it blocks.",
+      "source": "source/implementation/script_run.cpp",
+      "form": "function",
+      "availability": "Every engine",
+      "display": "sleep(seconds: number) -> void"
+    },
+    {
+      "owner": "global",
       "name": "parallel_transform",
       "signature": "parallel_transform(values: array<T>, callback: function(T) -> R, weight: function(T) -> number = default) -> array<R>",
       "provider": "core",
@@ -4393,30 +4405,6 @@
       "form": "function",
       "availability": "register_all() or area registration",
       "display": "time::date_from_unix(seconds: number, utc: bool = false) -> time::date"
-    },
-    {
-      "owner": "time",
-      "name": "sleep",
-      "signature": "sleep(seconds: number) -> void",
-      "provider": "stdlib",
-      "effect": "wait",
-      "notes": "Seconds; not a busy loop.",
-      "source": "include/jaiscript/stdlib/time.hpp",
-      "form": "function",
-      "availability": "register_all() or area registration",
-      "display": "time::sleep(seconds: number) -> void"
-    },
-    {
-      "owner": "time",
-      "name": "sleep_ms",
-      "signature": "sleep_ms(milliseconds: number) -> void",
-      "provider": "stdlib",
-      "effect": "wait",
-      "notes": "",
-      "source": "include/jaiscript/stdlib/time.hpp",
-      "form": "function",
-      "availability": "register_all() or area registration",
-      "display": "time::sleep_ms(milliseconds: number) -> void"
     },
     {
       "owner": "time",

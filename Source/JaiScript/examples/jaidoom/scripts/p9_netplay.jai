@@ -45,7 +45,7 @@ function pump2(int times) -> void {
 	for (int i = 0; i < times; ++i) {
 		np_frame();
 		if (FH != null) { FH.pump(); }
-		time::sleep_ms(3);
+		sleep(0.003);
 	}
 }
 
@@ -73,7 +73,7 @@ function pump_all(int times) -> void {
 		if (FA != null) { FA.pump(); }
 		if (FB != null) { FB.pump(); }
 		if (FC != null) { FC.pump(); }
-		time::sleep_ms(3);
+		sleep(0.003);
 	}
 }
 
@@ -638,7 +638,7 @@ function main() -> int {
 		game_tic();
 		np_frame();
 		FH.pump();
-		time::sleep_ms(3);
+		sleep(0.003);
 		spin = spin + 1;
 	}
 	check(NP_WI_PEND && NP_WI_NEXT == "E1M2" && NP_WI_K == 80, "late NEXT set the intermission pending flags");

@@ -377,6 +377,11 @@ namespace jai {
         // backend_state holds the interpreter_coroutine_state.
         checked_result<script_value> resume_coroutine(coroutine_handle& handle) override;
 
+        std::unique_ptr<backend_run_state> make_run_state() override;
+        void swap_run_state(backend_run_state& state) noexcept override;
+        void reset_run_state(backend_run_state& state) override;
+        void adopt_run_trace(backend_run_state& state) override;
+
         // Execute a script-defined callable payload (reached via execution_backend::execute_callable)
         checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args) override;
 
@@ -613,9 +618,16 @@ namespace jai {
         checked_result<bool> language_equal(const script_value& left, const script_value& right) override;
         checked_result<script_value> invoke_method(const script_value& self, uint64_t name_id) override;
         const expression* compound_map_target_ = nullptr;   // the subscript a general compound is reading as its target
+        // A function value running script calls: while a run is active a script callable enters without pinning it
+        checked_result<script_value> call_value(const script_function& f, const std::vector<script_value>& args) {
+            return engine_ && engine_->active_run_pins() ? detail::call_function_value(f, args) : f(args);
+        }
         builtin_method_context builtin_ctx() {
             return builtin_method_context{engine_, string_symbolizer_,
-                [](void* self, const script_value& a, const script_value& b) { return static_cast<interpreter*>(self)->language_equal(a, b); },
+                [](void* self, const script_value& a, const script_value& b) {
+                    engine::run_pin pin(static_cast<interpreter*>(self)->engine_);   // a builtin's comparison is its callback
+                    return static_cast<interpreter*>(self)->language_equal(a, b);
+                },
                 [](void* self) { return static_cast<interpreter*>(self)->is_unwinding_; }, this};
         }
         checked_result<script_value> handle_not_equal(const script_value& left, const script_value& right);
@@ -760,7 +772,13 @@ namespace jai {
                 values_.clear();
                 top_ = 0;
             }
+
+            void swap(script_valueStack& other) noexcept {
+                values_.swap(other.values_);
+                std::swap(top_, other.top_);
+            }
         };
+        struct interpreter_run_state;   // a suspendable run's own copy of every member that execution changes (swap_run_state)
         
         script_valueStack valueStack_;
         

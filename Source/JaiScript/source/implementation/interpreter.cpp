@@ -573,6 +573,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			if (predicate && !lvalues) { arguments.resize(2, a_context.make_value()); }
 			std::optional<error_propagator> error;
 			struct SortAborted {};
+			engine::run_pin pin(a_context.get_engine());   // the comparisons are the builtin's callbacks
 			try {
 				merge_sort_any_order(values, [&](const script_value& a_left, const script_value& a_right) {
 					if (!predicate) {
@@ -4087,7 +4088,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
         if (const script_value* opFunc = operator_table_->entry(detail::binary_op_slot(expr->op.type))) {
             const script_function& func = opFunc->as_function();
             std::vector<script_value> args = {left, right};
-            auto result = func(args);
+            auto result = call_value(func, args);
             if (!result) {
                 // Function returned error - propagate it up
                 return result.error_value();
@@ -4325,7 +4326,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     if (method.is_function()) {
                         const script_function& func = method.as_function();
                         std::vector<script_value> args = {left, right};
-                        auto result = func(args);
+                        auto result = call_value(func, args);
                         if (!result) {
                             return result.error_value();
                         }
@@ -4343,7 +4344,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     if (const script_value* getMethod = operator_table_->entry(detail::op_slot::subscript)) {
                         const script_function& func = getMethod->as_function();
                         std::vector<script_value> args = {left, right};
-                        auto result = func(args);
+                        auto result = call_value(func, args);
                         if (!result) {
                             // Function returned error - propagate it up
                             return result.error_value();
@@ -4764,7 +4765,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
         }
         const script_function& func = setter.as_function();
         std::vector<script_value> args = {objectValue, clone_for_assignment(value)};
-        auto result = func(args);
+        auto result = call_value(func, args);
         if (!result) {
             return result.error_value();
         }
@@ -5065,7 +5066,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         if (const script_value* opFunc = operator_table_->entry(op_slot)) {
                             const script_function& func = opFunc->as_function();
                             std::vector<script_value> args = {target.clone(), rightValue};
-                            auto result = func(args);
+                            auto result = call_value(func, args);
                             if (!result) {
                                 return result.error_value();
                             }
@@ -5941,7 +5942,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             if (compound_op_fn) {
                 const script_function& func = compound_op_fn->as_function();
                 std::vector<script_value> args = {currentValue, rightValue};
-                auto result = func(args);
+                auto result = call_value(func, args);
                 if (!result) {
                     // Function returned error - propagate it up
                     return result.error_value();
@@ -6414,7 +6415,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             std::vector<script_value> args;
                             args.push_back(*currentVal);  // 'this' - the shared_ptr (transparent access)
                             args.push_back(std::move(value));  // the value being assigned
-                            auto result = func(args);
+                            auto result = call_value(func, args);
                             if (result) {
                                 if (is_unwinding_) { push_value(make_value()); } else { push_stored(); }
                                 return checked_result<void>();
@@ -7653,7 +7654,7 @@ script_value interpreter::operator_value(const member_target& target, uint64_t i
     return pin ? pin->method_value : script_value::make_invalid(nullptr);
 }
 checked_result<script_value> interpreter::operator_call(const script_value& self, const script_value& method_val, uint64_t id, std::vector<script_value> args) {
-    if (!parallel_worker_) { return create_bound_method(self, method_val).as_function()(args); }
+    if (!parallel_worker_) { return call_value(create_bound_method(self, method_val).as_function(), args); }
     const detail::parallel_method_pin* pin = worker_operator_pin(self, id);
     if (!pin) { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text); }
     return detail::call_parallel_operator_pin(*this, *pin, id, self, std::move(args), engine_);
@@ -8540,8 +8541,10 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
     try {
         if (direct_script_call) {
             callOutcome.emplace(call_function(*callee_thunk->payload.fn, arguments));
+        } else if (arguments.size() == 1 && engine_->sleep_callee(&func)) {
+            callOutcome.emplace(engine_->sleep_builtin(arguments[0]));   // the builtin in place (vm op_sleep's twin)
         } else if (!call_static_method(func, arguments, callOutcome)) {
-            callOutcome.emplace(func(arguments));
+            callOutcome.emplace(call_value(func, arguments));
         }
     } catch (const std::exception& e) {
         pending_call_ctx_ = saved_ctx;
@@ -8760,7 +8763,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                         if (!static_method.is_null() && static_method.is_function()) {
                             // Call the class static method
                             auto func = static_method.as_function();
-                            return func(args);
+                            return eng->active_run_pins() ? detail::call_function_value(func, args) : func(args);
                         }
                     }
 
@@ -10168,7 +10171,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
             ~restore_context() { slot = previous; }
         } restore{pending_call_ctx_, pending_call_ctx_};
         pending_call_ctx_ = &ctx;
-        return function(args);
+        return call_value(function, args);
     };
 
     // This handles expressions like: new Point(), new Point(3.0, 4.0), etc.
@@ -10335,7 +10338,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
 
             script_value constructorFunc = std::move(ctor_result.value());
             const script_function& func = constructorFunc.as_function();
-            auto result = func({});  // Call with no args
+            auto result = call_value(func, {});  // Call with no args
             if (!result) {
                 return result.error_value();
             }
@@ -13480,7 +13483,7 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
             auto picked = detail::select_overload_member(*payload.overloads, args.data(), args.size(), engine_);
             if (!picked) { return picked.error_value(); }
             const script_callable* member = detail::script_callable_of(*picked.value(), engine_);
-            return member && member->fn ? call_function(*member->fn, args) : picked.value()->as_function()(args);
+            return member && member->fn ? call_function(*member->fn, args) : call_value(picked.value()->as_function(), args);
         }
         case script_callable::kind_type::method: {
             auto method_env = get_pooled_method_environment(payload.definition_env, *payload.this_obj, payload.cls.get());
@@ -15038,6 +15041,166 @@ bool interpreter::call_static_method(const script_function& callee, const std::v
     // the dispatcher's env exactly (its own, never pooled: what the body leaves in it dies with the call)
     out.emplace(execute_method_ast(ast, std::make_shared<environment>(dispatch->definition_env, string_symbolizer_, dispatch->cls), arguments));
     return true;
+}
+
+// A suspendable run's execution state (vm_backend::vm_run_state's twin): swapped whole with the live members at every switch,
+// so a suspended run keeps its native frames' interpreter state while another entry runs
+struct interpreter::interpreter_run_state : backend_run_state {
+    std::shared_ptr<jai::environment> env;
+    std::vector<std::shared_ptr<environment>> instance_scope_saved;
+    std::shared_ptr<environment> pending_instance_env;
+    detail::member_scope_ctx member_scope{};
+    const detail::call_site_context* pending_call_ctx = nullptr;
+    std::vector<const detail::call_site_context*> external_ctx_stack;
+    script_valueStack values;
+    std::optional<script_value> return_value;
+    bool has_return_value = false;
+    bool has_break_request = false;
+    bool has_continue_request = false;
+    int execute_depth = 0;
+    coroutine_handle* active_coroutine = nullptr;
+    bool has_yield_request = false;
+    std::optional<script_exception> current_exception;
+    bool is_unwinding = false;
+    std::optional<script_value> active_exception_value;
+    std::vector<stack_trace_entry> captured_trace;
+    bool trace_captured = false;
+    const ast_node* top_level_node = nullptr;
+    std::optional<error_propagator> run_error;
+    detail::nested_failure nested_failure;
+    uint64_t current_catch_var_id = 0;
+    bool in_switch = false;
+    bool should_fallthrough = false;
+    bool lvalue_target_context = false;
+    bool string_target_context = false;
+    int current_call_depth = 0;
+    std::chrono::steady_clock::time_point execution_deadline{};
+    uint32_t budget_tick = 0;
+    bool budget_active = false;
+    std::vector<call_frame> call_stack;
+    std::vector<script_value> argument_pool;
+    std::vector<std::shared_ptr<environment>> environment_pool;
+    size_t environment_pool_index = 0;
+    bool identifier_callee_lookup = false;
+    bool member_callee_lookup = false;
+    bool expression_result_needed = true;
+    const expression* unconsumed_root = nullptr;
+    const ast_node* debug_quiet_node = nullptr;
+    script_value current_method_this;
+    const unit_stamp* unit_override = nullptr;
+    size_t unit_override_depth = 0;
+    unit_stamp run_unit{};
+    size_t structural_equality_depth = 0;
+    const expression* compound_map_target = nullptr;
+};
+
+std::unique_ptr<backend_run_state> interpreter::make_run_state() {
+    auto state = std::make_unique<interpreter_run_state>();
+    state->env = get_global_environment();
+    return state;
+}
+
+void interpreter::swap_run_state(backend_run_state& a_state) noexcept {
+    auto& s = static_cast<interpreter_run_state&>(a_state);
+    using std::swap;
+    swap(environment_, s.env);
+    swap(instance_scope_saved_, s.instance_scope_saved);
+    swap(pending_instance_env_, s.pending_instance_env);
+    swap(member_scope_, s.member_scope);
+    swap(pending_call_ctx_, s.pending_call_ctx);
+    swap(external_ctx_stack_, s.external_ctx_stack);
+    valueStack_.swap(s.values);
+    swap(returnValue_, s.return_value);
+    swap(hasReturnValue_, s.has_return_value);
+    swap(hasBreakRequest_, s.has_break_request);
+    swap(hasContinueRequest_, s.has_continue_request);
+    swap(execute_depth_, s.execute_depth);
+    swap(active_coroutine_, s.active_coroutine);
+    swap(hasYieldRequest_, s.has_yield_request);
+    swap(current_exception_, s.current_exception);
+    swap(is_unwinding_, s.is_unwinding);
+    swap(active_exception_value_, s.active_exception_value);
+    swap(captured_trace_, s.captured_trace);
+    swap(trace_captured_, s.trace_captured);
+    swap(top_level_node_, s.top_level_node);
+    swap(run_error_, s.run_error);
+    swap(nested_failure_, s.nested_failure);
+    swap(current_catch_var_id_, s.current_catch_var_id);
+    swap(in_switch_, s.in_switch);
+    swap(should_fallthrough_, s.should_fallthrough);
+    swap(lvalue_target_context_, s.lvalue_target_context);
+    swap(string_target_context_, s.string_target_context);
+    swap(current_call_depth_, s.current_call_depth);
+    swap(execution_deadline_, s.execution_deadline);
+    swap(budget_tick_, s.budget_tick);
+    swap(budget_active_, s.budget_active);
+    swap(call_stack_, s.call_stack);
+    swap(argument_pool_, s.argument_pool);
+    swap(environment_pool_, s.environment_pool);
+    swap(environment_pool_index_, s.environment_pool_index);
+    swap(identifier_callee_lookup_, s.identifier_callee_lookup);
+    swap(member_callee_lookup_, s.member_callee_lookup);
+    swap(expression_result_needed_, s.expression_result_needed);
+    swap(unconsumed_root_, s.unconsumed_root);
+    swap(debug_quiet_node_, s.debug_quiet_node);
+    swap(current_method_this_, s.current_method_this);
+    swap(unit_override_, s.unit_override);
+    swap(unit_override_depth_, s.unit_override_depth);
+    swap(run_unit_, s.run_unit);
+    swap(structural_equality_depth_, s.structural_equality_depth);
+    swap(compound_map_target_, s.compound_map_target);
+    sync_unit();
+}
+
+void interpreter::reset_run_state(backend_run_state& a_state) {
+    auto& s = static_cast<interpreter_run_state&>(a_state);
+    s.env = get_global_environment();
+    s.instance_scope_saved.clear();
+    s.pending_instance_env.reset();
+    s.member_scope = {};
+    s.pending_call_ctx = nullptr;
+    s.external_ctx_stack.clear();
+    s.values.clear();
+    s.return_value.reset();
+    s.has_return_value = s.has_break_request = s.has_continue_request = false;
+    s.execute_depth = 0;
+    s.active_coroutine = nullptr;
+    s.has_yield_request = false;
+    s.current_exception.reset();
+    s.is_unwinding = false;
+    s.active_exception_value.reset();
+    s.captured_trace.clear();
+    s.trace_captured = false;
+    s.top_level_node = nullptr;
+    s.run_error.reset();
+    s.nested_failure = detail::nested_failure{};
+    s.current_catch_var_id = 0;
+    s.in_switch = s.should_fallthrough = s.lvalue_target_context = s.string_target_context = false;
+    s.current_call_depth = 0;
+    s.budget_tick = 0;
+    s.budget_active = false;
+    s.call_stack.clear();
+    s.argument_pool.clear();
+    for (auto& env : s.environment_pool) { if (env.use_count() == 1) { env->reset(nullptr); } }
+    std::erase_if(s.environment_pool, [](const std::shared_ptr<environment>& env) { return env.use_count() > 1; });
+    s.environment_pool_index = 0;
+    s.identifier_callee_lookup = s.member_callee_lookup = false;
+    s.expression_result_needed = true;
+    s.unconsumed_root = nullptr;
+    s.debug_quiet_node = nullptr;
+    s.current_method_this = script_value();
+    s.unit_override = nullptr;
+    s.unit_override_depth = 0;
+    s.run_unit = {};
+    s.structural_equality_depth = 0;
+    s.compound_map_target = nullptr;
+}
+
+void interpreter::adopt_run_trace(backend_run_state& a_state) {
+    auto& s = static_cast<interpreter_run_state&>(a_state);
+    captured_trace_ = std::move(s.captured_trace);
+    trace_captured_ = s.trace_captured;
+    s.captured_trace.clear();
 }
 
 void interpreter::reset_environment_pool() {

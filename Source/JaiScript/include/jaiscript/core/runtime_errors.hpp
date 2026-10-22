@@ -92,6 +92,7 @@ namespace jai {
         // Interpreter-internal: a yield unwinding the expression it sits in; consumed by the
         // statement that owns the expression, never surfaced by a correct replay
         coroutine_suspended = 127,
+        run_cancelled = 128,   // script_run::cancel: the suspended run's sleep raises it, terminal
     };
 
     class runtime_error_category_impl : public std::error_category {

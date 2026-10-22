@@ -376,7 +376,11 @@ clock. The implementation:
   (c) **a sleep** (`engine_time::sleep_for` → `controller::sleep_for` once a debugger exists:
   the thread waits on the controller's cv with the sleep's deadline; a transport change wakes
   it, it syncs outside the lock, a pending pause parks it at the statement that sleeps, and it
-  sleeps on for the remaining time; a host sleep source keeps its own sleep), (d) **an armed
+  sleeps on for the remaining time; a host sleep source keeps its own sleep; a `sleep` that suspends a run is no sync point and
+  no stop, and the run's step mode, base depth and stop depth travel with it through `engine::swap_run_entry_state` →
+  `controller::swap_step_state`, so another entry's statements never satisfy its step; `sleep(0)` and any non-positive
+  sleep wait for nothing and suspend nothing but run the same service through `engine::debug_sync_point` →
+  `controller::service`, one relaxed load of `sync_requested_` when nothing is pending), (d) **an armed
   session's next statement** after a transport change (`raise_sync` sets `sync_requested_`
   and then the step/pause gate flag, so `wants_statement` takes the slow path with no extra
   load; `on_statement` runs the backend's `sync_debug_hook`, and `sync_hot_state` re-raises the

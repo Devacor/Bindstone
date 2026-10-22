@@ -147,6 +147,13 @@ public:
     // change wakes it to sync, a pause parks it at the statement that sleeps, and the rest of
     // the sleep runs after.
     void sleep_for(std::chrono::nanoseconds duration);
+    // A sleep with no duration (sleep(0)): the same sync and pause service, waiting for nothing; one relaxed load when no
+    // transport change is pending
+    void service();
+
+    // ---- script thread: a suspendable run's step travels with it (engine::swap_run_entry_state), so another entry's
+    // statements never satisfy a run's step over or out ----
+    void swap_step_state(int& mode, int& base_depth, int& stop_depth) noexcept;
 
 private:
     void raise_sync();

@@ -341,7 +341,7 @@ public:
             "int frames = 0;\n"                         // line 1
             "bool quit = false;\n"                      // line 2
             "while (!quit && frames < 400) {\n"         // line 3
-            "    time::sleep_ms(20);\n"                 // line 4
+            "    sleep(0.02);\n"                        // line 4
             "    frames = frames + 1;\n"                // line 5
             "}\n";
         std::string script_error;
@@ -397,7 +397,7 @@ public:
 
         const std::string src =
             "int done = 0;\n"                           // line 1
-            "time::sleep_ms(1500);\n"                   // line 2
+            "sleep(1.5);\n"                             // line 2
             "done = 1;\n";                              // line 3
         std::string script_error;
         std::thread script([&] {
@@ -422,6 +422,72 @@ public:
         }
         check_true(done_at_pause.has_value() && *done_at_pause == 0, "parked inside the sleep, before the next statement");
         check_eq(int64_t(1), eng->get_variable("done").as_int());
+    }
+
+    // sleep(0) waits for nothing and is the sync point a loop calls: a session armed mid-run takes its breakpoint at the
+    // next statement that has one, a pause parks at the sleep(0) itself
+    void sleep_zero_is_a_sync_point(jai::backend_type type) {
+        auto eng = make_backend_engine(type);
+        eng->execution_budget(0);
+        jai::stdlib::register_all(eng);
+        auto& dbg = eng->debugger();
+        stop_waiter stops(dbg);
+        eng->add_function("arm_breakpoint", [&dbg] { dbg.set_breakpoints("<script>", {5}); dbg.set_enabled(true); });
+        eng->add_function("arm_pause", [&dbg] { dbg.set_enabled(true); dbg.request_pause(); });
+        const std::string src =
+            "int at = -1;\n"                            // line 1
+            "for (int i = 0; i < 10; ++i) {\n"          // line 2
+            "    if (i == 3) { arm_breakpoint(); }\n"   // line 3
+            "    sleep(0);\n"                           // line 4
+            "    at = i;\n"                             // line 5  (breakpoint)
+            "}\n";
+        std::string script_error;
+        std::thread script([&] {
+            try { eng->execute(src); } catch (const std::exception& e) { script_error = e.what(); }
+        });
+        const auto hit = stops.wait();
+        std::optional<int64_t> at_hit;
+        if (hit) {
+            at_hit = parked_read(dbg, [&] { return eng->get_variable("at").as_int(); });
+            dbg.clear_breakpoints();
+            dbg.resume();
+        }
+        dbg.detach();
+        script.join();
+        check_eq(std::string(), script_error);
+        check_true(hit.has_value(), "the breakpoint armed mid-loop is hit");
+        if (hit) { check_eq(5, hit->line); }
+        check_true(at_hit.has_value() && *at_hit == 2, "on the iteration that armed it, right after the sleep(0)");
+
+        auto eng2 = make_backend_engine(type);
+        eng2->execution_budget(0);
+        jai::stdlib::register_all(eng2);
+        auto& dbg2 = eng2->debugger();
+        stop_waiter stops2(dbg2);
+        eng2->add_function("arm_pause", [&dbg2] { dbg2.set_enabled(true); dbg2.request_pause(); });
+        const std::string paused_src =
+            "int reached = 0;\n"                        // line 1
+            "arm_pause();\n"                            // line 2
+            "sleep(0);\n"                               // line 3
+            "reached = 1;\n";                           // line 4
+        std::thread paused([&] {
+            try { eng2->execute(paused_src); } catch (const std::exception& e) { script_error = e.what(); }
+        });
+        const auto pause = stops2.wait();
+        std::optional<int64_t> reached_at_pause;
+        if (pause) {
+            reached_at_pause = parked_read(dbg2, [&] { return eng2->get_variable("reached").as_int(); });
+            dbg2.resume();
+        }
+        dbg2.detach();
+        paused.join();
+        check_eq(std::string(), script_error);
+        check_true(pause.has_value(), "the pause takes effect at the sleep(0)");
+        if (pause) {
+            check_eq(std::string("pause"), pause->reason);
+            check_eq(3, pause->line);
+        }
+        check_true(reached_at_pause.has_value() && *reached_at_pause == 0, "before the statement after it");
     }
 
     struct stack_view {
@@ -890,6 +956,12 @@ public:
         });
         test("vm_pause_wakes_a_sleeping_script", [this]() {
             pause_wakes_a_sleeping_script(jai::backend_type::vm);
+        });
+        test("sleep_zero_is_a_sync_point", [this]() {
+            sleep_zero_is_a_sync_point(jai::backend_type::interpreter);
+        });
+        test("vm_sleep_zero_is_a_sync_point", [this]() {
+            sleep_zero_is_a_sync_point(jai::backend_type::vm);
         });
         test("stack_trace_lists_every_frame_with_its_locals", [this]() {
             stack_trace_lists_every_frame_with_its_locals(jai::backend_type::interpreter);

@@ -462,7 +462,7 @@ void play_loop() {
 		STAT_FRAMES = STAT_FRAMES + 1;
 		FRAME = FRAME + 1;
 		int spent = time::now() * 1000 - NOW_MS;
-		if (spent < 33) { time::sleep_ms(33 - spent); }
+		if (spent < 33) { sleep((33 - spent) / 1000.0); }
 	}
 }
 

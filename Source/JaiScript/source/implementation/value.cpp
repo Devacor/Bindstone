@@ -2586,6 +2586,7 @@ namespace {
 
 	bool key_less(const script_value& a, const script_value& b) {
 		execution_backend& backend = key_backend(a);
+		engine::run_pin pin(a.get_engine());   // a map's key order is the map's callback
 		auto answer = backend.language_less(a, b);
 		if (!answer || backend.is_unwinding()) [[unlikely]] { raise_key_failure(a, answer ? error_propagator{} : answer.error_value()); }
 		return answer.value();
@@ -2594,6 +2595,7 @@ namespace {
 	bool key_equal(const script_value& a, const script_value& b, const class_definition* cls, const engine::map_key_ids& ids) {
 		if (!cls->defines_method(ids.equal)) { return (a <=> b) == 0; }
 		execution_backend& backend = key_backend(a);
+		engine::run_pin pin(a.get_engine());
 		auto answer = backend.language_equal(a, b);
 		if (!answer || backend.is_unwinding()) [[unlikely]] { raise_key_failure(a, answer ? error_propagator{} : answer.error_value()); }
 		return answer.value();
@@ -2601,6 +2603,7 @@ namespace {
 
 	JAI_NOINLINE script_int key_hash_value(const script_value& key, const engine::map_key_ids& ids) {
 		execution_backend& backend = key_backend(key);
+		engine::run_pin pin(key.get_engine());
 		auto answer = backend.invoke_method(key, ids.hash);
 		if (!answer || backend.is_unwinding()) [[unlikely]] { raise_key_failure(key, answer ? error_propagator{} : answer.error_value()); }
 		const script_value& value = answer.value().deref();

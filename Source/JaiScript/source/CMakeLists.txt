@@ -22,6 +22,7 @@ set(JAISCRIPT_SOURCES
     implementation/regex/regex_library.cpp
     implementation/runtime_errors.cpp
     implementation/schema_binding.cpp
+    implementation/script_run.cpp
     implementation/serialization/archive_core.cpp
     implementation/serialization/binary_archive.cpp
     implementation/serialization/json_archive.cpp

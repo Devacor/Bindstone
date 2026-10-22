@@ -145,7 +145,7 @@ function read_key() -> string {
 	}
 	while (true) {
 		var k = HOST_READ_KEY_RAW();
-		if (k == "") { time::sleep_ms(10); continue; }
+		if (k == "") { sleep(0.01); continue; }
 		if (k.size() == 1) {
 			return key_down("shift") ? shim_upper(k) : k;
 		}

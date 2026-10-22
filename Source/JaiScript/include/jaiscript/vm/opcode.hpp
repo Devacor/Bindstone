@@ -327,6 +327,7 @@ namespace jai::vm {
         op_concat_pending,  // a = 1 for x1: [snapshot, x1] -> [snapshot, tail]; later [snapshot, tail, x] -> [snapshot, tail + x]; a step that joins no plain text (an object's to_string, a utf8_string, a non-string snapshot, a registered operator) materializes and runs the general `+`: [null, value]
         op_concat_operands, // a = concat_protos index: stack [acc] -> acc + piece1 + ... + pieceN, each piece read at its step (op_concat_append's join)
         op_concat_store,    // a = symbols index, b = frame slot (k_invalid_u32 = env), c = store_flag_*: [snapshot, tail] -> the target takes the tail in place when it still holds the snapshot's node, else op_store's tail over snapshot + tail; [null, value] -> op_store's tail
+        op_sleep,           // op_call_from_scratch's word for `sleep(x)`: the pending callee is the core sleep, so engine::sleep_builtin runs in place; any other callee is the call
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -675,6 +676,7 @@ namespace jai::vm {
             case opcode::op_concat_pending: return "CONCAT_PENDING";
             case opcode::op_concat_store: return "CONCAT_STORE";
             case opcode::op_concat_operands: return "CONCAT_OPERANDS";
+            case opcode::op_sleep: return "SLEEP";
             case opcode::op_c_load_f: return "C_LOAD_F";
             case opcode::op_c_jlt_ff: return "C_JLT_FF";
             case opcode::op_c_jle_ff: return "C_JLE_FF";

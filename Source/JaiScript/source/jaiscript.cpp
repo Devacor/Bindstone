@@ -34,6 +34,7 @@
 #include "implementation/vm/chunk_manifest.cpp"
 #include "implementation/vm/vm_coverage.cpp"
 #include "implementation/coroutine.cpp"
+#include "implementation/script_run.cpp"
 #include "implementation/parallel_transform.cpp"
 #include "implementation/thread_pool.cpp"
 #include "implementation/debug/controller.cpp"

@@ -229,6 +229,7 @@ namespace {
 			case opcode::op_probe_callee:
 			case opcode::op_regex_constant:
 			case opcode::op_call_from_scratch:
+			case opcode::op_sleep:
 			case opcode::op_call_typed:
 			case opcode::op_probe_member:
 			case opcode::op_return:
@@ -452,6 +453,7 @@ namespace {
 			case opcode::op_probe_callee:
 			case opcode::op_regex_constant:
 			case opcode::op_call_from_scratch:
+			case opcode::op_sleep:
 			case opcode::op_call_typed:
 			case opcode::op_probe_member:
 			case opcode::op_return:
@@ -7783,7 +7785,8 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			for (size_t ip : captures_at->second) { chunk_->code[ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1); }
 			capture_sites_.erase(captures_at);
 		}
-		emit(opcode::op_call_from_scratch, static_cast<uint32_t>(expr->arguments.size()),
+		const bool sleep_call = expr->arguments.size() == 1 && static_cast<const identifier_expr*>(expr->callee.get())->name == "sleep";
+		emit(sleep_call ? opcode::op_sleep : opcode::op_call_from_scratch, static_cast<uint32_t>(expr->arguments.size()),
 		     static_cast<uint32_t>(chunk_->call_sites.size() - 1), tail_site ? 1u : 0u);
 	} else {
 		emit(opcode::op_call, static_cast<uint32_t>(expr->arguments.size()),

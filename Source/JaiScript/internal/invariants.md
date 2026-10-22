@@ -434,3 +434,25 @@ Private map-key comparison and hashing must remain consistent, including expired
 weak owners. Comparison errors and original script throws survive container ordering.
 Suite Spec Conformance's api_consistency groups pin these contracts on both backends
 with proofs on and off.
+
+## 16. A suspendable run owns every piece of execution state
+
+`engine::start` runs a program on a native fiber of its own (`source/implementation/script_run.cpp`, vendored minicoro), and
+a `sleep` that suspends it returns to the host with the run's frames still on that fiber. Every switch exchanges the live
+state with the run's in O(1): the backend's (`vm_backend::vm_run_state`, `interpreter::interpreter_run_state`, through
+`swap_run_state`) and the engine's own per-entry state (`engine::swap_run_entry_state`: the entry generation and stamp, the
+ambient unit, the load session, the limits' per-entry fields, the debugger's step). The rules:
+
+- A backend member that execution changes (a stack, a frame list, a pool indexed by nesting depth, a depth counter, a
+  pointer into frames, the exception and return state) joins its backend's run state, swapped and reset, in the commit that
+  adds it. A member missing from it is shared between a suspended run and the host's next entry: the failure is a corrupt
+  frame or a stale pointer in whichever resumes second, and neither backend's parity catches it (Script Run's interleaving
+  tests do).
+- A run suspends only while its pin count is zero. Native code that runs script takes a pin (`engine::run_pin`): the
+  passthrough of `checked_host_entry`, `script_method_dispatch::invoke` and `script_static_method_dispatch::call` when a
+  host calls them, an external call scope, a nested execute (include, import, a host's execute), the reload hook, a
+  destructor, a prepared builtin callback session and the library's comparisons. A backend calls a function value from
+  running script through `detail::call_function_value`, which enters a script callable without a pin, so both backends pin
+  at the same semantic points and never by native depth.
+- A run resumes only on the thread that started it, C++ exceptions never cross the fiber (the body catches and the host
+  side rethrows), and every switch advances the vm's raw epoch.

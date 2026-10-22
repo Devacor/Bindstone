@@ -27,7 +27,7 @@ void pt_deliver() {
 	for (int i = 0; i < 5000 && !pt_delivered(); ++i) {
 		NET_SRV.pump();
 		NCS_CH[PT_S].pump();
-		if (!pt_delivered()) { time::sleep_ms(1); }
+		if (!pt_delivered()) { sleep(0.001); }
 	}
 	if (!pt_delivered()) { PT_STALLED = true; }
 }
@@ -113,7 +113,7 @@ bool pt_setup(int port, int lag, int jitter, int loss) {
 	NET_SRV.on_client_packet.connect("pt", [](int id, string bytes) { PT_HOST_RX = PT_HOST_RX + bytes.size(); });
 	PT_S = net_client_open("127.0.0.1", port);
 	NCS_CH[PT_S].on_packet.connect("pt", [](string bytes) { PT_CLIENT_RX = PT_CLIENT_RX + bytes.size(); });
-	for (int i = 0; i < 200 && !NCS_CH[PT_S].connected(); ++i) { NET_SRV.pump(); NCS_CH[PT_S].pump(); time::sleep_ms(1); }
+	for (int i = 0; i < 200 && !NCS_CH[PT_S].connected(); ++i) { NET_SRV.pump(); NCS_CH[PT_S].pump(); sleep(0.001); }
 	NET_SIM_LAG = lag;
 	NET_SIM_JITTER = jitter;
 	NET_SIM_LOSS = loss;

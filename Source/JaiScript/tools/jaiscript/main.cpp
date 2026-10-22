@@ -6,6 +6,8 @@
 
 #include "profile_capture.hpp"
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/core/engine_time.hpp>
+#include <jaiscript/core/script_run.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/signals/signal_property.hpp>
@@ -88,7 +90,7 @@ struct console_state {
 		DWORD pids[4];
 		solo_console = GetConsoleProcessList(pids, 4) == 1;
 		SetConsoleCtrlHandler(ctrl_handler, TRUE);
-		timeBeginPeriod(1);   // 1ms Sleep granularity for time::sleep-paced game loops
+		timeBeginPeriod(1);   // 1ms Sleep granularity for sleep-paced game loops
 #else
 		out_tty = in_tty = vt = true;
 #endif
@@ -245,7 +247,7 @@ void print_usage() {
 		"  (the file import would load for that name), app_data_dir(name) / app_cache_dir(name),\n"
 		"  working_dir(), parent_dir(p), file_name(p) - a script dropped onto the executable runs\n"
 		"  from any working directory when its paths start from one of these; and console-game IO:\n"
-		"  key_down(name), read_key(), term_cols(), term_rows() (clocks and sleeps are time::),\n"
+		"  key_down(name), read_key(), term_cols(), term_rows() (clocks are time::, waits sleep()),\n"
 		"  sound: load_sound(path) -> Sound (play()/play(true) loops/stop()/playing()/volume(0..1)/\n"
 		"  format(); wav, midi or mp3 by the file's header), play_sound(path[, loop]), stop_sounds()\n"
 		"  (each Sound mixes with the others; Windows only, null elsewhere). POSIX terminals synthesize\n"
@@ -342,7 +344,7 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 
 // --------------------------------------------------------- console game IO ---
 // The capabilities a real-time terminal script cannot express (input and terminal
-// size; clocks and sleeps are the stdlib's time::), same shapes as the crawler/gloom hosts.
+// size; clocks are the stdlib's time::, waits the sleep builtin), same shapes as the crawler/gloom hosts.
 // Windows-first; elsewhere the input pair reports nothing, like those hosts.
 
 #ifdef _WIN32
@@ -1156,6 +1158,18 @@ void report_warn_mode_findings(jai::engine& eng, const std::string& content, con
 	}
 }
 
+// Scripts run as suspendable runs: a sleep hands control back here, and the loop waits on the engine's clock until the run is due
+jai::script_value finish_run(jai::engine& eng, jai::script_run run) {
+	while (!run.done()) {
+		const auto now = eng.time().monotonic_now();
+		if (run.wake_at() > now) { eng.time().sleep_for(run.wake_at() - now); }
+		run.resume();
+	}
+	const auto& result = run.result();
+	if (!result) { throw std::runtime_error(eng.format_error(result)); }
+	return result.value();
+}
+
 // execute_file_source keeps the file-path attribution (stack traces, debugger breakpoints)
 // while letting the host strip a UTF-8 BOM — Notepad's default, PowerShell's Set-Content —
 // which the lexer would otherwise reject as "Unexpected character".
@@ -1163,7 +1177,7 @@ jai::script_value execute_script_file(jai::engine& eng, const fs::path& abs) {
 	std::string content = slurp_file(abs.string());
 	if (content.rfind("\xEF\xBB\xBF", 0) == 0) { content.erase(0, 3); }
 	report_warn_mode_findings(eng, content, abs.filename().string());
-	return eng.execute_file_source(abs.string(), content);
+	return finish_run(eng, eng.start_file_source(abs.string(), content));
 }
 
 // Runs each -e source in order in `eng` (include/import resolve from the working directory); the first error stops the
@@ -1452,12 +1466,12 @@ struct repl_session {
 	// retries with it on a line of its own (past a trailing comment), and a retry that does not parse either gives the original
 	jai::script_value execute_line(const std::string& source) {
 		try {
-			return eng->execute(source);
+			return finish_run(*eng, eng->start(source));
 		} catch (const jai::parse_error& ex) {
 			if (std::string_view(ex.what()).find("Expected ';'") == std::string_view::npos) { throw; }
 			const std::exception_ptr original = std::current_exception();
 			try {
-				return eng->execute(source + "\n;");
+				return finish_run(*eng, eng->start(source + "\n;"));
 			} catch (const jai::parse_error&) {
 				std::rethrow_exception(original);
 			}
@@ -1849,7 +1863,7 @@ int run_selftest(const console_state& con) {
 				expect(run("var s = load_sound(snd + \"/tone.wav\"); var seen = to_string(s.playing()) + \" \" + to_string(s.play()) + \" \" + to_string(s.playing()); "
 					"s.stop(); seen += \" \" + to_string(s.playing()); s.play(true); seen += \" \" + to_string(s.playing()); stop_sounds(); seen + \" \" + to_string(s.playing());") ==
 					"false true true false true false", name("play, stop, a loop and stop_sounds set the play state").c_str());
-				expect(run("var s = play_sound(snd + \"/tone.wav\"); int waited = 0; while (s.playing() && waited < 3000) { time::sleep_ms(10); waited += 10; } !s.playing();") == "true",
+				expect(run("var s = play_sound(snd + \"/tone.wav\"); int waited = 0; while (s.playing() && waited < 3000) { sleep(0.01); waited += 10; } !s.playing();") == "true",
 					name("a sound played once stops playing when it ends").c_str());
 			}
 		}

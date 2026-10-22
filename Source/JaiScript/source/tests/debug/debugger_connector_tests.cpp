@@ -449,7 +449,7 @@ public:
             std::thread script([&] {
                 try {
                     eng->execute("int frames = 0;\nbool quit = false;\nwhile (!quit && frames < 400) {\n"
-                                 "    time::sleep_ms(20);\n    frames = frames + 1;\n}\n");
+                                 "    sleep(0.02);\n    frames = frames + 1;\n}\n");
                 } catch (const std::exception& e) { script_error = e.what(); }
             });
             struct script_guard {

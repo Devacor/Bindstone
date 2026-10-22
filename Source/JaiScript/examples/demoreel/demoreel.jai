@@ -427,7 +427,7 @@ function run_interactive() -> int {
 
 
 		float used = pace.elapsed() * 1000;
-		if (used < budget_ms) { time::sleep_ms(budget_ms - used); }
+		if (used < budget_ms) { sleep((budget_ms - used) / 1000.0); }
 	}
 	if (music != null) { music.stop(); }
 	print(ESC + "[0m" + ESC + "[?1049l" + ESC + "[?25h", skip_newline);

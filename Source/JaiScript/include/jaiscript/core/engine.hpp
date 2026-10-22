@@ -38,11 +38,12 @@ namespace jai {
     class execution_backend;
     class engine_time;
     class http_transport;
+    class script_run;
     class string_symbolizer;
     struct import_site;
     namespace vm { class vm_backend; struct coverage_tables; }
     namespace debug { class controller; class transport; }
-    namespace detail { struct release_machine; }
+    namespace detail { struct release_machine; struct run_record; struct run_entry_state; struct run_registry; }
     struct script_namespace_data;
 
     // engine::vm_coverage_summary: the report's class totals as numbers, for a harness that aggregates many runs
@@ -241,6 +242,44 @@ namespace jai {
         // never share a jaibite across engines. Parse errors throw here.
         jai::jaibite jaibite(const std::string& scriptContent);
         script_value execute(jai::jaibite& bite);
+
+        // === SUSPENDABLE RUNS (<jaiscript/core/script_run.hpp>; docs/site/embedding/17-host-api.html#suspendable-runs) ===
+        // Each starts a run on a native fiber of its own and runs it now, until a sleep suspends it or it ends; the returned
+        // script_run resumes it. A run from source, a file or a jaibite reports a failure as execute() does (the call that ends
+        // the run throws it); a callable's run reports it through result(). A jaibite must outlive its run. execute() never
+        // suspends: a sleep outside a run blocks.
+        script_run start(const std::string& scriptContent);
+        script_run start_file(const std::string& scriptPath);
+        script_run start_file_source(const std::string& resolvedPath, const std::string& content);   // execute_file_source's run
+        script_run start(jai::jaibite& bite);
+        script_run start(const script_value& callable, std::vector<script_value> args = {});
+
+        // The sleep builtin (detail: script_run.cpp): seconds on the time source; suspends the innermost run when nothing pins it,
+        // else blocks. sleep_callee: `function` is the core sleep function (a call of it runs the builtin)
+        checked_result<script_value> sleep_builtin(const script_value& seconds);
+        bool sleep_callee(const void* function) const noexcept;
+        // Native code running script inside a run (a host callback, a destructor, a signal receiver, an import, a builtin's
+        // callback): while one is on the stack a sleep blocks instead of suspending the run
+        void pin_run() noexcept { if (active_run_pins_) { ++*active_run_pins_; } }
+        void unpin_run() noexcept { if (active_run_pins_) { --*active_run_pins_; } }
+        class run_pin {
+        public:
+            explicit run_pin(engine* a_engine) noexcept : pins_(a_engine ? a_engine->active_run_pins_ : nullptr) { if (pins_) { ++*pins_; } }
+            ~run_pin() { if (pins_) { --*pins_; } }
+            run_pin(const run_pin&) = delete;
+            run_pin& operator=(const run_pin&) = delete;
+        private:
+            int* pins_;
+        };
+        // The innermost active run's pin count (null: no run is active, so nothing pins); set by every switch into a run
+        int* active_run_pins() const noexcept { return active_run_pins_; }
+        void active_run_pins(int* pins) noexcept { active_run_pins_ = pins; }
+        // A debug sync point (sleep with no duration): pending breakpoint edits apply and a pending pause parks here; one
+        // pointer test while no debugger exists
+        void debug_sync_point();
+        // Internal (script_run.cpp): the run machinery's registry, the exchange of the engine's own per-entry state with a run's
+        detail::run_registry& run_registry();
+        void swap_run_entry_state(detail::run_entry_state& state) noexcept;
 
         // Load a jaibite saved via jaibite::save()/save_bytes(). Symbols and type_info
         // are re-interned into THIS engine, so a bite saved from another engine loads
@@ -1224,7 +1263,8 @@ namespace jai {
         // script runs reports every failure in its result (a run-time error, an uncaught throw, a failed import or reload), the
         // engine left ready for the next call; a call from inside running script passes straight through
         using host_entry_body = checked_result<script_value> (*)(execution_backend&, void*);
-        checked_result<script_value> checked_host_entry(host_entry_body run, void* context);
+        // (host_call false: running script made the call, which pins no suspendable run)
+        checked_result<script_value> checked_host_entry(host_entry_body run, void* context, bool host_call = true);
 
         // An overloaded host function name's callable: the overload the arguments select
         struct overload_dispatch {
@@ -1421,8 +1461,11 @@ namespace jai {
         bool destructors_armed_ = false;
         bool parallel_region_active_ = false;
         bool construction_access_waived_ = false;
+        int* active_run_pins_ = nullptr;
         std::vector<field_migration_report> hot_reload_reports_;
         void register_location_builtins();   // engine-core script builtins: root/current_script_dir, resolve_path, app dirs
+        script_run launch_run(std::unique_ptr<detail::run_record> run);   // start's first switch into the run (script_run.cpp)
+        void cancel_suspended_runs() noexcept;   // the engine's teardown: every run still suspended is cancelled
         void register_privilege_builtins();
         void set_privileges(privilege flags, bool enabled);
         void set_privileges(std::span<const std::string_view> names, bool enabled);

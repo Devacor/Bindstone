@@ -6691,7 +6691,7 @@
       "display": "web::html_unescape(value: text) -> same_text_kind",
       "example": {
         "code": "print(web::html_unescape(\"&lt;b&gt; &copy &#x41;&#66; &bogus;\"));",
-        "output": "<b> \u00a9 AB &bogus;"
+        "output": "<b> © AB &bogus;"
       }
     },
     {
@@ -6821,6 +6821,138 @@
         "code": "web::url u = web::parse_url(\"https://snapjaw.example:8443/posts/7?sort=new#comments\");\nprint(u.host, \" \", u.port, \" \", u.path, \" \", u.query);",
         "output": "snapjaw.example 8443 /posts/7 sort=new"
       }
+    },
+    {
+      "owner": "spider",
+      "name": "catch",
+      "signature": "catch(url: string, options: map = {}) -> spider::Response",
+      "provider": "stdlib",
+      "effect": "network",
+      "notes": "A GET (options.method overrides) through the host's transport; options method, headers, timeout (30 s), type, redirects (5). Errors name the call, the URL and the reason.",
+      "source": "include/jaiscript/stdlib/spider.hpp",
+      "form": "function",
+      "availability": "register_spider() + a host transport + the network permission",
+      "display": "spider::catch(url: string, options: map = {}) -> spider::Response"
+    },
+    {
+      "owner": "spider",
+      "name": "get",
+      "signature": "get(url: string, options: map = {}) -> spider::Response",
+      "provider": "stdlib",
+      "effect": "network",
+      "notes": "The plain name of spider::catch.",
+      "source": "include/jaiscript/stdlib/spider.hpp",
+      "form": "function",
+      "availability": "register_spider() + a host transport + the network permission",
+      "display": "spider::get(url: string, options: map = {}) -> spider::Response"
+    },
+    {
+      "owner": "spider",
+      "name": "sling",
+      "signature": "sling(content: var, url: string, options: map = {}) -> spider::Response",
+      "provider": "stdlib",
+      "effect": "network",
+      "notes": "A POST carrying content: text as text/plain, anything else as JSON, a map as a form with type \"form\".",
+      "source": "include/jaiscript/stdlib/spider.hpp",
+      "form": "function",
+      "availability": "register_spider() + a host transport + the network permission",
+      "display": "spider::sling(content: var, url: string, options: map = {}) -> spider::Response"
+    },
+    {
+      "owner": "spider",
+      "name": "post",
+      "signature": "post(url: string, content: var, options: map = {}) -> spider::Response",
+      "provider": "stdlib",
+      "effect": "network",
+      "notes": "The plain name of spider::sling, URL first.",
+      "source": "include/jaiscript/stdlib/spider.hpp",
+      "form": "function",
+      "availability": "register_spider() + a host transport + the network permission",
+      "display": "spider::post(url: string, content: var, options: map = {}) -> spider::Response"
+    },
+    {
+      "owner": "spider",
+      "name": "Response",
+      "signature": "Response(status: int = 200, body: string = \"\") -> spider::Response",
+      "provider": "stdlib",
+      "effect": "construct",
+      "notes": "A new response, as a server handler builds one.",
+      "source": "include/jaiscript/stdlib/spider.hpp",
+      "form": "function",
+      "availability": "register_spider() + a host transport + the network permission",
+      "display": "spider::Response(status: int = 200, body: string = \"\") -> spider::Response"
+    },
+    {
+      "owner": "spider::Response",
+      "name": "ok",
+      "signature": "ok() -> bool",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "True for a 2xx status.",
+      "source": "include/jaiscript/stdlib/spider.hpp",
+      "form": "method",
+      "availability": "register_spider()",
+      "display": "spider::Response.ok() -> bool"
+    },
+    {
+      "owner": "spider::Response",
+      "name": "json",
+      "signature": "json() -> var",
+      "provider": "stdlib",
+      "effect": "deserialize",
+      "notes": "from_json of the body.",
+      "source": "include/jaiscript/stdlib/spider.hpp",
+      "form": "method",
+      "availability": "register_spider()",
+      "display": "spider::Response.json() -> var"
+    },
+    {
+      "owner": "spider::Response",
+      "name": "header",
+      "signature": "header(name: string) -> string",
+      "provider": "stdlib",
+      "effect": "observe",
+      "notes": "The header in any spelling of its name; \"\" when absent.",
+      "source": "include/jaiscript/stdlib/spider.hpp",
+      "form": "method",
+      "availability": "register_spider()",
+      "display": "spider::Response.header(name: string) -> string"
+    },
+    {
+      "owner": "spider::Response",
+      "name": "header",
+      "signature": "header(name: string, value: string) -> spider::Response&",
+      "provider": "stdlib",
+      "effect": "mutate",
+      "notes": "Sets a header, replacing one of the same name in any spelling; chains.",
+      "source": "include/jaiscript/stdlib/spider.hpp",
+      "form": "method",
+      "availability": "register_spider()",
+      "display": "spider::Response.header(name: string, value: string) -> spider::Response&"
+    },
+    {
+      "owner": "spider::Response",
+      "name": "set_cookie",
+      "signature": "set_cookie(name: string, value: string, options: map = {}) -> void",
+      "provider": "stdlib",
+      "effect": "mutate",
+      "notes": "Adds a Set-Cookie line, the value percent-encoded; options max_age, expires, path, domain, secure, http_only (true), same_site (\"Lax\").",
+      "source": "include/jaiscript/stdlib/spider.hpp",
+      "form": "method",
+      "availability": "register_spider()",
+      "display": "spider::Response.set_cookie(name: string, value: string, options: map = {}) -> void"
+    },
+    {
+      "owner": "spider::Response",
+      "name": "clear_cookie",
+      "signature": "clear_cookie(name: string, options: map = {}) -> void",
+      "provider": "stdlib",
+      "effect": "mutate",
+      "notes": "Adds a Set-Cookie line with Max-Age=0.",
+      "source": "include/jaiscript/stdlib/spider.hpp",
+      "form": "method",
+      "availability": "register_spider()",
+      "display": "spider::Response.clear_cookie(name: string, options: map = {}) -> void"
     },
     {
       "owner": "web::url",
@@ -7705,6 +7837,51 @@
       "access": "read/write",
       "notes": "web::parse_url's part, as written",
       "source": "include/jaiscript/stdlib/web_text.hpp"
+    },
+    {
+      "owner": "spider::Response",
+      "name": "status",
+      "type": "int",
+      "provider": "stdlib",
+      "access": "read/write",
+      "notes": "The status code.",
+      "source": "include/jaiscript/stdlib/spider.hpp"
+    },
+    {
+      "owner": "spider::Response",
+      "name": "headers",
+      "type": "map<string, string>",
+      "provider": "stdlib",
+      "access": "read/write",
+      "notes": "A received answer's names lowercased, repeats joined with \", \".",
+      "source": "include/jaiscript/stdlib/spider.hpp"
+    },
+    {
+      "owner": "spider::Response",
+      "name": "cookies",
+      "type": "array<string>",
+      "provider": "stdlib",
+      "access": "read/write",
+      "notes": "The Set-Cookie lines, one per cookie.",
+      "source": "include/jaiscript/stdlib/spider.hpp"
+    },
+    {
+      "owner": "spider::Response",
+      "name": "body",
+      "type": "string",
+      "provider": "stdlib",
+      "access": "read/write",
+      "notes": "",
+      "source": "include/jaiscript/stdlib/spider.hpp"
+    },
+    {
+      "owner": "spider::Response",
+      "name": "url",
+      "type": "string",
+      "provider": "stdlib",
+      "access": "read/write",
+      "notes": "The URL that answered, after redirects.",
+      "source": "include/jaiscript/stdlib/spider.hpp"
     },
     {
       "owner": "regex",

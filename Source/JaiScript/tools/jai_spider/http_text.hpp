@@ -14,7 +14,7 @@
 #include <string_view>
 #include <vector>
 
-namespace jaiweb {
+namespace spider_host {
 
 inline int hex_digit_value(char c) {
 	if (c >= '0' && c <= '9') { return c - '0'; }
@@ -229,4 +229,4 @@ inline std::string status_reason(int status) {
 	}
 }
 
-} // namespace jaiweb
+} // namespace spider_host

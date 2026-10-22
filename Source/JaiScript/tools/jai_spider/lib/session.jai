@@ -1,12 +1,14 @@
 // Cookie sessions kept in SQLite: the cookie carries only a random id (random_token, the system's secure source),
-// the data stays on the server as JSON in the jaiweb_sessions table.
+// the data stays on the server as JSON in the spider_sessions table.
 //
-//   SessionStore sessions = SessionStore(db);
-//   Session s = sessions.load(req);      // the visitor's session, or a new empty one
+//   spider::SessionStore sessions = spider::SessionStore(db);
+//   spider::Session s = sessions.load(req);      // the visitor's session, or a new empty one
 //   s.set("name", "Ada");
-//   Response r = redirect("/");
-//   sessions.save(s, r);                 // writes the row and the cookie when the session changed
-import "web.jai";
+//   spider::Response r = spider::redirect("/");
+//   sessions.save(s, r);                         // writes the row and the cookie when the session changed
+import "spider.jai";
+
+namespace spider {
 
 class Session {
 	string id;
@@ -43,14 +45,14 @@ class SessionStore {
 	SessionStore() {}
 	SessionStore(Database database) {
 		db = database;
-		db.execute("CREATE TABLE IF NOT EXISTS jaiweb_sessions (id TEXT PRIMARY KEY, data TEXT NOT NULL, expires INTEGER NOT NULL)");
+		db.execute("CREATE TABLE IF NOT EXISTS spider_sessions (id TEXT PRIMARY KEY, data TEXT NOT NULL, expires INTEGER NOT NULL)");
 	}
 
-	Session load(Request req) {
-		Session s;
+	spider::Session load(spider::Request req) {
+		spider::Session s;
 		string id = req.cookie(cookie_name);
 		if (id != "") {
-			var row = db.query_one("SELECT data FROM jaiweb_sessions WHERE id = ? AND expires > ?", id, now_seconds());
+			var row = db.query_one("SELECT data FROM spider_sessions WHERE id = ? AND expires > ?", id, now_seconds());
 			if (row != null) {
 				s.id = id;
 				s.data = from_json(row["data"]);
@@ -62,9 +64,9 @@ class SessionStore {
 		return s;
 	}
 
-	void save(Session& s, Response& resp) {
+	void save(spider::Session& s, spider::Response& resp) {
 		if (!s.changed || (s.is_new && s.data.size() == 0)) { return; }
-		db.execute("INSERT INTO jaiweb_sessions (id, data, expires) VALUES (?, ?, ?) "
+		db.execute("INSERT INTO spider_sessions (id, data, expires) VALUES (?, ?, ?) "
 			+ "ON CONFLICT(id) DO UPDATE SET data = excluded.data, expires = excluded.expires",
 			s.id, to_json(s.data), now_seconds() + max_age);
 		resp.set_cookie(cookie_name, s.id, {"max_age": max_age, "secure": secure_cookie});
@@ -73,20 +75,22 @@ class SessionStore {
 	}
 
 	// a new id for the same data: call it when the visitor signs in, so an id seen before the sign-in is worth nothing
-	void rotate(Session& s) {
-		db.execute("DELETE FROM jaiweb_sessions WHERE id = ?", s.id);
+	void rotate(spider::Session& s) {
+		db.execute("DELETE FROM spider_sessions WHERE id = ?", s.id);
 		s.id = random_token(32);
 		s.changed = true;
 	}
 
-	void destroy(Session& s, Response& resp) {
-		db.execute("DELETE FROM jaiweb_sessions WHERE id = ?", s.id);
+	void destroy(spider::Session& s, spider::Response& resp) {
+		db.execute("DELETE FROM spider_sessions WHERE id = ?", s.id);
 		resp.clear_cookie(cookie_name);
 		s.data = {};
 		s.changed = false;
 	}
 
-	int purge_expired() { return db.execute("DELETE FROM jaiweb_sessions WHERE expires <= ?", now_seconds()); }
+	int purge_expired() { return db.execute("DELETE FROM spider_sessions WHERE expires <= ?", now_seconds()); }
 
 	int now_seconds() { return time::unix_ms() / 1000; }
+}
+
 }

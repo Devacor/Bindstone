@@ -69,7 +69,7 @@ jobs:
           '-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug>:Embedded>'
 
       - name: Build
-        run: cmake --build build --target jaiscript_tests jaiscript_fuzz jaiscript_runner jaiscript_lsp jai_gloom jai_crawler jai_demoreel embed_quickstart jaiweb
+        run: cmake --build build --target jaiscript_tests jaiscript_fuzz jaiscript_runner jaiscript_lsp jai_gloom jai_crawler jai_demoreel embed_quickstart jai_spider
 
       - name: Tests (interpreter)
         run: bash tools/ci/gates.sh tests-interp
@@ -92,8 +92,8 @@ jobs:
       - name: Language server tests
         run: bash tools/ci/gates.sh lsp
 
-      - name: Web host
-        run: bash tools/ci/gates.sh jaiweb
+      - name: Web host and HTTP client
+        run: bash tools/ci/gates.sh spider
 
       # Release only: in a Debug build these two runs take tens of minutes.
       - name: demoreel hash gate

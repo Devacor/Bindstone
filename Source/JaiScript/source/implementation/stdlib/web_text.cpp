@@ -5,6 +5,7 @@
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/utf8.hpp>
+#include <jaiscript/detail/web_kernels.hpp>
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -839,33 +840,6 @@ namespace web_text_detail {
 		a_hex = digest.hex();
 		return nullptr;
 	}
-
-	// web::url: the parts of a URL as written (web::parse_url), and the URL they spell (to_string); port 0 is no port
-	struct url_record {
-		std::string scheme;
-		std::string user;
-		std::string password;
-		std::string host;
-		script_int port = 0;
-		std::string path;
-		std::string query;
-		std::string fragment;
-
-		std::string to_string() const {
-			std::string result;
-			if (!scheme.empty()) { result += scheme + ":"; }
-			if (!host.empty() || !user.empty() || port != 0) {
-				result += "//";
-				if (!user.empty() || !password.empty()) { result += user + (password.empty() ? "" : ":" + password) + "@"; }
-				result += host;
-				if (port != 0) { result += ":" + std::to_string(port); }
-			}
-			result += path;
-			if (!query.empty()) { result += "?" + query; }
-			if (!fragment.empty()) { result += "#" + fragment; }
-			return result;
-		}
-	};
 
 	// RFC 3986 2.3: the unreserved characters stay as they are; the form encoding (WHATWG application/x-www-form-urlencoded)
 	// keeps A-Z a-z 0-9 * - . _ and writes a space as '+'; every other byte is %XX in upper-case hex

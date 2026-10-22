@@ -29,7 +29,7 @@
 #include <utility>
 #include <vector>
 
-namespace jaiweb {
+namespace spider_host {
 
 inline constexpr const char* k_sql_refusal = "SQL text must be a constant; pass values as parameters (?)";
 
@@ -223,7 +223,7 @@ public:
 	jai::script_value transaction(const jai::script_value& fn) {
 		sqlite3* handle = open_handle();
 		const bool nested = sqlite3_get_autocommit(handle) == 0;
-		const std::string savepoint = "jaiweb_" + std::to_string(connection_->savepoint_depth + 1);
+		const std::string savepoint = "spider_" + std::to_string(connection_->savepoint_depth + 1);
 		auto body = jai::convert_script_function<jai::script_value()>(fn);   // the throwing flavor: a failure inside raises here
 		run_plain(nested ? "SAVEPOINT " + savepoint : std::string("BEGIN"));
 		++connection_->savepoint_depth;
@@ -529,4 +529,4 @@ inline void register_database(jai::engine& eng, const std::filesystem::path& app
 	}, jai::filesystem);
 }
 
-} // namespace jaiweb
+} // namespace spider_host

@@ -1,11 +1,12 @@
-// jaiweb - a web application host for JaiScript. `jaiweb app.jai` serves the app over HTTP/1.1: each request is
-// handed to the script's handle(Request) on one thread, the app's modules reload on the request after they are saved,
-// SQLite is a Database away, and files under --root are served as they are. The host is a consumer of the library:
-// sockets and HTTP (http_server.hpp), the text forms of HTTP (http_text.hpp) and SQLite (database.hpp) live here,
-// Request, Response and Router are script (lib/web.jai).
+// jai_spider - a web application host for JaiScript. `jai_spider app.jai` serves the app over HTTP/1.1: each request is
+// handed to the handler the app gave spider::spin, on one thread; the app's modules reload on the request after they are
+// saved, SQLite is a Database away, and files under --root are served as they are. The host is a consumer of the
+// library: sockets and HTTP (http_server.hpp), the text forms of HTTP (http_text.hpp) and SQLite (database.hpp) live
+// here, Request and Router are script (lib/spider.jai), Response is the library's spider::Response.
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
+#include "../jaiscript/http_transport.hpp"
 #include "../jaiscript/file_io.hpp"
 #include "database.hpp"
 #include "http_server.hpp"
@@ -61,22 +62,23 @@ struct options {
 	std::string backend = "vm";
 	std::string check = "strict";
 	double budget = 30.0;
-	jaiweb::http_limits limits;
+	spider_host::http_limits limits;
 	bool allow_shutdown = false;
 	bool quiet = false;
 };
 
 void print_usage() {
 	std::puts(
-		"jaiweb - a web application host for JaiScript\n"
+		"jai_spider - a web application host for JaiScript\n"
 		"\n"
 		"usage:\n"
-		"  jaiweb app.jai [options]\n"
+		"  jai_spider app.jai [options]\n"
 		"\n"
-		"The app defines Response handle(Request req) (lib/web.jai has Request, Response, Router and the\n"
-		"html/json/redirect/file helpers). Every request reaches the app's imports first, so a saved edit\n"
-		"applies to the next request; an edit that does not check is reported here and the app keeps\n"
-		"serving the code it had.\n"
+		"The app hands its handler to spider::spin(handler) (spider::serve is the same call): a function of a\n"
+		"spider::Request, or a spider::Router (lib/spider.jai has Request, Router and the html/json/redirect/\n"
+		"file helpers; spider::Response is the library's). Every request reaches the app's imports first, so a\n"
+		"saved edit applies to the next request; an edit that does not check is reported here and the app\n"
+		"keeps serving the code it had. spider::catch / sling / get / post reach other servers.\n"
 		"\n"
 		"options:\n"
 		"  --port N            port to listen on (default 8080; 0 picks a free one)\n"
@@ -89,7 +91,7 @@ void print_usage() {
 		"  --backend vm|interp execution backend (default vm)\n"
 		"  --check strict|warn|off\n"
 		"                      static checker mode (default strict)\n"
-		"  --allow-shutdown    POST /__jaiweb/shutdown from this machine stops the server\n"
+		"  --allow-shutdown    POST /__spider/shutdown from this machine stops the server\n"
 		"  --quiet             no request log\n"
 		"  --version / --help\n"
 		"\n"
@@ -117,7 +119,7 @@ int parse_args(int argc, char** argv, options& opt) {
 		auto value_of = [&](const std::string& flag) -> std::string {
 			if (a.size() > flag.size() && a[flag.size()] == '=') { return a.substr(flag.size() + 1); }
 			if (i + 1 < argc) { return argv[++i]; }
-			std::fprintf(stderr, "jaiweb: missing value for %s\n", flag.c_str());
+			std::fprintf(stderr, "jai_spider: missing value for %s\n", flag.c_str());
 			std::exit(2);
 		};
 		auto is_flag = [&](const char* flag) {
@@ -134,25 +136,25 @@ int parse_args(int argc, char** argv, options& opt) {
 			else if (is_flag("--timeout")) { opt.limits.timeout_seconds = std::stod(value_of("--timeout")); }
 			else if (is_flag("--max-body")) {
 				if (!parse_size(value_of("--max-body"), opt.limits.max_body_bytes)) {
-					std::fprintf(stderr, "jaiweb: --max-body takes a byte count (2097152, 512K, 2M)\n");
+					std::fprintf(stderr, "jai_spider: --max-body takes a byte count (2097152, 512K, 2M)\n");
 					return 2;
 				}
 			}
 			else if (a == "--allow-shutdown") { opt.allow_shutdown = true; }
 			else if (a == "--quiet") { opt.quiet = true; }
-			else if (a == "--version" || a == "-v") { std::printf("jaiweb (JaiScript %s, SQLite %s)\n", jai::version().c_str(), sqlite3_libversion()); std::exit(0); }
+			else if (a == "--version" || a == "-v") { std::printf("jai_spider (JaiScript %s, SQLite %s)\n", jai::version().c_str(), sqlite3_libversion()); std::exit(0); }
 			else if (a == "--help" || a == "-h" || a == "/?") { print_usage(); std::exit(0); }
 			else if (!a.empty() && a[0] == '-') {
-				std::fprintf(stderr, "jaiweb: unknown flag: %s\n", a.c_str());
+				std::fprintf(stderr, "jai_spider: unknown flag: %s\n", a.c_str());
 				return 2;
 			}
 			else if (opt.app.empty()) { opt.app = a; }
 			else {
-				std::fprintf(stderr, "jaiweb: unexpected extra argument: %s\n", a.c_str());
+				std::fprintf(stderr, "jai_spider: unexpected extra argument: %s\n", a.c_str());
 				return 2;
 			}
 		} catch (const std::exception&) {
-			std::fprintf(stderr, "jaiweb: bad value in %s\n", a.c_str());
+			std::fprintf(stderr, "jai_spider: bad value in %s\n", a.c_str());
 			return 2;
 		}
 	}
@@ -162,15 +164,15 @@ int parse_args(int argc, char** argv, options& opt) {
 		return 2;
 	}
 	if (opt.backend != "vm" && opt.backend != "interp") {
-		std::fprintf(stderr, "jaiweb: unknown backend: %s (use vm or interp)\n", opt.backend.c_str());
+		std::fprintf(stderr, "jai_spider: unknown backend: %s (use vm or interp)\n", opt.backend.c_str());
 		return 2;
 	}
 	if (opt.check != "strict" && opt.check != "warn" && opt.check != "off") {
-		std::fprintf(stderr, "jaiweb: unknown check mode: %s (use strict, warn or off)\n", opt.check.c_str());
+		std::fprintf(stderr, "jai_spider: unknown check mode: %s (use strict, warn or off)\n", opt.check.c_str());
 		return 2;
 	}
 	if (opt.port < 0 || opt.port > 65535) {
-		std::fprintf(stderr, "jaiweb: --port takes 0 to 65535\n");
+		std::fprintf(stderr, "jai_spider: --port takes 0 to 65535\n");
 		return 2;
 	}
 	return -1;
@@ -233,13 +235,13 @@ jai::script_value script_map_of(jai::engine* eng, std::vector<std::pair<std::str
 	return result;
 }
 
-// The HTTP text forms the standard library leaves to a web host (lib/web.jai builds Request and the session cookie on them)
+// The HTTP text forms the standard library leaves to a web host (lib/spider.jai builds Request on them)
 void register_http_text(jai::engine& eng) {
-	eng.add_function("parse_cookies", [](const std::string& header) { return jaiweb::parse_cookies(header); });
+	eng.add_function("parse_cookies", [](const std::string& header) { return spider_host::parse_cookies(header); });
 	jai::engine* engine_pointer = &eng;
 	eng.add_function("parse_multipart", [engine_pointer](const std::string& body, const std::string& content_type) {
-		std::vector<jaiweb::multipart_part> parts;
-		if (!jaiweb::parse_multipart(body, content_type, parts)) { throw std::runtime_error("parse_multipart: the body is not multipart/form-data with this boundary"); }
+		std::vector<spider_host::multipart_part> parts;
+		if (!spider_host::parse_multipart(body, content_type, parts)) { throw std::runtime_error("parse_multipart: the body is not multipart/form-data with this boundary"); }
 		jai::script_value result = jai::script_value::make_array(nullptr, engine_pointer);
 		for (auto& part : parts) {
 			result.as_array().push_back(script_map_of(engine_pointer, {
@@ -264,8 +266,8 @@ void register_http_text(jai::engine& eng) {
 		}
 		return result;
 	});
-	eng.add_function("http_date", [](jai::script_int unix_seconds) { return jaiweb::http_date(static_cast<std::time_t>(unix_seconds)); });
-	eng.add_function("content_type_for", [](const std::string& path) { return jaiweb::content_type_for(fs::path(path).extension().string()); });
+	eng.add_function("http_date", [](jai::script_int unix_seconds) { return spider_host::http_date(static_cast<std::time_t>(unix_seconds)); });
+	eng.add_function("content_type_for", [](const std::string& path) { return spider_host::content_type_for(fs::path(path).extension().string()); });
 }
 
 bool is_loopback(const std::string& address) { return address.rfind("127.", 0) == 0 || address == "::1"; }
@@ -281,14 +283,14 @@ public:
 		std::error_code ec;
 		app_path_ = fs::weakly_canonical(fs::absolute(opt_.app, ec), ec);
 		if (!fs::is_regular_file(app_path_, ec)) {
-			std::cerr << colors_.red("jaiweb: no such file: " + opt_.app) << "\n";
+			std::cerr << colors_.red("jai_spider: no such file: " + opt_.app) << "\n";
 			return false;
 		}
 		app_dir_ = app_path_.parent_path();
 		if (!opt_.root.empty()) {
 			static_root_ = fs::weakly_canonical(fs::absolute(opt_.root, ec), ec);
 			if (!fs::is_directory(static_root_, ec)) {
-				std::cerr << colors_.red("jaiweb: --root is not a folder: " + opt_.root) << "\n";
+				std::cerr << colors_.red("jai_spider: --root is not a folder: " + opt_.root) << "\n";
 				return false;
 			}
 		} else if (fs::is_directory(app_dir_ / "public", ec)) {
@@ -301,15 +303,16 @@ public:
 		eng_->import_recheck_interval(0);   // every request asks whether a module changed: a save applies to the next request
 		jai::stdlib::register_all(eng_);
 		jai::stdlib::register_web(eng_);
+		jai_runner::register_http_client(*eng_);
 		jai_runner::register_file_io(*eng_);
 		register_http_text(*eng_);
-		jaiweb::register_database(*eng_, app_dir_);
+		spider_host::register_database(*eng_, app_dir_);
 		eng_->add_include_path(app_dir_.generic_string());
 		eng_->add_include_path(library_dir().generic_string());
 		try {
-			eng_->execute("import \"web.jai\";");
+			eng_->execute("import \"spider.jai\";");
 		} catch (const std::exception& e) {
-			std::cerr << colors_.red("jaiweb: lib/web.jai did not load:") << "\n" << e.what() << "\n";
+			std::cerr << colors_.red("jai_spider: lib/spider.jai did not load:") << "\n" << e.what() << "\n";
 			return false;
 		}
 		std::string escaped;
@@ -322,12 +325,12 @@ public:
 		return true;
 	}
 
-	jaiweb::http_response handle(const jaiweb::http_request& request) {
+	spider_host::http_response handle(const spider_host::http_request& request) {
 		const auto start = std::chrono::steady_clock::now();
-		jaiweb::http_response response;
+		spider_host::http_response response;
 		bool from_disk = false;
-		if (opt_.allow_shutdown && request.path == "/__jaiweb/shutdown" && request.method == "POST" && is_loopback(request.remote_address)) {
-			response = jaiweb::plain_response(200, "jaiweb: stopping");
+		if (opt_.allow_shutdown && request.path == "/__spider/shutdown" && request.method == "POST" && is_loopback(request.remote_address)) {
+			response = spider_host::plain_response(200, "jai_spider: stopping");
 			response.stop_server = true;
 			response.close = true;
 		} else if (auto file = static_file(request)) {
@@ -350,15 +353,18 @@ public:
 
 	const fs::path& root() const { return static_root_; }
 
+	// the server whose body limit spider::spin's max_body moves
+	void attach(spider_host::http_server& a_server) { server_ = &a_server; }
+
 private:
 
-	// the checkout's lib/ while it is there, so an edit to web.jai applies like an edit to the app; else the copy
+	// the checkout's lib/ while it is there, so an edit to spider.jai applies like an edit to the app; else the copy
 	// the build put beside the executable
 	fs::path library_dir() const {
 		std::error_code ec;
-		const fs::path source = fs::path(JAIWEB_SOURCE_LIBRARY_DIR);
-		if (fs::is_regular_file(source / "web.jai", ec)) { return source; }
-		return fs::path(jai::engine::executable_path()).parent_path() / "jaiweb_lib";
+		const fs::path source = fs::path(JAI_SPIDER_SOURCE_LIBRARY_DIR);
+		if (fs::is_regular_file(source / "spider.jai", ec)) { return source; }
+		return fs::path(jai::engine::executable_path()).parent_path() / "jai_spider_lib";
 	}
 
 	// reaches the app's import: a changed module is checked, then runs; a rejected edit keeps the code the app had
@@ -370,9 +376,9 @@ private:
 				std::string names;
 				for (const std::string& name : modules_changed_since_last_run()) { names += (names.empty() ? "" : ", ") + name; }
 				if (loaded_) {
-					std::cout << colors_.green("jaiweb: reloaded " + (names.empty() ? app_path_.filename().string() : names)) << "\n";
+					std::cout << colors_.green("jai_spider: reloaded " + (names.empty() ? app_path_.filename().string() : names)) << "\n";
 				} else if (!failure_.empty()) {
-					std::cout << colors_.green("jaiweb: the app loads") << "\n";
+					std::cout << colors_.green("jai_spider: the app loads") << "\n";
 				}
 			}
 			failure_.clear();
@@ -380,7 +386,7 @@ private:
 		} catch (const std::exception& e) {
 			const std::string text = e.what();
 			if (text != failure_) {
-				std::cerr << colors_.red(loaded_ ? "jaiweb: the edit was rejected; serving the code the app had:" : "jaiweb: the app did not load:") << "\n" << text << "\n";
+				std::cerr << colors_.red(loaded_ ? "jai_spider: the edit was rejected; serving the code the app had:" : "jai_spider: the app did not load:") << "\n" << text << "\n";
 				std::cerr.flush();
 			}
 			failure_ = text;
@@ -401,8 +407,8 @@ private:
 	}
 
 	// the error and its trace go to the log; the page shows them to a browser on this machine only
-	jaiweb::http_response error_page(const jaiweb::http_request& request, const std::string& detail) {
-		jaiweb::http_response response;
+	spider_host::http_response error_page(const spider_host::http_request& request, const std::string& detail) {
+		spider_host::http_response response;
 		response.status = 500;
 		response.set_header("Content-Type", "text/html; charset=utf-8");
 		response.set_header("Cache-Control", "no-store");
@@ -414,9 +420,10 @@ private:
 		return response;
 	}
 
-	jaiweb::http_response run_app(const jaiweb::http_request& request) {
+	spider_host::http_response run_app(const spider_host::http_request& request) {
 		reload();
 		if (!loaded_) { return error_page(request, "The app did not load:\n" + failure_); }
+		apply_spin_options();
 		jai::script_value raw = script_map_of(eng_.get(), {
 			{"method", jai::script_value(request.method, eng_.get())},
 			{"target", jai::script_value(request.target, eng_.get())},
@@ -429,7 +436,7 @@ private:
 		});
 		std::string error;
 		try {
-			jai::script_value serve = eng_->get_variable("jaiweb_serve");
+			jai::script_value serve = eng_->get_variable("spider_host_serve");
 			auto result = serve.as_function()({raw});
 			if (result) { return response_from(request, result.value()); }
 			error = eng_->format_error(result) + "\n" + eng_->format_stack_trace();
@@ -437,38 +444,62 @@ private:
 			error = e.what();
 		}
 		while (!error.empty() && (error.back() == '\n' || error.back() == ' ')) { error.pop_back(); }
-		std::cerr << colors_.red("jaiweb: " + request.method + " " + request.path + " failed:") << "\n" << error << "\n";
+		std::cerr << colors_.red("jai_spider: " + request.method + " " + request.path + " failed:") << "\n" << error << "\n";
 		std::cerr.flush();
 		return error_page(request, error);
+	}
+
+	// spider::spin(handler, {"budget": s, "max_body": n}) over --budget and --max-body, from the next request on
+	void apply_spin_options() {
+		double budget = opt_.budget;
+		size_t max_body = opt_.limits.max_body_bytes;
+		try {
+			auto spun = eng_->get_variable("spider_host_options").as_function()({});
+			if (spun && spun.value().is_map()) {
+				for (const auto& [key, value] : spun.value().as_map()) {
+					const std::string name = key.as_string();
+					const jai::script_value& setting = value.deref();
+					if (name == "budget" && (setting.is_int() || setting.is_float())) { budget = setting.is_int() ? static_cast<double>(setting.as_int()) : setting.as_float(); }
+					if (name == "max_body" && setting.is_int() && setting.as_int() > 0) { max_body = static_cast<size_t>(setting.as_int()); }
+				}
+			}
+		} catch (const std::exception&) {
+		}
+		eng_->execution_budget(budget);
+		if (server_) { server_->max_body(max_body); }
 	}
 
 	jai::script_value field_of(const jai::script_value& parts, const char* key) const {
 		const auto& fields = parts.as_map();
 		auto it = fields.find(jai::script_value(std::string(key), eng_.get()));
-		if (it == fields.end()) { throw std::runtime_error(std::string("jaiweb_serve's answer has no '") + key + "'"); }
+		if (it == fields.end()) { throw std::runtime_error(std::string("spider_host_serve's answer has no '") + key + "'"); }
 		return it->second;
 	}
 
-	jaiweb::http_response response_from(const jaiweb::http_request& request, const jai::script_value& parts) {
-		jaiweb::http_response response;
+	spider_host::http_response response_from(const spider_host::http_request& request, const jai::script_value& parts) {
+		spider_host::http_response response;
 		response.status = static_cast<int>(field_of(parts, "status").as_int());
 		if (response.status < 100 || response.status > 999) {
 			throw std::runtime_error("Response status " + std::to_string(response.status) + " is not an HTTP status");
 		}
+		std::string file;
 		for (const auto& [name, text] : field_of(parts, "headers").as_map()) {
+			if (spider_host::iequals(name.as_string(), "x-sendfile")) {
+				file = text.as_string();
+				continue;
+			}
 			response.set_header(name.as_string(), text.as_string());
 		}
 		field_of(parts, "cookies").unchecked_array_node()->for_each(eng_.get(), [&](const jai::script_value& cookie) {
 			response.headers.emplace_back("Set-Cookie", cookie.as_string());
 		});
-		const std::string file = field_of(parts, "file").as_string();
 		if (!file.empty()) {
 			fs::path path = fs::path(file);
 			if (path.is_relative()) { path = app_dir_ / path; }
 			auto served = file_response(path, request, response.status);
 			if (!served) {
-				std::cerr << colors_.red("jaiweb: file(\"" + file + "\"): no such file") << "\n";
-				return jaiweb::plain_response(404, "Not Found");
+				std::cerr << colors_.red("jai_spider: file(\"" + file + "\"): no such file") << "\n";
+				return spider_host::plain_response(404, "Not Found");
 			}
 			for (auto& [name, text] : response.headers) { served->set_header(name, text); }
 			return std::move(*served);
@@ -479,7 +510,7 @@ private:
 	}
 
 	// a file under --root for GET and HEAD; dot-files, ".." and anything outside the root are never served
-	std::optional<jaiweb::http_response> static_file(const jaiweb::http_request& request) {
+	std::optional<spider_host::http_response> static_file(const spider_host::http_request& request) {
 		if (static_root_.empty() || (request.method != "GET" && request.method != "HEAD")) { return std::nullopt; }
 		fs::path candidate = static_root_;
 		size_t start = 1;
@@ -502,7 +533,7 @@ private:
 		return file_response(resolved, request, 200);
 	}
 
-	std::optional<jaiweb::http_response> file_response(const fs::path& path, const jaiweb::http_request& request, int status) {
+	std::optional<spider_host::http_response> file_response(const fs::path& path, const spider_host::http_request& request, int status) {
 		std::error_code ec;
 		if (!fs::is_regular_file(path, ec)) { return std::nullopt; }
 		const uint64_t size = fs::file_size(path, ec);
@@ -516,10 +547,10 @@ private:
 		char tag[64];
 		std::snprintf(tag, sizeof(tag), "W/\"%llx-%llx\"", static_cast<unsigned long long>(size),
 			static_cast<unsigned long long>(modified.time_since_epoch().count()));
-		const std::string last_modified = jaiweb::http_date(static_cast<std::time_t>(since_epoch));
-		jaiweb::http_response response;
+		const std::string last_modified = spider_host::http_date(static_cast<std::time_t>(since_epoch));
+		spider_host::http_response response;
 		response.status = status;
-		response.set_header("Content-Type", jaiweb::content_type_for(path.extension().string()));
+		response.set_header("Content-Type", spider_host::content_type_for(path.extension().string()));
 		response.set_header("Last-Modified", last_modified);
 		response.set_header("ETag", tag);
 		response.set_header("Cache-Control", "no-cache");
@@ -545,6 +576,7 @@ private:
 	std::string reload_source_;
 	std::string failure_;
 	std::map<std::string, std::pair<fs::file_time_type, uintmax_t>> module_stamps_;
+	spider_host::http_server* server_ = nullptr;
 	bool loaded_ = false;
 };
 
@@ -565,22 +597,24 @@ int main(int argc, char** argv) {
 	try {
 		app_host host(opt, colors);
 		if (!host.start()) { return 1; }
-		jaiweb::http_server server(opt.limits);
+		spider_host::http_server server(opt.limits);
 		std::string error;
 		if (!server.listen(opt.host, opt.port, error)) {
-			std::cerr << colors.red("jaiweb: " + error) << "\n";
+			std::cerr << colors.red("jai_spider: " + error) << "\n";
 			return 1;
 		}
-		std::cout << "jaiweb: serving " << opt.app << " on http://" << opt.host << ":" << server.port() << "/";
+		host.attach(server);
+		if (!opt.quiet) { std::cout << colors.dim("/\\(o.o)/\\  jai_spider " + jai::version()) << "\n"; }
+		std::cout << "jai_spider: spinning " << opt.app << " on http://" << opt.host << ":" << server.port() << "/";
 		if (!host.root().empty()) { std::cout << " (files from " << host.root().string() << ")"; }
-		std::cout << "\n" << colors.dim("jaiweb: edits apply on the next request; Ctrl+C stops") << std::endl;
+		std::cout << "\n" << colors.dim("jai_spider: edits apply on the next request; Ctrl+C stops") << std::endl;
 		server.on_rejected([&](const std::string& remote, int status, const std::string& why) {
-			if (!opt.quiet) { std::cout << colors.yellow("jaiweb: " + std::to_string(status) + " to " + remote + ": " + why) << std::endl; }
+			if (!opt.quiet) { std::cout << colors.yellow("jai_spider: " + std::to_string(status) + " to " + remote + ": " + why) << std::endl; }
 		});
-		server.run(g_stop, [&](const jaiweb::http_request& request) { return host.handle(request); });
-		std::cout << "jaiweb: stopped" << std::endl;
+		server.run(g_stop, [&](const spider_host::http_request& request) { return host.handle(request); });
+		std::cout << "jai_spider: stopped" << std::endl;
 	} catch (const std::exception& e) {
-		std::cerr << "jaiweb: " << e.what() << "\n";
+		std::cerr << "jai_spider: " << e.what() << "\n";
 		return 1;
 	}
 	return 0;

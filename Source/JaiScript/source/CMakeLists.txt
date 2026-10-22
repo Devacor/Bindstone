@@ -34,6 +34,7 @@ set(JAISCRIPT_SOURCES
     implementation/stdlib/strings.cpp
     implementation/stdlib/time.cpp
     implementation/stdlib/web_text.cpp
+    implementation/stdlib/spider.cpp
     implementation/thread_pool.cpp
     implementation/type_checker.cpp
     implementation/type_info.cpp

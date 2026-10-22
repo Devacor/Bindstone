@@ -7,6 +7,7 @@
 #include "strings.hpp"
 #include "reflection.hpp"
 #include "web_text.hpp"
+#include "spider.hpp"
 // Native math:: vectors and colors are core language values; host adapters are opt-in.
 
 namespace jai {

@@ -15,6 +15,7 @@
 #include <jaiscript/debug/connector.hpp>
 #include "fetch.hpp"   // Download, zip_entries, zip_extract (runner host API)
 #include "sound.hpp"   // load_sound, play_sound, stop_sounds (runner host API)
+#include "http_transport.hpp"   // spider::catch / sling / get / post over WinHTTP or sockets
 #endif
 
 #include <algorithm>
@@ -229,7 +230,11 @@ void print_usage() {
 		"\n"
 		"environment: the full JaiScript stdlib is always registered (print/format/to_string/\n"
 		"  type_of, math, to_json/from_json, containers, sha256(s), sha256_file(path)), the web::\n"
-		"  library (html_escape, url_encode, form_encode, parse_query, build_query, parse_url, ...)\n"
+		"  library (html_escape, url_encode, form_encode, parse_query, build_query, parse_url, ...),\n"
+		"  the spider:: HTTP client (spider::catch(url[, options]), also spelled spider::get;\n"
+		"  spider::sling(content, url[, options]), also spelled spider::post(url, content[, options]);\n"
+		"  each answers a spider::Response; WinHTTP on Windows, sockets elsewhere, HTTPS through OpenSSL\n"
+		"  when the build found it), with the network permission granted,\n"
 		"  plus host file IO: read_file(path),\n"
 		"  write_file(path, text) (creates missing folders), file_exists(path), delete_file(path), Download,\n"
 		"  zip_entries(zip), zip_extract(zip, entry, dest), dir_exists(path),\n"
@@ -1054,6 +1059,7 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 	register_net_channel(*eng);
 	jai_runner::register_fetch(*eng);
 	jai_runner::register_sound(*eng);
+	jai_runner::register_http_client(*eng);
 
 	jai::script_value args = jai::script_value::make_array(nullptr, eng.get());
 	auto& arg_storage = args.as_array();

@@ -320,34 +320,38 @@ public:
             check_eq(eng->execute("reflect::get(s, \"secret\")").as_int(), (int64_t)1);
         });
 
-        test("set_and_invoke_enforce_the_direct_syntax_access_matrix", [this]() {
-            // Reflection is a spelling, not a bypass: the write/invoke kernels are the
-            // SAME ones direct syntax runs, so the error text is byte-identical.
+        test("set_invoke_bind_and_construct_reach_private_members", [this]() {
+            // Reflection ignores script access control: reflecting is an intentional request for
+            // the whole shape, while direct syntax keeps enforcing private
             auto eng = make_reflective_engine();
             eng->execute(R"(
                 class Vault {
                     private: int gold = 100;
                     private: int peek() { return gold; }
-                    public: int audit() {
-                        reflect::set(this, "gold", 7);           // own class context: allowed
-                        return reflect::invoke(this, "peek");
-                    }
+                }
+                class Sealed {
+                    public: int n = 0;
+                    private: Sealed(int v) { n = v; }
                 }
                 var v = Vault();
             )");
             check_eq(eng->execute(R"(
-                var direct_err = ""; var reflected_err = "";
+                var direct_err = "";
                 try { v.gold = 5; } catch (e) { direct_err = e; }
-                try { reflect::set(v, "gold", 5); } catch (e) { reflected_err = e; }
-                direct_err != "" && direct_err == reflected_err
-            )").as<bool>(), true);
+                direct_err
+            )").as<std::string>(), std::string("Cannot access private member 'gold' of class 'Vault'"));
+            eng->execute("reflect::set(v, \"gold\", 5);");
+            check_eq(eng->execute("reflect::get(v, \"gold\")").as_int(), (int64_t)5);
+            check_eq(eng->execute("reflect::invoke(v, \"peek\")").as_int(), (int64_t)5);
+            check_eq(eng->execute("var p = reflect::bind(v, \"peek\"); p()").as_int(), (int64_t)5);
+            check_eq(eng->execute("var s = reflect::construct(\"Sealed\", 9); s.n").as_int(), (int64_t)9);
+            check_eq(eng->execute("var sh = reflect::construct_shared(\"Sealed\", 4); sh.n").as_int(), (int64_t)4);
+            // Builtin types expose no internals through reflection
             check_eq(eng->execute(R"(
-                var direct_err = ""; var reflected_err = "";
-                try { v.peek(); } catch (e) { direct_err = e; }
-                try { reflect::invoke(v, "peek"); } catch (e) { reflected_err = e; }
-                direct_err != "" && direct_err == reflected_err
-            )").as<bool>(), true);
-            check_eq(eng->execute("v.audit()").as_int(), (int64_t)7);
+                var err = "";
+                try { array<int> xs = [1]; reflect::set(xs, "size", 3); } catch (e) { err = "refused"; }
+                err
+            )").as<std::string>(), std::string("refused"));
         });
 
         test("call_construct_and_construct_shared", [this]() {

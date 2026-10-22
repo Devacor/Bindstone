@@ -5007,6 +5007,16 @@ private:
             }
             case node_type::parallel_for_stmt: {
                 auto* f = static_cast<parallel_for_stmt*>(s);
+                if (f->counted()) {
+                    static const char* const roles[] = { "start", "bound", "step" };
+                    const auto& args = static_cast<const call_expr*>(f->container.get())->arguments;
+                    for (size_t k = 0; k < 3 && k < args.size(); ++k) {
+                        const ctype t = infer(args[k].get());
+                        if (!t.is_unknown() && !t.tentative && t.kind != ctype::int_k) {
+                            diag(diag_level::error, args[k]->location, std::string("parallel_for: a counted loop's ") + roles[k] + " is " + ctype_name(t) + ", not int");
+                        }
+                    }
+                }
                 infer(f->container.get());
                 scopes_.emplace_back();
                 var_entry entry;

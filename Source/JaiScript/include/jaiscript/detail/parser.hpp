@@ -130,6 +130,7 @@ namespace jai {
         checked_result<statement_ptr> while_statement();
         checked_result<statement_ptr> for_statement();
         checked_result<statement_ptr> parallel_for_statement();
+        checked_result<expression_ptr> counted_parallel_range(const type_info_ptr& element_type, bool is_reference, bool is_const, const token& variable);
         checked_result<statement_ptr> return_statement();
         checked_result<statement_ptr> break_statement();
         checked_result<statement_ptr> continue_statement();

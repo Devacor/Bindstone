@@ -28,6 +28,7 @@
 
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
+#include <jaiscript/detail/integer_ops.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/core/execution_backend.hpp>
@@ -545,6 +546,10 @@ namespace {
 	}
 
 	// ============================== ADMISSION ==============================
+
+	std::string counted_variable_written(std::string_view name) {
+		return "the body writes the counted loop's variable '" + std::string(name) + "' (the loop steps it; copy it into a local to change it)";
+	}
 
 	// At namespace scope: a nested class's default member initializers are unusable in its enclosing class's default arguments
 	// referent: a reference's declared target type; const_ref_use: a const T& parameter's slot in admission_builder::const_ref_uses
@@ -1088,9 +1093,13 @@ namespace {
 			return SIZE_MAX;
 		}
 
+		void note_loop_variable_write(const identifier_expr* n) {
+			written_loop_variables.push_back(n->symbol_id);
+			if (n->symbol_id == element_symbol && !adm.loop_variable_write) { adm.loop_variable_write = n; }
+		}
 		// A loop variable handed to a reference parameter that writes it is written
 		void note_loop_variable_reference_argument(const expression_ptr& arg) {
-			if (loop_variable_position(arg.get()) != SIZE_MAX) { written_loop_variables.push_back(static_cast<const identifier_expr*>(arg.get())->symbol_id); }
+			if (loop_variable_position(arg.get()) != SIZE_MAX) { note_loop_variable_write(static_cast<const identifier_expr*>(arg.get())); }
 		}
 
 		// After the walk: an index-written name is touched as out[i] alone, with one loop variable the body never writes
@@ -1500,7 +1509,7 @@ namespace {
 				}
 				for (const auto& [argument, position] : callrec.loop_variable_arguments) {
 					if (argument < params.size() && params[argument].is_reference && !params[argument].is_const &&
-					    !ref_parameter_takes_temporary(eng, params, m.decl->body.get(), argument, true) && !admit_loop_variable_write(position)) {
+					    !ref_parameter_takes_temporary(eng, params, m.decl->body.get(), argument, true) && !admit_loop_variable_write(position, callrec.site)) {
 						return false;
 					}
 				}
@@ -1510,8 +1519,10 @@ namespace {
 		}
 		// A method the barrier resolves writes a loop variable through a reference parameter: the body's own walk could not see it
 		const parallel_admission* region_body = nullptr;
-		bool admit_loop_variable_write(size_t position) {
+		std::string_view counted_variable;   // the counted form's variable (parallel_for_stmt::counted), empty otherwise
+		bool admit_loop_variable_write(size_t position, const ast_node* site) {
 			if (!region_body) { return true; }
+			if (position == 0 && !counted_variable.empty()) { return fail(site, counted_variable_written(counted_variable)); }
 			for (const auto& w : region_body->index_writes) {
 				if (w.index_param == position) { return fail(w.site, "body writes enclosing state '" + std::string(w.name) + "' at an index the body changes"); }
 			}
@@ -1587,7 +1598,7 @@ namespace {
 						return;
 					}
 					for (const auto& [argument, position] : callrec.loop_variable_arguments) {
-						if (writes && argument < 64 && ((writes->mask >> argument) & 1) && !admit_loop_variable_write(position)) {
+						if (writes && argument < 64 && ((writes->mask >> argument) & 1) && !admit_loop_variable_write(position, callrec.site)) {
 							ok = false;
 							return;
 						}
@@ -2270,7 +2281,7 @@ namespace {
 			case node_type::identifier_expr: {
 				auto* n = static_cast<identifier_expr*>(t.get());
 				if (is_element_symbol(n->symbol_id)) { note_element_whole(); if (proof_mode && aliasing) { root_escaped = true; } }   // replaced: the old element releases every handle
-				if (is_element_symbol(n->symbol_id)) { written_loop_variables.push_back(n->symbol_id); }
+				if (loop_variable_position(n) != SIZE_MAX) { note_loop_variable_write(n); }   // the body's own: a callee's local of the same name is its own
 				if (is_local(n->symbol_id)) { note_const_ref_whole(n->symbol_id); return true; }
 				if (!aliasing && self_field(n->symbol_id)) { return true; }   // element field store (chunk-exclusive)
 				if (aliasing) {
@@ -4426,6 +4437,7 @@ namespace {
 
 struct region_plan {
 	const char* prefix = "parallel_for";
+	std::string_view counted_variable;   // the counted form's variable: a method writing it through a reference is refused
 	std::vector<script_value>* containers = nullptr;                 // [0] = the range, then the zip's arrays
 	std::shared_ptr<script_defined_function> root_fn;                // the body function / fn (admission root, pool key)
 	const parallel_admission* adm = nullptr;
@@ -4913,6 +4925,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			method_adm.adm.element_method_calls = adm->element_method_calls;
 			method_adm.adm.constructions = adm->constructions;
 			method_adm.region_body = adm;
+			method_adm.counted_variable = plan.counted_variable;
 			// the methods' captures are their own set: the same name is the body's capture in the
 			// region's enclosing scope and a method's in its class's scope
 			const bool classes_admitted = method_adm.admit_region_classes(element_classes, element_methods, written_types, program_destructors);
@@ -6147,10 +6160,15 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	if (!adm->admitted) {
 		return raise(adm->code, adm->message);
 	}
+	if (stmt->counted() && adm->loop_variable_write) {
+		return usage("parallel_for: " + counted_variable_written(stmt->loop_param.name) + " at " + std::to_string(adm->loop_variable_write->location.line) + ":" +
+		             std::to_string(adm->loop_variable_write->location.column));
+	}
 	const std::shared_ptr<function_decl>& chunk_wrapper = build_chunk_wrapper(eng, stmt, *adm);
 
 	region_plan plan;
 	plan.prefix = "parallel_for";
+	if (stmt->counted()) { plan.counted_variable = stmt->loop_param.name; }
 	plan.containers = &containers;
 	plan.root_fn = body_fn;
 	plan.adm = adm;
@@ -6265,6 +6283,59 @@ const script_string* parallel_borrow_string_source(const script_value& borrow, c
 	const script_value& elem = arr->values()[static_cast<size_t>(i)];
 	if (elem.raw_storage_index() != script_value::TYPEID_STRING) { return nullptr; }
 	return elem.unchecked_string_handle().get();
+}
+
+checked_result<script_value> parallel_counted_range(engine& eng, const std::vector<script_value>& args) {
+	parallel_engine_state& state = eng.parallel_state();
+	auto refuse = [&state](std::error_code code, std::string text) {
+		state.error_text = std::move(text);
+		return checked_result<script_value>(code, std::string_view(state.error_text));
+	};
+	if (args.size() != 5) { return refuse(make_error_code(runtime_error_code::argument_count_mismatch), "parallel_for: counted range takes five arguments (internal)"); }
+	static const char* const roles[] = { "start", "bound", "step" };
+	script_int v[3] = {};
+	for (size_t slot = 0; slot < 3; ++slot) {
+		const script_value& arg = args[slot].deref();
+		if (!arg.is_int()) {
+			return refuse(make_error_code(runtime_error_code::type_mismatch), std::string("parallel_for: a counted loop's ") + roles[slot] + " is " +
+			              slot_source_type_name(arg, &eng) + ", not int");
+		}
+		v[slot] = arg.unchecked_as_int();
+	}
+	const script_int a = v[0], b = v[1], k = v[2];
+	const script_int comparison = args[3].deref().as_int();
+	const script_int step_op = args[4].deref().as_int();   // 1 ++, -1 --, 2 +=, -2 -=
+	script_value result = script_value::make_array(type_info_ptr(eng.get_type_info_int()), &eng);
+	const bool holds = comparison == 0 ? a < b : comparison == 1 ? a <= b : comparison == 2 ? a > b : a >= b;
+	if (!holds) { return result; }   // the serial loop runs zero times
+	const bool up = step_op > 0 ? k > 0 : k < 0;
+	auto never_ends = [&]() {
+		return refuse(make_error_code(runtime_error_code::unsupported_operation), "parallel_for: a counted loop's step of " + std::to_string(k) +
+		              " never reaches its bound (the serial loop would not end)");
+	};
+	if (k == 0 || up != (comparison <= 1)) { return never_ends(); }
+	// in uint64: the distance to the bound, the step's size and the serial loop's whole travel (a .. its value after the last step)
+	const uint64_t distance = up ? static_cast<uint64_t>(b) - static_cast<uint64_t>(a) : static_cast<uint64_t>(a) - static_cast<uint64_t>(b);
+	const uint64_t size = k > 0 ? static_cast<uint64_t>(k) : static_cast<uint64_t>(-(k + 1)) + 1;
+	const bool inclusive = comparison == 1 || comparison == 3;
+	const uint64_t whole = distance / size;
+	const bool overflows_count = inclusive && whole == UINT64_MAX;
+	const uint64_t n = inclusive ? whole + 1 : whole + (distance % size != 0);
+	const uint64_t room = up ? static_cast<uint64_t>(std::numeric_limits<script_int>::max()) - static_cast<uint64_t>(a)
+	                         : static_cast<uint64_t>(a) - static_cast<uint64_t>(std::numeric_limits<script_int>::min());
+	if (overflows_count || n > room / size) {
+		if (!kCheckedOverflow) { return never_ends(); }   // the serial loop wraps past its bound
+		static const char* const overflow[] = { "Integer overflow in '-='", "Integer overflow in '--'", "", "Integer overflow in '++'", "Integer overflow in '+='" };
+		return refuse(make_error_code(runtime_error_code::invalid_numeric_operand), overflow[step_op + 2]);
+	}
+	if (!eng.execution_limits().memory_charge_items(n, sizeof(script_int))) { return raise_memory_cap(eng.execution_limits()); }
+	auto& values = result.unchecked_get_array_storage()->ints();
+	values.resize(static_cast<size_t>(n));
+	uint64_t travel = 0;   // i * size, within room for every i < n: the sum is the int it names
+	for (size_t i = 0; i < values.size(); ++i, travel += size) {
+		values[i] = static_cast<script_int>(up ? static_cast<uint64_t>(a) + travel : static_cast<uint64_t>(a) - travel);
+	}
+	return result;
 }
 
 bool parallel_borrow_count_method(std::string_view name) noexcept {

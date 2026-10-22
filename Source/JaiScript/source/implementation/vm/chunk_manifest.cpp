@@ -155,6 +155,12 @@ namespace {
 				const compound_fused_proto& p = ch.compound_fused_protos[i];
 				out << pre << " " << i << " rhs_proto=" << u(p.rhs_proto) << " rhs=" << operand(ch, p.rhs) << " sym=" << symidx(ch, p.symbol) << " slot=" << u(p.slot) << " kind=" << p.kind_flags << "\n";
 			}
+			out << pre << "concat_protos " << ch.concat_protos.size() << "\n";
+			for (size_t i = 0; i < ch.concat_protos.size(); ++i) {
+				out << pre << " " << i << " hint=" << ch.concat_protos[i].hint << " pieces=[";
+				for (const auto& o : ch.concat_protos[i].pieces) { out << operand(ch, o) << " "; }
+				out << "]\n";
+			}
 			out << pre << "fused_binary_dst_protos " << ch.fused_binary_dst_protos.size() << "\n";
 			for (size_t i = 0; i < ch.fused_binary_dst_protos.size(); ++i) {
 				const fused_binary_dst_proto& p = ch.fused_binary_dst_protos[i];

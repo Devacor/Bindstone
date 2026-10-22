@@ -167,6 +167,20 @@ public:
 			)", "s1A2B3 1A2B3", "user code in the chain keeps its order");
 		});
 
+		test("a_chain_reads_each_operand_at_its_step", [this]() {
+			both(R"(
+				string b = "b0";
+				class P { string to_string() { b = "b1"; return "P"; } }
+				P p;
+				string a = "a";
+				int n = 7;
+				string t = a + "-" + p + b + n + 'c' + 2.5 + true;
+				string u = `${a}|${p}|${b}|${n}`;
+				string w = "x" + a + [1] + b;
+				t + " " + u + " " + w
+			)", "a-Pb17c2.5true a|P|b1|7 xa[array]b1", "an operand after an object's to_string reads the value it left");
+		});
+
 		test("lambdas_capture_a_builder_by_reference_or_by_value", [this]() {
 			both(R"(
 				string s = "a";

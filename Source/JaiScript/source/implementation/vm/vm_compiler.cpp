@@ -239,6 +239,7 @@ namespace {
 			case opcode::op_call_builtin:
 			case opcode::op_concat_append:
 			case opcode::op_concat_pending:
+			case opcode::op_concat_operands:
 			case opcode::op_concat_store:
 			case opcode::op_push_fused:
 			case opcode::op_this:
@@ -461,6 +462,7 @@ namespace {
 			case opcode::op_call_builtin:
 			case opcode::op_concat_append:
 			case opcode::op_concat_pending:
+			case opcode::op_concat_operands:
 			case opcode::op_concat_store:
 			case opcode::op_push_fused:
 			case opcode::op_this:
@@ -6628,8 +6630,8 @@ bool vm_compiler::numeric_value_binary(expression* e) {
 	return binary_lands_fused(b);
 }
 
-// A left-deep `+` chain of two or more from a string literal (a template string): compile_binary emits it as appends, never as
-// a fused binary, ahead of every other shape decision
+// A left-deep `+` chain of two or more from a string literal (a template string), or of strings the checker typed: compile_binary
+// emits it as appends, never as a fused binary, ahead of every other shape decision
 static bool string_append_chain(const binary_expr* b) {
 	size_t links = 0;
 	const expression* e = b;
@@ -6637,8 +6639,14 @@ static bool string_append_chain(const binary_expr* b) {
 		++links;
 		e = static_cast<const binary_expr*>(e)->left.get();
 	}
-	return links >= 2 && e->get_type() == node_type::literal_expr &&
-	       static_cast<const literal_expr*>(e)->value.raw_storage_index() == script_value::TYPEID_STRING;
+	if (links < 2) return false;
+	if (e->get_type() == node_type::literal_expr && static_cast<const literal_expr*>(e)->value.raw_storage_index() == script_value::TYPEID_STRING) return true;
+	// a chain of strings the checker typed (its first `+` joins two strings) takes the same accumulator
+	const binary_expr* first = b;
+	while (first->left->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(first->left.get())->op.type == token_type::plus) {
+		first = static_cast<const binary_expr*>(first->left.get());
+	}
+	return first->static_operand_class == operand_class_string_string;
 }
 
 bool vm_compiler::binary_lands_fused(binary_expr* b) {
@@ -6774,11 +6782,48 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		for (const expression* e = expr.get(); e->get_type() == node_type::binary_expr; e = static_cast<const binary_expr*>(e)->left.get()) {
 			chain.push_back(static_cast<const binary_expr*>(e));
 		}
-		compile_expression(chain.back()->left);
-		for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
-			compile_expression((*it)->right);
-			emit(opcode::op_concat_append);
+		const expression* head = chain.back()->left.get();
+		const bool literal_head = head->get_type() == node_type::literal_expr && static_cast<const literal_expr*>(head)->value.raw_storage_index() == script_value::TYPEID_STRING;
+		// the first append sizes the accumulator: the literal pieces' bytes and a guess for each computed one
+		size_t hint = literal_head ? static_cast<const literal_expr*>(head)->value.unchecked_as_string().size() : 16;
+		for (const binary_expr* b : chain) {
+			const expression* r = b->right.get();
+			hint += r->get_type() == node_type::literal_expr && static_cast<const literal_expr*>(r)->value.raw_storage_index() == script_value::TYPEID_STRING
+				? static_cast<const literal_expr*>(r)->value.unchecked_as_string().size() : 16;
 		}
+		// a run of plain operands (literals, names) joins in one op, each read at its step; any other operand is evaluated where the
+		// chain evaluates it and joins through op_concat_append
+		compile_expression(chain.back()->left);
+		uint32_t first_hint = static_cast<uint32_t>((std::min)(hint, size_t{4096}));
+		concat_proto run;
+		uint32_t run_env = 0;
+		auto flush = [&]() {
+			if (run.pieces.empty()) return;
+			run.hint = first_hint;
+			first_hint = 0;
+			chunk_->concat_protos.push_back(std::move(run));
+			emit(opcode::op_concat_operands, static_cast<uint32_t>(chunk_->concat_protos.size() - 1));
+			run = concat_proto{};
+			run_env = 0;
+		};
+		for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+			const expression_ptr& piece = (*it)->right;
+			const bool literal = piece->get_type() == node_type::literal_expr;
+			const bool name = piece->get_type() == node_type::identifier_expr;
+			if (literal || name) {
+				fused_operand o = make_fused_operand(piece);
+				if (name && (o.load_flags & load_flag_type_ctor)) { flush(); compile_expression(piece); emit(opcode::op_concat_append, first_hint); first_hint = 0; continue; }
+				if (o.slot == k_invalid_u32 && o.const_index == k_invalid_u32 && run_env == 3) { flush(); }   // three environment reads per op (the lookup cache's roles)
+				if (o.slot == k_invalid_u32 && o.const_index == k_invalid_u32) { ++run_env; }
+				run.pieces.push_back(std::move(o));
+				continue;
+			}
+			flush();
+			compile_expression(piece);
+			emit(opcode::op_concat_append, first_hint);
+			first_hint = 0;
+		}
+		flush();
 		return;
 	}
 

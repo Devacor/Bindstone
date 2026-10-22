@@ -619,6 +619,7 @@ std::vector<std::pair<std::string, script_value>> vm_backend::frame_slot_locals(
 	for (const auto& p : f->code->fused_binary_protos) { note_operand(p.left); note_operand(p.right); }
 	for (const auto& cs : f->code->call_sites) { note_operand(cs.callee); }
 	for (const auto& p : f->code->counted_for_protos) { note_operand(p.var); note_operand(p.end); note_operand(p.step); }
+	for (const auto& p : f->code->concat_protos) { for (const auto& o : p.pieces) { note_operand(o); } }
 	for (const auto& p : f->code->compound_fused_protos) {
 		if (p.slot != k_invalid_u32 && p.symbol < f->code->symbols.size()) {
 			slot_names.emplace_back(p.slot, symbolizer_->get_string(f->code->symbols[p.symbol]));
@@ -5752,10 +5753,14 @@ JAI_NOINLINE bool vm_backend::self_concat_store(frame& f, const fused_binary_dst
 
 op_status vm_backend::exec_binary_fused_store(frame& f, const vm_instruction& ins) {
 	const fused_binary_dst_proto& dp = f.code->fused_binary_dst_protos[ins.a];
-	if (dp.slot != k_invalid_u32 && f.code->fused_binary_protos[dp.binary_proto].op == static_cast<uint8_t>(token_type::plus) &&
+	if (dp.slot != k_invalid_u32 && f.locals && !f.top_level && f.code->fused_binary_protos[dp.binary_proto].op == static_cast<uint8_t>(token_type::plus) &&
 	    f.code->fused_binary_protos[dp.binary_proto].left.slot == dp.slot) {
-		op_status st{};
-		if (self_concat_store(f, dp, st)) return st;
+		const script_value* target = frame_slot(f, dp.slot);
+		const size_t tk = target ? target->raw_storage_index() : script_value::TYPEID_NULL;
+		if (tk == script_value::TYPEID_STRING || tk == script_value::TYPEID_REFERENCE) {
+			op_status st{};
+			if (self_concat_store(f, dp, st)) return st;
+		}
 	}
 	const vm_instruction store_ins{opcode::op_store, dp.symbol, dp.slot, dp.flags};
 	struct store_lane_sink {
@@ -9694,12 +9699,39 @@ bool vm_backend::cell_cmp_any(frame& f, const vm_instruction& ins, bool& truthy)
 	return true;
 }
 
+// a comparison of two string cells or string constants: fused_cmp_rows's string lane (bytes, a node equal to itself) under its guard,
+// the custom-binary-op latch; false = any other kind or operator, which misses onto the general form
+JAI_NOINLINE bool vm_backend::cell_cmp_text(frame& f, const vm_instruction& ins, bool& truthy) {
+	const token_type op = static_cast<token_type>(ins.a >> k_cell_op_shift);
+	if (op == token_type::bang || has_custom_binary_ops_) return false;
+	const cell_state& cs = *f.cells;
+	auto text = [&](uint32_t o) -> const script_string* {
+		if (o & k_typed_const_bit) {
+			const script_value& c = f.code->constants[o & ~k_typed_const_bit];
+			return c.raw_storage_index() == script_value::TYPEID_STRING ? c.unchecked_string_handle().get() : nullptr;
+		}
+		return cs.kind[o] == static_cast<uint8_t>(script_value::TYPEID_STRING) ? reinterpret_cast<const script_string*>(cs.payload[o]) : nullptr;
+	};
+	const script_string* a = text(ins.a & k_cell_index_mask);
+	const script_string* b = a ? text(ins.b) : nullptr;
+	if (!b) return false;
+	switch (op) {
+	case token_type::equal_equal: truthy = a == b || *a == *b; return true;
+	case token_type::bang_equal: truthy = a != b && *a != *b; return true;
+	case token_type::less: truthy = *a < *b; return true;
+	case token_type::less_equal: truthy = *a <= *b; return true;
+	case token_type::greater: truthy = *a > *b; return true;
+	case token_type::greater_equal: truthy = *a >= *b; return true;
+	default: return false;
+	}
+}
+
 // the head form exits the block on false (flush, then the loop's exit); the interior form skips to its copy target
 op_status vm_backend::exec_c_cmp_any(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool head) {
 	JAI_CELLS_COUNT(7);
 	const chunk::cell_loop& loop = *cr.loop;
 	bool truthy;
-	if (!cell_cmp_any(f, ins, truthy)) {
+	if (!cell_cmp_any(f, ins, truthy) && !cell_cmp_text(f, ins, truthy)) {
 		if (head) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 0); }
 		else { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 3); }
 		return {};
@@ -10141,7 +10173,7 @@ op_status vm_backend::exec_c_cmpval(frame& f, size_t& ip, const vm_instruction& 
 	const chunk::cell_loop& loop = *cr.loop;
 	bool truthy;
 	const vm_instruction cmp{opcode::op_c_cmp_any, (ins.a & ~k_cell_index_mask) | ins.b, ins.c, 0};   // the compare kernel reads left from a, right from b
-	if (!cell_cmp_any(f, cmp, truthy) || !cell_land(f, loop, ins.a & k_cell_index_mask, static_cast<uint8_t>(script_value::TYPEID_BOOL), truthy ? 1 : 0)) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 3); return {}; }
+	if ((!cell_cmp_any(f, cmp, truthy) && !cell_cmp_text(f, cmp, truthy)) || !cell_land(f, loop, ins.a & k_cell_index_mask, static_cast<uint8_t>(script_value::TYPEID_BOOL), truthy ? 1 : 0)) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 3); return {}; }
 	++ip;
 	return {};
 }
@@ -11611,6 +11643,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 JAI_NOINLINE std::optional<op_status> vm_backend::index_text_append(frame& f) {
 	const script_value& rhs = stack_.back().deref();
 	const size_t ri = rhs.raw_storage_index();
+	if (ri != script_value::TYPEID_STRING && ri != script_value::TYPEID_CHAR && ri != script_value::TYPEID_UTF8_STRING) return std::nullopt;
 	script_value& container = stack_[stack_.size() - 3].deref();
 	const script_value& key = stack_[stack_.size() - 2].deref();
 	const size_t ki = key.raw_storage_index();
@@ -11699,7 +11732,10 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 	if ((ins.b & index_flag_lvalue_shape) != 0 && stack_.size() >= 3 &&
 	    (ins.a & compound_flag_old_result) == 0 &&
 	    !(operator_table_ && operator_table_->any())) {
-		if ((ins.a & compound_kind_mask) == compound_plus && !parallel_worker_) {
+		const size_t text_kind = stack_.back().raw_storage_index();
+		if ((ins.a & compound_kind_mask) == compound_plus && !parallel_worker_ &&
+		    (text_kind == script_value::TYPEID_STRING || text_kind == script_value::TYPEID_CHAR || text_kind == script_value::TYPEID_UTF8_STRING ||
+		     text_kind == script_value::TYPEID_REFERENCE)) {
 			if (auto appended = index_text_append(f)) { return *appended; }
 		}
 		const script_value& rhs = stack_.back();
@@ -13328,14 +13364,21 @@ JAI_NOINLINE op_status vm_backend::call_threw(size_t truncate_to) {
 
 // the site's direct host overload on the arguments where they are on the stack: each argument of its parameter's kind (try_direct's test)
 JAI_NOINLINE bool vm_backend::call_host_site(const call_site& site, size_t argc, op_status& st) {
-	if (argc != site.ic_host_argc || *site.ic_host_gen != site.ic_host_at) { return false; }
+	if ((argc != site.ic_host_argc && (site.ic_host_argc != UINT32_MAX || argc == 0 || argc > 8)) || *site.ic_host_gen != site.ic_host_at) { return false; }
 	const size_t base = stack_.size() - argc;
 	const script_value* args = stack_.data() + base;
 	for (size_t i = 0; i < argc; ++i) {   // an any-kind parameter (a host direct row) takes every argument but a reference
 		if (site.ic_host_kinds[i] == script_value_type::jai_any_type ? args[i].is_reference() : args[i].deref().type() != site.ic_host_kinds[i]) { return false; }
 	}
 	struct running { uint32_t& n; explicit running(uint32_t& c) : n(c) { ++n; } ~running() { --n; } } run{host_site_calls_};
-	checked_result<script_value> out = site.ic_host_invoke(site.ic_host_target, args, argc);
+	std::optional<checked_result<script_value>> called;
+	try {
+		called.emplace(site.ic_host_invoke(site.ic_host_target, args, argc));
+	} catch (...) {
+		st = call_threw(base);   // a throwing entry unwinds as the general call's guarded_native_call does
+		return true;
+	}
+	checked_result<script_value>& out = *called;
 	stack_.truncate(base);
 	if (!out) { st = raise_from(out); return true; }
 	stack_.push_back(std::move(out.value()));
@@ -13351,7 +13394,7 @@ JAI_NOINLINE void vm_backend::fill_host_site(const call_site& site, const script
 		const engine::host_direct_row* row = engine_->host_direct_for(&callee.unchecked_as_function());
 		if (!row) { return; }
 		site.ic_host_owner = *row->value.get_storage().get_if<script_value::TYPEID_FUNCTION>();
-		site.ic_host_argc = static_cast<uint32_t>(row->arity);
+		site.ic_host_argc = row->arity == engine::host_direct_any_arity ? UINT32_MAX : static_cast<uint32_t>(row->arity);
 		std::fill(std::begin(site.ic_host_kinds), std::end(site.ic_host_kinds), script_value_type::jai_any_type);
 		site.ic_host_gen = engine_->host_direct_generation();
 		site.ic_host_at = 0;
@@ -16935,12 +16978,11 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 // acc + x for a template chain: binary_general's `+`. With no global operator registered, a plain string acc and a string or
 // scalar x take handle_add's string branch in place: the same memory charge (the joined size), the same text for x, an untagged
 // result; the accumulated node is written only when nothing else holds it (copy-on-write).
-op_status vm_backend::exec_concat_append(frame& f) {
-	(void)f;
-	script_value right_raw = std::move(stack_.back());
-	stack_.pop_back();
+// One step of a string chain: the stack's top (the accumulator) + right, appending in place when the accumulator is a string and right
+// a string or scalar (the general `+` otherwise). `hint` > 0 on a chain's first step sizes the accumulator for the chain's text: the copy
+// the write gate makes (and charges) of a shared head, or the unique head's own buffer.
+op_status vm_backend::concat_step(const script_value& right, uint32_t hint) {
 	script_value& acc = stack_.back();
-	const script_value& right = right_raw.deref();
 	const size_t rk = right.raw_storage_index();
 	if (acc.raw_storage_index() == script_value::TYPEID_STRING && !(operator_table_ && operator_table_->any()) &&
 	    (rk == script_value::TYPEID_STRING || rk == script_value::TYPEID_INT || rk == script_value::TYPEID_FLOAT ||
@@ -16956,6 +16998,19 @@ op_status vm_backend::exec_concat_append(frame& f) {
 		if (!limits_->memory_charge(sizeof(script_value) + acc.unchecked_as_string().size() + text.size())) [[unlikely]] {
 			return raise_from(detail::raise_memory_cap(*limits_));
 		}
+		strong_ptr<script_string>& node = acc.unchecked_get_string_storage();
+		if (hint != 0) {
+			const size_t want = (std::max)(static_cast<size_t>(hint), node->size() + text.size());
+			if (!node.unique()) {
+				limits_->memory_charge_deferred(node->size() + sizeof(script_string));
+				strong_ptr<script_string> fresh = make_strong<script_string>();
+				fresh->reserve(want);
+				fresh->append(*node);
+				node = std::move(fresh);
+			} else if (node->capacity() < want) {
+				node->reserve(want);
+			}
+		}
 		acc.unchecked_as_string_ref().append(text);
 		acc.set_type_info(nullptr);
 		return {};
@@ -16965,6 +17020,47 @@ op_status vm_backend::exec_concat_append(frame& f) {
 	auto result = binary_general(token_type::plus, left_raw.deref(), right);
 	if (!result) { return raise_from(result); }
 	stack_.push_back(std::move(result.value()));
+	return {};
+}
+
+op_status vm_backend::exec_concat_append(frame& f, const vm_instruction& ins) {
+	(void)f;
+	script_value right_raw = std::move(stack_.back());
+	stack_.pop_back();
+	return concat_step(right_raw.deref(), ins.a);
+}
+
+// A chain's run of plain operands (constants, identifiers) joined onto the accumulator: each read at its own step, where the stack form
+// would LOAD it (a later one is read after an earlier step's to_string), then joined as op_concat_append joins it
+op_status vm_backend::exec_concat_operands(frame& f, const vm_instruction& ins) {
+	const concat_proto& p = f.code->concat_protos[ins.a];
+	uint32_t hint = p.hint;
+	uint32_t env_role = 0;
+	for (const fused_operand& piece : p.pieces) {
+		const script_value* v;
+		std::optional<script_value> scratch;
+		if (piece.const_index != k_invalid_u32) {
+			v = &f.code->constants[piece.const_index];
+		} else {
+			const size_t cache_slot = f.ip * 3 + (piece.slot == k_invalid_u32 ? env_role++ : 0);
+			v = fused_cmp_operand(f, piece, cache_slot);
+			if (!v) {
+				v = fused_ident_value(f, piece, scratch, cache_slot);
+				if (!v) return op_status::failed;
+			}
+		}
+		const size_t vk = v->raw_storage_index();
+		if (vk == script_value::TYPEID_STRING || vk == script_value::TYPEID_INT || vk == script_value::TYPEID_CHAR ||
+		    vk == script_value::TYPEID_FLOAT || vk == script_value::TYPEID_BOOL) {
+			VM_TRY(concat_step(*v, hint));
+		} else {
+			// the general `+` may run user code: it reads its own handle on the operand (a constant materialized with the engine)
+			script_value held = piece.const_index != k_invalid_u32 ? materialize_constant(*f.code, piece.const_index) : v->deref();
+			VM_TRY(concat_step(held, hint));
+		}
+		if (is_unwinding_) { return {}; }
+		hint = 0;
+	}
 	return {};
 }
 
@@ -19882,8 +19978,9 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_member_compound: return exec_member_compound(f, ins, static_cast<size_t>(&ins - f.code->code.data()));
 		case opcode::op_call_method: return exec_call_method(f, ins);
 		case opcode::op_call_builtin: return exec_call_builtin(f, ins);
-		case opcode::op_concat_append: return exec_concat_append(f);
+		case opcode::op_concat_append: return exec_concat_append(f, ins);
 		case opcode::op_concat_pending: return exec_concat_pending(f, ins);
+		case opcode::op_concat_operands: return exec_concat_operands(f, ins);
 		case opcode::op_concat_store: return exec_concat_store(f, ins);
 		case opcode::op_push_fused: return exec_push_fused(f, ins);
 		case opcode::op_new: return exec_new(f, ins);
@@ -21313,7 +21410,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
 				break;
 			case opcode::op_concat_append:
-				VM_TRY_OP_SHARED(exec_concat_append(f));
+				VM_TRY_OP_SHARED(exec_concat_append(f, ins));
 				break;
 			case opcode::op_call_builtin: JAI_OP_LABEL(op_call_builtin)
 				VM_TRY_OP_SHARED(exec_call_builtin(f, ins));
@@ -21373,6 +21470,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_const_guard:
 			case opcode::op_regex_constant:
 			case opcode::op_concat_pending:
+			case opcode::op_concat_operands:
 			case opcode::op_concat_store:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {

@@ -325,6 +325,7 @@ namespace jai::vm {
         // `s = s + x1 + ... + xn;` (a string right side whose leftmost operand is the target): the target's snapshot, then each operand's
         // text joins a tail at its own step under the concatenation's charge, and the store appends the tail to the target's own node
         op_concat_pending,  // a = 1 for x1: [snapshot, x1] -> [snapshot, tail]; later [snapshot, tail, x] -> [snapshot, tail + x]; a step that joins no plain text (an object's to_string, a utf8_string, a non-string snapshot, a registered operator) materializes and runs the general `+`: [null, value]
+        op_concat_operands, // a = concat_protos index: stack [acc] -> acc + piece1 + ... + pieceN, each piece read at its step (op_concat_append's join)
         op_concat_store,    // a = symbols index, b = frame slot (k_invalid_u32 = env), c = store_flag_*: [snapshot, tail] -> the target takes the tail in place when it still holds the snapshot's node, else op_store's tail over snapshot + tail; [null, value] -> op_store's tail
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
@@ -673,6 +674,7 @@ namespace jai::vm {
             case opcode::op_regex_constant: return "REGEX_CONSTANT";
             case opcode::op_concat_pending: return "CONCAT_PENDING";
             case opcode::op_concat_store: return "CONCAT_STORE";
+            case opcode::op_concat_operands: return "CONCAT_OPERANDS";
             case opcode::op_c_load_f: return "C_LOAD_F";
             case opcode::op_c_jlt_ff: return "C_JLT_FF";
             case opcode::op_c_jle_ff: return "C_JLE_FF";

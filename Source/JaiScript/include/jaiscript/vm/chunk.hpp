@@ -329,6 +329,13 @@ namespace jai::vm {
         uint8_t typed_class = 0;        // the checker's class of target and value (assignment_expr::static_operand_class): the typed row
     };
 
+    // op_concat_operands: a string chain's run of plain operands (constants, identifiers) joined onto the accumulator on the stack, each
+    // read at its own step as op_concat_append would read and join it; `hint` sizes the accumulator on the chain's first append (0 = none)
+    struct concat_proto {
+        std::vector<fused_operand> pieces;
+        uint32_t hint = 0;
+    };
+
     // op_binary_fused_decl / op_binary_fused_store: a fused binary whose result lands in
     // a compile-time-known sink with no push and no second dispatch (dest-addressed).
     // decl mode uses node_index (the variable_decl); store mode uses
@@ -617,6 +624,7 @@ namespace jai::vm {
         std::vector<std::pair<uint32_t, uint32_t>> logical_values;   // a && or || whose value is used: its first ip and the ip of the instruction consuming the value
         std::vector<fused_binary_proto> fused_binary_protos;
         std::vector<compound_fused_proto> compound_fused_protos;
+        std::vector<concat_proto> concat_protos;
         std::vector<fused_binary_dst_proto> fused_binary_dst_protos;
         std::vector<fused_index_proto> fused_index_protos;
         std::vector<string_target_site> string_target_sites;

@@ -60,7 +60,6 @@ OLD_TEXTS = [
     r"\[map\]",
     r"\[object\]",
     r"\[function\]",
-    r"time::sleep",
 ]
 
 

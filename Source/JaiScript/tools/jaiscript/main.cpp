@@ -115,6 +115,7 @@ struct console_state {
 
 struct options {
 	std::string script;                    // empty = REPL
+	std::vector<std::string> sources;      // -e <source>, in order, one engine: a file run of text
 	std::string backend = "vm";
 	uint32_t miss_every = 0;               // --miss-every=<n>: the miss injection lever (a build with JAISCRIPT_MISS_INJECTION)
 	size_t workers = 0;                    // --workers=<n>: the parallel regions' worker count (0: the engine's own)
@@ -191,9 +192,15 @@ void print_usage() {
 		"  jaiscript                          interactive REPL (persistent engine; :help inside)\n"
 		"  jaiscript file.jai [-- args...]    run a script and exit (drag-drop a .jai onto the exe\n"
 		"                                     works too - the window pauses so you can read output)\n"
+		"  jaiscript -e \"source\" [-e ...]     run the source text and exit, like a file: several -e run\n"
+		"                                     in order in one engine; nothing prints unless the source\n"
+		"                                     prints (piping into the REPL echoes values instead)\n"
 		"  jaiscript --watch file.jai         live-coding: runs the file, then re-runs it every time\n"
 		"                                     you save - edit in your editor, save, see output.\n"
-		"                                     Ctrl+C quits.\n"
+		"                                     Ctrl+C quits. Each run is a fresh engine; a program that\n"
+		"                                     reloads in place reaches import in its loop, inside\n"
+		"                                     try/catch: a rejected reload raises at the import and\n"
+		"                                     the program keeps its old code.\n"
 		"\n"
 		"options:\n"
 		"  --backend=vm|interp   execution backend (default vm; interp = tree-walking interpreter)\n"
@@ -269,6 +276,13 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 			std::exit(2);
 		};
 		if (a == "--") { args_section = true; }
+		else if (a == "-e") {
+			if (i + 1 >= argc) {
+				std::fprintf(stderr, "%s\n", con.red("missing value for -e").c_str());
+				return 2;
+			}
+			opt.sources.push_back(argv[++i]);
+		}
 		else if (a == "--watch") { opt.watch = true; }
 		else if (a == "--time") { opt.time_runs = true; }
 		else if (a == "--no-debug") { opt.debug = false; }
@@ -300,6 +314,10 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 			std::fprintf(stderr, "%s\n", con.red("unexpected extra argument: " + a + " (script args go after --)").c_str());
 			return 2;
 		}
+	}
+	if (!opt.sources.empty() && (!opt.script.empty() || opt.watch)) {
+		std::fprintf(stderr, "%s\n", con.red("-e runs its source instead of a script file (no file, no --watch)").c_str());
+		return 2;
 	}
 	if (opt.benchmark_main < 0 || (opt.benchmark_main > 0 && (opt.script.empty() || opt.watch))) {
 		std::fprintf(stderr, "--benchmark-main needs a file, a non-negative count and no --watch\n");
@@ -1248,22 +1266,47 @@ int result_to_exit_code(const jai::script_value& result) {
 	return result.is_int() ? static_cast<int>(result.as_int()) : 0;
 }
 
+// Warn mode lists the checker's findings on stderr and runs anyway (strict raises them from the execute).
+void report_warn_mode_findings(jai::engine& eng, const std::string& content, const std::string& name) {
+	if (eng.static_checking() != jai::check_mode::warn) { return; }
+	try {
+		jai::check_report report = eng.check(content);
+		if (!report.diagnostics.empty()) {
+			std::fprintf(stderr, "jaiscript: static check (warn mode, running anyway):\n%s", report.format(content, name).c_str());
+		}
+	} catch (const std::exception&) {
+	}
+}
+
 // execute_file_source keeps the file-path attribution (stack traces, debugger breakpoints)
 // while letting the host strip a UTF-8 BOM — Notepad's default, PowerShell's Set-Content —
 // which the lexer would otherwise reject as "Unexpected character".
 jai::script_value execute_script_file(jai::engine& eng, const fs::path& abs) {
 	std::string content = slurp_file(abs.string());
 	if (content.rfind("\xEF\xBB\xBF", 0) == 0) { content.erase(0, 3); }
-	if (eng.static_checking() == jai::check_mode::warn) {
-		try {
-			jai::check_report report = eng.check(content);
-			if (!report.diagnostics.empty()) {
-				std::fprintf(stderr, "jaiscript: static check (warn mode, running anyway):\n%s", report.format(content, abs.filename().string()).c_str());
-			}
-		} catch (const std::exception&) {
-		}
-	}
+	report_warn_mode_findings(eng, content, abs.filename().string());
 	return eng.execute_file_source(abs.string(), content);
+}
+
+// Runs each -e source in order in `eng` (include/import resolve from the working directory); the first error stops the
+// run, and the last source's result gives the exit code as a file's does.
+run_result run_sources_in_engine(jai::engine& eng, const std::vector<std::string>& sources) {
+	run_result r;
+	eng.add_include_path(fs::current_path().string());
+	auto start = std::chrono::steady_clock::now();
+	try {
+		for (const std::string& source : sources) {
+			report_warn_mode_findings(eng, source, "<script>");
+			r.exit_code = result_to_exit_code(eng.execute(source));
+		}
+	} catch (const std::exception& ex) {
+		r.ok = false;
+		r.exit_code = 1;
+		r.error = ex.what();
+		r.stack_trace = trim(eng.format_stack_trace());
+	}
+	r.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+	return r;
 }
 
 // Runs `path` in `eng` with include/import resolving from the script's own directory.
@@ -1287,7 +1330,7 @@ run_result run_file_in_engine(jai::engine& eng, const std::string& path) {
 }
 
 int run_file_mode(const options& opt, const console_state& con) {
-	if (!fs::exists(opt.script)) {
+	if (opt.sources.empty() && !fs::exists(opt.script)) {
 		std::fprintf(stderr, "%s\n", con.red("jaiscript: no such file: " + opt.script).c_str());
 		return 2;
 	}
@@ -1301,7 +1344,7 @@ int run_file_mode(const options& opt, const console_state& con) {
 	if (!debug_note.str().empty()) { std::fputs(debug_note.str().c_str(), stderr); }
 
 	if (opt.benchmark_main > 0) { std::cout << "JAI_BENCHMARK_PHASE warmup\n"; }
-	run_result r = run_file_in_engine(*eng, opt.script);
+	run_result r = opt.sources.empty() ? run_file_in_engine(*eng, opt.script) : run_sources_in_engine(*eng, opt.sources);
 	if (r.ok && r.exit_code == 0 && opt.benchmark_main > 0) {
 		for (int repetition = 1; repetition <= opt.benchmark_main; ++repetition) {
 			std::cout << "JAI_BENCHMARK_PHASE measured " << repetition << "\n";
@@ -1340,7 +1383,7 @@ int run_file_mode(const options& opt, const console_state& con) {
 	}
 	if (!opt.coverage.empty()) {
 		std::ofstream out(opt.coverage, std::ios::binary | std::ios::trunc);
-		out << "script " << opt.script << "\n" << eng->vm_coverage_report();
+		out << "script " << (opt.sources.empty() ? opt.script : std::string("-e")) << "\n" << eng->vm_coverage_report();
 		if (!out) { std::fprintf(stderr, "%s\n", con.red("jaiscript: cannot write " + opt.coverage).c_str()); }
 	}
 	if (opt.time_runs) {
@@ -1756,6 +1799,24 @@ int run_selftest(const console_state& con) {
 		expect(r.error.find("boom") != std::string::npos, "file: error message surfaced");
 	}
 
+	{ // -e: several sources in order, one engine, combined with the other flags; the last result is the exit code
+		const char* argv[] = {"jaiscript", "-e", "int base = 40;", "--backend=interp", "-e", "print(\"e ran\"); base + 2", "--check=warn", "--workers=2"};
+		options parsed;
+		int parse_exit = parse_args(static_cast<int>(std::size(argv)), const_cast<char**>(argv), parsed, con);
+		expect(parse_exit == -1 && parsed.sources.size() == 2 && parsed.script.empty(), "-e: each flag adds a source, no script file");
+		expect(parsed.backend == "interp" && parsed.check == "warn" && parsed.workers == 2, "-e: combines with --backend, --check and --workers");
+		parsed.debug = false;
+		auto eng = make_runner_engine(parsed, nullptr);
+		std::ostringstream captured;
+		eng->set_output_stream(std::shared_ptr<std::ostream>(&captured, [](std::ostream*) {}));
+		run_result r = run_sources_in_engine(*eng, parsed.sources);
+		expect(r.ok && r.exit_code == 42, "-e: sources share one engine and the last int result is the exit code");
+		expect(captured.str() == "e ran\n", "-e: only what the source prints is printed");
+		run_result failed = run_sources_in_engine(*eng, {"throw \"e boom\";", "print(\"never\");"});
+		expect(!failed.ok && failed.exit_code == 1 && failed.error.find("e boom") != std::string::npos, "-e: a script error exits 1");
+		expect(captured.str().find("never") == std::string::npos, "-e: the first error stops the run");
+	}
+
 	{ // REPL scripted session: multi-line, auto-print, typo recovery, meta-commands, path paste
 		fs::path pasted = dir / "pasted.jai";
 		spill_file(pasted.string(), "int pasted_marker = 777;\nprint(\"pasted ran\");\n");
@@ -2066,7 +2127,7 @@ int main(int argc, char** argv) {
 
 	if (opt.selftest) { return run_selftest(con); }
 	if (opt.watch) { return run_watch_mode(opt, con); }
-	if (!opt.script.empty()) { return run_file_mode(opt, con); }
+	if (!opt.script.empty() || !opt.sources.empty()) { return run_file_mode(opt, con); }
 	return run_repl_mode(opt, con);
 }
 #endif

@@ -140,7 +140,17 @@ print(t.fire());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">pew (shot 1)
 pew (shot 2)
 BRRRT x3 (shot 5)</code></pre></div>
-<p>Same turret, same shot count, new trigger. In an engine the second include is a keypress: the host re-executes the edited file, and the world never restarts.</p>
+<p>Same turret, same shot count, new trigger. A running game does the same by reaching its imports every frame: an import re-runs its module only when the file changed. Write that loop with its guard from the start. A reload the checker rejects raises a catchable error at the import, and the program keeps its old code:</p>
+<div class="codeblock cb-jai" data-host="the game&#x27;s loop (running, step_world)"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;string&gt; MODULES = ["turret.jai", "rules.jai"];
+while (running) {
+    try {
+        import(MODULES);   // re-runs a module whose file changed; an unchanged one does nothing
+    } catch (e) {
+        print("reload rejected: {}", e);   // the file and line of the mistake; the old code keeps running
+    }
+    step_world();
+}</code></pre></div>
+<p>Fix the file and save again, and the loop picks it up within about 0.2 seconds. The world never restarts. <a href="../guide/10-modules.html#reloading-from-a-running-program">Reloading from a running program</a> has the whole story.</p>
 <h2 id="every-core">Every core, one loop<a class="hlink" href="#every-core" aria-label="link">&#8203;</a></h2>
 <p>Most scripting languages give you one thread and a lecture. <code>parallel_for</code> spreads a loop over every core, and the result is byte-identical to running it serially, at any thread count.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Particle { float x = 0.0; float vx = 0.0; float life = 1.0; }

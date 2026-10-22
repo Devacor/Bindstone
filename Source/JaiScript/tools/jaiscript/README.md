@@ -25,6 +25,23 @@ script errors print message + stack trace to stderr and exit 1; usage errors exi
   "press Enter to close" so the output is readable. `--pause` / `--no-pause` override.
 - A UTF-8 BOM (Notepad's default) is stripped before parsing.
 
+### Source on the command line: `-e`
+
+```
+jaiscript -e "print(1 + 2)"
+jaiscript -e "int n = 20;" -e "n * 2"      # exit code 40
+```
+
+`-e <source>` runs the text as a file run would run a file's text, then exits: the exit code
+is the last source's result if it is an int, otherwise 0; a script error prints its message
+and stack trace (attributed to `<script>`) and exits 1. Several `-e` run in order in one
+engine, so declarations carry from one to the next, and the first error stops the run.
+Nothing prints unless the source prints: `jaiscript -e "1 + 2"` prints nothing and exits 3.
+The REPL is the mode that echoes values, piped or typed (`echo 1 + 2 | jaiscript` prints `3`).
+`-e` combines with `--backend`, `--check`, `--workers`, `--budget`, `--time` and `-- args`;
+`include`/`import` resolve from the working directory. A script file or `--watch` with `-e`
+is a usage error (exit 2).
+
 ## Mode 2 — REPL
 
 ```
@@ -81,9 +98,15 @@ output**. The console clears between runs and a status line reports run #, durat
 ok/ERROR and the time. Ctrl+C quits. Each run gets a **fresh engine** (deterministic
 world per save); because of that, the DAP listener is off in watch mode.
 
+`--watch` restarts the world on every save. A program that keeps its world and swaps code in
+place reaches `import` in its own loop instead, inside `try`/`catch`: a rejected reload raises
+a catchable error at the import, and the program keeps its old code
+(`docs/site/guide/10-modules.html`, "Reloading from a running program").
+
 ## Options
 
 ```
+-e <source>           run the source text instead of a file (repeatable; see Mode 1)
 --backend=vm|interp   execution backend (default vm)
 --check=strict|warn|off
                       static checker mode (default strict: typed mistakes and undeclared

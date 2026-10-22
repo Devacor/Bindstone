@@ -85,16 +85,32 @@ namespace {
         const size_t count = values.size();
         if (count < 2) { return; }
         std::vector<script_value> other(values);
-        std::vector<script_value>* from = &values;
-        std::vector<script_value>* to = &other;
-        for (size_t width = 1; width < count; width *= 2) {
-            for (size_t low = 0; low < count; low += 2 * width) {
-                const size_t mid = std::min(low + width, count), high = std::min(low + 2 * width, count);
-                size_t i = low, j = mid, k = low;
-                while (i < mid && j < high) { (*to)[k++] = less((*from)[j], (*from)[i]) ? std::move((*from)[j++]) : std::move((*from)[i++]); }
-                while (i < mid) { (*to)[k++] = std::move((*from)[i++]); }
-                while (j < high) { (*to)[k++] = std::move((*from)[j++]); }
+        auto merge = [&](std::vector<script_value>& from, std::vector<script_value>& to, size_t low, size_t width, size_t end) {
+            const size_t mid = std::min(low + width, end), high = std::min(low + 2 * width, end);
+            size_t i = low, j = mid, k = low;
+            while (i < mid && j < high) { to[k++] = less(from[j], from[i]) ? std::move(from[j++]) : std::move(from[i++]); }
+            while (i < mid) { to[k++] = std::move(from[i++]); }
+            while (j < high) { to[k++] = std::move(from[j++]); }
+        };
+        // The bottom-up passes below a block's width run block by block, so a block's elements stay in cache across them: the
+        // merges (and so the comparisons) are the whole-array passes', in another order
+        constexpr size_t block = 256;
+        const size_t local_widths_end = std::min(block, count);
+        size_t local_passes = 0;
+        for (size_t width = 1; width < local_widths_end; width *= 2) { ++local_passes; }
+        for (size_t block_low = 0; block_low < count; block_low += block) {
+            const size_t block_high = std::min(block_low + block, count);
+            std::vector<script_value>* from = &values;
+            std::vector<script_value>* to = &other;
+            for (size_t width = 1; width < local_widths_end; width *= 2) {
+                for (size_t low = block_low; low < block_high; low += 2 * width) { merge(*from, *to, low, width, block_high); }
+                std::swap(from, to);
             }
+        }
+        std::vector<script_value>* from = local_passes % 2 ? &other : &values;
+        std::vector<script_value>* to = local_passes % 2 ? &values : &other;
+        for (size_t width = size_t{1} << local_passes; width < count; width *= 2) {
+            for (size_t low = 0; low < count; low += 2 * width) { merge(*from, *to, low, width, count); }
             std::swap(from, to);
         }
         if (from != &values) { values = std::move(*from); }
@@ -134,10 +150,11 @@ namespace {
 
     // A callback call whose lvalue positions get a cell holding the element; the element takes the cell's value back
     // after the call (the builtin works on its own copies of the container's elements)
+    // call_args: the builtin's buffer for the call's arguments, reused call to call (empty after the call)
     checked_result<script_value> call_with_lvalues(const builtin_callback& callback, uint32_t positions,
-                                                   std::initializer_list<script_value*> elements, engine* eng) {
-        std::vector<script_value> call_args;
-        call_args.reserve(elements.size());
+                                                   std::initializer_list<script_value*> elements, engine* eng, std::vector<script_value>& call_args) {
+        struct release { std::vector<script_value>& a; ~release() { a.clear(); } } done{call_args};
+        call_args.clear();
         size_t i = 0;
         for (script_value* e : elements) {
             call_args.push_back((positions >> i++) & 1 ? script_value::make_cell_reference(script_value(e->deref()), eng) : *e);
@@ -146,12 +163,23 @@ namespace {
         i = 0;
         for (script_value* e : elements) {
             if ((positions >> i) & 1) {
-                script_value taken = call_args[i].deref();
-                *e = std::move(taken);
+                const script_value& now = call_args[i].deref();
+                const bool same_object = now.raw_storage_index() == script_value::TYPEID_OBJECT && e->raw_storage_index() == script_value::TYPEID_OBJECT &&
+                                         now.unchecked_object_handle().get() == e->unchecked_object_handle().get() && now.type_info_raw() == e->type_info_raw();
+                if (!same_object) {
+                    script_value taken = now;
+                    *e = std::move(taken);
+                }
             }
             ++i;
         }
         return result;
+    }
+    checked_result<script_value> call_with_lvalues(const builtin_callback& callback, uint32_t positions,
+                                                   std::initializer_list<script_value*> elements, engine* eng) {
+        std::vector<script_value> call_args;
+        call_args.reserve(elements.size());
+        return call_with_lvalues(callback, positions, elements, eng, call_args);
     }
 
     // A script callback's own declaration: the parameters it spells and the return type it declares (null for a host callable)
@@ -571,6 +599,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			const uint32_t lvalues = predicate ? callback_lvalue_positions(a_args[0], 2) : 0;
 			std::vector<script_value> arguments;
 			if (predicate && !lvalues) { arguments.resize(2, a_context.make_value()); }
+			if (lvalues) { arguments.reserve(2); }
 			std::optional<error_propagator> error;
 			struct SortAborted {};
 			engine::run_pin pin(a_context.get_engine());   // the comparisons are the builtin's callbacks
@@ -593,7 +622,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 					}
 					checked_result<script_value> result = [&]() {
 						if (lvalues) {
-							return call_with_lvalues(*predicate, lvalues, {const_cast<script_value*>(&a_left), const_cast<script_value*>(&a_right)}, a_context.get_engine());
+							return call_with_lvalues(*predicate, lvalues, {const_cast<script_value*>(&a_left), const_cast<script_value*>(&a_right)}, a_context.get_engine(), arguments);
 						}
 						arguments[0] = a_left;
 						arguments[1] = a_right;

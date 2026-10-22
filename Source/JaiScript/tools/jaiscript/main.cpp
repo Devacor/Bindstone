@@ -14,6 +14,7 @@
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 #include <jaiscript/debug/connector.hpp>
 #include "fetch.hpp"   // Download, sha256_file, zip_extract (runner host API)
+#include "sound.hpp"   // load_sound, play_sound, stop_sounds (runner host API)
 #endif
 
 #include <algorithm>
@@ -59,10 +60,6 @@ namespace fs = std::filesystem;
 // ---------------------------------------------------------------- console ---
 
 std::atomic<bool> g_interrupted{false};  // Ctrl+C / Ctrl+Break (host-exe state, not engine state)
-
-#ifdef _WIN32
-std::map<std::string, std::string> g_wav_aliases;   // wav path -> its open MCI device
-#endif
 
 #ifdef _WIN32
 BOOL WINAPI ctrl_handler(DWORD type) {
@@ -240,8 +237,9 @@ void print_usage() {
 		"  working_dir(), parent_dir(p), file_name(p) - a script dropped onto the executable runs\n"
 		"  from any working directory when its paths start from one of these; and console-game IO:\n"
 		"  key_down(name), read_key(), term_cols(), term_rows() (clocks and sleeps are time::),\n"
-		"  play_wav(path) (async, one voice), play_midi(path)/stop_midi()/midi_status()\n"
-		"  (MCI sequencer; audio is a no-op off Windows). POSIX terminals synthesize\n"
+		"  sound: load_sound(path) -> Sound (play()/play(true) loops/stop()/playing()/volume(0..1)/\n"
+		"  format(); wav, midi or mp3 by the file's header), play_sound(path[, loop]), stop_sounds()\n"
+		"  (each Sound mixes with the others; Windows only, null elsewhere). POSIX terminals synthesize\n"
 		"  key_down from auto-repeat; there are no key-up events. Networking: NetChannel\n"
 		"  (new NetChannel(); listen(port)/connect(host,port)/send(bytes)/pump()/close();\n"
 		"  signals on_packet(bytes)/on_connect()/on_disconnect(reason) fire during pump();\n"
@@ -572,67 +570,6 @@ void register_console_game_io(jai::engine& eng) {
 		if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0) { return ws.ws_row; }
 #endif
 		return 25;
-	});
-	// fire-and-forget WAV playback through winmm's MCI (already linked).
-	// Each distinct file gets its own waveaudio device, so DIFFERENT sounds
-	// overlap (the OS mixes); replaying a sound restarts it. Registered
-	// everywhere, a graceful no-op off-Windows so scripts stay portable.
-	eng.add_function("play_wav", [](const std::string& path) -> bool {
-#ifdef _WIN32
-		const DWORD attributes = ::GetFileAttributesA(path.c_str());
-		if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {   // async PlaySound reports success for a file it never finds
-			return false;
-		}
-		auto it = g_wav_aliases.find(path);
-		if (it == g_wav_aliases.end()) {
-			std::string alias = "jaiwav" + std::to_string(g_wav_aliases.size());
-			std::string open = "open \"" + path + "\" type waveaudio alias " + alias;
-			if (::mciSendStringA(open.c_str(), nullptr, 0, nullptr) != 0) {
-				return PlaySoundA(path.c_str(), nullptr, SND_FILENAME | SND_ASYNC | SND_NODEFAULT) != 0;
-			}
-			it = g_wav_aliases.emplace(path, alias).first;
-		}
-		std::string cmd = "stop " + it->second;
-		::mciSendStringA(cmd.c_str(), nullptr, 0, nullptr);
-		cmd = "seek " + it->second + " to start";
-		::mciSendStringA(cmd.c_str(), nullptr, 0, nullptr);
-		cmd = "play " + it->second;
-		return ::mciSendStringA(cmd.c_str(), nullptr, 0, nullptr) == 0;
-#else
-		(void)path;
-		return false;
-#endif
-	}, jai::filesystem);
-	// background MIDI through winmm's MCI sequencer (mixes freely with
-	// play_wav). One track at a time; scripts poll midi_status() == "stopped"
-	// to loop. Same portability contract: no-ops off Windows.
-	eng.add_function("play_midi", [](const std::string& path) -> bool {
-#ifdef _WIN32
-		::mciSendStringA("close jaimidi", nullptr, 0, nullptr);
-		std::string open = "open \"" + path + "\" type sequencer alias jaimidi";
-		if (::mciSendStringA(open.c_str(), nullptr, 0, nullptr) != 0) { return false; }
-		return ::mciSendStringA("play jaimidi", nullptr, 0, nullptr) == 0;
-#else
-		(void)path;
-		return false;
-#endif
-	}, jai::filesystem);
-	eng.add_function("stop_midi", []() -> bool {
-#ifdef _WIN32
-		::mciSendStringA("stop jaimidi", nullptr, 0, nullptr);
-		return ::mciSendStringA("close jaimidi", nullptr, 0, nullptr) == 0;
-#else
-		return false;
-#endif
-	});
-	eng.add_function("midi_status", []() -> std::string {
-#ifdef _WIN32
-		char buf[64] = {0};
-		if (::mciSendStringA("status jaimidi mode", buf, 63, nullptr) != 0) { return ""; }
-		return buf;
-#else
-		return "";
-#endif
 	});
 }
 
@@ -1226,6 +1163,7 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 	register_console_game_io(*eng);
 	register_net_channel(*eng);
 	jai_runner::register_fetch(*eng);
+	jai_runner::register_sound(*eng);
 
 	jai::script_value args = jai::script_value::make_array(nullptr, eng.get());
 	auto& arg_storage = args.as_array();
@@ -1889,6 +1827,53 @@ int run_selftest(const console_state& con) {
 		expect(run("file_exists(missing_path) ? read_file(missing_path) : \"fallback\";") == "fallback", name("check first, then read").c_str());
 	}
 
+	{   // sound: format by header, then by extension; the play state a script reads (played only where an output device exists)
+		auto le = [](uint32_t v, int bytes) { std::string out; for (int i = 0; i < bytes; ++i) { out += static_cast<char>((v >> (8 * i)) & 0xFF); } return out; };
+		const std::string samples(80, static_cast<char>(128));   // 10 ms of 8-bit silence
+		const std::string wav = "RIFF" + le(36 + 80, 4) + "WAVEfmt " + le(16, 4) + le(1, 2) + le(1, 2) + le(8000, 4) + le(8000, 4) + le(1, 2) + le(8, 2) +
+			"data" + le(80, 4) + samples;
+		const std::string track = std::string("\x00\x90\x3C\x64\x60\x80\x3C\x00\x00\xFF\x2F\x00", 12);
+		const std::string midi = std::string("MThd\x00\x00\x00\x06\x00\x00\x00\x01\x01\xE0", 14) + "MTrk" + std::string("\x00\x00\x00", 3) + static_cast<char>(track.size()) + track;
+		const fs::path sounds = dir / "sounds";
+		std::error_code ec;
+		fs::create_directories(sounds, ec);
+		spill_file((sounds / "tone.wav").string(), wav);
+		spill_file((sounds / "tone.bin").string(), wav);
+		spill_file((sounds / "song.mid").string(), midi);
+		spill_file((sounds / "tagged.dat").string(), std::string("ID3\x04\x00", 5));
+		spill_file((sounds / "noise.mp3").string(), "not a header");
+		spill_file((sounds / "notes.txt").string(), "not a sound");
+#ifdef _WIN32
+		const bool output_device = ::waveOutGetNumDevs() > 0;
+#else
+		const bool output_device = false;
+#endif
+		for (const char* backend : {"interp", "vm"}) {
+			options sound_opt = opt;
+			sound_opt.backend = backend;
+			auto eng = make_runner_engine(sound_opt, nullptr);
+			eng->add_global("snd", jai::script_value(sounds.generic_string(), eng.get()));
+			auto run = [&](const std::string& src) {
+				try { return eng->execute(src).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+			};
+			auto name = [&](const char* what) { return std::string("sound [") + backend + "]: " + what; };
+#ifdef _WIN32
+			expect(run("var f = [\"tone.wav\", \"tone.bin\", \"song.mid\", \"tagged.dat\", \"noise.mp3\"]; var out = \"\"; "
+				"for (auto n : f) { out += load_sound(snd + \"/\" + n).format() + \" \"; } out;") == "wav wav midi mp3 mp3 ",
+				name("the header names the format, else the extension").c_str());
+#endif
+			expect(run("load_sound(snd + \"/missing.wav\") == null && load_sound(snd + \"/notes.txt\") == null && play_sound(snd + \"/notes.txt\") == null;") == "true",
+				name("a missing file or an unknown format is no sound").c_str());
+			if (output_device) {
+				expect(run("var s = load_sound(snd + \"/tone.wav\"); var seen = to_string(s.playing()) + \" \" + to_string(s.play()) + \" \" + to_string(s.playing()); "
+					"s.stop(); seen += \" \" + to_string(s.playing()); s.play(true); seen += \" \" + to_string(s.playing()); stop_sounds(); seen + \" \" + to_string(s.playing());") ==
+					"false true true false true false", name("play, stop, a loop and stop_sounds set the play state").c_str());
+				expect(run("var s = play_sound(snd + \"/tone.wav\"); int waited = 0; while (s.playing() && waited < 3000) { time::sleep_ms(10); waited += 10; } !s.playing();") == "true",
+					name("a sound played once stops playing when it ends").c_str());
+			}
+		}
+	}
+
 	for (const char* backend : {"interp", "vm"}) {
 		// Process-owned fixtures only. The invalid URL is rejected before Download
 		// starts a worker, and missing audio files cannot produce audible output.
@@ -1945,8 +1930,8 @@ int run_selftest(const console_state& con) {
 				{"make_dirs(fixture + \"/created\")", "make_dirs"},
 				{"writable_dir(fixture + \"/probe-created\")", "writable_dir"},
 				{"list_dir(fixture)", "list_dir"},
-				{"play_wav(fixture + \"/missing.wav\")", "play_wav"},
-				{"play_midi(fixture + \"/missing.mid\")", "play_midi"},
+				{"load_sound(fixture + \"/missing.wav\")", "load_sound"},
+				{"play_sound(fixture + \"/missing.mid\")", "play_sound"},
 				{"sha256_file(fixture + \"/content.txt\")", "sha256_file"},
 				{"zip_entries(fixture + \"/missing.zip\")", "zip_entries"},
 				{"zip_extract(fixture + \"/missing.zip\", \"entry\", fixture + \"/extracted.txt\")", "zip_extract"},
@@ -1983,7 +1968,7 @@ int run_selftest(const console_state& con) {
 			expect_privilege(eng->execute("pending.received();").as_int() == 0,
 				"Download.received remains available when progress is memory-only");
 #endif
-			expect_privilege(eng->execute("pending.cancel(); stop_midi(); midi_status(); true;").as_bool(),
+			expect_privilege(eng->execute("pending.cancel(); stop_sounds(); true;").as_bool(),
 				"explicit cancel, stop and status remain available");
 			expect_privilege(output.str().empty(), "denials produce no unexpected script output");
 			eng->enable(jai::filesystem);
@@ -1997,8 +1982,8 @@ int run_selftest(const console_state& con) {
 				"move_file(fixture + \"/save.tmp\", fixture + \"/save.txt\") && !file_exists(fixture + \"/save.tmp\") && "
 				"read_file(fixture + \"/save.txt\") == \"new\" && !move_file(fixture + \"/save.tmp\", fixture + \"/save.txt\");").as_bool(),
 				"move_file replaces the destination and answers false for a missing source");
-			expect_privilege(!eng->execute("play_wav(fixture + \"/missing.wav\") || play_midi(fixture + \"/missing.mid\");").as_bool(),
-				"play_wav and play_midi answer false for a missing file");
+			expect_privilege(eng->execute("load_sound(fixture + \"/missing.wav\") == null && play_sound(fixture + \"/missing.mid\") == null;").as_bool(),
+				"load_sound and play_sound answer null for a missing file");
 			expect_privilege(!eng->execute("saved_start(\"jaiscript-selftest://never-network\", "
 				"fixture + \"/reenabled-download.bin\");").as_bool()
 				&& eng->execute("pending.error();").as_string() == "download: only http and https URLs are supported",

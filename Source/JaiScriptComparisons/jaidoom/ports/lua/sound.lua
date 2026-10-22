@@ -33,19 +33,17 @@ function snd_play(name)
 	end
 	if (not (SND_READY[name] ~= nil)) then
 		local path = ((audio_cache_dir() .. string.lower(("" .. name))) .. ".wav")
-		if file_exists(path) then
-			SND_READY[name] = path
-		else
+		if (not file_exists(path)) then
 			local wav = snd_wav_bytes(name)
 			if ((wav == "") or (not _j_truth(write_file(path, wav)))) then
 				path = ""
 			end
-			SND_READY[name] = path
 		end
+		SND_READY[name] = (path ~= "") and load_sound(path) or false
 	end
-	local p = SND_READY[name]
-	if (p ~= "") then
-		play_wav(p)
+	local s = SND_READY[name]
+	if s then
+		s:play()
 	end
 end
 SND_POS_READY = {}
@@ -137,11 +135,11 @@ function snd_play_at(name, x, y)
 			if (not _j_truth(write_file(path, wav))) then
 				path = ""
 			end
-			SND_POS_READY[key] = path
+			SND_POS_READY[key] = (path ~= "") and load_sound(path) or false
 		end
 	end
-	local p = SND_POS_READY[key]
-	if (p ~= "") then
-		play_wav(p)
+	local s = SND_POS_READY[key]
+	if s then
+		s:play()
 	end
 end

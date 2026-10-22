@@ -95,10 +95,9 @@ function parallel_transform(a,fn)
 	return result
 end
 -- The benchmark has SND_ON/MUS_ON false, just as in the original.
-function play_wav() error("audio is not part of the headless comparison") end
-function play_midi() error("audio is not part of the headless comparison") end
-function stop_midi() end
-function midi_status() return "stopped" end
+function load_sound() error("audio is not part of the headless comparison") end
+function play_sound() error("audio is not part of the headless comparison") end
+function stop_sounds() end
 
 local utf8_char=utf8.char
 function from_json(s)

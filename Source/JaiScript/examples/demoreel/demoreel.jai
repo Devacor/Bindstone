@@ -398,9 +398,8 @@ function run_interactive() -> int {
 	demo_boot(w, h, OPT_SEED, RUNNER_BACKEND, false, true);
 	if (OPT_SCENE >= 0) { demo_jump(OPT_SCENE, 5.0); }
 	HB_WORKERS = w >= 100 ? 1 : 0;
-	string music = OPT_MUSIC ? write_soundtrack() : "";
-	if (music != "") { play_midi(music); }
-	int frame_no = 0;
+	string music_path = OPT_MUSIC ? write_soundtrack() : "";
+	var music = music_path != "" ? play_sound(music_path, true) : null;
 
 	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J" + ESC + "[H", skip_newline);
 	time::stopwatch show;
@@ -426,13 +425,11 @@ function run_interactive() -> int {
 		print(ESC + "[H" + frame + ESC + "[0m", skip_newline);
 		draw_ms = pace.delta() * 1000;
 
-		frame_no = frame_no + 1;
-		if (music != "" && frame_no % 30 == 0 && midi_status() == "stopped") { play_midi(music); }
 
 		float used = pace.elapsed() * 1000;
 		if (used < budget_ms) { time::sleep_ms(budget_ms - used); }
 	}
-	if (music != "") { stop_midi(); }
+	if (music != null) { music.stop(); }
 	print(ESC + "[0m" + ESC + "[?1049l" + ESC + "[?25h", skip_newline);
 	return 0;
 }

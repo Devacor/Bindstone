@@ -139,6 +139,22 @@ print(to_json(values));</code></pre></div>
 <p>Argument types follow the host-bound signal signature; emit discards receiver return values.</p>
 </div>
 </section>
+<section class="api-group"><h2 id="group-sound">Sound</h2>
+<div class="api-entry" data-provider="runner" data-search="sound.format() -&gt; string observe &quot;wav&quot;, &quot;midi&quot; or &quot;mp3&quot;. standalone jaiscript.exe"><h3 id="api-e9b797f3a37a"><code>Sound.format() -&gt; string</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; observe</p>
+<p>&quot;wav&quot;, &quot;midi&quot; or &quot;mp3&quot;.</p>
+</div>
+<div class="api-entry" data-provider="runner" data-search="sound.play(loop: bool = false) -&gt; bool audio starts from the beginning (a playing sound restarts), looping when loop is true, and returns at once; false once the file proved unplayable. standalone jaiscript.exe"><h3 id="api-ca75aea910f1"><code>Sound.play(loop: bool = false) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
+<p>Starts from the beginning (a playing Sound restarts), looping when loop is true, and returns at once; false once the file proved unplayable.</p>
+</div>
+<div class="api-entry" data-provider="runner" data-search="sound.playing() -&gt; bool observe true from play() until stop(), stop_sounds() or the end of a sound played once. standalone jaiscript.exe"><h3 id="api-863e24d4a433"><code>Sound.playing() -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; observe</p>
+<p>True from play() until stop(), stop_sounds() or the end of a sound played once.</p>
+</div>
+<div class="api-entry" data-provider="runner" data-search="sound.stop() -&gt; void audio  standalone jaiscript.exe"><h3 id="api-0465eceec7f6"><code>Sound.stop() -&gt; void</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
+</div>
+<div class="api-entry" data-provider="runner" data-search="sound.volume(level: float) -&gt; void audio level 0..1, clamped; 1 until set. standalone jaiscript.exe"><h3 id="api-ba2f6fa3934e"><code>Sound.volume(level: float) -&gt; void</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
+<p>Level 0..1, clamped; 1 until set.</p>
+</div>
+</section>
 <section class="api-group"><h2 id="group-array">array</h2>
 <div class="api-entry" data-provider="core" data-search="array::append(values: array&lt;t&gt;, other: array&lt;t&gt; or array&lt;var&gt;) -&gt; array&lt;t&gt; copy returns a new array, preserving the first input constraints; inputs do not mutate. same-kind typed buffers avoid boxing. handles retain identity. every engine"><h3 id="api-0d8c5b6c2d8d"><code>array::append(values: array&lt;T&gt;, other: array&lt;T&gt; or array&lt;var&gt;) -&gt; array&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 <p>Returns a new array, preserving the first input constraints; inputs do not mutate. Same-kind typed buffers avoid boxing. Handles retain identity.</p>
@@ -561,14 +577,15 @@ print(v[&quot;hp&quot;], &quot; &quot;, v[&quot;tags&quot;][0]);</code></pre></d
 </div>
 <div class="api-entry" data-provider="runner" data-search="list_dir(path: string) -&gt; array&lt;string&gt; filesystem  standalone jaiscript.exe"><h3 id="api-ac8ad6d95fb5"><code>list_dir(path: string) -&gt; array&lt;string&gt;</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
 </div>
+<div class="api-entry" data-provider="runner" data-search="load_sound(path: string) -&gt; sound audio opens a wav, midi or mp3 file (the header decides, else the extension) and preloads it in the background; null for a missing file, an unknown format, or off windows. standalone jaiscript.exe"><h3 id="api-6b298ba89ccf"><code>load_sound(path: string) -&gt; Sound</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
+<p>Opens a WAV, MIDI or MP3 file (the header decides, else the extension) and preloads it in the background; null for a missing file, an unknown format, or off Windows.</p>
+</div>
 <div class="api-entry" data-provider="runner" data-search="make_dirs(path: string) -&gt; bool filesystem  standalone jaiscript.exe"><h3 id="api-dda73883f287"><code>make_dirs(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="merge(first: map&lt;k,v&gt;, second: map) -&gt; map&lt;k,v&gt; copy preserves the first input key/value constraints and converts selected second values through normal map-store rules. second entries replace colliding keys. only values retained in the result copy; explicit handles retain identity. inputs do not mutate. register_all() or area registration"><h3 id="api-723e9adc001f"><code>merge(first: map&lt;K,V&gt;, second: map) -&gt; map&lt;K,V&gt;</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
 <p>Preserves the first input key/value constraints and converts selected second values through normal map-store rules. Second entries replace colliding keys. Only values retained in the result copy; explicit handles retain identity. Inputs do not mutate.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(to_json(merge({&quot;a&quot;: 1, &quot;b&quot;: 2}, {&quot;b&quot;: 3})));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;a&quot;:1,&quot;b&quot;:3}</code></pre></div>
-</div>
-<div class="api-entry" data-provider="runner" data-search="midi_status() -&gt; string observe  standalone jaiscript.exe"><h3 id="api-7f9e26c95b5a"><code>midi_status() -&gt; string</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; observe</p>
 </div>
 <div class="api-entry" data-provider="runner" data-search="move_file(from: string, to: string) -&gt; bool filesystem replaces destination; may copy across volumes. standalone jaiscript.exe"><h3 id="api-dee472e46d06"><code>move_file(from: string, to: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
 <p>Replaces destination; may copy across volumes.</p>
@@ -589,11 +606,8 @@ print(v[&quot;hp&quot;], &quot; &quot;, v[&quot;tags&quot;][0]);</code></pre></d
 </div>
 <div class="api-entry" data-provider="core" data-search="parent_dir(path: string) -&gt; string observe  every engine"><h3 id="api-9a65d35e1a8d"><code>parent_dir(path: string) -&gt; string</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="runner" data-search="play_midi(path: string) -&gt; bool audio windows mci sequencer, one track; false for a missing file and off windows. standalone jaiscript.exe"><h3 id="api-6a2d87f1a5d7"><code>play_midi(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
-<p>Windows MCI sequencer, one track; false for a missing file and off Windows.</p>
-</div>
-<div class="api-entry" data-provider="runner" data-search="play_wav(path: string) -&gt; bool audio asynchronous windows playback; different files can overlap, replay restarts a file; false for a missing file and off windows. standalone jaiscript.exe"><h3 id="api-75c0f76cc3aa"><code>play_wav(path: string) -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
-<p>Asynchronous Windows playback; different files can overlap, replay restarts a file; false for a missing file and off Windows.</p>
+<div class="api-entry" data-provider="runner" data-search="play_sound(path: string, loop: bool = false) -&gt; sound audio load_sound then play: the sound keeps playing when the result is dropped, and stops with stop() or stop_sounds(); null as load_sound. standalone jaiscript.exe"><h3 id="api-4370eefab32f"><code>play_sound(path: string, loop: bool = false) -&gt; Sound</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
+<p>load_sound then play: the Sound keeps playing when the result is dropped, and stops with stop() or stop_sounds(); null as load_sound.</p>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="print(format_or_values: var...) -&gt; void output, callback format string placeholders when applicable; instance to_string methods are respected; skip_newline/skip_flush are control tokens. register_all() or area registration"><h3 id="api-3fd5504ea777"><code>print(format_or_values: var...) -&gt; void</code></h3><p><strong>register_all() or area registration</strong> &middot; output, callback</p>
 <p>Format string placeholders when applicable; instance to_string methods are respected; skip_newline/skip_flush are control tokens.</p>
@@ -627,7 +641,8 @@ print(same_object(a, b), &quot; &quot;, same_object(a, r), &quot; &quot;, a == b
 <div class="api-entry" data-provider="core" data-search="shared_from_this() -&gt; shared_ptr&lt;t&gt; observe method context only. every engine"><h3 id="api-0cb76b5518ef"><code>shared_from_this() -&gt; shared_ptr&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Method context only.</p>
 </div>
-<div class="api-entry" data-provider="runner" data-search="stop_midi() -&gt; bool audio  standalone jaiscript.exe"><h3 id="api-56d0d20f9a99"><code>stop_midi() -&gt; bool</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
+<div class="api-entry" data-provider="runner" data-search="stop_sounds() -&gt; void audio stops every sound. standalone jaiscript.exe"><h3 id="api-acd1d9db6d7c"><code>stop_sounds() -&gt; void</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
+<p>Stops every Sound.</p>
 </div>
 <div class="api-entry" data-provider="runner" data-search="term_cols() -&gt; int observe  standalone jaiscript.exe"><h3 id="api-2462ec1c8c81"><code>term_cols() -&gt; int</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; observe</p>
 </div>

@@ -89,7 +89,7 @@ The soundtrack is composed by the script at boot: a Standard MIDI File (64 bars
 at 124 bpm in A minor over i-VI-III-VII — pumping synth bass, warm pad, a saw
 arpeggiating sixteenths, a square lead improvising on the pentatonic from the
 reel's seed, a four-on-the-floor kit) written to the app cache dir and looped
-through the runner's `play_midi`.
+through the runner's `play_sound`.
 
 Verified: the 1700-frame smoke reel produces the same stream hash and
 byte-identical dumped frames under `--backend=vm` and `--backend=interp`.

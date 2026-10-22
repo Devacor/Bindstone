@@ -2,8 +2,8 @@
 // MUS is a compact MIDI dialect: same note/controller model, 7-bit varlen
 // delays at 140Hz. Transcoding is pure byte work (MIDI division 70 at the
 // default 120bpm = 140 ticks/sec, so delays copy through unchanged); the
-// runner's MCI-backed play_midi does the playback. Tracks convert lazily to
-// cached .mid files; music_tick() restarts the track when it runs out.
+// runner's Sound plays the track, looped. Tracks convert lazily to cached
+// .mid files.
 
 import "wad.jai";
 import "sound.jai";
@@ -117,35 +117,28 @@ function map_music(string mapname) -> string {
 }
 
 var MUSIC_CUR = "";
-var MUSIC_READY = {};         // track name -> mid path ("" = missing/failed)
+var MUSIC_READY = {};         // track name -> its Sound (null = missing/failed)
+var MUSIC_SOUND = null;       // the track playing, looped
 
 function music_want(string name) -> void {
 	if (!SND_ON || MUSIC_CUR == name) { return; }
 	if (!MUSIC_READY.has(name)) {
 		var path = audio_cache_dir() + ("" + name).to_lower() + ".mid";
-		if (file_exists(path)) { MUSIC_READY[name] = path; }           // bootstrap (or an earlier run) already transcoded it
-		else {
+		if (!file_exists(path)) {                    // bootstrap (or an earlier run) already transcoded it
 			var mid = mus_midi_bytes(name);
 			if (mid == "" || !write_file(path, mid)) { path = ""; }
-			MUSIC_READY[name] = path;
 		}
+		MUSIC_READY[name] = path != "" ? load_sound(path) : null;
 	}
 	MUSIC_CUR = name;                                // even when missing: stop retrying per frame
-	var p = MUSIC_READY[name];
-	if (p != "") { play_midi(p); }
-	else { stop_midi(); }
+	if (MUSIC_SOUND != null) { MUSIC_SOUND.stop(); }
+	MUSIC_SOUND = MUSIC_READY[name];
+	if (MUSIC_SOUND != null) { MUSIC_SOUND.play(true); }
 }
 
 function music_stop() -> void {
 	MUSIC_CUR = "";
-	stop_midi();
+	if (MUSIC_SOUND != null) { MUSIC_SOUND.stop(); }
+	MUSIC_SOUND = null;
 }
-
-// call every second or two: MCI has no loop flag, so re-arm on runout
-function music_tick() -> void {
-	if (!SND_ON || MUSIC_CUR == "") { return; }
-	if (midi_status() == "stopped") {
-		var p = MUSIC_READY.get(MUSIC_CUR, "");
-		if (p != "") { play_midi(p); }
-	}
-}
+

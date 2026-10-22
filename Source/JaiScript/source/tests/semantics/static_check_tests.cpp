@@ -2936,6 +2936,182 @@ public:
             check_true(names.size() == 2 && names[0] == "a" && names[1] == "b", "the declarations on both sides of the error are kept");
         });
 
+        // ------------------------------------------------------------ members through references
+        // A reference's referent type is as known as a value's: field names, field stores, method names and arity are checked
+        // through T&, const T&, auto& of a known class, range-for variables and the fields reached through them, with the texts
+        // a value receiver draws
+
+        test("members_through_references_are_checked_like_values", [this]() {
+            auto e = make_engine();
+            const std::string cls = "class W { int n = 0; void put(int v) {} }\n";
+            const std::vector<std::pair<std::string, std::string>> cases = {
+                {"void f(W& w) { w.n = \"ring\"; }", "cannot assign 'string' to field 'n' declared 'int'"},
+                {"void f(W& w) { w.putt(1); }", "no member 'putt' in class 'W'"},
+                {"void f(W& w) { w.put(1, 2); }", "'put' expects 1 argument(s), got 2"},
+                {"void f(W& w) { w.put(\"x\"); }", "cannot pass 'string' to 'v' declared 'int'"},
+                {"void f(W& w) { var g = w.put; }", "'put' is a method of W"},
+                {"void f(const W& w) { print(\"{}\", w.nme); }", "no member 'nme' in class 'W'"},
+                {"void f(const W& w) { w.put(); }", "'put' expects 1 argument(s), got 0"},
+                {"void f(const W& w) { w.n = 4; }", "cannot assign to 'w.n': 'w' is const"},
+                {"W w = W();\nW& r = w;\nr.putt(1);", "no member 'putt' in class 'W'"},
+                {"W w = W();\nauto& r = w;\nr.nme = 1;", "no member 'nme' in class 'W'"},
+                {"W w = W();\nW& r = w;\nauto& q = r;\nq.n = \"s\";", "cannot assign 'string' to field 'n' declared 'int'"},
+                {"array<W> ws = [W()];\nfor (auto& c : ws) { c.nme = 1; }", "no member 'nme' in class 'W'"},
+                {"array<W> ws = [W()];\nfor (W& c : ws) { c.put(); }", "'put' expects 1 argument(s), got 0"},
+                {"array<W> ws = [W()];\nfor (auto c : ws) { c.nme = 1; }", "no member 'nme' in class 'W'"},
+                {"void f(array<W>& ws) { for (auto& c : ws) { c.n = \"s\"; } }", "cannot assign 'string' to field 'n' declared 'int'"},
+                {"class H { W w = W(); array<W> ws = []; map<string, W> named = {}; }\nvoid f(H& h) { h.w.putt(); }", "no member 'putt' in class 'W'"},
+                {"class H { W w = W(); array<W> ws = []; map<string, W> named = {}; }\nvoid f(H& h) { h.ws[0].n = \"s\"; }", "cannot assign 'string' to field 'n' declared 'int'"},
+                {"class H { W w = W(); array<W> ws = []; map<string, W> named = {}; }\nvoid f(H& h) { h.named[\"a\"].nme = 1; }", "no member 'nme' in class 'W'"},
+                {"void f(W& w) { auto g = [w]() { return w.nme; }; }", "no member 'nme' in class 'W'"},
+            };
+            for (const auto& [body, text] : cases) {
+                const std::string src = cls + body;
+                auto r = e->check(src);
+                check_eq((size_t)1, error_count(r), r.format(src));
+                check_true(has_diag(r, dlevel::error, text), r.format(src));
+            }
+            // the value receiver's text, byte for byte
+            auto by_value = e->check(cls + "W w = W();\nw.n = \"ring\";\nw.putt(1);");
+            auto by_ref = e->check(cls + "W w = W();\nW& r = w;\nr.n = \"ring\";\nr.putt(1);");
+            check_eq((size_t)2, by_value.diagnostics.size(), by_value.format());
+            check_eq((size_t)2, by_ref.diagnostics.size(), by_ref.format());
+            for (size_t i = 0; i < 2 && i < by_ref.diagnostics.size() && i < by_value.diagnostics.size(); ++i) {
+                check_eq(by_value.diagnostics[i].message, by_ref.diagnostics[i].message);
+            }
+        });
+
+        test("members_through_references_stay_clean_where_values_do", [this]() {
+            auto e = make_engine();
+            const std::string src = R"(
+                class Unit { int hp = 10; void hit(int d) { hp -= d; } }
+                class Archer : Unit { int range = 6; }
+                class Holder { Unit u = Unit(); array<Unit> squad = [Unit()]; map<string, Unit> named = {"a": Unit()}; }
+                int run(Unit& u, const Unit& cu, var& anything, Holder& h) {
+                    u.hp = 3; u.hit(1);
+                    int total = cu.hp;
+                    cast<Archer&>(u).range = 9;
+                    h.u.hp = 2; h.u.hit(1);
+                    for (auto& m : h.squad) { m.hit(1); }
+                    Unit& first = h.squad[0]; first.hit(1);
+                    h.named["a"].hit(2);
+                    auto& alias = u; alias.hit(2);
+                    auto& deeper = h.u; deeper.hit(1);
+                    var loose = u;
+                    auto f = [&u]() { u.hit(1); };
+                    f();
+                    return total + u.hp + h.u.hp + first.hp + h.named["a"].hp + cast<Archer&>(u).range + loose.range;
+                }
+                Archer a = Archer();
+                Holder h = Holder();
+                var any = 0;
+                run(a, a, any, h)
+            )";
+            auto r = e->check(src);
+            check_eq((size_t)0, r.diagnostics.size(), r.format(src));
+            check_eq((int64_t)35, e->execute(src).as_int());
+            // a var& and an auto& over a var reach anything: the run time decides
+            auto open = e->check("class W { int n = 0; }\nvar v = W();\nvar& r = v;\nr.zz = 1;\nauto& q = v;\nq.yy();\nvoid f(var& x) { x.ww = 2; }");
+            check_eq((size_t)0, error_count(open), open.format());
+        });
+
+        test("subclass_members_through_a_base_reference_are_errors_like_a_base_slot", [this]() {
+            auto e = make_engine();
+            const std::string cls = "class Unit { int hp = 10; }\nclass Archer : Unit { int range = 6; }\n";
+            auto slot = e->check(cls + "Unit u = Archer();\nprint(\"{}\", u.range);");
+            auto ref = e->check(cls + "Archer a = Archer();\nUnit& u = a;\nprint(\"{}\", u.range);");
+            auto param = e->check(cls + "int f(Unit& u) { return u.range; }");
+            for (const auto* r : {&slot, &ref, &param}) {
+                check_eq((size_t)1, error_count(*r), r->format());
+                check_true(has_diag(*r, dlevel::error, "no member 'range' in class 'Unit'"), r->format());
+            }
+            const std::string fixed = cls + "Archer a = Archer();\nUnit& u = a;\nprint(\"{}\", cast<Archer&>(u).range);";
+            check_eq((size_t)0, error_count(e->check(fixed)));
+        });
+
+        test("reference_member_diagnostics_seed_no_proofs", [this]() {
+            // the referent class serves diagnostics only: the proof pass stamps what it stamped before
+            auto e = make_engine();
+            const std::string src = "class W { int n = 0; void put(int v) { n = v; } }\n"
+                                    "void f(W& w) { w.n = 3; w.put(4); }\nW w = W();\nf(w);\nW w2 = W();\nw.n + w2.n";
+            e->execute(src);
+            check_eq((int64_t)4, e->execute(src).as_int());
+            auto plain = make_engine();
+            const std::string open = "class W { int n = 0; void put(int v) { n = v; } }\n"
+                                     "void f(var& w) { w.n = 3; w.put(4); }\nW w = W();\nf(w);\nW w2 = W();\nw.n + w2.n";
+            plain->execute(open);
+            check_eq((int64_t)4, plain->execute(open).as_int());
+            check_eq(plain->last_proof_stats().members, e->last_proof_stats().members, "a T& receiver proves what a var& receiver does");
+            check_eq(plain->last_proof_stats().stores, e->last_proof_stats().stores);
+            check_eq(plain->last_proof_stats().calls, e->last_proof_stats().calls);
+        });
+
+        // ------------------------------------------------------------ comparisons with no comparison
+        test("comparing_types_with_no_comparison_is_an_error", [this]() {
+            auto e = make_engine();
+            const std::string decls = "class C { int v = 1; }\nint i = 1; string s = \"s\"; bool b = true; char c = 'a'; array<int> a = [1]; "
+                                      "map<string, int> m = {}; C oc = C();\n";
+            const std::vector<std::pair<std::string, std::string>> cases = {
+                {"i == s", "cannot compare 'int' with 'string' using '==': the types have no comparison (it is always false); convert one operand"},
+                {"s != i", "cannot compare 'string' with 'int' using '!=': the types have no comparison (it is always true); convert one operand"},
+                {"i < s", "cannot compare 'int' with 'string' using '<': the types have no comparison (it raises 'Invalid operands for < operator'); convert one operand"},
+                {"s <=> 1", "using '<=>'"},
+                {"b == 1", "cannot compare 'bool' with 'int' using '=='"},
+                {"c == \"a\"", "cannot compare 'char' with 'string' using '=='"},
+                {"a == m", "cannot compare 'array<int>' with 'map<string,int>' using '=='"},
+                {"a >= i", "using '>='"},
+                {"oc == 1", "cannot compare 'C' with 'int' using '==': class 'C' declares no comparison operator (it is always false); declare the operator in the class or convert the operand"},
+                {"2 < oc", "cannot compare 'int' with 'C' using '<': class 'C' declares no comparison operator"},
+                {"i == null", "cannot compare 'int' with null using '==': 'int' is never null (it is always false); compare with a value of its type, or declare the slot var to hold null"},
+                {"null != s", "cannot compare 'string' with null using '!=': 'string' is never null (it is always true)"},
+                {"b == null", "cannot compare 'bool' with null using '=='"},
+                {"a == null", "'array<int>' is never null"},
+                {"m != null", "'map<string,int>' is never null"},
+                {"c < null", "cannot compare 'char' with null using '<': 'char' is never null (it raises 'Invalid operands for < operator')"},
+            };
+            for (const auto& [expr, text] : cases) {
+                const std::string src = decls + "bool r = " + expr + ";";
+                auto rep = e->check(src);
+                check_eq((size_t)1, error_count(rep), rep.format(src));
+                check_true(has_diag(rep, dlevel::error, text), rep.format(src));
+            }
+            // warn mode reports it as a warning and runs, with the run-time result unchanged
+            auto w = make_engine();
+            w->static_checking(check_mode::warn);
+            check_eq(false, w->execute("int i = 1; string s = \"s\"; i == s").as<bool>());
+            check_true(has_diag(w->last_check_diagnostics(), dlevel::error, "cannot compare 'int' with 'string'"));
+            // var operands keep the run-time verdict
+            check_eq(false, e->execute("var v = 1; var t = \"s\"; v == t").as<bool>());
+            // an auto takes its initializer's type, then holds to it like a declaration
+            check_true(has_diag(e->check("auto k = 5;\nbool r = k == null;"), dlevel::error, "cannot compare 'int' with null using '=='"));
+            // what can hold null compares with it: class values, handles, functions, var, and a call whose container result falls off its body
+            const std::string nullable = "class C { int v = 1; }\nC oc = C(); shared_ptr<C> h = new C(); weak_ptr<C> w = h; function fn = null; var v = 1;\n"
+                                         "array<int> maybe(int k) { if (k > 0) { return [k]; } }\n"
+                                         "[oc == null, h != null, w == null, fn == null, v == null, maybe(0) == null, null == null].size()";
+            auto quiet = e->check(nullable);
+            check_eq((size_t)0, error_count(quiet), quiet.format(nullable));
+            check_eq((int64_t)7, e->execute(nullable).as_int());
+        });
+
+        test("comparisons_that_exist_stay_clean", [this]() {
+            auto e = make_engine();
+            const std::string src = R"(
+                class C { int v = 1; }
+                class D { int v = 1; bool operator==(int o) { return v == o; } }
+                class K { int v = 2; int operator<=>(var o) { return 0; } }
+                enum E { A, B }
+                int i = 1; float f = 1.0; char c = 'a'; string s = "s"; array<int> a = [1]; map<string, int> m = {};
+                C oc = C(); D od = D(); K ok = K(); shared_ptr<C> h = new C(); var dyn = 3; function fn = (x) => x; var nothing = null;
+                array<bool> r = [i == f, i < c, c == 97, s == "t", a == [2], m != {}, oc == C(), od == 1, 1 == od,
+                                 ok < 3, 3 < ok, h == null, oc == null, fn == null, dyn == "x", dyn < 2, E::A == 0, E::A == E::B, h == h,
+                                 oc == h, a < [3], s < "t", dyn == null, nothing == 1];
+                r.size()
+            )";
+            auto rep = e->check(src);
+            check_eq((size_t)0, rep.diagnostics.size(), rep.format(src));
+            check_eq((int64_t)24, e->execute(src).as_int());
+        });
+
     }
 };
 

@@ -123,6 +123,9 @@ struct ctype {
     // A map key read through a range-for pair (`kv.first`, C++ `const Key`): copies freely,
     // never mutated or aliased (reference, shared_ptr, T& parameter, T& return, cast<T&>)
     bool const_key = false;
+    // The class a reference names (T&, auto& of a known class, a range-for variable over class elements): member diagnostics
+    // read it, while the receiver keeps the proof pass's view (internal/static_checking.md "References")
+    bool diagnostic_only = false;
 	const expression* origin = nullptr; // this use's expression, for literal-only checks
 
     bool is_unknown() const { return kind == unknown; }
@@ -462,7 +465,23 @@ private:
         const lambda_expr* lambda = nullptr;   // a frame-slot local declared with a lambda literal (its calls' graft declaration)
         const enum_decl* enum_def = nullptr;   // an enum declared in a function or block: local to that scope
         bool is_const = false;            // const T x / const T& p / a const reference (auto& over a const) (internal/const.md)
+        ctype referent;                   // the class (or typed container) a reference or an auto range-for variable holds: member diagnostics only
     };
+
+    // A reference's (or an auto loop variable's) known class or typed container, for member diagnostics alone
+    static ctype referent_type(const ctype& t) {
+        const bool known_class = t.kind == ctype::object_k && !t.cls.empty();
+        const bool typed_container = (t.kind == ctype::array_k || t.kind == ctype::map_k) && t.ti;
+        if (!known_class && !typed_container) { return {}; }
+        ctype result = t;
+        result.tentative = true;
+        result.diagnostic_only = true;
+        result.element_proof = false;
+        result.alias_proof = false;
+        result.const_key = false;
+        result.origin = nullptr;
+        return result;
+    }
     std::vector<std::unordered_map<std::string_view, var_entry>> scopes_;
     std::vector<size_t> namespace_scopes_;   // indices into scopes_ that are namespace bodies (their enums are the namespace's)
 
@@ -3651,6 +3670,7 @@ private:
 					return {};
 				}
 				stamp(b->static_operand_class, operand_class_of(l, r), operand_class_unknown);   // annotation only
+				check_comparison(b, l, r);
 				if (l.kind == ctype::object_k) {
 					if (auto user = class_binary_operator(l.cls, b->op.type, r)) { return *user; }
 				}
@@ -3904,6 +3924,38 @@ private:
         return t;
     }
 
+    // What a reference names, for member diagnostics: a reference local, parameter or loop variable of a known class or typed
+    // container, then the fields and elements reached through it. The proof pass never reads it.
+    ctype referent_receiver(const expression* e) {
+        if (!e) { return {}; }
+        switch (e->get_type()) {
+            case node_type::identifier_expr: {
+                const auto* id = static_cast<const identifier_expr*>(e);
+                if (extended_names_.count(id->name)) { return {}; }
+                const var_entry* local = find_named(id);
+                return local ? local->referent : ctype{};
+            }
+            case node_type::member_expr: {
+                const auto* m = static_cast<const member_expr*>(e);
+                if (m->is_static || m->null_safe || extended_members_.count(m->member)) { return {}; }
+                const ctype held = referent_receiver(m->object.get());
+                if (held.kind != ctype::object_k) { return {}; }
+                const member_hit hit = lookup_member(held.cls, m->member, false);
+                if (!hit.found || hit.methods || !hit.field || hit.field->is_static || !hit.field->type || chain_has_user_accessor(held.cls, m->member)) { return {}; }
+                return referent_type(member_type(hit));
+            }
+            case node_type::binary_expr: {
+                const auto* b = static_cast<const binary_expr*>(e);
+                if (b->op.type != token_type::left_bracket) { return {}; }
+                const ctype held = referent_receiver(b->left.get());
+                if (held.kind != ctype::array_k && held.kind != ctype::map_k) { return {}; }
+                return referent_type(container_value_type(held));
+            }
+            default:
+                return {};
+        }
+    }
+
     ctype infer_member(member_expr* m, bool writing, const variable_decl** typed_field_out = nullptr,
                        ctype* recv_out = nullptr, member_hit* hit_out = nullptr,
                        std::optional<field_proof>* proof_out = nullptr) {
@@ -3940,6 +3992,13 @@ private:
 			if (!recv.tentative && m->member != "next" && m->member != "done") { coroutine_member_missing(m); }
 			return {};
 		}
+		if (recv.is_unknown() && !m->is_static) {
+			if (const ctype held = referent_receiver(m->object.get()); held.kind == ctype::object_k) {
+				std::optional<field_proof> unused;
+				infer_class_member(m, held, writing, typed_field_out, hit_out, unused);
+				if (recv_out) { *recv_out = held; }
+			}
+		}
 		if (recv.is_unknown() && !writing) {
 			if (ctype t = reference_field_read(m); !t.is_unknown()) { return t; }
 		}
@@ -3950,6 +4009,13 @@ private:
 			if (!writing && !recv.tentative && !m->is_static) { builtin_method_value(recv, m); }
 			return {};   // builtin methods / map keys / dynamic: lenient
 		}
+		return infer_class_member(m, recv, writing, typed_field_out, hit_out, fp);
+	}
+
+	// A member of a class, an enum or a class used as a value; a reference's referent (diagnostic_only) is checked alike and seeds
+	// no field proof
+	ctype infer_class_member(member_expr* m, const ctype& recv, bool writing, const variable_decl** typed_field_out,
+							 member_hit* hit_out, std::optional<field_proof>& fp) {
 		if (extended_members_.count(m->member)) { return {}; }
 		if (class_dot_receiver(m, recv)) { return {}; }
 		if (recv.kind == ctype::enum_ref_k) {
@@ -3971,7 +4037,7 @@ private:
 		if (!want_static && chain_has_user_accessor(cls, m->member)) { return accessor_read_type(cls, m->member); }   // a user _get_/_set_ answers: known member, typed only by a single declared getter, never a proof
 		if (hit.found) {
 			if (typed_field_out && hit.field && (hit.field->type || hit.field->function_spelling)) { *typed_field_out = hit.field; }
-			if (recv.kind == ctype::object_k && !m->null_safe && !m->is_static &&
+			if (recv.kind == ctype::object_k && !recv.diagnostic_only && !m->null_safe && !m->is_static &&
 				m->object->get_type() != node_type::super_expr) {
 				fp = resolve_field_proof(cls, m->member, hit);
 			}
@@ -4252,39 +4318,9 @@ private:
 			}
 			if (recv.const_key && string_mutator_name(m->member)) { map_key_mutation(m->location, m->object.get()); }
 			if (class_dot_receiver(m, recv)) { return {}; }
-			if (recv.kind == ctype::object_k || recv.kind == ctype::class_ref_k) {
-				bool want_static = (recv.kind == ctype::class_ref_k);
-				member_hit hit = lookup_member(recv.cls, m->member, want_static);
-				if (!hit.found && !want_static && chain_has_user_accessor(recv.cls, m->member)) { return {}; }   // calling what a user _get_ returns
-				if (hit.found) {
-					if (hit.methods) {
-						if (hit.provable) { ov = hit.methods; ov_class_ = recv.cls; }
-						ctype r = check_script_overloads(m->member, *hit.methods, args, c->location, hit.foreign).result;
-						if (!hit.provable) { r.tentative = true; }
-						return r;
-					}
-					if (!want_static) { return check_strict_host_method(recv.cls, m->member, args, c->location); }
-					return {};
-				}
-				if (!want_static) {
-					if (ctype t; handle_builtin_result(m->member, t)) { return t; }
-				}
-				if (stale_shape_receiver(recv, m->object.get())) { return {}; }
-				if (hit.certain && !want_static && m->object->get_type() == node_type::this_expr && recv.cls == class_ctx_name_ &&
-					report_cdtor_call(m->member, m->location)) {
-					return {};
-				}
-				if (hit.certain) {
-					size_t rl = 0, rc = 0;
-					if (auto it = classes_.find(recv.cls); it != classes_.end()) {
-						rl = it->second.decl->location.line;
-						rc = it->second.decl->location.column;
-					}
-					diag(diag_level::error, m->location,
-						 std::string(want_static ? "no static member '" : "no member '") + std::string(m->member) +
-						 "' in class '" + std::string(recv.cls) + "'", rl, rc);
-				}
-				return {};
+			if (recv.kind == ctype::object_k || recv.kind == ctype::class_ref_k) { return class_member_call(c, m, recv, args, &ov); }
+			if (recv.is_unknown() && !m->is_static) {
+				if (const ctype held = referent_receiver(m->object.get()); held.kind == ctype::object_k) { class_member_call(c, m, held, args, nullptr); }
 			}
 			if (recv.kind == ctype::enum_ref_k) {
 				return {};
@@ -4326,6 +4362,44 @@ private:
 		infer(callee);
 		return {};
 	}
+
+    // recv.m(args) on a class or a class used as a value; ov (null for a reference's referent: diagnostics only) takes the overloads
+    // a proof may rest on
+    ctype class_member_call(call_expr* c, member_expr* m, const ctype& recv, const std::vector<ctype>& args,
+                            const std::vector<const function_decl*>** ov) {
+        bool want_static = (recv.kind == ctype::class_ref_k);
+        member_hit hit = lookup_member(recv.cls, m->member, want_static);
+        if (!hit.found && !want_static && chain_has_user_accessor(recv.cls, m->member)) { return {}; }   // calling what a user _get_ returns
+        if (hit.found) {
+            if (hit.methods) {
+                if (hit.provable && ov) { *ov = hit.methods; ov_class_ = recv.cls; }
+                ctype result = check_script_overloads(m->member, *hit.methods, args, c->location, hit.foreign).result;
+                if (!hit.provable) { result.tentative = true; }
+                return result;
+            }
+            if (!want_static) { return check_strict_host_method(recv.cls, m->member, args, c->location); }
+            return {};
+        }
+        if (!want_static) {
+            if (ctype t; handle_builtin_result(m->member, t)) { return t; }
+        }
+        if (stale_shape_receiver(recv, m->object.get())) { return {}; }
+        if (hit.certain && !want_static && m->object->get_type() == node_type::this_expr && recv.cls == class_ctx_name_ &&
+            report_cdtor_call(m->member, m->location)) {
+            return {};
+        }
+        if (hit.certain) {
+            size_t rl = 0, rc = 0;
+            if (auto it = classes_.find(recv.cls); it != classes_.end()) {
+                rl = it->second.decl->location.line;
+                rc = it->second.decl->location.column;
+            }
+            diag(diag_level::error, m->location,
+                 std::string(want_static ? "no static member '" : "no member '") + std::string(m->member) +
+                 "' in class '" + std::string(recv.cls) + "'", rl, rc);
+        }
+        return {};
+    }
 
     // -------------------------------------------------------------- assignment
 
@@ -4451,7 +4525,7 @@ private:
 								"field '" + std::string(typed_field->name) + "'", a->location,
 								hit.foreign ? 0 : typed_field->location.line, hit.foreign ? 0 : typed_field->location.column);
 				}
-				return ft;
+				return recv.diagnostic_only ? result_type : ft;
 			}
 			if (recv.kind == ctype::object_k && !m->is_static) { check_accessor_store(recv.cls, m->member, rhs, compound, base_op, a->location); }
 			return result_type;
@@ -4659,6 +4733,82 @@ private:
              "' compare by identity: declare operator<=> (or operator<) or hash() to key its values by value");
     }
 
+    static const char* comparison_spelling(token_type op) {
+        switch (op) {
+            case token_type::equal_equal: return "==";
+            case token_type::bang_equal: return "!=";
+            case token_type::less: return "<";
+            case token_type::less_equal: return "<=";
+            case token_type::greater: return ">";
+            case token_type::greater_equal: return ">=";
+            case token_type::spaceship: return "<=>";
+            default: return nullptr;
+        }
+    }
+
+    // A class whose chain declares (or a host binds) any comparison operator, either way round, or one the checker cannot see whole
+    bool class_may_compare(std::string_view cls) {
+        for (std::string_view name : {"==", "!=", "<", "<=", ">", ">=", "<=>"}) {
+            if (extended_members_.count(name)) { return true; }
+            const member_hit hit = lookup_member(cls, name, /*want_static=*/false);
+            if (hit.found || !hit.certain) { return true; }
+            const member_hit reflected = lookup_member(cls, engine::reflected_operator_name(name), /*want_static=*/false);
+            if (reflected.found || !reflected.certain) { return true; }
+        }
+        return chain_open(cls);
+    }
+
+    // Two declared types with no comparison between them: == and != are constant, the orderings raise at run time
+    void check_comparison(const binary_expr* b, const ctype& l, const ctype& r) {
+        const char* op = comparison_spelling(b->op.type);
+        if (!op || l.tentative || r.tentative || eng_.has_function(op)) { return; }
+        if ((l.kind == ctype::null_k) != (r.kind == ctype::null_k)) {
+            check_null_comparison(b, l.kind == ctype::null_k ? r : l, l.kind == ctype::null_k ? b->right.get() : b->left.get(), op);
+            return;
+        }
+        const auto comparable_kind = [](const ctype& t) {
+            switch (t.kind) {
+                case ctype::int_k: case ctype::float_k: case ctype::char_k: case ctype::bool_k: case ctype::string_k: case ctype::utf8_k:
+                case ctype::array_k: case ctype::map_k: case ctype::function_k: return true;
+                case ctype::object_k: return !t.cls.empty();
+                default: return false;
+            }
+        };
+        if (!comparable_kind(l) || !comparable_kind(r)) { return; }
+        const auto family = [](ctype::kind_t k) {
+            return is_numeric_or_char(k) ? 1 : (k == ctype::string_k || k == ctype::utf8_k) ? 2 : 3 + static_cast<int>(k);
+        };
+        if (l.kind == ctype::object_k && r.kind == ctype::object_k) { return; }
+        const ctype* object = l.kind == ctype::object_k ? &l : r.kind == ctype::object_k ? &r : nullptr;
+        if (object && class_may_compare(object->cls)) { return; }
+        if (!object && family(l.kind) == family(r.kind)) { return; }
+        const bool equality = b->op.type == token_type::equal_equal || b->op.type == token_type::bang_equal;
+        std::string text = "cannot compare '" + ctype_name(l) + "' with '" + ctype_name(r) + "' using '" + op + "': ";
+        text += object ? "class '" + std::string(object->cls) + "' declares no comparison operator" : std::string("the types have no comparison");
+        text += equality ? std::string(" (it is always ") + (b->op.type == token_type::equal_equal ? "false" : "true") + ")"
+                         : std::string(" (it raises 'Invalid operands for ") + op + " operator')";
+        text += object ? "; declare the operator in the class or convert the operand" : "; convert one operand";
+        diag(diag_level::error, b->location, text);
+    }
+
+    // null against a declared slot that never holds it (a store of null raises or converts there); class values, handles and
+    // functions hold null, and a call's container or class result is null when the body falls off its end
+    void check_null_comparison(const binary_expr* b, const ctype& t, const expression* operand, const char* op) {
+        switch (t.kind) {
+            case ctype::int_k: case ctype::float_k: case ctype::char_k: case ctype::bool_k: case ctype::string_k: case ctype::utf8_k: break;
+            case ctype::array_k: case ctype::map_k: case ctype::math_k:
+                if (operand && operand->get_type() == node_type::call_expr) { return; }
+                break;
+            default: return;
+        }
+        const bool equality = b->op.type == token_type::equal_equal || b->op.type == token_type::bang_equal;
+        const std::string name = ctype_name(t);
+        diag(diag_level::error, b->location, "cannot compare '" + name + "' with null using '" + op + "': '" + name + "' is never null" +
+             (equality ? std::string(" (it is always ") + (b->op.type == token_type::equal_equal ? "false" : "true") + ")"
+                       : std::string(" (it raises 'Invalid operands for ") + op + " operator')") +
+             "; compare with a value of its type, or declare the slot var to hold null");
+    }
+
     std::optional<ctype> class_binary_operator(std::string_view cls, token_type op, const ctype& r) {
         std::string_view name;
         switch (op) {
@@ -4776,6 +4926,14 @@ private:
                 entry.dynamic = !f->element_type || f->element_type->base_type == script_value_type::jai_any_type ||
                                 f->is_reference;
                 entry.is_reference = f->is_reference;
+                if (entry.dynamic) {   // T& over elements, or auto (by value or reference) over class elements
+                    ctype held = elem;
+                    if (held.is_unknown() && container.is_unknown() && f->auto_spelled) {
+                        const ctype through = referent_receiver(f->container.get());
+                        if (through.kind == ctype::array_k && through.ti && through.ti->element_type()) { held = ctype_from_type_info(through.ti->element_type().get()); }
+                    }
+                    entry.referent = referent_type(f->auto_spelled ? held : entry.type);
+                }
                 entry.map_pair = container.kind == ctype::map_k;
                 if (f->is_reference && container.kind != ctype::map_k) {
                     // an alias of a typed buffer's element holds the element's kind (the buffer converts every store): the builtin receiver
@@ -5157,6 +5315,12 @@ private:
 				entry.alias.alias_proof = true;
 			}
 			entry.is_reference = is_reference_decl;
+			if (is_reference_decl) {
+				// auto& takes its initializer's class; var& stays dynamic
+				const bool auto_referent = decl->type->type_params.empty() || !decl->type->type_params[0];
+				const ctype source = !has_init ? ctype{} : !init.is_unknown() ? init : referent_receiver(decl->initializer.get());
+				entry.referent = referent_type(auto_referent ? source : entry.type);
+			}
 			entry.is_handle = decl->type->base_type == script_value_type::jai_shared_ptr_type;
 			const bool plain_kind = decl->type->base_type != script_value_type::jai_shared_ptr_type &&
 									decl->type->base_type != script_value_type::jai_weak_ptr_type &&
@@ -5297,6 +5461,7 @@ private:
             entry.type = pt;
             entry.dynamic = pt.is_unknown() || p.is_reference;
             entry.is_reference = p.is_reference;
+            if (p.is_reference) { entry.referent = referent_type(pt); }
             entry.is_handle = p.type && p.type->base_type == script_value_type::jai_shared_ptr_type;
             entry.declared = p.type.get();
             entry.display = p.type ? p.type->canonical_name() : "auto";

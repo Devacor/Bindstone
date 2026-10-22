@@ -304,6 +304,21 @@ copy-on-write path at runtime: strings share their node until the first in-place
 map is never touched. `m.keys()[i]` stays lenient (builtin results are untyped here); a pair
 that escapes whole into a container or a by-value parameter loses the marker.
 
+**References** — a reference local, parameter or range-for variable (and an `auto` range-for variable over class elements)
+keeps its referent's class or typed container in `var_entry::referent`; `referent_receiver` follows it through fields and
+elements. Member diagnostics read it exactly as a value receiver's class (no member, method values, arity and arguments, field
+and accessor stores, read-only properties), while the receiver keeps the proof pass's view: unknown, so no field proof, call
+proof, store proof or result type changes, and a reference's own reads and stores stay as before. `var&` and `auto&` over an
+unknown value have no referent.
+
+**Comparisons** — `== != < <= > >= <=>` between two non-tentative declared types with no comparison is an error: numbers and
+chars are one family, strings and utf8 strings another, every other kind (bool, array, map, function) compares only with
+itself, and a class operand passes when its chain declares any comparison operator or reflected form (or the checker cannot
+see the chain whole). `null` against int, float, char, bool, string, utf8, array, map or math is an error (those slots raise or convert on a
+null store; an array, map or math call result is skipped, since a body that falls off its end returns null); class values, handles,
+weak handles and functions hold null. Two class operands, unknown and tentative operands, math kinds, weak and coroutine handles, and a host free
+operator function of that name are left to the run time.
+
 **Casts** — `cast<T>(e)` types as certain `T` (a typed local initialized from it proves
 `same_type`), `cast<T&>(e)` as `T` for member lookup only (a reference: never a store proof),
 `cast<shared_ptr<T>>(e)` as the handle spelling; primitives type as the primitive. A store through

@@ -126,11 +126,27 @@ public:
             check_eq(std::string("[   42]\n"), capture->str());
         });
 
-        test("format_spec_invalid_stays_literal", [this]() {
+        test("format_spec_outside_the_subset_raises", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            // Lenient like invalid positional indexes: a non-parsing spec is not a placeholder
-            check_eq(std::string("1 {:zz}"), engine->execute(R"(format("{} {:zz}", 1);)").as<std::string>());
+            // a {n:...} placeholder whose spec the subset does not have raises, naming it; a {...} that is no placeholder stays literal
+            auto caught = [&](const char* call) {
+                return engine->execute(std::string("var msg = \"none\"; try { ") + call + "; } catch (e) { msg = e; } msg;").as<std::string>();
+            };
+            check_eq(std::string("Unsupported format spec ':zz' in format string"), caught("format(\"{} {:zz}\", 1, 2)"));
+            check_eq(std::string("Unsupported format spec ':,x' in format string"), caught("format(\"{:,x}\", 255)"));
+            check_eq(std::string("Unsupported format spec ':#x' in format string"), caught("print(\"{0:#x}\", 255)"));
+            check_eq(std::string("{\"a\": 1} 2"), engine->execute(R"(format("{\"a\": 1} {}", 2);)").as<std::string>());
+        });
+
+        test("format_spec_groups_thousands", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            check_eq(std::string("1,234,567 1,234,567.89 1_234_567 dead_beef 00,001,234 -0,001,234    1,234,567| -1,234,567.5 12 -999"),
+                     engine->execute(R"(format("{:,} {:,.2f} {:_} {:_x} {:010,} {:010,} {:>12,}| {:,} {:,} {:,}", 1234567, 1234567.891, 1234567, 3735928559, 1234, -1234, 1234567, -1234567.5, 12, -999);)").as<std::string>());
+            check_eq(std::string("1,234,567 0.500 9_876_543_210 +1,000"), engine->execute(R"(`${1234567:,} ${0.5:,.3f} ${9876543210:_d} ${1000:+,}`;)").as<std::string>());
+            auto result = engine->execute(R"(var msg = ""; try { format("{:,}", "abc"); } catch (e) { msg = e; } msg;)");
+            check_eq(std::string("format spec ':,' does not apply to string value"), result.as<std::string>());
         });
 
         test("format_spec_type_mismatch_throws", [this]() {

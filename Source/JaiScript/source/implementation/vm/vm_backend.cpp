@@ -2295,6 +2295,7 @@ void vm_backend::exec_map(frame& f, const vm_instruction& ins) {
 	script_value mapValue = script_value::make_map(nullptr, nullptr, engine_);
 	auto& map = const_cast<script_map&>(mapValue.as_map());
 	const size_t n = ins.a;
+	map.reserve(n);
 	const size_t base = stack_.size() - n * 2;
 	const auto* literal = static_cast<const map_literal_expr*>(f.code->nodes[ins.b].get());
 	// All-detach rule: literal construction is a store boundary -
@@ -11893,6 +11894,45 @@ JAI_NOINLINE std::optional<op_status> vm_backend::index_text_append(frame& f) {
 	return op_status{};
 }
 
+// m[k] op= v on a number stored in a map, the number on the right: the replay's INDEX + INDEX_COMPOUND on the entry the caller
+// found, with no entry reference (one lookup, no holder). The same zero checks, arithmetic and element conversion in the same
+// order; no user code runs. handled = false leaves the operands to the replay.
+JAI_NOINLINE op_status vm_backend::map_numeric_compound(frame& f, const vm_instruction& ins, const script_value& container, script_value& target, bool& handled) {
+	handled = false;
+	const script_value& rhs = stack_.back();
+	const size_t rk = rhs.raw_storage_index();
+	const size_t tk = target.raw_storage_index();
+	if ((rk != script_value::TYPEID_INT && rk != script_value::TYPEID_FLOAT) || (tk != script_value::TYPEID_INT && tk != script_value::TYPEID_FLOAT)) { return {}; }
+	const type_info* map_tag = container.type_info_raw();
+	const type_info_ptr element_type = map_tag ? map_tag->value_type() : nullptr;
+	if (element_type && element_type->base_type == script_value_type::jai_object_type) { return {}; }
+	handled = true;
+	const token_type op = compound_kind_token(ins.a);
+	if (op == token_type::slash &&
+	    ((rk == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) || (rk == script_value::TYPEID_FLOAT && rhs.unchecked_as_float() == 0.0))) {
+		return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+	}
+	if (op == token_type::percent && rk == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) {
+		return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
+	}
+	script_value resultValue = make_null();
+	VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(target, op, rhs, detail::compound_index(op)));
+	if (element_type) {
+		if (!vm_is_element_type_compatible(resultValue, element_type, target)) {
+			return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", resultValue, element_type));
+		}
+		auto converted_result = vm_convert_array_element(engine_, resultValue, element_type);
+		if (!converted_result) { return raise_from(converted_result); }
+		target = std::move(converted_result.value());
+	} else {
+		target = resultValue.clone();
+	}
+	stack_.pop_back();   // rhs
+	stack_.pop_back();   // index
+	stack_.back() = assignment_result_used(f) ? clone_for_assignment(target) : std::move(resultValue);
+	return {};
+}
+
 op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& ins) {
 	if (ins.a & compound_flag_value_first) {
 		// [rhs, container, index] -> [container, index, rhs]
@@ -11909,7 +11949,12 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 			if (key_type && key_type->base_type != script_value_type::jai_any_type && key.type() != key_type->base_type) {
 				return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key, key_type));
 			}
-			(void)detail::map_compound_insert_default(container, key, engine_);
+			script_value* target = detail::map_compound_target(container, key, engine_);
+			if (target && (ins.b & index_flag_lvalue_shape) != 0 && (ins.a & compound_flag_old_result) == 0 && !(operator_table_ && operator_table_->any())) {
+				bool handled = false;
+				const op_status st = map_numeric_compound(f, ins, container, *target, handled);
+				if (handled) { return st; }
+			}
 		}
 	}
 	// stack: [container, index, rhs]. Numeric fast path: all peeks are read-only and

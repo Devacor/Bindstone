@@ -28,8 +28,14 @@
 #include <iterator>
 #include <utility>
 #include <jaiscript/detail/copy_census.hpp>
+#include <jaiscript/detail/text_hash.hpp>
 
 namespace jai {
+
+    // operator<=> ranks a string by its type first, so the type seeds the text's hash
+    inline uint64_t script_value::map_string_key_hash(std::string_view text) noexcept {
+        return static_cast<uint64_t>(detail::text_hash(text)) ^ (static_cast<uint64_t>(script_value_type::jai_string_type) * 0x9E3779B97F4A7C15ull);
+    }
 
     // the payload mix of script_value::map_key_hash (seeded by the type rank); hashes stay 64-bit on a 32-bit host, so a map
     // keyed by numbers lays out (and destroys its entries) in the same order there
@@ -57,7 +63,11 @@ namespace jai {
             const size_t k = a.raw_storage_index();   // same-kind ints and strings compare their payloads, as operator<=> does
             if (k == b.raw_storage_index()) {
                 if (k == script_value::TYPEID_INT) return a.unchecked_as_int() == b.unchecked_as_int();
-                if (k == script_value::TYPEID_STRING) return a.unchecked_as_string() == b.unchecked_as_string();
+                if (k == script_value::TYPEID_STRING) {
+                    const std::string& x = a.unchecked_as_string();
+                    const std::string& y = b.unchecked_as_string();
+                    return &x == &y || x == y;   // copies of one string share its node
+                }
             }
             return (a <=> b) == 0;
         }
@@ -92,18 +102,23 @@ namespace jai {
     private:
         // An entry lives in its own allocation until it is erased (references and pointers into it stay valid); the index is
         // open addressing over {hash, entry}: a probe compares the cached hash before it touches an entry
-        // A string key of at most eight bytes keeps them beside the hash: a probe settles it without reaching the key's text
+        // A string key of at most sixteen bytes keeps them beside the hash: a probe settles it without reaching the key's text
         static constexpr uint32_t no_short = UINT32_MAX;
-        struct short_key { uint64_t text = 0; uint32_t len = no_short; };
-        static short_key short_of(std::string_view t) noexcept {
+        struct short_key { uint64_t low = 0; uint64_t high = 0; uint32_t len = no_short; };
+        JAI_FORCEINLINE static short_key short_of(std::string_view t) noexcept {
             short_key k;
-            if (t.size() <= 8) { std::memcpy(&k.text, t.data(), t.size()); k.len = static_cast<uint32_t>(t.size()); }
+            const size_t n = t.size();
+            if (n <= 16) {
+                k.low = detail::text_pack_short(t.data(), n < 8 ? n : 8);
+                k.high = n > 8 ? detail::text_pack_short(t.data() + 8, n - 8) : 0;
+                k.len = static_cast<uint32_t>(n);
+            }
             return k;
         }
-        static short_key short_of(const script_value& v) noexcept {
+        JAI_FORCEINLINE static short_key short_of(const script_value& v) noexcept {
             return v.raw_storage_index() == script_value::TYPEID_STRING ? short_of(std::string_view(v.unchecked_as_string())) : short_key{};
         }
-        static short_key short_of(const map_string_key_probe& p) noexcept { return short_of(p.text); }
+        JAI_FORCEINLINE static short_key short_of(const map_string_key_probe& p) noexcept { return short_of(p.text); }
         struct entry {
             uint64_t hash;
             short_key brief;
@@ -116,7 +131,7 @@ namespace jai {
         // the probe's key test: two short string keys by their bytes, anything else by the key equality
         template <typename K>
         static bool same_key(const entry* e, const short_key& b, const K& key) {
-            if (b.len != no_short && e->brief.len != no_short) { return b.len == e->brief.len && b.text == e->brief.text; }
+            if (b.len != no_short && e->brief.len != no_short) { return b.len == e->brief.len && b.low == e->brief.low && b.high == e->brief.high; }
             return script_value_key_eq{}(e->kv.first, key);
         }
         // the entries' storage: chunks that never move (an entry stays where it was made until it is erased), filled in
@@ -140,6 +155,11 @@ namespace jai {
                 cursor_ = o.cursor_; left_ = o.left_; next_count_ = o.next_count_; free_ = o.free_;
                 o.reset();
                 return *this;
+            }
+            // the first chunk sized for count entries (a map built at once in one allocation)
+            void reserve(size_t count) {
+                if (!chunks_.empty() || count <= next_count_) return;
+                next_count_ = std::min<size_t>(count, 4096);
             }
             template <typename... A>
             entry* make(A&&... a) {
@@ -486,10 +506,21 @@ namespace jai {
         void prepare_order() const { build_order(); }   // the order view built now (ahead of concurrent readers)
         size_type size() const noexcept { return size_; }
         bool empty() const noexcept { return size_ == 0; }
+        // room for count entries: the index sized once, the entries' first chunk holding them all
+        void reserve(size_t count) {
+            grow_for(count);
+            pool_.reserve(count);
+        }
         void clear() noexcept {
             std::vector<entry*> dying = detach_all();
             changed();
             for (entry* e : dying) { pool_.destroy(e); }
+        }
+
+        // every entry once, in the index's order: for a walk whose outcome no order can change (no key order is built)
+        template <typename F>
+        void for_each_unordered(F&& f) const {
+            for (const slot& s : slots_) { if (s.e) { f(static_cast<const value_type&>(s.e->kv)); } }
         }
 
         iterator begin() { build_order(); iterator it(this, nullptr, npos, gen_, false); it.seat(0); return it; }
@@ -636,7 +667,13 @@ namespace jai {
                 return;
             }
         }
-        clear();
+        // the index leaves the map whole (no copy of the entry list): the map is empty and consistent before any value dies
+        std::vector<slot> index;
+        index.swap(slots_);
+        size_ = 0;
+        class_keys_.reset();
+        changed();
+        for (const slot& s : index) { if (s.e) { pool_.destroy(s.e); } }
     }
 
 } // namespace jai

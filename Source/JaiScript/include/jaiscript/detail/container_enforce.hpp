@@ -48,17 +48,23 @@ namespace jai::detail {
 
 	// A compound target m[k] on a missing key: insert the value type's default so the compound applies to it; false when the
 	// map has no default for its value type (the compound then meets null as before)
-	inline bool map_compound_insert_default(script_value& map_value, const script_value& key, engine* eng) {
+	// The compound's target value in the map (inserted as above when missing), or null when the key is missing and the value
+	// type has no default
+	inline script_value* map_compound_target(script_value& map_value, const script_value& key, engine* eng) {
 		auto& map = const_cast<script_map&>(map_value.as_map());
-		if (map.find(key) != map.end()) { return true; }
+		if (const script_map::value_type* hit = map.lookup(key)) { return const_cast<script_value*>(&hit->second); }
 		auto def = map_value_default(map_value, eng);
-		if (!def) { return false; }
+		if (!def) { return nullptr; }
 		script_value k = key;
 		if (!k.has_valid_engine()) { k.set_engine(eng); }
 		auto tag = map_value.get_type_info();
 		def->set_type_info(tag->value_type());
-		map[k] = std::move(*def);
-		return true;
+		script_value& slot = map[k];
+		slot = std::move(*def);
+		return &slot;
+	}
+	inline bool map_compound_insert_default(script_value& map_value, const script_value& key, engine* eng) {
+		return map_compound_target(map_value, key, eng) != nullptr;
 	}
 
 	inline std::string container_base_type_name(script_value_type type) {
@@ -776,23 +782,29 @@ namespace jai::detail {
 			}
 			const auto& entries = value.unchecked_as_map();
 			bool needs_conversion = false;
-			for (const auto& entry : entries) {
-				if (!key_open) {
-					// keys never coerce: converting 1.5 -> 1 could merge entries
-					const script_value& actual_key = entry.first.is_reference() ? entry.first.deref() : entry.first;
-					if (actual_key.type() != key_type->base_type) {
-						out.offending = container_value_type_name(actual_key);
+			// the offending key or value, else null; keys never coerce (converting 1.5 -> 1 could merge entries)
+			auto mismatch = [&](const script_map::value_type& entry) -> const script_value* {
+				const script_value& actual_key = entry.first.is_reference() ? entry.first.deref() : entry.first;
+				if (!key_open && actual_key.type() != key_type->base_type) { return &actual_key; }
+				const script_value& actual = entry.second.is_reference() ? entry.second.deref() : entry.second;
+				if (!value_open && !container_element_compatible(actual, value_type, eng)) { return &actual; }
+				return nullptr;
+			};
+			// the checks are pure: they run in the index's order, and only a failure walks the keys in order for the first one
+			bool fits = true;
+			entries.for_each_unordered([&](const script_map::value_type& entry) { if (fits && mismatch(entry)) { fits = false; } });
+			if (!fits) {
+				for (const auto& entry : entries) {
+					if (const script_value* bad = mismatch(entry)) {
+						out.offending = container_value_type_name(*bad);
 						out.expected = target_type->canonical_name();
 						return out;
 					}
 				}
+			}
+			entries.for_each_unordered([&](const script_map::value_type& entry) {
 				if (!value_open) {
 					const script_value& actual = entry.second.is_reference() ? entry.second.deref() : entry.second;
-					if (!container_element_compatible(actual, value_type, eng)) {
-						out.offending = container_value_type_name(actual);
-						out.expected = target_type->canonical_name();
-						return out;
-					}
 					const auto value_base = value_type->base_type;
 					if (actual.type() != value_base &&
 					    (value_base == script_value_type::jai_int_type ||
@@ -808,7 +820,7 @@ namespace jai::detail {
 						needs_conversion = true;   // nested value: rebuilt through its own boundary below
 					}
 				}
-			}
+			});
 			if (!needs_conversion) {
 				value.set_type_info(target_type);
 				out.value = std::move(value);

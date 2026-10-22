@@ -125,7 +125,11 @@ if [ "$TIER" != battery-only ]; then
 		echo "CHERRY-PICK FAILED at $c"
 		echo "$conflicted" | head -5
 		git cherry-pick --abort
-		exit 1
+		# Picks that applied before the failure stay on master, so they are still checked below
+		if [ "$(git rev-parse HEAD)" = "$(git rev-parse "$BEFORE")" ]; then exit 1; fi
+		PARTIAL="stopped at $(git log --oneline -1 "$c" | cut -c1-60)"
+		echo "checking the picks that applied ($PARTIAL)"
+		break
 	done
 	echo "landed tip: $(git rev-parse --short HEAD)"
 fi
@@ -151,7 +155,7 @@ if [ "$TIER" = targeted ]; then
 		echo "CLIENT GATE DONE (not needed)" > "$LOG_DIR/land_${L}_client.txt"
 	fi
 	if grep -q "CLIENT GATE DONE" "$LOG_DIR/land_${L}_client.txt"; then
-		echo "$L LANDED (targeted) $HEADSHA"
+		echo "$L LANDED (targeted) $HEADSHA${PARTIAL:+ (PARTIAL: $PARTIAL)}"
 		exit 0
 	fi
 	echo "$L NOT GREEN: $(grep -aE 'CLIENT GATE FAILED' "$LOG_DIR/land_${L}_client.txt" | head -1) (master holds the picks; fix forward)"

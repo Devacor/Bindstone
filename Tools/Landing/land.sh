@@ -26,6 +26,9 @@ LOG_DIR="${LAND_LOG_DIR:-$(lockq_temp_dir)/bindstone-land}"
 export LAND_LOG_DIR="$LOG_DIR" JAI_CI_LOG_DIR="$LOG_DIR"
 mkdir -p "$LOG_DIR"
 UNION_FILES="${LAND_UNION_FILES:-Source/JaiScript/docs/PERF_PASS_2026-09-02.md}"
+# Generated from the site's own sources: a conflict in them is settled by regenerating once the sources merged
+SEARCH_INDEX="Source/JaiScript/docs/site/assets/search-index.js"
+API_OUTPUTS="Source/JaiScript/docs/site/reference/api.html Source/JaiScript/include/jaiscript/detail/builtin_api_arities.hpp"
 
 # client_choice <rev-range>: sets CLIENT_BUILD_WHY and CLIENT_VERIFY_WHY from the paths the range touches
 client_choice() {
@@ -96,13 +99,26 @@ if [ "$TIER" != battery-only ]; then
 			echo "skipped $(git log --oneline -1 "$c" | cut -c1-70) (already on master)"
 			continue
 		fi
-		union_only=1
-		for f in $conflicted; do case " $UNION_FILES " in *" $f "*) ;; *) union_only=0 ;; esac; done
-		if [ "$union_only" = 1 ] && [ -n "$conflicted" ]; then
+		resolvable=1
+		for f in $conflicted; do case " $UNION_FILES $SEARCH_INDEX $API_OUTPUTS " in *" $f "*) ;; *) resolvable=0 ;; esac; done
+		if [ "$resolvable" = 1 ] && [ -n "$conflicted" ]; then
 			ok=1
-			for f in $conflicted; do "$(jai_python)" "$REPO/Tools/Landing/resolve_union.py" "$f" > /dev/null && git add "$f" || ok=0; done
+			regen_search=0
+			regen_api=0
+			for f in $conflicted; do
+				case " $UNION_FILES " in
+					*" $f "*) "$(jai_python)" "$REPO/Tools/Landing/resolve_union.py" "$f" > /dev/null || ok=0 ;;
+					*)
+						git checkout --theirs -- "$f" > /dev/null 2>&1 || ok=0
+						case " $SEARCH_INDEX " in *" $f "*) regen_search=1 ;; *) regen_api=1 ;; esac
+						;;
+				esac
+			done
+			if [ "$regen_search" = 1 ]; then "$(jai_python)" "$REPO/Source/JaiScript/docs/site_tools/build_search_index.py" > /dev/null || ok=0; fi
+			if [ "$regen_api" = 1 ]; then "$(jai_python)" "$REPO/Source/JaiScript/docs/site_tools/build_api_reference.py" > /dev/null || ok=0; fi
+			for f in $conflicted; do git add "$f" || ok=0; done
 			if [ "$ok" = 1 ] && GIT_EDITOR=true git cherry-pick --continue > /dev/null 2>&1; then
-				echo "picked $(git log --oneline -1 "$c" | cut -c1-70) -> $(git rev-parse --short HEAD) (union of $conflicted)"
+				echo "picked $(git log --oneline -1 "$c" | cut -c1-70) -> $(git rev-parse --short HEAD) (resolved $(echo $conflicted))"
 				continue
 			fi
 		fi

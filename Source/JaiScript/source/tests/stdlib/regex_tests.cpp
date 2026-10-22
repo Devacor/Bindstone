@@ -349,8 +349,10 @@ public:
             expect(lines + "parallel_for (auto& s : lines) { s = regex(R\"(\\d+)\").replace(s, \"<$0>\"); } lines[123]", "id-<123>", "a constant pattern in the body");
             expect(lines + "array<int> n = []; for (auto s : lines) { n.push(0); } parallel_for (auto& s, auto& v : lines, n) { var m = regex(R\"(id-(\\d+))\").search(s); v = m[1].to_int(); } int t = 0; for (int v : n) { t += v; } t", "79800", "match groups in the body");
             expect(lines + "parallel_for (auto& s : lines) { string p = \"-\"; s = to_string(regex(p).split(s).size()); } lines[7]", "2", "a dynamic pattern in the body");
-            expect(lines + "regex r = regex(\"i\"); var out = \"\"; try { parallel_for (auto& s : lines) { s = r.replace(s, \"I\"); } } catch (e) { out = e; } out",
-                   "parallel_for: method 'replace' may mutate captured state 'r' at 1:176", "a captured regex is refused like any captured object");
+            expect(lines + "regex r = regex(R\"(i(d)-(\\d+))\"); parallel_for (auto& s : lines) { var m = r.search(s); s = r.replace(s, \"$1\") + m[2]; } lines[123]",
+                   "d123", "a captured regex runs on every worker");
+            expect(lines + "var out = \"\"; try { parallel_for (auto& s : lines) { s = regex(\"i\").replace(s, (m) => \"I\"); } } catch (e) { out = e; } out.starts_with(\"parallel_for: lambdas are not allowed\")",
+                   "true", "a function replacement is refused as every lambda is");
         });
 
         test("the_engine_agrees_with_ecmascript_on_generated_patterns", [this]() {

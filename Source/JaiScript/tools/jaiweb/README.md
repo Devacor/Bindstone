@@ -88,34 +88,44 @@ Ctrl+C stops the server; open connections are closed and the app's databases are
 anything else answers); a HEAD request takes the GET route; a path that only other methods
 match answers 405 with `Allow`.
 
-**Text helpers** (host functions): `url_encode`, `url_decode`, `parse_query`, `build_query`,
-`parse_cookies`, `parse_multipart`, `http_date(unix_seconds)`, `content_type_for(path)`,
-`random_token(bytes)` (hex from the system's secure random source), `html_escape`.
+**Text**: the opt-in `web::` library (`jai::stdlib::register_web`, registered here): `web::html_escape`,
+`web::html_unescape`, `web::url_encode` / `url_decode` (RFC 3986), `web::form_encode` / `form_decode` (space as
+`+`), `web::parse_query`, `web::parse_query_all`, `web::build_query`, `web::parse_url` (a `web::url` with
+`to_string()`). The host adds `parse_cookies`, `parse_multipart`, `http_date(unix_seconds)`,
+`content_type_for(path)` and `random_token(bytes)` (hex from the system's secure random source).
 
-**Database** (SQLite 3.54, compiled into jaiweb):
+**Database** (SQLite 3.54, compiled into jaiweb), injection-proof by construction:
 
 ```cpp
 Database db = open_database("app.db");          // ":memory:" for a scratch database
-db.execute(sql, a, b, ...)                      // rows changed; a text of several statements runs them all
-db.query(sql, ...)                              // array<map<string, var>>: int, float, string, null
-db.query_one(sql, ...)                          // one row or null
+const string FIND = "SELECT * FROM posts WHERE id = ?";
+db.query_one(FIND, id)                          // one row or null
+db.query(sql, a, b, ...)                        // array<map<string, var>>: int, float, string, null
+db.execute(sql, ...)                            // rows changed; a constant text of several statements runs them all
 db.value(sql, ...)                              // the first column of the first row, or null
-db.query("SELECT * FROM t WHERE id = :id", {"id": 3});   // one map binds by name
+db.query("SELECT * FROM t WHERE id IN (?)", [1, 2, 3]);                 // an array fills IN (?)
+db.query("SELECT * FROM t ORDER BY {}", sql_choose(sort, ["created", "title"]));   // {} takes a constant choice
+db.query("SELECT * FROM t WHERE id = :id", {"id": 3});                  // one map binds by name
 db.transaction(() => { ... });                  // commits, or rolls back and raises again
 db.begin(); db.commit(); db.rollback(); db.last_insert_id(); db.close();
 ```
 
-Parameters are always bound, never spliced into the SQL. Statements are prepared once per SQL text
-and kept until the database closes. An SQLite failure is a catchable error carrying SQLite's message
-(`SQLite error: no such table: posts`). Files open in WAL mode.
+The SQL text must be one of the program's own constants: a string literal, a `const` holding one, a ternary or
+`+` of them. Anything else fails the load (`argument 1 of 'query' is not a constant: SQL text must be a constant;
+pass values as parameters (?)`), and at run time a text the program does not spell is refused before SQLite sees it,
+whatever path it took (`engine::constant_argument`, gathered from every unit as it loads). Values only bind as
+parameters; there is no escape or quote function. `sql_choose(value, choices)` answers the choice equal to `value`
+for a `{}` slot (a sort column, a direction) and raises for anything else; its choices are constants too. Statements
+are prepared once per text and kept until the database closes. An SQLite failure is a catchable error carrying
+SQLite's message (`SQLite error: no such table: posts`). Files open in WAL mode.
 
 **Sessions** (`lib/session.jai`): `SessionStore sessions = SessionStore(db);`, then
 `Session s = sessions.load(req)`, `s.get/set/erase/take`, `sessions.save(s, response)`,
 `sessions.rotate(s)` after a sign-in, `sessions.destroy(s, response)`. The cookie carries a
 256-bit random id; the data stays in the `jaiweb_sessions` table.
 
-Every file function of the runner (`read_file`, `write_file`, `list_dir`, ...) and the full standard
-library are there too.
+Every file function of the runner (`read_file`, `write_file`, `list_dir`, ...), the full standard library and the
+`web::` library are there too.
 
 ## Hot reload
 

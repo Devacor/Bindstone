@@ -1,8 +1,8 @@
 // jaiweb's script surface: Request, Response, the response helpers and Router. The host imports this file before
 // the app and calls jaiweb_serve once per request; the app defines Response handle(Request req).
 //
-// Host functions this file stands on: parse_query, parse_cookies, parse_multipart, url_encode, url_decode,
-// random_token, http_date, content_type_for, read_file, write_file, and Database / open_database.
+// The host functions it stands on: parse_cookies, parse_multipart, random_token, http_date, read_file and write_file;
+// web::parse_query and web::url_encode are the web library's.
 
 extern function handle;
 
@@ -39,7 +39,7 @@ class Request {
 		body = raw["body"];
 		remote_addr = raw["remote_addr"];
 		headers = raw["headers"];
-		query = parse_query(query_string);
+		query = web::parse_query(query_string);
 		cookies = parse_cookies(headers.get("cookie", ""));
 	}
 
@@ -52,7 +52,7 @@ class Request {
 
 	// the fields of an urlencoded or multipart form body; a file field is in files(), not here
 	map<string, string> form() {
-		if (!is_multipart()) { return parse_query(body); }
+		if (!is_multipart()) { return web::parse_query(body); }
 		map<string, string> fields;
 		array<map<string, var>> parts = parse_multipart(body, header("content-type"));
 		for (auto part : parts) {
@@ -103,7 +103,7 @@ class Response {
 	// options: max_age (seconds), expires (unix seconds), path ("/"), domain, secure (false), http_only (true),
 	// same_site ("Lax")
 	void set_cookie(string name, string value, map<string, var> options = {}) {
-		string line = name + "=" + url_encode(value);
+		string line = name + "=" + web::url_encode(value);
 		line += "; Path=" + options.get("path", "/");
 		if (options.contains("domain")) { line += "; Domain=" + options["domain"]; }
 		if (options.contains("max_age")) { line += "; Max-Age=" + to_string(options["max_age"]); }
@@ -160,12 +160,6 @@ Response file(string path, string content_type = "") {
 }
 
 Response not_found(string text = "Not Found") { return plain_text(text, 404); }
-
-string build_query(map<string, var> fields) {
-	array<string> pairs;
-	for (auto [key, value] : fields) { pairs.push(url_encode(key) + "=" + url_encode(to_string(value))); }
-	return pairs.join("&");
-}
 
 // a handler may answer a Response, a string (an HTML page), null (204) or any other value (JSON)
 Response to_response(var result) {

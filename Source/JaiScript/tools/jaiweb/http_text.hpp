@@ -1,6 +1,7 @@
 #pragma once
-// The text forms HTTP speaks: percent-encoding, query strings, cookie headers, multipart bodies, HTTP dates and the
-// content types static files are served with. Pure functions over bytes; register_http_text binds the script surface.
+// The text forms HTTP speaks that a web host reads and writes itself: the request path's percent-decoding, cookie
+// headers, multipart bodies, HTTP dates and the content types static files are served with. Pure functions over bytes;
+// the URL functions scripts call (url_encode, parse_query, ...) are the standard library's.
 #include <jaiscript/jaiscript.hpp>
 
 #include <algorithm>
@@ -42,25 +43,8 @@ inline std::string_view trim_spaces(std::string_view text) {
 	return text;
 }
 
-// RFC 3986: the unreserved characters stay, every other byte is %XX
-inline std::string url_encode(std::string_view text) {
-	static const char hex[] = "0123456789ABCDEF";
-	std::string result;
-	result.reserve(text.size());
-	for (unsigned char c : text) {
-		if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-			result += static_cast<char>(c);
-		} else {
-			result += '%';
-			result += hex[c >> 4];
-			result += hex[c & 15];
-		}
-	}
-	return result;
-}
-
-// %XX becomes its byte; a '%' not followed by two hex digits stays as written. plus_is_space is the form encoding's rule.
-inline std::string url_decode(std::string_view text, bool plus_is_space = false) {
+// %XX becomes its byte; a '%' not followed by two hex digits stays as written ('+' stays: a path is not a form)
+inline std::string percent_decode(std::string_view text) {
 	std::string result;
 	result.reserve(text.size());
 	for (size_t i = 0; i < text.size(); ++i) {
@@ -74,26 +58,7 @@ inline std::string url_decode(std::string_view text, bool plus_is_space = false)
 				continue;
 			}
 		}
-		result += plus_is_space && c == '+' ? ' ' : c;
-	}
-	return result;
-}
-
-// a=1&b=two%20words: '+' is a space, a key without '=' has an empty value, a repeated key keeps its last value
-inline std::map<std::string, std::string> parse_query(std::string_view text) {
-	std::map<std::string, std::string> result;
-	size_t start = 0;
-	while (start <= text.size()) {
-		size_t end = text.find('&', start);
-		if (end == std::string_view::npos) { end = text.size(); }
-		std::string_view pair = text.substr(start, end - start);
-		if (!pair.empty()) {
-			size_t equals = pair.find('=');
-			std::string key = url_decode(pair.substr(0, equals), true);
-			std::string value = equals == std::string_view::npos ? std::string() : url_decode(pair.substr(equals + 1), true);
-			if (!key.empty()) { result[std::move(key)] = std::move(value); }
-		}
-		start = end + 1;
+		result += c;
 	}
 	return result;
 }
@@ -110,7 +75,7 @@ inline std::map<std::string, std::string> parse_cookies(std::string_view header)
 		if (equals != std::string_view::npos && equals > 0) {
 			std::string_view value = trim_spaces(pair.substr(equals + 1));
 			if (value.size() >= 2 && value.front() == '"' && value.back() == '"') { value = value.substr(1, value.size() - 2); }
-			result.emplace(std::string(trim_spaces(pair.substr(0, equals))), url_decode(value));
+			result.emplace(std::string(trim_spaces(pair.substr(0, equals))), percent_decode(value));
 		}
 		start = end + 1;
 	}

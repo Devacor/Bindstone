@@ -233,11 +233,8 @@ jai::script_value script_map_of(jai::engine* eng, std::vector<std::pair<std::str
 	return result;
 }
 
-// The text forms of HTTP as script functions (lib/web.jai builds Request and the session cookie on them)
+// The HTTP text forms the standard library leaves to a web host (lib/web.jai builds Request and the session cookie on them)
 void register_http_text(jai::engine& eng) {
-	eng.add_function("url_encode", [](const std::string& text) { return jaiweb::url_encode(text); });
-	eng.add_function("url_decode", [](const std::string& text) { return jaiweb::url_decode(text); });
-	eng.add_function("parse_query", [](const std::string& text) { return jaiweb::parse_query(text); });
 	eng.add_function("parse_cookies", [](const std::string& header) { return jaiweb::parse_cookies(header); });
 	jai::engine* engine_pointer = &eng;
 	eng.add_function("parse_multipart", [engine_pointer](const std::string& body, const std::string& content_type) {
@@ -303,10 +300,10 @@ public:
 		eng_->execution_budget(opt_.budget);
 		eng_->import_recheck_interval(0);   // every request asks whether a module changed: a save applies to the next request
 		jai::stdlib::register_all(eng_);
+		jai::stdlib::register_web(eng_);
 		jai_runner::register_file_io(*eng_);
 		register_http_text(*eng_);
 		jaiweb::register_database(*eng_, app_dir_);
-		register_html_escape_unless_the_stdlib_has_it();
 		eng_->add_include_path(app_dir_.generic_string());
 		eng_->add_include_path(library_dir().generic_string());
 		try {
@@ -354,11 +351,6 @@ public:
 	const fs::path& root() const { return static_root_; }
 
 private:
-	// pages escape visitor text with html_escape; an engine whose standard library has none gets this one
-	void register_html_escape_unless_the_stdlib_has_it() {
-		if (eng_->has_function("html_escape")) { return; }
-		eng_->add_function("html_escape", [](const std::string& text) { return html_text(text); });
-	}
 
 	// the checkout's lib/ while it is there, so an edit to web.jai applies like an edit to the app; else the copy
 	// the build put beside the executable

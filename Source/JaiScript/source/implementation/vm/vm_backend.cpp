@@ -5057,7 +5057,7 @@ op_status vm_backend::exec_math_temp(frame& f, const vm_instruction& ins) {
 		}
 	}
 	const script_value* argp[1] = { v };
-	auto result = detail::eval_math_intrinsic(fn, argp, 1, engine_, engine_->math_rng());
+	auto result = detail::eval_math_intrinsic(fn, argp, 1, engine_);
 	if (!result) {
 		return raise_from(result);
 	}
@@ -5090,7 +5090,7 @@ op_status vm_backend::exec_math_pair(frame& f, const vm_instruction& ins, detail
 		return {};
 	}
 	const script_value* argp[2] = { &held, &rv };
-	auto result = detail::eval_math_intrinsic(fn, argp, 2, engine_, engine_->math_rng());
+	auto result = detail::eval_math_intrinsic(fn, argp, 2, engine_);
 	if (!result) return raise_from(result);
 	frame_slot_set(f, ins.b, std::move(result.value()));
 	return {};
@@ -11608,7 +11608,7 @@ JAI_NOINLINE op_status vm_backend::exec_math_kernel(size_t base, size_t argc, de
 	for (size_t i = 0; i < argc; ++i) {
 		argp[i] = &stack_[base + i].deref();
 	}
-	auto result = detail::eval_math_intrinsic(fn, argp, argc, engine_, engine_->math_rng());
+	auto result = detail::eval_math_intrinsic(fn, argp, argc, engine_);
 	if (!result) {
 		return raise_from(result);
 	}

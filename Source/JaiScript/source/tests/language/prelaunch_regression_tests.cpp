@@ -305,24 +305,22 @@ public:
 			)").as_int());
 		});
 
-		test("numeric_random_seed_conversion_is_checked", [this]() {
+		test("a_float_seed_converts_like_every_int_parameter", [this]() {
+			// toward zero, saturating at the int64 ends, NaN as 0: the same seed on every platform
 			auto eng = make_engine();
-			for (double input : {0x1p64, -1.0, 1e100, std::numeric_limits<double>::infinity(),
-				std::numeric_limits<double>::quiet_NaN()}) {
+			jai::stdlib::register_all(*eng);
+			const std::pair<double, script_int> inputs[] = {
+				{-0.5, 0}, {0.0, 0}, {42.75, 42}, {-1.0, -1}, {0x1p63, INT64_MAX}, {1e100, INT64_MAX}, {-1e19, INT64_MIN},
+				{std::numeric_limits<double>::infinity(), INT64_MAX}, {std::numeric_limits<double>::quiet_NaN(), 0},
+			};
+			for (const auto& [input, integer] : inputs) {
 				eng->add_global("seed_input", script_value(input, eng.get()));
-				check_eq(std::string("Cannot convert float to integer: non-finite or out of range"), eng->execute(R"(
-					string message = "";
-					try { math::random_seed(seed_input); } catch (e) { message = e; }
-					message;
-				)").as_string());
-			}
-			for (double input : {-0.5, 0.0, 42.75, 0x1p63, std::nextafter(0x1p64, 0.0)}) {
-				eng->add_global("seed_input", script_value(input, eng.get()));
-				eng->add_global("integer_seed", script_value(static_cast<script_int>(static_cast<uint64_t>(input)), eng.get()));
+				eng->add_global("integer_seed", script_value(integer, eng.get()));
 				check(eng->execute(R"(
-					math::random_seed(integer_seed); auto expected = math::random();
-					math::random_seed(seed_input); math::random() == expected;
-				)").as_bool());
+					random reseeded;
+					reseeded.seed(seed_input);
+					random(seed_input).state == random(integer_seed).state && reseeded.state == random(integer_seed).state;
+				)").as_bool(), std::to_string(input));
 			}
 		});
 

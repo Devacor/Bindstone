@@ -440,8 +440,6 @@ struct engine::implementation {
     // Unified conversion registry (replaces both type_conversions and custom_conversions)
     std::shared_ptr<conversions::conversion_registry> conversions;
 
-    // Engine-owned deterministic RNG for the math:: intrinsics (fixed default seed)
-    detail::math_rng_state math_rng_;
 
     std::array<engine::math_alias_row, engine::k_math_alias_rows> math_alias_rows_{};
     std::unordered_map<uint64_t, uint8_t> math_alias_symbols_;
@@ -2155,15 +2153,6 @@ execution_backend* engine::region_chunk_backend() const {
 
 void engine::recover_parallel_registrations() {
     if (impl->parallel_) { detail::recover_pending_registrations(*impl->parallel_); }
-}
-
-detail::math_rng_state& engine::math_rng() {
-    if (parallel_region_active_ && impl->parallel_ && impl->parallel_->active_region) {
-        if (const auto* chunk = impl->parallel_->active_region->find_entry(std::this_thread::get_id()); chunk && chunk->draws) {
-            return *chunk->draws;
-        }
-    }
-    return impl->math_rng_;
 }
 
 void engine::implementation::updateOverloadedFunction(const std::string& name, engine* engine_ptr) {

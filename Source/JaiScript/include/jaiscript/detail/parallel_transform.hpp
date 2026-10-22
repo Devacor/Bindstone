@@ -49,8 +49,6 @@ namespace jai {
 
 namespace jai::detail {
 
-    struct math_rng_state;
-
     // Thread -> per-worker limits table, installed on the engine only while a region's
     // workers are running (read-only during the region; built/torn down single-threaded).
     // engine::execution_limits() consults it so EVERY charge site — backends, shared
@@ -96,8 +94,6 @@ namespace jai::detail {
             // The C++ objects of serial-only classes that die on this chunk, released by the join; cursors name the element running
             std::vector<deferred_release>* deferred_releases = nullptr;
             const std::vector<script_value>* cursors = nullptr;
-            // The chunk's draw stream: engine::math_rng() on this thread answers it, never the engine's own stream
-            math_rng_state* draws = nullptr;
             size_t element() const noexcept { return cursors && !cursors->empty() ? cursors->front().element_cursor_index() : SIZE_MAX; }
         };
         std::vector<entry> entries;
@@ -127,8 +123,9 @@ namespace jai::detail {
     //              non-primitive content or non-subscript uses such as iteration,
     //              read-only methods, whole-value reads)
     // written: a fresh private copy per worker, merged back at the join; object: a class instance (or a handle to one) read
-    // through a worker's own view - a detached copy of a value-class instance, a view sharing a C++ object - never written
-    enum class parallel_capture_kind : int { scalar = 0, string = 1, borrow = 2, snapshot = 3, written = 4, object = 5 };
+    // through a worker's own view - a detached copy of a value-class instance, a view sharing a C++ object - never written;
+    // stream: a captured random, a per-worker copy drawing each element's own stream from one draw of the captured generator
+    enum class parallel_capture_kind : int { scalar = 0, string = 1, borrow = 2, snapshot = 3, written = 4, object = 5, stream = 6 };
 
     // Amortized admission verdict for one function body (keyed by body block pointer).
     // The graph snapshot records what the body needs provisioned per worker; entries are
@@ -237,8 +234,6 @@ namespace jai::detail {
         // (element_reach_all) binds the element IN PLACE on the worker: every remaining use is
         // a member read, so the copy is unobservable (a copy we can prove away goes).
         bool element_mutated = false;
-        // A math::random-family call the bodies can reach: the region seeds its chunks' draw streams with one engine draw
-        bool draws = false;
         bool transform_cursor = false;   // the transform delivers elements through a chunk cursor (set once its chunk loop lands)
     };
 
@@ -329,6 +324,16 @@ namespace jai::detail {
         parallel_region_table* active_region = nullptr;   // non-null only while workers run
         std::mutex instance_registry_mutex;                // class_definition instance registry, region-time only
         bool region_running = false;                       // reentrancy guard (v0: no nesting)
+        // The bound C++ objects the element walk meets in elements' fields (a random, a time::date): the barrier proves each its
+        // element's own by identity, naming the field when two elements share one
+        struct element_host_value {
+            const void* object = nullptr;
+            uint64_t field = UINT64_MAX;                   // UINT64_MAX: held outside any field (an array element)
+            const class_definition* cls = nullptr;
+            size_t element = SIZE_MAX;
+        };
+        std::vector<element_host_value> element_host_values;
+        uint64_t element_host_field = UINT64_MAX;          // the field the walk is inside
         uint32_t region_serial = 0;                        // the running region's number, bumped as each one starts
         // Every name a C++ level of a registered class binds (methods and accessors), refreshed when the classes change: a
         // region pins only the names it calls that are among them

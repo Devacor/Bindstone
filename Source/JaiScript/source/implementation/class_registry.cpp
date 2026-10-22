@@ -93,6 +93,19 @@ bool class_definition::flat_value_semantics() const {
     return flat_value_cached_;
 }
 
+bool class_definition::flat_over_host_values() const {
+    if (!engine_) {
+        return false;
+    }
+    const uint64_t epoch = engine_->class_definition_epoch();
+    if (flat_host_epoch_ != epoch) {
+        std::vector<const class_definition*> in_progress;
+        flat_host_cached_ = flat_value_semantics_impl(in_progress, true);
+        flat_host_epoch_ = epoch;
+    }
+    return flat_host_cached_;
+}
+
 const std::vector<uint32_t>& class_definition::handle_bearing_slots() const {
     const uint64_t epoch = engine_ ? engine_->class_definition_epoch() : 0;
     if (handle_slots_epoch_ == epoch && engine_) { return handle_slots_cached_; }
@@ -530,7 +543,7 @@ const std::vector<uint32_t>& class_definition::string_reachable_slots() const {
     string_slots_epoch_ = epoch;
     return string_slots_cached_;
 }
-bool class_definition::flat_value_semantics_impl(std::vector<const class_definition*>& in_progress) const {
+bool class_definition::flat_value_semantics_impl(std::vector<const class_definition*>& in_progress, bool host_values) const {
     if (class_type_ != script_class && class_type_ != vm_class) {
         return false;
     }
@@ -545,7 +558,7 @@ bool class_definition::flat_value_semantics_impl(std::vector<const class_definit
     in_progress.push_back(this);
     bool flat = true;
     for (const auto& parent : parent_classes_) {
-        if (!parent || !parent->flat_value_semantics_impl(in_progress)) {
+        if (!parent || !parent->flat_value_semantics_impl(in_progress, host_values)) {
             flat = false;
             break;
         }
@@ -553,7 +566,7 @@ bool class_definition::flat_value_semantics_impl(std::vector<const class_definit
     if (flat) {
         for (const auto& [field_id, field_default] : field_defaults_) {
             (void)field_default;
-            if (!flat_field_type(get_field_declared_type(field_id), in_progress)) {
+            if (!flat_field_type(get_field_declared_type(field_id), in_progress, host_values)) {
                 flat = false;
                 break;
             }
@@ -567,7 +580,7 @@ bool class_definition::flat_value_semantics_impl(std::vector<const class_definit
 // qualifies - primitives, strings, containers OF value-closed types to any depth,
 // nested flat classes). What poisons: shared_ptr/weak_ptr/function/reference (their
 // semantics IS pointing elsewhere) and auto/var (no store-enforced shape).
-bool class_definition::flat_field_type(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const {
+bool class_definition::flat_field_type(const type_info_ptr& t, std::vector<const class_definition*>& in_progress, bool host_values) const {
     if (!t) {
         return false;   // auto/untyped field: no store-enforced shape to lean on
     }
@@ -579,16 +592,21 @@ bool class_definition::flat_field_type(const type_info_ptr& t, std::vector<const
     case script_value_type::jai_string_type:
         return true;
     case script_value_type::jai_array_type:
-        return flat_field_type(t->element_type(), in_progress);
+        return flat_field_type(t->element_type(), in_progress, host_values);
     case script_value_type::jai_map_type:
-        return flat_field_type(t->key_type(), in_progress) &&
-               flat_field_type(t->value_type(), in_progress);
+        return flat_field_type(t->key_type(), in_progress, host_values) &&
+               flat_field_type(t->value_type(), in_progress, host_values);
     case script_value_type::jai_object_type: {
         if (!engine_ || t->type_name.empty()) {
             return false;
         }
-        auto nested = engine_->get_class_registry().find_script_class(std::string(t->type_name));
-        return nested && nested->flat_value_semantics_impl(in_progress);
+        const std::string name(t->type_name);
+        auto nested = engine_->get_class_registry().find_script_class(name);
+        if (!nested && host_values) {
+            const auto& hosts = engine_->get_class_registry().cpp_classes_;
+            return hosts.find(name) != hosts.end();   // a bound C++ class held by value: its object is proven by identity
+        }
+        return nested && nested->flat_value_semantics_impl(in_progress, host_values);
     }
     default:
         return false;   // function, shared_ptr/weak_ptr (reference semantics), reference, var

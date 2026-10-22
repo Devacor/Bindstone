@@ -20,7 +20,7 @@ target_compile_definitions(jai_spider PRIVATE JAI_SPIDER_SOURCE_LIBRARY_DIR="${C
 # spider:: (../jaiscript/http_transport.hpp): WinHTTP on Windows; sockets elsewhere, HTTPS through OpenSSL when found
 if(WIN32)
 	target_compile_definitions(jai_spider PRIVATE _WIN32_WINNT=0x0A00 NOMINMAX)
-	target_link_libraries(jai_spider PRIVATE ws2_32 bcrypt winhttp)
+	target_link_libraries(jai_spider PRIVATE ws2_32 winhttp)
 else()
 	find_package(OpenSSL QUIET)
 	if(OPENSSL_FOUND)

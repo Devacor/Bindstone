@@ -3,6 +3,7 @@
 // exit switches. All heights live in the SE_ arrays, so the renderer sees
 // moving doors for free.
 
+import "sim_random.jai";
 import "wad.jai";
 import "map.jai";
 import "vid.jai";
@@ -291,8 +292,8 @@ class Weapon {
 			if (ammo == 0 && P_BERSERK) { mul = mul * 10; }   // berserk fists
 			for (int p = 0; p < pellets; ++p) {
 				float aim = P_ANG;
-				if (spread > 0.0) { aim = aim + (math::random() - 0.5) * spread; }
-				shoot_hitscan(P_X, P_Y, eyez, aim, mul * math::random(1, dmg_roll), -1, range);
+				if (spread > 0.0) { aim = aim + (SIM_RANDOM.unit() - 0.5) * spread; }
+				shoot_hitscan(P_X, P_Y, eyez, aim, mul * SIM_RANDOM.between(1, dmg_roll), -1, range);
 			}
 		}
 		W_COOL = cooldown;

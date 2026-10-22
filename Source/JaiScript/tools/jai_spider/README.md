@@ -99,8 +99,8 @@ and the requests behind it, until its answer arrives.
 **Text**: the opt-in `web::` library (`jai::stdlib::register_web`, registered here): `web::html_escape`,
 `web::html_unescape`, `web::url_encode` / `url_decode` (RFC 3986), `web::form_encode` / `form_decode` (space as
 `+`), `web::parse_query`, `web::parse_query_all`, `web::build_query`, `web::parse_url` (a `web::url` with
-`to_string()`). The host adds `parse_cookies`, `parse_multipart`, `http_date(unix_seconds)`,
-`content_type_for(path)` and `random_token(bytes)` (hex from the system's secure random source).
+`to_string()`). The host adds `parse_cookies`, `parse_multipart`, `http_date(unix_seconds)` and
+`content_type_for(path)`; session ids are `crypto::random_hex(32)`, the system's secure random source.
 
 **Database** (SQLite 3.54, compiled into jai_spider), injection-proof by construction:
 

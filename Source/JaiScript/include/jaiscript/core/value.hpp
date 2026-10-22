@@ -3139,6 +3139,29 @@ namespace detail {
         }
     }
 
+    inline void script_array::swap_elements(size_t i, size_t j) {
+        if (i == j) { return; }
+        switch (kind_) {
+            case kind_t::i64: std::swap(ints_[i], ints_[j]); break;
+            case kind_t::f64: std::swap(floats_[i], floats_[j]); break;
+            case kind_t::b8:
+            case kind_t::u8:
+            case kind_t::i8:
+            case kind_t::c8: std::swap(bytes_[i], bytes_[j]); break;
+            case kind_t::str: std::swap(strs_[i], strs_[j]); break;
+            case kind_t::obj: std::swap(objs_[i], objs_[j]); break;
+            case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba: {
+                uint32_t a[4], b[4];
+                vec_words(i, a);
+                vec_words(j, b);
+                set_vec_words(i, b);
+                set_vec_words(j, a);
+                break;
+            }
+            default: std::swap(values_[i], values_[j]); break;
+        }
+    }
+
     template <typename F>
     inline void script_array::for_each(engine* eng, F&& f) const {
         switch (kind_) {

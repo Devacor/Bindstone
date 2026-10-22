@@ -625,9 +625,9 @@ the vector rows of the interpolation family. Not built: the other destinations (
 | `moveToward` | `v.move_toward(goal, max_distance)` | pure |
 | `Point::normalized/magnitude/atOrigin/set/translate/scale/clear`, `Color::hex/hsv/set/normalize`, `Size::area/contains` | methods (section 6); `area()` / `contains()` stay out unless a script needs them | the type's own surface |
 | `Matrix` / `TransformMatrix` operations, `inverse`, `affineMultiply` | `math::mat3` / `math::mat4` (6.4), standard semantics | hoisted as types; MV's pre-multiplying translate and diagonal-only scale stay MV's |
-| `Random::randomString`, `randomString(len)` | `math::random_string(charset, length)` on the engine RNG | deterministic engine-owned RNG (`math_rng_state`); no global singleton |
-| `Random::shuffle` | `array.shuffle()` on the engine RNG | belongs to containers, not math; deterministic |
-| `Random::integer/number`, `randomNumber/Integer` | exist as `math::random(lo, hi)` | already hoisted, with deterministic mappings |
+| `Random::randomString`, `randomString(len)` | a `random` object's draws (`r.next_bytes(n)`, `r.pick(chars)`) | randomness is an owned `random` value, never math:: state |
+| `Random::shuffle` | `r.shuffle(array)` | a `random` method; deterministic for a seed |
+| `Random::integer/number`, `randomNumber/Integer` | `r.next_int(lo, hi)`, `r.next_float(lo, hi)` | the `random` type's specified mappings |
 | `insertSorted`, `insertReverseSorted` | optional `array.insert_sorted(v)` | containers, not math; low value |
 | `indexOf` | exists (array `index_of`) | already covered |
 | `guid(base)` | stays | a per-process naming counter held in a static map, not a GUID; naming policy is the engine's |

@@ -1,4 +1,4 @@
-// Cookie sessions kept in SQLite: the cookie carries only a random id (random_token, the system's secure source),
+// Cookie sessions kept in SQLite: the cookie carries only a random id (crypto::random_hex, the system's secure source),
 // the data stays on the server as JSON in the spider_sessions table.
 //
 //   spider::SessionStore sessions = spider::SessionStore(db);
@@ -59,7 +59,7 @@ class SessionStore {
 				return s;
 			}
 		}
-		s.id = random_token(32);
+		s.id = crypto::random_hex(32);
 		s.is_new = true;
 		return s;
 	}
@@ -77,7 +77,7 @@ class SessionStore {
 	// a new id for the same data: call it when the visitor signs in, so an id seen before the sign-in is worth nothing
 	void rotate(spider::Session& s) {
 		db.execute("DELETE FROM spider_sessions WHERE id = ?", s.id);
-		s.id = random_token(32);
+		s.id = crypto::random_hex(32);
 		s.changed = true;
 	}
 

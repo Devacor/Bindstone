@@ -5,6 +5,7 @@
 // tag-666 boss drop. game.jai globals (P_X, door_use, sector_at, ...)
 // resolve at call time — importing game.jai here would cycle.
 
+import "sim_random.jai";
 import "wad.jai";
 import "map.jai";
 
@@ -174,7 +175,7 @@ function light_spawn(int s, int sp) -> void {
 	int mn = neighbor_light_min(s);
 	if (sp == 1) {
 		LT_SEC.push(s); LT_KIND.push(1); LT_MAX.push(base); LT_MIN.push(mn);
-		LT_CNT.push(math::random(1, 64)); LT_AUX.push(0);
+		LT_CNT.push(SIM_RANDOM.between(1, 64)); LT_AUX.push(0);
 	} else if (sp == 8) {
 		LT_SEC.push(s); LT_KIND.push(3); LT_MAX.push(base); LT_MIN.push(mn);
 		LT_CNT.push(0); LT_AUX.push(-1);
@@ -184,7 +185,7 @@ function light_spawn(int s, int sp) -> void {
 	} else {
 		if (mn == base) { mn = 0; }                  // an isolated strobe still strobes
 		LT_SEC.push(s); LT_KIND.push(2); LT_MAX.push(base); LT_MIN.push(mn);
-		LT_CNT.push(sp == 12 || sp == 13 ? 1 : math::random(1, 8));
+		LT_CNT.push(sp == 12 || sp == 13 ? 1 : SIM_RANDOM.between(1, 8));
 		LT_AUX.push(sp == 2 || sp == 13 ? 15 : 35);  // fast/slow dark time
 	}
 }
@@ -209,13 +210,13 @@ function lights_tic() -> void {
 		LT_CNT[i] = LT_CNT[i] - 1;
 		if (LT_CNT[i] > 0) { continue; }
 		if (kind == 1) {                             // blink: long bright, short random drops
-			if (SE_LIGHT[s] == LT_MAX[i]) { SE_LIGHT[s] = LT_MIN[i]; LT_CNT[i] = math::random(1, 8); }
-			else { SE_LIGHT[s] = LT_MAX[i]; LT_CNT[i] = math::random(1, 64); }
+			if (SE_LIGHT[s] == LT_MAX[i]) { SE_LIGHT[s] = LT_MIN[i]; LT_CNT[i] = SIM_RANDOM.between(1, 8); }
+			else { SE_LIGHT[s] = LT_MAX[i]; LT_CNT[i] = SIM_RANDOM.between(1, 64); }
 		} else if (kind == 2) {                      // strobe: 5 bright / darktime dark
 			if (SE_LIGHT[s] == LT_MIN[i]) { SE_LIGHT[s] = LT_MAX[i]; LT_CNT[i] = 5; }
 			else { SE_LIGHT[s] = LT_MIN[i]; LT_CNT[i] = LT_AUX[i]; }
 		} else {                                     // flicker: fire jitter every 4 tics
-			int l2 = LT_MAX[i] - math::random(0, 3) * 16;
+			int l2 = LT_MAX[i] - SIM_RANDOM.between(0, 3) * 16;
 			if (l2 < LT_MIN[i]) { l2 = LT_MIN[i]; }
 			SE_LIGHT[s] = l2;
 			LT_CNT[i] = 4;

@@ -7945,7 +7945,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                 for (size_t i = 0; i < argc; ++i) {
                     argp[i] = &margs[i]->deref();
                 }
-                auto result = detail::eval_math_intrinsic(fn, argp, argc, engine_, engine_->math_rng());
+                auto result = detail::eval_math_intrinsic(fn, argp, argc, engine_);
                 if (!result) {
                     return result.error_value();
                 }

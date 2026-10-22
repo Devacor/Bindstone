@@ -100,7 +100,7 @@ int FACE_LOOK = 0;
 int FACE_NEXT = -1;           // GAME_TIC of the next glance re-roll
 int FACE_SEED = 4321;
 
-// hud-only LCG: the face glance must never touch math::random — that stream
+// hud-only LCG: the face glance must never touch SIM_RANDOM — that stream
 // is the sim's, and demos replay it (demo.jai pins the seed)
 function face_rnd(int n) -> int {
 	FACE_SEED = (FACE_SEED * 1103515245 + 12345) & 2147483647;

@@ -300,7 +300,7 @@ function shim_probe_report() -> void {
 		shim_dump_view(SHIM_DUMP);
 		var path = SHIM_DUMP + ".ans";
 		write_file(path, SHIM_FRAMES.join(""));
-		print(`FRAME_HASH: ${sha256_file(path)} (${SHIM_FRAMES.size()} frames -> ${path})`);
+		print(`FRAME_HASH: ${crypto::sha256_file(path)} (${SHIM_FRAMES.size()} frames -> ${path})`);
 		print(`frame build: ${SHIM_FRAME_MS:.0f} ms total, ${SHIM_FRAME_MS / imax(1, SHIM_FRAMES.size())} ms/frame`);
 	}
 	if (SHIM_BENCH > 0) {

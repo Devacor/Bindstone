@@ -155,7 +155,7 @@ const std::vector<std::string>& math_intrinsic_names() {
 		std::vector<std::string> out;
 		for (const char* n : {"abs", "atan2", "cos", "ceil", "clamp", "distance", "distance_squared", "degrees_to_radians", "floor",
 		                      "itrunc", "ifloor", "lerp", "min", "max", "mix", "mix_in", "mix_out", "mix_in_out", "mix_out_in",
-		                      "unmix", "unmix_in", "unmix_out", "unmix_in_out", "unmix_out_in", "pow", "random", "random_seed",
+		                      "unmix", "unmix_in", "unmix_out", "unmix_in_out", "unmix_out_in", "pow",
 		                      "radians_to_degrees", "sin", "sqrt", "tan", "wrap_add", "wrap_sub", "wrap_mul"}) {
 			if (jai::detail::math_intrinsic_from_name(n) != jai::detail::math_fn::none) { out.emplace_back(n); }
 		}

@@ -508,6 +508,67 @@ print(w.size(), &quot; &quot;, to_json(w.to_string().to_bytes()));</code></pre><
 <p>A copy of the value the body returned, once done() is true, however the body was driven (advance, next() or range-for); null for a body that returns nothing or failed. Before then it raises Coroutine has not finished: result() is available once done() is true. The checker types it as the coroutine&#x27;s declared type.</p>
 </div>
 </section>
+<section class="api-group"><h2 id="group-crypto">crypto</h2>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::equals(a: text, b: text) -&gt; bool observe equal bytes, compared in time that depends only on the length. register_all() or area registration"><h3 id="api-5c2154e147fe"><code>crypto::equals(a: text, b: text) -&gt; bool</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>Equal bytes, compared in time that depends only on the length.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::hmac_sha256(key: text, message: text) -&gt; string observe hmac-sha-256 (rfc 2104), hex. register_all() or area registration"><h3 id="api-af163614ee82"><code>crypto::hmac_sha256(key: text, message: text) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>HMAC-SHA-256 (RFC 2104), hex.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::hmac_sha256_bytes(key: text, message: text) -&gt; string observe the 32 raw mac bytes. register_all() or area registration"><h3 id="api-b4737b1945e0"><code>crypto::hmac_sha256_bytes(key: text, message: text) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>The 32 raw MAC bytes.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::hmac_sha512(key: text, message: text) -&gt; string observe hmac-sha-512 (rfc 2104), hex. register_all() or area registration"><h3 id="api-0bf0dfad3f83"><code>crypto::hmac_sha512(key: text, message: text) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>HMAC-SHA-512 (RFC 2104), hex.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::hmac_sha512_bytes(key: text, message: text) -&gt; string observe the 64 raw mac bytes. register_all() or area registration"><h3 id="api-11743de93924"><code>crypto::hmac_sha512_bytes(key: text, message: text) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>The 64 raw MAC bytes.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::md5(bytes: text) -&gt; string observe md5 (rfc 1321), 32 hex digits: for interoperability only, never for security. register_all() or area registration"><h3 id="api-8e5f2f230523"><code>crypto::md5(bytes: text) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>MD5 (RFC 1321), 32 hex digits: for interoperability only, never for security.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::md5_bytes(bytes: text) -&gt; string observe the 16 raw digest bytes. register_all() or area registration"><h3 id="api-4c0a9f3cef2e"><code>crypto::md5_bytes(bytes: text) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>The 16 raw digest bytes.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::password_hash(password: text, cost: int = 12) -&gt; string random bcrypt as php&#x27;s password_hash writes it ($2y$, a fresh 16-byte salt, cost 4 to 31); the first 72 bytes count. register_all() or area registration"><h3 id="api-8f68b0e37131"><code>crypto::password_hash(password: text, cost: int = 12) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; random</p>
+<p>bcrypt as PHP&#x27;s password_hash writes it ($2y$, a fresh 16-byte salt, cost 4 to 31); the first 72 bytes count.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::password_verify(password: text, hash: string) -&gt; bool observe checks a $2y$, $2b$, $2a$ or $2x$ bcrypt hash; any other text is false. register_all() or area registration"><h3 id="api-a92ab7601c94"><code>crypto::password_verify(password: text, hash: string) -&gt; bool</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>Checks a $2y$, $2b$, $2a$ or $2x$ bcrypt hash; any other text is false.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::random_bytes(count: int) -&gt; string random count bytes from the operating system&#x27;s secure generator; never seedable. register_all() or area registration"><h3 id="api-d116d3f9292b"><code>crypto::random_bytes(count: int) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; random</p>
+<p>count bytes from the operating system&#x27;s secure generator; never seedable.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::random_hex(count: int) -&gt; string random count secure random bytes as 2 * count lowercase hex digits. register_all() or area registration"><h3 id="api-e24399eaac48"><code>crypto::random_hex(count: int) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; random</p>
+<p>count secure random bytes as 2 * count lowercase hex digits.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::random_int(lo: int, hi: int) -&gt; int random a secure random int over lo..hi, both inclusive, unbiased. register_all() or area registration"><h3 id="api-10526c135bbf"><code>crypto::random_int(lo: int, hi: int) -&gt; int</code></h3><p><strong>register_all() or area registration</strong> &middot; random</p>
+<p>A secure random int over lo..hi, both inclusive, unbiased.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::sha1(bytes: text) -&gt; string observe sha-1, 40 hex digits: for interoperability with formats that name it, never for security. register_all() or area registration"><h3 id="api-113ae25919fb"><code>crypto::sha1(bytes: text) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>SHA-1, 40 hex digits: for interoperability with formats that name it, never for security.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::sha1_bytes(bytes: text) -&gt; string observe the 20 raw digest bytes. register_all() or area registration"><h3 id="api-1e46d1998be2"><code>crypto::sha1_bytes(bytes: text) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>The 20 raw digest bytes.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::sha256(bytes: text) -&gt; string observe the sha-256 digest (fips 180-4) of the bytes (a utf8_string&#x27;s utf-8 bytes), 64 lowercase hex digits. register_all() or area registration"><h3 id="api-6b444235e9fd"><code>crypto::sha256(bytes: text) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>The SHA-256 digest (FIPS 180-4) of the bytes (a utf8_string&#x27;s UTF-8 bytes), 64 lowercase hex digits.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(crypto::sha256(&quot;abc&quot;));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad</code></pre></div>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::sha256_bytes(bytes: text) -&gt; string observe the 32 raw digest bytes. register_all() or area registration"><h3 id="api-b5cbe1f81637"><code>crypto::sha256_bytes(bytes: text) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>The 32 raw digest bytes.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::sha256_file(path: string) -&gt; string filesystem the sha-256 digest of the file&#x27;s bytes, streamed in chunks; a file it cannot read raises cannot read file &#x27;&lt;path&gt;&#x27;: &lt;reason&gt;. register_all() or area registration"><h3 id="api-67e2ad61a52c"><code>crypto::sha256_file(path: string) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; filesystem</p>
+<p>The SHA-256 digest of the file&#x27;s bytes, streamed in chunks; a file it cannot read raises Cannot read file &#x27;&lt;path&gt;&#x27;: &lt;reason&gt;.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::sha512(bytes: text) -&gt; string observe the sha-512 digest (fips 180-4), 128 lowercase hex digits. register_all() or area registration"><h3 id="api-6b48e30c4734"><code>crypto::sha512(bytes: text) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>The SHA-512 digest (FIPS 180-4), 128 lowercase hex digits.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="crypto::sha512_bytes(bytes: text) -&gt; string observe the 64 raw digest bytes. register_all() or area registration"><h3 id="api-165b4b55f825"><code>crypto::sha512_bytes(bytes: text) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
+<p>The 64 raw digest bytes.</p>
+</div>
+</section>
 <section class="api-group"><h2 id="group-global">global</h2>
 <div class="api-entry" data-provider="runner" data-search="download() -&gt; download construct  standalone jaiscript.exe"><h3 id="api-1b5bc6ffcc92"><code>Download() -&gt; Download</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; construct</p>
 </div>
@@ -621,6 +682,15 @@ print(v[&quot;hp&quot;], &quot; &quot;, v[&quot;tags&quot;][0]);</code></pre></d
 <div class="api-entry" data-provider="core" data-search="print(values: var...) -&gt; void output core concatenates display texts; stdlib replacement supports formatting and print tokens. every engine"><h3 id="api-dbef42ca7c2b"><code>print(values: var...) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; output</p>
 <p>Core concatenates display texts; stdlib replacement supports formatting and print tokens.</p>
 </div>
+<div class="api-entry" data-provider="stdlib" data-search="random() -&gt; random random a generator seeded from the operating system&#x27;s secure generator: its draws differ every run. `random r;` declares one. register_all() or area registration"><h3 id="api-19a842dd4f27"><code>random() -&gt; random</code></h3><p><strong>register_all() or area registration</strong> &middot; random</p>
+<p>A generator seeded from the operating system&#x27;s secure generator: its draws differ every run. `random r;` declares one.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="random(seed: int) -&gt; random construct a generator whose draws are fixed by the seed on every platform and backend. `random r(seed);` declares one. register_all() or area registration"><h3 id="api-bdc9156937eb"><code>random(seed: int) -&gt; random</code></h3><p><strong>register_all() or area registration</strong> &middot; construct</p>
+<p>A generator whose draws are fixed by the seed on every platform and backend. `random r(seed);` declares one.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">random r(42);
+print(r.next_int(1, 6), &quot; &quot;, r.next_int(1, 6), &quot; &quot;, r.next_int(1, 6));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 3 5</code></pre></div>
+</div>
 <div class="api-entry" data-provider="runner" data-search="read_file(path: string) -&gt; string filesystem missing/unreadable file raises; empty file returns empty string. standalone jaiscript.exe"><h3 id="api-191b68a91927"><code>read_file(path: string) -&gt; string</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
 <p>Missing/unreadable file raises; empty file returns empty string.</p>
 </div>
@@ -647,14 +717,6 @@ array&lt;int&gt; b = a;
 auto&amp; r = a;
 print(same_object(a, b), &quot; &quot;, same_object(a, r), &quot; &quot;, a == b);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">false true true</code></pre></div>
-</div>
-<div class="api-entry" data-provider="stdlib" data-search="sha256(bytes: text) -&gt; string observe the sha-256 digest of the bytes (a utf8_string&#x27;s utf-8 bytes), 64 lowercase hex digits. register_all() or area registration"><h3 id="api-737d6570505f"><code>sha256(bytes: text) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
-<p>The SHA-256 digest of the bytes (a utf8_string&#x27;s UTF-8 bytes), 64 lowercase hex digits.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(sha256(&quot;abc&quot;));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad</code></pre></div>
-</div>
-<div class="api-entry" data-provider="stdlib" data-search="sha256_file(path: string) -&gt; string filesystem the sha-256 digest of the file&#x27;s bytes, streamed in chunks; a file it cannot read raises cannot read file &#x27;&lt;path&gt;&#x27;: &lt;reason&gt;. register_all() or area registration"><h3 id="api-75fd3ab86357"><code>sha256_file(path: string) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; filesystem</p>
-<p>The SHA-256 digest of the file&#x27;s bytes, streamed in chunks; a file it cannot read raises Cannot read file &#x27;&lt;path&gt;&#x27;: &lt;reason&gt;.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="shared_from_this() -&gt; shared_ptr&lt;t&gt; observe method context only. every engine"><h3 id="api-0cb76b5518ef"><code>shared_from_this() -&gt; shared_ptr&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Method context only.</p>
@@ -904,14 +966,6 @@ print(to_json(stock.to_array()));</code></pre></div>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::radians_to_degrees(angle: number or vector) -&gt; float or vector observe  every engine"><h3 id="api-94c0b011bb1a"><code>math::radians_to_degrees(angle: number or vector) -&gt; float or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="math::random() -&gt; float random deterministic engine-owned rng; unit range includes both ends. every engine"><h3 id="api-df5adb702880"><code>math::random() -&gt; float</code></h3><p><strong>Every engine</strong> &middot; random</p>
-<p>Deterministic engine-owned RNG; unit range includes both ends.</p>
-</div>
-<div class="api-entry" data-provider="core" data-search="math::random(minimum: number, maximum: number) -&gt; number random inclusive range; integer pair gives an integer. every engine"><h3 id="api-05f9b4c6fe66"><code>math::random(minimum: number, maximum: number) -&gt; number</code></h3><p><strong>Every engine</strong> &middot; random</p>
-<p>Inclusive range; integer pair gives an integer.</p>
-</div>
-<div class="api-entry" data-provider="core" data-search="math::random_seed(seed: int) -&gt; void configure  every engine"><h3 id="api-0174a65b29e3"><code>math::random_seed(seed: int) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; configure</p>
-</div>
 <div class="api-entry" data-provider="core" data-search="math::reflect(vector: vector, normal: matching_vector) -&gt; floating_vector observe  every engine"><h3 id="api-3d1057499c06"><code>math::reflect(vector: vector, normal: matching_vector) -&gt; floating_vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::remap(value: number or vector, in_start: same_shape, in_end: same_shape, out_start: same_shape, out_end: same_shape) -&gt; number or vector observe  every engine"><h3 id="api-ff2af8f141cc"><code>math::remap(value: number or vector, in_start: same_shape, in_end: same_shape, out_start: same_shape, out_end: same_shape) -&gt; number or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
@@ -1011,12 +1065,6 @@ print(to_json(stock.to_array()));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="math::radians(value: number) -&gt; float observe alias of math::degrees_to_radians. every engine"><h3 id="api-19f042e68178"><code>math::radians(value: number) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Alias of math::degrees_to_radians.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="math::random_int(minimum: int, maximum: int) -&gt; int random inclusive integer range using the engine-owned deterministic rng; shares math::random_seed state. every engine"><h3 id="api-f27d1f20b6af"><code>math::random_int(minimum: int, maximum: int) -&gt; int</code></h3><p><strong>Every engine</strong> &middot; random</p>
-<p>Inclusive integer range using the engine-owned deterministic RNG; shares math::random_seed state.</p>
-</div>
-<div class="api-entry" data-provider="core" data-search="math::random_range(minimum: number, maximum: number) -&gt; float random engine-owned deterministic rng, inclusive range; always returns float. shares math::random_seed state. every engine"><h3 id="api-0b28d50ab6f7"><code>math::random_range(minimum: number, maximum: number) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; random</p>
-<p>Engine-owned deterministic RNG, inclusive range; always returns float. Shares math::random_seed state.</p>
-</div>
 <div class="api-entry" data-provider="core" data-search="math::saturate(value: number) -&gt; float observe  every engine"><h3 id="api-7637681d13ff"><code>math::saturate(value: number) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::sign(value: number) -&gt; int observe  every engine"><h3 id="api-8e9908d306ee"><code>math::sign(value: number) -&gt; int</code></h3><p><strong>Every engine</strong> &middot; observe</p>
@@ -1105,6 +1153,32 @@ print(to_json(stock.to_array()));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="math::vec4.length_squared() -&gt; number observe  every engine"><h3 id="api-870fb707de7c"><code>math::vec4.length_squared() -&gt; number</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::vec4.normalized() -&gt; floating_vector copy  every engine"><h3 id="api-e3748054c19a"><code>math::vec4.normalized() -&gt; floating_vector</code></h3><p><strong>Every engine</strong> &middot; copy</p>
+</div>
+</section>
+<section class="api-group"><h2 id="group-random">random</h2>
+<div class="api-entry" data-provider="stdlib" data-search="random.next_bool() -&gt; bool random the top bit of a draw. register_all() or area registration"><h3 id="api-87a20d34c768"><code>random.next_bool() -&gt; bool</code></h3><p><strong>register_all() or area registration</strong> &middot; random</p>
+<p>The top bit of a draw.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="random.next_bytes(count: int) -&gt; string random count bytes, eight per draw, low byte first. register_all() or area registration"><h3 id="api-cccdcbd49932"><code>random.next_bytes(count: int) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; random</p>
+<p>count bytes, eight per draw, low byte first.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="random.next_float() -&gt; float random uniform in [0, 1): the top 53 bits of a draw over 2^53. register_all() or area registration"><h3 id="api-bc2dad7e6555"><code>random.next_float() -&gt; float</code></h3><p><strong>register_all() or area registration</strong> &middot; random</p>
+<p>Uniform in [0, 1): the top 53 bits of a draw over 2^53.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="random.next_float(lo: float, hi: float) -&gt; float random uniform in [lo, hi); the bounds must be finite and in order. register_all() or area registration"><h3 id="api-d6593c24add5"><code>random.next_float(lo: float, hi: float) -&gt; float</code></h3><p><strong>register_all() or area registration</strong> &middot; random</p>
+<p>Uniform in [lo, hi); the bounds must be finite and in order.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="random.next_int(lo: int, hi: int) -&gt; int random uniform over lo..hi, both inclusive, unbiased; an inverted range raises. register_all() or area registration"><h3 id="api-802f7e178047"><code>random.next_int(lo: int, hi: int) -&gt; int</code></h3><p><strong>register_all() or area registration</strong> &middot; random</p>
+<p>Uniform over lo..hi, both inclusive, unbiased; an inverted range raises.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="random.pick(values: array) -&gt; var random one element, each equally likely; an empty array raises. register_all() or area registration"><h3 id="api-666476fcdb17"><code>random.pick(values: array) -&gt; var</code></h3><p><strong>register_all() or area registration</strong> &middot; random</p>
+<p>One element, each equally likely; an empty array raises.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="random.seed(seed: int) -&gt; void configure restarts the generator as random(seed) would. register_all() or area registration"><h3 id="api-a4b997ced4b2"><code>random.seed(seed: int) -&gt; void</code></h3><p><strong>register_all() or area registration</strong> &middot; configure</p>
+<p>Restarts the generator as random(seed) would.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="random.shuffle(values: array&amp;) -&gt; void random shuffles the array in place (fisher-yates from the last element down). register_all() or area registration"><h3 id="api-fef8ba7fe0a0"><code>random.shuffle(values: array&amp;) -&gt; void</code></h3><p><strong>register_all() or area registration</strong> &middot; random</p>
+<p>Shuffles the array in place (Fisher-Yates from the last element down).</p>
 </div>
 </section>
 <section class="api-group"><h2 id="group-reflect">reflect</h2>
@@ -1884,6 +1958,7 @@ print(u.to_string());</code></pre></div>
 <tr><td><code>math::vec4.z</code></td><td>float</td><td>read/write / core</td><td>Component narrows to int32 or float32.</td></tr>
 <tr><td><code>pair.first</code></td><td>var</td><td>read/write / stdlib</td><td>Map iteration keys remain protected from mutation.</td></tr>
 <tr><td><code>pair.second</code></td><td>var</td><td>read/write / stdlib</td><td>Map iteration keys remain protected from mutation.</td></tr>
+<tr><td><code>random.state</code></td><td>string</td><td>read/write / stdlib</td><td>The generator&#x27;s state as 64 hex digits; storing it resumes the stream exactly.</td></tr>
 <tr><td><code>regex.flags</code></td><td>string</td><td>read-only / core</td><td></td></tr>
 <tr><td><code>regex.pattern</code></td><td>string</td><td>read-only / core</td><td>Saved by to_json and from_json.</td></tr>
 <tr><td><code>spider::Response.body</code></td><td>string</td><td>read/write / stdlib</td><td></td></tr>

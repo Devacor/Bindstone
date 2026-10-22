@@ -1,9 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
-#include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
-#include <filesystem>
-#include <fstream>
 #include <string>
 
 namespace jai::foundry::tests {
@@ -75,84 +72,37 @@ public:
 				to_string(bad);)"));
 		});
 
-		test("sha256_matches_the_nist_vectors", [this, es]() {
-			check_eq(std::string("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"), es("sha256(\"\");"));
-			check_eq(std::string("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"), es("sha256(\"abc\");"));
-			check_eq(std::string("248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"), es("sha256(\"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq\");"));
-			check_eq(std::string("cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1"),
-				es("sha256(\"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu\");"));
-			check_eq(std::string("cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"), es("sha256(string::repeat(\"a\", 1000000));"));
-		});
-
-		test("sha256_pads_at_every_block_boundary_and_hashes_bytes", [this, es]() {
-			const std::pair<int, const char*> lengths[] = {
-				{55, "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318"}, {56, "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a"},
-				{63, "7d3e74a05d7db15bce4ad9ec0658ea98e3f06eeecf16b4c6fff2da457ddc2f34"}, {64, "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb"},
-				{65, "635361c48bb9eab14198e76ea8ab7f1a41685d6ad62aa9146d301d4f17eb0ae0"}, {119, "31eba51c313a5c08226adf18d4a359cfdfd8d2e816b13f4af952f7ea6584dcfb"},
-				{120, "2f3d335432c70b580af0e8e1b3674a7c020d683aa5f73aaaedfdc55af904c21c"}, {128, "6836cf13bac400e9105071cd6af47084dfacad4e5e302c94bfed24e013afb73e"},
-			};
-			for (const auto& [length, digest] : lengths) {
-				check_eq(std::string(digest), es("sha256(string::repeat(\"a\", " + std::to_string(length) + "));"), std::to_string(length));
-			}
-			check_eq(std::string("2c8d07cd986f58eb210bd800133d6645c7340c59865377c8ea431cebca0b3113"), es("sha256(\"\\x00\\xFF\\x00\");"));
-			check_eq(std::string("4a99557e4033c3539de2eb65472017cad5f9557f7a0625a09f1c3f6e2ba69c4c 4a99557e4033c3539de2eb65472017cad5f9557f7a0625a09f1c3f6e2ba69c4c"),
-				es("sha256(utf8_string(\"\xC3\xA9\")) + \" \" + sha256(\"\xC3\xA9\");"));
-			check_eq(std::string("string"), es("type_of(sha256(\"a\"));"));
-		});
-
 		test("arguments_are_checked_at_load_and_at_run_time", [this, caught]() {
 			check_eq(std::string("web::html_escape expects a string"), caught("var n = 5; web::html_escape(n);"));
 			check_eq(std::string("web::html_unescape expects a string"), caught("var n = null; web::html_unescape(n);"));
-			check_eq(std::string("No overload of 'sha256' takes (string, string)"), caught("var f = sha256; f(\"a\", \"b\");"));
-			check_eq(std::string("No overload of 'sha256_file' takes ()"), caught("var f = sha256_file; f();"));
 			auto engine = make_engine();
 			stdlib::register_all(*engine);
 			stdlib::register_web(*engine);
-			for (const char* source : {"web::html_escape(5);", "sha256();", "sha256(\"a\", \"b\");", "int n = sha256(\"a\");", "sha256_file(1.5);"}) {
+			for (const char* source : {"web::html_escape(5);", "web::html_unescape();", "web::html_unescape(\"a\", \"b\");"}) {
 				bool rejected = false;
 				try { engine->execute(source); } catch (const std::exception&) { rejected = true; }
 				check_true(rejected, source);
 			}
 		});
 
-		test("sha256_file_streams_the_file_and_names_what_it_cannot_read", [this, es, caught]() {
-			namespace fs = std::filesystem;
-			const fs::path dir = test_temp_directory() / "jai_sha256_file";
-			std::error_code error;
-			fs::remove_all(dir, error);
-			fs::create_directories(dir);
-			std::string pattern(200000, '\0');
-			for (size_t i = 0; i < pattern.size(); ++i) { pattern[i] = static_cast<char>((i * 7 + 3) % 256); }
-			std::ofstream(dir / "pattern.bin", std::ios::binary) << pattern;
-			std::ofstream(dir / "empty.bin", std::ios::binary).flush();
-			const std::string base = dir.generic_string();
-			check_eq(std::string("ec0ebf98b6f2954bf0f7b839402b1ba245996c39d18e155414e91a2b4353c157"), es("sha256_file(\"" + base + "/pattern.bin\");"));
-			check_eq(std::string("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"), es("sha256_file(utf8_string(\"" + base + "/empty.bin\"));"));
-			check_eq("Cannot read file '" + base + "/missing.bin': not found", caught("sha256_file(\"" + base + "/missing.bin\");"));
-			check_eq("Cannot read file '" + base + "': not a file", caught("sha256_file(\"" + base + "\");"));
-			fs::remove_all(dir, error);
-		});
-
-		test("sha256_file_needs_the_filesystem_privilege_and_the_rest_do_not", [this]() {
+		test("the_html_functions_need_no_filesystem_privilege", [this]() {
 			auto engine = make_engine();
 			stdlib::register_all(*engine);
 			stdlib::register_web(*engine);
 			engine->disable(privilege::filesystem);
-			check_eq(std::string("Insufficient privilege: filesystem."), engine->execute("string m = \"\"; try { sha256_file(\"anything.bin\"); } catch (e) { m = e; } m;").as<std::string>());
-			check_eq(std::string("&lt; < ba7816bf"), engine->execute("web::html_escape(\"<\") + \" \" + web::html_unescape(\"&lt;\") + \" \" + sha256(\"abc\").substr(0, 8);").as<std::string>());
+			check_eq(std::string("&lt; <"), engine->execute("web::html_escape(\"<\") + \" \" + web::html_unescape(\"&lt;\");").as<std::string>());
 		});
 
-		test("the_pure_functions_run_in_parallel_bodies_and_sha256_file_stays_serial", [this, es, caught]() {
+		test("the_html_functions_run_in_parallel_bodies", [this, es]() {
 			check_eq(std::string("true true"), es(R"(
 				array<string> texts = [];
 				for (int i = 0; i < 64; ++i) { texts.push("<" + i + "> & '" + i + "'"); }
 				array<string> serial = [];
-				for (auto t : texts) { serial.push(sha256(web::html_escape(t)) + web::html_unescape(web::html_escape(t))); }
-				var parallel = parallel_transform(texts, [](string t) { return sha256(web::html_escape(t)) + web::html_unescape(web::html_escape(t)); });
+				for (auto t : texts) { serial.push(web::html_escape(t) + web::html_unescape(web::html_escape(t))); }
+				var parallel = parallel_transform(texts, [](string t) { return web::html_escape(t) + web::html_unescape(web::html_escape(t)); });
 				array<string> looped = texts;
-				parallel_for (auto& t : looped) { t = sha256(web::html_escape(t)) + web::html_unescape(web::html_escape(t)); }
+				parallel_for (auto& t : looped) { t = web::html_escape(t) + web::html_unescape(web::html_escape(t)); }
 				to_string(to_json(parallel) == to_json(serial)) + " " + to_string(to_json(looped) == to_json(serial));)"));
-			check_true(caught("array<string> paths = [\"a\"]; parallel_for (auto& p : paths) { p = sha256_file(p); }").find("host function 'sha256_file' is marked serial_function() and cannot be called in a parallel body") != std::string::npos);
 		});
 
 		test("url_encode_and_url_decode_are_rfc_3986_percent_encoding", [this, es]() {

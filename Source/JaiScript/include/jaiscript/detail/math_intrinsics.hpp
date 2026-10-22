@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <random>
 #include <string_view>
 
 namespace jai::detail {
@@ -32,7 +31,6 @@ namespace jai::detail {
         sin_, cos_, tan_, atan2_,
         distance, distance_squared,
         radians_to_degrees, degrees_to_radians,
-        random_, random_range, random_seed,
         // Interpolation family (formula-identical to the stdlib
         // registrations they supersede; lerp and mix are the same formula)
         lerp_, mix_, unmix_,
@@ -56,7 +54,7 @@ namespace jai::detail {
         f32_, i32_, cstore_, vcomp_, acos_,
         i32_add_, i32_sub_, i32_mul_, i32_div_, i32_neg_,
         // Complete scalar library; appended so existing intrinsic ids stay stable.
-        trunc_, cbrt_, exp_, exp2_, log_, log2_, log10_, asin_, acos_public_, atan_, sinh_, cosh_, tanh_, sign_, fmod_, hypot_, saturate_, wrap_, is_nan_, is_inf_, random_int_,
+        trunc_, cbrt_, exp_, exp2_, log_, log2_, log10_, asin_, acos_public_, atan_, sinh_, cosh_, tanh_, sign_, fmod_, hypot_, saturate_, wrap_, is_nan_, is_inf_,
         count,
         none = count
     };
@@ -148,11 +146,7 @@ namespace jai::detail {
                 if (name == "perpendicular") return math_fn::perpendicular_;
                 return math_fn::none;
             case 'r':
-                if (name == "random_range") return math_fn::random_range;
                 if (name == "radians") return math_fn::degrees_to_radians;
-                if (name == "random_int") return math_fn::random_int_;
-                if (name == "random") return math_fn::random_;   // arity picks range form
-                if (name == "random_seed") return math_fn::random_seed;
                 if (name == "radians_to_degrees") return math_fn::radians_to_degrees;
                 if (name == "round") return math_fn::round_;
                 if (name == "remap") return math_fn::remap_;
@@ -187,60 +181,6 @@ namespace jai::detail {
                 return math_fn::none;
         }
     }
-
-    // Engine-owned deterministic RNG (zero statics). Two deliberate choices: (1) the raw engine is
-    // std::mt19937_64 - its sequence IS exactly specified by the standard, so seeds
-    // reproduce cross-platform - but the int/float MAPPINGS are ours, because
-    // std::uniform_*_distribution algorithms are implementation-defined and would
-    // break STATE_HASH/differential-fuzz determinism across toolchains; (2) the
-    // default seed is FIXED (unseeded engines are deterministic, matching the test
-    // regime) rather than random_device - games seed via math::random_seed.
-    inline uint64_t splitmix64_mix(uint64_t z) noexcept {
-        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-        z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-        return z ^ (z >> 31);
-    }
-
-    // A parallel region's draw: a function of the region's seed, the element running and how many draws that element made
-    // before, so no draw depends on which worker runs the element or what it ran first
-    inline uint64_t region_counter_draw(uint64_t seed, uint64_t element, uint64_t draw) noexcept {
-        const uint64_t element_key = splitmix64_mix(seed ^ splitmix64_mix(element + 0x9E3779B97F4A7C15ull));
-        return splitmix64_mix(element_key + (draw + 1) * 0xD1B54A32D192ED03ull);
-    }
-
-    struct math_rng_state {
-        std::mt19937_64 generator{0x9E3779B97F4A7C15ull};
-        // Set on a parallel chunk's stream: the chunk's cursors name the running element (cursors[0])
-        const std::vector<script_value>* region_cursors = nullptr;
-        uint64_t region_seed = 0;
-        size_t region_element = SIZE_MAX;
-        uint64_t region_draws = 0;
-
-        uint64_t next() { return region_cursors ? next_in_region() : generator(); }
-        uint64_t next_in_region() noexcept {
-            const size_t element = region_cursors->empty() ? SIZE_MAX : region_cursors->front().element_cursor_index();
-            if (element != region_element) {
-                region_element = element;
-                region_draws = 0;
-            }
-            return region_counter_draw(region_seed, element, region_draws++);
-        }
-        void begin_region(const std::vector<script_value>* cursors, uint64_t seed) noexcept {
-            region_cursors = cursors;
-            region_seed = seed;
-            region_element = SIZE_MAX;
-            region_draws = 0;
-        }
-        void seed(uint64_t s) { generator.seed(s); }
-        // Uniform [0.0, 1.0] INCLUSIVE of both ends (ranges are inclusive)
-        double next_unit_inclusive() {
-            return static_cast<double>(next() >> 11) * (1.0 / 9007199254740991.0);   // / (2^53 - 1)
-        }
-    };
-
-    // seed(): mt19937_64 seeding uses the standard-specified init_seq, so the mix
-    // (fixed sequence from seed) reproduces cross-platform - update the RNG rationale
-    // comment above if the engine ever changes.
 
     // Shared call-shape recognition (both backends): `math::<fn>` static access.
     // Name-based and engine-independent, so the resolution caches on the AST node
@@ -813,7 +753,6 @@ namespace jai::detail {
             case math_fn::wrap_: return {3, 3, 0, "math::wrap expects 3 arguments"};
             case math_fn::is_nan_: return {1, 1, 0, "math::is_nan expects 1 argument"};
             case math_fn::is_inf_: return {1, 1, 0, "math::is_inf expects 1 argument"};
-            case math_fn::random_int_: return {2, 2, 0, "math::random_int expects 2 arguments"};
             case math_fn::floor_: return {1, 1, 0, "math::floor expects 1 argument"};
             case math_fn::ceil_: return {1, 1, 0, "math::ceil expects 1 argument"};
             case math_fn::round_: return {1, 1, 0, "math::round expects 1 argument"};
@@ -833,9 +772,6 @@ namespace jai::detail {
             case math_fn::distance_squared: return {2, 2, 4, "math::distance_squared expects 2 vectors or 4 arguments (x1, y1, x2, y2)"};
             case math_fn::radians_to_degrees: return {1, 1, 0, "math::radians_to_degrees expects 1 argument"};
             case math_fn::degrees_to_radians: return {1, 1, 0, "math::degrees_to_radians expects 1 argument"};
-            case math_fn::random_: return {0, 0, 2, "math::random expects 0 or 2 arguments (min, max)"};
-            case math_fn::random_range: return {2, 2, 0, "math::random_range expects 2 arguments (min, max)"};
-            case math_fn::random_seed: return {1, 1, 0, "math::random_seed expects 1 argument"};
             case math_fn::wrap_add_: return {2, 2, 0, "math::wrap_add expects 2 arguments"};
             case math_fn::wrap_sub_: return {2, 2, 0, "math::wrap_sub expects 2 arguments"};
             case math_fn::wrap_mul_: return {2, 2, 0, "math::wrap_mul expects 2 arguments"};
@@ -1144,7 +1080,7 @@ namespace jai::detail {
     // ONE variant read per arg, switch on it; cpp_bound decodes through
     // the S8 prologue shape. Every case arity-checks BEFORE touching args.
     inline checked_result<script_value> eval_math_intrinsic(math_fn fn, const script_value* const* args, size_t argc,
-                                                            engine* eng, math_rng_state& rng) {
+                                                            engine* eng) {
         // Normalize each operand once: yields (is_number, as_double, is_int, as_int)
         struct num {
             bool ok = false;
@@ -1405,41 +1341,6 @@ namespace jai::detail {
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::degrees_to_radians expects a numeric argument");
                 return checked_result<script_value>(script_value(a.d() * (3.14159265358979323846 / 180.0), eng));
-            }
-            case math_fn::random_:
-            case math_fn::random_range:
-            case math_fn::random_int_: {
-                if (fn == math_fn::random_ && argc == 0) {
-                    // math::random(): uniform [0.0, 1.0] inclusive
-                    return checked_result<script_value>(script_value(rng.next_unit_inclusive(), eng));
-                }
-                if (!math_arity_accepts(fn, argc)) return bad_arity(math_arity_of(fn).text);
-                const num lo = read(*args[0]), hi = read(*args[1]);
-                if (!lo.ok || !hi.ok) return bad_type("math::random expects numeric arguments");
-                if (fn == math_fn::random_int_ && (!lo.is_int || !hi.is_int)) { return bad_type("math::random_int expects integer arguments"); }
-                if (fn != math_fn::random_range && lo.is_int && hi.is_int) {
-                    // Inclusive int range; empty/inverted range errors cleanly
-                    if (hi.i < lo.i) return bad_type("math::random range is inverted (max < min)");
-                    const uint64_t span = static_cast<uint64_t>(hi.i) - static_cast<uint64_t>(lo.i) + 1ull;
-                    // span == 0 means the FULL int64 range (hi - lo wrapped); modulo by 0 guard
-                    const uint64_t r = span == 0 ? rng.next() : rng.next() % span;
-                    return checked_result<script_value>(script_value(static_cast<script_int>(static_cast<uint64_t>(lo.i) + r), eng));
-                }
-                if (hi.d() < lo.d()) return bad_type("math::random range is inverted (max < min)");
-                return checked_result<script_value>(script_value(lo.d() + rng.next_unit_inclusive() * (hi.d() - lo.d()), eng));
-            }
-            case math_fn::random_seed: {
-                if (!math_arity_ok<math_fn::random_seed>(argc)) return bad_arity(math_arity_of(math_fn::random_seed).text);
-                const num a = read(*args[0]);
-                if (!a.ok) return bad_type("math::random_seed expects a numeric argument");
-				if (a.is_int) {
-					rng.seed(static_cast<uint64_t>(a.i));
-				} else {
-					auto result = checked_float_to_integer<uint64_t>(a.f);
-					if (!result) { return result.error_value(); }
-					rng.seed(result.value());
-				}
-                return checked_result<script_value>(script_value(std::monostate{}, eng));
             }
             case math_fn::wrap_add_:
             case math_fn::wrap_sub_:

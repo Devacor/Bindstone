@@ -681,9 +681,9 @@ public:
 		});
 		test("api_consistency_math_namespace_is_the_standard_api", [this]() {
 			every_config("math namespace", "true|0.0|1.0|1.0|0.0|3|4.0", [](engine& e) {
-				const bool noGlobals = !e.has_function("sqrt") && !e.has_function("random") && !e.has_variable("PI");
+				const bool noGlobals = !e.has_function("sqrt") && !e.has_function("floor") && !e.has_variable("PI");
 				return std::string(noGlobals ? "true|" : "false|") + e.execute(R"(
-					to_string(math::acos(1)) + "|" + to_string(math::exp(0)) + "|" + to_string(math::hypot(0,1)) + "|" + to_string(math::trunc(0.5)) + "|" + to_string(math::random_int(3,3)) + "|" + to_string(math::sqrt(16));
+					to_string(math::acos(1)) + "|" + to_string(math::exp(0)) + "|" + to_string(math::hypot(0,1)) + "|" + to_string(math::trunc(0.5)) + "|" + to_string(math::itrunc(3.7)) + "|" + to_string(math::sqrt(16));
 				)").to_string();
 			});
 		});
@@ -2305,7 +2305,7 @@ private:
 				{"sin is float", "char c = math::sin(1.0);", 1},
 				{"sin into int converts", "int i = math::sin(1.0);", 0},
 				{"abs and max follow their operands", "char a = math::abs(1); char b = math::abs(1.5); char c = math::max(1, 2.5);", 2},
-				{"random_seed is unknown", "char c = math::random_seed(1);", 0},
+				{"an unknown math name is a run-time error", "char c = math::no_such(1);", 0},
 				{"math arity is a runtime error", "var z = math::pow(2);", 0},
 				{"namespace paths are lenient", "namespace a::b { int c = 1; } var x = a::b::zzz;", 0},
 				{"handle builtins on any object", "class C { int v = 0; } C c = C(); int n = c.use_count(); bool u = c.unique(); c.reset();", 0},

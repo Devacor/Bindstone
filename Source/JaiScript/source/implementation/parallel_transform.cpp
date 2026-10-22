@@ -47,6 +47,7 @@
 #include <jaiscript/detail/ast_serializer.hpp>
 #include <jaiscript/detail/return_conv.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
+#include <jaiscript/stdlib/random.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/vm/vm_backend.hpp>
 
@@ -108,7 +109,6 @@ namespace jai::detail {
 		cell_counters cells_folded{};   // this worker's block counters already folded into the engine's
 		parallel_schedule_cursor sched;   // this worker's place in the region's shared blocks (schedule null: the static partition)
 		std::vector<script_value> cursors;   // [0] = the range's chunk cursor, then the zip's arrays
-		math_rng_state draws;                // keyed by the element cursors[0] names
 		std::vector<script_value> call_args; // prepared at the barrier; no worker-entry allocation
 		// Live input vector ("safe AND free"): workers read the
 		// caller's vector directly - all-primitive elements (typed proof or one dynamic
@@ -476,7 +476,7 @@ namespace {
 		return value != found->second->variables.end() && value->second.is_function() ? &value->second : nullptr;
 	}
 
-	// The library builtins that stay parallel (parallel_pure_function): pure math, to_string, sha256 and the web:: text functions; the rest register serial
+	// The library builtins that stay parallel (parallel_pure_function): pure math, to_string, the web:: text functions and crypto:: (apart from its file read); the rest register serial
 	bool parallel_host_whitelisted(std::string_view name) {
 		static constexpr std::string_view k_whitelist[] = {
 			"abs", "sign", "min", "max", "clamp",
@@ -488,9 +488,12 @@ namespace {
 			"lerp", "mix", "unmix", "mix_in", "mix_out", "mix_in_out", "mix_out_in",
 			"unmix_in", "unmix_out", "unmix_in_out", "unmix_out_in",
 			"saturate", "wrap", "remap", "is_nan", "is_inf",
-			"to_string", "sha256",
+			"to_string",
 			"web::html_escape", "web::html_unescape", "web::url_encode", "web::url_decode", "web::form_encode", "web::form_decode",
 			"web::parse_query", "web::parse_query_all", "web::build_query", "web::parse_url",
+			"crypto::sha256", "crypto::sha256_bytes", "crypto::sha512", "crypto::sha512_bytes", "crypto::sha1", "crypto::sha1_bytes", "crypto::md5", "crypto::md5_bytes",
+			"crypto::hmac_sha256", "crypto::hmac_sha256_bytes", "crypto::hmac_sha512", "crypto::hmac_sha512_bytes", "crypto::equals",
+			"crypto::random_bytes", "crypto::random_hex", "crypto::random_int", "crypto::password_hash", "crypto::password_verify",
 		};
 		for (auto w : k_whitelist) {
 			if (name == w) { return true; }
@@ -1607,15 +1610,23 @@ namespace {
 				if (!owner) { return; }
 				if (callrec.enclosing_arguments || !callrec.loop_variable_arguments.empty()) {
 					const script_value method = owner->get_method(name_id, false);
-					const auto* writes = method.is_function() ? method.as_function().target<host_writeback_function>() : nullptr;
-					if (writes && (writes->mask & callrec.enclosing_arguments)) {
+					// the positions a non-const T& parameter writes back through: one callable's mask, or every overload's of a bound method
+					uint64_t written = 0;
+					if (const auto* writes = method.is_function() ? method.as_function().target<host_writeback_function>() : nullptr) {
+						written = writes->mask;
+					} else if (const auto* dispatch = method.is_function() ? method.as_function().target<class_definition::cpp_method_dispatch>() : nullptr) {
+						for (size_t i = 0; i < 64; ++i) {
+							if (dispatch->argument_binding(i, SIZE_MAX) & 4) { written |= uint64_t(1) << i; }
+						}
+					}
+					if (written & callrec.enclosing_arguments) {
 						const auto* root = static_cast<const identifier_expr*>(callrec.enclosing_site);
 						ok = fail(callrec.enclosing_site, "argument passes enclosing state '" + std::string(root->name) +
 						                                  "' by reference (captured reads are read-only)");
 						return;
 					}
 					for (const auto& [argument, position] : callrec.loop_variable_arguments) {
-						if (writes && argument < 64 && ((writes->mask >> argument) & 1) && !admit_loop_variable_write(position, callrec.site)) {
+						if (argument < 64 && ((written >> argument) & 1) && !admit_loop_variable_write(position, callrec.site)) {
 							ok = false;
 							return;
 						}
@@ -2348,14 +2359,11 @@ namespace {
 			if (call->callee && call->callee->get_type() == node_type::member_expr) {
 				auto* m = static_cast<member_expr*>(call->callee.get());
 				if (m->is_static) {
-					// math:: intrinsics are value functions; a random draw reads the chunk's counter stream (engine::math_rng)
+					// math:: intrinsics are value functions; crypto::sha256_file reads a file (the rest of crypto:: is pinned below)
 					const jai::detail::math_fn fn = jai::detail::math_intrinsic_for_call(m);
-					if (fn == jai::detail::math_fn::random_seed) {
-						return fail(m, "math::random_seed cannot be called in a parallel body (seed before the loop: the loop's draws come from"
-						               " a stream it seeds from the engine's)");
-					}
-					if (fn == jai::detail::math_fn::random_ || fn == jai::detail::math_fn::random_range || fn == jai::detail::math_fn::random_int_) {
-						adm.draws = true;
+					if (m->object && m->object->get_type() == node_type::identifier_expr && static_cast<identifier_expr*>(m->object.get())->name == "crypto" &&
+					    m->member == "sha256_file") {
+						return fail(m, "crypto::sha256_file cannot be called in a parallel body (it reads a file)");
 					}
 					if (fn != jai::detail::math_fn::none) {
 						for (const auto& a : call->arguments) {
@@ -3786,11 +3794,16 @@ namespace {
 
 	// The slots of an instance whose declared type can reach a refcount, and its runtime-added fields
 	bool normalize_instance_fields(class_instance* inst, const class_definition* cd, engine& eng, const reach_filter& reach, bool unreferenced_array, std::vector<type_info*>* types) {
+		uint64_t& walking_field = eng.parallel_state().element_host_field;
+		const uint64_t enclosing_field = walking_field;
 		for (const uint32_t slot : cd->handle_bearing_slots()) {
 			const uint64_t id = cd->slot_field(slot);
 			if (!reach.names(id)) { continue; }
 			if (script_value* field = inst->field_slot_value(slot)) {
-				if (!normalize_element_inplace(*field, eng, reach.below(id), unreferenced_array, nullptr, types)) { return false; }
+				walking_field = id;
+				const bool ok = normalize_element_inplace(*field, eng, reach.below(id), unreferenced_array, nullptr, types);
+				walking_field = enclosing_field;
+				if (!ok) { return false; }
 			}
 		}
 		if (inst->has_user_overflow_fields()) {   // runtime-added fields carry no declared type: walk them
@@ -3904,7 +3917,14 @@ namespace {
 				inst->region_tag(eng.parallel_state().region_serial);
 				return normalize_instance_fields(inst, cd, eng, reach, false, types);
 			}
-			if (!cd || !cd->flat_value_semantics()) {
+			if (cd && !shared_key && cd->is_cpp_class() && !v.is_shared_ptr_type() && inst->native()) {
+				// a bound C++ value an element holds: its chunk's own once the barrier finds no other element holding the object
+				auto& pstate = eng.parallel_state();
+				pstate.element_host_values.push_back({ element_object_key(*inst), pstate.element_host_field, cd, SIZE_MAX });
+				inst->region_tag(pstate.region_serial);
+				return true;
+			}
+			if (!cd || !(cd->flat_value_semantics() || cd->flat_over_host_values())) {
 				return false;
 			}
 			JAI_OBJ_SEC(0);
@@ -3921,7 +3941,7 @@ namespace {
 			// then make the instance and its object/container subtree exclusive by construction;
 			// the only alias left is a SHARED STRING BUFFER (a literal several instances hold), so
 			// the walk narrows to the string slots the body can reach.
-			if (unreferenced_array && inst->live_field_refs() == 0 && !inst->has_user_overflow_fields()) {
+			if (unreferenced_array && inst->live_field_refs() == 0 && !inst->has_user_overflow_fields() && cd->flat_value_semantics()) {
 				if (cd == string_free_class) { return true; }   // proved once per fork: no reachable shared string
 				for (const uint32_t slot : cd->string_reachable_slots()) {
 					const uint64_t id = cd->slot_field(slot);
@@ -4086,10 +4106,12 @@ namespace {
 			slot_box(obj_slot& s, engine* e) : slot(s), v(std::move(s.handle), s.tag, e) {}
 			~slot_box() { slot.handle = std::move(v.unchecked_get_object_storage()); slot.tag = v.get_type_info(); }
 		};
+		auto& host_values = eng.parallel_state().element_host_values;
 		for (size_t i = 0; i < n; ++i) {
 			bool ok = false;
 			const void* object = nullptr;
 			const void** key = handle_objects ? &object : nullptr;   // handles are admitted at the top level only, for the distinctness check
+			const size_t host_mark = host_values.size();
 			try {
 				if (proof.typed_obj) {
 					slot_box box(slots[i], &eng);
@@ -4098,6 +4120,9 @@ namespace {
 					ok = normalize_element_inplace(elements[i], eng, reach, node.live_elem_refs == 0, string_free_class, types, key);
 				}
 				if (object) { handle_objects->emplace_back(object, i); }
+				if (handle_objects) {
+					for (size_t k = host_mark; k < host_values.size(); ++k) { host_values[k].element = i; }
+				}
 			} catch (const std::exception& e) {
 				proof.failed = i;
 				proof.what = e.what();
@@ -4119,6 +4144,26 @@ namespace {
 			}
 		}
 		return proof;
+	}
+
+	JAI_NOINLINE std::string shared_element_host_value_text(engine& eng, const parallel_engine_state::element_host_value& first, const parallel_engine_state::element_host_value& second) {
+		std::string result = "elements " + std::to_string(first.element) + " and " + std::to_string(second.element) + " share one '" + first.cls->get_name() + "'";
+		if (first.field != UINT64_MAX) {
+			result += " in field '" + std::string(eng.get_symbolizer()->get_string(first.field)) + "'";
+		}
+		return result + " (an element owns the C++ values it holds: give each element its own, or capture one from outside the loop)";
+	}
+
+	// Two elements holding one bound C++ value: the first such pair in element order, else null
+	const parallel_engine_state::element_host_value* shared_element_host_value(std::vector<parallel_engine_state::element_host_value>& values) {
+		if (values.size() < 2) { return nullptr; }
+		std::stable_sort(values.begin(), values.end(), [](const auto& a, const auto& b) { return a.object < b.object || (a.object == b.object && a.element < b.element); });
+		const parallel_engine_state::element_host_value* found = nullptr;
+		for (size_t k = 1; k < values.size(); ++k) {
+			if (values[k].object != values[k - 1].object || values[k].element == values[k - 1].element) { continue; }
+			if (!found || values[k].element < found[1].element) { found = &values[k - 1]; }
+		}
+		return found;
 	}
 
 	// Distinctness of the handle elements a fork admitted (range and zipped arrays, by element): one worker touches each object, so
@@ -4202,6 +4247,8 @@ namespace {
 		bool sliced = false;                 // borrow: the plan's sliced input, its elements' handles handed out (proven below)
 		bool host = false;                   // object: a C++ class's instance (each worker's view shares its C++ object)
 		std::vector<const class_definition*> classes;   // object: the classes of the instances it holds
+		// stream: each worker's copy and the cursors it follows, seeded together once the region is sure to run
+		std::vector<std::pair<script_value, const std::vector<script_value>*>> stream_copies;
 	};
 
 	// A captured class instance, or a handle to one, a body reads through a worker's own view: a script class whose value
@@ -4793,6 +4840,10 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			return usage("captured name '" + std::string(entry.name) +
 			             "' is a function value (only direct calls to statically-known functions are allowed in a parallel body)");
 		case script_value::TYPEID_OBJECT: {
+			if (stdlib::random_detail::is_random(*cap.source)) {
+				cap.kind = parallel_capture_kind::stream;
+				break;
+			}
 			if (!cap.source->unchecked_object_handle()) {   // a null handle copies no count
 				cap.kind = parallel_capture_kind::scalar;
 				break;
@@ -4814,7 +4865,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		default:
 			return usage("captured name '" + std::string(entry.name) + "' is not value-semantic (object/shared_ptr/weak_ptr)");
 		}
-		if (entry.member_use && cap.kind != parallel_capture_kind::object) {
+		if (entry.member_use && cap.kind != parallel_capture_kind::object && cap.kind != parallel_capture_kind::stream) {
 			return usage("member access reaches captured state '" + std::string(entry.name) + "' (captured reads are read-only, and only a captured object has members) at " +
 			             std::to_string(entry.member_use->location.line) + ":" + std::to_string(entry.member_use->location.column));
 		}
@@ -4894,6 +4945,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	std::vector<type_info*> value_types;
 	std::vector<std::pair<const void*, size_t>> handle_objects;   // (object, element) of every handle element, range and zips
 	element_proof proof;
+	state.element_host_values.clear();
+	state.element_host_field = UINT64_MAX;
 	const bool skip_proof = !plan.inplace && (statically_all_scalar(array_value) || parallel_content_all_scalar(array_value));
 	if (!skip_proof) {
 		state.faults.checkpoint("region.element_proof");
@@ -4966,6 +5019,11 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	if (const auto [repeat, original] = repeated_handle_object(handle_objects); repeat != SIZE_MAX) {
 		return usage("elements " + std::to_string(original) + " and " + std::to_string(repeat) +
 		             " hold the same object (an object a body reaches through a handle element belongs to one element)");
+	}
+	if (plan.inplace) {
+		if (const auto* shared = shared_element_host_value(state.element_host_values)) {
+			return usage(shared_element_host_value_text(eng, shared[0], shared[1]));
+		}
 	}
 	// The sliced input: every element read whole by the one worker its chunk runs on, so each must be exclusive like a zipped array's
 	for (const auto& cap : captures) {
@@ -5148,6 +5206,13 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			for (const auto& c : captures) { if (c.entry->name_id == call.capture_id && c.method_scope == method_scope) { cap = &c; break; } }
 			if (!cap) { continue; }
 			auto at = [&call]() { return " at " + std::to_string(call.site->location.line) + ":" + std::to_string(call.site->location.column); };
+			if (cap->kind == parallel_capture_kind::stream) {
+				if (call.name == "seed") {
+					return usage("random::seed cannot be called on captured '" + std::string(cap->entry->name) +
+					             "' in a parallel body (seed before the loop: each element draws its own stream from it)" + at());
+				}
+				continue;   // a draw: each element's stream is the worker copy's
+			}
 			bool method_of_object = false;
 			if (cap->kind == parallel_capture_kind::object) {
 				for (const class_definition* cd : cap->classes) {
@@ -5401,7 +5466,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 #ifdef JAISCRIPT_VM_PROFILE
 		{ const uint64_t now = __rdtsc(); pf_slots += now - pf_a; pf_a = now; }
 #endif
-		for (const auto& cap : captures) {
+		for (auto& cap : captures) {
 			state.faults.checkpoint("region.capture_value", k);
 			script_value provisioned(std::monostate{}, &eng);
 			try {
@@ -5426,6 +5491,13 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 					break;
 				case parallel_capture_kind::object:
 					provisioned = captured_object_view(*cap.source, cap.host, eng, value_types);
+					break;
+				case parallel_capture_kind::stream:
+					provisioned = stdlib::random_detail::region_copy(*cap.source, &eng, &slot->cursors, 0);
+					if (auto holder = provisioned.get_object_holder(); holder && holder->is_class_instance_wrapper && holder->data) {
+						static_cast<class_instance*>(holder->data.get())->region_tag(state.region_serial);   // the worker's own copy takes its draws
+					}
+					cap.stream_copies.emplace_back(provisioned, &slot->cursors);
 					break;
 				case parallel_capture_kind::written:   // a fresh copy each region: the join reads back what this worker wrote
 					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
@@ -5661,10 +5733,14 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	const uint64_t pf_prewarm1 = __rdtsc();
 #endif
 
-	// DRAWS: one engine draw seeds every chunk's counter stream, so a region's draws and the engine stream after it are the
-	// same at every worker count
-	const uint64_t draw_seed = adm->draws || method_adm.adm.draws ? eng.math_rng().next() : 0;
-	for (parallel_worker_slot* ctx : contexts) { ctx->draws.begin_region(&ctx->cursors, draw_seed); }
+	// STREAMS: one draw from each captured random seeds every worker's copy of it, so a region's draws, and the generator after
+	// it, are the same at every worker count
+	for (resolved_capture& cap : captures) {
+		if (cap.kind != parallel_capture_kind::stream) { continue; }
+		const uint64_t seed = stdlib::random_detail::draw_region_seed(*cap.source);
+		for (auto& [copy, cursors] : cap.stream_copies) { stdlib::random_detail::begin_region(copy, cursors, seed); }
+		cap.stream_copies.clear();
+	}
 
 	// REGION: pinned pool workers for chunks 1..W-1 (submit_to fixes each chunk's thread so
 	// the limits table can be built before fan-out), the calling thread runs chunk 0. The pool
@@ -5672,7 +5748,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	auto& table = region_guard.table;
 	state.faults.checkpoint("region.table_entry", 0);
 	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits, &contexts[0]->pending_instances, contexts[0]->backend.get(), &contexts[0]->method_env,
-	                          &contexts[0]->deferred_reports, &contexts[0]->pending_script_layers, &contexts[0]->deferred_releases, &contexts[0]->cursors, &contexts[0]->draws });
+	                          &contexts[0]->deferred_reports, &contexts[0]->pending_script_layers, &contexts[0]->deferred_releases, &contexts[0]->cursors });
 	if (worker_count > 1) {
 		const size_t pool_workers_needed = worker_count - 1;
 		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
@@ -5695,7 +5771,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			state.faults.checkpoint("region.table_entry", k);
 			table.entries.push_back({ detail::thread_pool_access::worker_thread_id(*state.pool, k - 1), &contexts[k]->limits, &contexts[k]->pending_instances,
 			                          contexts[k]->backend.get(), &contexts[k]->method_env, &contexts[k]->deferred_reports,
-			                          &contexts[k]->pending_script_layers, &contexts[k]->deferred_releases, &contexts[k]->cursors, &contexts[k]->draws });
+			                          &contexts[k]->pending_script_layers, &contexts[k]->deferred_releases, &contexts[k]->cursors });
 		}
 	}
 	region_guard.prepared = true;

@@ -8,6 +8,8 @@
 #include "reflection.hpp"
 #include "web_text.hpp"
 #include "spider.hpp"
+#include "random.hpp"
+#include "crypto.hpp"
 // Native math:: vectors and colors are core language values; host adapters are opt-in.
 
 namespace jai {
@@ -29,14 +31,16 @@ namespace stdlib {
     inline void register_container_types(engine* e) { register_container_types(*e); }
     inline void register_string_functions(const std::shared_ptr<engine>& e) { register_string_functions(*e); }
     inline void register_string_functions(engine* e) { register_string_functions(*e); }
-    inline void register_web_text_functions(const std::shared_ptr<engine>& e) { register_web_text_functions(*e); }
-    inline void register_web_text_functions(engine* e) { register_web_text_functions(*e); }
     inline void register_web(const std::shared_ptr<engine>& e) { register_web(*e); }
     inline void register_web(engine* e) { register_web(*e); }
     // time.hpp (the stopwatch and calendar internals, with <chrono>) is the library's; hosts need only the registration
     void register_time_functions(engine& eng_ref);
     inline void register_time_functions(const std::shared_ptr<engine>& e) { register_time_functions(*e); }
     inline void register_time_functions(engine* e) { register_time_functions(*e); }
+    inline void register_random_functions(const std::shared_ptr<engine>& e) { register_random_functions(*e); }
+    inline void register_random_functions(engine* e) { register_random_functions(*e); }
+    inline void register_crypto_functions(const std::shared_ptr<engine>& e) { register_crypto_functions(*e); }
+    inline void register_crypto_functions(engine* e) { register_crypto_functions(*e); }
 
 } // namespace stdlib
 } // namespace jai

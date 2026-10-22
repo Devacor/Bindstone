@@ -141,9 +141,9 @@ a catchable error at the import, and the program keeps its old code
 
 The full JaiScript stdlib is always registered (`jai::stdlib::register_all`): formatted
 `print` / `format` / `to_string` / `type_of`, math, `to_json` / `from_json`, container
-helpers, `sha256(s)` and `sha256_file(path)` (a hex digest, the file
-streamed; it needs the `filesystem` privilege and raises `read_file`'s error below), and the opt-in `web::`
-library (`jai::stdlib::register_web`: `web::html_escape`, `web::url_encode`, `web::form_encode`,
+helpers, the `random` type, `crypto::` (hashes such as `crypto::sha256(s)` and `crypto::sha256_file(path)`, HMAC,
+secure random bytes and password hashing; `crypto::sha256_file` needs the `filesystem` privilege and raises `read_file`'s
+error below), and the opt-in `web::` library (`jai::stdlib::register_web`: `web::html_escape`, `web::url_encode`, `web::form_encode`,
 `web::parse_query`, `web::build_query`, `web::parse_url` and the rest), and the opt-in `spider::` HTTP client
 (`jai::stdlib::register_spider`: `spider::catch(url[, options])`, also spelled `spider::get`, and
 `spider::sling(content, url[, options])`, also spelled `spider::post(url, content[, options])`, each answering a

@@ -8,6 +8,8 @@ class Node {
 	var right = null;
 }
 
+random PRIORITIES(1);   // the treap's node priorities
+
 function merge(var lower, var greater, var& result) {
 	if (lower == null) {
 		result = greater;
@@ -59,7 +61,7 @@ function insert(var& root, var x) {
 	if (equal == null) {
 		equal = new Node();
 		equal.x = x;
-		equal.y = math::random_int(0, 2147483647);
+		equal.y = PRIORITIES.next_int(0, 2147483647);
 	}
 	var tmp = null;
 	merge(lower, equal, tmp);

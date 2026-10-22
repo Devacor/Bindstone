@@ -108,7 +108,7 @@ function pix_clear(int color) -> void {
 // ------------------------------------------------------------- screen melt ---
 // the classic wipe: the departing frame slides DOWN in ragged columns over
 // whatever the draw path just rendered, top rows revealing first. Presentation
-// only — its own LCG (the face_rnd pattern) never touches math::random, whose
+// only — its own LCG (the face_rnd pattern) never touches SIM_RANDOM, whose
 // stream belongs to the sim (demos and netplay replay it), and nothing
 // consults WIPE_TICS except play()'s draw path.
 int WIPE_TICS = 0;            // 0 = inactive

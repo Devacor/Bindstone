@@ -229,7 +229,8 @@ void print_usage() {
 		"           (message + stack trace on stderr), usage errors exit 2.\n"
 		"\n"
 		"environment: the full JaiScript stdlib is always registered (print/format/to_string/\n"
-		"  type_of, math, to_json/from_json, containers, sha256(s), sha256_file(path)), the web::\n"
+		"  type_of, math, to_json/from_json, containers, the random type, crypto:: hashes, HMAC,\n"
+		"  secure random and passwords), the web::\n"
 		"  library (html_escape, url_encode, form_encode, parse_query, build_query, parse_url, ...),\n"
 		"  the spider:: HTTP client (spider::catch(url[, options]), also spelled spider::get;\n"
 		"  spider::sling(content, url[, options]), also spelled spider::post(url, content[, options]);\n"
@@ -1912,7 +1913,7 @@ int run_selftest(const console_state& con) {
 				{"list_dir(fixture)", "list_dir"},
 				{"load_sound(fixture + \"/missing.wav\")", "load_sound"},
 				{"play_sound(fixture + \"/missing.mid\")", "play_sound"},
-				{"sha256_file(fixture + \"/content.txt\")", "sha256_file"},
+				{"crypto::sha256_file(fixture + \"/content.txt\")", "crypto::sha256_file"},
 				{"zip_entries(fixture + \"/missing.zip\")", "zip_entries"},
 				{"zip_extract(fixture + \"/missing.zip\", \"entry\", fixture + \"/extracted.txt\")", "zip_extract"},
 				{"pending.start(\"jaiscript-selftest://never-network\", fixture + \"/download.bin\")", "Download.start"},

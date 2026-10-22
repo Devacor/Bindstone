@@ -1477,6 +1477,8 @@ const char* repl_help =
 	":time on|off          print wall time per execute\n"
 	":quit / :exit         leave (Ctrl+Z+Enter or Ctrl+C also work)\n"
 	"\n"
+	"no ';':     a line's last statement needs none (int x = 5, x += 1, import \"f.jai\");\n"
+	"            inside {} the language's rule stands.\n"
 	"multi-line: input keeps collecting while (), [], {}, /* */ or a string is open\n"
 	"            (the prompt becomes ...>); a blank line force-submits what you have.\n"
 	"auto-print: a non-null result prints; strings print quoted so \"5\" and 5 differ.\n"
@@ -1527,10 +1529,26 @@ struct repl_session {
 		else { out << result.to_string() << "\n"; }
 	}
 
+	// A line's last statement needs no ';', as the last expression of an execute needs none: a parse error asking for one
+	// retries with it on a line of its own (past a trailing comment), and a retry that does not parse either gives the original
+	jai::script_value execute_line(const std::string& source) {
+		try {
+			return eng->execute(source);
+		} catch (const jai::parse_error& ex) {
+			if (std::string_view(ex.what()).find("Expected ';'") == std::string_view::npos) { throw; }
+			const std::exception_ptr original = std::current_exception();
+			try {
+				return eng->execute(source + "\n;");
+			} catch (const jai::parse_error&) {
+				std::rethrow_exception(original);
+			}
+		}
+	}
+
 	void execute_chunk(const std::string& source, std::ostream& out) {
 		auto start = std::chrono::steady_clock::now();
 		try {
-			jai::script_value result = eng->execute(source);
+			jai::script_value result = execute_line(source);
 			print_result(result, out);
 		} catch (const std::exception& ex) {
 			out << con->red(std::string("error: ") + ex.what()) << "\n";
@@ -1778,6 +1796,32 @@ int run_selftest(const console_state& con) {
 		expect(text.find("pasted ran") != std::string::npos, "repl: pasted .jai path runs into the session");
 		expect(text.find("777") != std::string::npos, "repl: pasted file's globals visible");
 		expect(text.find(":backend vm|interp") != std::string::npos, "repl: :help prints");
+	}
+
+	{ // a line's last statement needs no ';' (declarations print nothing); inside braces the language's rule stands
+		fs::path lib = dir / "semi lib.jai";
+		spill_file(lib.string(), "int semi_lib = 31;\n");
+		std::ostringstream out;
+		std::istringstream in(
+			"int y = 5\n"
+			"auto s = \"hi\" // a trailing comment\n"
+			"y += 1\n"
+			"y * 7\n"
+			"s + \"!\"\n"
+			"import \"" + lib.generic_string() + "\"\n"
+			"semi_lib + 11\n"
+			"if (y > 0) { int q = 1 }\n"
+			"int bad = 1 int worse = 2\n"
+			":quit\n");
+		repl_session session;
+		session.opt = opt;
+		session.con = &con;
+		session.engine_out = &out;
+		session.run(in, out, false);
+		const std::string text = out.str();
+		expect(text.rfind("6\n42\n\"hi!\"\n42\nerror:", 0) == 0, "repl: declarations, compound assignment and import need no ';'");
+		expect(text.find("1:25: Expected ';'") != std::string::npos && text.find("1:13: Expected ';'") != std::string::npos,
+			"repl: inside braces and mid-line ';' is still required");
 	}
 
 	{ // interactive dressing: banner + prompts (piped/captured, so colors are off)

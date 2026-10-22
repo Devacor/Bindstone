@@ -36,7 +36,7 @@ A persistent engine: globals, functions and classes accumulate across lines.
 ```
 JaiScript 0.5.0-beta - vm backend, stdlib loaded, budget off. :help for commands.
 debugger: DAP listening on 127.0.0.1:52477 (VS Code: Attach to JaiScript)
-jai> int hp = 100;
+jai> int hp = 100
 jai> hp - 58
 42
 jai> int add(int x, int y) {
@@ -46,6 +46,9 @@ jai> add(4, 5)
 9
 ```
 
+- **No `;` at the end of a line**: a line's last statement needs none, whatever its kind
+  (`int hp = 100`, `hp += 1`, `import "rules.jai"`), as the last expression of an execute
+  needs none; statements inside `{}` keep the language's rule.
 - **Multi-line**: input keeps collecting while `()`, `[]`, `{}`, `/* */` or a string is
   open (the prompt becomes `...>`); a blank line force-submits what you have.
 - **Auto-print**: a non-null result prints. Strings print quoted (`"5"` vs `5` stay

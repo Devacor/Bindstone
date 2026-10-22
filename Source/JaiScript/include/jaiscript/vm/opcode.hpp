@@ -322,6 +322,10 @@ namespace jai::vm {
         op_c_gdepth,        // a = 1 or 0: op_graft_depth inside a block
         op_regex_constant,  // a = call site, b = chunk::regex_constants index, c = argc: regex(literal pattern[, flags]); while the callee
                             // resolves to the engine's regex constructor a new regex over the pattern compiled at load, else the call
+        // `s = s + x1 + ... + xn;` (a string right side whose leftmost operand is the target): the target's snapshot, then each operand's
+        // text joins a tail at its own step under the concatenation's charge, and the store appends the tail to the target's own node
+        op_concat_pending,  // a = 1 for x1: [snapshot, x1] -> [snapshot, tail]; later [snapshot, tail, x] -> [snapshot, tail + x]; a step that joins no plain text (an object's to_string, a utf8_string, a non-string snapshot, a registered operator) materializes and runs the general `+`: [null, value]
+        op_concat_store,    // a = symbols index, b = frame slot (k_invalid_u32 = env), c = store_flag_*: [snapshot, tail] -> the target takes the tail in place when it still holds the snapshot's node, else op_store's tail over snapshot + tail; [null, value] -> op_store's tail
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -366,6 +370,11 @@ namespace jai::vm {
                                                          // exec_store may skip type enforcement after
                                                          // its runtime type-tag guard confirms
     inline constexpr uint32_t store_flag_global_only = 16; // ::name store target (global env only)
+    // op_concat_store's target: c >> concat_store_mode_shift (the low bits are op_store's flags in the identifier mode)
+    inline constexpr uint32_t concat_store_mode_shift = 24;
+    inline constexpr uint32_t concat_store_ident = 0;   // a = symbols index, b = frame slot
+    inline constexpr uint32_t concat_store_member = 1;  // a = member node, b = store proof; [snapshot, tail, receiver]
+    inline constexpr uint32_t concat_store_index = 2;   // a = index flags, b = string site; [snapshot, tail, container, index]
     inline constexpr uint32_t store_flag_same_type = 32; // assignment_expr::static_store_proof == proof_same_type
                                                          // (frozen at compile; exec skips enforcement only behind
                                                          // detail::same_type_payload, so a stale bit costs the skip)
@@ -662,6 +671,8 @@ namespace jai::vm {
             case opcode::op_graft_depth: return "GRAFT_DEPTH";
             case opcode::op_c_gdepth: return "C_GDEPTH";
             case opcode::op_regex_constant: return "REGEX_CONSTANT";
+            case opcode::op_concat_pending: return "CONCAT_PENDING";
+            case opcode::op_concat_store: return "CONCAT_STORE";
             case opcode::op_c_load_f: return "C_LOAD_F";
             case opcode::op_c_jlt_ff: return "C_JLT_FF";
             case opcode::op_c_jle_ff: return "C_JLE_FF";

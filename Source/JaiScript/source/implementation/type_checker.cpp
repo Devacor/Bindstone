@@ -4520,6 +4520,10 @@ private:
 
 	ctype infer_assignment_impl(assignment_expr* a, uint8_t& store_proof) {
 		ctype rhs = infer(a->value.get());
+		// a plain store of a string-valued right side: the compiler's text-builder store (`s = s + ...`) takes it, behind its run-time guards
+		if (a->op.type == token_type::equal) {
+			stamp(a->static_operand_class, rhs.kind == ctype::string_k ? operand_class_string_string : operand_class_unknown, operand_class_unknown);
+		}
 		struct incdec_scope { const char*& slot; const char* prev; ~incdec_scope() { slot = prev; } } incdec_guard{incdec_op_, incdec_op_};
 		incdec_op_ = !a->incdec_desugar ? nullptr : a->op.type == token_type::plus_equal ? "++" : "--";
 		bool compound = (a->op.type != token_type::equal);

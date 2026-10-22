@@ -79,7 +79,7 @@ namespace {
 		case opcode::op_index_fused: case opcode::op_index_store_fused: case opcode::op_index_compound_operand: case opcode::op_index_fused_decl: case opcode::op_iter_init: case opcode::op_iter_next:
 		case opcode::op_iter_pop: case opcode::op_iter_entry: case opcode::op_destructure: case opcode::op_parallel_element: case opcode::op_deref_top:
 			return fam::element;
-		case opcode::op_concat_append: return fam::string;
+		case opcode::op_concat_append: case opcode::op_concat_pending: case opcode::op_concat_store: return fam::string;
 		case opcode::op_new: case opcode::op_array: case opcode::op_map: case opcode::op_closure: return fam::alloc;
 		case opcode::op_binary: case opcode::op_binary_fused: case opcode::op_binary_fused_decl: case opcode::op_binary_fused_store: case opcode::op_binary_fused_temp:
 		case opcode::op_unary: case opcode::op_unary_temp: case opcode::op_math: case opcode::op_math_temp: case opcode::op_compound_store: case opcode::op_compound_fused:
@@ -218,7 +218,7 @@ namespace {
 		switch (ins.op) {
 		case opcode::op_decl_ref_ident: case opcode::op_decl_ref_value: case opcode::op_ref_return_bind: case opcode::op_ref_return_lvalue: case opcode::op_ref_target_store:
 			return "reference / alias";
-		case opcode::op_concat_append: return "string operation";
+		case opcode::op_concat_append: case opcode::op_concat_pending: case opcode::op_concat_store: return "string operation";
 		default: break;
 		}
 		switch (family_of(ins.op)) {

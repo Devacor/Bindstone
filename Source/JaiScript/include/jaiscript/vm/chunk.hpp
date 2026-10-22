@@ -561,6 +561,7 @@ namespace jai::vm {
             // (one per parameter, by slot): its entry reads nothing but the parameters (no environment value, no site, no guard of a graft)
             bool frame_program = false;
             bool raw_enterable = false;
+            bool writes_stamps = false;   // a frame program that can stamp a cell (an auto declaration from a name, a boundary's re-read): a raw entry clears the stamps
             bool raw_sites = false;   // a call of the block may be raw (plans is sized): only such a block advances the raw epoch at its entry and its doors
             // a boundary operation (internal/typed_regions_design.md "Boundary operations"): a statement the translation does not take runs on the
             // general form while the block stays parked; start is its first general ip, end the general ip it ends at (the resume point: a
@@ -572,8 +573,9 @@ namespace jai::vm {
             std::string ir_text;   // the region's canonical operations (index:kind, ->target, w slot, r slots), filled only when the compiler lists the IR
             uint32_t param_kinds = 0;   // the parameter cells' kinds, four bits per parameter (the call site's raw_kinds form)
             // a raw site's plan, the run time's (one per call when any call is raw): the epoch in which the probe last validated the callee
-            // (vm_backend::raw_epoch_) and its body's chunk
-            struct call_plan { uint64_t epoch = 0; chunk* body = nullptr; };
+            // (vm_backend::raw_epoch_), its body's chunk, that body's frame program, the function the probe found and how a raw return lands
+            // (vm_backend::call_record::raw_land)
+            struct call_plan { uint64_t epoch = 0; chunk* body = nullptr; const cell_loop* program = nullptr; const script_defined_function* fn = nullptr; uint8_t land = 0; };
             mutable std::vector<call_plan> plans;
         };
         std::vector<cell_loop> cell_loops;

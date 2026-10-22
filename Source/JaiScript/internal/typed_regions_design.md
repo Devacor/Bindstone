@@ -986,6 +986,13 @@ once, at compile time, and the run time keeps only the guards that keep those de
 
 - **Raw entry.** A raw-entered frame has no environment, no binder, no argument vector and no window fill; its site keeps
   its plan, and typed values travel raw between frames whose signatures are proven scalar (the protocol above).
+- **The raw call and return are small.** A raw site's plan carries what its probe found (the callee's body, frame program and function,
+  and how the return lands), so the arguments instruction re-derives nothing. A record keeps the fields every raw entry of one body writes
+  alike (return type, name, member scope, frame flags, the cells' sizes) while only raw entries use it; any other push and the general pop
+  clear the mark. The entry records the caller's parked call, its loop and the destination cell, so the return pops and lands without
+  reading the caller's code. A frame-program run takes its scalar operations, branches, raw calls and raw returns through a lean lane
+  (`cells_run_lean`) small enough to keep its state in registers; any other instruction, an overflow or a declined call runs on the block
+  loop's own case. The stamps are cleared at a raw entry only for a program that can write one (`cell_loop::writes_stamps`).
 - **The result goes where it is used.** `op_call_typed` lands an int or float result straight into its declaration or
   compiler temp (by `chunk::typed_sites`, skipping the consumer that follows); a raw return lands its payload in the caller's
   destination cell and skips the landing.

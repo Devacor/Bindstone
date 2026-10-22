@@ -764,6 +764,10 @@ namespace detail {
             return *storage_.get_if<TYPEID_INT>();
         }
 
+        // the payload of a value whose raw storage index is known to be INT / FLOAT (a chunk constant a typed instruction was emitted for): no bound decode
+        JAI_FORCEINLINE script_int unchecked_int_payload() const noexcept { return storage_.get<script_int>(); }
+        JAI_FORCEINLINE script_float unchecked_float_payload() const noexcept { return storage_.get<script_float>(); }
+
         // Mutable accessor for in-place modification (avoids make_value() overhead in loops)
         // Caller MUST be dominated by a raw-index gate: no bound decode is possible through a script_int&
         inline script_int& unchecked_as_int_ref() noexcept {

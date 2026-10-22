@@ -396,6 +396,7 @@ namespace jai::vm {
             frames_.clear();
             top_frame_mark_ = SIZE_MAX;
             call_records_top_ = 0;
+            for (auto& r : call_records_) { r->raw_prepared = nullptr; }
             entry_areas_top_ = 0;
             try_records_.clear();
             iter_states_.clear();
@@ -912,6 +913,19 @@ namespace jai::vm {
             size_t cfor_base = 0;
             size_t pending_base = 0;
             uint64_t raw_mark = 0;     // a raw-entered record: the raw epoch at its entry (its raw return re-validates the caller when the epoch moved)
+            // a raw-entered record's return, decided at its entry: the caller's call instruction (its ip and its raw_landing mark), the caller's
+            // loop and the call's destination cell, the result kind a raw return lands (0: none), and how it lands (k_raw_land_*, or the contract
+            // kind of a compiler value)
+            static constexpr uint8_t k_raw_land_drop = 0xFF, k_raw_land_rule = 0xFE;   // a statement call, a declared local (cell_land's rule)
+            // the body whose raw entry last wrote the fields every raw entry of it writes alike (return type, name, member scope, frame flags,
+            // the cells' sizes); any other push and the general pop clear it
+            const chunk* raw_prepared = nullptr;
+            const chunk::cell_loop* raw_caller_loop = nullptr;
+            size_t raw_parked_ip = SIZE_MAX;
+            uint32_t raw_dst = 0;
+            uint16_t raw_landing = 0;
+            uint8_t raw_ret_kind = 0;
+            uint8_t raw_land = 0;
         };
         std::vector<std::unique_ptr<call_record>> call_records_;  // grows, never shrinks mid-run
         size_t call_records_top_ = 0;                  // records [0, top) are live
@@ -2327,10 +2341,20 @@ namespace jai::vm {
         // raw typed frames (internal/typed_regions_design.md "Raw typed frames"): the arguments instruction of a raw call site enters the parked callee's
         // frame program raw when it has one whose parameter kinds are the arguments' kinds (false: the general door runs); a frame program's return
         // lands raw in a raw caller's cell, else boxes through its return pad. Both switch the block loop's frame through raw_switch_
-        bool raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm_instruction& ins, op_status& st);
+        // in_loop: the frame-program loop follows the callee itself (*in_loop names it; raw_switch_ untouched)
+        bool raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm_instruction& ins, op_status& st, frame** in_loop = nullptr);
+        static constexpr size_t k_raw_small_cells = 16;   // a small program's cells clear with fixed-size stores (the vectors keep at least this many)
+        frame& raw_push(frame& f, const chunk::cell_loop& loop, uint32_t index, const chunk::cell_loop::call_plan& plan);
+        void raw_pop(call_record& rec);
+        // the frame-program loop's raw call and return when nothing is left to decide (out of the loop: its inlining budget is spent); nullptr
+        // leaves them to raw_call_enter and exec_c_ret
+        JAI_NOINLINE frame* raw_enter_lean(frame& f, const chunk::cell_loop& loop, uint32_t index);
+        JAI_NOINLINE void cells_run_lean(frame*& fp, const chunk::cell_loop*& lp);
+        JAI_NOINLINE frame* raw_return_lean(frame& f, uint8_t kind, int64_t bits, const chunk::cell_loop*& back_loop);
         bool raw_probe(frame& f, const chunk::cell_loop& loop, uint32_t index);   // the callee found through the site's cache: a raw-enterable frame program
         void park_raw_callee(frame& f, const chunk::cell_loop& loop);             // a raw probe's callee parked as the general probe parks it (a miss before the arguments)
-        op_status exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
+        // back: a raw return that landed in a frame-program caller names it (and its loop) for the frame-program loop to follow; raw_switch_ otherwise
+        op_status exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, frame*& back, const chunk::cell_loop*& back_loop);
         void materialize_raw_window(frame& f) { if (f.raw) [[unlikely]] { build_raw_window(f); } }   // a raw-entered frame's window, built when the general form first needs it
         void build_raw_window(frame& f);
         // one frame's block run; Raw: a frame program's, whose calls and returns are on the hot switch. A run that hands the block loop another
@@ -2406,6 +2430,16 @@ namespace jai::vm {
 #endif
         op_status exec_c_guard(frame& f, const vm_instruction& ins, const cell_regs& cr);
         bool cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint8_t kind, int64_t bits);
+        // cell_land's rows that convert nothing (a compiler value its contract admits, a local already of the kind) inline; the rest is cell_land's
+        bool cell_land_fast(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint8_t kind, int64_t bits) {
+            cell_state& cs = *f.cells;
+            const chunk::cell_loop::cell& cl = loop.cells[dk];
+            if (cl.temp ? (cl.kind == 0 || cl.kind == kind) : (cs.kind[dk] == kind && kind != 0)) {
+                cs.payload[dk] = bits; cs.kind[dk] = kind; cs.dirty.set(dk);
+                return true;
+            }
+            return cell_land(f, loop, dk, kind, bits);
+        }
         bool cell_takes_string(const frame& f, const chunk::cell_loop& loop, uint32_t dk) const noexcept;
         void cell_land_string(frame& f, const chunk::cell_loop& loop, uint32_t dk, script_value&& v);
         bool cells_store_string(frame& f, const chunk::cell_loop& loop, uint32_t dk, script_value& v);

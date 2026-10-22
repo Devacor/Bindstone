@@ -5439,6 +5439,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			for (const uint32_t k : loop.entry_cells) { if (std::find(loop.param_cells.begin(), loop.param_cells.end(), k) == loop.param_cells.end()) { enterable = false; } }
 			for (const auto& cl : loop.cells) { if (cl.kind == static_cast<uint8_t>(script_value::TYPEID_STRING)) { enterable = false; } }
 			loop.raw_enterable = enterable;
+			loop.writes_stamps = !loop.boundaries.empty();
+			for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) { if (code[ip2].op == opcode::op_c_mov) { loop.writes_stamps = true; } }
 		}
 		for (chunk::cell_loop::boundary& bd : loop.boundaries) {
 			// a boundary's resume point: the copy ip of its end; an end inside the body takes a CELLS_RESUME (one per end, shared with an inner

@@ -1,11 +1,9 @@
 #include "download.h"
-#include "MV/Network/networkContextAsio.h"
-#include "MV/Network/tlsAsio.h"
+#include "MV/Network/networkReactor.h"
+#include "MV/Network/networkStream.h"
 #include "MV/Utility/log.h"
 #include "MV/Utility/stringUtility.h"
 
-#include <asio.hpp>
-#include <asio/ssl.hpp>
 #include <algorithm>
 #include <optional>
 #include <sstream>
@@ -13,8 +11,6 @@
 namespace MV {
 
 	namespace {
-		using tcp = asio::ip::tcp;
-
 		constexpr size_t MAX_REDIRECTS = 32;
 
 		std::string trimmedHeaderValue(const std::string& a_line, size_t a_colon) {
@@ -78,51 +74,28 @@ namespace MV {
 
 		bool endOfStream(const std::error_code& a_err) {
 			// A server that closes TLS without close_notify still ends the body when the length came from the close
-			return a_err == asio::error::eof || a_err == asio::ssl::error::stream_truncated;
+			return a_err == NetworkError::END_OF_STREAM || a_err == NetworkError::STREAM_TRUNCATED;
 		}
 	}
 
-	struct DownloadRequest::AsioDownload {
-		struct TlsSocket {
-			TlsSocket(asio::io_context& a_ioContext, const std::string& a_trustedCaFile) :
-				context(makePublicTlsClientContext(a_trustedCaFile)),
-				stream(a_ioContext, *context) {
-			}
-
-			std::shared_ptr<asio::ssl::context> context;
-			TlsStream stream;
-		};
-
-		explicit AsioDownload(std::shared_ptr<NetworkContext> a_context) :
+	struct DownloadRequest::Transport {
+		explicit Transport(std::shared_ptr<NetworkContext> a_context) :
 			sharedContext(std::move(a_context)),
-			ioContext(sharedContext->asio().ioContext),
-			deadline(ioContext) {
+			reactor(sharedContext->reactor()) {
 		}
 
-		AsioDownload() :
-			ownedContext(std::in_place),
-			ioContext(*ownedContext),
-			deadline(ioContext) {
-		}
-
-		template <typename Handler>
-		void read(size_t a_minimum, Handler&& a_handler) {
-			if (tls) {
-				asio::async_read(tls->stream, *response, asio::transfer_at_least(a_minimum), std::forward<Handler>(a_handler));
-			} else {
-				asio::async_read(*socket, *response, asio::transfer_at_least(a_minimum), std::forward<Handler>(a_handler));
-			}
+		// A blocking download's reactor runs on the calling thread until the download ends.
+		explicit Transport(NetworkReactor& a_reactor) :
+			reactor(a_reactor),
+			stopWhenComplete(true) {
 		}
 
 		std::shared_ptr<NetworkContext> sharedContext;
-		std::optional<asio::io_context> ownedContext;
-		asio::io_context& ioContext;
-		std::unique_ptr<tcp::resolver> resolver;
-		std::unique_ptr<tcp::socket> socket;
-		std::unique_ptr<TlsSocket> tls;
-		std::unique_ptr<asio::streambuf> request;
-		std::unique_ptr<asio::streambuf> response;
-		asio::steady_timer deadline;
+		NetworkReactor& reactor;
+		bool stopWhenComplete = false;
+		std::shared_ptr<TlsContext> tlsContext;
+		std::shared_ptr<NetworkStream> stream;
+		NetworkReactor::TimerId deadline = 0;
 	};
 
 	void HttpResponse::readHeader(std::istream& a_stream) {
@@ -237,9 +210,10 @@ namespace MV {
 
 	DownloadResult downloadBlocking(const HttpRequest& a_request, DownloadOptions a_options) {
 		auto download = std::shared_ptr<DownloadRequest>(new DownloadRequest(a_request, std::move(a_options)));
-		download->asioDownload = std::make_unique<DownloadRequest::AsioDownload>();
+		NetworkReactor reactor(1);
+		download->transport = std::make_unique<DownloadRequest::Transport>(reactor);
 		download->start();
-		download->asioDownload->ioContext.run();
+		reactor.run();
 		return download->ourResult;
 	}
 
@@ -253,16 +227,11 @@ namespace MV {
 
 	std::string localIpV4() {
 		std::string result = "0.0.0.0";
-		try {
-			asio::io_context ioContext;
-			tcp::resolver resolver(ioContext);
-			for (auto&& entry : resolver.resolve(asio::ip::host_name(), "")) {
-				auto address = entry.endpoint().address();
-				if (address.is_v4()) {
-					result = address.to_string();
-				}
+		std::error_code error;
+		for (auto&& address : resolveAddresses(localHostName(), "", error)) {
+			if (!address.ipv6()) {
+				result = address.host();
 			}
-		} catch(...) {
 		}
 		return result;
 	}
@@ -277,7 +246,7 @@ namespace MV {
 	std::shared_ptr<DownloadRequest> DownloadRequest::make(const std::shared_ptr<NetworkContext>& a_context, const HttpRequest& a_request, CompletionCallback a_onComplete, DownloadOptions a_options) {
 		auto result = std::shared_ptr<DownloadRequest>(new DownloadRequest(a_request, std::move(a_options)));
 		result->onComplete = std::move(a_onComplete);
-		result->asioDownload = std::make_unique<AsioDownload>(a_context);
+		result->transport = std::make_unique<Transport>(a_context);
 		result->start();
 		return result;
 	}
@@ -294,7 +263,7 @@ namespace MV {
 		}
 		cancelled = true;
 		// The failure runs on the network thread, which owns the sockets
-		asio::post(asioDownload->ioContext, [self = shared_from_this()] {
+		transport->reactor.post([self = shared_from_this()] {
 			std::scoped_lock<std::recursive_mutex> lock(self->criticalPath);
 			self->handleCancellation();
 		});
@@ -338,7 +307,8 @@ namespace MV {
 			return;
 		}
 		onCompleteCalled = true;
-		asioDownload->deadline.cancel();
+		transport->reactor.cancel(transport->deadline);
+		transport->deadline = 0;
 		auto self = shared_from_this();
 		if (releaseFromPool) {
 			releaseFromPool(self);
@@ -346,29 +316,40 @@ namespace MV {
 		if (onComplete) {
 			deliver([self, callback = onComplete] { callback(self); });
 		}
+		if (transport->stopWhenComplete) {
+			transport->reactor.stop();
+		}
 	}
 
-	// Closing cancels a pending operation, whose handler still runs against the stream, so the streams stay alive until
-	// initializeSocket replaces them (no operation is pending then) or the request dies (no handler holds it then).
 	void DownloadRequest::closeSockets() {
-		asio::error_code ignored;
-		if (asioDownload->socket) {
-			asioDownload->socket->shutdown(tcp::socket::shutdown_both, ignored);
-			asioDownload->socket->close(ignored);
-		}
-		if (asioDownload->tls) {
-			asioDownload->tls->stream.lowest_layer().shutdown(tcp::socket::shutdown_both, ignored);
-			asioDownload->tls->stream.lowest_layer().close(ignored);
+		if (transport->stream) {
+			transport->stream->close();
 		}
 	}
 
-	void DownloadRequest::handleReadContent(const std::error_code& a_err) {
+	void DownloadRequest::handleInput() {
 		std::scoped_lock<std::recursive_mutex> lock(criticalPath);
 		if (handleCancellation()) {
 			return;
 		}
-		if (!a_err) {
+		if (headerParsed) {
 			continueReadingContent(false);
+		} else {
+			readHeader();
+		}
+	}
+
+	void DownloadRequest::handleClosed(const std::error_code& a_err) {
+		std::scoped_lock<std::recursive_mutex> lock(criticalPath);
+		if (handleCancellation()) {
+			return;
+		}
+		if (!headerParsed) {
+			if (transport->stream->writing()) {
+				fail(DownloadError::WRITE, a_err, "Download Write Failure");
+			} else {
+				fail(DownloadError::READ, a_err, "Download Read Header Failure");
+			}
 		} else if (endOfStream(a_err)) {
 			continueReadingContent(true);
 		} else {
@@ -376,15 +357,10 @@ namespace MV {
 		}
 	}
 
-	void DownloadRequest::initiateReadingMoreContent(size_t a_minimumTransferAmount) {
-		asioDownload->read(a_minimumTransferAmount, [self = shared_from_this()](const asio::error_code& a_err, size_t) { self->handleReadContent(a_err); });
-	}
-
 	void DownloadRequest::continueReadingContent(bool a_endOfStream) {
-		auto& response = *asioDownload->response;
-		auto data = response.data();
-		bodyBytes.append(asio::buffers_begin(data), asio::buffers_end(data));
-		response.consume(response.size());
+		auto& stream = *transport->stream;
+		bodyBytes.append(stream.input());
+		stream.consume(stream.input().size());
 
 		if (options.maxBodyBytes && bodyBytes.size() > options.maxBodyBytes) {
 			fail(DownloadError::BODY_TOO_LARGE, "Download exceeded the " + std::to_string(options.maxBodyBytes) + " byte limit.");
@@ -397,8 +373,6 @@ namespace MV {
 		}
 		if (a_endOfStream || (sizeKnown && bodyBytes.size() >= expectedBodyBytes)) {
 			finishBody();
-		} else {
-			initiateReadingMoreContent(sizeKnown ? std::min(ChunkSize, expectedBodyBytes - bodyBytes.size()) : 1);
 		}
 	}
 
@@ -423,18 +397,17 @@ namespace MV {
 		callOnComplete();
 	}
 
-	void DownloadRequest::handleReadHeaders(const std::error_code& a_err) {
-		std::scoped_lock<std::recursive_mutex> lock(criticalPath);
-		if (handleCancellation()) {
+	void DownloadRequest::readHeader() {
+		auto& stream = *transport->stream;
+		auto end = stream.input().find("\r\n\r\n");
+		if (end == std::string_view::npos) {
 			return;
 		}
-		if (a_err) {
-			fail(DownloadError::READ, a_err, "Download Read Header Failure");
-			return;
-		}
+		std::istringstream header(std::string(stream.input().substr(0, end + 4)), std::ios::in | std::ios::binary);
+		stream.consume(end + 4);
+		headerParsed = true;
 		auto& response = ourResult.response;
-		std::istream responseStream(asioDownload->response.get());
-		response.readHeader(responseStream);
+		response.readHeader(header);
 		auto contentLength = response.headerValues.find("content-length");
 		expectedBodyBytes = contentLength != response.headerValues.end() ? parsedContentLength(contentLength->second) : 0;
 		auto transferEncoding = response.headerValues.find("transfer-encoding");
@@ -452,21 +425,13 @@ namespace MV {
 		}
 	}
 
-	void DownloadRequest::handleWriteRequest(const std::error_code& a_err) {
-		std::scoped_lock<std::recursive_mutex> lock(criticalPath);
-		if (handleCancellation()) {
-			return;
-		}
-		if (a_err) {
-			fail(DownloadError::WRITE, a_err, "Download Write Failure");
-			return;
-		}
-		auto onHeaders = [self = shared_from_this()](const asio::error_code& a_readErr, size_t) { self->handleReadHeaders(a_readErr); };
-		if (asioDownload->tls) {
-			asio::async_read_until(asioDownload->tls->stream, *asioDownload->response, "\r\n\r\n", onHeaders);
-		} else {
-			asio::async_read_until(*asioDownload->socket, *asioDownload->response, "\r\n\r\n", onHeaders);
-		}
+	void DownloadRequest::sendRequest() {
+		auto self = shared_from_this();
+		auto& stream = *transport->stream;
+		stream.onInput([self] { self->handleInput(); });
+		stream.onClosed([self](const std::error_code& a_err) { self->handleClosed(a_err); });
+		stream.write(requestBytes);
+		stream.reading(true);
 	}
 
 	void DownloadRequest::initiateRequest(const MV::Url& a_url) {
@@ -475,31 +440,31 @@ namespace MV {
 			return;
 		}
 		ourResult.finalUrl = a_url;
+		headerParsed = false;
 		bodyBytes.clear();
+		expectedBodyBytes = 0;
+		chunkedBody = false;
 		try {
 			initializeSocket();
 		} catch (std::exception& e) {
 			fail(DownloadError::TLS, e.what());
 			return;
 		}
-		asioDownload->request = std::make_unique<asio::streambuf>();
-		asioDownload->response = std::make_unique<asio::streambuf>();
-
-		std::ostream requestStream(asioDownload->request.get());
+		std::ostringstream requestStream(std::ios::out | std::ios::binary);
 		ourRequest.writeRequest(requestStream, a_url);
+		requestBytes = requestStream.str();
 
-		auto self = shared_from_this();
-		asioDownload->resolver->async_resolve(a_url.host(), a_url.port() ? std::to_string(a_url.port()) : a_url.scheme(), [self](const asio::error_code& a_err, tcp::resolver::results_type a_endpoints) {
+		auto stream = transport->stream;
+		transport->reactor.resolve(a_url.host(), a_url.port() ? std::to_string(a_url.port()) : a_url.scheme(), [self = shared_from_this(), stream](const std::error_code& a_err, std::vector<SocketAddress> a_addresses) {
 			std::scoped_lock<std::recursive_mutex> lock(self->criticalPath);
-			if (self->handleCancellation()) {
+			if (stream != self->transport->stream || self->handleCancellation()) {
 				return;
 			}
 			if (a_err) {
 				self->fail(DownloadError::RESOLVE, a_err, "Download Resolve Failure");
 				return;
 			}
-			// async_connect tries each endpoint in turn
-			auto onConnected = [self](const asio::error_code& a_connectErr, const tcp::endpoint&) {
+			stream->connect(std::move(a_addresses), [self, stream](const std::error_code& a_connectErr) {
 				std::scoped_lock<std::recursive_mutex> lock(self->criticalPath);
 				if (self->handleCancellation()) {
 					return;
@@ -508,61 +473,51 @@ namespace MV {
 					self->fail(DownloadError::CONNECT, a_connectErr, "Download Connection Failure");
 					return;
 				}
-				auto onWritten = [self](const asio::error_code& a_writeErr, size_t) { self->handleWriteRequest(a_writeErr); };
-				if (self->asioDownload->tls) {
-					auto host = self->ourResult.finalUrl.host();
-					try {
-						verifyTlsPeerAs(self->asioDownload->tls->stream, host);
-					} catch (std::exception& e) {
-						self->fail(DownloadError::TLS, e.what());
+				if (!self->transport->tlsContext) {
+					self->sendRequest();
+					return;
+				}
+				auto host = self->ourResult.finalUrl.host();
+				ssl_st* ssl = nullptr;
+				try {
+					ssl = stream->beginTls(*self->transport->tlsContext);
+					verifyTlsPeerAs(ssl, host);
+				} catch (std::exception& e) {
+					self->fail(DownloadError::TLS, e.what());
+					return;
+				}
+				stream->handshake([self, host, ssl](const std::error_code& a_handshakeErr) {
+					std::scoped_lock<std::recursive_mutex> lock(self->criticalPath);
+					if (self->handleCancellation()) {
 						return;
 					}
-					self->asioDownload->tls->stream.async_handshake(asio::ssl::stream_base::client, [self, onWritten, host](const asio::error_code& a_handshakeErr) {
-						std::scoped_lock<std::recursive_mutex> lock(self->criticalPath);
-						if (self->handleCancellation()) {
-							return;
-						}
-						if (a_handshakeErr) {
-							self->fail(DownloadError::TLS, "Download Connection Handshake Failure [" + host + "]: " + describeTlsFailure(a_handshakeErr, self->asioDownload->tls->stream));
-						} else {
-							asio::async_write(self->asioDownload->tls->stream, *self->asioDownload->request, onWritten);
-						}
-					});
-				} else {
-					asio::async_write(*self->asioDownload->socket, *self->asioDownload->request, onWritten);
-				}
-			};
-			if (self->asioDownload->tls) {
-				asio::async_connect(self->asioDownload->tls->stream.lowest_layer(), a_endpoints, onConnected);
-			} else {
-				asio::async_connect(*self->asioDownload->socket, a_endpoints, onConnected);
-			}
+					if (a_handshakeErr) {
+						self->fail(DownloadError::TLS, "Download Connection Handshake Failure [" + host + "]: " + describeTlsFailure(a_handshakeErr, ssl));
+					} else {
+						self->sendRequest();
+					}
+				});
+			});
 		});
 	}
 
 	void DownloadRequest::initializeSocket() {
-		if (!asioDownload->resolver) {
-			asioDownload->resolver = std::make_unique<tcp::resolver>(asioDownload->ioContext);
-		}
 		closeSockets();
-		asioDownload->socket.reset();
-		asioDownload->tls.reset();
-		if (ourResult.finalUrl.scheme() == "https") {
-			asioDownload->tls = std::make_unique<AsioDownload::TlsSocket>(asioDownload->ioContext, options.trustedCaFile);
-		} else {
-			asioDownload->socket = std::make_unique<tcp::socket>(asioDownload->ioContext);
-		}
+		transport->stream.reset();
+		transport->tlsContext = ourResult.finalUrl.scheme() == "https" ? makePublicTlsClientContext(options.trustedCaFile) : nullptr;
+		transport->stream = NetworkStream::make(transport->reactor);
 	}
 
 	void DownloadRequest::start() {
+		transport->reactor.post([self = shared_from_this()] { self->begin(); });
+	}
+
+	void DownloadRequest::begin() {
 		std::scoped_lock<std::recursive_mutex> lock(criticalPath);
-		asioDownload->deadline.expires_after(options.timeout);
-		asioDownload->deadline.async_wait([weak = std::weak_ptr<DownloadRequest>(shared_from_this())](const asio::error_code& a_err) {
-			if (a_err) {
-				return;
-			}
+		transport->deadline = transport->reactor.scheduleAfter(options.timeout, [weak = std::weak_ptr<DownloadRequest>(shared_from_this())] {
 			if (auto self = weak.lock()) {
 				std::scoped_lock<std::recursive_mutex> lock(self->criticalPath);
+				self->transport->deadline = 0;
 				self->fail(DownloadError::TIMED_OUT, "Download timed out after " + std::to_string(self->options.timeout.count()) + " ms.");
 			}
 		});
@@ -584,7 +539,7 @@ namespace MV {
 				self->activeRequests.erase(a_download);
 			}
 		};
-		result->asioDownload = std::make_unique<DownloadRequest::AsioDownload>(ourContext);
+		result->transport = std::make_unique<DownloadRequest::Transport>(ourContext);
 		{
 			std::scoped_lock<std::mutex> lock(activeRequestsMutex);
 			activeRequests.insert(result);

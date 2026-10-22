@@ -75,6 +75,15 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkContext.cpp">
       <Filter>MV\Network</Filter>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkReactor.cpp">
+      <Filter>MV\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkStream.cpp">
+      <Filter>MV\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\socket.cpp">
+      <Filter>MV\Network</Filter>
+    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\url.cpp">
       <Filter>MV\Network</Filter>
     </ClCompile>
@@ -222,13 +231,16 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkContext.h">
       <Filter>MV\Network</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkContextAsio.h">
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkReactor.h">
+      <Filter>MV\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkStream.h">
+      <Filter>MV\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\socket.h">
       <Filter>MV\Network</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\package.h">
-      <Filter>MV\Network</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\tlsAsio.h">
       <Filter>MV\Network</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\tls.h">

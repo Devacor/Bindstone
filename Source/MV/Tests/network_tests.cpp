@@ -3,7 +3,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include "MV/Network/network.h"
-#include "MV/Network/tlsAsio.h"
+#include "socket_test_peers.hpp"
 #include "tls_test_pki.hpp"
 
 #include <windows.h>
@@ -124,71 +124,55 @@ bool pumpUntil(const std::function<void()>& a_pump, Condition a_condition, doubl
 // A hand-driven TLS client: speaks the framing directly, so a test can send what MV::Client never would.
 struct RawPeer {
 	explicit RawPeer(uint16_t a_port, const MV::TlsConfig& a_tls = networkPki().clientConfig()) :
-		context(MV::makeTlsClientContext(a_tls)),
-		socket(io, *context) {
+		tls(connectLoopback(a_port), MV::makeTlsClientContext(a_tls)) {
 
-		socket.lowest_layer().connect(asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), a_port));
-		MV::verifyTlsPeerAs(socket, "127.0.0.1");
-		socket.handshake(asio::ssl::stream_base::client, handshakeError);
+		MV::verifyTlsPeerAs(tls.ssl(), "127.0.0.1");
+		handshaken = tls.handshake();
 	}
 
-	asio::error_code send(const std::string& a_content) {
-		asio::error_code result;
-		asio::write(socket, asio::buffer(MV::NetworkMessage::make(a_content)->wire()), result);
-		return result;
+	bool send(const std::string& a_content) {
+		return tls.write(MV::NetworkMessage::make(a_content)->wire());
 	}
 
-	asio::error_code sendHeader(uint32_t a_contentSize) {
-		asio::error_code result;
-		std::array<uint8_t, 4> header {static_cast<uint8_t>(a_contentSize >> 24), static_cast<uint8_t>(a_contentSize >> 16), static_cast<uint8_t>(a_contentSize >> 8), static_cast<uint8_t>(a_contentSize)};
-		asio::write(socket, asio::buffer(header), result);
-		return result;
+	bool sendHeader(uint32_t a_contentSize) {
+		std::string header {static_cast<char>(a_contentSize >> 24), static_cast<char>(a_contentSize >> 16), static_cast<char>(a_contentSize >> 8), static_cast<char>(a_contentSize)};
+		return tls.write(header);
 	}
 
-	asio::error_code sendRaw(const std::string& a_bytes) {
-		asio::error_code result;
-		asio::write(socket, asio::buffer(a_bytes), result);
-		return result;
+	bool sendRaw(const std::string& a_bytes) {
+		return tls.write(a_bytes);
 	}
 
-	std::string receive(asio::error_code& a_error) {
+	std::string receive(PeerRead& a_read) {
 		MV::NetworkMessage message;
-		asio::read(socket, asio::buffer(message.headerBuffer), a_error);
-		if (a_error) {
+		a_read = tls.readExactly(reinterpret_cast<char*>(message.headerBuffer.data()), message.headerBuffer.size());
+		if (a_read != PeerRead::OK) {
 			return {};
 		}
 		auto header = message.headerValue();
 		protocolFrame = (header & MV::PROTOCOL_FRAME_BIT) != 0;
 		message.content.resize(header & ~MV::PROTOCOL_FRAME_BIT);
-		asio::read(socket, asio::buffer(message.content), a_error);
-		return a_error ? std::string() : message.content;
+		a_read = tls.readExactly(message.content.data(), message.content.size());
+		return a_read == PeerRead::OK ? message.content : std::string();
 	}
 
 	size_t available() {
-		return socket.lowest_layer().available();
+		return tls.socket().available();
 	}
 
 	void close() {
-		asio::error_code ignored;
-		socket.lowest_layer().shutdown(asio::ip::tcp::socket::shutdown_both, ignored);
-		socket.lowest_layer().close(ignored);
+		tls.socket().close();
 	}
 
-	asio::io_context io;
-	std::shared_ptr<asio::ssl::context> context;
-	MV::TlsStream socket;
-	asio::error_code handshakeError;
+	BlockingTls tls;
+	bool handshaken = false;
 	bool protocolFrame = false;
 };
 
-bool closedByPeer(const asio::error_code& a_error) {
-	return a_error == asio::error::eof || a_error == asio::ssl::error::stream_truncated || a_error == asio::error::connection_reset || a_error == asio::error::connection_aborted;
-}
-
 std::optional<MV::ProtocolFrame> receiveFrame(RawPeer& a_peer) {
-	asio::error_code error;
-	auto content = a_peer.receive(error);
-	if (error || !a_peer.protocolFrame) {
+	PeerRead read;
+	auto content = a_peer.receive(read);
+	if (read != PeerRead::OK || !a_peer.protocolFrame) {
 		return std::nullopt;
 	}
 	return MV::ProtocolFrame::decode(content);
@@ -200,9 +184,9 @@ void expectRejection(RawPeer& a_peer, MV::ProtocolCode a_code, uint32_t a_value)
 	check_eq(static_cast<int>(a_code), static_cast<int>(frame->code), "the rejection's reason code");
 	check_eq(a_value, frame->value, "the rejection's limit");
 	check_true(!frame->reason.empty(), "the rejection carries a reason");
-	asio::error_code error;
-	a_peer.receive(error);
-	check_true(closedByPeer(error), "then the server closes the connection (" + error.message() + ")");
+	PeerRead read;
+	a_peer.receive(read);
+	check_true(read == PeerRead::CLOSED, std::string("then the server closes the connection (") + describe(read) + ")");
 }
 
 struct ClientRecord {
@@ -227,7 +211,7 @@ std::shared_ptr<MV::Client> makeClient(uint16_t a_port, std::shared_ptr<ClientRe
 	}, a_limits);
 }
 
-// Floods through TLS from its own thread. TLS records cannot be written non-blocking and resumed, so a
+// Floods through TLS from its own thread. A blocking TLS write cannot be abandoned and resumed, so a
 // flood the server never drains is ended by closing the socket once the test is done with it.
 struct Flooder {
 	Flooder(RawPeer& a_peer, size_t a_messageSize, size_t a_count) :
@@ -237,9 +221,7 @@ struct Flooder {
 			for (size_t i = 0; i < a_count && !stopping; ++i) {
 				std::string bytes {static_cast<char>(a_messageSize >> 24), static_cast<char>(a_messageSize >> 16), static_cast<char>(a_messageSize >> 8), static_cast<char>(a_messageSize)};
 				bytes.append(a_messageSize, static_cast<char>('a' + i % 26));
-				asio::error_code error;
-				asio::write(peer.socket, asio::buffer(bytes), error);
-				if (error) {
+				if (!peer.sendRaw(bytes)) {
 					failed = true;
 					break;
 				}
@@ -255,8 +237,7 @@ struct Flooder {
 			std::this_thread::sleep_for(std::chrono::milliseconds(1));
 		}
 		if (!finished) {
-			asio::error_code ignored;
-			peer.socket.lowest_layer().close(ignored);
+			peer.close();
 		}
 		thread.join();
 	}
@@ -336,11 +317,11 @@ public:
 			connection.reset();
 			server->update(0.01);
 
-			asio::error_code error;
-			check_eq(std::string("Logged in elsewhere."), peer.receive(error));
-			check_true(peer.receive(error) == farewell, "a large final message arrives whole");
-			peer.receive(error);
-			check_true(closedByPeer(error), "then the server closes the connection (" + error.message() + ")");
+			PeerRead read;
+			check_eq(std::string("Logged in elsewhere."), peer.receive(read));
+			check_true(peer.receive(read) == farewell, "a large final message arrives whole");
+			peer.receive(read);
+			check_true(read == PeerRead::CLOSED, std::string("then the server closes the connection (") + describe(read) + ")");
 		});
 
 		test("a client whose last owner lets go is destroyed at once, not kept alive by its pending read", [this]() {

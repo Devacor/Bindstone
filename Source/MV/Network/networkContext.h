@@ -2,26 +2,37 @@
 #define _MV_NETWORK_CONTEXT_H_
 
 #include <cstddef>
+#include <functional>
 #include <memory>
+#include <thread>
 
 namespace MV {
-	// An asio io_context and the worker threads that run it, with no asio in this header: networking .cpp files reach the
-	// context through networkContextAsio.h. Downloads, email and anything else asynchronous share one by holding it.
+	class NetworkReactor;
+
+	// A network thread running a NetworkReactor (sockets, timers and posted work), plus the threads that resolve host
+	// names. Downloads, email and anything else asynchronous share one by holding it.
 	class NetworkContext {
 	public:
-		struct Asio;
-
-		// 0 threads = jai::thread_pool's default worker count
+		// a_threads resolve host names; 0 = jai::thread_pool's default worker count
 		explicit NetworkContext(size_t a_threads = 1);
 		~NetworkContext();
 
 		NetworkContext(const NetworkContext&) = delete;
 		NetworkContext& operator=(const NetworkContext&) = delete;
 
-		Asio& asio() { return *ourAsio; }
+		NetworkReactor& reactor() {
+			return *ourReactor;
+		}
+
+		// Runs a_task on the network thread, after the work posted before it; from any thread.
+		void post(std::function<void()> a_task);
+
+		// Ends the network thread and joins it (unless called on it); sockets and unrun work wait for destruction.
+		void stop();
 
 	private:
-		std::unique_ptr<Asio> ourAsio;
+		std::unique_ptr<NetworkReactor> ourReactor;
+		std::thread worker;
 	};
 }
 

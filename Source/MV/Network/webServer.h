@@ -40,10 +40,19 @@ int main(){
 #include "MV/Network/url.h"
 #include "MV/Utility/log.h"
 #include "MV/Network/download.h"
+#include "MV/Network/networkContext.h"
+#include "MV/Network/socket.h"
+
+namespace jai {
+	class thread_pool;
+}
 
 namespace MV {
 	class WebServer;
 	class WebConnection;
+	class NetworkMailbox;
+	class NetworkListener;
+	class NetworkStream;
 
 	//derive from this in your own code.
 	class WebConnectionStateBase {
@@ -78,12 +87,11 @@ namespace MV {
 	};
 
 	//Handles a single HTTP Request and response. Closes the connection upon successfully sending, or upon an error or timeout.
-	//Every handler of one connection runs on its strand; send() and close() may be called from any thread.
+	//Its socket work runs on the server's network thread and processRequest on one of its handler threads; send() and
+	//close() may be called from any thread.
 	class WebConnection : public std::enable_shared_from_this<WebConnection> {
 	public:
-		struct AsioWebSocket;
-
-		explicit WebConnection(std::unique_ptr<AsioWebSocket> a_asioSocket);
+		WebConnection(NetworkReactor &a_reactor, std::shared_ptr<NetworkStream> a_stream, jai::thread_pool &a_handlers);
 
 		//can't happen in the constructor due to shared_from_this
 		void initialize(std::function<std::unique_ptr<WebConnectionStateBase>(const std::shared_ptr<WebConnection> &)> a_connectionStateFactory);
@@ -101,18 +109,23 @@ namespace MV {
 		void close();
 
 	private:
-		struct WebActiveRequestState;
-
-		void handleReadContent(std::shared_ptr<WebActiveRequestState> a_message, const std::error_code& err);
-		void continueReadingContent(std::shared_ptr<WebActiveRequestState> a_message);
+		void readRequest();
+		void process();
 
 		void handleError(const std::error_code &a_err, const std::string &a_section);
 
 		void resetTimeout();
-		void checkTimeout(const std::error_code& a_ec);
 		void closeNow();
 
-		std::unique_ptr<AsioWebSocket> asioSocket;
+		NetworkReactor &reactor;
+		std::shared_ptr<NetworkMailbox> mailbox;
+		std::shared_ptr<NetworkStream> stream;
+		jai::thread_pool &handlers;
+		uint64_t timeout = 0;
+
+		HttpRequest parsedRequest;
+		bool headerParsed = false;
+		std::string body;
 
 		std::atomic<bool> completed = false;
 
@@ -123,7 +136,8 @@ namespace MV {
 
 	class WebServer {
 	public:
-		// a_address is an IPv4 or IPv6 literal ("0.0.0.0" listens everywhere, "127.0.0.1" on this machine only); port 0 picks a free one.
+		// a_address is an IPv4 or IPv6 literal ("0.0.0.0" listens everywhere, "127.0.0.1" on this machine only); port 0
+		// picks a free one. processRequest runs on a_totalThreads handler threads.
 		WebServer(const std::string& a_address, uint16_t a_port, std::function<std::unique_ptr<WebConnectionStateBase> (const std::shared_ptr<WebConnection> &)> a_connectionStateFactory, int a_totalThreads = 8);
 		~WebServer();
 
@@ -132,14 +146,12 @@ namespace MV {
 		}
 
 	private:
-		struct AsioWebAcceptor;
+		void accept(Socket a_socket);
 
-		void acceptClients();
-
-		std::unique_ptr<AsioWebAcceptor> asioAcceptor;
+		std::unique_ptr<jai::thread_pool> handlers;
+		std::unique_ptr<NetworkContext> network;
+		std::shared_ptr<NetworkListener> listener;
 		uint16_t ourPort = 0;
-
-		std::vector<std::unique_ptr<std::thread>> workers;
 
 		std::function<std::unique_ptr<WebConnectionStateBase> (const std::shared_ptr<WebConnection> &)> connectionStateFactory;
 	};

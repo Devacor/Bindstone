@@ -36,7 +36,7 @@ namespace MV {
 	// One plain-text message to one recipient over STARTTLS with AUTH LOGIN: no MIME parts, no CC or BCC.
 	class Email : public std::enable_shared_from_this<Email> {
 	public:
-		struct AsioSmtp;
+		struct Transport;
 		using CompletionCallback = std::function<void(const std::shared_ptr<Email>&)>;
 
 		struct Credentials {
@@ -129,16 +129,21 @@ namespace MV {
 		void secureLogin();
 		void sendMessageAndQuit();
 
-		// Writes a_content and, when a_onReply is set, reads the server's reply; a reply outside a_validResponses fails the send.
-		void command(const std::string &a_content, std::vector<int> a_validResponses, std::function<void()> a_onReply, bool a_secure);
-		void readReply(std::vector<int> a_validResponses, std::function<void()> a_onReply, bool a_secure);
+		// Writes a_content and, when a_onReply is set, waits for the server's reply; a reply outside a_validResponses fails
+		// the send. Without a_onReply the conversation ends once a_content is out.
+		void command(const std::string &a_content, std::vector<int> a_validResponses, std::function<void()> a_onReply);
+		void expectReply(std::vector<int> a_validResponses, std::function<void()> a_onReply);
+		void readReplies();
 
 		void succeed();
 		void fail(EmailError a_error, const std::string &a_reason);
 		void fail(EmailError a_error, const std::error_code &a_err, const std::string &a_what);
 		void finish();
+		void closeTransport();
 
-		std::unique_ptr<AsioSmtp> asioSmtp;
+		std::unique_ptr<Transport> transport;
+		std::vector<int> expectedReplies;
+		std::function<void()> onReply;
 
 		mutable std::mutex lock;
 

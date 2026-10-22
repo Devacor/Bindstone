@@ -1,15 +1,17 @@
 // How MV drives jai::thread_pool: MV::initializeThreadPool, a decode on the pool whose upload continues on the main thread
 // (SharedTextures::loadFile), the lobby's one-worker database pool whose continuations its update() drains, and the
-// io_context pools (NetworkContext: DownloadPool, the lobby's email context) whose workers block in run(). Foundry, built into mv_tests.exe.
+// NetworkContext's network thread (DownloadPool, the lobby's email context). Foundry, built into mv_tests.exe.
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/thread_pool.hpp>
 #include "MV/Utility/log.h"
 #include "MV/Utility/services.hpp"
 
-#include <asio.hpp>
+#include "MV/Network/networkContext.h"
 
+#include <algorithm>
 #include <atomic>
+#include <set>
 #include <chrono>
 #include <mutex>
 #include <stdexcept>
@@ -159,29 +161,32 @@ public:
 			check(inOrder, "queries and their continuations keep submission order");
 		});
 
-		test("io_context workers block in run() until the context stops, and the pool then joins", [this]() {
-			for (size_t workers : {size_t{1}, size_t{3}}) {
-				auto service = std::make_shared<asio::io_context>();
-				auto work = asio::make_work_guard(*service);
-				std::atomic<int> handled{0};
-				std::atomic<int> running{0};
-				{
-					jai::thread_pool pool(workers);
-					MV::initializeThreadPool(pool);
-					for (size_t i = 0; i < pool.worker_count(); ++i) {
-						pool.submit([service, &running]() {
-							++running;
-							service->run();
-						});
-					}
-					for (int i = 0; i < 100; ++i) {
-						asio::post(*service, [&]() { ++handled; });
-					}
-					check(waitFor([&]() { return handled.load() == 100 && running.load() == static_cast<int>(workers); }), "every worker serves the context");
-					service->stop();
-				}
-				check_eq(100, handled.load());
+		test("a NetworkContext runs posted work in order on its one network thread, and its last owner may let go there", [this]() {
+			auto context = std::make_shared<MV::NetworkContext>(1);
+			std::mutex lock;
+			std::vector<int> order;
+			std::set<std::thread::id> threads;
+			for (int i = 0; i < 100; ++i) {
+				context->post([&, i]() {
+					std::lock_guard<std::mutex> guard(lock);
+					order.push_back(i);
+					threads.insert(std::this_thread::get_id());
+				});
 			}
+			check(waitFor([&]() { std::lock_guard<std::mutex> guard(lock); return order.size() == 100; }), "every task runs");
+			{
+				std::lock_guard<std::mutex> guard(lock);
+				check(std::is_sorted(order.begin(), order.end()), "in the order posted");
+				check(threads.size() == 1 && !threads.count(std::this_thread::get_id()), "on one thread that is not the poster's");
+			}
+			std::atomic<bool> released {false};
+			auto* network = context.get();
+			network->post([held = std::move(context), &released]() mutable {
+				held.reset();
+				released = true;
+			});
+			check(waitFor([&]() { return released.load(); }), "the context dies on its own network thread without joining itself");
+			std::this_thread::sleep_for(std::chrono::milliseconds(50));
 		});
 	}
 };

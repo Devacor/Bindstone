@@ -161,7 +161,7 @@ namespace MV {
 		friend class DownloadPool;
 		friend DownloadResult downloadBlocking(const HttpRequest& a_request, DownloadOptions a_options);
 	public:
-		struct AsioDownload;
+		struct Transport;
 		using CompletionCallback = std::function<void(const std::shared_ptr<DownloadRequest>&)>;
 
 		// Runs on a_context's threads; a_onComplete runs once, when the download succeeds or fails.
@@ -188,7 +188,9 @@ namespace MV {
 	private:
 		DownloadRequest(const HttpRequest& a_request, DownloadOptions a_options);
 
+		// Posts the download to its network thread.
 		void start();
+		void begin();
 
 		bool handleCancellation();
 		void fail(DownloadError a_error, const std::error_code& a_err, const std::string& a_what);
@@ -200,11 +202,11 @@ namespace MV {
 		void deliver(std::function<void()> a_callback);
 
 		void initiateRequest(const MV::Url& a_url);
+		void sendRequest();
 
-		void handleWriteRequest(const std::error_code& a_err);
-		void handleReadHeaders(const std::error_code& a_err);
-		void handleReadContent(const std::error_code& a_err);
-		void initiateReadingMoreContent(size_t a_minimumTransferAmount);
+		void handleInput();
+		void handleClosed(const std::error_code& a_err);
+		void readHeader();
 		void continueReadingContent(bool a_endOfStream);
 		void finishBody();
 
@@ -212,8 +214,10 @@ namespace MV {
 		DownloadOptions options;
 		DownloadResult ourResult;
 
-		std::unique_ptr<AsioDownload> asioDownload;
+		std::unique_ptr<Transport> transport;
 
+		std::string requestBytes;
+		bool headerParsed = false;
 		std::string bodyBytes;
 		size_t expectedBodyBytes = 0;
 		bool chunkedBody = false;
@@ -222,9 +226,7 @@ namespace MV {
 		// Runs on the network thread even when onComplete is queued, so the pool forgets a finished download at once.
 		CompletionCallback releaseFromPool;
 
-		static constexpr size_t ChunkSize = 64 * 1024;
-
-		// Every handler takes the lock: a context may run a request's handlers on different threads, and cancel() comes from any thread.
+		// Every handler takes the lock: complete() and cancel() come from any thread.
 		mutable std::recursive_mutex criticalPath;
 		bool cancelled = false;
 		bool onCompleteCalled = false;

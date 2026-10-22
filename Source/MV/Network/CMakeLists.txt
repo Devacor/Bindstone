@@ -5,10 +5,14 @@ target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/network.h
   ${CMAKE_CURRENT_SOURCE_DIR}/networkContext.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/networkContext.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/networkContextAsio.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/networkReactor.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/networkReactor.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/networkStream.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/networkStream.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/socket.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/socket.h
   ${CMAKE_CURRENT_SOURCE_DIR}/tls.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tls.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/tlsAsio.h
   ${CMAKE_CURRENT_SOURCE_DIR}/url.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/url.h
   ${CMAKE_CURRENT_SOURCE_DIR}/email.h

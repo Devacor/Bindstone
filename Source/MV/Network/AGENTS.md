@@ -4,15 +4,22 @@ Networking helpers including client/server wrappers and HTTP utilities.
 
 Key files:
 - `network.h` / `network.cpp` – connection and client/server abstractions.
-- `tls.h` / `tls.cpp` – TLS configuration and certificate identity; `tlsAsio.h` – the contexts with the settings below
-  and peer verification.
-- `networkContext.h` – an io_context run by a `jai::thread_pool`, shared by downloads and email.
+- `tls.h` / `tls.cpp` – TLS configuration and certificate identity, `TlsContext` (an `SSL_CTX` with the settings below)
+  and peer verification, on OpenSSL directly.
+- `socket.h` / `socket.cpp` – `Socket`, `SocketAddress`, `resolveAddresses`: the only file that includes the platform's
+  socket headers (Winsock, BSD sockets).
+- `networkReactor.h` – `NetworkReactor`: one network thread's poll loop (`WSAPoll` / `poll`) over sockets, timers and
+  posted work; host names resolve on its `jai::thread_pool`. `NetworkMailbox` is the thread-safe way in and outlives it.
+- `networkStream.h` – `NetworkStream`: a non-blocking TCP connection buffered both ways, with TLS through memory BIOs
+  that can start mid-stream (SMTP STARTTLS); `NetworkListener` accepts.
+- `networkContext.h` – a `NetworkReactor` on its own thread, shared by downloads and email.
 - `networkObject.h` – `NetworkObject` / `NetworkObjectPool`: the synchronized object state a match replicates.
 - `webServer.h` / `webServer.cpp` – simple web server implementation.
 - `download.*`, `url.*`, `email.*` – HTTP download, URL and email utilities.
 
-No header here includes asio: each class keeps its asio state in an `Asio*` struct its `.cpp` defines, and
-`tlsAsio.h` / `networkContextAsio.h` are included only from `.cpp` files.
+Every socket of a `Server`, `Client`, `WebServer` or `NetworkContext` lives on that object's one network thread;
+other threads reach it by posting. `downloadBlocking` and `Email::sendBlocking` run a reactor on the calling thread.
+A stream's callbacks may own its owner, so closing the stream (or the reactor's end) is what releases them.
 
 Used by both game and lobby servers as well as the client.
 
@@ -46,9 +53,9 @@ What each link checks:
 
 TLS 1.3 is preferred and TLS 1.2 is the minimum; SSL 3, TLS 1.0 and 1.1 are refused. TLS 1.2 uses only ECDHE key
 exchange with AEAD ciphers (AES-GCM, ChaCha20-Poly1305); TLS 1.3's own suites are all AEAD. Compression,
-renegotiation, session tickets and session resumption are off. Every client verifies the peer (`verify_peer`), sends
+renegotiation, session tickets and session resumption are off. Every client verifies the peer (`SSL_VERIFY_PEER`), sends
 the host name (SNI) and checks the certificate names that host: a DNS name for a name, an IP address entry for an
-address. Servers that need client certificates refuse a peer without one (`verify_fail_if_no_peer_cert`).
+address. Servers that need client certificates refuse a peer without one (`SSL_VERIFY_FAIL_IF_NO_PEER_CERT`).
 A certificate's purpose is checked too: a server certificate cannot log in as a client and a client certificate
 cannot serve. Each process logs the OpenSSL it runs at startup (`TLS: OpenSSL ...`) and each handshake's protocol
 and cipher (`[handshake] 127.0.0.1:port -> TLSv1.3 TLS_AES_256_GCM_SHA384 ...`).

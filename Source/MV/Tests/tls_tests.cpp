@@ -3,9 +3,9 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include "MV/Network/network.h"
-#include "MV/Network/tlsAsio.h"
 #include "MV/Network/download.h"
 #include "MV/Network/email.h"
+#include "socket_test_peers.hpp"
 #include "tls_test_pki.hpp"
 
 #include <openssl/crypto.h>
@@ -114,105 +114,77 @@ void expectClientRefuses(const std::string& a_host, const MV::TlsConfig& a_serve
 // A TLS client driven by hand: it can present any certificate (or none) and send after its handshake.
 struct RawTlsPeer {
 	RawTlsPeer(uint16_t a_port, const MV::TlsConfig& a_tls) :
-		context(MV::makeTlsClientContext(a_tls)),
-		stream(io, *context) {
+		tls(connectLoopback(a_port, std::chrono::milliseconds(5000)), MV::makeTlsClientContext(a_tls)) {
 
-		stream.lowest_layer().connect(asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), a_port));
-		stream.lowest_layer().set_option(asio::detail::socket_option::integer<SOL_SOCKET, SO_RCVTIMEO>(5000));
-		MV::verifyTlsPeerAs(stream, "127.0.0.1");
-		stream.handshake(asio::ssl::stream_base::client, handshakeError);
+		MV::verifyTlsPeerAs(tls.ssl(), "127.0.0.1");
+		handshaken = tls.handshake();
 	}
 
-	asio::error_code send(const std::string& a_content) {
-		asio::error_code result;
-		asio::write(stream, asio::buffer(MV::NetworkMessage::make(a_content)->wire()), result);
-		return result;
+	bool send(const std::string& a_content) {
+		return tls.write(MV::NetworkMessage::make(a_content)->wire());
 	}
 
-	asio::error_code readSomething() {
-		asio::error_code result;
+	PeerRead readSomething() {
 		std::array<char, 64> buffer;
-		stream.read_some(asio::buffer(buffer), result);
-		return result;
+		size_t received = 0;
+		return tls.read(buffer.data(), buffer.size(), received);
 	}
 
-	asio::io_context io;
-	std::shared_ptr<asio::ssl::context> context;
-	MV::TlsStream stream;
-	asio::error_code handshakeError;
+	BlockingTls tls;
+	bool handshaken = false;
 };
 
 struct PlainPeer {
-	explicit PlainPeer(uint16_t a_port) {
-		socket.connect(asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), a_port));
-		socket.set_option(asio::detail::socket_option::integer<SOL_SOCKET, SO_RCVTIMEO>(5000));
+	explicit PlainPeer(uint16_t a_port) :
+		socket(connectLoopback(a_port, std::chrono::milliseconds(5000))) {
 	}
 
 	// Blocks until the server closes the socket.
-	void waitUntilClosed() {
-		std::array<char, 256> buffer;
-		asio::error_code error;
-		while (!error) {
-			socket.read_some(asio::buffer(buffer), error);
-		}
+	PeerRead waitUntilClosed() {
+		return mv_tests::waitUntilClosed(socket);
 	}
 
-	asio::io_context io;
-	asio::ip::tcp::socket socket {io};
+	MV::Socket socket;
 };
 
 // Accepts one connection on loopback and runs a_session on it from its own thread.
 struct OneShotServer {
-	explicit OneShotServer(std::function<void(asio::ip::tcp::socket&)> a_session) :
-		acceptor(io, asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), 0)),
-		port(acceptor.local_endpoint().port()) {
+	explicit OneShotServer(std::function<void(MV::Socket&)> a_session) :
+		port(listener.port()) {
 
-		acceptor.async_accept(socket, [this, a_session](const asio::error_code& a_err) {
-			if (!a_err) {
-				socket.set_option(asio::detail::socket_option::integer<SOL_SOCKET, SO_RCVTIMEO>(5000));
+		thread = std::thread([this, a_session] {
+			auto socket = listener.accept();
+			if (socket.valid()) {
 				a_session(socket);
 			}
 		});
-		thread = std::thread([this] { io.run_for(std::chrono::seconds(10)); });
 	}
 
 	~OneShotServer() {
 		finish();
 	}
 
+	// Closing the listener ends an accept that is still waiting; a session already running finishes first.
 	void finish() {
+		listener.close();
 		if (thread.joinable()) {
 			thread.join();
 		}
 	}
 
-	asio::io_context io;
-	asio::ip::tcp::acceptor acceptor;
-	asio::ip::tcp::socket socket {io};
+	LoopbackListener listener;
 	uint16_t port;
 	std::thread thread;
 };
 
-std::string readLine(asio::ip::tcp::socket& a_socket, std::string& a_buffer) {
-	asio::error_code error;
-	auto length = asio::read_until(a_socket, asio::dynamic_buffer(a_buffer), "\r\n", error);
-	if (error) {
-		return {};
-	}
-	auto result = a_buffer.substr(0, length);
-	a_buffer.erase(0, length);
-	return result;
+std::string readLine(MV::Socket& a_socket, std::string& a_buffer) {
+	std::string result;
+	return mv_tests::readUntil(a_socket, a_buffer, "\r\n", result) == PeerRead::OK ? result : std::string();
 }
 
-std::string readLine(MV::TlsStream& a_stream, std::string& a_buffer, const std::string& a_delimiter = "\r\n") {
-	asio::error_code error;
-	auto length = asio::read_until(a_stream, asio::dynamic_buffer(a_buffer), a_delimiter, error);
-	if (error) {
-		return {};
-	}
-	auto result = a_buffer.substr(0, length);
-	a_buffer.erase(0, length);
-	return result;
+std::string readLine(BlockingTls& a_stream, std::string& a_buffer, const std::string& a_delimiter = "\r\n") {
+	std::string result;
+	return a_stream.readUntil(a_buffer, a_delimiter, result) == PeerRead::OK ? result : std::string();
 }
 
 struct SmtpLog {
@@ -223,22 +195,20 @@ struct SmtpLog {
 };
 
 // Plaintext greeting, EHLO and STARTTLS, then the TLS handshake with a_context and the rest of a send.
-std::function<void(asio::ip::tcp::socket&)> fakeSmtp(std::shared_ptr<asio::ssl::context> a_context, std::shared_ptr<SmtpLog> a_log) {
-	return [a_context, a_log](asio::ip::tcp::socket& a_socket) {
+std::function<void(MV::Socket&)> fakeSmtp(std::shared_ptr<MV::TlsContext> a_context, std::shared_ptr<SmtpLog> a_log) {
+	return [a_context, a_log](MV::Socket& a_socket) {
 		std::string buffer;
-		asio::error_code error;
-		asio::write(a_socket, asio::buffer(std::string("220 fake smtp\r\n")), error);
+		writeAll(a_socket, "220 fake smtp\r\n");
 		readLine(a_socket, buffer);
-		asio::write(a_socket, asio::buffer(std::string("250 hello\r\n")), error);
+		writeAll(a_socket, "250 hello\r\n");
 		if (!contains(readLine(a_socket, buffer), "STARTTLS")) {
 			return;
 		}
-		asio::write(a_socket, asio::buffer(std::string("220 go ahead\r\n")), error);
-		MV::TlsStream stream(std::move(a_socket), *a_context);
-		stream.handshake(asio::ssl::stream_base::server, error);
-		if (error) {
+		writeAll(a_socket, "220 go ahead\r\n");
+		BlockingTls stream(std::move(a_socket), a_context);
+		if (!stream.handshake()) {
 			std::lock_guard<std::mutex> guard(a_log->lock);
-			a_log->handshakeError = error.message();
+			a_log->handshakeError = stream.error();
 			return;
 		}
 		{
@@ -255,13 +225,13 @@ std::function<void(asio::ip::tcp::socket&)> fakeSmtp(std::shared_ptr<asio::ssl::
 				std::lock_guard<std::mutex> guard(a_log->lock);
 				a_log->secureCommands.push_back(command);
 			}
-			asio::write(stream, asio::buffer(reply), error);
+			stream.write(reply);
 		}
 		readLine(stream, buffer, "\r\n.\r\n");
-		asio::write(stream, asio::buffer(std::string("250 queued\r\n")), error);
+		stream.write("250 queued\r\n");
 		readLine(stream, buffer);
-		asio::write(stream, asio::buffer(std::string("221 bye\r\n")), error);
-		stream.shutdown(error);
+		stream.write("221 bye\r\n");
+		stream.shutdown();
 	};
 }
 
@@ -271,14 +241,12 @@ struct HttpsLog {
 	std::string handshakeError;
 };
 
-std::function<void(asio::ip::tcp::socket&)> fakeHttps(std::shared_ptr<asio::ssl::context> a_context, std::shared_ptr<HttpsLog> a_log) {
-	return [a_context, a_log](asio::ip::tcp::socket& a_socket) {
-		MV::TlsStream stream(std::move(a_socket), *a_context);
-		asio::error_code error;
-		stream.handshake(asio::ssl::stream_base::server, error);
-		if (error) {
+std::function<void(MV::Socket&)> fakeHttps(std::shared_ptr<MV::TlsContext> a_context, std::shared_ptr<HttpsLog> a_log) {
+	return [a_context, a_log](MV::Socket& a_socket) {
+		BlockingTls stream(std::move(a_socket), a_context);
+		if (!stream.handshake()) {
 			std::lock_guard<std::mutex> guard(a_log->lock);
-			a_log->handshakeError = error.message();
+			a_log->handshakeError = stream.error();
 			return;
 		}
 		std::string buffer;
@@ -287,8 +255,8 @@ std::function<void(asio::ip::tcp::socket&)> fakeHttps(std::shared_ptr<asio::ssl:
 			std::lock_guard<std::mutex> guard(a_log->lock);
 			a_log->request = request;
 		}
-		asio::write(stream, asio::buffer(std::string("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello")), error);
-		stream.shutdown(error);
+		stream.write("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello");
+		stream.shutdown();
 	};
 }
 
@@ -378,8 +346,8 @@ public:
 			for (auto&& [what, tls] : refused) {
 				RawTlsPeer peer(server->port(), tls);
 				peer.send("RegisterMe");
-				auto error = peer.readSomething();
-				check_true(!!error, what + ": the server ends the connection (" + error.message() + ")");
+				auto read = peer.readSomething();
+				check_true(read != PeerRead::OK, what + ": the server ends the connection (" + describe(read) + ")");
 				pumpUntil(pump, [] { return false; }, 0.2);
 				check_eq(0, stateCount(*record), what + ": the server never builds a connection state");
 				check_eq(static_cast<size_t>(0), messageCount(*record), what + ": nothing it sent is read");
@@ -414,7 +382,7 @@ public:
 			});
 			PlainPeer peer(server->port());
 			auto plaintext = MV::NetworkMessage::make("LoginRequest password=hunter2");
-			asio::write(peer.socket, asio::buffer(plaintext->wire()));
+			writeAll(peer.socket, plaintext->wire());
 			auto start = std::chrono::steady_clock::now();
 			peer.waitUntilClosed();
 			auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
@@ -454,16 +422,13 @@ public:
 
 		test("a client gives up on a server that accepts and never handshakes, at its handshake deadline", [this]() {
 			TestPki pki;
-			asio::io_context io;
-			asio::ip::tcp::acceptor acceptor(io, asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), 0));
-			asio::ip::tcp::socket held(io);
-			acceptor.async_accept(held, [](const asio::error_code&) {});
+			LoopbackListener silent;
 			MV::MessageLimits limits;
 			limits.handshakeTimeout = std::chrono::milliseconds(200);
 			auto clientRecord = std::make_shared<ClientRecord>();
-			auto client = makeClient("127.0.0.1", acceptor.local_endpoint().port(), pki.clientConfig(), clientRecord, limits);
+			auto client = makeClient("127.0.0.1", silent.port(), pki.clientConfig(), clientRecord, limits);
 			auto start = std::chrono::steady_clock::now();
-			check_true(pumpUntil([&] { io.poll(); client->update(); }, [&] { return !clientRecord->failures.empty(); }, 3.0), "the client fails");
+			check_true(pumpUntil([&] { client->update(); }, [&] { return !clientRecord->failures.empty(); }, 3.0), "the client fails");
 			auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 			check_true(seconds < 1.5, "at its deadline (" + std::to_string(seconds) + " s)");
 			check_true(contains(clientRecord->failures[0], "No TLS handshake"), "saying why: " + clientRecord->failures[0]);
@@ -499,8 +464,8 @@ public:
 				auto log = std::make_shared<HttpsLog>();
 				std::string serverName;
 				auto sni = MV::makeTlsServerContext(pki.serverConfig(pki.localServer()));
-				SSL_CTX_set_tlsext_servername_callback(sni->native_handle(), recordServerName);
-				SSL_CTX_set_tlsext_servername_arg(sni->native_handle(), &serverName);
+				SSL_CTX_set_tlsext_servername_callback(sni->native(), recordServerName);
+				SSL_CTX_set_tlsext_servername_arg(sni->native(), &serverName);
 				OneShotServer server(fakeHttps(sni, log));
 				MV::DownloadOptions options;
 				options.trustedCaFile = pki.caFile;
@@ -537,7 +502,7 @@ public:
 				check_true(log->tlsEstablished && log->secureCommands.size() == 7, "every command after STARTTLS went over TLS");
 				check_true(contains(log->secureCommands[1], "AUTH LOGIN"), "including the login");
 			}
-			std::vector<std::pair<std::string, std::shared_ptr<asio::ssl::context>>> impostors {
+			std::vector<std::pair<std::string, std::shared_ptr<MV::TlsContext>>> impostors {
 				{"a certificate for another host", MV::makeTlsServerContext(pki.serverConfig(pki.issue("wrong host", "DNS:smtp.elsewhere.example")))},
 				{"a certificate from another CA", MV::makeTlsServerContext(other.serverConfig(other.localServer()))},
 			};

@@ -7,7 +7,7 @@
 #include "MV/Network/email.h"
 #include "MV/Utility/require.hpp"
 
-#include <asio.hpp>
+#include "socket_test_peers.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -47,7 +47,6 @@ std::shared_ptr<MV::WebServer> echoServer() {
 class RawTcpServer {
 public:
 	explicit RawTcpServer(std::vector<std::function<std::string(const std::string&)>> a_responders, std::chrono::milliseconds a_holdOpen = std::chrono::milliseconds(0), bool a_readsRequestFirst = true) :
-		acceptor(io, asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), 0)),
 		responders(std::move(a_responders)),
 		holdOpen(a_holdOpen),
 		readsRequestFirst(a_readsRequestFirst) {
@@ -55,15 +54,14 @@ public:
 	}
 
 	~RawTcpServer() {
-		asio::error_code ignored;
-		acceptor.close(ignored);
+		listener.close();
 		if (worker.joinable()) {
 			worker.join();
 		}
 	}
 
 	uint16_t port() const {
-		return acceptor.local_endpoint().port();
+		return listener.port();
 	}
 
 	std::vector<std::string> requests() {
@@ -74,17 +72,14 @@ public:
 private:
 	void serve() {
 		for (auto&& respond : responders) {
-			asio::ip::tcp::socket socket(io);
-			asio::error_code error;
-			acceptor.accept(socket, error);
-			if (error) {
+			auto socket = listener.accept();
+			if (!socket.valid()) {
 				return;
 			}
 			std::string head;
 			if (readsRequestFirst) {
-				asio::streambuf buffer;
-				asio::read_until(socket, buffer, "\r\n\r\n", error);
-				head.assign(asio::buffers_begin(buffer.data()), asio::buffers_end(buffer.data()));
+				std::string buffer;
+				readUntil(socket, buffer, "\r\n\r\n", head);
 			}
 			{
 				std::lock_guard<std::mutex> guard(lock);
@@ -94,14 +89,13 @@ private:
 			if (answer.empty()) {
 				std::this_thread::sleep_for(holdOpen);
 			} else {
-				asio::write(socket, asio::buffer(answer), error);
+				writeAll(socket, answer);
 			}
-			socket.shutdown(asio::ip::tcp::socket::shutdown_both, error);
+			socket.shutdownSend();
 		}
 	}
 
-	asio::io_context io;
-	asio::ip::tcp::acceptor acceptor;
+	LoopbackListener listener;
 	std::vector<std::function<std::string(const std::string&)>> responders;
 	std::chrono::milliseconds holdOpen;
 	bool readsRequestFirst;

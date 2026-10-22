@@ -27,11 +27,16 @@
 #include <vector>
 #include "MV/Network/url.h"
 #include "MV/Network/tls.h"
+#include "MV/Network/networkContext.h"
+#include "MV/Network/socket.h"
 #include "MV/Utility/generalUtility.h"
 #include "MV/Utility/log.h"
 
-// asio stays inside network.cpp: each class keeps its io_context, streams and timers in an Asio* struct defined there.
 namespace MV {
+	class NetworkMailbox;
+	class NetworkListener;
+	class NetworkStream;
+
 	struct MessageLimits {
 		uint32_t authenticatedMaxMessageBytes {2 * 1024 * 1024};
 		uint32_t unauthenticatedMaxMessageBytes {32 * 1024};
@@ -198,17 +203,15 @@ namespace MV {
 		void disconnect();
 
 	private:
-		struct AsioConnection;
-
 		Client(const MV::Url& a_url, const TlsConfig& a_tls, const std::function<void(const std::string &)> &a_onMessageGet, const std::function<void(const std::string &)> &a_onConnectionFail, const std::function<void()> &a_onInitialized, const MessageLimits& a_limits);
 
 		void initialize();
 		void tryInitializeCallback();
 
 		void initiateConnection();
-
-		void initiateRead();
-		void writeNext();
+		void connectTo(const std::shared_ptr<NetworkStream> &a_attempt, std::vector<SocketAddress> a_addresses);
+		void handshake(const std::shared_ptr<NetworkStream> &a_attempt);
+		void readMessages(const std::shared_ptr<NetworkStream> &a_attempt);
 
 		void handleError(const std::error_code &a_err, const std::string &a_section);
 
@@ -226,9 +229,13 @@ namespace MV {
 		std::mutex inboxLock;
 		mutable std::mutex errorLock;
 
-		// The resolver, stream and outbox belong to the network thread; handlers capture this, never own it.
-		std::unique_ptr<AsioConnection> asioConnection;
-		std::deque<std::shared_ptr<NetworkMessage>> outbox;
+		// The TLS context, stream, deadline and partial message belong to the network thread; handlers capture this, never own it.
+		std::unique_ptr<NetworkContext> network;
+		// Built by the first connection attempt, so a missing certificate fails that attempt instead of the constructor.
+		std::shared_ptr<TlsContext> tlsContext;
+		std::shared_ptr<NetworkStream> stream;
+		uint64_t handshakeDeadline = 0;
+		std::shared_ptr<NetworkMessage> incoming;
 		std::string ourTlsSession;
 
 		std::vector<std::shared_ptr<NetworkMessage>> inbox;
@@ -240,8 +247,6 @@ namespace MV {
 
 		std::function<void()> onInitialized;
 		std::function<void(const ProtocolFrame &)> onRejectedCallback;
-
-		std::unique_ptr<std::thread> worker;
 
 		std::vector<double> serverTimeDeltas;
 		std::atomic<ConnectionState> ourConnectionState = DISCONNECTED;
@@ -295,9 +300,7 @@ namespace MV {
 	// handshake is closed without ever becoming a Connection.
 	class ConnectionSocket : public std::enable_shared_from_this<ConnectionSocket> {
 	public:
-		struct AsioSocket;
-
-		ConnectionSocket(std::unique_ptr<AsioSocket> a_asioSocket, const MessageLimits& a_limits, std::function<void(const std::shared_ptr<ConnectionSocket> &)> a_onReady);
+		ConnectionSocket(NetworkReactor &a_reactor, std::shared_ptr<TlsContext> a_tlsContext, std::shared_ptr<NetworkStream> a_stream, const MessageLimits& a_limits, std::function<void(const std::shared_ptr<ConnectionSocket> &)> a_onReady);
 		~ConnectionSocket();
 
 		void start();
@@ -342,35 +345,34 @@ namespace MV {
 		void handshakeComplete(const std::error_code &a_err);
 		void queue(const std::shared_ptr<NetworkMessage> &a_message);
 		void push(const std::shared_ptr<NetworkMessage> &a_message);
-		void initiateRead();
-		void stopReading();
-		void receive(const std::shared_ptr<NetworkMessage> &a_message);
+		void readMessages();
+		// False once the inbox reached its cap and reading paused.
+		bool receive(const std::shared_ptr<NetworkMessage> &a_message);
 		void resumeBelowCap();
 		void resumeReading();
 		void armDeadline(std::chrono::milliseconds a_timeout);
 		void disarmDeadline();
 		void deadlineReached();
 		void reject(ProtocolCode a_code, uint32_t a_value, const std::string &a_reason);
-		void writeNext();
 		void beginClose();
-		void linger();
-		void shutdownTls();
-		void discardNext();
 		void closeNow();
 		void handleError(const std::error_code &a_err, const std::string &a_section);
 
-		std::unique_ptr<AsioSocket> asioSocket;
+		// Posts from other threads go through the mailbox, which outlives the reactor; the reactor itself is
+		// touched only from work running on it.
+		NetworkReactor &reactor;
+		std::shared_ptr<NetworkMailbox> mailbox;
+		std::shared_ptr<TlsContext> tlsContext;
+		std::shared_ptr<NetworkStream> stream;
+		uint64_t deadline = 0;
+		uint64_t closeDeadline = 0;
 		std::function<void(const std::shared_ptr<ConnectionSocket> &)> onReady;
-		std::deque<std::shared_ptr<NetworkMessage>> outbox;
 		bool handshaking = false;
 		bool closing = false;
-		bool lingering = false;
-		std::vector<char> discarded;
 
 		const MessageLimits ourLimits;
 		std::atomic<bool> ourAuthenticated {false};
-		bool reading = false;
-		bool awaitingContent = false;
+		std::shared_ptr<NetworkMessage> incoming;
 
 		std::optional<PeerCertificate> ourPeerCertificate;
 		std::string ourTlsSession;
@@ -519,21 +521,20 @@ namespace MV {
 			return received.bytesPerSecond();
 		}
 	private:
-		struct AsioAcceptor;
-
-		void acceptClients();
+		void accept(Socket a_socket);
 		void adoptAcceptedConnections();
 
 		const MessageLimits ourLimits;
-		std::unique_ptr<AsioAcceptor> asioAcceptor;
+		std::shared_ptr<TlsContext> tlsContext;
+		// Declared before the connections so it outlives them: a dying Connection still posts its close.
+		std::unique_ptr<NetworkContext> network;
+		std::shared_ptr<NetworkListener> listener;
 		uint16_t ourPort = 0;
 
 		std::mutex acceptedLock;
 		std::vector<std::shared_ptr<ConnectionSocket>> accepted;
 
 		std::vector<std::shared_ptr<Connection>> ourConnections;
-
-		std::unique_ptr<std::thread> worker;
 
 		std::function<std::unique_ptr<ConnectionStateBase> (const std::shared_ptr<Connection> &)> connectionStateFactory;
 		double accumulatedTime = 0.0;

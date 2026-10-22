@@ -4,9 +4,9 @@ call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build
 cd /d d:\git\Bindstone\Source\MV\Bench
 set ROOT=d:\git\Bindstone
 cl /nologo /O2 /std:c++20 /EHsc /MD /DNDEBUG ^
-  /DASIO_STANDALONE /D_WIN32_WINNT=0x0602 /DNOMINMAX /DSDL_MAIN_HANDLED ^
+  /D_WIN32_WINNT=0x0602 /DNOMINMAX /DSDL_MAIN_HANDLED ^
   /I"%ROOT%\Source" /I"%ROOT%\External" /I"%ROOT%\External\glm\glm" ^
-  /I"%ROOT%\External\gl3w\include" /I"%ROOT%\External\asio\include" ^
+  /I"%ROOT%\External\gl3w\include" ^
   /I"%ROOT%\External\openssl\openssl-3.5.9\include" /I"%ROOT%\Source\JaiScript\include" ^
   /I"%ROOT%\VSProjects\SDL2\include" ^
   bench_scene.cpp "%ROOT%\External\gl3w\src\gl3w.c" /Fe:bench_scene.exe ^

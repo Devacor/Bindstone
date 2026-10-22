@@ -1,25 +1,35 @@
-#include "MV/Network/networkContextAsio.h"
-#include "MV/Utility/log.h"
-
-#include <thread>
+#include "MV/Network/networkContext.h"
+#include "MV/Network/networkReactor.h"
 
 namespace MV {
 
 	NetworkContext::NetworkContext(size_t a_threads) :
-		ourAsio(std::make_unique<Asio>(a_threads)) {
-		initializeThreadPool(ourAsio->workers);
-		for (size_t i = 0; i < ourAsio->workers.worker_count(); ++i) {
-			ourAsio->workers.submit([context = ourAsio.get()] { context->ioContext.run(); });
+		ourReactor(std::make_unique<NetworkReactor>(a_threads)) {
+		worker = std::thread([reactor = ourReactor.get()] { reactor->run(); });
+	}
+
+	// The last owner can be work running on the network thread, which cannot join itself: another thread joins once
+	// run() returns, then destroys the reactor.
+	NetworkContext::~NetworkContext() {
+		ourReactor->stop();
+		if (ourReactor->runningInThisThread()) {
+			std::thread([reactor = std::move(ourReactor), worker = std::move(worker)]() mutable {
+				worker.join();
+				reactor.reset();
+			}).detach();
+		} else if (worker.joinable()) {
+			worker.join();
 		}
 	}
 
-	// The context stops before the workers join (the pool's destructor), so every run() returns first. The last owner
-	// can be a handler on one of those workers, which cannot join itself: another thread joins once its run() returns.
-	NetworkContext::~NetworkContext() {
-		ourAsio->keepRunning.reset();
-		ourAsio->ioContext.stop();
-		if (ourAsio->ioContext.get_executor().running_in_this_thread()) {
-			std::thread([asio = std::move(ourAsio)]() mutable { asio.reset(); }).detach();
+	void NetworkContext::post(std::function<void()> a_task) {
+		ourReactor->post(std::move(a_task));
+	}
+
+	void NetworkContext::stop() {
+		ourReactor->stop();
+		if (!ourReactor->runningInThisThread() && worker.joinable()) {
+			worker.join();
 		}
 	}
 

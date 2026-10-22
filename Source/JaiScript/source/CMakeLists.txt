@@ -38,6 +38,7 @@ set(JAISCRIPT_SOURCES
     implementation/type_checker.cpp
     implementation/type_info.cpp
     implementation/value.cpp
+    implementation/value_text.cpp
     implementation/vm/chunk_manifest.cpp
     implementation/vm/disassembler.cpp
     implementation/vm/vm_backend.cpp

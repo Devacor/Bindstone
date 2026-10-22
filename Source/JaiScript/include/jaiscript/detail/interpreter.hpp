@@ -20,6 +20,7 @@
 #include "execution_limits.hpp"
 #include "operator_table.hpp"
 #include "host_member.hpp"
+#include "value_text.hpp"
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/core/execution_backend.hpp>
@@ -1157,8 +1158,9 @@ namespace jai {
         // Type conversion helpers (inlined for performance)
         // Helper function for object to_bool() method lookup (defined in interpreter.cpp)
         bool object_to_bool_via_method(const script_value& value);
-        // An operand's text for string +: an object's to_string() when it declares one (its error is the caller's)
+        // A value's display text (detail::value_text) with each object's to_string() run on this backend; its error is the caller's
         checked_result<std::string> value_to_string_with_method(const script_value& val);
+        checked_result<detail::own_text_verdict> object_own_text(const script_value& val, std::string& out);
         checked_result<script_value> concat_with_methods(const script_value& left, const script_value& right);
         // User operator methods (==, <, <=, >, >=, + - * / %): nullopt when the operand defines none (or the method's result
         // does not answer the question), else the method's result or the runtime error it raised

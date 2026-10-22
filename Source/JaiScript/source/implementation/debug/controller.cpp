@@ -3,6 +3,7 @@
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/value_text.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -173,6 +174,9 @@ void controller::set_variable(const std::string& name, const script_value& value
 
 namespace {
 
+// A Variables row shows the structural display text (no to_string() runs on a parked thread), cut short past this many bytes
+constexpr size_t k_variable_text_limit = 1000;
+
 // callables are noise in a Variables view
 std::vector<variable_info> rendered_variables(const std::vector<std::pair<std::string, script_value>>& named) {
     std::vector<variable_info> out;
@@ -183,7 +187,8 @@ std::vector<variable_info> rendered_variables(const std::vector<std::pair<std::s
         else if (value.is_map()) type = "map";
         else if (value.is_object()) type = "object";
         else if (value.is_math()) type = math_type_name(value.deref().current_type());
-        out.push_back(variable_info{ name, value.to_string(), std::move(type) });
+        std::string text = detail::plain_text_value(value) ? value.to_string() : detail::value_text(value, {}, k_variable_text_limit).value();
+        out.push_back(variable_info{ name, std::move(text), std::move(type) });
     }
     std::sort(out.begin(), out.end(),
               [](const variable_info& a, const variable_info& b) { return a.name < b.name; });

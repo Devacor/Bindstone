@@ -1571,26 +1571,30 @@ checked_result<script_value> vm_backend::invoke_method(const script_value& self,
 	return operator_call(self, method_val, name_id, {});
 }
 
-checked_result<std::string> vm_backend::value_to_string_with_method(const script_value& val) {
-	if (val.type() == script_value_type::jai_object_type) {
-		if (parallel_worker_ && !worker_operators_pinned(val, { to_string_id_ })) [[unlikely]] {
-			return checked_result<std::string>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-		}
-		auto target = resolve_member_target(val);
-		if (target) {
-			auto method_val = operator_value(target, to_string_id_);
-			if (!method_val.is_null() && !method_val.is_invalid() && method_val.is_function()) {
-				auto result = operator_call(val, method_val, to_string_id_, {});
-				if (!result) {
-					return result.error_value();   // KEEP BYTE-PARALLEL with interpreter::value_to_string_with_method
-				}
-				if (result.value().is_string()) {
-					return std::string(result.value().unchecked_as_string());
-				}
-			}
-		}
+// KEEP BYTE-PARALLEL with interpreter::object_own_text
+checked_result<detail::own_text_verdict> vm_backend::object_own_text(const script_value& val, std::string& out) {
+	using verdict = detail::own_text_verdict;
+	if (parallel_worker_ && !worker_operators_pinned(val, { to_string_id_ })) [[unlikely]] {
+		return checked_result<verdict>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
 	}
-	return val.to_string();
+	auto target = resolve_member_target(val);
+	if (!target) { return verdict::silent; }
+	auto method_val = operator_value(target, to_string_id_);
+	if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) { return verdict::silent; }
+	auto result = operator_call(val, method_val, to_string_id_, {});
+	if (!result) { return result.error_value(); }
+	if (is_unwinding_) { return verdict::unwinding; }
+	if (!result.value().is_string()) { return verdict::silent; }
+	out += result.value().unchecked_as_string();
+	return verdict::spoke;
+}
+
+checked_result<std::string> vm_backend::value_to_string_with_method(const script_value& val) {
+	if (detail::plain_text_value(val)) { return val.to_string(); }
+	const detail::own_text_hook hook{
+		[](void* self, const script_value& object, std::string& out) { return static_cast<vm_backend*>(self)->object_own_text(object, out); },
+		this, !parallel_worker_ };
+	return detail::value_text(val, hook);
 }
 
 bool vm_backend::object_defines_custom_equality(const script_value& v) const {
@@ -18314,9 +18318,9 @@ op_status vm_backend::exec_throw(frame& f, const vm_instruction& ins) {
 	if (ins.a) {
 		script_value val = std::move(stack_.back());
 		stack_.pop_back();
-		// the message is the value's text, a class's own to_string() for an instance (KEEP BYTE-PARALLEL with the interpreter)
+		// the message is the value's display text, a class's own to_string() for an instance (KEEP BYTE-PARALLEL with the interpreter)
 		std::string message;
-		if (val.deref().is_object()) {
+		if (!detail::plain_text_value(val)) {
 			auto text = engine_->text_of(val);
 			if (!text) { return raise_from(text); }
 			if (is_unwinding_) { return {}; }   // to_string() threw: that throw propagates

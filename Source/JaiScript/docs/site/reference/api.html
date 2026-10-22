@@ -615,11 +615,11 @@ print(v[&quot;hp&quot;], &quot; &quot;, v[&quot;tags&quot;][0]);</code></pre></d
 <div class="api-entry" data-provider="runner" data-search="play_sound(path: string, loop: bool = false) -&gt; sound audio load_sound then play: the sound keeps playing when the result is dropped, and stops with stop() or stop_sounds(); null as load_sound. standalone jaiscript.exe"><h3 id="api-4370eefab32f"><code>play_sound(path: string, loop: bool = false) -&gt; Sound</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
 <p>load_sound then play: the Sound keeps playing when the result is dropped, and stops with stop() or stop_sounds(); null as load_sound.</p>
 </div>
-<div class="api-entry" data-provider="stdlib" data-search="print(format_or_values: var...) -&gt; void output, callback format string placeholders when applicable; instance to_string methods are respected; skip_newline/skip_flush are control tokens. register_all() or area registration"><h3 id="api-3fd5504ea777"><code>print(format_or_values: var...) -&gt; void</code></h3><p><strong>register_all() or area registration</strong> &middot; output, callback</p>
-<p>Format string placeholders when applicable; instance to_string methods are respected; skip_newline/skip_flush are control tokens.</p>
+<div class="api-entry" data-provider="stdlib" data-search="print(format_or_values: var...) -&gt; void output, callback format string placeholders when applicable; each value prints its display text (containers their contents, instances their to_string methods or fields); skip_newline/skip_flush are control tokens. register_all() or area registration"><h3 id="api-3fd5504ea777"><code>print(format_or_values: var...) -&gt; void</code></h3><p><strong>register_all() or area registration</strong> &middot; output, callback</p>
+<p>Format string placeholders when applicable; each value prints its display text (containers their contents, instances their to_string methods or fields); skip_newline/skip_flush are control tokens.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="print(values: var...) -&gt; void output core concatenates; stdlib replacement supports formatting and print tokens. every engine"><h3 id="api-dbef42ca7c2b"><code>print(values: var...) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; output</p>
-<p>Core concatenates; stdlib replacement supports formatting and print tokens.</p>
+<div class="api-entry" data-provider="core" data-search="print(values: var...) -&gt; void output core concatenates display texts; stdlib replacement supports formatting and print tokens. every engine"><h3 id="api-dbef42ca7c2b"><code>print(values: var...) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; output</p>
+<p>Core concatenates display texts; stdlib replacement supports formatting and print tokens.</p>
 </div>
 <div class="api-entry" data-provider="runner" data-search="read_file(path: string) -&gt; string filesystem missing/unreadable file raises; empty file returns empty string. standalone jaiscript.exe"><h3 id="api-191b68a91927"><code>read_file(path: string) -&gt; string</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; filesystem</p>
 <p>Missing/unreadable file raises; empty file returns empty string.</p>
@@ -689,10 +689,10 @@ print(to_json([1, 2], 2));</code></pre></div>
   2
 ]</code></pre></div>
 </div>
-<div class="api-entry" data-provider="stdlib" data-search="to_string(value: var) -&gt; string callback uses an instance&#x27;s to_string when applicable. register_all() or area registration"><h3 id="api-30059b265de9"><code>to_string(value: var) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; callback</p>
-<p>Uses an instance&#x27;s to_string when applicable.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(to_string(3) + &quot;!&quot;, &quot; &quot;, to_string(2.5), &quot; &quot;, to_string([1, 2]));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3! 2.5 [array]</code></pre></div>
+<div class="api-entry" data-provider="stdlib" data-search="to_string(value: var) -&gt; string callback the display text print shows: a container&#x27;s contents, an instance&#x27;s to_string(), else its class name and fields. register_all() or area registration"><h3 id="api-30059b265de9"><code>to_string(value: var) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; callback</p>
+<p>The display text print shows: a container&#x27;s contents, an instance&#x27;s to_string(), else its class name and fields.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(to_string(3) + &quot;!&quot;, &quot; &quot;, to_string(2.5), &quot; &quot;, to_string([1, &quot;two&quot;]));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3! 2.5 [1, &quot;two&quot;]</code></pre></div>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="type_of(value: var) -&gt; string observe  register_all() or area registration"><h3 id="api-b30f6412a259"><code>type_of(value: var) -&gt; string</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(type_of(1), &quot; &quot;, type_of(1.5), &quot; &quot;, type_of(&quot;s&quot;), &quot; &quot;, type_of([1]));</code></pre></div>

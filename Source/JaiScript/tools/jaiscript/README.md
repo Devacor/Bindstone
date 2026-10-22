@@ -69,8 +69,8 @@ jai> add(4, 5)
 - **Multi-line**: input keeps collecting while `()`, `[]`, `{}`, `/* */` or a string is
   open (the prompt becomes `...>`); a blank line force-submits what you have.
 - **Auto-print**: a non-null result prints. Strings print quoted (`"5"` vs `5` stay
-  distinguishable), chars quoted with `'`, arrays/maps as compact JSON
-  (`[1,2,3]`, `{"k":7}`); `print(...)` and other null-returning statements print nothing.
+  distinguishable), chars quoted with `'`, everything else as `print` shows it
+  (`[1, 2, 3]`, `{"k": 7}`, `P{x: 1}`); `print(...)` and other null-returning statements print nothing.
 - **Errors don't kill the session** — the message prints and the engine stays usable.
 - **Paste/drop a path**: a line that is a (optionally quoted) path to an existing `.jai`
   file runs that file into the session — this is exactly what dropping a file onto an

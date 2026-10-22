@@ -2176,7 +2176,7 @@
       "signature": "print(values: var...) -> void",
       "provider": "core",
       "effect": "output",
-      "notes": "Core concatenates; stdlib replacement supports formatting and print tokens.",
+      "notes": "Core concatenates display texts; stdlib replacement supports formatting and print tokens.",
       "source": "source/implementation/engine.cpp",
       "form": "function",
       "availability": "Every engine",
@@ -2496,7 +2496,7 @@
       "signature": "print(format_or_values: var...) -> void",
       "provider": "stdlib",
       "effect": "output, callback",
-      "notes": "Format string placeholders when applicable; instance to_string methods are respected; skip_newline/skip_flush are control tokens.",
+      "notes": "Format string placeholders when applicable; each value prints its display text (containers their contents, instances their to_string methods or fields); skip_newline/skip_flush are control tokens.",
       "source": "include/jaiscript/stdlib/io.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
@@ -2524,14 +2524,14 @@
       "signature": "to_string(value: var) -> string",
       "provider": "stdlib",
       "effect": "callback",
-      "notes": "Uses an instance's to_string when applicable.",
+      "notes": "The display text print shows: a container's contents, an instance's to_string(), else its class name and fields.",
       "source": "include/jaiscript/stdlib/io.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
       "display": "to_string(value: var) -> string",
       "example": {
-        "code": "print(to_string(3) + \"!\", \" \", to_string(2.5), \" \", to_string([1, 2]));",
-        "output": "3! 2.5 [array]"
+        "code": "print(to_string(3) + \"!\", \" \", to_string(2.5), \" \", to_string([1, \"two\"]));",
+        "output": "3! 2.5 [1, \"two\"]"
       }
     },
     {

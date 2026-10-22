@@ -8,6 +8,7 @@
 #include "vm_compiler.hpp"
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
+#include <jaiscript/detail/value_text.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/member_scope.hpp>
@@ -1447,6 +1448,7 @@ namespace jai::vm {
         bool is_truthy(const script_value& value);
         bool object_to_bool_via_method(const script_value& value);
         checked_result<std::string> value_to_string_with_method(const script_value& val);
+        checked_result<detail::own_text_verdict> object_own_text(const script_value& val, std::string& out);
         checked_result<script_string> concat_text(const script_value& left, const script_value& right);
         script_value materialize_constant(const script_value& tmpl);
         script_value materialize_constant(const chunk& code, uint32_t const_index);

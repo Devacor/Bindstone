@@ -11,6 +11,7 @@
 #include <jaiscript/detail/string_element.hpp>
 #include <jaiscript/detail/math_values.hpp>
 #include <jaiscript/detail/float_text.hpp>
+#include <jaiscript/detail/value_text.hpp>
 #include <atomic>
 #include <optional>
 #include <thread>
@@ -2051,13 +2052,11 @@ std::string script_value::to_string() const {
         case script_value_type::jai_bool_type:
             return as_bool() ? "true" : "false";
         case script_value_type::jai_array_type:
-            return "[array]";
         case script_value_type::jai_map_type:
-            return "[map]";
         case script_value_type::jai_object_type:
-            return "[object]";
         case script_value_type::jai_function_type:
-            return "[function]";
+        case script_value_type::jai_weak_ptr_type:
+            return detail::value_text(*this, {}).value();   // the structural form: no class's to_string() runs here (engine::text_of runs them)
         default:
             return "[unknown]";
     }

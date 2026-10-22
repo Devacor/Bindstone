@@ -4033,7 +4033,7 @@ public:
 				"string out = \"\";\n"
 				"for (int i = 0; i < 4; ++i) { if (i == 2) { rereg(); } out += to_string(i) + \" \"; }\n"
 				"out;";
-			check_eq(std::string("1.5,2.25,0truecsnull;1.5,2.25,1truecsnull;1.5,2.25,2truecsnull;1.52.25P3[array] caught no text 7"), run(false, kinds, false), "kinds (interpreter)");
+			check_eq(std::string("1.5,2.25,0truecsnull;1.5,2.25,1truecsnull;1.5,2.25,2truecsnull;1.52.25P3[1, 2] caught no text 7"), run(false, kinds, false), "kinds (interpreter)");
 			check_eq(run(false, kinds, false), run(true, kinds, false), "kinds (parity)");
 			check_eq(std::string("0 1 host host "), run(false, rebound, true), "re-registered (interpreter)");
 			check_eq(run(false, rebound, true), run(true, rebound, true), "re-registered (parity)");

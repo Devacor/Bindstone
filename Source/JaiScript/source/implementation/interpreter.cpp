@@ -720,13 +720,19 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         // one buffer: string elements by their length, everything else by a short estimate;
         // hetero elements read in place, typed kinds box once per element
         size_t total = node->size() > 1 ? sep.size() * (node->size() - 1) : 0;
-        node->for_each(eng, [&](const script_value& e) { total += e.is_string() ? e.unchecked_as_string().size() : 8; });
+        bool walked = false;
+        node->for_each(eng, [&](const script_value& e) {
+            total += e.is_string() ? e.unchecked_as_string().size() : 8;
+            walked = walked || !detail::plain_text_value(e);
+        });
         if (!detail::builtin_memory_charge(eng, total)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
         std::string result;
         result.reserve(total);
 
         bool first = true;
-        node->for_each(eng, [&](const script_value& elem) {
+        std::optional<checked_result<script_value>> stopped;   // an element's to_string() failed or threw
+        auto append = [&](const script_value& elem) {
+            if (stopped) { return; }
             if (!first) {
                 result += sep;
             }
@@ -743,12 +749,23 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 result += elem.unchecked_as_char();
             } else if (elem.is_null()) {
                 result += "null";
-            } else if (script_value::is_math_index(elem.raw_storage_index())) {
+            } else if (detail::plain_text_value(elem)) {
                 result += elem.to_string();
+            } else if (auto text = eng ? eng->text_of(elem) : checked_result<std::string>(elem.to_string()); !text) {
+                stopped.emplace(text.error_value());
+            } else if (ctx.unwinding()) {
+                stopped.emplace(ctx.make_value());
             } else {
-                result += "[object]";
+                result += text.value();
             }
-        });
+        };
+        if (walked) {
+            // a to_string() is script that may change this array: the elements are read from a snapshot
+            for (const script_value& elem : node->materialize_values(eng)) { append(elem); }
+        } else {
+            node->for_each(eng, append);
+        }
+        if (stopped) { return std::move(*stopped); }
 
         return ctx.make_value(std::move(result));
     }},
@@ -7651,27 +7668,31 @@ checked_result<script_value> interpreter::invoke_method(const script_value& self
     return operator_call(self, method_val, name_id, {});
 }
 
-checked_result<std::string> interpreter::value_to_string_with_method(const script_value& val) {
-    if (val.type() == script_value_type::jai_object_type) {
-        if (parallel_worker_ && !worker_operators_pinned(val, { to_string_id_ })) [[unlikely]] {
-            return checked_result<std::string>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-        }
-        auto target = resolve_member_target(val);
-        if (target) {
-            auto method_id = to_string_id_;
-            auto method_val = operator_value(target, method_id);
-            if (!method_val.is_null() && !method_val.is_invalid() && method_val.is_function()) {
-                auto result = operator_call(val, method_val, method_id, {});
-                if (!result) {
-                    return result.error_value();   // KEEP BYTE-PARALLEL with vm_backend::value_to_string_with_method
-                }
-                if (result.value().is_string()) {
-                    return std::string(result.value().unchecked_as_string());
-                }
-            }
-        }
+// An object's own to_string() for the display walk: spoke when it returned a string, silent when it has none (the walk shows
+// its fields), unwinding when it threw. KEEP BYTE-PARALLEL with vm_backend::object_own_text
+checked_result<detail::own_text_verdict> interpreter::object_own_text(const script_value& val, std::string& out) {
+    using verdict = detail::own_text_verdict;
+    if (parallel_worker_ && !worker_operators_pinned(val, { to_string_id_ })) [[unlikely]] {
+        return checked_result<verdict>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
     }
-    return val.to_string();
+    auto target = resolve_member_target(val);
+    if (!target) { return verdict::silent; }
+    auto method_val = operator_value(target, to_string_id_);
+    if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) { return verdict::silent; }
+    auto result = operator_call(val, method_val, to_string_id_, {});
+    if (!result) { return result.error_value(); }
+    if (is_unwinding_) { return verdict::unwinding; }
+    if (!result.value().is_string()) { return verdict::silent; }
+    out += result.value().unchecked_as_string();
+    return verdict::spoke;
+}
+
+checked_result<std::string> interpreter::value_to_string_with_method(const script_value& val) {
+    if (detail::plain_text_value(val)) { return val.to_string(); }
+    const detail::own_text_hook hook{
+        [](void* self, const script_value& object, std::string& out) { return static_cast<interpreter*>(self)->object_own_text(object, out); },
+        this, !parallel_worker_ };
+    return detail::value_text(val, hook);
 }
 
 // String + x: each operand's text, the left operand's to_string() first; a failing to_string() is the expression's error
@@ -10741,9 +10762,9 @@ checked_result<void> interpreter::visit_throw_expr_t(throw_expr* expr, const rep
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_operand, 0, {});
         script_value val = pop_value();
 
-        // the message is the value's text, a class's own to_string() for an instance (engine::text_of, print's rule)
+        // the message is the value's display text, a class's own to_string() for an instance (engine::text_of, print's rule)
         std::string message;
-        if (val.deref().is_object()) {
+        if (!detail::plain_text_value(val)) {
             auto text = engine_->text_of(val);
             if (!text) { return text.error_value(); }
             if (is_unwinding_) { push_value(make_value()); return {}; }   // to_string() threw: that throw propagates

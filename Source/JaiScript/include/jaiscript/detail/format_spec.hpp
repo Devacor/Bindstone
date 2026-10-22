@@ -95,5 +95,10 @@ inline bool parse_format_spec(std::string_view s, format_spec& out) {
 // mismatch (e.g. `${str:.2f}`).
 std::string format_value_with_spec(const script_value& value, const format_spec& spec, std::string_view raw_spec);
 
+// A spec that applies to numbers only (sign, zero padding, precision, a type); width, fill and align apply to any text
+inline bool format_spec_needs_number(const format_spec& spec) {
+    return spec.sign || spec.zero || spec.precision >= 0 || spec.type != 0;
+}
+
 } // namespace detail
 } // namespace jai

@@ -219,7 +219,7 @@ door 2/3
 door 3/3
 door done</code></pre></div>
 <h3 id="print-and-to-string">to_string() speaks for an instance<a class="hlink" href="#print-and-to-string" aria-label="link">&#8203;</a></h3>
-<p>A class's <code>string to_string()</code> is what <code>to_string(x)</code>, <code>"text" + x</code>, a template splice and <code>print(x)</code> show, as <code>ToString()</code> is in C#. A class without one prints as <code>[object]</code>:</p>
+<p>A class's <code>string to_string()</code> is what <code>to_string(x)</code>, <code>"text" + x</code>, a template splice and <code>print(x)</code> show, as <code>ToString()</code> is in C#. A class without one prints its class name and fields:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point { int x = 1; int y = 2; string to_string() { return "(" + x + ", " + y + ")"; } }
 class Plain { int x = 1; }
 Point p;
@@ -228,7 +228,7 @@ print(to_string(p), " ", `${p}`, " ", "at " + p);
 print(Plain());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(1, 2)
 (1, 2) (1, 2) at (1, 2)
-[object]</code></pre></div>
+Plain{x: 1}</code></pre></div>
 <h3 id="strings-change-in-place">Strings change in place<a class="hlink" href="#strings-change-in-place" aria-label="link">&#8203;</a></h3>
 <p>A string is a value, so a copy never sees a later change, but the mutating methods change the string they are called on and return it. The <code>string::</code> functions return a new string instead:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string name = "ada";

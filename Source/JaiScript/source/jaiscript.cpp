@@ -6,6 +6,7 @@
 
 #include "implementation/type_info.cpp"
 #include "implementation/value.cpp"
+#include "implementation/value_text.cpp"
 #include "implementation/environment.cpp"
 #include "implementation/engine.cpp"
 #include "implementation/lexer.cpp"

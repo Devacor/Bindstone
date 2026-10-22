@@ -3,6 +3,8 @@
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/format_spec.hpp>
+#include <jaiscript/detail/value_text.hpp>
+#include <optional>
 #include <iostream>
 #include <sstream>
 #include <format>
@@ -62,7 +64,10 @@ namespace stdlib {
         return false;
     }
     
+    // shown: each argument's display text where it is no scalar (args elsewhere); a spec that asks for a number reads the
+    // argument itself, so its mismatch names the argument's own type
     inline std::string process_format_string(const std::string& format_str,
+                                           const std::vector<script_value>& shown,
                                            const std::vector<script_value>& args,
                                            size_t arg_offset = 0) {
         std::string result;
@@ -114,8 +119,8 @@ namespace stdlib {
 
             if (spec.empty()) {
                 // {} - use next argument
-                if (next_arg < args.size()) {
-                    result += args[next_arg].to_string();
+                if (next_arg < shown.size()) {
+                    result += shown[next_arg].to_string();
                     next_arg++;
                 }
             } else if (size_t colon = spec.find(':'); colon != std::string::npos) {
@@ -135,8 +140,9 @@ namespace stdlib {
                     } else {
                         arg_index = std::stoull(index_part) + arg_offset;
                     }
-                    if (arg_index < args.size()) {
-                        result += detail::format_value_with_spec(args[static_cast<size_t>(arg_index)], parsed, fmt_part);
+                    if (arg_index < shown.size()) {
+                        const size_t at = static_cast<size_t>(arg_index);
+                        result += detail::format_value_with_spec(detail::format_spec_needs_number(parsed) ? args[at] : shown[at], parsed, fmt_part);
                     }
                 } else {
                     result += "{" + spec + "}";
@@ -145,8 +151,8 @@ namespace stdlib {
                 // {n} - use positional argument
                 try {
                     const unsigned long long arg_index = std::stoull(spec) + arg_offset;
-                    if (arg_index < args.size()) {
-                        result += args[static_cast<size_t>(arg_index)].to_string();
+                    if (arg_index < shown.size()) {
+                        result += shown[static_cast<size_t>(arg_index)].to_string();
                     }
                 } catch (...) {
                     // Invalid index, ignore
@@ -160,6 +166,26 @@ namespace stdlib {
         return result;
     }
     
+    inline bool is_print_control(const script_value& v) {
+        auto control = v.get_type_info();
+        return control && (control->type_name == "skip_newline_t" || control->type_name == "skip_flush_t");
+    }
+
+    // shown: args with each container, object, handle and function replaced by its display text (left empty when every
+    // argument is a scalar); a failing to_string() is the call's error, a throw out of one returns null with the throw in flight
+    inline std::optional<checked_result<script_value>> show_arguments(engine* eng, const std::vector<script_value>& args, std::vector<script_value>& shown) {
+        for (size_t i = 0; i < args.size() && eng; ++i) {
+            const script_value& a = args[i];
+            if (detail::plain_text_value(a) || is_print_control(a)) { continue; }
+            if (shown.empty()) { shown = args; }
+            auto text = eng->text_of(a);
+            if (!text) { return checked_result<script_value>(text.error_value()); }
+            if (eng->backend_unwinding()) { return checked_result<script_value>(script_value(std::monostate{}, eng)); }
+            shown[i] = script_value(std::move(text.value()), eng);
+        }
+        return std::nullopt;
+    }
+
     // Special types for controlling print behavior
     struct skip_newline_t {};
     struct skip_flush_t {};
@@ -219,20 +245,10 @@ namespace stdlib {
         //   print("Debug: ", value, skip_flush)       // Output: Debug: <value> (no newline/flush)
         //
         eng_ref.add_variadic_function("print", [eng](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
-            // a class's own to_string() speaks for its instances, as in to_string(x) and `${x}`; such a text is never a format string
+            // every value shows its display text, as to_string(x) and `${x}` do; a container's or an object's is never a format string
             std::vector<script_value> shown;
-            const bool first_was_object = !raw_args.empty() && raw_args[0].deref().type() == script_value_type::jai_object_type;
-            for (size_t i = 0; i < raw_args.size() && eng; ++i) {
-                const script_value& a = raw_args[i];
-                if (a.deref().type() != script_value_type::jai_object_type) { continue; }
-                auto control = a.get_type_info();
-                if (control && (control->type_name == "skip_newline_t" || control->type_name == "skip_flush_t")) { continue; }
-                if (shown.empty()) { shown = raw_args; }
-                auto text = eng->text_of(a);
-                if (!text) { return text.error_value(); }
-                if (eng->backend_unwinding()) { return script_value(std::monostate{}, eng); }
-                shown[i] = script_value(std::move(text.value()), eng);
-            }
+            if (auto failed = show_arguments(eng, raw_args, shown)) { return std::move(*failed); }
+            const bool first_was_shown = !raw_args.empty() && !detail::plain_text_value(raw_args[0]);
             const std::vector<script_value>& args = shown.empty() ? raw_args : shown;
             std::ostream& out = eng ? eng->get_output_stream() : std::cout;
 
@@ -282,7 +298,7 @@ namespace stdlib {
             }
 
             std::string first_str = args[0].to_string();
-            bool has_format_specs = !first_was_object && has_format_placeholders(first_str);
+            bool has_format_specs = !first_was_shown && has_format_placeholders(first_str);
 
             if (!has_format_specs) {
                 for (size_t i = 0; i < effective_args; ++i) {
@@ -298,7 +314,8 @@ namespace stdlib {
 
             // arg_offset=1: format string is args[0], actual values start at args[1]
             std::vector<script_value> format_args(args.begin(), args.begin() + effective_args);
-            std::string result = process_format_string(first_str, format_args, 1);
+            std::vector<script_value> raw_format_args(raw_args.begin(), raw_args.begin() + effective_args);
+            std::string result = process_format_string(first_str, format_args, raw_format_args, 1);
 
             out << result;
             if (should_newline) {
@@ -319,7 +336,7 @@ namespace stdlib {
         //   format("Hello", " ", "World")      // Returns: "Hello World"
         //   format("{} + {} = {}", 2, 3, 5)    // Returns: "2 + 3 = 5"
         //
-        eng_ref.add_variadic_function("format", [eng](const std::vector<script_value>& args) -> script_value {
+        eng_ref.add_variadic_function("format", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.empty()) {
                 return script_value("", eng);
             }
@@ -327,9 +344,7 @@ namespace stdlib {
             // Filter out control types (they don't make sense for format)
             std::vector<script_value> filtered_args;
             for (const auto& arg : args) {
-                auto type_info = arg.get_type_info();
-                if (!type_info || (type_info->type_name != "skip_newline_t" &&
-                                   type_info->type_name != "skip_flush_t")) {
+                if (!is_print_control(arg)) {
                     filtered_args.push_back(arg);
                 }
             }
@@ -338,31 +353,35 @@ namespace stdlib {
                 return script_value("", eng);
             }
 
-            if (filtered_args.size() == 1) {
-                return script_value(filtered_args[0].to_string(), eng);
+            std::vector<script_value> shown;
+            if (auto failed = show_arguments(eng, filtered_args, shown)) { return std::move(*failed); }
+            const std::vector<script_value>& texts = shown.empty() ? filtered_args : shown;
+
+            if (texts.size() == 1) {
+                return script_value(texts[0].to_string(), eng);
             }
 
-            std::string first_str = filtered_args[0].to_string();
-            bool has_format_specs = has_format_placeholders(first_str);
+            std::string first_str = texts[0].to_string();
+            bool has_format_specs = detail::plain_text_value(filtered_args[0]) && has_format_placeholders(first_str);
 
             if (!has_format_specs) {
                 std::string result;
-                for (const auto& arg : filtered_args) {
+                for (const auto& arg : texts) {
                     result += arg.to_string();
                 }
                 return script_value(result, eng);
             }
 
-            std::string result = process_format_string(first_str, filtered_args, 1);
+            std::string result = process_format_string(first_str, texts, filtered_args, 1);
 
             return script_value(result, eng);
         });
         
         // Register as variadic to bypass type matching issues
-        // a class's own to_string() speaks for its instances, as in string + value
+        // the display text string + value shows (a class's own to_string() speaks for its instances)
         constexpr engine::host_direct_invoke to_string_of = [](const void* target, const script_value* args, size_t) -> checked_result<script_value> {
             engine* e = static_cast<engine*>(const_cast<void*>(target));
-            if (args[0].type() != script_value_type::jai_object_type) { return script_value(args[0].to_string(), e); }   // only an object's class speaks for it
+            if (detail::plain_text_value(args[0])) { return script_value(args[0].to_string(), e); }
             auto text = e->text_of(args[0]);
             if (!text) { return text.error_value(); }
             if (e->backend_unwinding()) { return script_value(std::monostate{}, e); }

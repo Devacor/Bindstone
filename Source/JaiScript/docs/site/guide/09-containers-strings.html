@@ -36,7 +36,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Guide</a><span class="sep" aria-hidden="true">/</span>09</nav>
 <article class="chapter"><h1 id="containers-strings">Containers &amp; Strings<a class="hlink" href="#containers-strings" aria-label="link">&#8203;</a></h1>
 <p>Value-semantic arrays, ordered maps, a string type with a deep method set, and byte-level string reads for binary work. Array literals use <code>[...]</code>; map literals use <code>{key: value, ...}</code>. Builtin methods for arrays, maps, strings, and pointers live in <strong>one registry shared by both backends</strong>, so the lists below cannot drift between them. They are enumerated directly from that registry.</p>
-<p>Display tip: <code>to_string(arr)</code> prints just <code>[array]</code> / <code>[map]</code>; use <code>to_json(x)</code> to see contents.</p>
+<p><code>print(x)</code> shows a container's contents (<a href="#printing-values">Printing values</a>); <code>to_json(x)</code> writes the archive text <code>from_json</code> reads back.</p>
 <h2 id="the-builtin-method-registry">The builtin method registry<a class="hlink" href="#the-builtin-method-registry" aria-label="link">&#8203;</a></h2>
 <p><strong>Array methods (31):</strong> <code>size</code> <code>push</code> <code>pop</code> <code>empty</code> <code>clear</code> <code>front</code> <code>back</code> <code>index_of</code> <code>has</code> <code>contains</code> <code>first</code> <code>last</code> <code>length</code> <code>slice</code> <code>filter</code> <code>sort</code> <code>reverse</code> <code>remove</code> <code>erase</code> <code>remove_if</code> <code>join</code> <code>map</code> <code>reduce</code> <code>for_each</code> <code>find</code> <code>find_index</code> <code>some</code> <code>every</code> <code>concat</code> <code>append</code> <code>insert</code> (<code>erase</code> is <code>remove</code>, <code>append</code> is <code>concat</code>)</p>
 <p><strong>Map methods (14):</strong> <code>size</code> <code>empty</code> <code>clear</code> <code>contains</code> <code>erase</code> <code>keys</code> <code>values</code> <code>has</code> <code>get</code> <code>length</code> <code>remove</code> <code>remove_if</code> <code>filter</code> <code>to_array</code></p>
@@ -46,29 +46,29 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto nums = [4, 1, 3, 2];
 print("size={} front={} back={}", nums.size(), nums.front(), nums.back());
 nums.push(5);
-print("after push(5): {}", to_json(nums));
+print("after push(5): {}", nums);
 auto popped = nums.pop();
 print("pop() -&gt; {}", popped);
 nums.sort();                        // sorts IN PLACE
-print("sorted: {}", to_json(nums));
+print("sorted: {}", nums);
 nums.reverse();                     // reverses IN PLACE
-print("reversed: {}", to_json(nums));
+print("reversed: {}", nums);
 print("index_of(3) = {}, contains(9) = {}", nums.index_of(3), nums.contains(9));
-print("slice(1, 3) = {} (a new array)", to_json(array::slice(nums, 1, 3)));
+print("slice(1, 3) = {} (a new array)", array::slice(nums, 1, 3));
 auto evens = array::filter(nums, [](x) { return x % 2 == 0; });   // filter returns new
-print("evens: {}, original intact: {}", to_json(evens), to_json(nums));
+print("evens: {}, original intact: {}", evens, nums);
 nums.remove_if([](x) { return x &gt; 2; });                  // remove_if mutates
-print("after remove_if(&gt;2): {}", to_json(nums));
+print("after remove_if(&gt;2): {}", nums);
 ["a", "b", "c"].join("-");</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">size=4 front=4 back=2
-after push(5): [4,1,3,2,5]
+after push(5): [4, 1, 3, 2, 5]
 pop() -&gt; 5
-sorted: [1,2,3,4]
-reversed: [4,3,2,1]
+sorted: [1, 2, 3, 4]
+reversed: [4, 3, 2, 1]
 index_of(3) = 1, contains(9) = false
-slice(1, 3) = [3,2] (a new array)
-evens: [4,2], original intact: [4,3,2,1]
-after remove_if(&gt;2): [2,1]
+slice(1, 3) = [3, 2] (a new array)
+evens: [4, 2], original intact: [4, 3, 2, 1]
+after remove_if(&gt;2): [2, 1]
 == result: a-b-c</code></pre></div>
 <p>See the <a href="../reference/api.html">complete API signatures</a> for arguments, defaults, results and mutation effects. <code>array::slice(values)</code> copies the whole array; <code>values.slice(start)</code> retains the range in place and defaults the exclusive end to <code>size()</code>. <code>erase(index)</code> aliases <code>remove(index)</code>, and both map removal spellings report whether a key existed.</p>
 <p>Transforms called on an array mutate it: <code>append concat filter map slice sort reverse</code>. The matching <code>array::</code> functions return new arrays. <code>push pop clear erase remove remove_if insert</code> also mutate; observers such as <code>size front back find contains</code> read without changing it. <code>remove(i)</code> erases the element at index <code>i</code> and returns <code>true</code>, or returns <code>false</code> and changes nothing when <code>i</code> is out of range; <code>remove_if(pred)</code> erases every element the predicate accepts. <code>pop</code>, <code>front</code>, <code>back</code>, <code>first</code> and <code>last</code> on an empty array raise a catchable error (<code>Cannot pop from empty array</code>). <code>contains</code>, <code>has</code> and <code>index_of</code> compare with the language&#x27;s <code>==</code>, so <code>[1, 2].contains(2.0)</code> is true and an array of class instances finds an element its <code>operator==</code> accepts; <code>sort()</code> uses the language order, including a class&#x27;s <code>operator&lt;</code> or its <code>operator&lt;=&gt;</code> fallback. An explicit predicate returns bool, and default float sorting groups NaNs last. A <code>slice</code> keeps the receiver&#x27;s element type: a slice of an <code>array&lt;int&gt;</code> is an <code>array&lt;int&gt;</code>.</p>
@@ -77,25 +77,25 @@ after remove_if(&gt;2): [2,1]
 <h3 id="array-helpers">Callbacks: map, reduce, find and friends<a class="hlink" href="#array-helpers" aria-label="link">&#8203;</a></h3>
 <p>The callback helpers take a function, a lambda or an arrow function (<a href="06-functions.html#arrow-functions">Functions</a>) and call it with the element, or with the element and its index when the callback declares two parameters. A predicate counts only when it answers <code>true</code>, as <code>filter</code>'s does:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto scores = [72, 95, 40, 88];
-print(to_json(array::map(scores, (x) =&gt; x + 5)));
+print(array::map(scores, (x) =&gt; x + 5));
 print(scores.reduce((sum, x) =&gt; sum + x, 0), " ", scores.find(x =&gt; x &gt; 90), " ", scores.find_index(x =&gt; x &lt; 50));
 print(scores.some(x =&gt; x &lt; 50), " ", scores.every(x =&gt; x &gt; 30));
 scores.for_each((x, i) =&gt; print(i, ": ", x));
 auto more = array::concat(scores, [60]);
 more.insert(0, 100);
-print(to_json(more));
+print(more);
 array&lt;int&gt; hp = [10, 20];
 hp.for_each([](int&amp; x) { x -= 5; });       // a T&amp; element parameter is the element itself
-print(to_json(hp));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[77,100,45,93]
+print(hp);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[77, 100, 45, 93]
 295 95 2
 true true
 0: 72
 1: 95
 2: 40
 3: 88
-[100,72,95,40,88,60]
-[5,15]</code></pre></div>
+[100, 72, 95, 40, 88, 60]
+[5, 15]</code></pre></div>
 <div class="tablewrap"><table><thead><tr><th>method</th><th>returns</th></tr></thead><tbody><tr><td><code>array::map(values, f)</code></td><td>a new array of <code>f(x)</code>: an <code>array&lt;T&gt;</code> when <code>f</code> declares its return type <code>T</code> (<code>[](int x) -&gt; int { ... }</code>, <code>int twice(int x)</code>), an <code>array&lt;var&gt;</code> otherwise</td></tr><tr><td><code>reduce(f, init)</code></td><td><code>f(accumulator, x)</code> folded left to right from <code>init</code>; <code>reduce(f)</code> starts from the first element and raises on an empty array</td></tr><tr><td><code>for_each(f)</code></td><td>nothing; calls <code>f</code> on each element in order</td></tr><tr><td><code>find(f)</code></td><td>a copy of the first element <code>f</code> answers <code>true</code> for, or <code>null</code></td></tr><tr><td><code>find_index(f)</code></td><td>its index, or <code>-1</code></td></tr><tr><td><code>some(f)</code> / <code>every(f)</code></td><td>whether any / every element answers <code>true</code>; they stop at the first element that decides (<code>some</code> of an empty array is false, <code>every</code> is true)</td></tr><tr><td><code>array::concat(values, other)</code></td><td>a new array: this one's elements, then copies of <code>other</code>'s, with this array's element type</td></tr><tr><td><code>insert(i, v)</code></td><td>nothing; puts <code>v</code> at index <code>i</code> (0 to <code>size()</code>) and moves the rest up; another index raises</td></tr></tbody></table></div>
 <p>A callback element parameter declared <code>T&amp;</code> names the element in the array, so a write through it changes the array, as <code>std::for_each</code> does in C++; a by-value parameter gets a copy. The helpers walk the elements the array has when they start: a callback that grows the array does not see the new elements, and one that shrinks it ends the walk early. A <code>throw</code> in a callback ends the call and propagates.</p>
 <h2 id="maps">Maps<a class="hlink" href="#maps" aria-label="link">&#8203;</a></h2>
@@ -103,22 +103,22 @@ true true
 inventory["gold"] = 250;
 print("size = {}", inventory.size());
 print("has(potion) = {}, has(shield) = {}", inventory.has("potion"), inventory.has("shield"));
-print("keys: {}", to_json(inventory.keys()));
-print("values: {}", to_json(inventory.values()));
+print("keys: {}", inventory.keys());
+print("values: {}", inventory.values());
 inventory.erase("sword");
-print("after erase: {}", to_json(inventory));
+print("after erase: {}", inventory);
 print("get with default: {}", inventory.get("shield", 0));
 auto rich = map::filter(inventory, [](k, v) { return v &gt; 10; });
-print("filter(v &gt; 10): {}", to_json(rich));
+print("filter(v &gt; 10): {}", rich);
 print("missing key read: {}", inventory["nothing"] == null);
 to_json(inventory.to_array());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">size = 3
 has(potion) = true, has(shield) = false
-keys: [&quot;gold&quot;,&quot;potion&quot;,&quot;sword&quot;]
-values: [250,3,1]
-after erase: {&quot;gold&quot;:250,&quot;potion&quot;:3}
+keys: [&quot;gold&quot;, &quot;potion&quot;, &quot;sword&quot;]
+values: [250, 3, 1]
+after erase: {&quot;gold&quot;: 250, &quot;potion&quot;: 3}
 get with default: 0
-filter(v &gt; 10): {&quot;gold&quot;:250}
+filter(v &gt; 10): {&quot;gold&quot;: 250}
 missing key read: true
 == result: [[&quot;gold&quot;,250],[&quot;potion&quot;,3]]</code></pre></div>
 <p>Notes: on a map, <code>m.filter(f)</code> keeps the entries <code>f</code> accepts in place and returns the map, as an array&#x27;s dot <code>filter</code>, <code>map</code>, <code>slice</code>, <code>concat</code> and <code>append</code> return the array (its <code>sort()</code> and <code>reverse()</code> return null); <code>map::filter(m, f)</code> returns them as a new map and leaves <code>m</code> alone; <code>remove_if(f)</code> erases in place and returns the count. Writing <code>m[key] = v</code> inserts; <strong>reading a missing key returns <code>null</code> and does NOT insert</strong>. <code>get(key)</code> returns null for a missing key; <code>get(key, default)</code> supplies an explicit fallback. <code>get</code>, like an array&#x27;s <code>front</code>, <code>back</code>, <code>first</code> and <code>last</code>, hands back a stored object, array or map the way a C++ reference return does: <code>var x = m.get(k)</code> is a copy, while <code>var&amp; x = m.get(k)</code> and <code>m.get(k).method()</code> reach the stored value. Keys are ordered (a <code>var</code> map takes any script value as a key; the total ordering of <code>&lt;=&gt;</code> guarantees it), so iteration order is deterministic: range-<code>for</code>, <code>keys()</code>, <code>values()</code> and serialization walk keys in order on every platform, whatever order they were inserted in. Lookups are hashed, and the order is produced only when something iterates; a loop that inserts a key ahead of its position visits it, and one that erases entries skips them. Note that <code>auto inventory = {…}</code> inferred <code>map&lt;string, int&gt;</code> from its literal, exactly as <code>auto</code> does for arrays, so <code>inventory[5]</code> would raise; see <a href="#key-types">Key types</a>. Map <code>filter</code>&#x27;s predicate takes <code>(key, value)</code>.</p>
@@ -126,17 +126,17 @@ missing key read: true
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto stock = {"arrow": 20, "potion": 3};
 for (auto [item, count] : stock) { print(item, " x", count); }
 for (auto&amp; [item, count] : stock) { count *= 2; }   // auto&amp; makes count the entry's value
-print(to_json(stock));</code></pre></div>
+print(stock);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">arrow x20
 potion x3
-{&quot;arrow&quot;:40,&quot;potion&quot;:6}</code></pre></div>
+{&quot;arrow&quot;: 40, &quot;potion&quot;: 6}</code></pre></div>
 <h2 id="typed-containers">Typed containers<a class="hlink" href="#typed-containers" aria-label="link">&#8203;</a></h2>
 <p><code>array&lt;T&gt;</code> and <code>map&lt;K,V&gt;</code> enforce their element types. A push or a store converts when the value is compatible (int to float, say) and rejects otherwise, with an error that names the container (the sample below).</p>
 <p>Elements and map values convert between <code>bool</code> and <code>int</code>: false becomes 0, true becomes 1, and an int becomes false only when it is zero. Int/float conversion also applies. Int-to-string requires an explicit <code>to_string(value)</code> or <code>cast&lt;string&gt;(value)</code>; float/bool conversion stays rejected. Map keys never coerce.</p>
 <p><code>shared_ptr&lt;T&gt;</code> and <code>weak_ptr&lt;T&gt;</code> elements admit <code>null</code>. A shared-handle element also takes a live instance of T or a subclass and checks the class of a shared handle. Class values, primitive values and nested containers remain non-nullable.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];
 nums.push(4.9);          // converts to the element type
-print("pushed 4.9 -&gt; {}", to_json(nums));
+print("pushed 4.9 -&gt; {}", nums);
 var bad = "nope"; // a var-sourced value: the checker cannot see it
 try {
 	nums.push(bad);          // checked at run time
@@ -147,7 +147,7 @@ map&lt;string, int&gt; ages = {"ana": 31};
 ages["bo"] = 44;
 array&lt;array&lt;int&gt;&gt; grid = [[1, 2], [3, 4]];
 print("grid[1][0] + ages[bo] = {}", grid[1][0] + ages["bo"]);</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">pushed 4.9 -&gt; [1,2,3,4]
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">pushed 4.9 -&gt; [1, 2, 3, 4]
 caught: Cannot push &#x27;string&#x27; to array&lt;int&gt;
 grid[1][0] + ages[bo] = 47</code></pre></div>
 <p>The <a href="13-strict-checking.html">checker</a> checks known literal elements and keys, nested literals, typed push arguments and typed subscript stores. A subscript on a declared <code>array&lt;T&gt;</code> or <code>map&lt;K,V&gt;</code> carries its element type into later typed assignments. A <code>var</code>-sourced value is checked at run time and its error is catchable, as above. Bounds, missing keys and computed numeric range failures remain runtime checks. <code>[[warn_mode]]</code> is the explicit way to downgrade a static diagnostic.</p>
@@ -156,18 +156,18 @@ grid[1][0] + ages[bo] = 47</code></pre></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];         // a raw int buffer
 array&lt;var&gt; copy = nums;              // the explicit step to the dynamic form: a copy
 copy.push(4);
-print("copy: {}  nums: {}", to_json(copy), to_json(nums));
+print("copy: {}  nums: {}", copy, nums);
 array&lt;float&gt; widened = nums;         // typed to typed converts element by element
-print("widened: {}", to_json(widened));
+print("widened: {}", widened);
 auto guessed = [1, 2, 3];            // auto infers array&lt;int&gt; from a uniform literal
 try { guessed.push("s"); } catch (e) { print("caught: {}", e); }
 var loose = [1, 2, 3];               // var: dynamic, whatever the literal held
 loose.push("s");
-print("loose: {}", to_json(loose));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">copy: [1,2,3,4]  nums: [1,2,3]
-widened: [1.0,2.0,3.0]
+print("loose: {}", loose);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">copy: [1, 2, 3, 4]  nums: [1, 2, 3]
+widened: [1.0, 2.0, 3.0]
 caught: Cannot push &#x27;string&#x27; to array&lt;int&gt;
-loose: [1,2,3,&quot;s&quot;]</code></pre></div>
+loose: [1, 2, 3, &quot;s&quot;]</code></pre></div>
 <p>Three spellings, three intents: <code>array&lt;int&gt;</code> when you know, <code>auto</code> when the literal says it for you (a mixed literal under <code>auto</code> raises <code>Array 'auto' requires homogeneous elements - type mismatch at index 1</code>), and <code>var</code> or <code>array&lt;var&gt;</code> when the elements genuinely vary. This is the contract behind the &quot;typed arrays&quot; bullet in the <a href="../embedding/11-performance.html">performance notes</a>: a typed loop reads a raw buffer, and a C++ binding can take the buffer without boxing.</p>
 <p><strong>Byte arrays.</strong> <code>array&lt;uint8&gt;</code> (0 to 255) and <code>array&lt;int8&gt;</code> (-128 to 127) hold one byte per element. An element reads as an <code>int</code>, and every store runs the range: <code>Cannot store 256 in array&lt;uint8&gt; (0..255)</code>, whether it comes from <code>=</code>, a compound assignment, <code>++</code>, <code>push</code>, a reference or a conversion. A float element converts like it does into an <code>int</code> first (<code>7.9</code> stores <code>7</code>), and a <code>bool</code> stores 0 or 1; a <code>char</code> needs <code>cast&lt;int&gt;</code>. <code>array&lt;int&gt; x = bytes;</code> and <code>array&lt;uint8&gt; b = ints;</code> convert by value (the second checks every element), and <code>array&lt;var&gt; v = bytes;</code> is the dynamic copy. <code>uint8</code> and <code>int8</code> name array elements only: a single byte is an <code>int</code>, so <code>uint8 x = 5;</code> is a parse error that says so.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;uint8&gt; pixels = [0, 128, 255];   // three bytes
@@ -175,9 +175,9 @@ pixels[1] += 100;
 array&lt;int&gt; wide = pixels;              // by value: a raw int buffer
 int v = pixels[2] + 1;
 try { pixels[2] = v; } catch (e) { print("caught: {}", e); }
-print("pixels: {}  wide: {}", to_json(pixels), to_json(wide));</code></pre></div>
+print("pixels: {}  wide: {}", pixels, wide);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Cannot store 256 in array&lt;uint8&gt; (0..255)
-pixels: [0,228,255]  wide: [0,228,255]</code></pre></div>
+pixels: [0, 228, 255]  wide: [0, 228, 255]</code></pre></div>
 <h3 id="class-typed-arrays-admit-subclasses">Class-typed arrays admit subclasses<a class="hlink" href="#class-typed-arrays-admit-subclasses" aria-label="link">&#8203;</a></h3>
 <p><code>array&lt;Base&gt;</code> holds a <code>Base</code> or anything derived from it, and each slot keeps its own class, so a derived element keeps its extra fields inside the base-typed array. <code>array&lt;Derived&gt;</code> converts to <code>array&lt;Base&gt;</code> by value. An unrelated class raises:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Unit { int hp = 10; }
@@ -204,18 +204,18 @@ try { ages[5] = 1; } catch (e) { print("caught: {}", e); }     // keys never coe
 map&lt;var, int&gt; anything = {};                                   // any key
 anything[5] = 1;
 anything["five"] = 5;
-print("map&lt;var,int&gt;: {}", to_json(anything));
+print("map&lt;var,int&gt;: {}", anything);
 map&lt;auto, int&gt; inferred = {5: 1};                              // auto key: int, from the literal
 try { inferred["k"] = 2; } catch (e) { print("caught: {}", e); }
 map&lt;string, int&gt; empty;                                        // no initializer: an empty map of its declared type
 print("empty.size(): {}", empty.size());
 empty["x"] = 1;
-print("after assigning a literal: {}", to_json(empty));</code></pre></div>
+print("after assigning a literal: {}", empty);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Cannot use &#x27;int&#x27; as a key of type &#x27;string&#x27;
-map&lt;var,int&gt;: {&quot;$map&quot;:[[5,1],[&quot;five&quot;,5]]}
+map&lt;var,int&gt;: {5: 1, &quot;five&quot;: 5}
 caught: Cannot use &#x27;string&#x27; as a key of type &#x27;int&#x27;
 empty.size(): 0
-after assigning a literal: {&quot;x&quot;:1}</code></pre></div>
+after assigning a literal: {&quot;x&quot;: 1}</code></pre></div>
 <p>Keys follow one total order, the order a map iterates and serializes in, and lookup hashes alike any two keys that order calls equivalent, so a lookup finds exactly the entry iteration shows. Numbers order by value, with <code>0.0</code> and <code>-0.0</code> one key and a NaN key found again; keys of different kinds never merge (<code>1</code> and <code>1.0</code> are two keys); an array, map or handle used as a key orders and hashes by the identity of the object it holds, never by its contents, so two equal array literals are two keys while the same array is one.</p>
 <p>A class value used as a key (an instance or a bound C++ object held by value, not a handle) keys by its class, as <code>std::map</code> and <code>std::unordered_map</code> do. A class that declares <code>operator&lt;</code> or <code>operator&lt;=&gt;</code> orders its keys: two keys are one when neither is less, and the map iterates them in that order. A class with neither but a <code>hash()</code> returning an int keys by <code>hash()</code> and <code>operator==</code> (by identity when it declares no <code>==</code>), and iterates them by <code>hash()</code> value. A class with none of these keys by identity, as an array does, and the first such key warns: <code>map keys of class 'C' compare by identity: declare operator&lt;=&gt; (or operator&lt;) or hash() to key its values by value</code> (the checker gives the same warning where it sees the key's class). Class keys iterate grouped by class name, ahead of handles. An operator that throws or fails inside a lookup or insert raises from that statement and leaves the map unchanged. Keep a key unchanged while it is in the map: a key changed through another name leaves the map's order stale, as a key mutated in place breaks a C++ map, so erase it and insert the changed value. In a <code>parallel_for</code> body, a map that holds class values cannot be captured (it is not value-semantic), and a map the body builds itself raises the parallel operator verdict at its first class key whose class orders or hashes.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Tile { int x = 0; int y = 0; Tile(int a, int b) { x = a; y = b; } int operator&lt;=&gt;(Tile o) { return x != o.x ? x - o.x : y - o.y; } }
@@ -235,11 +235,36 @@ for (auto name : ["orc", "elf", "orc"]) { hits[name] += 1; }   // a missing key 
 hits["troll"]++;
 map&lt;string, string&gt; log = {};
 log["turn1"] += "moved";                                       // appends to ""
-print("{} {}", to_json(hits), to_json(log));
+print("{} {}", hits, log);
 var loose = {};
 try { loose["q"] += 1; } catch (e) { print("caught: {}", e); }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;elf&quot;:1,&quot;orc&quot;:2,&quot;troll&quot;:1} {&quot;turn1&quot;:&quot;moved&quot;}
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;elf&quot;: 1, &quot;orc&quot;: 2, &quot;troll&quot;: 1} {&quot;turn1&quot;: &quot;moved&quot;}
 caught: Cannot apply &#x27;+=&#x27; to null and int</code></pre></div>
+<h2 id="printing-values">Printing values<a class="hlink" href="#printing-values" aria-label="link">&#8203;</a></h2>
+<p>Every value has one display text, and <code>print</code>, <code>to_string</code>, <code>string + x</code>, a template splice <code>${x}</code>, <code>format</code>&rsquo;s <code>{}</code>, <code>join</code>, a <code>string</code> parameter or variable and a <code>throw</code>&rsquo;s message all use it:</p>
+<ul><li>A string at the top level is its bytes. Inside a container a string or <code>utf8_string</code> is written as a literal in double quotes and a <code>char</code> in single quotes, with <code>\n</code>, <code>\r</code>, <code>\t</code>, <code>\\</code> and the quote escaped and other control bytes as <code>\xNN</code>.</li><li>Numbers, <code>bool</code>, <code>null</code> and vectors print as they do alone: <code>2.0</code>, <code>true</code>, <code>(1.0, 2.0)</code>.</li><li>An array lists its elements, <code>[1, 2, 3]</code>; a map its entries in key order, <code>{"x": 1, "y": [2]}</code>.</li><li>An instance whose class or a base declares <code>string to_string()</code> shows that text. Any other instance shows its class name and its fields in declaration order, a base&rsquo;s fields first: <code>P{x: 1, name: "hi"}</code>.</li><li>A <code>shared_ptr</code> or <code>weak_ptr</code> shows the object it points to, an expired <code>weak_ptr</code> <code>null</code>. An object met again while it is still being shown prints <code>&lt;cycle P&gt;</code>; one object held twice side by side prints twice.</li><li>A function prints <code>&lt;function&gt;</code>, a coroutine handle <code>&lt;coroutine&gt;</code>, a host object whose type binds no <code>to_string</code> its type name, <code>&lt;Sprite&gt;</code>.</li></ul>
+<p>A value prints in full however large or deeply nested it is. A container or an instance given to <code>print</code> or <code>format</code> first is never read as a format string, and a <code>to_string()</code> that throws or fails is the error of the call that asked for the text.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 1; string name = "hi"; }
+class Q : P { array&lt;int&gt; hits = [2, 3]; }
+class Tag { string to_string() { return "&lt;tag&gt;"; } }
+class Link { int id = 0; shared_ptr&lt;Link&gt; next; }
+print([1, 2.5, "two", 'c', true, null]);
+print({"pos": [1, 2], "name": "orc\n"});
+print(Q(), " ", [Tag(), Tag()]);
+shared_ptr&lt;Link&gt; a = new Link();
+a.next = a;
+print(a);
+P shared = P();
+var twice = [shared, shared];
+var stock = {"arrow": 20};
+print("stock: " + stock, " ", `${twice}`, " ", format("{:&gt;8}|", [7]));
+print(to_json(stock));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[1, 2.5, &quot;two&quot;, &#x27;c&#x27;, true, null]
+{&quot;name&quot;: &quot;orc\n&quot;, &quot;pos&quot;: [1, 2]}
+Q{x: 1, name: &quot;hi&quot;, hits: [2, 3]} [&lt;tag&gt;, &lt;tag&gt;]
+Link{id: 0, next: &lt;cycle Link&gt;}
+stock: {&quot;arrow&quot;: 20} [P{x: 1, name: &quot;hi&quot;}, P{x: 1, name: &quot;hi&quot;}]      [7]|
+{&quot;arrow&quot;:20}</code></pre></div>
 <h2 id="json">JSON<a class="hlink" href="#json" aria-label="link">&#8203;</a></h2>
 <p><code>to_json(x)</code> writes any value as compact JSON text and <code>to_json(x, n)</code> pretty-prints it with <code>n</code> spaces per level (0 is compact). <code>from_json(text)</code> reads it back: objects become maps, arrays become arrays, numbers keep int or float, and a malformed text raises a catchable error. A class instance writes its class name under <code>$type</code> and its fields under <code>$val</code>; <code>from_json</code> rebuilds the instance when the class exists, and a typed declaration takes it directly (<code>Hero h = from_json(text);</code>). Rebuilding runs the class&#x27;s zero-argument constructor whatever its access, restores every saved field in declaration order without notifying, then runs <code>post_load</code> once the whole load is done (<a href="07-classes.html#loading-saved-objects">Loading saved objects</a>). The values JSON has no spelling for round-trip through tagged objects: a map whose keys are not strings is <code>{"$map": [[key, value], ...]}</code> and a char is <code>{"$char": 65}</code>, so both come back as what they were. A <code>shared_ptr</code> or <code>weak_ptr</code> handle writes its object once, at its first handle, as <code>{"$id": 1, "$type": "Hero", "$val": {...}}</code> (<code>$ref</code> in place of <code>$id</code> for a weak one) and every later handle as the id alone, an expired weak handle as <code>null</code>, so handles that shared one object share it again after <code>from_json</code> (and after <code>to_binary</code> / <code>from_binary</code>, which keeps the same identities), through cycles too (a handle back into an object still being written is that object); an id whose object the text never wrote raises <code>Invalid shared_ptr ID: 4</code>. No depth limit applies: a value nests as deep as memory allows, through <code>to_json</code>, <code>from_json</code>, the binary pair and a copy alike. Floats are written with every digit they need to read back exactly.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var save = {"name": "orc", "hp": [10, 20], "pos": {"x": 1.5}};
@@ -277,7 +302,7 @@ auto s = "The Quick Fox";
 print("length={} find(Quick)={} count(o)={}", s.length(), s.find("Quick"), s.count("o"));
 print("contains/starts/ends: {} {} {}", s.contains("Fox"), s.starts_with("The"), s.ends_with("Fox"));
 print("substr(4, 5) = {} (s untouched: {})", s.substr(4, 5), s);
-print("split: {}", to_json(s.split(" ")));
+print("split: {}", s.split(" "));
 print("\"42\".to_int() + 1 = {}", "42".to_int() + 1);
 
 // MUTATORS change the string IN PLACE and return self (chainable):
@@ -293,7 +318,7 @@ r;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">length=13 find(Quick)=4 count(o)=1
 contains/starts/ends: true true true
 substr(4, 5) = Quick (s untouched: The Quick Fox)
-split: [&quot;The&quot;,&quot;Quick&quot;,&quot;Fox&quot;]
+split: [&quot;The&quot;, &quot;Quick&quot;, &quot;Fox&quot;]
 &quot;42&quot;.to_int() + 1 = 43
 t is now: [HELLO JAI]
 padded: 007
@@ -378,14 +403,14 @@ print("{} at {}: {}", e["name"], e["pos"], wad.substr(e["pos"], e["size"]));
 class Entry { int pos; int size; string name; }
 Entry first = wad.reader().seek(dir).read(Entry, ENTRY);
 print("{} {} {}", first.name, first.pos, first.size);
-print(to_json(wad.to_bytes(0, 4)));
+print(wad.to_bytes(0, 4));
 print(string::from_bytes([80, 87, 65, 68]));
 try { r.int32(); } catch (err) { print("caught: {}", err); }
 try { w.uint8(256); } catch (err) { print("caught: {}", err); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">PWAD, lump count 1
 GREET at 12: hello
 GREET 12 5
-[80,87,65,68]
+[80, 87, 65, 68]
 PWAD
 caught: Cannot read int32 at position 33: 4 bytes wanted, 0 remain
 caught: Cannot write 256 as uint8 (0 to 255)</code></pre></div>
@@ -438,7 +463,7 @@ try { sha256_file(&quot;missing.bin&quot;); } catch (e) { print(&quot;caught: &q
 true
 caught: Cannot read file &#x27;missing.bin&#x27;: not found</code></pre></div>
 <h2 id="strings-and">Strings and <code>+</code><a class="hlink" href="#strings-and" aria-label="link">&#8203;</a></h2>
-<p>Concatenation with <code>+</code> returns a new string and is the safe non-mutating way to build text: <code>s = s + "!"</code>. Mixed <code>string + number</code> stringifies the number.</p>
+<p>Concatenation with <code>+</code> returns a new string and is the safe non-mutating way to build text: <code>s = s + "!"</code>. Mixed <code>string + x</code> appends the display text of <code>x</code> (<a href="#printing-values">Printing values</a>).</p>
 <h2 id="template-strings-format-specs">Template strings &amp; format specs<a class="hlink" href="#template-strings-format-specs" aria-label="link">&#8203;</a></h2>
 <p>Backtick strings interpolate any expression with <code>${...}</code> (the lexer desugars them to plain string concatenation). A splice can end in a <strong>format spec</strong>, <code>${expr:spec}</code>, the most useful part of <code>std::format</code>: <code>[[fill]align][+| ][0][width][.precision][d|x|X|b|f|e|g]</code> (a sign and zero padding for numbers, <code>${id:05}</code> is <code>00042</code>, <code>${-42:05}</code> is <code>-0042</code>, <code>${d:+}</code> marks non-negatives). This kills the to_string-then-pad dance in HUD code:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var name = "Vex";

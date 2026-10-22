@@ -854,9 +854,8 @@ Their property managers hold pointers into the object, so the types are delibera
 <code>from_json&lt;Spawner&gt;</code> by value won't compile. Use
 <code>from_json&lt;std::shared_ptr&lt;Spawner&gt;&gt;</code>, as every example here does.</li>
 <li><strong>Reading an observable property yields a wrapper, not the raw value.</strong> In expressions it
-unwraps transparently (<code>gate.threat + 2</code> works), but printing it directly shows
-<code>[object]</code>. Put it in an expression or assign it to a typed local when you want the value
-itself.</li>
+unwraps transparently (<code>gate.threat + 2</code> works, and <code>print(gate.threat)</code> shows the value).
+Assign it to a typed local when you want the value itself.</li>
 <li><strong>No cross-thread object sharing.</strong> An engine (and the objects registered into it) belongs to
 one thread at a time. The zero-global-state design means the alternative is cheap: one engine per thread,
 values copy cleanly, and nothing needs a lock. There is no binder flag that makes a single bound object

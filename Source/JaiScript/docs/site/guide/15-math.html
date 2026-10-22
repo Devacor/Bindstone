@@ -322,7 +322,7 @@ try { pts.sort(); } catch (e) { print(e); }</code></pre></div>
 door
 Cannot push &#x27;math::vec2&#x27; to array&lt;math::vec3&gt;</code></pre></div>
 <h2 id="text-and-json">Text and JSON<a class="hlink" href="#text-and-json" aria-label="link">&#8203;</a></h2>
-<p><code>to_string</code>, <code>print</code> and string concatenation write a vector as its components in parentheses, floats in the shortest text that reads back the same 32-bit value. (An array prints as <code>[array]</code>; use <code>join</code>.) <code>to_json</code> writes the type and the named components, and <code>from_json</code> rebuilds the same type; the binary archive (<code>to_base64</code> / <code>from_base64</code>) keeps the exact bits.</p>
+<p><code>to_string</code>, <code>print</code> and string concatenation write a vector as its components in parentheses, floats in the shortest text that reads back the same 32-bit value. An array of vectors prints its elements, <code>[(1.0, 2.0), (3.0, 4.0)]</code>. <code>to_json</code> writes the type and the named components, and <code>from_json</code> rebuilds the same type; the binary archive (<code>to_base64</code> / <code>from_base64</code>) keeps the exact bits.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 v = math::vec3(1, 0.5, -2);
 print(to_string(v), " ", "v = " + v, " ", math::vec2(0.1, 1e30));
 string j = to_json(v);

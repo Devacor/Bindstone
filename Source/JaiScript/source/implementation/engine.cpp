@@ -24,6 +24,7 @@
 #include <jaiscript/detail/ast_serializer.hpp>   // jaibite save/load
 #include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/format_spec.hpp>       // format_value builtin (template-string specs)
+#include <jaiscript/detail/value_text.hpp>
 #include <jaiscript/detail/binary_data.hpp>
 #include <jaiscript/detail/regex_library.hpp>
 #include <jaiscript/debug/controller.hpp>         // engine::debugger()
@@ -2658,11 +2659,11 @@ void engine::initialize_engine_reference() {
     add_variadic_function("print", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
         std::string line;
         for (const auto& arg : args) {
-            if (arg.deref().type() != script_value_type::jai_object_type) {
+            if (detail::plain_text_value(arg)) {
                 line += arg.to_string();
                 continue;
             }
-            auto text = engine_weak->text_of(arg);   // a class's own to_string() speaks for its instances
+            auto text = engine_weak->text_of(arg);   // the display text, a class's own to_string() speaking for its instances
             if (!text) { return text.error_value(); }
             if (engine_weak->backend_unwinding()) { return script_value(std::monostate{}, engine_weak); }
             line += text.value();
@@ -2684,6 +2685,12 @@ void engine::initialize_engine_reference() {
         detail::format_spec spec;
         if (!detail::parse_format_spec(raw, spec)) {
             throw runtime_error("unsupported format spec ':" + raw + "'");
+        }
+        if (!detail::plain_text_value(args[0]) && !detail::format_spec_needs_number(spec)) {
+            auto text = engine_weak->text_of(args[0]);   // width and align pad the display text
+            if (!text) { return text.error_value(); }
+            if (engine_weak->backend_unwinding()) { return script_value(std::monostate{}, engine_weak); }
+            return script_value(detail::format_value_with_spec(script_value(std::move(text.value()), engine_weak), spec, raw), engine_weak);
         }
         return script_value(detail::format_value_with_spec(args[0], spec, raw), engine_weak);
     });
@@ -3660,7 +3667,7 @@ void engine::add_class_impl(const std::string& name, std::shared_ptr<class_defin
     // Use optimized make_object with cached type_id for fast type checking
     uint64_t name_id = impl->string_symbolizer_.intern(name);
     auto [class_var_id, class_var_name] = impl->string_symbolizer_.get_class_var_id_with_view(name_id);
-    impl->global_environment_->define(class_var_id, script_value::make_object("class_definition", impl->class_definition_type_id_, classDef, this));
+    impl->global_environment_->define(class_var_id, script_value::make_object("class_definition", impl->class_definition_type_id_, classDef, this, false));   // the definition itself, no class_instance
 }
 
 std::vector<std::string> engine::registered_class_names() const {

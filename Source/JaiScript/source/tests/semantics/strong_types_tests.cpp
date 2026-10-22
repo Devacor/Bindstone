@@ -2560,7 +2560,7 @@ public:
             check_quad(q("o.setBool(1) + \" \" + o.dump()").c_str(), "ok 1|1.5|a|true|10|0|2|true|true", "typed bool field, int converts");
             check_quad(q("o.setAuto(2.5) + \" \" + o.dump()").c_str(), "ok 1|1.5|a|false|2|0|2|true|true", "auto field infers int from its initializer, float truncates");
             check_quad(q("o.setAuto(\"str\") + \" \" + o.dump()").c_str(), "Cannot assign string to field 'a' of F (declared int) 1|1.5|a|false|10|0|2|true|true", "auto field rejects a string");
-            check_quad(q("o.setVar(\"anything\") + \" \" + o.setVar([1,2,3]) + \" \" + o.dump()").c_str(), "ok ok 1|1.5|a|false|10|[array]|2|true|true", "var field takes anything");
+            check_quad(q("o.setVar(\"anything\") + \" \" + o.setVar([1,2,3]) + \" \" + o.dump()").c_str(), "ok ok 1|1.5|a|false|10|[1, 2, 3]|2|true|true", "var field takes anything");
             check_quad(q("o.setArr([4,5,6]) + \" \" + o.setArr([\"a\"]) + \" \" + o.setArr(7) + \" \" + o.dump()").c_str(), "ok Cannot assign array to field 'arr' of F (declared array<int>) Cannot assign int to field 'arr' of F (declared array<int>) 1|1.5|a|false|10|0|3|true|true", "typed array field: typed array ok, wrong element type and scalar raise");
             check_quad(q("auto o2 = F(); string r1 = o.setOther(o2); o2.i = 99; r1 + \" \" + to_string(o.other.i) + \" \" + o.setOther(5)").c_str(), "ok 1 Cannot assign int to field 'other' of F (declared F)", "object field: by-value copy, scalar raises");
             check_quad(q("o.setSp(shared_ptr<F>()) + \" \" + o.setSp(F()) + \" \" + o.setSp(3) + \" \" + o.dump()").c_str(), "ok ok Cannot assign int to field 'sp' of F (declared shared_ptr<F>) 1|1.5|a|false|10|0|2|true|false", "shared_ptr field: handle, value, scalar");
@@ -2623,10 +2623,10 @@ public:
             check_quad(q("auto lam = [](var val) { string r = \"ok\"; try { C::i = val; } catch (err) { r = err; } return r; }; lam(\"x\") + \" \" + lam(3) + \" \" + to_string(C::i)").c_str(), "Cannot assign string to static 'i' of C (declared int) ok 3", "C::i inside a lambda");
             check_quad(q("var vv = 2.9; C::i = vv; to_string(C::i) + \"|\" + type_of(C::i)").c_str(), "2|int", "C::i at top level keeps the declared type");
             check_quad(q("setF(2) + \" \" + setF(\"q\") + \" \" + o.dump()").c_str(), "ok Cannot assign string to static 'f' of C (declared float) 1|2.0|a|false|10|0|2|true|true|true", "float static: int promotes, string raises");
-            check_quad(q("setStr(12) + \" \" + setStr(null) + \" \" + setStr(C()) + \" \" + o.dump()").c_str(), "ok ok ok 1|1.5|[object]|false|10|0|2|true|true|true", "string static takes anything through to_string (the instance-field row)");
+            check_quad(q("setStr(12) + \" \" + setStr(null) + \" \" + setStr(C()) + \" \" + o.dump()").c_str(), "ok ok ok 1|1.5|C{x: 0}|false|10|0|2|true|true|true", "string static takes anything through to_string (the instance-field row)");
             check_quad(q("setB(1) + \" \" + o.dump()").c_str(), "ok 1|1.5|a|true|10|0|2|true|true|true", "bool static: int converts");
             check_quad(q("setA(2.5) + \" \" + setA(\"str\") + \" \" + o.dump()").c_str(), "ok Cannot assign string to static 'a' of C (declared int) 1|1.5|a|false|2|0|2|true|true|true", "auto static infers int from its initializer");
-            check_quad(q("setV(\"anything\") + \" \" + setV([1, 2, 3]) + \" \" + o.dump()").c_str(), "ok ok 1|1.5|a|false|10|[array]|2|true|true|true", "var static takes anything");
+            check_quad(q("setV(\"anything\") + \" \" + setV([1, 2, 3]) + \" \" + o.dump()").c_str(), "ok ok 1|1.5|a|false|10|[1, 2, 3]|2|true|true|true", "var static takes anything");
             check_quad(q("setArr([4, 5, 6]) + \" \" + setArr([\"a\"]) + \" \" + setArr(7) + \" \" + o.dump()").c_str(), "ok Cannot assign array to static 'arr' of C (declared array<int>) Cannot assign int to static 'arr' of C (declared array<int>) 1|1.5|a|false|10|0|3|true|true|true", "array<int> static: typed array ok, wrong element type and scalar raise");
             check_quad(q("auto o2 = C(); string r1 = setOther(o2); o2.x = 99; r1 + \" \" + to_string(C::other.x) + \" \" + setOther(5)").c_str(), "ok 0 Cannot assign int to static 'other' of C (declared C)", "object static: by-value copy, scalar raises");
             check_quad(q("setSp(shared_ptr<C>()) + \" \" + setSp(C()) + \" \" + setSp(3) + \" \" + o.dump()").c_str(), "ok ok Cannot assign int to static 'sp' of C (declared shared_ptr<C>) 1|1.5|a|false|10|0|2|true|false|true", "shared_ptr static: handle, value, scalar");
@@ -3590,7 +3590,7 @@ public:
                 string f(string t) { return t; }
                 var n = null;
                 f(2.5) + "|" + f(true) + "|" + f('a') + "|" + f(n) + "|" + f(null) + "|" + f([1]) + "|" + f({"k": 1})
-            )JAI", "2.5|true|a|null|null|[array]|[map]", "string parameter: every primitive and container row");
+            )JAI", "2.5|true|a|null|null|[1]|{\"k\": 1}", "string parameter: every primitive and container row");
             check_both(R"JAI(
                 class X { string to_string() { return "X!"; } }
                 class D {}
@@ -3601,7 +3601,7 @@ public:
                 auto h = H(); h.s = X();
                 string a = X(); string b; b = X();
                 f(X()) + "|" + f(D()) + "|" + g() + "|" + g2() + "|" + h.s + "|" + a + "|" + b
-            )JAI", "X!|[object]|X!|2.5|X!|X!|X!", "objects render through their script to_string() on every path");
+            )JAI", "X!|D{}|X!|2.5|X!|X!|X!", "objects render through their script to_string() on every path");
         });
 
         test("typed_slot_bool_is_truthiness_everywhere", [check_both]() {

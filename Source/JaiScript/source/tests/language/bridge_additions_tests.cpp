@@ -371,7 +371,7 @@ public:
 
         // ------------------------------------------------------------------ print
         test("print_uses_to_string", [this]() {
-            check_eq(std::string("P(1)\nP(1) and 3\nat P(1)!\n[object]\n{x} 2\n"), run_output(R"JS(
+            check_eq(std::string("P(1)\nP(1) and 3\nat P(1)!\nPlain{y: 2}\n{x} 2\n"), run_output(R"JS(
                 class P { int x = 1; string to_string() { return "P(" + x + ")"; } }
                 class Plain { int y = 2; }
                 class Braces { string to_string() { return "{x}"; } }

@@ -76,9 +76,10 @@ in-scope variable, and edits variables live. Plus syntax highlighting.
 - **Named scopes.** `environment` maps interned symbol id → `script_value*` (`flat_lookup_`),
   parent-linked (`parent_`). Enumerate via `get_local_variables()` / `get_all_variables()`.
   Names are never erased — `string_symbolizer` keeps id↔name for the engine's life.
-- **Value display.** `script_value::to_string()`; richer object rendering via
-  `value_to_string_with_method` (calls a script `to_string()`); `to_json` (`stdlib/json.hpp`) for
-  the expandable arrays/maps/objects tree.
+- **Value display.** `detail::value_text` (`detail/value_text.hpp`): the Variables row is the
+  structural display text (contents, `Class{field: value}`, no script `to_string()` runs on a parked
+  thread), cut at 1000 bytes; `engine::text_of` is the same text with each class's `to_string()`
+  (what print shows); `to_json` (`stdlib/json.hpp`) for an expandable arrays/maps/objects tree.
 - **The hook is at statement granularity.** The per-statement gate is each backend's cached
   `debug_hook_`; the VM detects statement entry from `chunk::debug_spans`. NOT the budget-check
   sites (loop back-edges + call entry): those aren't statement boundaries, so straight-line code

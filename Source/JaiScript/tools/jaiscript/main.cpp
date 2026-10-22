@@ -1435,13 +1435,10 @@ struct repl_session {
 		if (result.is_null()) { return; }
 		if (result.is_string()) { out << '"' << result.to_string() << '"' << "\n"; }
 		else if (result.is_char()) { out << '\'' << result.to_string() << '\'' << "\n"; }
-		else if (result.is_array() || result.is_map()) {
-			// to_string says only "[array]"/"[map]" — show the contents like a REPL should
-			jai::serialization::json_archive_writer writer(-1, eng.get());
-			writer.write_value(result);
-			out << writer.str() << "\n";
+		else {
+			auto text = eng->text_of(result);   // print's text: a container's elements, a class's own to_string()
+			out << (text ? text.value() : eng->format_error(text)) << "\n";
 		}
-		else { out << result.to_string() << "\n"; }
 	}
 
 	// A line's last statement needs no ';', as the last expression of an execute needs none: a parse error asking for one

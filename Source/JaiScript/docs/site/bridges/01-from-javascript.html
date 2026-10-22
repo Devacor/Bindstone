@@ -322,9 +322,9 @@ for (auto cb : callbacks) { print(cb()); }</code></pre></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(double_it(4));
 function double_it(int x) { return x * 2; }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Undefined variable 'double_it'</code></pre></div>
-<h3 id="print">print shows a container's kind<a class="hlink" href="#print" aria-label="link">&#8203;</a></h3>
-<p><code>print(a, b)</code> joins its arguments with no separator, and a container prints as <code>[array]</code> or <code>[map]</code>; <code>to_json</code> prints the contents. An instance prints its class's <code>to_string()</code>, as <code>"text" + x</code> does. A first argument that holds <code>{}</code> is a format string, so data that might contain braces goes in a placeholder:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var a = [1, 2];
+<h3 id="print">print shows a container's contents<a class="hlink" href="#print" aria-label="link">&#8203;</a></h3>
+<p><code>print(a, b)</code> joins its arguments with no separator, and a container prints its contents with the strings inside quoted, much as <code>console.log</code> does; <code>to_json</code> writes the JSON text. An instance prints its class's <code>to_string()</code>, as <code>"text" + x</code> does, or else its class name and fields. A first argument that is a string holding <code>{}</code> is a format string, so data that might contain braces goes in a placeholder:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var a = [1, "two"];
 print(a);
 print(to_json(a));
 print("{} and {}", 1, "two");
@@ -334,8 +334,8 @@ print(to_json(empty), " entries");         // "{}" is read as a placeholder
 print("{} entries", to_json(empty));
 class Tag { string to_string() { return "&lt;tag&gt;"; } }
 print(Tag());</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[array]
-[1,2]
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[1, &quot;two&quot;]
+[1,&quot;two&quot;]
 1 and two
 123
  entries

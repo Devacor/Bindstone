@@ -55,6 +55,11 @@ OLD_TEXTS = [
     r"--unsafe-parallel",
     r"[Uu]nsafe parallel mode",
     r"Cannot compare: the values nest deeper",
+    # a container, an instance and a function print their contents (guide 09 "Printing values"), never a tag
+    r"\[array\]",
+    r"\[map\]",
+    r"\[object\]",
+    r"\[function\]",
 ]
 
 

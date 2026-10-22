@@ -14,12 +14,14 @@ namespace detail {
 // std::format subset — documented in docs/site/guide/09-containers-strings.html
 // "Template strings & format specs":
 //
-//   spec      = [[fill] align] [sign] ["0"] [width] ["." precision] [type]
+//   spec      = [[fill] align] [sign] ["0"] [width] [group] ["." precision] [type]
 //   align     = "<" | ">" | "^"
 //   fill      = any char except "{" and "}" (default " "; requires align)
 //   sign      = "+" | " "            (numeric values only: "+" marks non-negatives, " " leaves them a space)
 //   "0"       = zero padding after the sign (numeric values only; ignored with an explicit align, as std::format does)
 //   width     = [1-9][0-9]*          (max 1024)
+//   group     = "," | "_"            (numeric values only: the integer digits in groups of three, "_" in groups of four with
+//                                    x / X / b; "," with x / X / b is rejected; with "0" the padding zeros are grouped too)
 //   precision = "." [0-9]+           (numeric values only; max 1024)
 //   type      = "d" | "x" | "X" | "b" (integers) | "f" | "e" | "g" (numbers)
 //
@@ -30,6 +32,7 @@ struct format_spec {
     char sign = 0;       // 0, '+', ' '
     bool zero = false;
     int width = 0;
+    char group = 0;      // 0, ',', '_'
     int precision = -1;  // -1 = unset
     char type = 0;       // 0, 'd', 'x', 'X', 'b', 'f', 'e', 'g'
 };
@@ -67,6 +70,10 @@ inline bool parse_format_spec(std::string_view s, format_spec& out) {
         }
         out.width = static_cast<int>(w);
     }
+    if (i < s.size() && (s[i] == ',' || s[i] == '_')) {
+        out.group = s[i];
+        ++i;
+    }
     if (i < s.size() && s[i] == '.') {
         ++i;
         if (i >= s.size() || !is_digit(s[i])) return false;
@@ -83,6 +90,7 @@ inline bool parse_format_spec(std::string_view s, format_spec& out) {
         if (t != 'f' && t != 'x' && t != 'X' && t != 'b' && t != 'd' && t != 'e' && t != 'g') return false;
         out.type = t;
         ++i;
+        if (out.group == ',' && (t == 'x' || t == 'X' || t == 'b')) return false;
     }
     return i == s.size();
 }

@@ -219,6 +219,27 @@ std::string spec_format_fixed(script_float v, int precision) {
     return std::string(buf, res.ptr);
 }
 
+// The spec's grouping over a formatted number: its integer digits (hex digits for x / X / b) in groups of `group` joined by `sep`;
+// zero_width > 0 pads that run with zeros (grouped too) until the whole text is at least that wide
+void spec_group_digits(std::string& body, char sep, size_t group, int zero_width) {
+    const size_t start = !body.empty() && (body[0] == '-' || body[0] == '+' || body[0] == ' ') ? 1 : 0;
+    size_t end = start;
+    while (end < body.size() && (group == 4 ? std::isxdigit(static_cast<unsigned char>(body[end])) : std::isdigit(static_cast<unsigned char>(body[end])))) { ++end; }
+    std::string digits = body.substr(start, end - start);
+    if (digits.empty()) { return; }
+    const size_t fixed = start + (body.size() - end);
+    auto grouped_size = [group](size_t n) { return n + (n - 1) / group; };
+    while (zero_width > 0 && fixed + grouped_size(digits.size()) < static_cast<size_t>(zero_width)) { digits.insert(0, 1, '0'); }
+    std::string out = body.substr(0, start);
+    out.reserve(fixed + grouped_size(digits.size()));
+    for (size_t i = 0; i < digits.size(); ++i) {
+        if (i > 0 && (digits.size() - i) % group == 0) { out += sep; }
+        out += digits[i];
+    }
+    out.append(body, end, std::string::npos);
+    body = std::move(out);
+}
+
 std::string spec_format_float(script_float v, std::chars_format fmt, int precision) {
     if (std::isnan(v)) { return std::string(detail::k_nan_text); }
     char buf[1500];
@@ -235,7 +256,7 @@ std::string detail::format_value_with_spec(const script_value& value, const form
     const script_value& v = value.is_reference() ? value.deref() : value;
     const bool numeric = v.is_int() || v.is_float();
     std::string body;
-    if ((spec.sign || spec.zero) && !numeric) {
+    if ((spec.sign || spec.zero || spec.group) && !numeric) {
         throw runtime_error("format spec ':" + std::string(raw_spec) + "' does not apply to " + spec_value_type_name(v) + " value");
     }
     if (spec.type == 'x' || spec.type == 'X' || spec.type == 'b' || spec.type == 'd') {
@@ -262,7 +283,10 @@ std::string detail::format_value_with_spec(const script_value& value, const form
     if (numeric && spec.sign && !body.empty() && body[0] != '-') {
         body.insert(0, 1, spec.sign);   // '+' or ' ' before a non-negative number
     }
-    if (numeric && spec.zero && !spec.align && static_cast<int>(body.size()) < spec.width) {
+    if (numeric && spec.group) {
+        const bool radix = spec.type == 'x' || spec.type == 'X' || spec.type == 'b';
+        spec_group_digits(body, spec.group, radix ? 4 : 3, spec.zero && !spec.align ? spec.width : 0);
+    } else if (numeric && spec.zero && !spec.align && static_cast<int>(body.size()) < spec.width) {
         // zero padding goes after the sign
         const size_t at = !body.empty() && (body[0] == '-' || body[0] == '+' || body[0] == ' ') ? 1 : 0;
         body.insert(at, static_cast<size_t>(spec.width) - body.size(), '0');
@@ -4806,7 +4830,7 @@ const engine::math_alias_row* engine::math_alias_rows() const {
 }
 
 void engine::add_host_direct(std::string_view name, size_t arity, host_direct_invoke invoke, const void* target) {
-    if (!invoke || arity == 0 || arity > 8) { return; }
+    if (!invoke || arity == 0 || (arity > 8 && arity != host_direct_any_arity)) { return; }
     script_value* global = impl->global_environment_->get_value_ptr(impl->string_symbolizer_.intern(name));
     if (!global || global->raw_storage_index() != script_value::TYPEID_FUNCTION) { return; }
     const void* identity = &global->unchecked_as_function();

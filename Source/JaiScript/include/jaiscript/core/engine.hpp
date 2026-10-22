@@ -562,6 +562,7 @@ namespace jai {
         // instead of the function (no argument vector, no std::function). `invoke` must return what the function returns for
         // those arguments; a re-registration or a rebinding of the name is another function, which the site calls as before.
         using host_direct_invoke = checked_result<script_value> (*)(const void*, const script_value*, size_t);
+        static constexpr size_t host_direct_any_arity = SIZE_MAX;   // a variadic function's row: any call of 1 to 8 arguments
         struct host_direct_row {
             const void* identity = nullptr;   // &value.unchecked_as_function()
             script_value value{std::monostate{}, nullptr};   // pins the node: a freed function's address never matches later

@@ -457,7 +457,7 @@ true</code></pre></div>
 <h2 id="strings-and">Strings and <code>+</code><a class="hlink" href="#strings-and" aria-label="link">&#8203;</a></h2>
 <p>Concatenation with <code>+</code> returns a new string and is the safe non-mutating way to build text: <code>s = s + "!"</code>. Mixed <code>string + x</code> appends the display text of <code>x</code> (<a href="#printing-values">Printing values</a>).</p>
 <h2 id="template-strings-format-specs">Template strings &amp; format specs<a class="hlink" href="#template-strings-format-specs" aria-label="link">&#8203;</a></h2>
-<p>Backtick strings interpolate any expression with <code>${...}</code> (the lexer desugars them to plain string concatenation). A splice can end in a <strong>format spec</strong>, <code>${expr:spec}</code>, the most useful part of <code>std::format</code>: <code>[[fill]align][+| ][0][width][.precision][d|x|X|b|f|e|g]</code> (a sign and zero padding for numbers, <code>${id:05}</code> is <code>00042</code>, <code>${-42:05}</code> is <code>-0042</code>, <code>${d:+}</code> marks non-negatives). This kills the to_string-then-pad dance in HUD code:</p>
+<p>Backtick strings interpolate any expression with <code>${...}</code> (the lexer desugars them to plain string concatenation). A splice can end in a <strong>format spec</strong>, <code>${expr:spec}</code>, the most useful part of <code>std::format</code>: <code>[[fill]align][+| ][0][width][,|_][.precision][d|x|X|b|f|e|g]</code> (a sign and zero padding for numbers, <code>${id:05}</code> is <code>00042</code>, <code>${-42:05}</code> is <code>-0042</code>, <code>${d:+}</code> marks non-negatives; <code>,</code> or <code>_</code> groups a number's integer digits in thousands, so <code>${1234567:,}</code> is <code>1,234,567</code> and <code>${total:,.2f}</code> is a money amount, and <code>_</code> groups <code>x</code>, <code>X</code> and <code>b</code> digits in fours). This kills the to_string-then-pad dance in HUD code:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var name = "Vex";
 var hp = 73.5;
 var gold = 1234;
@@ -465,6 +465,7 @@ print(`${name:&lt;8}|${gold:8}|`);                // strings left-align, numbers
 print(`${hp:.1f} ${gold:*&gt;8} ${gold:^8}|`);    // fixed float; fill+align; centered
 print(`${gold:x} ${gold:X} ${5:b}`);           // hex / HEX / binary (ints only)
 print(`HP ${hp:&gt;6.1f}/${100.0:&lt;6.1f} G${gold:&gt;7} ${name:&lt;12}|`);
+print(`${gold * 1000:,} ${hp * 1000:,.2f} ${gold:_b}`);   // thousands, a money amount, nibbles
 var crit = true;
 print(`${crit ? "CRIT" : "hit"} for ${(crit ? 150 : 100):&gt;5}|`);  // ternaries still work
 try {
@@ -477,10 +478,11 @@ print(format("{:.2f} vs {0:&gt;8}", 3.14159));    // same specs in format()/prin
 73.5 ****1234   1234  |
 4d2 4D2 101
 HP   73.5/100.0  G   1234 Vex         |
+1,234,000 73,500.00 100_1101_0010
 CRIT for   150|
 caught: format spec &#x27;:.2f&#x27; does not apply to string value
 3.14 vs  3.14159</code></pre></div>
-<p>The rules: <code>.N</code> means <em>fixed</em> (bare or with <code>f</code>; <code>:f</code> alone is 6 decimals), <code>^</code> centering puts the odd fill char on the right, and a malformed spec (<code>${x:q}</code>, <code>${x:#x}</code>) is rejected <strong>at lex time</strong> with <code>Unsupported format spec ':q' in template string</code>. The spec starts at a top-level <code>:</code> that closes no ternary <code>?</code>, so <code>${a ? b : c}</code> stays an expression and <code>${m["k"]:6}</code> / map-literal colons just work; parenthesize a ternary to give it a spec. Splices desugar to the engine-core builtin <code>format_value(value, "spec")</code>, available on every engine, one shared implementation, so <strong>both backends produce byte-identical output and error text</strong>.</p>
+<p>The rules: <code>.N</code> means <em>fixed</em> (bare or with <code>f</code>; <code>:f</code> alone is 6 decimals), <code>^</code> centering puts the odd fill char on the right, zero padding under a grouping groups its zeros too (<code>${1234:010,}</code> is <code>00,001,234</code>), and a malformed spec (<code>${x:q}</code>, <code>${x:#x}</code>, <code>${n:,x}</code>) is rejected <strong>at lex time</strong> with <code>Unsupported format spec ':q' in template string</code>; in a <code>format()</code> or <code>print</code> placeholder it raises <code>Unsupported format spec ':q' in format string</code> when the call runs, never printing the braces. The spec starts at a top-level <code>:</code> that closes no ternary <code>?</code>, so <code>${a ? b : c}</code> stays an expression and <code>${m["k"]:6}</code> / map-literal colons just work; parenthesize a ternary to give it a spec. Splices desugar to the engine-core builtin <code>format_value(value, "spec")</code>, available on every engine, one shared implementation, so <strong>both backends produce byte-identical output and error text</strong>.</p>
 <h2 id="regular-expressions">Regular expressions<a class="hlink" href="#regular-expressions" aria-label="link">&#8203;</a></h2>
 <p><code>regex(pattern)</code> and <code>regex(pattern, flags)</code> make a <code>regex</code>, a value that searches text. Write a pattern as a raw string, <code>R"(\d+)"</code> (<a href="01-hello.html">Hello &amp; Basics</a>), so its backslashes stay backslashes; in a plain string every one doubles (<code>"\\d+"</code>). Matching runs in linear time: no pattern backtracks, so no pattern and text can stall a search, and a hostile pattern from a request is as safe to run as a known one.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">regex date = regex(R"((?&lt;year&gt;\d{4})-(?&lt;month&gt;\d\d)-(?&lt;day&gt;\d\d))");

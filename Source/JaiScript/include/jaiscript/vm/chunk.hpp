@@ -195,6 +195,7 @@ namespace jai::vm {
         mutable strong_ptr<script_function> ic_host_owner;
         mutable const uint64_t* ic_host_gen = nullptr;   // the overload set's mutation count: a registration of the name since the fill declines the lane
         mutable uint64_t ic_host_at = 0;
+        mutable const void* call_host_seen = nullptr;   // op_call: the callee identity the site last looked a direct entry up for
     };
 
     struct function_proto {

@@ -141,6 +141,14 @@ by-value parameters deep-copy; reference parameters and <code>var&amp;</code> de
 cheap-by-design idiom. Decision guidance:
 <a href="../guide/03-value-semantics.html">Value Semantics</a>; three-way measurements:
 <a href="#value-strategy-costs">below</a>.</li>
+<li><strong>Building a string in a loop is amortized O(1) per append, in every spelling.</strong> There is
+no string builder to reach for: <code>s += x</code>, <code>s = s + x</code>, <code>s = s + a + "-" + b</code>
+and template appends grow the string's own buffer in place, whether <code>s</code> is a local, a global,
+a field (<code>obj.s</code>, <code>this.s</code>, a bare field), a static, an array element, a map value,
+a <code>string&amp;</code> parameter or a map entry's binding. Strings stay values: a copy taken before an
+append shares the text until the append, which then writes its own copy, so the copy never sees it.
+A chain such as <code>a + "/" + b + "/" + c</code> or a template string joins into one accumulator sized
+for its text, and <code>format()</code> writes its values straight into its result.</li>
 <li><strong>Class declaration is bookkeeping, not construction.</strong> Executing a <code>class</code>
 declaration pays redefinition/hot-reload machinery every time: cheap once, wasteful per-frame.</li>
 <li><strong>Engine lifecycle sits far above script cost.</strong> Creating an engine and registering the

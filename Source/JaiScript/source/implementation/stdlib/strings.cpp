@@ -6,6 +6,8 @@
 #include <cctype>
 #include <string>
 #include <vector>
+#include <span>
+#include <memory>
 
 namespace jai {
 namespace stdlib {
@@ -35,47 +37,28 @@ namespace stdlib {
         sign("pad_left", {2, 3, {text, integer, any}, any, true});
         sign("pad_right", {2, 3, {text, integer, any}, any, true});
 
-        ns->variables[eng_ref.symbolize("to_lower")] = script_value::make_function(
-            [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
-                if (args.size() != 1) {
-                    return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                        "string::to_lower expects exactly 1 argument");
-                }
-                const script_value& arg = args[0].deref();
-                if (!arg.is_text()) {
-                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
-                        "string::to_lower expects a string argument");
-                }
-                std::string out = arg.is_utf8_string() ? arg.unchecked_as_utf8().bytes : arg.as<std::string>();
-                for (auto& c : out) { c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
-                return arg.is_utf8_string() ? script_value::make_utf8(std::move(out), eng) : script_value(std::move(out), eng);
-            }, &eng_ref);
-
-        ns->variables[eng_ref.symbolize("to_upper")] = script_value::make_function(
-            [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
-                if (args.size() != 1) {
-                    return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                        "string::to_upper expects exactly 1 argument");
-                }
-                const script_value& arg = args[0].deref();
-                if (!arg.is_text()) {
-                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
-                        "string::to_upper expects a string argument");
-                }
-                std::string out = arg.is_utf8_string() ? arg.unchecked_as_utf8().bytes : arg.as<std::string>();
-                for (auto& c : out) { c = static_cast<char>(std::toupper(static_cast<unsigned char>(c))); }
-                return arg.is_utf8_string() ? script_value::make_utf8(std::move(out), eng) : script_value(std::move(out), eng);
-            }, &eng_ref);
-
         // the rest of the namespace's free functions: each checks its arguments and returns a new value
         using R = checked_result<script_value>;
+        using args_view = std::span<const script_value* const>;
+        // each function's entry, and its host direct row: a vm call site runs it over the arguments where they are (no vector)
         auto def = [&](const char* name, auto fn) {
-            ns->variables[eng_ref.symbolize(name)] = script_value::make_function(
-                [eng, fn](const std::vector<script_value>& raw) -> R {
+            using F = decltype(fn);
+            struct entry { engine* e; F fn; };
+            auto held = std::make_shared<entry>(entry{eng, fn});
+            script_value value = script_value::make_function(
+                [held](const std::vector<script_value>& raw) -> R {
                     std::vector<const script_value*> args;
+                    args.reserve(raw.size());
                     for (const auto& a : raw) { args.push_back(&a.deref()); }
-                    return fn(eng, args);
+                    return held->fn(held->e, args_view(args.data(), args.size()));
                 }, &eng_ref);
+            ns->variables[eng_ref.symbolize(name)] = value;
+            eng_ref.add_host_direct(value, engine::host_direct_any_arity, [](const void* target, const script_value* raw, size_t count) -> R {
+                const entry& h = *static_cast<const entry*>(target);
+                const script_value* args[8];
+                for (size_t i = 0; i < count; ++i) { args[i] = &raw[i]; }   // a direct row never sees a reference
+                return h.fn(h.e, args_view(args, count));
+            }, held.get());
         };
         auto count_error = [](const char* text) { return R(make_error_code(runtime_error_code::argument_count_mismatch), text); };   // static texts: the result holds a view
         auto type_error = [](const char* text) { return R(make_error_code(runtime_error_code::type_mismatch), text); };
@@ -84,9 +67,23 @@ namespace stdlib {
             if (a->is_text() && !a->unchecked_text().empty()) { out = a->unchecked_text()[0]; return true; }
             return false;
         };
+        def("to_lower", [=](engine* e, args_view a) -> R {
+            if (a.size() != 1) { return count_error("string::to_lower expects exactly 1 argument"); }
+            if (!a[0]->is_text()) { return type_error("string::to_lower expects a string argument"); }
+            std::string out = a[0]->is_utf8_string() ? a[0]->unchecked_as_utf8().bytes : a[0]->as<std::string>();
+            for (auto& c : out) { c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
+            return a[0]->is_utf8_string() ? script_value::make_utf8(std::move(out), e) : script_value(std::move(out), e);
+        });
+        def("to_upper", [=](engine* e, args_view a) -> R {
+            if (a.size() != 1) { return count_error("string::to_upper expects exactly 1 argument"); }
+            if (!a[0]->is_text()) { return type_error("string::to_upper expects a string argument"); }
+            std::string out = a[0]->is_utf8_string() ? a[0]->unchecked_as_utf8().bytes : a[0]->as<std::string>();
+            for (auto& c : out) { c = static_cast<char>(std::toupper(static_cast<unsigned char>(c))); }
+            return a[0]->is_utf8_string() ? script_value::make_utf8(std::move(out), e) : script_value(std::move(out), e);
+        });
 
 		sign("append", {2, 255, {text, text}, any, true});
-		def("append", [=](engine* a_engine, const std::vector<const script_value*>& a_args) -> R {
+		def("append", [=](engine* a_engine, args_view a_args) -> R {
 			if (a_args.size() < 2) { return count_error("string::append expects at least 2 text arguments"); }
 			size_t size = 0;
 			for (const auto* argument : a_args) {
@@ -99,7 +96,7 @@ namespace stdlib {
 			for (const auto* argument : a_args) { result.append(argument->unchecked_text()); }
 			return a_args[0]->is_utf8_string() ? script_value::make_utf8(std::move(result), a_engine) : script_value(std::move(result), a_engine);
 		});
-        def("from_code", [=](engine* e, const std::vector<const script_value*>& a) -> R {
+        def("from_code", [=](engine* e, args_view a) -> R {
             if (a.size() != 1) return count_error("string::from_code expects exactly 1 argument");
             if (!a[0]->is_int()) return type_error("string::from_code expects an int code point");
             const script_int cp = a[0]->unchecked_as_int();
@@ -109,14 +106,14 @@ namespace stdlib {
             }
             return script_value(std::move(out), e);
         });
-        def("is_valid_utf8", [=](engine* e, const std::vector<const script_value*>& a) -> R {
+        def("is_valid_utf8", [=](engine* e, args_view a) -> R {
             if (a.size() != 1) return count_error("string::is_valid_utf8 expects exactly 1 argument");
             if (!a[0]->is_text()) return type_error("string::is_valid_utf8 expects a string argument");
             const std::string& s = a[0]->unchecked_text();
             for (size_t at = 0; at < s.size();) { const auto st = detail::utf8::decode(s, at); if (!st.valid) return script_value(false, e); at += st.length; }
             return script_value(true, e);
         });
-        def("join", [=](engine* e, const std::vector<const script_value*>& a) -> R {
+        def("join", [=](engine* e, args_view a) -> R {
             if (a.size() < 1 || a.size() > 2) return count_error("string::join expects 1 or 2 arguments (parts, [separator])");
             if (!a[0]->is_array()) return type_error("string::join expects an array of strings");
             std::string sep;
@@ -142,7 +139,7 @@ namespace stdlib {
             if (denied) [[unlikely]] { return detail::builtin_memory_cap(e); }
             return utf8 ? script_value::make_utf8(std::move(out), e) : script_value(std::move(out), e);
         });
-        def("trim", [=](engine* e, const std::vector<const script_value*>& a) -> R {
+        def("trim", [=](engine* e, args_view a) -> R {
             if (a.size() != 1) return count_error("string::trim expects exactly 1 argument");
             if (!a[0]->is_text()) return type_error("string::trim expects a string argument");
             const std::string& s = a[0]->unchecked_text();
@@ -152,7 +149,7 @@ namespace stdlib {
             while (n > b && space(s[n - 1])) --n;
             return a[0]->is_utf8_string() ? script_value::make_utf8(s.substr(b, n - b), e) : script_value(s.substr(b, n - b), e);
         });
-        def("replace", [=](engine* e, const std::vector<const script_value*>& a) -> R {
+        def("replace", [=](engine* e, args_view a) -> R {
             if (a.size() != 3) return count_error("string::replace expects exactly 3 arguments (s, from, to)");
             if (!a[0]->is_text() || !a[1]->is_text() || !a[2]->is_text()) return type_error("string::replace expects string arguments");
             const std::string& s = a[0]->unchecked_text(); const std::string& from = a[1]->unchecked_text(); const std::string& to = a[2]->unchecked_text();
@@ -166,7 +163,7 @@ namespace stdlib {
             out.append(s, at, std::string::npos);
             return a[0]->is_utf8_string() ? script_value::make_utf8(std::move(out), e) : script_value(std::move(out), e);
         });
-        def("repeat", [=](engine* e, const std::vector<const script_value*>& a) -> R {
+        def("repeat", [=](engine* e, args_view a) -> R {
             if (a.size() != 2) return count_error("string::repeat expects exactly 2 arguments (s, count)");
             if (!a[0]->is_text()) return type_error("string::repeat expects a string first argument");
             if (!a[1]->is_int()) return type_error("string::repeat count must be an integer");
@@ -181,7 +178,7 @@ namespace stdlib {
         for (const pad_texts& pt : {
                 pad_texts{"pad_left", "string::pad_left expects 2 or 3 arguments (s, width, [fill])", "string::pad_left expects a string first argument", "string::pad_left width must be an integer", "string::pad_left fill must be a char or a non-empty string", true},
                 pad_texts{"pad_right", "string::pad_right expects 2 or 3 arguments (s, width, [fill])", "string::pad_right expects a string first argument", "string::pad_right width must be an integer", "string::pad_right fill must be a char or a non-empty string", false}}) {
-            def(pt.name, [=](engine* e, const std::vector<const script_value*>& a) -> R {
+            def(pt.name, [=](engine* e, args_view a) -> R {
                 if (a.size() < 2 || a.size() > 3) return count_error(pt.count);
                 if (!a[0]->is_text()) return type_error(pt.first);
                 if (!a[1]->is_int()) return type_error(pt.width);

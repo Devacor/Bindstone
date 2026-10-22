@@ -571,6 +571,7 @@ namespace jai {
             size_t arity = 0;
         };
         void add_host_direct(std::string_view name, size_t arity, host_direct_invoke invoke, const void* target);
+        void add_host_direct(const script_value& function, size_t arity, host_direct_invoke invoke, const void* target);   // a function value (a namespace's)
         const host_direct_row* host_direct_for(const void* identity) const;
         const uint64_t* host_direct_generation() const;   // never moves: a row holds for as long as its function is the callee
 

@@ -13987,6 +13987,31 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
+	if (argc != 0 && cached_global_env_ && !parallel_worker_) {
+		// a host callee with a direct entry (a namespace function, a callable value): the entry over the arguments where they are
+		const script_value& callee_peek = stack_[stack_.size() - argc - 1];
+		if (callee_peek.raw_storage_index() == script_value::TYPEID_FUNCTION) {
+			const void* identity = &callee_peek.unchecked_as_function();
+			if (site.ic_host_owner.get() != identity && site.call_host_seen != identity) {
+				fill_host_site(site, callee_peek);
+				site.call_host_seen = identity;
+			}
+			if (site.ic_host_target && site.ic_host_owner.get() == identity) {
+				const size_t depth = stack_.size();
+				op_status st{};
+				if (call_host_site(site, argc, st)) {
+					if (stack_.size() == depth - argc + 1) {   // a result (or the unwinding null) on top of the callee: it takes the callee's place
+						script_value out = std::move(stack_.back());
+						stack_.pop_back();
+						stack_.back() = std::move(out);
+					} else {
+						stack_.pop_back();
+					}
+					return st;
+				}
+			}
+		}
+	}
 
 	auto arguments = acquire_arg_vector(argc);
 	arg_vector_return arg_return{this, &arguments};

@@ -312,7 +312,7 @@ void nt_round() {
 	sim_tick();
 	net_host_pump();
 	host_after_tick();
-	time::sleep_ms(2);
+	sleep(0.002);
 	for (int s = 0; s < NCS_CH.size(); ++s) { net_session_pump(s); }
 }
 
@@ -479,7 +479,7 @@ int run_nettest(string base_dir, int port) {
 	for (int i = 0; i < 20; ++i) {
 		NOW_MS = NOW_MS + TICK_MS;
 		for (int s = 0; s < NCS_CH.size(); ++s) { net_session_pump(s); }
-		time::sleep_ms(2);
+		sleep(0.002);
 	}
 	int told = 0;
 	for (int k = 0; k < crowd.size(); ++k) {

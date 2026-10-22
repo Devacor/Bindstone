@@ -359,7 +359,7 @@ string net_join(string host, int port, string name, int hue, bool prepare_world)
 			net_client_hello(s, name, hue);
 			said = true;
 		}
-		time::sleep_ms(10);
+		sleep(0.01);
 		waited = waited + 1;
 	}
 	if (NCS_STATUS[s] != "joined") { return "no answer from " + host; }

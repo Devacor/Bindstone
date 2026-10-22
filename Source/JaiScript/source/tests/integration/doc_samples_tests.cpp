@@ -10,6 +10,7 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/core/engine_time.hpp>
+#include <jaiscript/core/script_run.hpp>
 
 #include <chrono>
 #include <cstdlib>
@@ -725,6 +726,29 @@ public:
 				    [&](std::chrono::nanoseconds d) { sim_now += d; });              // sleep advances the simulation
 				sim_now += std::chrono::milliseconds(1500);
 				eng->execute("print(time::now(), ' ', time::utc_now().to_string());");
+				// [/sample]
+			});
+		});
+
+		test("host_api_suspendable_runs", [this]() {
+			expect_cpp("embedding/17-host-api.html", "host-api-suspendable-runs", [] {
+				auto eng = jai::engine::make();
+				jai::stdlib::register_all(eng);
+				// [sample host-api-suspendable-runs]
+				std::chrono::nanoseconds now{0};
+				eng->time().source([&] { return now; }, {}, {});
+				jai::script_run run = eng->start(R"(
+				    for (int wave = 1; wave <= 3; ++wave) {
+				        print("wave {} at {}", wave, time::now());
+				        sleep(2.0);
+				    }
+				    "cleared";
+				)");
+				while (!run.done()) {
+				    now = run.wake_at();   // a game moves its clock each frame and resumes; this jumps to the wake time
+				    run.resume();
+				}
+				std::cout << run.result().value().to_string() << "\n";
 				// [/sample]
 			});
 		});

@@ -44,10 +44,9 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <tr><td><code>time::unix_time()</code></td><td>seconds (float) since the Unix epoch, from the wall clock</td></tr>
 <tr><td><code>time::unix_ms()</code></td><td>whole milliseconds (int) since the Unix epoch</td></tr>
 <tr><td><code>time::date_now(template)</code></td><td>the current local date and time as a string, <a href="#formatting">formatted by a template</a></td></tr>
-<tr><td><code>time::sleep(seconds)</code> / <code>time::sleep_ms(ms)</code></td><td>block the script thread for that long (zero or less returns at once)</td></tr>
 </tbody></table></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">float t0 = time::now();
-time::sleep_ms(20);
+sleep(0.02);
 float waited = time::now() - t0;
 print("waited at least 20 ms: {}", waited &gt;= 0.02);
 print("this execute has run at least that long: {}", time::execute_elapsed() &gt;= waited);
@@ -56,8 +55,8 @@ print("unix_ms is unix_time in milliseconds: {}", math::abs(time::unix_ms() / 10
 this execute has run at least that long: true
 unix_ms is unix_time in milliseconds: true</code></pre></div>
 <p>Use the monotonic clocks (<code>now</code>, <code>execute_elapsed</code>, stopwatches) to measure durations: the wall clock can jump when the system clock is set. Use the wall clock (<code>unix_time</code>, dates) to say what time it is.</p>
-<p><code>time::sleep</code> really does block: it is for tools and batch scripts, never for code inside a game frame. The time it spends counts against the engine&#x27;s execution budget like any other time, and the standalone runner runs with no budget.</p>
-<p><strong>The engine&#x27;s own deadlines run on the real clock.</strong> The execution budget and the window between import check passes (<a href="10-modules.html">Modules</a>) always measure real time, so a host&#x27;s virtual clock can neither stall nor trip them. The engine keeps a sample of the real clock, taken at each call from the host and at the budget&#x27;s periodic checks; while the time source is the system clock, a <code>time::</code> reading (and waking from <code>time::sleep</code>) refreshes that sample too, which is what lets a frame loop&#x27;s <code>time::sleep_ms</code> keep hot reload prompt. A replaced source never touches it.</p>
+<p>Waiting is the language&#x27;s own <code>sleep(seconds)</code> (<a href="08-coroutines.html#sleep">Coroutines</a>), which reads the same time source: in a run the host started with <code>engine::start</code> it suspends the run and hands control back to the host until the time has passed, and in a plain <code>execute()</code> it blocks the thread, counting against the execution budget like any other time.</p>
+<p><strong>The engine&#x27;s own deadlines run on the real clock.</strong> The execution budget and the window between import check passes (<a href="10-modules.html">Modules</a>) always measure real time, so a host&#x27;s virtual clock can neither stall nor trip them. The engine keeps a sample of the real clock, taken at each call from the host and at the budget&#x27;s periodic checks; while the time source is the system clock, a <code>time::</code> reading (and waking from a <code>sleep</code> that blocks) refreshes that sample too, and a run resumed after a <code>sleep</code> is a call from the host, which is what keeps a sleep-paced frame loop&#x27;s hot reload prompt. A replaced source never touches it.</p>
 <h2 id="stopwatches">Stopwatches<a class="hlink" href="#stopwatches" aria-label="link">&#8203;</a></h2>
 <p><code>time::stopwatch</code> is a type like any class: declare one, and call its methods. All results are float seconds.</p>
 <div class="tablewrap"><table><thead><tr><th>Method</th><th>Does</th></tr></thead><tbody>
@@ -72,10 +71,10 @@ unix_ms is unix_time in milliseconds: true</code></pre></div>
 <p>Time spent paused never counts toward <code>elapsed()</code> or <code>delta()</code>. A stopwatch is a value, like every JaiScript value: a copy is a separate stopwatch from then on, and a stopwatch field copies with its object.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::stopwatch frame;
 frame.delta();                      // the first delta starts the stopwatch and returns 0.0
-time::sleep_ms(10);
+sleep(0.01);
 float dt = frame.delta();           // seconds since the previous delta
 frame.pause();
-time::sleep_ms(50);                 // paused: none of this counts
+sleep(0.05);                        // paused: none of this counts
 frame.resume();
 print("dt covered the sleep: {}", dt &gt;= 0.01);
 print("the pause was skipped: {}", frame.elapsed() &lt; 0.05);
@@ -181,7 +180,7 @@ print(type_of(s.clock), " ", s.clock.is_running());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3600.0 s after start
 9000.0 s after start
 time::stopwatch false</code></pre></div>
-<p>The strict checker knows the namespace: a <code>time::</code> call with the wrong number of arguments (<code>'time::now' expects 0 argument(s), got 1</code>) or an argument it cannot take (<code>time::sleep("soon")</code>) fails the load, results carry their types, and a member neither type has (<code>no member 'nope' in class 'time::date'</code>) is a load error like any class&#x27;s.</p>
+<p>The strict checker knows the namespace: a <code>time::</code> call with the wrong number of arguments (<code>'time::now' expects 0 argument(s), got 1</code>) or an argument it cannot take (<code>time::date_from_unix("soon")</code>) fails the load, results carry their types, and a member neither type has (<code>no member 'nope' in class 'time::date'</code>) is a load error like any class&#x27;s.</p>
 <h2 id="time-and-parallel-loops">Time and parallel loops<a class="hlink" href="#time-and-parallel-loops" aria-label="link">&#8203;</a></h2>
 <p>A <code>parallel_for</code> gives the same result at every worker count. A clock read cannot keep that promise (the answer would depend on scheduling), so a parallel body that calls <code>time::</code> is rejected before any worker starts, with the usual catchable explanation:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;float&gt; stamps = [0.0, 0.0, 0.0];

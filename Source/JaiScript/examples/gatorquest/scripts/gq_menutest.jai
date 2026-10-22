@@ -36,7 +36,7 @@ string mt_connect(int proto_sent) {
 		choice = title_update();
 		NET_PROTO = proto;
 		net_host_pump();
-		time::sleep_ms(2);
+		sleep(0.002);
 	}
 	return choice != "" ? choice : TM_PAGE;
 }
@@ -44,7 +44,7 @@ string mt_connect(int proto_sent) {
 void mt_host_rounds(int n) {
 	for (int i = 0; i < n; ++i) {
 		net_host_pump();
-		time::sleep_ms(2);
+		sleep(0.002);
 	}
 }
 
@@ -240,7 +240,7 @@ int run_menutest(string base_dir, int port) {
 	for (int i = 0; i < 400 && !QUIT; ++i) {
 		NOW_MS = time::now() * 1000;
 		net_client_pump();
-		time::sleep_ms(1);
+		sleep(0.001);
 	}
 	check(QUIT && PLAY_EXIT == "title" && NET_CLOSE_WHY.contains("the host has left the swamp"), `the client's session ends toward the title (${NET_CLOSE_WHY})`);
 	QUIT = false;

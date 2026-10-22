@@ -333,7 +333,7 @@ function shim_run_live(int bench_frames) -> int {
 
 		int budget = itrunc(1000.0 / SHIM_FPS);
 		float used = frame.elapsed() * 1000;
-		if (used < budget) { time::sleep_ms(budget - used); }
+		if (used < budget) { sleep((budget - used) / 1000.0); }
 	}
 	print(ESC + "[0m" + ESC + "[?1049l" + ESC + "[?25h", true);   // restore screen + cursor
 	if (bench && done > 0) {

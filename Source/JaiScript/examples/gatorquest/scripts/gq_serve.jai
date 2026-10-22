@@ -35,7 +35,7 @@ int run_serve() {
 		int now = time::now() * 1000;
 		if (now < next) {
 			NET_SRV.pump();
-			time::sleep_ms(imin(5, next - now));
+			sleep(imin(5, next - now) / 1000.0);
 			continue;
 		}
 		next = next + TICK_MS;
@@ -106,7 +106,7 @@ int run_client() {
 		if (f == 20) { net_session_send(s, "M|" + to_string(walk)); }
 		if (f == 35) { net_session_send(s, "M|-1"); }
 		if (f == 60 && say != "") { net_session_send(s, "A|:" + say); }
-		time::sleep_ms(33);
+		sleep(0.033);
 	}
 	ClientView& v = NCS_VIEW[s];
 	// chat from the other players: "Name: text" lines whose name is a player we saw

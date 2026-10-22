@@ -312,7 +312,7 @@ inline checked_result<const std::shared_ptr<function_decl>*> script_method_dispa
 }
 
 inline checked_result<script_value> script_method_dispatch::invoke(const script_value& this_obj, const std::vector<script_value>& args,
-                                                                   size_t first) const {
+                                                                   size_t first, bool host_call) const {
     auto resolved = resolve(args, first);
     if (!resolved) {
         return resolved.error_value();
@@ -324,7 +324,10 @@ inline checked_result<script_value> script_method_dispatch::invoke(const script_
     }
 
     const std::shared_ptr<function_decl>& ast = *resolved.value();
-    if (backend->is_executing() || backend->is_unwinding()) { return backend->execute_method_from(*this, ast, this_obj, args, first); }
+    if (backend->is_executing() || backend->is_unwinding()) {
+        engine::run_pin pin(host_call ? eng : nullptr);
+        return backend->execute_method_from(*this, ast, this_obj, args, first);
+    }
     struct call {
         const script_method_dispatch& dispatch; const std::shared_ptr<function_decl>& ast; const script_value& this_obj;
         const std::vector<script_value>& args; size_t first;
@@ -380,7 +383,7 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
     bump_method_epoch();
 }
 
-inline checked_result<script_value> script_static_method_dispatch::operator()(const std::vector<script_value>& args) const {
+inline checked_result<script_value> script_static_method_dispatch::call(const std::vector<script_value>& args, bool host_call) const {
     execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
     if (!backend) {
         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
@@ -397,7 +400,10 @@ inline checked_result<script_value> script_static_method_dispatch::operator()(co
         if (verdict.rival) [[unlikely]] { return detail::ambiguous_call(name_id, (*verdict.best)->parameters, (*verdict.rival)->parameters, args.data(), args.size(), eng); }
         if (verdict.best) { payload.ast = *verdict.best; }
     }
-    if (backend->is_executing() || backend->is_unwinding()) { return backend->execute_callable(payload, args); }
+    if (backend->is_executing() || backend->is_unwinding()) {
+        engine::run_pin pin(host_call ? eng : nullptr);
+        return backend->execute_callable(payload, args);
+    }
     struct call { const script_callable& payload; const std::vector<script_value>& args; } c{payload, args};
     return eng->checked_host_entry([](execution_backend& be, void* ctx) {
         auto* cc = static_cast<call*>(ctx);

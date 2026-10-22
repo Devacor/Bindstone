@@ -849,6 +849,191 @@ struct vm_backend::vm_coroutine_state : coroutine_backend_state {
 	}
 };
 
+// A suspendable run's execution state: the run swaps it whole with the live members at every switch, so a run that suspends
+// keeps its frames, stacks, records and per-depth pools while another entry runs, and either resumes in any order
+struct vm_backend::vm_run_state : backend_run_state {
+	value_stack stack;
+	frame_stack frames;
+	size_t top_frame_mark = SIZE_MAX;
+	std::vector<std::unique_ptr<call_record>> call_records;
+	size_t call_records_top = 0;
+	frame* switch_to = nullptr;
+	pending_call_site pending_site_ctx{};
+	std::vector<pending_call_site> external_site_stack;
+	const unit_stamp* unit_override = nullptr;
+	size_t unit_override_depth = 0;
+	std::shared_ptr<jai::environment> env;
+	std::vector<std::shared_ptr<environment>> instance_scope_saved;
+	std::shared_ptr<environment> pending_instance_env;
+	std::vector<pending_callee> pending_callees;
+	std::optional<script_value> return_value;
+	bool has_return_value = false;
+	std::optional<script_value> implicit_result;
+	std::optional<script_exception> current_exception;
+	std::optional<script_value> active_exception_value;
+	bool is_unwinding = false;
+	bool trace_captured = false;
+	std::vector<stack_frame> captured_trace;
+	std::optional<error_propagator> run_error;
+	detail::nested_failure nested_failure;
+	uint64_t current_catch_var_id = 0;
+	std::vector<try_record> try_records;
+	std::vector<iter_state> iter_states;
+	std::vector<counted_for_state> cfor_states;
+	coroutine_handle* active_coroutine = nullptr;
+	bool yielding = false;
+	std::chrono::steady_clock::time_point execution_deadline{};
+	uint32_t budget_tick = 0;
+	bool budget_active = false;
+	int current_call_depth = 0;
+	size_t structural_equality_depth = 0;
+	std::vector<script_value>* owned_args = nullptr;
+	std::vector<std::vector<script_value>> cell_lists;
+	std::vector<script_value> shared_cells;
+	std::vector<size_t> shared_cell_bases;
+	bool probe_callee_resolving = false;
+	error_propagator pending_error{};
+	std::deque<std::vector<script_value>> builtin_arg_pool;
+	size_t builtin_arg_depth = 0;
+	uint32_t host_site_calls = 0;
+	frame* raw_switch = nullptr;
+	frame* cells_frame = nullptr;
+	std::vector<strong_ptr<script_function>> retired_callees;
+	std::vector<std::unique_ptr<callback_session>> callback_sessions;
+	size_t callback_depth = 0;
+	std::vector<std::unique_ptr<cell_state>> entry_areas;
+	size_t entry_areas_top = 0;
+	const frame* debug_last_frame = nullptr;
+	const chunk* debug_last_code = nullptr;
+	size_t debug_last_depth = SIZE_MAX;
+};
+
+std::unique_ptr<backend_run_state> vm_backend::make_run_state() {
+	auto state = std::make_unique<vm_run_state>();
+	if (engine_) { state->env = engine_->get_global_environment(); }
+	return state;
+}
+
+void vm_backend::swap_run_state(backend_run_state& a_state) noexcept {
+	auto& s = static_cast<vm_run_state&>(a_state);
+	using std::swap;
+	stack_.swap_payload(s.stack);
+	swap(frames_, s.frames);
+	swap(top_frame_mark_, s.top_frame_mark);
+	swap(call_records_, s.call_records);
+	swap(call_records_top_, s.call_records_top);
+	swap(switch_to_, s.switch_to);
+	swap(pending_site_ctx_, s.pending_site_ctx);
+	swap(external_site_stack_, s.external_site_stack);
+	swap(unit_override_, s.unit_override);
+	swap(unit_override_depth_, s.unit_override_depth);
+	swap(environment_, s.env);
+	swap(instance_scope_saved_, s.instance_scope_saved);
+	swap(pending_instance_env_, s.pending_instance_env);
+	swap(pending_callees_, s.pending_callees);
+	swap(return_value_, s.return_value);
+	swap(has_return_value_, s.has_return_value);
+	swap(implicit_result_, s.implicit_result);
+	swap(current_exception_, s.current_exception);
+	swap(active_exception_value_, s.active_exception_value);
+	swap(is_unwinding_, s.is_unwinding);
+	swap(trace_captured_, s.trace_captured);
+	swap(captured_trace_, s.captured_trace);
+	swap(run_error_, s.run_error);
+	swap(nested_failure_, s.nested_failure);
+	swap(current_catch_var_id_, s.current_catch_var_id);
+	swap(try_records_, s.try_records);
+	swap(iter_states_, s.iter_states);
+	swap(cfor_states_, s.cfor_states);
+	swap(active_coroutine_, s.active_coroutine);
+	swap(yielding_, s.yielding);
+	swap(execution_deadline_, s.execution_deadline);
+	swap(budget_tick_, s.budget_tick);
+	swap(budget_active_, s.budget_active);
+	swap(current_call_depth_, s.current_call_depth);
+	swap(structural_equality_depth_, s.structural_equality_depth);
+	swap(owned_args_, s.owned_args);
+	swap(cell_lists_, s.cell_lists);
+	swap(shared_cells_, s.shared_cells);
+	swap(shared_cell_bases_, s.shared_cell_bases);
+	swap(probe_callee_resolving_, s.probe_callee_resolving);
+	swap(pending_error_, s.pending_error);
+	swap(builtin_arg_pool_, s.builtin_arg_pool);
+	swap(builtin_arg_depth_, s.builtin_arg_depth);
+	swap(host_site_calls_, s.host_site_calls);
+	swap(raw_switch_, s.raw_switch);
+	swap(cells_frame_, s.cells_frame);
+	swap(retired_callees_, s.retired_callees);
+	swap(callback_sessions_, s.callback_sessions);
+	swap(callback_depth_, s.callback_depth);
+	swap(entry_areas_, s.entry_areas);
+	swap(entry_areas_top_, s.entry_areas_top);
+	swap(debug_last_frame_, s.debug_last_frame);
+	swap(debug_last_code_, s.debug_last_code);
+	swap(debug_last_depth_, s.debug_last_depth);
+	raw_epoch_advance();   // the other side's code ran in between: no raw call plan outlives a switch
+	sync_unit();
+}
+
+void vm_backend::reset_run_state(backend_run_state& a_state) {
+	auto& s = static_cast<vm_run_state&>(a_state);
+	s.stack.clear();
+	s.frames.clear();
+	s.top_frame_mark = SIZE_MAX;
+	s.call_records_top = 0;
+	s.switch_to = nullptr;
+	s.pending_site_ctx = {};
+	s.external_site_stack.clear();
+	s.unit_override = nullptr;
+	s.unit_override_depth = 0;
+	s.env = engine_ ? engine_->get_global_environment() : nullptr;
+	s.instance_scope_saved.clear();
+	s.pending_instance_env.reset();
+	s.pending_callees.clear();
+	s.return_value.reset();
+	s.has_return_value = false;
+	s.implicit_result.reset();
+	s.current_exception.reset();
+	s.active_exception_value.reset();
+	s.is_unwinding = false;
+	s.trace_captured = false;
+	s.captured_trace.clear();
+	s.run_error.reset();
+	s.nested_failure = detail::nested_failure{};
+	s.current_catch_var_id = 0;
+	s.try_records.clear();
+	s.iter_states.clear();
+	s.cfor_states.clear();
+	s.active_coroutine = nullptr;
+	s.yielding = false;
+	s.budget_tick = 0;
+	s.budget_active = false;
+	s.current_call_depth = 0;
+	s.structural_equality_depth = 0;
+	s.owned_args = nullptr;
+	s.shared_cells.clear();
+	s.shared_cell_bases.clear();
+	s.probe_callee_resolving = false;
+	s.pending_error = {};
+	s.builtin_arg_depth = 0;
+	s.host_site_calls = 0;
+	s.raw_switch = nullptr;
+	s.cells_frame = nullptr;
+	s.retired_callees.clear();
+	s.callback_depth = 0;
+	s.entry_areas_top = 0;
+	s.debug_last_frame = nullptr;
+	s.debug_last_code = nullptr;
+	s.debug_last_depth = SIZE_MAX;
+}
+
+void vm_backend::adopt_run_trace(backend_run_state& a_state) {
+	auto& s = static_cast<vm_run_state&>(a_state);
+	captured_trace_ = std::move(s.captured_trace);
+	trace_captured_ = s.trace_captured;
+	s.captured_trace.clear();
+}
+
 vm_backend::vm_coroutine_state& vm_backend::coroutine_fiber_state(coroutine_handle& handle) {
 	auto* state = static_cast<vm_coroutine_state*>(handle.backend_state());
 	if (!state) {
@@ -1634,7 +1819,7 @@ script_value vm_backend::operator_value(const member_target& target, uint64_t id
 	return pin ? pin->method_value : script_value::make_invalid(nullptr);
 }
 checked_result<script_value> vm_backend::operator_call(const script_value& self, const script_value& method_val, uint64_t id, std::vector<script_value> args) {
-	if (!parallel_worker_) { return make_bound_method(self, method_val).as_function()(args); }
+	if (!parallel_worker_) { return call_value(make_bound_method(self, method_val).as_function(), args); }
 	const detail::parallel_method_pin* pin = worker_operator_pin(self, id);
 	if (!pin) { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text); }
 	return detail::call_parallel_operator_pin(*this, *pin, id, self, std::move(args), engine_);
@@ -2621,7 +2806,7 @@ checked_result<script_value> vm_backend::binary_general(token_type op, const scr
 		if (const script_value* opFunc = operator_table_->entry(detail::binary_op_slot(op))) {
 			const script_function& func = opFunc->as_function();
 			std::vector<script_value> args = {left, right};
-			auto result = func(args);
+			auto result = call_value(func, args);
 			if (!result) {
 				return result.error_value();
 			}
@@ -3711,7 +3896,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 						std::vector<script_value> args;
 						args.push_back(*currentVal);
 						args.push_back(std::move(value));
-						auto call_result = func(args);
+						auto call_result = call_value(func, args);
 						if (!call_result) {
 							return raise_from(call_result);   // the operator's own error, never a stand-in text
 						}
@@ -4008,7 +4193,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 				if (const script_value* opFunc = operator_table_->entry(op_slot)) {
 					const script_function& func = opFunc->as_function();
 					std::vector<script_value> args = {target.clone(), rightValue};
-					auto result = func(args);
+					auto result = call_value(func, args);
 					if (!result) {
 						return raise_from(result);
 					}
@@ -6507,7 +6692,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 			if (method.is_function()) {
 				const script_function& func = method.as_function();
 				std::vector<script_value> args = {left, right};
-				auto result = func(args);
+				auto result = call_value(func, args);
 				if (!result) {
 					return raise_from(result);
 				}
@@ -6523,7 +6708,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 			if (const script_value* getMethod = operator_table_->entry(detail::op_slot::subscript)) {
 				const script_function& func = getMethod->as_function();
 				std::vector<script_value> args = {left, right};
-				auto result = func(args);
+				auto result = call_value(func, args);
 				if (!result) {
 					return raise_from(result);
 				}
@@ -6623,7 +6808,7 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 	if (opFunc) {
 		const script_function& func = opFunc->as_function();
 		std::vector<script_value> args = {currentValue, rightValue};
-		auto result = func(args);
+		auto result = call_value(func, args);
 		if (!result) {
 			return raise_from(result);
 		}
@@ -13301,6 +13486,22 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 	return exec_call_from_scratch_general(f, ins);
 }
 
+// `sleep(x)` whose probe found the core sleep: the builtin in place (the interpreter's twin is visit_call_expr's); any other callee
+// takes the call op_call_from_scratch would make
+op_status vm_backend::exec_sleep(frame& f, const vm_instruction& ins) {
+	const pending_callee& top = pending_callees_.back();
+	const script_function* callee = top.fn ? nullptr : top.pin ? top.pin.get() : top.host_fn ? top.host_fn
+		: top.value.raw_storage_index() == script_value::TYPEID_FUNCTION ? &top.value.unchecked_as_function() : nullptr;
+	if (!engine_->sleep_callee(callee)) { return exec_call_from_scratch(f, vm_instruction{opcode::op_call_from_scratch, ins.a, ins.b, ins.c}); }
+	pop_back_detached(pending_callees_);
+	script_value seconds = std::move(stack_.back());
+	stack_.pop_back();
+	auto slept = engine_->sleep_builtin(seconds);
+	if (!slept) { return raise_from(slept); }
+	stack_.push_back(std::move(slept.value()));
+	return {};
+}
+
 // a parked script function: the tail splice or the record push; a throw ahead of the record leaves the args on the stack
 op_status vm_backend::call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function> pin) {
 	const size_t argc = ins.a;
@@ -14181,7 +14382,7 @@ op_status vm_backend::invoke_native(frame& f, const script_function& func, std::
 			vm_backend* vm; pending_call_site saved;
 			~pending_restore() { vm->pending_site_ctx_ = saved; }
 		} restore_pending{this, saved_pending};
-		callOutcome.emplace(func(arguments));
+		callOutcome.emplace(call_value(func, arguments));
 	} catch (...) {
 		return call_threw(SIZE_MAX);
 	}
@@ -15288,7 +15489,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 					script_value static_method = fallback_class->static_method_in_chain(member_id);
 					if (!static_method.is_null() && static_method.is_function()) {
 						auto func = static_method.as_function();
-						return func(args);
+						return eng->active_run_pins() ? detail::call_function_value(func, args) : func(args);
 					}
 				}
 
@@ -16002,7 +16203,7 @@ op_status vm_backend::assign_member(frame& f, const script_value& object_value, 
 	if (!setter.is_null() && !setter.is_invalid() && setter.is_function()) {
 		const script_function& func = setter.as_function();
 		std::vector<script_value> args = {object_value, clone_for_assignment(value)};
-		auto result = func(args);
+		auto result = call_value(func, args);
 		if (!result) {
 			return raise_from(result);
 		}
@@ -18183,7 +18384,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 			}
 			script_value constructorFunc = ctor_cell->deref();
 			const script_function& func = constructorFunc.as_function();
-			auto result = func({});
+			auto result = call_value(func, {});
 			if (!result) {
 				return raise_from(result);
 			}
@@ -18267,7 +18468,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 			vm_backend* vm; pending_call_site saved;
 			~pending_restore() { vm->pending_site_ctx_ = saved; }
 		} restore_pending{this, saved_pending};
-		auto result = func(args);
+		auto result = call_value(func, args);
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_new_count_;
 		profile_new_resolve_cyc_ += prof_sp1 - prof_new0;
@@ -18368,7 +18569,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 			vm_backend* vm; pending_call_site saved;
 			~pending_restore() { vm->pending_site_ctx_ = saved; }
 		} restore_pending{this, saved_pending};
-		auto result = func(args);
+		auto result = call_value(func, args);
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_new_count_;
 		profile_new_resolve_cyc_ += prof_new1 - prof_new0;
@@ -20104,6 +20305,8 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 			return {};
 		case opcode::op_place_arg:
 			return exec_place_arg(f, ins);
+		case opcode::op_sleep:
+			return exec_sleep(f, ins);
 		default: return {};
 	}
 }
@@ -21529,6 +21732,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_concat_pending:
 			case opcode::op_concat_operands:
 			case opcode::op_concat_store:
+			case opcode::op_sleep:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or
@@ -22064,7 +22268,7 @@ checked_result<script_value> vm_backend::execute_callable_from(const script_call
 			auto picked = detail::select_overload_member(*payload.overloads, args.data(), args.size(), engine_);
 			if (!picked) { return picked.error_value(); }
 			const script_callable* member = detail::script_callable_of(*picked.value(), engine_);
-			return member && member->fn ? call_script_function(*member->fn, args) : picked.value()->as_function()(args);
+			return member && member->fn ? call_script_function(*member->fn, args) : call_value(picked.value()->as_function(), args);
 		}
 		case script_callable::kind_type::method: {
 			if (!payload.this_obj) {
@@ -24208,6 +24412,7 @@ prepared_callback* vm_backend::prepare_callback(const script_value& callable) {
 		s.f = frame{};
 		s.f.locals = &s.locals;
 		s.f.window_backed = true;
+		engine_->pin_run();   // the session's calls are the builtin's callbacks (release_callback unpins)
 		return &s;
 	}
 	if (thunk->eng != engine_ || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn) { return nullptr; }
@@ -24241,10 +24446,12 @@ prepared_callback* vm_backend::prepare_callback(const script_value& callable) {
 	f.return_type = function.return_type;
 	f.return_conv_class = static_cast<uint8_t>(detail::return_conv_of(function));
 	f.unit = function.unit;
+	engine_->pin_run();
 	return &s;
 }
 
 void vm_backend::release_callback(prepared_callback* prepared) {
+	engine_->unpin_run();
 	auto& s = *static_cast<callback_session*>(prepared);
 	assert(callback_depth_ > 0 && callback_sessions_[callback_depth_ - 1].get() == &s);
 	--callback_depth_;

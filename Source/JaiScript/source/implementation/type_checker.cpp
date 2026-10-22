@@ -27,6 +27,7 @@
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
+#include <jaiscript/detail/run_texts.hpp>
 #include <jaiscript/detail/ref_param_writes.hpp>
 #include <jaiscript/detail/const_rules.hpp>
 #include <jaiscript/detail/lvalue_shape.hpp>
@@ -558,6 +559,35 @@ private:
     std::string_view class_ctx_name_{};
     enum class cdtor_ctx : uint8_t { none, construction, destruction };
     cdtor_ctx cdtor_ctx_ = cdtor_ctx::none;   // code the class's constructor, field initializers or destructor run (not a lambda they create)
+    int parallel_body_depth_ = 0;   // a parallel_for body, or a lambda written as a parallel_transform/parallel_reduce argument
+
+    bool core_sleep_bound() const {
+        const script_value bound = eng_.get_variable("sleep");
+        return bound.is_function() && eng_.sleep_callee(&bound.unchecked_as_function());
+    }
+    // sleep(seconds): one number, and a place where a run can suspend
+    void check_sleep_call(const std::vector<ctype>& args, const source_location& loc) {
+        if (args.size() != 1) {
+            diag(diag_level::error, loc, "'sleep' expects 1 argument(s), got " + std::to_string(args.size()));
+            return;
+        }
+        if (!namespace_arg_accepts(args[0], script_value_type::jai_float_type)) {
+            diag(diag_level::error, loc, "argument 1 of 'sleep': cannot pass '" + ctype_name(args[0]) + "' where " +
+                 namespace_param_spelling(script_value_type::jai_float_type) + " is expected");
+            return;
+        }
+        check_sleep_context(loc);
+    }
+    // A sleep where a run can never suspend: a parallel body refuses it as admission does, a destructor or the reload hook blocks
+    void check_sleep_context(const source_location& loc) {
+        if (parallel_body_depth_ > 0) {
+            diag(diag_level::error, loc, std::string(detail::k_sleep_in_parallel_body));
+            return;
+        }
+        const bool in_reload_hook = std::any_of(fn_stack_.begin(), fn_stack_.end(), [](const fn_ctx& f) { return f.name == "<hot_reload_migrate>" || f.name == "hot_reload_migrate"; });
+        if (cdtor_ctx_ == cdtor_ctx::destruction) { diag(diag_level::warning, loc, std::string(detail::k_sleep_in_destructor)); }
+        else if (in_reload_hook) { diag(diag_level::warning, loc, std::string(detail::k_sleep_in_reload_hook)); }
+    }
     std::string_view ov_class_{};   // the class whose methods infer_call_impl resolved the call to (empty: not a method call)
 
     static ref_write_callee ref_write_callee_of(const function_decl* f) {
@@ -4140,7 +4170,15 @@ private:
     ctype infer_call(call_expr* c) {
         std::vector<ctype> args;
         args.reserve(c->arguments.size());
-        for (auto& a : c->arguments) { args.push_back(infer(a.get())); }
+        const bool parallel_callee = c->callee && c->callee->get_type() == node_type::identifier_expr &&
+            (static_cast<const identifier_expr*>(c->callee.get())->name == "parallel_transform" ||
+             static_cast<const identifier_expr*>(c->callee.get())->name == "parallel_reduce");
+        for (auto& a : c->arguments) {
+            const bool body = parallel_callee && a->get_type() == node_type::lambda_expr;
+            parallel_body_depth_ += body;
+            args.push_back(infer(a.get()));
+            parallel_body_depth_ -= body;
+        }
         const std::vector<const function_decl*>* ov = nullptr;   // the statically resolved same-script overload set
         ov_class_ = {};
         ctype t = infer_call_impl(c, args, ov);
@@ -4358,6 +4396,10 @@ private:
 			if (eng_.has_function(name)) {
 				note_global_use(id->name);
 				check_constant_arguments(name, name, c);
+				if (name == "sleep" && core_sleep_bound()) {
+					check_sleep_call(args, c->location);
+					return ctype::make(ctype::null_k);
+				}
 				check_host_call(name, args, c->location);
 				if (name == "parallel_reduce") { check_reduce_callbacks(c); }
 				// a stdlib math alias yields the builtin's float wherever its name binds the builtin: a proof every consumer guards at run time
@@ -5103,7 +5145,9 @@ private:
                     scopes_.back().emplace(std::string_view(extra.name), std::move(more));
                 }
                 for (const auto& c : f->extra_containers) { infer(c.get()); }
+                ++parallel_body_depth_;
                 walk_stmt(f->body.get());
+                --parallel_body_depth_;
                 scopes_.pop_back();
                 break;
             }

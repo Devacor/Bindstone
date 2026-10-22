@@ -297,21 +297,6 @@ namespace stdlib {
                 return make_date(e, d);
             });
         }
-        def("sleep", sig(1, 1, {svt::jai_float_type}, svt::jai_null_type), [=](engine* e, const args_t& a) -> R {
-            if (a.size() != 1) return count_error("time::sleep expects exactly 1 argument (seconds)");
-            double seconds = 0.0;
-            if (!number(a[0], seconds)) return type_error("time::sleep expects a number of seconds");
-            if (seconds > 0.0) { e->time().sleep_for(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(seconds > 1e9 ? 1e9 : seconds))); }
-            return script_value(std::monostate{}, e);
-        });
-        def("sleep_ms", sig(1, 1, {svt::jai_float_type}, svt::jai_null_type), [=](engine* e, const args_t& a) -> R {
-            if (a.size() != 1) return count_error("time::sleep_ms expects exactly 1 argument (milliseconds)");
-            double ms = 0.0;
-            if (!number(a[0], ms)) return type_error("time::sleep_ms expects a number of milliseconds");
-            if (ms > 0.0) { e->time().sleep_for(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double, std::milli>(ms > 1e12 ? 1e12 : ms))); }
-            return script_value(std::monostate{}, e);
-        });
-
         for (const char* name : {"stopwatch", "date"}) {
             const uint64_t id = eng_ref.symbolize(name);
             ns->variables[id] = eng_ref.get_variable(std::string("time::") + name);

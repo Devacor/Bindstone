@@ -361,6 +361,11 @@ namespace jai::vm {
 
         checked_result<script_value> resume_coroutine(coroutine_handle& handle) override;
 
+        std::unique_ptr<backend_run_state> make_run_state() override;
+        void swap_run_state(backend_run_state& state) noexcept override;
+        void reset_run_state(backend_run_state& state) override;
+        void adopt_run_trace(backend_run_state& state) override;
+
         std::string get_backend_name() const override { return "vm"; }
         checked_result<std::string> text_of(const script_value& v) override { return value_to_string_with_method(v.deref()); }
 
@@ -1140,6 +1145,7 @@ namespace jai::vm {
         // Suspended-fiber state stored opaquely on a coroutine_handle (frames+ip+stack model,
         // not the interpreter's AST continuation replay). Defined in vm_backend.cpp.
         struct vm_coroutine_state;
+        struct vm_run_state;   // a suspendable run's own copy of every member below that execution changes (swap_run_state)
         coroutine_handle* active_coroutine_ = nullptr;
         bool yielding_ = false;
 
@@ -1645,7 +1651,10 @@ namespace jai::vm {
 
         builtin_method_context builtin_ctx() const {
             return {engine_, symbolizer_,
-                [](void* self, const script_value& a, const script_value& b) { return static_cast<vm_backend*>(self)->language_equal(a, b); },
+                [](void* self, const script_value& a, const script_value& b) {
+                    engine::run_pin pin(static_cast<vm_backend*>(self)->engine_);   // a builtin's comparison is its callback
+                    return static_cast<vm_backend*>(self)->language_equal(a, b);
+                },
                 [](void* self) { return static_cast<vm_backend*>(self)->is_unwinding_; }, const_cast<vm_backend*>(this)};
         }
         checked_result<bool> language_equal(const script_value& a, const script_value& b) override;
@@ -2600,6 +2609,11 @@ namespace jai::vm {
         op_status capture_arg(frame& f, const vm_instruction& ins);   // cold: the value may still share storage, or a place binds (op_capture_arg)
         op_status exec_place_arg(frame& f, const vm_instruction& ins);
         op_status exec_call_from_scratch(frame& f, const vm_instruction& ins);
+        op_status exec_sleep(frame& f, const vm_instruction& ins);
+        // A function value running script calls: while a run is active a script callable enters without pinning it
+        checked_result<script_value> call_value(const script_function& f, const std::vector<script_value>& args) {
+            return engine_->active_run_pins() ? detail::call_function_value(f, args) : f(args);
+        }
         op_status exec_call_from_scratch_general(frame& f, const vm_instruction& ins);
         op_status call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function> pin);
         // the call paths' catch: the active exception becomes the unwinding state (out of line, no texts on the caller's

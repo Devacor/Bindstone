@@ -1128,15 +1128,15 @@ script_value* environment::get_env_var_ptr(uint64_t id) {
     return nullptr;
 }
 
-checked_result<script_value> bound_method_fn::operator()(const std::vector<script_value>& args) const {
+checked_result<script_value> bound_method_fn::call(const std::vector<script_value>& args, bool host_call) const {
     const auto& method_func = method.as_function();
     const auto* dispatch = method_func.target<script_method_dispatch>();
-    auto result = dispatch ? dispatch->invoke(this_obj, args, 0) : [&]() {
+    auto result = dispatch ? dispatch->invoke(this_obj, args, 0, host_call) : [&]() {
         std::vector<script_value> method_args;
         method_args.reserve(args.size() + 1);
         method_args.push_back(this_obj);
         method_args.insert(method_args.end(), args.begin(), args.end());
-        return method_func(method_args);
+        return host_call ? method_func(method_args) : detail::call_function_value(method_func, method_args);
     }();
 
     detail::anchor_bound_method_result(this_obj, result);

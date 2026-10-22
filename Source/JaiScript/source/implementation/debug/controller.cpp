@@ -334,6 +334,15 @@ bool controller::sync_hot_state() {
     return true;
 }
 
+void controller::swap_step_state(int& mode, int& base_depth, int& stop_depth) noexcept {
+    std::lock_guard<std::mutex> lk(mtx_);
+    mode = step_mode_.exchange(mode, std::memory_order_relaxed);
+    base_depth = step_base_depth_.exchange(base_depth, std::memory_order_relaxed);
+    stop_depth = current_stop_depth_.exchange(stop_depth, std::memory_order_relaxed);
+    hot_step_or_pause_.store(enabled_.load(std::memory_order_acquire) && (pending_pause_.load(std::memory_order_relaxed) != 0
+        || step_mode_.load(std::memory_order_relaxed) != static_cast<int>(step_mode::none) || sync_requested_.load()), std::memory_order_relaxed);
+}
+
 bool controller::should_stop(const ast_node* node, int depth, std::string& reason_out) const {
     if (pending_pause_.load(std::memory_order_relaxed)) {
         reason_out = "pause";
@@ -414,6 +423,11 @@ void controller::park(const stop_info& si) {
     // breakpoints edited during the pause must be live from the very next statement,
     // and a detach during the pause disarms the backend's gate at once.
     engine_->get_execution_backend()->sync_debug_hook();
+}
+
+void controller::service() {
+    if (!sync_requested_.load(std::memory_order_relaxed)) { return; }
+    sleep_for(std::chrono::nanoseconds{0});
 }
 
 void controller::sleep_for(std::chrono::nanoseconds duration) {

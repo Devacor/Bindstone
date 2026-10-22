@@ -1453,7 +1453,7 @@ public:
         test("an_edit_is_seen_inside_one_long_execute", [=, this]() {
             // interval 0: every reach checks, whichever site reaches the module, inside one execute; the default window: a loop
             // that keeps reaching the same import inside one execute sees the edit once the window has passed (the clock
-            // sample moves with a time:: sleep and with the budget check's samples in a busy loop)
+            // sample moves with a sleep and with the budget check's samples in a busy loop)
             const auto dir = jai::foundry::test_temp_directory();
             const auto path = dir / "le_mod.jai";
             int tick = 0;
@@ -1483,12 +1483,12 @@ public:
                 check_eq(3, runs);
             }
             for (bool sleeping : {true, false}) {
-                const std::string label = sleeping ? " (time::sleep_ms in the loop)" : " (a busy loop)";
+                const std::string label = sleeping ? " (a sleep in the loop)" : " (a busy loop)";
                 int runs = 0, value = 1;
                 write(value);
                 auto eng = setup(runs, value);
                 eng->import_recheck_interval(0.2);
-                const std::string body = sleeping ? "time::sleep_ms(5);" : "for (int k = 0; k < 2000; k++) { spin += k; }";
+                const std::string body = sleeping ? "sleep(0.005);" : "for (int k = 0; k < 2000; k++) { spin += k; }";
                 const script_int seen = eng->execute(
                     "int spin = 0;\nint frames = 0;\nimport(\"le_mod.jai\");\nrewrite();\n"
                     "while (runs() < 2 && frames < 100000) { import(\"le_mod.jai\"); " + body + " frames++; }\nle_value();").as_int();

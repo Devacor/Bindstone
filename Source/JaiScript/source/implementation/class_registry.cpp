@@ -224,6 +224,7 @@ void class_definition::run_destructor_body(class_instance* instance, const class
         if (run_destructor_body_in_region(*engine_, instance, level, body)) { return; }
     }
     detail::release_machine* m = engine_->release_machine_here();
+    engine::run_pin pin(engine_);   // a destructor runs where a release happens: a sleep in it blocks
     std::vector<script_value> arguments;
     if (m && !m->spare_arguments.empty()) {
         arguments = std::move(m->spare_arguments.back());

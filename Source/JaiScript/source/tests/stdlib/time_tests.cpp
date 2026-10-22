@@ -411,11 +411,11 @@ public:
                 virtual_clock clk;
                 auto e = make_timed(use_vm, clk);
                 const char* be = use_vm ? " (vm)" : " (interpreter)";
-                e->execute("time::sleep(0.25); time::sleep_ms(10); time::sleep(0); time::sleep(-1); time::sleep_ms(0); time::sleep_ms(-5);");
+                e->execute("sleep(0.25); sleep(0.01); sleep(0); sleep(-1); sleep(0.0); sleep(-0.005);");
                 check_eq((size_t)2, clk.sleeps.size(), std::string("only positive sleeps reach the source") + be);
                 if (clk.sleeps.size() == 2) {
                     check_eq((int64_t)250000000, (int64_t)clk.sleeps[0].count(), std::string("sleep(seconds)") + be);
-                    check_eq((int64_t)10000000, (int64_t)clk.sleeps[1].count(), std::string("sleep_ms(ms)") + be);
+                    check_eq((int64_t)10000000, (int64_t)clk.sleeps[1].count(), std::string("a fraction of a second") + be);
                 }
                 check_eq(std::string("100.26"), e->execute("time::now();").to_string(), std::string("a sleep advances a host clock") + be);
                 check_near(100.26, e->engine_elapsed(), 1e-9);
@@ -425,8 +425,8 @@ public:
                 e->time().source({}, {}, {});
                 check_true(e->execute("var a = time::now(); a >= 0.0 && a < 3600.0;").as<bool>(), std::string("the system source is back") + be);
                 check_eq(reads, clk.mono_reads, std::string("the host clock is no longer read") + be);
-                auto errors = e->execute(R"(var out = ""; var s = "x"; try { time::sleep(s); } catch (e) { out += e; } out += " | "; try { reflect::call("time::sleep", 1, 2); } catch (e) { out += e; } out;)").to_string();
-                check_eq(std::string("time::sleep expects a number of seconds | time::sleep expects exactly 1 argument (seconds)"), errors, std::string("sleep errors") + be);
+                auto errors = e->execute(R"(var out = ""; var s = "x"; try { sleep(s); } catch (e) { out += e; } out += " | "; try { reflect::call("sleep", 1, 2); } catch (e) { out += e; } out;)").to_string();
+                check_eq(std::string("sleep expects a number of seconds | No overload of 'sleep' takes (int, int)"), errors, std::string("sleep errors") + be);
             }
         });
 
@@ -454,7 +454,7 @@ public:
                     [&](std::chrono::nanoseconds d) { sim_now += d; });
                 sim_now += std::chrono::milliseconds(1500);
                 eng->execute("print(time::now(), ' ', time::utc_now().to_string());");
-                eng->execute("time::sleep(2.0); print(time::now());");
+                eng->execute("sleep(2.0); print(time::now());");
                 check_eq(std::string("1.5 2023-11-14T22:13:21.500Z\n3.5\n"), out->str(), use_vm ? "vm" : "interpreter");
             }
         });
@@ -489,7 +489,7 @@ public:
             };
             check_eq(std::string("'time::now' expects 0 argument(s), got 1"), first_error("time::now(5);"), "arity");
             check_eq(std::string("'time::date_from_unix' expects 1 to 2 argument(s), got 3"), first_error("time::date_from_unix(1, true, 3);"), "an arity range");
-            check_eq(std::string("argument 1 of 'time::sleep': cannot pass 'string' where a number is expected"), first_error("time::sleep(\"x\");"), "an argument type");
+            check_eq(std::string("argument 1 of 'sleep': cannot pass 'string' where a number is expected"), first_error("sleep(\"x\");"), "an argument type");
             check_eq(std::string("argument 2 of 'time::date_from_unix': cannot pass 'int' where a bool is expected"), first_error("time::date_from_unix(1, 1);"), "a bool argument");
             check_eq(std::string("no member 'bogus' in class 'time::stopwatch'"), first_error("time::stopwatch sw; sw.bogus();"), "a stopwatch member");
             check_eq(std::string("no member 'nope' in class 'time::date'"), first_error("auto d = time::utc_now(); d.nope;"), "a date member");
@@ -501,7 +501,7 @@ public:
                 string s = time::date_now("${year}"); time::date d = time::local_now(); time::date u = time::utc_now(); time::date f = time::date_from_unix(0, true);
                 time::date g = time::utc_date(2024, 1, 1); time::date h = time::local_date(2024, 1, 1, 12); int y = d.year; d.month = 3; float gap = u - d;
                 bool b = d.between(f, g) && d < g; string iso = d.to_string(); time::date t = d.add_days(1).add_hours(1.5).to_utc(); time::stopwatch w = time::stopwatch();
-                time::sleep(0); time::sleep_ms(0);)";
+                sleep(0); sleep(0.0);)";
             const check_report r = e->check(clean);
             check_eq((size_t)0, r.diagnostics.size(), "a clean program: " + (r.diagnostics.empty() ? std::string() : r.diagnostics[0].message));
         });

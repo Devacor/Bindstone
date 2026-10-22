@@ -190,8 +190,11 @@ checked against it - the `string::` library declares one per function, so
 `string::repeat(to_char(a), 3)` is `argument 1 of 'string::repeat': cannot pass 'char' where a
 string is expected`, a wrong count is `'string::pad_left' expects 2 to 3 argument(s), got 1`, and
 the result is typed (text of the first argument's kind, `bool` for `is_valid_utf8`); the `time::`
-entries declare theirs too (`'time::now' expects 0 argument(s), got 1`, `time::sleep("x")` is `argument 1 of
-'time::sleep': cannot pass 'string' where a number is expected`, `time::local_now()` types as `time::date`). A unit that
+entries declare theirs too (`'time::now' expects 0 argument(s), got 1`, `time::date_from_unix("x")` is `argument 1 of
+'time::date_from_unix': cannot pass 'string' where a number is expected`, `time::local_now()` types as `time::date`). The core
+`sleep` checks the same way (`argument 1 of 'sleep': cannot pass 'string' where a number is expected`), and its place: an
+error in a `parallel_for` body or a lambda handed to `parallel_transform`/`parallel_reduce`, a warning in a destructor or a
+`hot_reload_migrate` (a run cannot suspend there). A unit that
 declares the namespace itself, or a script function of the entry's name, stays lenient. Any
 other user namespace path `a::b::c` (a flat name; declared here or registered with the engine)
 is lenient at every depth.

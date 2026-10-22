@@ -472,7 +472,7 @@ string title_screen(bool has_save, int auto_frames) {
 		print(HOME + out, skip_newline);
 		FRAME = FRAME + 1;
 		int spent = time::now() * 1000 - NOW_MS;
-		if (spent < 33) { time::sleep_ms(33 - spent); }
+		if (spent < 33) { sleep((33 - spent) / 1000.0); }
 	}
 	return "";
 }

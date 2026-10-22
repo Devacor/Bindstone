@@ -393,7 +393,8 @@ namespace jai {
     struct bound_method_fn {
         script_value this_obj;
         script_value method;
-        checked_result<script_value> operator()(const std::vector<script_value>& args) const;
+        checked_result<script_value> operator()(const std::vector<script_value>& args) const { return call(args, true); }
+        checked_result<script_value> call(const std::vector<script_value>& args, bool host_call) const;   // script_callable_thunk::call's
     };
 
     namespace detail {

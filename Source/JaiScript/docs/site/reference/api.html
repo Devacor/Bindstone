@@ -721,6 +721,9 @@ print(same_object(a, b), &quot; &quot;, same_object(a, r), &quot; &quot;, a == b
 <div class="api-entry" data-provider="core" data-search="shared_from_this() -&gt; shared_ptr&lt;t&gt; observe method context only. every engine"><h3 id="api-0cb76b5518ef"><code>shared_from_this() -&gt; shared_ptr&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Method context only.</p>
 </div>
+<div class="api-entry" data-provider="core" data-search="sleep(seconds: number) -&gt; void wait waits seconds on the engine&#x27;s time source: inside a run engine::start began, the run suspends and returns to the host until then; elsewhere it blocks. every engine"><h3 id="api-556785430d43"><code>sleep(seconds: number) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; wait</p>
+<p>Waits seconds on the engine&#x27;s time source: inside a run engine::start began, the run suspends and returns to the host until then; elsewhere it blocks.</p>
+</div>
 <div class="api-entry" data-provider="runner" data-search="stop_sounds() -&gt; void audio stops every sound. standalone jaiscript.exe"><h3 id="api-acd1d9db6d7c"><code>stop_sounds() -&gt; void</code></h3><p><strong>Standalone jaiscript.exe</strong> &middot; audio</p>
 <p>Stops every Sound.</p>
 </div>
@@ -1603,11 +1606,6 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="time::now() -&gt; float observe engine elapsed seconds, monotonic. register_all() or area registration"><h3 id="api-0503c71d0dd9"><code>time::now() -&gt; float</code></h3><p><strong>register_all() or area registration</strong> &middot; observe</p>
 <p>Engine elapsed seconds, monotonic.</p>
-</div>
-<div class="api-entry" data-provider="stdlib" data-search="time::sleep(seconds: number) -&gt; void wait seconds; not a busy loop. register_all() or area registration"><h3 id="api-d4d32781becb"><code>time::sleep(seconds: number) -&gt; void</code></h3><p><strong>register_all() or area registration</strong> &middot; wait</p>
-<p>Seconds; not a busy loop.</p>
-</div>
-<div class="api-entry" data-provider="stdlib" data-search="time::sleep_ms(milliseconds: number) -&gt; void wait  register_all() or area registration"><h3 id="api-198f2b802de0"><code>time::sleep_ms(milliseconds: number) -&gt; void</code></h3><p><strong>register_all() or area registration</strong> &middot; wait</p>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="time::stopwatch() -&gt; time::stopwatch construct  register_all() or area registration"><h3 id="api-3fea913b0a98"><code>time::stopwatch() -&gt; time::stopwatch</code></h3><p><strong>register_all() or area registration</strong> &middot; construct</p>
 </div>

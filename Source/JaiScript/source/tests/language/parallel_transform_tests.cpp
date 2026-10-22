@@ -706,6 +706,7 @@ public:
 			// published chunk counts cover the range (the blocks each worker took, whatever the timing)
 			for (size_t workers : {size_t(1), size_t(2), size_t(3), size_t(7), size_t(8)}) {
 				auto e = make_engine();
+				e->execution_budget(0);   // timing-free: a loaded machine must not trip the default budget
 				jai::stdlib::register_all(*e);
 				e->parallel_thread_count(workers);
 				auto r = e->execute(R"(
@@ -739,6 +740,7 @@ public:
 			// many elements with uneven costs over many workers: every element once, and the lowest failing element still wins
 			for (int round = 0; round < 20; ++round) {
 				auto e = make_engine();
+				e->execution_budget(0);   // the Debug interpreter's 3000-element serial and parallel passes outrun the default on a loaded machine
 				jai::stdlib::register_all(*e);
 				e->parallel_thread_count(6);
 				auto r = e->execute(R"(

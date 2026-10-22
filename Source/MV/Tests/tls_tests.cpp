@@ -2,9 +2,11 @@
 // checks, against loopback servers using certificates made at test time (tls_test_pki.hpp).
 
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 #include "MV/Network/network.h"
 #include "MV/Network/download.h"
 #include "MV/Network/email.h"
+#include "MV/Network/scriptHttp.h"
 #include "socket_test_peers.hpp"
 #include "tls_test_pki.hpp"
 
@@ -484,6 +486,47 @@ public:
 				server.finish();
 				std::lock_guard<std::mutex> guard(log->lock);
 				check_true(log->request.empty(), "and sends no request");
+			}
+		});
+
+		test("spider:: on the script transport sends any method with its headers and body, keeps every Set-Cookie, follows no redirect itself and trusts only the platform's roots", [this]() {
+			auto engine = jai::engine::make();
+			jai::stdlib::register_all(*engine);
+			jai::stdlib::register_spider(*engine);
+			engine->enable("network");
+			engine->http_transport(MV::makeScriptHttpTransport());
+			auto text = [&](const std::string& a_source) { return engine->execute(a_source).as<std::string>(); };
+			{
+				std::string request;
+				OneShotServer server([&](MV::Socket& a_socket) {
+					std::string buffer;
+					readUntil(a_socket, buffer, "payload", request);
+					writeAll(a_socket, "HTTP/1.1 201 Created\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Length: 4\r\nConnection: close\r\n\r\nmade");
+				});
+				auto answer = text("auto r = spider::post(\"http://127.0.0.1:" + std::to_string(server.port) + "/things?x=1\", \"payload\", {\"method\": \"PUT\", \"headers\": {\"X-Spider\": \"silk\"}}); "
+					"r.status + \" \" + r.body + \" \" + r.cookies.size() + \" \" + r.cookies[1];");
+				server.finish();
+				check_eq(std::string("201 made 2 b=2"), answer);
+				check_true(contains(request, "PUT /things?x=1 HTTP/1.1\r\n") && contains(request, "X-Spider: silk\r\n") && contains(request, "Content-Type: text/plain; charset=utf-8\r\n")
+					&& contains(request, "Content-Length: 7\r\n") && contains(request, "\r\n\r\npayload"), "the request went out as the script spelled it: " + request);
+			}
+			{
+				OneShotServer server([&](MV::Socket& a_socket) {
+					std::string buffer;
+					std::string head;
+					readUntil(a_socket, buffer, "\r\n\r\n", head);
+					writeAll(a_socket, "HTTP/1.1 302 Found\r\nLocation: /elsewhere\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+				});
+				auto answer = text("auto r = spider::get(\"http://127.0.0.1:" + std::to_string(server.port) + "/\", {\"redirects\": 0}); r.status + \" \" + r.headers[\"location\"];");
+				server.finish();
+				check_eq(std::string("302 /elsewhere"), answer, "the transport answers a redirect; the library's policy follows it");
+			}
+			{
+				TestPki pki;
+				OneShotServer server(fakeHttps(MV::makeTlsServerContext(pki.serverConfig(pki.localServer())), std::make_shared<HttpsLog>()));
+				auto refused = text("string m = \"\"; try { spider::get(\"https://localhost:" + std::to_string(server.port) + "/\"); } catch (e) { m = e; } m;");
+				server.finish();
+				check_true(contains(refused, "Handshake Failure") && contains(refused, "certificate verify failed"), "a test CA is not among the platform's roots: " + refused);
 			}
 		});
 

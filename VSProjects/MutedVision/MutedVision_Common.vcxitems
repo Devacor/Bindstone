@@ -24,6 +24,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkContext.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkReactor.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkStream.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\scriptHttp.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\socket.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\tls.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\url.cpp" />
@@ -128,6 +129,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkContext.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkReactor.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkStream.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\scriptHttp.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\socket.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\package.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\tls.h" />

@@ -90,6 +90,9 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\tls.cpp">
       <Filter>MV\Network</Filter>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\scriptHttp.cpp">
+      <Filter>MV\Network</Filter>
+    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Physics\collider.cpp">
       <Filter>MV\Physics</Filter>
     </ClCompile>
@@ -244,6 +247,9 @@
       <Filter>MV\Network</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\tls.h">
+      <Filter>MV\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\scriptHttp.h">
       <Filter>MV\Network</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\url.h">

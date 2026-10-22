@@ -18,6 +18,11 @@
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+#endif
+
 // Present from OpenSSL 1.1.0h; the bit is unused before that, so older libraries simply ignore it.
 #ifndef SSL_OP_NO_RENEGOTIATION
 #define SSL_OP_NO_RENEGOTIATION 0x40000000U
@@ -132,6 +137,63 @@ namespace MV {
 			require<ResourceException>(SSL_CTX_check_private_key(a_context) == 1, "TLS: [", a_config.privateKeyFile, "] is not the key of [", a_config.certificateFile, "]");
 		}
 
+#ifdef __APPLE__
+		void appendCertificate(CFMutableArrayRef a_certificates, X509* a_certificate) {
+			unsigned char* der = nullptr;
+			const int length = i2d_X509(a_certificate, &der);
+			if (length <= 0) {
+				return;
+			}
+			if (CFDataRef data = CFDataCreate(kCFAllocatorDefault, der, length)) {
+				if (SecCertificateRef certificate = SecCertificateCreateWithData(kCFAllocatorDefault, data)) {
+					CFArrayAppendValue(a_certificates, certificate);
+					CFRelease(certificate);
+				}
+				CFRelease(data);
+			}
+			OPENSSL_free(der);
+		}
+
+		// iOS keeps its roots in the keychain, out of OpenSSL's reach: the peer's chain is judged by SecTrust, the system's
+		// own verifier, against the name the connection sent as SNI (verifyTlsPeerAs); an IP-literal host sends none and is refused
+		int verifyWithSystemTrust(X509_STORE_CTX* a_store, void*) {
+			SSL* ssl = static_cast<SSL*>(X509_STORE_CTX_get_ex_data(a_store, SSL_get_ex_data_X509_STORE_CTX_idx()));
+			const char* host = ssl ? SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name) : nullptr;
+			X509* leaf = X509_STORE_CTX_get0_cert(a_store);
+			if (!host || !leaf) {
+				X509_STORE_CTX_set_error(a_store, X509_V_ERR_HOSTNAME_MISMATCH);
+				return 0;
+			}
+			CFMutableArrayRef certificates = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+			appendCertificate(certificates, leaf);
+			if (STACK_OF(X509)* chain = X509_STORE_CTX_get0_untrusted(a_store)) {
+				for (int i = 0; i < sk_X509_num(chain); ++i) {
+					if (X509* link = sk_X509_value(chain, i); link != leaf) {
+						appendCertificate(certificates, link);
+					}
+				}
+			}
+			CFStringRef name = CFStringCreateWithCString(kCFAllocatorDefault, host, kCFStringEncodingUTF8);
+			SecPolicyRef policy = SecPolicyCreateSSL(true, name);
+			SecTrustRef trust = nullptr;
+			const bool trusted = SecTrustCreateWithCertificates(certificates, policy, &trust) == errSecSuccess && SecTrustEvaluateWithError(trust, nullptr);
+			if (trust) {
+				CFRelease(trust);
+			}
+			CFRelease(policy);
+			if (name) {
+				CFRelease(name);
+			}
+			CFRelease(certificates);
+			if (!trusted) {
+				X509_STORE_CTX_set_error(a_store, X509_V_ERR_CERT_UNTRUSTED);
+			}
+			return trusted ? 1 : 0;
+		}
+#endif
+
+		// The platform's roots: the Windows ROOT store copied in, SecTrust (the keychain) on Apple platforms, the system CA
+		// folder on Android, OpenSSL's default paths elsewhere
 		void trustSystemRoots(SSL_CTX *a_context) {
 #ifdef _WIN32
 			HCERTSTORE systemStore = CertOpenSystemStoreW(0, L"ROOT");
@@ -150,6 +212,13 @@ namespace MV {
 			}
 			ERR_clear_error();
 			CertCloseStore(systemStore, 0);
+#elif defined(__APPLE__)
+			SSL_CTX_set_cert_verify_callback(a_context, &verifyWithSystemTrust, nullptr);
+#elif defined(__ANDROID__)
+			// one PEM per subject-hash file name: the layout OpenSSL reads as a CA folder
+			SSL_CTX_load_verify_locations(a_context, nullptr, "/system/etc/security/cacerts");
+			SSL_CTX_set_default_verify_paths(a_context);
+			ERR_clear_error();
 #else
 			SSL_CTX_set_default_verify_paths(a_context);
 			ERR_clear_error();

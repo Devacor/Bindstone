@@ -19,6 +19,7 @@
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include "MV/ArtificialIntelligence/pathfinding.h"
+#include "MV/Network/scriptHttp.h"
 #include <jaiscript/stdlib/stdlib.hpp>
 #include "MV/Utility/services.hpp"
 #include "MV/Utility/generalUtility.h"
@@ -137,6 +138,9 @@ namespace MV {
 			MV::error("Script callback failed: ", a_message, trace.empty() ? "" : "\n", trace);
 		});
 		jai::stdlib::register_all(*engine);
+		jai::stdlib::register_spider(*engine);   // spider::catch / sling / get / post over MV downloads: HTTPS on every platform
+		engine->http_transport(makeScriptHttpTransport());
+		engine->enable("network");
 		jai::bind_registrar<MV::Services>(*engine, a_services);
 		engine->add_global("InEditMode", jai::script_value(editMode(), engine.get()));
 		engine->add_global("PathMode", engine->make_object(std::make_shared<PathModeValues>()));

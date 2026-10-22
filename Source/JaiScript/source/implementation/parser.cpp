@@ -6,6 +6,7 @@
 #include "../../include/jaiscript/detail/math_intrinsics.hpp"
 #include "../../include/jaiscript/detail/lexer.hpp"  // a spliced include is lexed here
 #include "../../include/jaiscript/detail/map_entry_binding.hpp"
+#include "../../include/jaiscript/detail/expr_children.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iterator>
@@ -3760,32 +3761,37 @@ checked_result<statement_ptr> parser::parallel_for_statement() {
     // plain auto gets a worker-local COPY - zero side effects, still legal
     // Zip: `, decl` repeats declare further loop variables over further arrays (same length)
     std::vector<parameter> extra_params;
-    while (match(token_type::comma)) {
-        bool extra_const = match(token_type::const_keyword);
-        JAISCRIPT_TRY_ASSIGN(type_info_ptr extra_type, parse_type());
-        const bool extra_ref = match(token_type::ampersand);
-        if (!check(token_type::identifier)) {
-            report_error("Expected loop variable name in parallel_for", peek());
+    std::vector<expression_ptr> extra_containers;
+    expression_ptr container;
+    if (match(token_type::equal)) {
+        JAISCRIPT_TRY_ASSIGN(container, counted_parallel_range(element_type, is_reference, is_const, varName));
+    } else {
+        while (match(token_type::comma)) {
+            bool extra_const = match(token_type::const_keyword);
+            JAISCRIPT_TRY_ASSIGN(type_info_ptr extra_type, parse_type());
+            const bool extra_ref = match(token_type::ampersand);
+            if (!check(token_type::identifier)) {
+                report_error("Expected loop variable name in parallel_for", peek());
+                return make_error_code(parse_error_code::unexpected_token);
+            }
+            token extraName = advance();
+            parameter extra(extra_type, std::string(extraName.lexeme), extra_ref, extra_const);
+            extra.symbol_id = get_symbol_id(extraName);
+            extra_params.push_back(std::move(extra));
+        }
+        JAISCRIPT_TRY(consume(token_type::colon, "Expected ':' after parallel_for loop variable"));
+
+        // The containers evaluate in the ENCLOSING scope on the calling thread
+        JAISCRIPT_TRY_ASSIGN(container, expression());
+        while (match(token_type::comma)) {
+            JAISCRIPT_TRY_ASSIGN(expression_ptr extra_container, expression());
+            extra_containers.push_back(std::move(extra_container));
+        }
+        if (extra_containers.size() != extra_params.size()) {
+            report_error("parallel_for zip: one array per loop variable (" + std::to_string(1 + extra_params.size()) +
+                         " variables, " + std::to_string(1 + extra_containers.size()) + " arrays)", peek());
             return make_error_code(parse_error_code::unexpected_token);
         }
-        token extraName = advance();
-        parameter extra(extra_type, std::string(extraName.lexeme), extra_ref, extra_const);
-        extra.symbol_id = get_symbol_id(extraName);
-        extra_params.push_back(std::move(extra));
-    }
-    JAISCRIPT_TRY(consume(token_type::colon, "Expected ':' after parallel_for loop variable"));
-
-    // The containers evaluate in the ENCLOSING scope on the calling thread
-    JAISCRIPT_TRY_ASSIGN(expression_ptr container, expression());
-    std::vector<expression_ptr> extra_containers;
-    while (match(token_type::comma)) {
-        JAISCRIPT_TRY_ASSIGN(expression_ptr extra_container, expression());
-        extra_containers.push_back(std::move(extra_container));
-    }
-    if (extra_containers.size() != extra_params.size()) {
-        report_error("parallel_for zip: one array per loop variable (" + std::to_string(1 + extra_params.size()) +
-                     " variables, " + std::to_string(1 + extra_containers.size()) + " arrays)", peek());
-        return make_error_code(parse_error_code::unexpected_token);
     }
     JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after parallel_for range"));
 
@@ -3826,6 +3832,110 @@ checked_result<statement_ptr> parser::parallel_for_statement() {
     node->local_count = restore_scope();
     node->frame_captures = std::move(frame_captures);
     return node;
+}
+
+// A step the serial loop would evaluate to the same value every time: names, literals and operators, no call or store
+static bool loop_invariant_step(const jai::expression* e) {
+    if (!e) { return true; }
+    switch (e->get_type()) {
+        case node_type::call_expr: case node_type::assignment_expr: case node_type::lambda_expr: case node_type::new_expr:
+        case node_type::yield_expr: case node_type::throw_expr: case node_type::import_expr: case node_type::include_expr:
+            return false;
+        case node_type::unary_expr: {
+            const token_type op = static_cast<const unary_expr*>(e)->op.type;
+            if (op == token_type::plus_plus || op == token_type::minus_minus) { return false; }
+            break;
+        }
+        default:
+            break;
+    }
+    bool result = true;
+    detail::for_each_child_expression(e, [&](const jai::expression* child) { result = result && loop_invariant_step(child); });
+    return result;
+}
+
+// parallel_for (int i = a; i < b; i++): one int variable stepped by a fixed amount toward a bound, so it visits each index of
+// one arithmetic sequence once. The range is that sequence: __jai_parallel_range(a, b, k, comparison, step kind) evaluates
+// a, b and k once, in order, before the region (detail::parallel_counted_range); the region iterates it as an index array
+checked_result<expression_ptr> parser::counted_parallel_range(const type_info_ptr& element_type, bool is_reference, bool is_const, const token& variable) {
+    auto refuse = [&](const char* text) -> checked_result<expression_ptr> {
+        report_error(text, peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    };
+    const bool int_variable = !is_reference && !is_const &&   // a null type is auto
+                              (!element_type || (element_type->base_type == script_value_type::jai_int_type && !element_type->is_byte_element()));
+    if (!int_variable) { return refuse("parallel_for: a counted loop declares one int variable (int i = a or auto i = a)"); }
+    const source_location at = variable.location;
+    JAISCRIPT_TRY_ASSIGN(expression_ptr start, expression());
+    if (!match(token_type::semicolon)) { return refuse("parallel_for: a counted loop declares one int variable (int i = a or auto i = a)"); }
+    auto names_variable = [&]() { return check(token_type::identifier) && peek().lexeme == variable.lexeme; };
+    const char* compares = "parallel_for: a counted loop compares its variable with a bound (i < b, i <= b, i > b or i >= b)";
+    if (!names_variable()) { return refuse(compares); }
+    advance();
+    script_int comparison = 0;
+    if (match(token_type::less)) { comparison = 0; }
+    else if (match(token_type::less_equal)) { comparison = 1; }
+    else if (match(token_type::greater)) { comparison = 2; }
+    else if (match(token_type::greater_equal)) { comparison = 3; }
+    else { return refuse(compares); }
+    JAISCRIPT_TRY_ASSIGN(expression_ptr bound, shift());
+    if (!match(token_type::semicolon)) { return refuse(compares); }
+    const char* steps = "parallel_for: a counted loop must step its variable by a fixed amount toward a bound (write i++, i--, i += k or i -= k)";
+    script_int step_kind = 0;   // 1 ++, -1 --, 2 +=, -2 -=
+    expression_ptr step;
+    if (match(token_type::plus_plus) || match(token_type::minus_minus)) {
+        step_kind = previous().type == token_type::plus_plus ? 1 : -1;
+        if (!names_variable()) { return refuse(steps); }
+        advance();
+    } else if (names_variable()) {
+        advance();
+        if (match(token_type::plus_plus) || match(token_type::minus_minus)) {
+            step_kind = previous().type == token_type::plus_plus ? 1 : -1;
+        } else if (match(token_type::plus_equal) || match(token_type::minus_equal)) {
+            step_kind = previous().type == token_type::plus_equal ? 2 : -2;
+            JAISCRIPT_TRY_ASSIGN(step, expression());
+            if (!loop_invariant_step(step.get())) { return refuse(steps); }
+        } else {
+            return refuse(steps);
+        }
+    } else {
+        return refuse(steps);
+    }
+    if (!check(token_type::right_paren)) { return refuse(steps); }
+    // a constant step's direction is known here: zero, or away from the bound, never ends the serial loop
+    std::optional<script_int> constant = 1;
+    if (step) {
+        constant.reset();
+        const jai::expression* e = step.get();
+        bool negated = false;
+        if (e->get_type() == node_type::unary_expr && static_cast<const unary_expr*>(e)->op.type == token_type::minus) {
+            negated = true;
+            e = static_cast<const unary_expr*>(e)->operand.get();
+        }
+        if (e && e->get_type() == node_type::literal_expr && static_cast<const literal_expr*>(e)->value.is_int()) {
+            const script_int v = static_cast<const literal_expr*>(e)->value.unchecked_as_int();
+            constant = negated ? (v == 0 ? 0 : (v > 0 ? -1 : 1)) : (v == 0 ? 0 : (v > 0 ? 1 : -1));
+        }
+    }
+    if (constant) {
+        if (*constant == 0) { return refuse("parallel_for: a counted loop's step must not be zero"); }
+        if ((comparison <= 1) != (*constant * step_kind > 0)) {
+            return refuse("parallel_for: a counted loop must step toward its bound (i < b and i <= b count up, i > b and i >= b count down)");
+        }
+    }
+    if (!step) {
+        step = std::make_shared<literal_expr>(at, script_value(script_value::ast_literal_tag{}, script_int(1)));
+    }
+    auto [range_id, range_view] = symbolizer_->intern_with_view(parallel_for_stmt::k_counted_range);
+    auto callee = std::make_shared<identifier_expr>(at, range_view, range_id);
+    callee->slot_index = lookup_slot(range_id);
+    std::vector<expression_ptr> arguments;
+    arguments.push_back(std::move(start));
+    arguments.push_back(std::move(bound));
+    arguments.push_back(std::move(step));
+    arguments.push_back(std::make_shared<literal_expr>(at, script_value(script_value::ast_literal_tag{}, comparison)));
+    arguments.push_back(std::make_shared<literal_expr>(at, script_value(script_value::ast_literal_tag{}, step_kind)));
+    return expression_ptr(std::make_shared<call_expr>(at, callee, std::move(arguments)));
 }
 
 checked_result<statement_ptr> parser::for_statement() {

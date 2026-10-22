@@ -1975,6 +1975,76 @@ public:
 			const std::string method = error_of(e, prelude + "parallel_for (auto& b, int i : bs, idx) { b.reset(i); out[i] = 1; }");
 			check_true(method.rfind("parallel_for: body writes enclosing state 'out' at an index the body changes at 6:", 0) == 0, method);
 			check_eq(std::string("[1,2,3,4,5,6,7,8]"), e->execute(prelude + "parallel_for (int i : idx) { out[i] = peek(i) + 1; } return to_json(out);").as<std::string>());
+			// a callee's own variable of the loop variable's name is not the loop variable
+			check_eq(std::string("[0,0,1,3,6,10,15,21]"), e->execute(prelude + "int sum_below(int x) { int s = 0; for (int i = 0; i < x; i++) { s += i; } return s; }"
+			                                                          " parallel_for (int i : idx) { out[i] = sum_below(i); } return to_json(out);").as<std::string>());
+		});
+
+		test("counted_parallel_for_matches_the_serial_loop", [this]() {
+			// parallel_for (int i = a; i < b; i++) visits the values the serial loop gives i: forward, backward, strided, <=, >=,
+			// a step read from a variable, and none when the serial loop runs zero times
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			const std::string src = R"(
+				int n = 50; int stride = 3; int down = 7;
+				array<int> out = []; array<int> serial = [];
+				for (int k = 0; k < 64; k++) { out.push(-1); serial.push(-1); }
+				int f(int i) { return i * i - 3 * i; }
+				parallel_for (int i = 0; i < n; i++) { out[i] = f(i); }
+				for (int i = 0; i < n; i++) { serial[i] = f(i); }
+				parallel_for (int i = n; i > 40; i--) { out[i] = f(i) + 1; }
+				for (int i = n; i > 40; i--) { serial[i] = f(i) + 1; }
+				parallel_for (auto i = 1; i <= 61; i += stride) { out[i] = i; }
+				for (auto i = 1; i <= 61; i += stride) { serial[i] = i; }
+				parallel_for (int i = 63; i >= 0; i -= down) { out[i] = 2 * i; }
+				for (int i = 63; i >= 0; i -= down) { serial[i] = 2 * i; }
+				parallel_for (int i = 0; i <= 5; ++i) { out[i] = out[i] + 100; }
+				for (int i = 0; i <= 5; ++i) { serial[i] = serial[i] + 100; }
+				parallel_for (int i = 5; i < 5; i++) { out[i] = 0; }
+				parallel_for (int i = 9; i < 2; i += stride) { out[i] = 0; }
+				parallel_for (int i = 9; i < 2; i -= stride) { out[i] = 0; }
+				return [to_json(out), to_json(serial)];
+			)";
+			check_matches_serial_at(e, src, {1, 4, 8});
+		});
+
+		test("counted_parallel_for_refuses_what_it_cannot_prove", [this]() {
+			// Only one int variable stepped by a fixed amount toward a bound: every other shape is a load-time error, a step that
+			// never ends the serial loop or overflows its last step is refused when the statement is reached, and the body may
+			// not write the variable
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			e->parallel_thread_count(4);
+			const char* steps = "parallel_for: a counted loop must step its variable by a fixed amount toward a bound (write i++, i--, i += k or i -= k)";
+			const char* compares = "parallel_for: a counted loop compares its variable with a bound (i < b, i <= b, i > b or i >= b)";
+			const char* declares = "parallel_for: a counted loop declares one int variable (int i = a or auto i = a)";
+			const char* toward = "parallel_for: a counted loop must step toward its bound (i < b and i <= b count up, i > b and i >= b count down)";
+			struct refusal { const char* source; const char* text; };
+			const refusal refusals[] = {
+				{ "int n = 10; parallel_for (int i = 0; i < n; i *= 10) { }", steps },
+				{ "int n = 10; parallel_for (int i = 0; i < n; i = i + 1) { }", steps },
+				{ "int n = 10; int g(int x) { return x + 1; } parallel_for (int i = 0; i < n; i += g(1)) { }", steps },
+				{ "int n = 10; int j = 0; parallel_for (int i = 0; j < n; i++) { }", compares },
+				{ "int n = 10; parallel_for (int i = 0; ; i++) { }", compares },
+				{ "int n = 10; parallel_for (int i = 0; i != n; i++) { }", compares },
+				{ "int n = 10; parallel_for (int i = 0, j = 0; i < n; i++) { }", declares },
+				{ "int n = 10; parallel_for (float i = 0; i < n; i++) { }", declares },
+				{ "int n = 10; parallel_for (int i = 0; i < n; i--) { }", toward },
+				{ "int n = 10; parallel_for (int i = n; i >= 0; i += 2) { }", toward },
+				{ "int n = 10; parallel_for (int i = 0; i < n; i += -2) { }", toward },
+				{ "int n = 10; parallel_for (int i = 0; i < n; i += 0) { }", "parallel_for: a counted loop's step must not be zero" },
+				{ "int z = 0; parallel_for (int i = 0; i < 10; i += z) { }", "parallel_for: a counted loop's step of 0 never reaches its bound (the serial loop would not end)" },
+				{ "int k = -2; parallel_for (int i = 0; i < 10; i += k) { }", "parallel_for: a counted loop's step of -2 never reaches its bound (the serial loop would not end)" },
+				{ "parallel_for (int i = 9223372036854775800; i <= 9223372036854775807; i++) { }", "Integer overflow in '++'" },
+				{ "parallel_for (int i = -9223372036854775807; i >= -9223372036854775807; i -= 5) { }", "Integer overflow in '-='" },
+				{ "parallel_for (int i = 0; i < 4; i++) { int x = i; i += 1; x = i; }", "parallel_for: the body writes the counted loop's variable 'i' (the loop steps it; copy it into a local to change it) at 1:" },
+				{ "float b = 3.5; parallel_for (int i = 0; i < b; i++) { }", "parallel_for: a counted loop's bound is float, not int" },
+				{ "var b = 3.5; parallel_for (int i = 0; i < b; i++) { }", "parallel_for: a counted loop's bound is float, not int" },
+			};
+			for (const refusal& r : refusals) {
+				const std::string got = error_of(e, r.source);
+				check_true(got.find(r.text) != std::string::npos, std::string(r.source) + ": expected '" + r.text + "', got '" + got + "'");
+			}
 		});
 
 		test("captured_containers_answer_their_count_without_a_copy", [this]() {

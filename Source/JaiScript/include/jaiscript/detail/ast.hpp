@@ -731,6 +731,14 @@ namespace jai {
         parallel_for_stmt(const source_location& loc, parameter p, expression_ptr cont, statement_ptr b)
             : statement(loc, node_type::parallel_for_stmt), loop_param(std::move(p)),
               container(std::move(cont)), body(std::move(b)) {}
+
+        // The counted form `parallel_for (int i = a; i < b; i++)`: the parser's range call (parser::counted_parallel_range)
+        static constexpr std::string_view k_counted_range = "__jai_parallel_range";
+        bool counted() const noexcept {
+            if (!container || container->get_type() != node_type::call_expr) { return false; }
+            const auto& callee = static_cast<const call_expr*>(container.get())->callee;
+            return callee && callee->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(callee.get())->name == k_counted_range;
+        }
     };
 
     // Return statement

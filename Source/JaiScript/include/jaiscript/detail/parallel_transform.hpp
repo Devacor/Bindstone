@@ -169,6 +169,7 @@ namespace jai::detail {
             const ast_node* site = nullptr;
         };
         std::vector<index_write> index_writes;
+        const ast_node* loop_variable_write = nullptr;   // the body's first write of its (first) loop variable
         bool index_written(uint64_t name_id) const {
             for (const auto& w : index_writes) { if (w.name_id == name_id) { return true; } }
             return false;
@@ -477,6 +478,11 @@ namespace jai::detail {
     // read runs the kernel above. Lets a worker serve repeated reads of the same table cell
     // from its own copy (validated against these bytes) instead of allocating per read.
     const script_string* parallel_borrow_string_source(const script_value& borrow, const script_value& index) noexcept;
+
+    // The counted parallel_for's range (parallel_for_stmt::k_counted_range): __jai_parallel_range(a, b, k, comparison, step)
+    // with comparison 0 <, 1 <=, 2 >, 3 >= and step 1 ++, -1 --, 2 +=, -2 -= gives the values the serial loop gives its
+    // variable, as array<int>; the serial loop that never ends or overflows its last step is refused with its text
+    checked_result<script_value> parallel_counted_range(engine& eng, const std::vector<script_value>& args);
 
     // size(), length() and empty() with no arguments: the builtins a borrowed container answers in place (the count is frozen
     // for the region). parallel_borrow_count gives the call's result, null when the name is not one of them

@@ -441,6 +441,16 @@ no weight hint. Candidate spellings for one (a really easy OPTIONAL syntax):
 
 Arrays only. Maps/ranges are not supported; the parenthetical above is the reason.
 
+The counted form `parallel_for (int i = a; i < b; i++)` is an array too: the parser turns its header into the range
+`__jai_parallel_range(a, b, k, comparison, step)` (`parallel_for_stmt::counted`), which evaluates a, b and k once, in
+order, and builds the `array<int>` of the values the serial loop gives `i` (`detail::parallel_counted_range`), so
+chunking, index writes and determinism are the range form's. Only shapes that provably visit each index once parse: one
+int variable, `<`/`<=`/`>`/`>=` against the bound, `i++`/`i--`/`i += k`/`i -= k` with no call or store in k, a
+constant step pointing at the bound. At entry a loop the serial form runs zero times is empty, a step that never
+reaches the bound is refused, and so is a last step that overflows (the serial loop's own `Integer overflow` text,
+from exact uint64 travel arithmetic). The body may not write `i`, directly or through a writing reference parameter
+(`parallel_admission::loop_variable_write`, and the barrier for methods).
+
 ### Q3 — captured reads: provisioned at the barrier
 
 > Question: a first-touch lock+clone, or snapshot the captured set up front at the barrier?

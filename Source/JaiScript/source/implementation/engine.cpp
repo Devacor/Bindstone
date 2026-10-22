@@ -2745,6 +2745,9 @@ void engine::initialize_engine_reference() {
     add_functionWithArity("parallel_reduce", [this](const std::vector<script_value>& args) -> checked_result<script_value> {
         return detail::run_parallel_reduce(*this, args);
     }, 4);
+    add_functionWithArity(std::string(parallel_for_stmt::k_counted_range), [this](const std::vector<script_value>& args) -> checked_result<script_value> {
+        return detail::parallel_counted_range(*this, args);
+    }, 5);
 
     // binary::reader / writer / layout and the width tokens (detail/binary_data.hpp): string's reader() builtin
     // returns a binary::reader, so the library exists on every engine

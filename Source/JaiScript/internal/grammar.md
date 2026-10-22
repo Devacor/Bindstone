@@ -341,7 +341,11 @@ forRangeStatement = "for" "(" "const"? type "&"? IDENTIFIER ":" expression ")" s
 
 // One loop variable per array, arrays of the SAME length walked in lockstep, the body a
 // fresh function scope (internal/parallel_design.md): `parallel_for (auto& v, auto& o : vecs, outs)`
-parallelForStatement = "parallel_for" "(" loopVariable ("," loopVariable)* ":" expression ("," expression)* ")" blockStatement
+parallelForStatement = "parallel_for" "(" ( loopVariable ("," loopVariable)* ":" expression ("," expression)*
+                                         | countedLoop ) ")" blockStatement
+// One int variable stepped by a fixed amount toward a bound; the step k has no call or store (parser::counted_parallel_range)
+countedLoop = ("int" | "auto") IDENTIFIER "=" expression ";" IDENTIFIER ("<" | "<=" | ">" | ">=") shiftExpression ";"
+              ( ("++" | "--") IDENTIFIER | IDENTIFIER ("++" | "--" | ("+=" | "-=") expression) )
 loopVariable = "const"? type "&"? IDENTIFIER
 
 switchStatement = "switch" "(" expression ")" "{" caseClause* "}"
@@ -979,7 +983,8 @@ string healthLevel = health > 75 ? "healthy" :
     weight hint is simply the third argument. `parallel_for (auto& x : arr) { ... }` iterates
     an array in place (`continue`/`return` = next element, a loop-level `break` is rejected),
     and the zip form `parallel_for (auto& x, auto& o : xs, outs)` walks further arrays of the
-    same length in lockstep - the pre-allocated output written in place
+    same length in lockstep - the pre-allocated output written in place, and the counted form
+    `parallel_for (int i = a; i < b; i++)` iterates the values the serial loop gives `i`
     (internal/parallel_design.md). Without a weight hint the workers claim blocks of
     consecutive elements in order as each finishes its last; a weight hint splits the range
     into contiguous spans of equal cumulative weight. `fn` must be a script-defined

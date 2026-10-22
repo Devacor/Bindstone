@@ -84,15 +84,15 @@ reflect::set(s, "hp", 42);                     // writes like s.hp = 42
 print("wound(5) -&gt; {}", reflect::invoke(s, "wound", 5));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hp = 10
 wound(5) -&gt; 37</code></pre></div>
-<p>The one rule that governs all of these: <strong>reflection is a spelling, not a bypass.</strong> A write or call through <code>reflect::</code> enforces exactly what direct syntax enforces: private stays private from outside (<code>reflect::construct</code> of a private constructor included), typed fields still convert-or-error, and the error text is byte-identical to the direct spelling. Reads are the deliberate exception: <code>reflect::get</code> and <code>reflect::fields</code> see everything, with <code>access</code> reported so tools can choose to respect it, the same rule <code>to_json</code> and the debugger already follow. A load is the other side of it: <code>from_json</code> and <code>from_binary</code> reconstitute the saved state, private fields and classes with private constructors included, and no access rule blocks them.</p>
+<p>The one rule that governs all of these: <strong>reflection ignores script access control, by design.</strong> Reflecting a class is an intentional request for its whole shape, so <code>reflect::get</code>, <code>reflect::set</code>, <code>reflect::invoke</code>, <code>reflect::bind</code> and <code>reflect::construct</code> reach private members and private constructors alike; at that level <code>private</code> is a convention, not a guarantee. Everything else still holds: typed fields convert-or-error with the same text as direct syntax, and direct syntax keeps enforcing <code>private</code> from outside the class. The security boundary is the host and the engine, and reflection never crosses it: a C++-bound class shows only what its binding registered (an unbound member stays unreachable, a read-only property stays read-only), builtin values expose no internal state, and engine capabilities such as file access are never reachable. A load follows the same idea: <code>from_json</code> and <code>from_binary</code> reconstitute the saved state, private fields and classes with private constructors included.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vault { private: int gold = 100; }
 var v = Vault();
 
-print("reads see everything: {}", reflect::get(v, "gold"));
-try { reflect::set(v, "gold", 0); } catch (e) { print("writes enforce: {}", e); }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">reads see everything: 100
-writes enforce: Cannot access private member &#x27;gold&#x27; of class &#x27;Vault&#x27;</code></pre></div>
-<p>Enforcement is from the <em>caller&#x27;s</em> context: inside a method of the declaring class, <code>reflect::set(this, "gold", 7)</code> works, the same places direct syntax may touch private state.</p>
+try { v.gold = 0; } catch (e) { print("direct syntax: {}", e); }
+reflect::set(v, "gold", 7);
+print("through reflection: {}", reflect::get(v, "gold"));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">direct syntax: Cannot access private member &#x27;gold&#x27; of class &#x27;Vault&#x27;
+through reflection: 7</code></pre></div>
 <p><code>reflect::bind(obj, "name")</code> hands back the method as a callable bound to <code>obj</code>: it holds the object and keeps it alive, so calling it later is <code>obj.name(…)</code> on the object it was taken from, even after the variable that held it is reassigned. It is the one spelling of a method taken as a value (<code>obj.name</code> without a call is an error, see <a href="07-classes.html#methods-as-values">Classes</a>). A string, array or map is a value, so <code>reflect::bind</code> refuses one and points to a lambda: <code>[&amp;]() { s.to_upper(); }</code>.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter { int n = 0; void bump() { n += 1; } }
 Counter c;

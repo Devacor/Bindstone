@@ -133,13 +133,6 @@ inline member_door resolve_member_door(engine* eng, const script_value& value) {
     return door;
 }
 
-// The caller's class context at builtin-call time (a builtin pushes no script frame,
-// so the backend's current environment belongs to the caller)
-inline const class_definition* caller_context(engine* eng) {
-    auto* be = eng->get_execution_backend();
-    return be ? be->current_access_context() : nullptr;
-}
-
 // Surface a kernel error with the SAME final text the backends produce at their
 // boundary: plain {0}/{1} substitution through the symbolizer (checked_result.hpp)
 template <typename T>
@@ -149,10 +142,15 @@ template <typename T>
         eng->get_symbolizer()->get_string(r.symbol_id2())));
 }
 
-inline void enforce_member_access_or_throw(engine* eng, const class_definition* def,
-                                           uint64_t member_id) {
-    auto access = detail::enforce_member_access(def, member_id, caller_context(eng));
-    if (!access) { throw_kernel_error(eng, access); }
+// Reflection reaches a script class's private constructors as it reaches its other private members
+inline checked_result<script_value> construct_through_reflection(engine* eng, const std::string& name,
+                                                                 const script_value& ctor, const std::vector<script_value>& args) {
+    const std::shared_ptr<class_definition> def = eng->get_class_definition(name);
+    if (def && def->is_script_class()) {
+        engine::construction_access_waiver waiver(eng);
+        return ctor.as_function()(args);
+    }
+    return ctor.as_function()(args);
 }
 
 // Strict `ident(::ident)*` shape — the gate before a name string may be evaluated
@@ -609,7 +607,6 @@ void register_reflection_functions(engine& eng_ref) {
                 throw runtime_error("reflect::set: class '" + def->get_name() +
                                     "' has no static field '" + name + "'");
             }
-            reflect_detail::enforce_member_access_or_throw(eng, def, id);
             (void)def->set_static_field(id, std::move(value));
             return script_value(std::monostate{}, eng);
         }
@@ -620,24 +617,19 @@ void register_reflection_functions(engine& eng_ref) {
         // Setter first, like direct writes: a _set_<name> method shadows the field
         // (the script auto-setter body IS enforce_field_write + store, so this is
         // raw-store-equivalent there; host property setters only answer here).
-        // Access enforces from the caller's context BEFORE either door — the same
-        // kernel and text as `v.name = x`.
         if (known && door.def) {
             script_value setter = door.def->get_method(eng->get_symbolizer()->get_setter_id_with_view(id).first, false);
             if (setter.is_function()) {
-                reflect_detail::enforce_member_access_or_throw(eng, door.def, id);
                 return make_bound_method(target, setter).as_function()({std::move(value)});
             }
         }
         if (known && door.instance && door.instance->find_field_value(id)) {
-            if (door.def) { reflect_detail::enforce_member_access_or_throw(eng, door.def, id); }
             auto converted = door.instance->enforce_field_write(id, std::move(value));
             if (!converted) { reflect_detail::throw_kernel_error(eng, converted); }
             door.instance->set_field_unchecked(id, std::move(converted.value()));
             return script_value(std::monostate{}, eng);
         }
         if (known && door.def && door.def->get_static_field_ptr(id)) {
-            reflect_detail::enforce_member_access_or_throw(eng, door.def, id);
             (void)door.def->set_static_field(id, std::move(value));
             return script_value(std::monostate{}, eng);
         }
@@ -657,7 +649,6 @@ void register_reflection_functions(engine& eng_ref) {
             auto* def = reflect_detail::resolve_class(eng, target, "invoke");
             script_value method = known ? def->get_static_method(id, false) : script_value::make_null(eng);
             if (method.is_function()) {
-                reflect_detail::enforce_member_access_or_throw(eng, def, id);
                 return method.as_function()(call_args);
             }
             throw runtime_error("reflect::invoke: class '" + def->get_name() +
@@ -672,7 +663,6 @@ void register_reflection_functions(engine& eng_ref) {
             throw runtime_error("reflect::invoke: '" + door.def->get_name() +
                                 "' has no method '" + name + "'");
         }
-        reflect_detail::enforce_member_access_or_throw(eng, door.def, id);
         return make_bound_method(target, dispatcher).as_function()(call_args);
     });
 
@@ -694,7 +684,6 @@ void register_reflection_functions(engine& eng_ref) {
         if (!dispatcher.is_function()) {
             throw runtime_error("reflect::bind: '" + door.def->get_name() + "' has no method '" + name + "'");
         }
-        reflect_detail::enforce_member_access_or_throw(eng, door.def, id);
         return make_bound_method(target, dispatcher);
     });
 
@@ -715,7 +704,7 @@ void register_reflection_functions(engine& eng_ref) {
         if (!ctor || !ctor.value().is_function()) {
             throw runtime_error(std::string("reflect::construct: unknown class '") + name + "'");
         }
-        return ctor.value().as_function()(call_args);
+        return reflect_detail::construct_through_reflection(eng, name, ctor.value(), call_args);
     });
 
     add("construct_shared", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -726,7 +715,7 @@ void register_reflection_functions(engine& eng_ref) {
         if (!ctor || !ctor.value().is_function()) {
             throw runtime_error(std::string("reflect::construct_shared: unknown class '") + name + "'");
         }
-        auto result = ctor.value().as_function()(call_args);
+        auto result = reflect_detail::construct_through_reflection(eng, name, ctor.value(), call_args);
         if (!result) { return result; }
         script_value value = std::move(result.value());
         // `new Class(...)` semantics: shared_ptr is a TYPE MARKER, not storage — mark

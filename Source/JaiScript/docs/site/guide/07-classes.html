@@ -353,7 +353,7 @@ print(c.gold);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&lt;script&gt;:6:9: error: Cannot access private member &#x27;gold&#x27; of class &#x27;Chest&#x27;
     print(c.gold);
             ^</code></pre></div>
-<p>Constructors follow the same rule. A constructor declared after <code>private:</code> (or <code>protected:</code>) is callable from its own class (a static factory, a method) and from every class derived from it (<code>super(...)</code>, a derived class&#x27;s implicit base construction). Any other construction raises <code>Cannot access private constructor of class 'C'</code>, whatever the spelling: <code>Name(...)</code>, <code>new</code>, a declaration, an implicit conversion, <code>reflect::construct</code>. Access is checked on the overload that overload resolution picks, so a class may keep some constructors public. The strict checker reports a construction it resolves at load, with the same text. A load is different: <code>from_json</code> and <code>from_binary</code> reconstitute the state that was saved, and access rules never block them (<a href="#loading-saved-objects">Loading saved objects</a>). A binary layout&#x27;s <code>read</code> runs a private default constructor the same way:</p>
+<p>Constructors follow the same rule. A constructor declared after <code>private:</code> (or <code>protected:</code>) is callable from its own class (a static factory, a method) and from every class derived from it (<code>super(...)</code>, a derived class&#x27;s implicit base construction). Any other construction raises <code>Cannot access private constructor of class 'C'</code>, whatever the spelling: <code>Name(...)</code>, <code>new</code>, a declaration, an implicit conversion. Reflection is the deliberate exception: <code>reflect::construct</code> reaches a private constructor, as reflection reaches every private member (<a href="12-reflection.html">Reflection</a>). Access is checked on the overload that overload resolution picks, so a class may keep some constructors public. The strict checker reports a construction it resolves at load, with the same text. A load is different: <code>from_json</code> and <code>from_binary</code> reconstitute the state that was saved, and access rules never block them (<a href="#loading-saved-objects">Loading saved objects</a>). A binary layout&#x27;s <code>read</code> runs a private default constructor the same way:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Ticket {
 private:
     Ticket(int n) { number = n; }
@@ -365,14 +365,9 @@ class VipTicket : Ticket {
     VipTicket() : super(1) {}                           // so does a derived class
 }
 print("issued {}, vip {}", Ticket::issue(7).number, VipTicket().number);
-var name = "Ticket";
-try {
-    reflect::construct(name, 3);
-} catch (e) {
-    print("caught: {}", e);
-}</code></pre></div>
+print("through reflection: {}", reflect::construct("Ticket", 3).number);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">issued 7, vip 1
-caught: Cannot access private constructor of class &#x27;Ticket&#x27;</code></pre></div>
+through reflection: 3</code></pre></div>
 <h2 id="loading-saved-objects">Loading saved objects<a class="hlink" href="#loading-saved-objects" aria-label="link">&#8203;</a></h2>
 <p><code>from_json</code> and <code>from_binary</code> rebuild an object in one fixed order, on both backends and in both formats, so saving what a load restored writes the same bytes:</p>
 <ol>

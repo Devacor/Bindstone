@@ -54,13 +54,14 @@ The introspect-then-invoke loop closes: enumerate a callable's parameter types
 (`reflect::method_arguments(x, "heal")` / `reflect::function_arguments("spawn_wave")` — one
 param-array **per overload**), build a matching args array, and `invoke`/`call` it.
 
-The one rule that governs all of B: **reflection is a spelling, not a bypass.** A write or call
-through `reflect::` enforces exactly what direct syntax enforces, with byte-identical error
-text — private stays private from outside, typed fields still convert-or-error, observable
-properties still fire their change signals. Reads see everything (with `access` reported), the
-same rule `to_json` and the debugger already follow. The full access model and its
-justification: companion §3. A host function registered with a required privilege keeps that
-check through a function alias or `reflect::call`; reflection cannot grant permission.
+The one rule that governs all of B: **reflection ignores script access control, by design.**
+Reflecting is an intentional request for a type's whole shape, so get/set/invoke/bind/construct
+reach private members and private constructors of script classes; `private` is a convention at
+that level. Typed fields still convert-or-error and observable properties still fire their change
+signals. The security boundary is the host and the engine: a C++ binding exposes only what it
+registered, builtin values expose no internals, and a host function registered with a required
+privilege keeps that check through a function alias or `reflect::call`; reflection cannot grant
+permission.
 
 Spawn-by-name, the canonical use:
 

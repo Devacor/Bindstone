@@ -1088,6 +1088,11 @@ namespace {
 			return SIZE_MAX;
 		}
 
+		// A loop variable handed to a reference parameter that writes it is written
+		void note_loop_variable_reference_argument(const expression_ptr& arg) {
+			if (loop_variable_position(arg.get()) != SIZE_MAX) { written_loop_variables.push_back(static_cast<const identifier_expr*>(arg.get())->symbol_id); }
+		}
+
 		// After the walk: an index-written name is touched as out[i] alone, with one loop variable the body never writes
 		bool check_index_writes() {
 			for (const auto& w : adm.index_writes) {
@@ -1114,22 +1119,25 @@ namespace {
 			return method_class && method_class->find_field_declaring_class(id) != nullptr;
 		}
 
-		void collect_element_method(const member_expr* m, const call_expr* call) {
+		void collect_element_method(uint64_t name_id, std::string_view name, const ast_node* site, const call_expr* call) {
 			uint64_t enclosing = 0;
 			const ast_node* enclosing_site = nullptr;
+			std::vector<std::pair<size_t, size_t>> loop_variables;
 			for (size_t i = 0; i < call->arguments.size() && i < 64; ++i) {
 				if (identifier_expr* root = enclosing_root(call->arguments[i])) {
 					enclosing |= uint64_t(1) << i;
 					if (!enclosing_site) { enclosing_site = root; }
 				}
+				if (const size_t position = loop_variable_position(call->arguments[i].get()); position != SIZE_MAX) { loop_variables.emplace_back(i, position); }
 			}
 			for (auto& rec : adm.element_method_calls) {
-				if (rec.name_id != m->member_id) { continue; }
+				if (rec.name_id != name_id) { continue; }
 				if (!rec.enclosing_site) { rec.enclosing_site = enclosing_site; }
 				rec.enclosing_arguments |= enclosing;
+				rec.loop_variable_arguments.insert(rec.loop_variable_arguments.end(), loop_variables.begin(), loop_variables.end());
 				return;
 			}
-			adm.element_method_calls.push_back({ m->member_id, m->member, m, enclosing, enclosing_site });
+			adm.element_method_calls.push_back({ name_id, name, site, enclosing, enclosing_site, std::move(loop_variables) });
 		}
 
 		// In-place mode member access (read or store position): admitted iff the chain
@@ -1490,7 +1498,22 @@ namespace {
 					const bool reads_only = ref_parameter_takes_temporary(eng, params, m.decl->body.get(), i, true);
 					return fail(callrec.enclosing_site, reference_argument_refusal(root, params[i], cls->get_name() + "::" + std::string(callrec.name), reads_only));
 				}
+				for (const auto& [argument, position] : callrec.loop_variable_arguments) {
+					if (argument < params.size() && params[argument].is_reference && !params[argument].is_const &&
+					    !ref_parameter_takes_temporary(eng, params, m.decl->body.get(), argument, true) && !admit_loop_variable_write(position)) {
+						return false;
+					}
+				}
 				return true;
+			}
+			return true;
+		}
+		// A method the barrier resolves writes a loop variable through a reference parameter: the body's own walk could not see it
+		const parallel_admission* region_body = nullptr;
+		bool admit_loop_variable_write(size_t position) {
+			if (!region_body) { return true; }
+			for (const auto& w : region_body->index_writes) {
+				if (w.index_param == position) { return fail(w.site, "body writes enclosing state '" + std::string(w.name) + "' at an index the body changes"); }
 			}
 			return true;
 		}
@@ -1508,7 +1531,7 @@ namespace {
 					if (!admit_class_method(cls, callrec.name_id, callrec.name, callrec.site)) {
 						return false;
 					}
-					if (callrec.enclosing_arguments && !admit_method_reference_arguments(cls, callrec)) { return false; }
+					if ((callrec.enclosing_arguments || !callrec.loop_variable_arguments.empty()) && !admit_method_reference_arguments(cls, callrec)) { return false; }
 				}
 				if (!admit_host_methods(callrec.name_id, callrec)) { return false; }
 			}
@@ -1554,7 +1577,7 @@ namespace {
 			for_each_registered_class([&](const class_definition* cls) {
 				const class_definition* owner = ok ? host_method_owner(cls, name_id) : nullptr;
 				if (!owner) { return; }
-				if (callrec.enclosing_arguments) {
+				if (callrec.enclosing_arguments || !callrec.loop_variable_arguments.empty()) {
 					const script_value method = owner->get_method(name_id, false);
 					const auto* writes = method.is_function() ? method.as_function().target<host_writeback_function>() : nullptr;
 					if (writes && (writes->mask & callrec.enclosing_arguments)) {
@@ -1562,6 +1585,12 @@ namespace {
 						ok = fail(callrec.enclosing_site, "argument passes enclosing state '" + std::string(root->name) +
 						                                  "' by reference (captured reads are read-only)");
 						return;
+					}
+					for (const auto& [argument, position] : callrec.loop_variable_arguments) {
+						if (writes && argument < 64 && ((writes->mask >> argument) & 1) && !admit_loop_variable_write(position)) {
+							ok = false;
+							return;
+						}
 					}
 				}
 				host_pins.push_back({ cls, name_id, owner });
@@ -2337,6 +2366,7 @@ namespace {
 							const auto* writes = method.as_function().target<host_writeback_function>();
 							for (size_t i = 0; i < call->arguments.size() && i < 64; ++i) {
 								if (!writes || !((writes->mask >> i) & 1)) { continue; }
+								note_loop_variable_reference_argument(call->arguments[i]);
 								if (identifier_expr* root = enclosing_root(call->arguments[i])) {
 									return fail(root, "argument passes enclosing state '" + std::string(root->name) +
 									                  "' by reference (captured reads are read-only)");
@@ -2382,7 +2412,7 @@ namespace {
 					// Element / worker-local receiver: record the name for the barrier's
 					// class-method admission (the receiver's class is a runtime fact; names
 					// no element class defines are builtins and simply never match)
-					collect_element_method(m, call);
+					collect_element_method(m->member_id, m->member, m, call);
 					if (chain_root_is_element(m->object) && !parallel_readonly_method(m->member)) { adm.element_mutated = true; }
 					if (proof_mode && !chain_root_is_element(m->object) && (!parallel_readonly_method(m->member) || builtin_runs_script(m->member, proof_chain_type(m->object.get())))) {
 						if (global_rooted(m->object.get())) { return fail(m, "method '" + std::string(m->member) + "' may mutate program state"); }
@@ -2423,23 +2453,7 @@ namespace {
 					return fail(callee, "method '" + callee_name + "' must be called as 'this." + callee_name +
 					               "()' in a parallel body (a bare call of a C++ base method)");
 				}
-				uint64_t enclosing = 0;
-				const ast_node* enclosing_site = nullptr;
-				for (size_t i = 0; i < call->arguments.size() && i < 64; ++i) {
-					if (identifier_expr* root = enclosing_root(call->arguments[i])) {
-						enclosing |= uint64_t(1) << i;
-						if (!enclosing_site) { enclosing_site = root; }
-					}
-				}
-				bool recorded = false;
-				for (auto& rec : adm.element_method_calls) {
-					if (rec.name_id != callee->symbol_id) { continue; }
-					if (!rec.enclosing_site) { rec.enclosing_site = enclosing_site; }
-					rec.enclosing_arguments |= enclosing;
-					recorded = true;
-					break;
-				}
-				if (!recorded) { adm.element_method_calls.push_back({ callee->symbol_id, callee->name, callee, enclosing, enclosing_site }); }
+				collect_element_method(callee->symbol_id, callee->name, callee, call);
 				for (const auto& a : call->arguments) {
 					if (!walk_expr(a)) { return false; }
 				}
@@ -2481,6 +2495,9 @@ namespace {
 						if (!params[i].is_reference) { continue; }
 						const expression* arg = call->arguments[i].get();
 						const bool const_ref = !proof_mode && params[i].is_const;
+						if (!proof_mode && !params[i].is_const && !ref_parameter_takes_temporary(eng, params, payload->fn->body.get(), i, true)) {
+							note_loop_variable_reference_argument(call->arguments[i]);
+						}
 						if (identifier_expr* root = enclosing_root(call->arguments[i])) {
 							if (!const_ref) {
 								const bool reads_only = !proof_mode && ref_parameter_takes_temporary(eng, params, payload->fn->body.get(), i, true);
@@ -2517,6 +2534,7 @@ namespace {
 					const uint64_t writeback = eng.host_function_writeback(callee_name);
 					for (size_t i = 0; i < call->arguments.size() && i < 64; ++i) {
 						if (!((writeback >> i) & 1)) { continue; }
+						note_loop_variable_reference_argument(call->arguments[i]);
 						if (identifier_expr* root = enclosing_root(call->arguments[i])) {
 							return fail(root, "argument passes enclosing state '" + std::string(root->name) +
 							                  "' by reference (captured reads are read-only)");
@@ -4894,9 +4912,12 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		if (!admitted_before) {
 			method_adm.adm.element_method_calls = adm->element_method_calls;
 			method_adm.adm.constructions = adm->constructions;
+			method_adm.region_body = adm;
 			// the methods' captures are their own set: the same name is the body's capture in the
 			// region's enclosing scope and a method's in its class's scope
-			if (!method_adm.admit_region_classes(element_classes, element_methods, written_types, program_destructors)) {
+			const bool classes_admitted = method_adm.admit_region_classes(element_classes, element_methods, written_types, program_destructors);
+			method_adm.region_body = nullptr;
+			if (!classes_admitted) {
 				record->ok = false;
 				record->code = method_adm.adm.code;
 				record->message = method_adm.adm.message;

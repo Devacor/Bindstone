@@ -184,6 +184,7 @@ namespace jai::detail {
             const ast_node* site = nullptr;   // pinned transitively via script_functions
             uint64_t enclosing_arguments = 0;   // the argument positions any call of the name passes enclosing state at
             const ast_node* enclosing_site = nullptr;
+            std::vector<std::pair<size_t, size_t>> loop_variable_arguments;   // (argument position, loop variable position)
         };
         // Host static methods the bodies call, by the class name as written (Name::method(...)): pinned per worker
         struct static_call {

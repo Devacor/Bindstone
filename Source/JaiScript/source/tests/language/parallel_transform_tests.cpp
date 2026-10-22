@@ -1958,6 +1958,25 @@ public:
 			check_eq((int64_t)4, e->execute(prelude + "parallel_for (auto& w : ws) { w.n(grid); } return ws[0].v + ws[1].v - 4;").as_int());
 		});
 
+		test("a_loop_variable_a_reference_parameter_writes_is_written", [this]() {
+			// An index write's loop variable changed through a function's or a method's writing T& parameter would point
+			// iterations at one slot; a T& the callee only reads leaves it alone
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			e->parallel_thread_count(4);
+			const std::string prelude = R"(
+				void zero(int& x) { x = 0; }
+				int peek(int& x) { return x; }
+				class B { int v = 0; void reset(int& x) { x = 0; } }
+				array<int> idx = [0, 1, 2, 3, 4, 5, 6, 7]; array<int> out = [0, 0, 0, 0, 0, 0, 0, 0]; array<B> bs = [B(), B(), B(), B(), B(), B(), B(), B()];
+			)";
+			const std::string function = error_of(e, prelude + "parallel_for (int i : idx) { zero(i); out[i] = out[i] + 1; }");
+			check_true(function.rfind("parallel_for: body writes enclosing state 'out' at an index the body changes at 6:", 0) == 0, function);
+			const std::string method = error_of(e, prelude + "parallel_for (auto& b, int i : bs, idx) { b.reset(i); out[i] = 1; }");
+			check_true(method.rfind("parallel_for: body writes enclosing state 'out' at an index the body changes at 6:", 0) == 0, method);
+			check_eq(std::string("[1,2,3,4,5,6,7,8]"), e->execute(prelude + "parallel_for (int i : idx) { out[i] = peek(i) + 1; } return to_json(out);").as<std::string>());
+		});
+
 		test("captured_containers_answer_their_count_without_a_copy", [this]() {
 			// size(), length() and empty() read a borrowed container's count, so a body (or a by-value lambda capture) bounding
 			// its reads by the size keeps the borrow tier: no worker copies the container

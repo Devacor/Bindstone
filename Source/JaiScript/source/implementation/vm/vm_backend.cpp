@@ -16491,8 +16491,40 @@ JAI_NOINLINE std::optional<op_status> vm_backend::member_text_append(frame& f, s
 	if (!text_append_kinds(current.raw_storage_index(), right.raw_storage_index())) return std::nullopt;
 	uint32_t slot = UINT32_MAX;
 	class_instance* inst = plain_member_store_slot(f, ins_index, member, object, slot);
-	if (!inst) return std::nullopt;
-	return field_cell_text_append(inst->field_slot_value(slot), inst->get_class_definition(), member->member_id, current, right, true);
+	if (inst) {
+		return field_cell_text_append(inst->field_slot_value(slot), inst->get_class_definition(), member->member_id, current, right, true);
+	}
+	return host_member_text_append(f, ins_index, member, object, current, right);
+}
+
+// `obj.m += text` on a bound C++ member of type script_value that holds a reference (a map pair's `second` over its entry): the
+// member's setter stores through the reference under its container's element type, which a string takes as it is, so the referent
+// holding the node the compound read takes the bytes in place, under the value's own tag
+JAI_NOINLINE std::optional<op_status> vm_backend::host_member_text_append(frame& f, size_t ins_index, member_expr* member, const script_value& object,
+                                                                         script_value& current, const script_value& right) {
+	if (parallel_worker_ || current.raw_storage_index() != script_value::TYPEID_STRING || object.raw_storage_index() != script_value::TYPEID_OBJECT) return std::nullopt;
+	const std::vector<chunk::member_ic_entry>* rows = member_ic_rows(*f.code);
+	auto& holder = const_cast<script_value&>(object).unchecked_get_object_storage();
+	if (!rows || ins_index >= rows->size() || !holder || !holder->is_class_instance_wrapper || !holder->data) return std::nullopt;
+	const class_instance* inst = static_cast<class_instance*>(holder->data.get());
+	const chunk::member_ic_entry& entry = (*rows)[ins_index];
+	const class_definition* cd = inst->get_class_definition();
+	// a lane with `serves` reads a script_value member (dynamic_binder's make_host_member_lane)
+	if (!cd || entry.cd != cd || entry.epoch != cd->method_epoch() || entry.slot != UINT32_MAX || !entry.host.lane || !entry.host.lane->serves) return std::nullopt;
+	auto* member_value = static_cast<script_value*>(detail::host_member_address(inst, entry.host));
+	if (!member_value || member_value->raw_storage_index() != script_value::TYPEID_REFERENCE) return std::nullopt;
+	bool retag = false;
+	script_value* target = text_store_referent(*member_value, retag);
+	if (!target || target->raw_storage_index() != script_value::TYPEID_STRING || target->unchecked_string_handle().get() != current.unchecked_string_handle().get()) {
+		return std::nullopt;
+	}
+	(void)member;
+	if (!charge_text_concat(current, right)) [[unlikely]] { return raise_from(detail::raise_memory_cap(*limits_)); }
+	current = make_null();
+	append_text_in_place(*target, right, true);
+	if (retag && target->type_info_raw() != engine_->get_type_info_string()) { target->set_type_info(type_info_ptr{engine_->get_type_info_string()}); }
+	current = *target;
+	return op_status{};
 }
 
 // `C::s += text` onto a class's own static holding the node the compound read: store_static_member's rows over the class the store

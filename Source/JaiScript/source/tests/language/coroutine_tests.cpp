@@ -1755,6 +1755,48 @@ public:
             )", "1/2/1/9/2", "completion values copy globals and move the body's own locals");
         });
 
+        test("advance_stores_each_yield_and_answers_false_at_the_end", [this, check_both, check_executes, both_backends]() {
+            check_both("coroutine int g() { yield 1; yield 2; return 3; }\nauto h = g(); int v = 0; string s = \"\"; "
+                       "while (h.advance(v)) { s += to_string(v) + \",\"; } s + to_string(v) + \"|\" + to_string(h.done())",
+                       "1,2,2|true", "true per yield with the value stored; the finishing step answers false, drops the return value, leaves v");
+            check_both("coroutine g() { yield 1; yield null; yield 3; }\nauto h = g(); var v = 0; string s = \"\"; "
+                       "while (h.advance(v)) { s += to_string(v) + \",\"; } s",
+                       "1,null,3,", "a yielded null is a value like any other");
+            check_both("coroutine int g() { yield 1; }\nauto h = g(); int v = 5; bool a = h.advance(v); bool b = h.advance(v); bool c = h.advance(v); "
+                       "to_string(a) + \"|\" + to_string(b) + \"|\" + to_string(c) + \"|\" + to_string(v)",
+                       "true|false|false|1", "advance after completion answers false and stores nothing");
+            check_both("coroutine int g() { yield 1; throw \"bad\"; }\nauto h = g(); int v = 0; string t = \"\"; "
+                       "try { while (h.advance(v)) { } } catch (e) { t = to_string(e); } t + \"|\" + to_string(v) + \"|\" + to_string(h.done()) + \"|\" + to_string(h.advance(v))",
+                       "bad|1|true|false", "a throw from the body reaches the advance; the failed handle answers false");
+            check_both("coroutine int g() { yield 4; yield 5; yield 6; }\nclass B { int x = 0; }\nB b; array<int> a = [0, 0]; auto h = g(); "
+                       "h.advance(b.x); h.advance(a[1]); h.advance(a[0]); to_string(b.x) + to_json(a)",
+                       "4[6,5]", "a field and an element are lvalues");
+            check_both("coroutine int inner() { yield 5; yield 6; }\ncoroutine int outer() { auto h = inner(); int x = 0; while (h.advance(x)) { yield x * 10; } }\n"
+                       "string s = \"\"; for (auto o : outer()) { s += to_string(o) + \",\"; } s",
+                       "50,60,", "advance inside a coroutine body, the handle a local");
+            check_both("class S { int base = 10; coroutine int waves(int n) { for (int k = 0; k < n; ++k) { yield base + k; } } }\n"
+                       "S sp; auto h = sp.waves(2); int w = 0; string s = \"\"; while (h.advance(w)) { s += to_string(w) + \",\"; } s",
+                       "10,11,", "a method coroutine");
+            check_both("coroutine int g() { yield 1; }\nvar h = g(); string t = \"\"; try { h.advance(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",
+                       "advance() takes 1 argument (the variable that receives the yielded value)|false", "the arity error runs nothing");
+            check_both("coroutine int g() { yield 1; }\nvar h = g(); string t = \"\"; try { h.advance(math::abs(3)); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done()) + \"|\" + to_string(h.next())",
+                       "Cannot pass non-lvalue to reference parameter|false|1", "a temporary raises before the body runs");
+            check_both("coroutine var g() { yield \"s\"; }\nvar h = g(); int i = 7; string t = \"\"; try { h.advance(i); } catch (e) { t = to_string(e); } t + \"|\" + to_string(i)",
+                       "Cannot assign string to a variable declared int|7", "the store converts to the variable's declared type");
+            check_executes("coroutine int g() { yield 1; yield 2; } auto h = g(); int v = 0;",
+                           {"h.advance(v);", "v;", "h.advance(v);", "h.advance(v);", "v;"}, "true|1|true|false|2", "across separate executes");
+            const auto load_error = [this, both_backends](const char* src, const std::string& text, const char* what) {
+                auto [i_out, v_out] = both_backends(src);
+                check_true(i_out.find(text) != std::string::npos, std::string("interp: ") + what + " (got: " + i_out + ")");
+                check_true(v_out.find(text) != std::string::npos, std::string("vm: ") + what + " (got: " + v_out + ")");
+            };
+            load_error("coroutine int g() { yield 1; }\nauto h = g(); h.advance();", "2:26: error: advance() takes 1 argument (the variable that receives the yielded value)", "the checker knows the arity");
+            load_error("coroutine int g() { yield 1; }\nauto h = g(); h.advance(5);", "2:25: error: advance() writes the yielded value through its argument; pass a variable", "a literal fails the load");
+            load_error("coroutine string g() { yield \"a\"; }\nauto h = g(); int v = 0; h.advance(v);", "advance() cannot store the yielded 'string' into 'int'", "the yielded type against v's");
+            load_error("coroutine int g() { yield 1; }\nconst int c = 0; auto h = g(); h.advance(c);", "cannot pass const 'c' to parameter 'v' of 'advance': 'advance' writes through it", "a const fails the load");
+            load_error("coroutine int g() { yield 1; }\nauto h = g(); h.advanse(c);", "no member 'advanse' on 'coroutine_handle' (did you mean 'advance'?)", "the suggestion knows advance");
+        });
+
         test("next_and_next_count", [this, check_both, check_executes]() {
             const std::string gen = "coroutine int g() { yield 1; yield 2; yield 3; yield 4; return 5; }\n";
             check_both((gen + "auto h = g(); string s = to_string(h.next()); s += \"|\" + to_string(h.next(2)); s += \"|\" + to_string(h.next()); "

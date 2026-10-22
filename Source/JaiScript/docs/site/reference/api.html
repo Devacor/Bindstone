@@ -495,6 +495,9 @@ print(w.size(), &quot; &quot;, to_json(w.to_string().to_bytes()));</code></pre><
 </div>
 </section>
 <section class="api-group"><h2 id="group-coroutine">coroutine</h2>
+<div class="api-entry" data-provider="core" data-search="coroutine.advance(v: var&amp;) -&gt; bool advance, callback resumes once: true when the body yielded, with the yielded value stored into v (converted to v&#x27;s declared type); false when the body ran to its end, or had already ended, leaving v as it was. the final return value is not delivered (next() delivers it). v binds as a t&amp; parameter does: a temporary raises cannot pass non-lvalue to reference parameter before anything runs. every engine"><h3 id="api-b1d7d482f3d5"><code>coroutine.advance(v: var&amp;) -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; advance, callback</p>
+<p>Resumes once: true when the body yielded, with the yielded value stored into v (converted to v&#x27;s declared type); false when the body ran to its end, or had already ended, leaving v as it was. The final return value is not delivered (next() delivers it). v binds as a T&amp; parameter does: a temporary raises Cannot pass non-lvalue to reference parameter before anything runs.</p>
+</div>
 <div class="api-entry" data-provider="core" data-search="coroutine.done() -&gt; bool observe whether the body finished (returned or failed); it never starts or advances the coroutine. every engine"><h3 id="api-20d699eb9029"><code>coroutine.done() -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Whether the body finished (returned or failed); it never starts or advances the coroutine.</p>
 </div>

@@ -30,6 +30,10 @@ public:
     checked_result<script_value> next(engine* eng, script_int a_count = 1);
     // h.next() / h.next(count) as script calls it: both backends dispatch the builtin method here
     checked_result<script_value> next_from_script(engine* eng, const script_value* a_args, size_t a_argCount);
+    // h.advance(v) as script calls it, C++'s bool advance(T& v): v binds at the call, one resume, then true with the yielded value
+    // stored into v, or false when the body ran to its end or had ended (v untouched, the return value dropped). Both backends
+    // dispatch here with the call site armed, so the argument resolves as a T& parameter binds it
+    checked_result<script_value> advance_from_script(engine* eng, const std::vector<script_value>& a_args);
     bool done() const { return status_ == status::completed || status_ == status::failed; }
     status get_status() const { return status_; }
     // A later step of one host next(n): the backend keeps the entry's deadline instead of arming its own

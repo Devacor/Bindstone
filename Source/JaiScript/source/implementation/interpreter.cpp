@@ -3063,6 +3063,7 @@ interpreter::interpreter()
     next_id_ = string_symbolizer_->intern("next");
     handle_reset_id_ = string_symbolizer_->intern("reset");
     done_id_ = string_symbolizer_->intern("done");
+    advance_id_ = string_symbolizer_->intern("advance");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
     to_bool_id_ = string_symbolizer_->intern("to_bool");
@@ -3136,6 +3137,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     next_id_ = string_symbolizer_->intern("next");
     handle_reset_id_ = string_symbolizer_->intern("reset");
     done_id_ = string_symbolizer_->intern("done");
+    advance_id_ = string_symbolizer_->intern("advance");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
     to_bool_id_ = string_symbolizer_->intern("to_bool");
@@ -3209,6 +3211,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     next_id_ = string_symbolizer_->intern("next");
     handle_reset_id_ = string_symbolizer_->intern("reset");
     done_id_ = string_symbolizer_->intern("done");
+    advance_id_ = string_symbolizer_->intern("advance");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
     to_bool_id_ = string_symbolizer_->intern("to_bool");
@@ -9119,6 +9122,16 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
                     return script_value(captured_handle->done(), eng);
                 };
                 push_value(script_value::make_function(done_method, engine_));
+                return {};
+            }
+            if (expr->member_id == advance_id_) {
+	            if (!as_callee) { return method_value_error(expr, objectValue, false); }
+                auto captured_handle = handle;
+                auto* eng = engine_;
+                script_function advance_method = [captured_handle, eng](const std::vector<script_value>& a_args) -> checked_result<script_value> {
+                    return captured_handle->advance_from_script(eng, a_args);
+                };
+                push_value(script_value::make_function(advance_method, engine_));
                 return {};
             }
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found),

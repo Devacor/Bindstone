@@ -2495,10 +2495,6 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
 // The map-key hash (core/script_map.hpp): keys operator<=> calls equivalent hash alike. The type rank seeds it, then the payload
 // operator<=> compares: ints and chars by value, floats by value with every NaN and both zeros hashing alike (equality stays
 // operator<=>'s), strings and utf8_strings by bytes, bools, and every heavy kind by the identity operator<=> orders by.
-uint64_t script_value::map_string_key_hash(std::string_view text) noexcept {
-    return std::hash<std::string_view>{}(text) ^ (static_cast<uint64_t>(script_value_type::jai_string_type) * 0x9E3779B97F4A7C15ull);
-}
-
 uint64_t script_value::map_key_hash() const noexcept {
     const script_value_type t = type();
     const uint64_t seed = static_cast<uint64_t>(t) * 0x9E3779B97F4A7C15ull;
@@ -2514,7 +2510,7 @@ uint64_t script_value::map_key_hash() const noexcept {
             return mix(bits);
         }
         case script_value_type::jai_string_type: return map_string_key_hash(unchecked_as_string());
-        case script_value_type::jai_utf8_string_type: return std::hash<std::string_view>{}(unchecked_as_utf8().bytes) ^ seed;
+        case script_value_type::jai_utf8_string_type: return detail::text_hash(unchecked_as_utf8().bytes) ^ seed;
         case script_value_type::jai_char_type: return mix(static_cast<unsigned char>(unchecked_as_char()));
         case script_value_type::jai_bool_type: return mix(unchecked_as_bool() ? 1 : 0);
         case script_value_type::jai_vec2_type:

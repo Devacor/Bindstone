@@ -2537,6 +2537,7 @@ namespace jai::vm {
         // a bound method session takes the overload argc picks when argc alone decides it and its body needs no frame env
         JAI_NOINLINE bool bind_method_session(callback_session& s, const std::vector<script_value>& args);
         op_status map_scalar_store(script_value& container, const script_value& key, const script_value& value, bool& handled, script_value*& stored);
+        op_status map_numeric_compound(frame& f, const vm_instruction& ins, const script_value& container, script_value& target, bool& handled);
         const script_map::value_type* map_lane_find(const script_map& map, const script_value& key) const;
         script_value& map_lane_slot(script_map& map, const script_value& key) const;
         void commit_string_scratch(script_value& recv, uint16_t bi_string, uint64_t member_id);

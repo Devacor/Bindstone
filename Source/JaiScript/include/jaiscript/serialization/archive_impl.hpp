@@ -122,13 +122,14 @@ protected:
     std::pair<uint32_t, bool> track_shared_ptr(const void* raw_ptr);
 
     engine* engine_ref_;
-    // Hashed on std::type_index: libstdc++'s type_info::before is not a strict weak order between internal-linkage and other types
-    std::unordered_map<std::type_index, void*> user_contexts_;
+    // Hashed on std::type_index: libstdc++'s type_info::before is not a strict weak order between internal-linkage and other types.
+    // Made at first use (most archives never set a context or meet a handle)
+    std::unique_ptr<std::unordered_map<std::type_index, void*>> user_contexts_;
 
-    std::unordered_map<const void*, uint32_t> shared_ptr_ids_;
+    std::unique_ptr<std::unordered_map<const void*, uint32_t>> shared_ptr_ids_;
     uint32_t next_shared_id_ = 1;  // 0 reserved for null
 
-    std::stack<SerializationContext> context_stack_;
+    std::stack<SerializationContext, std::vector<SerializationContext>> context_stack_;
 
     uint32_t version_ = 0;
 
@@ -755,10 +756,10 @@ protected:
         std::shared_ptr<void> object;
         std::type_index type = std::type_index(typeid(void));
     };
-    std::unordered_map<uint32_t, deserialized_entry> cpp_shared_ptrs_;
+    std::unique_ptr<std::unordered_map<uint32_t, deserialized_entry>> cpp_shared_ptrs_;   // made at first use
 
     // Hashed on std::type_index: libstdc++'s type_info::before is not a strict weak order between internal-linkage and other types
-    std::unordered_map<std::type_index, void*> user_contexts_;
+    std::unique_ptr<std::unordered_map<std::type_index, void*>> user_contexts_;
 
     uint32_t version_ = 0;
 

@@ -312,6 +312,8 @@ void json_archive_writer::write_map_key(const std::string& key) {
 
 void json_archive_writer::write_value(const script_value& root) {
     std::vector<write_frame> frames;
+    frames.reserve(8);
+    if (out_.capacity() < 256) { out_.reserve(256); }
     const int depth_at_entry = json_depth_;
     begin_value(root, frames);
     script_value scratch(std::monostate{}, engine_ref_);
@@ -685,6 +687,19 @@ json_archive_reader::json_archive_reader(std::string_view json_string, engine* e
 
 uint32_t json_archive_reader::intern_key(uint32_t off, uint32_t len) {
     const std::string_view text(chars_.data() + off, len);
+    constexpr size_t scanned_keys = 16;   // up to this many distinct keys a scan finds them; past it, the hash table
+    if (key_spans_.size() < scanned_keys) {
+        for (uint32_t slot = 0; slot < key_spans_.size(); ++slot) {
+            const auto [o, l] = key_spans_[slot];
+            if (l == len && std::memcmp(chars_.data() + o, text.data(), len) == 0) {
+                if (off + len == chars_.size()) { chars_.resize(off); }
+                return slot;
+            }
+        }
+        if (key_spans_.empty()) { key_spans_.reserve(scanned_keys); }
+        key_spans_.emplace_back(off, len);
+        return static_cast<uint32_t>(key_spans_.size() - 1);
+    }
     if (key_spans_.size() * 2 >= key_table_.size()) {
         std::vector<uint32_t> table(key_table_.empty() ? 64 : key_table_.size() * 2, 0);
         const size_t mask = table.size() - 1;
@@ -1007,6 +1022,7 @@ script_value json_archive_reader::materialize(uint32_t idx) {
     engine* eng = engine_ref_;
     struct frame { uint32_t node; uint32_t next; script_value container; };
     std::vector<frame> frames;
+    frames.reserve(8);
     // a leaf's value, or nothing when n opened a container frame
     auto open = [&](uint32_t n, script_value& leaf) -> bool {
         const JNode& node = nodes_[n];

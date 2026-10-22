@@ -31,8 +31,10 @@
 #include <jaiscript/detail/arg_capture.hpp>
 #include <jaiscript/detail/math_component_store.hpp>
 #include <jaiscript/detail/release_machine.hpp>
+#include <jaiscript/detail/constant_arguments.hpp>
 #ifdef JAISCRIPT_VM_COVERAGE
 #include <jaiscript/vm/coverage.hpp>
+#include <deque>
 #include <mutex>
 #endif
 #include <charconv>
@@ -926,6 +928,7 @@ struct engine::implementation {
         uint64_t last_used = 0;
         uint32_t unit = 0;   // shadowing unit (the path for a file, the content for a literal); 0 until first run
         bool loaded_noted = false;   // run_unit looked at it for loaded_units_ (which holds the entry each unit last ran)
+        bool constants_gathered = false;   // its const texts and constant arguments are in the engine's tables (gather_constant_texts)
         // Static-check result, cached beside the parse (amortized once per unique
         // source); re-run when the registration surface epoch moves.
         bool checked = false;
@@ -1024,6 +1027,25 @@ struct engine::implementation {
     std::string program_parse_failures_;
     // Host functions' declared scalar results (engine::host_function_result): jai_null_type = unknown or disagreeing
     std::unordered_map<std::string, script_value_type> host_results_;
+    // Constant arguments (engine::constant_argument): the rules in registration order (stable addresses), indexed by the key
+    // a call spells ("name", ".member"), and the program's const texts by name
+    struct constant_argument_entry {
+        std::string callable;
+        detail::constant_argument_rule rule;
+    };
+    std::deque<constant_argument_entry> constant_arguments_;
+    detail::constant_rule_map constant_rule_index_;
+    detail::constant_table program_constants_;
+
+    void gather_constant_texts(const std::vector<declaration_ptr>& declarations) {
+        detail::gather_constants(declarations, program_constants_, constant_rule_index_);
+        detail::gather_constant_arguments(declarations, program_constants_, constant_rule_index_);
+    }
+    void gather_entry_constants(script_cache_entry& entry) {
+        if (entry.constants_gathered) { return; }
+        entry.constants_gathered = true;
+        gather_constant_texts(entry.declarations);
+    }
     script_value_type staged_host_result_ = script_value_type::jai_null_type;
     engine::host_direct_entry staged_host_direct_;
 
@@ -1216,6 +1238,7 @@ struct engine::implementation {
     }
 
     void check_entry(engine& self, script_cache_entry& entry, bool want_diagnostics) {
+        gather_entry_constants(entry);
         const uint64_t want_proof_epoch = type_proofs_ ? check_surface_epoch_ : UINT64_MAX;
         const bool need_check = want_diagnostics && (!entry.checked || entry.checked_epoch != check_surface_epoch_);
         const bool need_proofs = entry.proof_epoch != want_proof_epoch || !entry.autos_typed ||
@@ -1268,6 +1291,9 @@ struct engine::implementation {
                 std::unordered_set<std::string> visited;
                 collect_closure_units(self, roots, visited, closure, entry.closure_stamps, entry.source_path, entry.closure_parse_failures);
                 entry.checked = false;
+                // every unit's consts before any unit's check: a constant argument may name a const a later unit declares
+                detail::gather_constants(entry.declarations, program_constants_, constant_rule_index_);
+                for (const auto& unit : closure) { detail::gather_constants(unit.entry->declarations, program_constants_, constant_rule_index_); }
             }
             entry.closure_epoch = check_surface_epoch_;
             entry.closure_filesystem = self.is_enabled(privilege::filesystem);
@@ -2937,6 +2963,7 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
         o.program_functions = &impl->program_functions_;
         o.program_globals = &impl->program_globals_;
         if (!need_check) { impl->lowering_view(*this, bite.declarations_, lowering); }   // this walk is the proof pass
+        impl->gather_constant_texts(bite.declarations_);
         check_report r = detail::run_static_check(*this, bite.declarations_, nullptr, o);
         if (need_check) {
             bite.check_report_ = std::move(r);
@@ -3467,6 +3494,40 @@ void engine::stage_host_result(script_value_type kind) {
 void engine::stage_host_direct(host_direct_entry entry) {
     impl->staged_host_direct_ = entry;
 }
+
+void engine::constant_argument(const std::string& callable, size_t index, std::string refusal) {
+    for (auto& existing : impl->constant_arguments_) {
+        if (existing.callable == callable && existing.rule.index == index) {
+            existing.rule.refusal = std::move(refusal);
+            return;
+        }
+    }
+    impl->constant_arguments_.push_back({callable, {}});
+    auto& entry = impl->constant_arguments_.back();
+    entry.rule.index = index;
+    entry.rule.refusal = std::move(refusal);
+    const size_t dot = callable.rfind('.');
+    impl->constant_rule_index_[dot == std::string::npos ? callable : callable.substr(dot)].push_back(&entry.rule);
+}
+
+bool engine::constant_argument_admits(const std::string& callable, size_t index, std::string_view text) const {
+    for (const auto& entry : impl->constant_arguments_) {
+        if (entry.callable == callable && entry.rule.index == index) { return entry.rule.texts.count(std::string(text)) != 0; }
+    }
+    return false;
+}
+
+std::vector<std::pair<size_t, const std::string*>> engine::constant_argument_indexes(const std::string& callable) const {
+    std::vector<std::pair<size_t, const std::string*>> result;
+    for (const auto& entry : impl->constant_arguments_) {
+        if (entry.callable == callable) { result.emplace_back(entry.rule.index, &entry.rule.refusal); }
+    }
+    return result;
+}
+
+bool engine::has_constant_arguments() const { return !impl->constant_arguments_.empty(); }
+
+const std::unordered_map<std::string, std::vector<std::string>>& engine::constant_texts_by_name() const { return impl->program_constants_; }
 
 bool engine::host_function_result(const std::string& name, script_value_type& out) const {
     auto it = impl->host_results_.find(name);

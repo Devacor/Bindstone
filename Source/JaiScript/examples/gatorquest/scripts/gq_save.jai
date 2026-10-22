@@ -62,7 +62,7 @@ string seal(string body) { return body + "end " + to_string(text_checksum(body))
 string unseal(string text, string magic) {
 	if (text == "") { SAVE_NOTE = "missing or empty"; return ""; }
 	string t = text;
-	t.replace_all("\r\n", "\n");              // saves are written with \n; a tool that converted them is forgiven
+	t.replace("\r\n", "\n");              // saves are written with \n; a tool that converted them is forgiven
 	while (t.size() > 0 && (t.ends_with("\n") || t.ends_with("\r") || t.ends_with(" "))) { t = t.substr(0, t.size() - 1); }
 	int at = t.rfind("\n");
 	if (at < 0) { SAVE_NOTE = "truncated"; return ""; }
@@ -140,7 +140,7 @@ string rec_str(map<string, string>& r, string key, string def) { return r.has(ke
 array<int> rec_ints(map<string, string>& r, string key) {
 	if (!r.has(key)) { return []; }
 	string v = r[key];
-	v.replace_all(" ", ",");
+	v.replace(" ", ",");
 	return dec_ints(v);
 }
 
@@ -379,7 +379,7 @@ bool world_from_body(string body, bool keep_players) {
 		if (line.starts_with("m ")) {
 			int m = mob_push();
 			if (line == "m -") { continue; }
-			array<int> f = dec_ints(line.substr(2, line.size() - 2).replace_all(" ", ","));
+			array<int> f = dec_ints(line.substr(2, line.size() - 2).replace(" ", ","));
 			if (f.size() < 33 || f[0] < 0 || f[0] >= MONS.size() || f[2] < 0 || f[2] >= WORLD_COUNT) { continue; }
 			MOB_KIND[m] = f[0];
 			MOB_SER[m] = f[1];

@@ -1032,17 +1032,17 @@
     },
     {
       "owner": "string",
-      "name": "replace_all",
-      "signature": "replace_all(from: text, to: text) -> Self",
+      "name": "replace",
+      "signature": "replace(from: text, to: text) -> Self",
       "provider": "core",
       "effect": "mutate",
-      "notes": "",
+      "notes": "Replaces every occurrence of from, left to right and without overlap.",
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.replace_all(from: text, to: text) -> Self",
+      "display": "string.replace(from: text, to: text) -> Self",
       "example": {
-        "code": "string s = \"a-b-c\";\ns.replace_all(\"-\", \"+\");\nprint(s);",
+        "code": "string s = \"a-b-c\";\ns.replace(\"-\", \"+\");\nprint(s);",
         "output": "a+b+c"
       }
     },
@@ -1716,15 +1716,15 @@
     },
     {
       "owner": "utf8_string",
-      "name": "replace_all",
-      "signature": "replace_all(from: text, to: text) -> Self",
+      "name": "replace",
+      "signature": "replace(from: text, to: text) -> Self",
       "provider": "core",
       "effect": "mutate",
-      "notes": "",
+      "notes": "Replaces every occurrence of from, left to right and without overlap.",
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "utf8_string.replace_all(from: text, to: text) -> Self"
+      "display": "utf8_string.replace(from: text, to: text) -> Self"
     },
     {
       "owner": "utf8_string",
@@ -2764,15 +2764,15 @@
     },
     {
       "owner": "string",
-      "name": "replace_all",
-      "signature": "replace_all(value: text, from: text, to: text) -> same_text_kind",
+      "name": "replace",
+      "signature": "replace(value: text, from: text, to: text) -> same_text_kind",
       "provider": "stdlib",
       "effect": "copy",
-      "notes": "",
+      "notes": "Replaces every occurrence of from, left to right and without overlap.",
       "source": "include/jaiscript/stdlib/strings.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "string::replace_all(value: text, from: text, to: text) -> same_text_kind"
+      "display": "string::replace(value: text, from: text, to: text) -> same_text_kind"
     },
     {
       "owner": "string",

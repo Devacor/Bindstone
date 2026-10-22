@@ -414,17 +414,17 @@ public:
             check_eq(result.as<std::string>(), "hello hi");
         });
 
-        test("replace_all", [this]() {
+        test("replace", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello hello hello\"; s.replace_all(\"hello\", \"hi\");");
+            auto result = engine->execute("var s = \"hello hello hello\"; s.replace(\"hello\", \"hi\");");
             check_eq(result.as<std::string>(), "hi hi hi");
         });
 
-        test("replace_all_non_overlapping", [this]() {
+        test("replace_non_overlapping", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"aaaa\"; s.replace_all(\"aa\", \"b\");");
+            auto result = engine->execute("var s = \"aaaa\"; s.replace(\"aa\", \"b\");");
             check_eq(result.as<std::string>(), "bb");
         });
 
@@ -484,7 +484,7 @@ public:
         test("chaining_multiple_operations", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"  Hello World  \"; s.trim().to_lower().replace_all(\" \", \"_\");");
+            auto result = engine->execute("var s = \"  Hello World  \"; s.trim().to_lower().replace(\" \", \"_\");");
             check_eq(result.as<std::string>(), "hello_world");
         });
 
@@ -614,10 +614,10 @@ public:
             check_eq(result.as<std::string>(), "hello");
         });
 
-        test("mutation_replace_all_modifies_original", [this]() {
+        test("mutation_replace_modifies_original", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"aaa\"; s.replace_all(\"a\", \"b\"); s;");
+            auto result = engine->execute("var s = \"aaa\"; s.replace(\"a\", \"b\"); s;");
             check_eq(result.as<std::string>(), "bbb");
         });
 
@@ -953,7 +953,7 @@ public:
         test("string_namespace_free_functions", [this, eval, es]() {
             check_eq(std::string("a-b-c"), es("string::join([\"a\", \"b\", \"c\"], \"-\");"));
             check_eq(std::string("[hi][  hi  ]"), es("string t = \"  hi  \"; \"[\" + string::trim(t) + \"][\" + t + \"]\";"));   // the argument is untouched
-            check_eq(std::string("a+b+c"), es("string::replace_all(\"a-b-c\", \"-\", \"+\");"));
+            check_eq(std::string("a+b+c"), es("string::replace(\"a-b-c\", \"-\", \"+\");"));
             check_eq(std::string("ababab"), es("string::repeat(\"ab\", 3);"));
             check_eq(std::string("007x.."), es("string::pad_left(\"7\", 3, \"0\") + string::pad_right(\"x\", 3, '.');"));
             check_eq(std::string("HI!"), es("namespace string { function shout(string s) -> string { return string::to_upper(s) + \"!\"; } } string::shout(\"hi\");"));   // the namespace stays script-extensible

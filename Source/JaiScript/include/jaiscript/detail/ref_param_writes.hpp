@@ -63,7 +63,7 @@ namespace jai::detail {
 			"push", "push_back", "push_front", "pop", "pop_back", "pop_front", "insert", "erase", "remove", "remove_at",
 			"clear", "sort", "reverse", "resize", "set", "swap", "fill", "shuffle", "append", "extend", "reserve",
 			"to_lower", "to_upper", "trim", "trim_left", "trim_right", "pad_left", "pad_right", "pad_center",
-			"replace_first", "replace_last", "replace_all", "remove_prefix", "remove_suffix", "repeat", "reset",
+			"replace_first", "replace_last", "replace", "remove_prefix", "remove_suffix", "repeat", "reset",
 		};
 		for (auto m : k_writing) { if (name == m) { return true; } }
 		return false;

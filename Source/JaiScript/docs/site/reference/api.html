@@ -1205,7 +1205,8 @@ print(reflect::invoke(Orc(), &quot;add&quot;, 2, 3));</code></pre></div>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="string::repeat(value: text, count: int) -&gt; same_text_kind copy  register_all() or area registration"><h3 id="api-b89411134760"><code>string::repeat(value: text, count: int) -&gt; same_text_kind</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
 </div>
-<div class="api-entry" data-provider="stdlib" data-search="string::replace_all(value: text, from: text, to: text) -&gt; same_text_kind copy  register_all() or area registration"><h3 id="api-bc4b9f4afeec"><code>string::replace_all(value: text, from: text, to: text) -&gt; same_text_kind</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
+<div class="api-entry" data-provider="stdlib" data-search="string::replace(value: text, from: text, to: text) -&gt; same_text_kind copy replaces every occurrence of from, left to right and without overlap. register_all() or area registration"><h3 id="api-e177e5762ecf"><code>string::replace(value: text, from: text, to: text) -&gt; same_text_kind</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
+<p>Replaces every occurrence of from, left to right and without overlap.</p>
 </div>
 <div class="api-entry" data-provider="stdlib" data-search="string::to_lower(value: text) -&gt; same_text_kind copy namespace transform leaves input unchanged. register_all() or area registration"><h3 id="api-e87d5664969f"><code>string::to_lower(value: text) -&gt; same_text_kind</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
 <p>Namespace transform leaves input unchanged.</p>
@@ -1320,9 +1321,10 @@ print(s.at(1), &quot; &quot;, s[2], &quot; &quot;, type_of(s.at(0)));</code></pr
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;ab&quot;.repeat(3));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ababab</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.replace_all(from: text, to: text) -&gt; self mutate  every engine"><h3 id="api-19d8248a7204"><code>string.replace_all(from: text, to: text) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="string.replace(from: text, to: text) -&gt; self mutate replaces every occurrence of from, left to right and without overlap. every engine"><h3 id="api-6e803d631187"><code>string.replace(from: text, to: text) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Replaces every occurrence of from, left to right and without overlap.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string s = &quot;a-b-c&quot;;
-s.replace_all(&quot;-&quot;, &quot;+&quot;);
+s.replace(&quot;-&quot;, &quot;+&quot;);
 print(s);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a+b+c</code></pre></div>
 </div>
@@ -1586,7 +1588,8 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 <div class="api-entry" data-provider="core" data-search="utf8_string.repeat(count: int) -&gt; self mutate repeats receiver and returns text for chaining. every engine"><h3 id="api-4a7409d0b956"><code>utf8_string.repeat(count: int) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
 <p>Repeats receiver and returns text for chaining.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.replace_all(from: text, to: text) -&gt; self mutate  every engine"><h3 id="api-3f70af5de672"><code>utf8_string.replace_all(from: text, to: text) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.replace(from: text, to: text) -&gt; self mutate replaces every occurrence of from, left to right and without overlap. every engine"><h3 id="api-f6c162b2db60"><code>utf8_string.replace(from: text, to: text) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Replaces every occurrence of from, left to right and without overlap.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="utf8_string.replace_first(from: text, to: text) -&gt; self mutate  every engine"><h3 id="api-f9feb6fb99f1"><code>utf8_string.replace_first(from: text, to: text) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
 </div>

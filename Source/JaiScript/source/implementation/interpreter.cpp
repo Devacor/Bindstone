@@ -1888,18 +1888,18 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             return self;
         }},
 
-        {symbolizer->intern("replace_all"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        {symbolizer->intern("replace"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 2) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "replace_all() takes exactly 2 arguments (old, new)");
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "replace() takes exactly 2 arguments (old, new)");
             }
             if (!args[0].is_text() || !args[1].is_text()) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "replace_all() arguments must be strings");
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "replace() arguments must be strings");
             }
             const auto& old_str = args[0].unchecked_text();
             const auto& new_str = args[1].unchecked_text();
 
             if (old_str.empty()) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "replace_all() search string cannot be empty");
+                return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "replace() search string cannot be empty");
             }
 
             // One pass builds the result: replacing in place shifts the tail at every hit, quadratic in the hits

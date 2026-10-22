@@ -147,8 +147,8 @@ int run_tour() {
 		travel(me, w, W_ARRIVE_X[w] + 3, W_ARRIVE_Y[w] + 2);
 		tour_ticks(28);
 		string n = string::to_lower(WORLDS[w].name);
-		n.replace_all(" ", "_");
-		n.replace_all(".", "");
+		n.replace(" ", "_");
+		n.replace(".", "");
 		tour_shot(dir, `${w + 1 < 10 ? "0" : ""}${w + 1}_${n}`);
 	}
 	// night in Gatorland: torchlight and the forge glow

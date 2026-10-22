@@ -637,7 +637,7 @@ the vector rows of the interpolation family. Not built: the other destinations (
 | `Stopwatch`, `programTime`, `systemTime*` | stays | the time source is the host's; a deterministic game feeds scripts the simulation clock |
 | file helpers (`fileContents`, `fileExists*`, `writeToFile`, `deleteFile`, `lastFileWriteTime`, `sdlFileHandle`, `playerPreferencesPath`, `fileNameFromPath`) | stays | filesystem is a host privilege; JaiScript has `file_name` / `parent_dir` / `resolve_path` and host `read_file` / `write_file` |
 | `simpleFilter` | stays | engine input sanitizing, not a general string operation |
-| `explode`, `toLower`, `toUpper`, `replaceFirst`, `replaceAll`, `filenameFromPath` | exist (`split`, `to_lower`, `to_upper`, `replace_first`, `replace_all`, `file_name`) | already covered |
+| `explode`, `toLower`, `toUpper`, `replaceFirst`, `replaceAll`, `filenameFromPath` | exist (`split`, `to_lower`, `to_upper`, `replace_first`, `replace`, `file_name`) | already covered |
 | `startsWith` | exists (`starts_with`) | MV's version is inverted (3.2) |
 | `toWide` / `toString(wstring)`, `getline_platform_agnostic` | stays | Windows/stream plumbing |
 

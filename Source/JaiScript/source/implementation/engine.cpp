@@ -4832,13 +4832,18 @@ const engine::math_alias_row* engine::math_alias_rows() const {
 void engine::add_host_direct(std::string_view name, size_t arity, host_direct_invoke invoke, const void* target) {
     if (!invoke || arity == 0 || (arity > 8 && arity != host_direct_any_arity)) { return; }
     script_value* global = impl->global_environment_->get_value_ptr(impl->string_symbolizer_.intern(name));
-    if (!global || global->raw_storage_index() != script_value::TYPEID_FUNCTION) { return; }
-    const void* identity = &global->unchecked_as_function();
+    if (!global) { return; }
+    add_host_direct(*global, arity, invoke, target);
+}
+
+void engine::add_host_direct(const script_value& function, size_t arity, host_direct_invoke invoke, const void* target) {
+    if (!invoke || arity == 0 || (arity > 8 && arity != host_direct_any_arity) || function.raw_storage_index() != script_value::TYPEID_FUNCTION) { return; }
+    const void* identity = &function.unchecked_as_function();
     for (auto& row : impl->host_direct_rows_) {
         if (row.identity == identity) { row.invoke = invoke; row.target = target; row.arity = arity; return; }
     }
     host_direct_row& row = impl->host_direct_rows_.emplace_back();
-    row.value = *global;
+    row.value = function;
     row.identity = &row.value.unchecked_as_function();
     row.invoke = invoke;
     row.target = target;

@@ -2099,7 +2099,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 max_splits = args[1].unchecked_as_int();
             }
 
-            std::string delim = "";
+            std::string_view delim;
             bool whitespace = args.empty();
             if (args.size() > 0) {
                 if (!args[0].is_text()) {
@@ -2124,7 +2124,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             auto push_piece = [&](size_t a_at, size_t a_count) {
                 const size_t length = std::min(a_count, str.size() - a_at);
                 if (!limits.memory_charge(sizeof(script_value) + length)) [[unlikely]] { return false; }
-                result.push(ctx.make_value(str.substr(a_at, length)));
+                result.strs().push_back(make_strong<script_string>(str, a_at, length));   // the piece's handle, as push stores a string
                 return true;
             };
 
@@ -2151,6 +2151,9 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                     if (!push_piece(at, 1)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
                 }
             } else {
+                size_t pieces = 1;   // counted first: one sized buffer
+                for (size_t at = str.find(delim); at != std::string::npos && (max_splits < 0 || static_cast<script_int>(pieces) <= max_splits); at = str.find(delim, at + delim.size())) { ++pieces; }
+                result.reserve(pieces);
                 size_t start = 0;
                 size_t end;
                 script_int splits = 0;

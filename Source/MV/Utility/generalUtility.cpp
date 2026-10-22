@@ -20,6 +20,7 @@
 #endif
 
 #ifdef __APPLE__
+	#include <TargetConditionals.h>
 	#include "CoreFoundation/CoreFoundation.h"
 	#include <assert.h>
 	#include <stdbool.h>
@@ -145,6 +146,16 @@ namespace MV {
 
 	const std::string& playerPreferencesPath() {
 		static const std::string path = SDL_GetPrefPath(APPLICATION_ORG, APPLICATION_NAME);
+		return path;
+	}
+
+	const std::string& playerCachePath() {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+		// Library/Caches stays out of iCloud backup and the OS may purge it, which suits data that rebuilds itself
+		static const std::string path = SDL_getenv("HOME") ? std::string(SDL_getenv("HOME")) + "/Library/Caches/" : playerPreferencesPath();
+#else
+		static const std::string path = playerPreferencesPath();
+#endif
 		return path;
 	}
 

@@ -302,6 +302,7 @@ namespace MV {
 
 	std::string fileNameFromPath(std::string a_path, bool a_includeExtension = false);
 	const std::string& playerPreferencesPath();
+	const std::string& playerCachePath();
 
 	bool fileExistsAbsolute(const std::string& a_path);
 	bool fileExistsInSearchPaths(const std::string& a_path);

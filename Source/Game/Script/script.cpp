@@ -129,7 +129,7 @@ namespace MV {
 #if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
 		// bundled scripts are read-only (APK assets are not even files), so parse caches go to the app's writable folder
 		std::error_code ignored;
-		engine->jaibite_cache_directory(playerPreferencesPath() + "ScriptCache", std::filesystem::current_path(ignored).string());
+		engine->jaibite_cache_directory(playerCachePath() + "ScriptCache", std::filesystem::current_path(ignored).string());
 #endif
 		engine->static_checking(jai::check_mode::warn);   // engine default is strict; the live client stays at warn (-verifyassets runs the same scripts strict)
 		engine->set_script_error_handler([raw = engine.get()](const std::string& a_message) {

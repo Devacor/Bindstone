@@ -33,21 +33,14 @@
 #include <thread>
 #include <vector>
 
+#include "file_io.hpp"      // read_file, write_file and the rest of the host file IO
+#include "net_socket.hpp"   // the socket primitives NetChannel and NetServer stand on
+
 #ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include <windows.h>
-#pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "winmm.lib")
 #else
-#include <cerrno>
-#include <fcntl.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <sys/ioctl.h>
-#include <sys/socket.h>
 #include <termios.h>
 #include <unistd.h>
 #include <csignal>
@@ -56,6 +49,7 @@
 namespace {
 
 namespace fs = std::filesystem;
+using namespace jai_runner;
 
 // ---------------------------------------------------------------- console ---
 
@@ -599,40 +593,6 @@ void register_console_game_io(jai::engine& eng) {
 // firing signals inside the script's own call stack. Protocol semantics
 // (actions, lockstep, handshakes) live entirely in script.
 
-#ifdef _WIN32
-using net_socket = SOCKET;
-constexpr net_socket net_bad_socket = INVALID_SOCKET;
-bool net_ready() {
-	static const bool ready = [] { WSADATA wsa; return ::WSAStartup(MAKEWORD(2, 2), &wsa) == 0; }();
-	return ready;
-}
-bool net_would_block() {
-	int e = ::WSAGetLastError();
-	return e == WSAEWOULDBLOCK || e == WSAEINPROGRESS;
-}
-void net_close_socket(net_socket s) { ::closesocket(s); }
-void net_set_nonblocking(net_socket s) {
-	u_long mode = 1;
-	::ioctlsocket(s, FIONBIO, &mode);
-}
-// Windows' SO_REUSEADDR lets a second listener take a port that is in use; exclusive use makes that bind fail
-void net_listen_options(net_socket s) {
-	BOOL yes = TRUE;
-	::setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&yes), sizeof(yes));
-}
-#else
-using net_socket = int;
-constexpr net_socket net_bad_socket = -1;
-bool net_ready() { return true; }
-bool net_would_block() { return errno == EWOULDBLOCK || errno == EAGAIN || errno == EINPROGRESS; }
-void net_close_socket(net_socket s) { ::close(s); }
-void net_set_nonblocking(net_socket s) { ::fcntl(s, F_SETFL, ::fcntl(s, F_GETFL, 0) | O_NONBLOCK); }
-void net_listen_options(net_socket s) {
-	int yes = 1;
-	::setsockopt(s, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
-}
-#endif
-
 class net_channel : public jai::property_owner<net_channel> {
 	friend jai::access;
 public:
@@ -1059,41 +1019,6 @@ std::string slurp_file(const std::string& path) {
 	return ss.str();
 }
 
-// read_file: the file's bytes, "" for an empty file; a missing or unreadable one raises the catchable
-// "Cannot read file '<path>': <reason>" (docs/site/guide/10-modules.html "Where files are")
-std::string read_file_or_raise(const std::string& path) {
-	std::error_code ec;
-	const fs::file_status st = fs::status(path, ec);
-	const char* reason = nullptr;
-	if (st.type() == fs::file_type::not_found) { reason = "not found"; }
-	else if (ec) { reason = ec == std::errc::permission_denied ? "permission denied" : "cannot be opened"; }
-	else if (!fs::is_regular_file(st)) { reason = "not a file"; }
-	if (!reason) {
-		errno = 0;
-		std::ifstream in(path, std::ios::binary);
-		if (!in) {
-			reason = errno == EACCES ? "permission denied" : "cannot be opened";
-		} else {
-			std::ostringstream ss;
-			ss << in.rdbuf();
-			if (!in.bad()) { return ss.str(); }
-			reason = "read failed";
-		}
-	}
-	throw std::runtime_error("Cannot read file '" + path + "': " + reason);
-}
-
-bool spill_file(const std::string& path, const std::string& content) {
-	if (const fs::path parent = fs::path(path).parent_path(); !parent.empty()) {
-		std::error_code ec;
-		fs::create_directories(parent, ec);   // a missing folder is the ofstream's failure to report
-	}
-	std::ofstream out(path, std::ios::binary | std::ios::trunc);
-	if (!out) { return false; }
-	out.write(content.data(), static_cast<std::streamsize>(content.size()));
-	return out.good();
-}
-
 // The reference embedding: engine + backend + budget + full stdlib + host file IO.
 std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream* engine_out) {
 	auto eng = jai::engine::make();
@@ -1122,63 +1047,7 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 	jai::stdlib::register_all(eng);
 
 	// Host file IO — a runner without it can't save anything (same shapes as the example games).
-	eng->add_function("read_file", [](const std::string& path) -> std::string { return read_file_or_raise(path); }, jai::filesystem);
-	eng->add_function("write_file", [](const std::string& path, const std::string& content) -> bool {
-		return spill_file(path, content);
-	}, jai::filesystem);
-	eng->add_function("file_exists", [](const std::string& path) -> bool { return fs::exists(path); }, jai::filesystem);
-	eng->add_function("delete_file", [](const std::string& path) -> bool {
-		std::error_code ec;
-		return fs::remove(path, ec);
-	}, jai::filesystem);
-	// the safe-save step: the destination is replaced in one operation on the same volume (MoveFileEx / rename(2)), a
-	// reader sees the old file or the new one; across volumes the move copies, then removes the source
-	eng->add_function("move_file", [](const std::string& from, const std::string& to) -> bool {
-		std::error_code ec;
-		if (!fs::is_regular_file(from, ec)) { return false; }
-#ifdef _WIN32
-		return MoveFileExW(fs::path(from).c_str(), fs::path(to).c_str(),
-			MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH | MOVEFILE_COPY_ALLOWED) != 0;
-#else
-		fs::rename(from, to, ec);
-		if (!ec) { return true; }
-		if (ec != std::errc::cross_device_link) { return false; }
-		ec.clear();
-		fs::copy_file(from, to, fs::copy_options::overwrite_existing, ec);
-		return !ec && fs::remove(from, ec);
-#endif
-	}, jai::filesystem);
-	eng->add_function("dir_exists", [](const std::string& path) -> bool {
-		std::error_code ec;
-		return fs::is_directory(path, ec);
-	}, jai::filesystem);
-	eng->add_function("make_dirs", [](const std::string& path) -> bool {
-		std::error_code ec;
-		fs::create_directories(path, ec);
-		return fs::is_directory(path, ec);
-	}, jai::filesystem);
-	// The save-side question resolve_path cannot answer: can this folder take a file? Creates it
-	// if missing, writes and removes a probe. A program picks its save anchor with it:
-	// root_script_dir() when writable, app_data_dir(name) otherwise.
-	eng->add_function("writable_dir", [](const std::string& path) -> bool {
-		std::error_code ec;
-		fs::create_directories(path, ec);
-		if (!fs::is_directory(path, ec)) { return false; }
-		fs::path probe = fs::path(path) / (".jai_write_probe_" + std::to_string(static_cast<unsigned long long>(std::chrono::steady_clock::now().time_since_epoch().count())));
-		{
-			std::ofstream out(probe, std::ios::binary | std::ios::trunc);
-			if (!out) { return false; }
-		}
-		fs::remove(probe, ec);
-		return true;
-	}, jai::filesystem);
-	eng->add_function("list_dir", [](const std::string& path) -> std::vector<std::string> {
-		std::vector<std::string> names;
-		std::error_code ec;
-		for (const auto& entry : fs::directory_iterator(path, ec)) { names.push_back(entry.path().filename().generic_string()); }
-		std::sort(names.begin(), names.end());
-		return names;
-	}, jai::filesystem);
+	register_file_io(*eng);
 	register_console_game_io(*eng);
 	register_net_channel(*eng);
 	jai_runner::register_fetch(*eng);

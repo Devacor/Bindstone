@@ -5757,7 +5757,7 @@
       "provider": "runner",
       "effect": "filesystem",
       "notes": "Missing/unreadable file raises; empty file returns empty string.",
-      "source": "tools/jaiscript/main.cpp",
+      "source": "tools/jaiscript/file_io.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
       "display": "read_file(path: string) -> string"
@@ -5769,7 +5769,7 @@
       "provider": "runner",
       "effect": "filesystem",
       "notes": "Creates missing parent folders.",
-      "source": "tools/jaiscript/main.cpp",
+      "source": "tools/jaiscript/file_io.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
       "display": "write_file(path: string, content: string) -> bool"
@@ -5781,7 +5781,7 @@
       "provider": "runner",
       "effect": "filesystem",
       "notes": "",
-      "source": "tools/jaiscript/main.cpp",
+      "source": "tools/jaiscript/file_io.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
       "display": "file_exists(path: string) -> bool"
@@ -5793,7 +5793,7 @@
       "provider": "runner",
       "effect": "filesystem",
       "notes": "",
-      "source": "tools/jaiscript/main.cpp",
+      "source": "tools/jaiscript/file_io.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
       "display": "delete_file(path: string) -> bool"
@@ -5805,7 +5805,7 @@
       "provider": "runner",
       "effect": "filesystem",
       "notes": "Replaces destination; may copy across volumes.",
-      "source": "tools/jaiscript/main.cpp",
+      "source": "tools/jaiscript/file_io.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
       "display": "move_file(from: string, to: string) -> bool"
@@ -5817,7 +5817,7 @@
       "provider": "runner",
       "effect": "filesystem",
       "notes": "",
-      "source": "tools/jaiscript/main.cpp",
+      "source": "tools/jaiscript/file_io.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
       "display": "dir_exists(path: string) -> bool"
@@ -5829,7 +5829,7 @@
       "provider": "runner",
       "effect": "filesystem",
       "notes": "",
-      "source": "tools/jaiscript/main.cpp",
+      "source": "tools/jaiscript/file_io.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
       "display": "make_dirs(path: string) -> bool"
@@ -5841,7 +5841,7 @@
       "provider": "runner",
       "effect": "filesystem",
       "notes": "Creates folder and performs a write/remove probe.",
-      "source": "tools/jaiscript/main.cpp",
+      "source": "tools/jaiscript/file_io.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
       "display": "writable_dir(path: string) -> bool"
@@ -5853,7 +5853,7 @@
       "provider": "runner",
       "effect": "filesystem",
       "notes": "",
-      "source": "tools/jaiscript/main.cpp",
+      "source": "tools/jaiscript/file_io.hpp",
       "form": "function",
       "availability": "Standalone jaiscript.exe",
       "display": "list_dir(path: string) -> array<string>"

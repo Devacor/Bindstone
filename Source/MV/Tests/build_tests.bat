@@ -16,7 +16,7 @@ cl /nologo /O2 /std:c++20 /EHsc /MD /bigobj /DJAISCRIPT_ENABLE_DEBUGGER ^
   /I"%ROOT%\External\gl3w\include" ^
   /I"%ROOT%\External\openssl\openssl-3.5.9\include" /I"%ROOT%\Source\JaiScript\include" ^
   /I"%ROOT%\VSProjects\SDL2\include" /I"%ROOT%\VSProjects\SDL2_ttf\include" ^
-  matrix_tests.cpp scene_tests.cpp atlas_tests.cpp rhi_tests.cpp scriptdebug_tests.cpp ^
+  matrix_tests.cpp scene_tests.cpp atlas_tests.cpp rhi_tests.cpp device_binding_tests.cpp scriptdebug_tests.cpp ^
   scene_serialization_tests.cpp texture_handle_tests.cpp pathfinding_tests.cpp utility_tests.cpp threadpool_tests.cpp emitter_tests.cpp ^
   network_tests.cpp openssl_tests.cpp tls_tests.cpp web_tests.cpp ^
   "%ROOT%\Source\Game\Script\script.cpp" ^

@@ -11,6 +11,7 @@
 
 #include "render.h"
 #include "device.h"   // Render::Device / Render::BoundTexture (held by value in LoadedTextureData)
+#include "deviceBindings.h"
 #include "boxaabb.h"
 
 #include <jaiscript/signals/signal_decl.hpp>
@@ -199,12 +200,11 @@ namespace MV {
 	// A texture's GPU object: a device BoundTexture, or a legacy raw-GL name until a device exists. id() resolves whichever is active.
 	struct LoadedTextureData {
 		friend LoadedTexture;
+		friend Render::DeviceBindings;
 	public:
 		LoadedTextureData() {}
 		LoadedTextureData(GLuint a_textureId) : textureId(a_textureId){}
-		LoadedTextureData(Render::Device* a_device, Render::BoundTexture a_bound, Render::BoundSampler a_sampler = {}) :
-			renderDevice(a_device), boundTexture(a_bound), boundSampler(a_sampler) {}
-		LoadedTextureData(LoadedTextureData&& a_rhs) = default;
+		LoadedTextureData(Render::Device* a_device, Render::BoundTexture a_bound, Render::BoundSampler a_sampler = {});
 		~LoadedTextureData();
 
 		GLuint id() const;
@@ -233,6 +233,9 @@ namespace MV {
 	private:
 		LoadedTextureData(const LoadedTextureData& a_rhs) = delete;
 		LoadedTextureData& operator=(const LoadedTextureData& a_rhs) = delete;
+
+		// Recovery after this is reload(): the binding was built from the source, never kept as the only copy.
+		void releaseDeviceBindings(Render::Device& a_device);
 
 		std::atomic<int> useCount = 0;   // live holders of the shared globalLookup entry; last one erases it.
 	};
@@ -304,11 +307,6 @@ namespace MV {
 		// Device-back the shared cache entry for these params in place (every live holder upgrades at
 		// once; nothing erased, so no raw dataValue is invalidated). No-op if absent or already backed.
 		static bool deviceBackInPlace(const TextureParameters& a_parameters, Render::Device* a_device);
-		// Draw2D-teardown hook: destroy this device's bindings while its context is still current.
-		// globalLookup is static and outlives every device; without this, entries surviving to static
-		// teardown (e.g. cacheDecodedSurface preloads) destroy through a dangling Device*. Entries
-		// stay resident and reload-capable (recovery is reload(), not a retained binding).
-		static void releaseDeviceBackedEntries(Render::Device* a_device);
 	private:
 		LoadedTexture(const LoadedTexture&) = delete;
 		LoadedTexture& operator=(const LoadedTexture&) = delete;

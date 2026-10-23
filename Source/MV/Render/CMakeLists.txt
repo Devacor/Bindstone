@@ -1,6 +1,8 @@
 target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/boxaabb.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/boxaabb.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deviceBindings.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/deviceBindings.h
   ${CMAKE_CURRENT_SOURCE_DIR}/formattedText.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/formattedText.h
   ${CMAKE_CURRENT_SOURCE_DIR}/matrix.hpp

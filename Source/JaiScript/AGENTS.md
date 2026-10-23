@@ -1,9 +1,9 @@
 # AGENTS.md — JaiScript
 
 JaiScript is an embedded, C++-like scripting language with hot reload: a static library plus headers, snake_case
-throughout. Every script runs on one of two backends held to identical behavior: the bytecode VM (the default) and the
-tree-walking interpreter (the oracle that keeps the VM honest). Same results, same printed output, same error text,
-byte for byte.
+throughout. Every script runs on one of two backends held to identical behavior: the bytecode VM (the default, and the
+only backend whose speed matters) and the tree-walking interpreter (a plain validator of what the site specifies). Same
+results, same printed output, same error text, byte for byte.
 
 `CONTRIBUTING.md` is the human workflow and `docs/BUILD.md` the build reference; this file is the short version plus
 the rules a change must not break.
@@ -143,8 +143,9 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
 - C++ semantics are the contract: lifetimes, copies, references, evaluation order, conversions. The exception is a
   static-typing artifact such as slicing; there the dynamic choice wins (a subclass stored into a base slot keeps its
   class).
-- Both backends stay at parity. A change that satisfies one backend is not done; the interpreter is never dropped to
-  simplify the VM.
+- Both backends stay at parity on what the site specifies. A change that satisfies one backend is not done.
+- The VM may take any shortcut nobody can observe. The interpreter is a plain evaluator: a change shrinks its fast paths
+  rather than adding to them, and never holds a VM win back.
 - A simplification lands only when it is behavior- and error-text-identical, and no slower.
 - Uplift the general path rather than special-casing a shape: a fast path that only one spelling reaches is suspect,
   and operator overloads and dynamic values must keep working on every path.

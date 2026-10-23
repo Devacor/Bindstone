@@ -226,7 +226,7 @@
         },
         {
           "name": "storage.modifier.jaiscript",
-          "match": "\\b(const|static|inline|nocopy|override|public|private|protected|new|cast|import|include|extern)\\b"
+          "match": "\\b(const|static|inline|nocopy|override|public|private|protected|new|make_shared|cast|import|include|extern)\\b"
         },
         {
           "name": "meta.attribute.jaiscript",

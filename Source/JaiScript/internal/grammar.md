@@ -436,6 +436,7 @@ primaryExpression = literal
 
 // Sugar: `new T(args)` ≡ `shared_ptr<T>(args)` (idempotent when T is already shared_ptr<...>)
 newExpression = "new" type ( "(" argumentList? ")" | "{" argumentList? "}" )
+              | "make_shared" "<" type ">" "(" argumentList? ")"
 
 // include in expression position evaluates to the included file's result value
 // (its last top-level expression — exactly what engine::execute returns for it)

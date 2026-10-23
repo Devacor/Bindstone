@@ -346,6 +346,6 @@ receiver loads armed. Run it after any change to a property, registrar or loader
 
 ## Git
 
-- Dev handles all git operations. Never check out files without explicit permission; never force push or amend pushed
-  commits.
+- Dev handles all git operations. Look before any destructive action (a checkout over local changes, a reset, a
+  delete); never force push or amend pushed commits.
 - Commit messages are one line: a title, no body, matching `git log --oneline`. No co-author or other trailers.

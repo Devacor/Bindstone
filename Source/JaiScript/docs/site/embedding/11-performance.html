@@ -65,8 +65,8 @@ and pushed inside the dispatch loop, and arguments bind zero-copy from the stack
 run bodies that the engine can <em>prove</em> safe across a worker pool, deterministic by
 construction (identical results and hashes at any worker count), reaching 4.8&times; over the
 serial loop at 8 workers on a 4C/8T machine for a 100k-element map.</li>
-<li><strong>Thin values.</strong> <code>script_value</code> is 32 bytes on a 64-bit host (24 on a 32-bit
-one), static-assert-gated: two per cache line.</li>
+<li><strong>Thin values.</strong> <code>script_value</code> is 16 bytes, static-assert-gated: four per
+cache line.</li>
 <li><strong>Two backends, one contract.</strong> The tree-walking interpreter is the oracle that keeps
 the VM honest. The full test suite and a differential fuzzer hold both to byte-identical behavior
 (see <a href="03-backends.html">Backends</a>), so the fast paths above carry no semantic drift,

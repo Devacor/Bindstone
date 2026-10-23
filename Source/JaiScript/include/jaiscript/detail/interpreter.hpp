@@ -984,20 +984,20 @@ namespace jai {
         // Fast value factories — skip null checks, cache comparisons, and engine indirection
         inline script_value make_int_fast(script_int i) const noexcept {
             script_value v(script_value::ast_literal_tag{}, i);
-            v.engine_ = engine_;
-            v.type_info_ = cached_type_info_int_;
+            v.set_engine_tag(engine_);
+            v.set_stamp(cached_type_info_int_);
             return v;
         }
         inline script_value make_float_fast(script_float f) const noexcept {
             script_value v(script_value::ast_literal_tag{}, f);
-            v.engine_ = engine_;
-            v.type_info_ = cached_type_info_float_;
+            v.set_engine_tag(engine_);
+            v.set_stamp(cached_type_info_float_);
             return v;
         }
         inline script_value make_bool_fast(script_bool b) const noexcept {
             script_value v(script_value::ast_literal_tag{}, b);
-            v.engine_ = engine_;
-            v.type_info_ = cached_type_info_bool_;
+            v.set_engine_tag(engine_);
+            v.set_stamp(cached_type_info_bool_);
             return v;
         }
 

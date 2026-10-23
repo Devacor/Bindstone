@@ -52,60 +52,62 @@ namespace jai {
     throw runtime_error(text);
 }
 
-script_value::script_value(script_int i, engine* eng) : type_info_(nullptr), engine_(eng), storage_(i) {
+script_value::script_value(script_int i, engine* eng) : storage_(i) {
     if (eng) {
-        type_info_ = eng->get_type_info_int();
+        set_stamp(eng->get_type_info_int());
     }
 }
 
-script_value::script_value(script_float f, engine* eng) : type_info_(nullptr), engine_(eng), storage_(f) {
+script_value::script_value(script_float f, engine* eng) : storage_(f) {
     if (eng) {
-        type_info_ = eng->get_type_info_float();
+        set_stamp(eng->get_type_info_float());
     }
 }
 
-script_value::script_value(const script_string& s, engine* eng) : type_info_(nullptr), engine_(eng), storage_(make_strong<script_string>(s)) {
+script_value::script_value(const script_string& s, engine* eng) : storage_(make_strong<script_string>(s)) {
     if (eng) {
-        type_info_ = eng->get_type_info_string();
+        set_stamp(eng->get_type_info_string());
     }
 }
 
-script_value::script_value(script_string&& s, engine* eng) : type_info_(nullptr), engine_(eng), storage_(make_strong<script_string>(std::move(s))) {
+script_value::script_value(script_string&& s, engine* eng) : storage_(make_strong<script_string>(std::move(s))) {
     if (eng) {
-        type_info_ = eng->get_type_info_string();
+        set_stamp(eng->get_type_info_string());
     }
 }
 
-script_value::script_value(strong_ptr<object_holder> handle, type_info_ptr tag, engine* eng) : type_info_(tag), engine_(eng), storage_(std::move(handle)) {}
+script_value::script_value(strong_ptr<object_holder> handle, type_info_ptr tag, engine* eng) : storage_(std::move(handle)) {
+    if (tag) { set_stamp(tag); } else { set_engine_tag(eng); }
+}
 
 script_value script_value::make_utf8(std::string bytes, engine* eng) {
     script_value v(std::monostate{}, eng);
     v.storage_ = make_strong<script_utf8>(std::move(bytes));
-    v.type_info_ = eng ? eng->get_type_info_utf8_string() : nullptr;
+    v.set_stamp(eng ? eng->get_type_info_utf8_string() : nullptr);
     return v;
 }
 
-script_value::script_value(strong_ptr<script_string> shared, engine* eng) : type_info_(nullptr), engine_(eng), storage_(std::move(shared)) {
+script_value::script_value(strong_ptr<script_string> shared, engine* eng) : storage_(std::move(shared)) {
     if (eng) {
-        type_info_ = eng->get_type_info_string();
+        set_stamp(eng->get_type_info_string());
     }
 }
 
-script_value::script_value(const char* s, engine* eng) : type_info_(nullptr), engine_(eng), storage_(make_strong<script_string>(s)) {
+script_value::script_value(const char* s, engine* eng) : storage_(make_strong<script_string>(s)) {
     if (eng) {
-        type_info_ = eng->get_type_info_string();
+        set_stamp(eng->get_type_info_string());
     }
 }
 
-script_value::script_value(script_char c, engine* eng) : type_info_(nullptr), engine_(eng), storage_(c) {
+script_value::script_value(script_char c, engine* eng) : storage_(c) {
     if (eng) {
-        type_info_ = eng->get_type_info_char();
+        set_stamp(eng->get_type_info_char());
     }
 }
 
-script_value::script_value(script_bool b, engine* eng) : type_info_(nullptr), engine_(eng), storage_(b) {
+script_value::script_value(script_bool b, engine* eng) : storage_(b) {
     if (eng) {
-        type_info_ = eng->get_type_info_bool();
+        set_stamp(eng->get_type_info_bool());
     }
 }
 
@@ -133,13 +135,13 @@ script_value script_value::make_vec(script_value_type kind, const uint32_t* word
     std::memcpy(node->words, words, sizeof(uint32_t) * node->count);
     script_value v(std::monostate{}, eng);
     v.storage_ = std::move(node);
-    if (eng) { v.type_info_ = eng->get_type_info_math(kind); }
+    if (eng) { v.set_stamp(eng->get_type_info_math(kind)); }
     return v;
 }
 
 bool script_value::math_words_as(script_value_type kind, uint32_t* words) const {
     const script_value* v = &deref();
-    script_value decoded(std::monostate{}, engine_);
+    script_value decoded(std::monostate{}, get_engine());
     if (v->raw_storage_index() == TYPEID_CPP_BOUND) {
         decoded = v->bound_decoded_temp();
         v = &decoded;
@@ -151,7 +153,7 @@ bool script_value::math_words_as(script_value_type kind, uint32_t* words) const 
         return true;
     }
     if (!detail::math::converts(from, kind)) { return false; }
-    auto converted = detail::math::convert(*v, kind, engine_);
+    auto converted = detail::math::convert(*v, kind, get_engine());
     if (!converted) { return false; }
     std::memcpy(words, converted.value().unchecked_vec_node().words, sizeof(script_vec_node::words));
     return true;
@@ -526,7 +528,7 @@ strong_ptr<script_vec_node> script_value::acquire_vec_node(engine* eng) {
 
 void script_value::unshare_vec_node() {
     strong_ptr<script_vec_node>& node = storage_.vec_node();
-    auto fresh = acquire_vec_node(engine_);
+    auto fresh = acquire_vec_node(get_engine());
     *fresh = *node;
     node = std::move(fresh);
 }
@@ -540,7 +542,7 @@ script_value script_value::make_cell_reference(script_value&& boxed, engine* eng
         throw runtime_error("Cannot create reference: null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(boxed.get_type_info());
+    v.set_stamp(eng->get_type_info_reference(boxed.get_type_info()));
     // engine::memory_cap: cells are heap boxes (raised at the next loop back-edge)
     eng->execution_limits().memory_charge_deferred(sizeof(reference_holder));
     auto ref = acquire_reference_holder(eng);
@@ -803,7 +805,7 @@ script_value script_value::make_map_entry_reference(const strong_ptr<script_map>
         throw runtime_error("Cannot create reference: null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(entry ? entry->get_type_info() : nullptr);
+    v.set_stamp(eng->get_type_info_reference(entry ? entry->get_type_info() : nullptr));
     eng->execution_limits().memory_charge_deferred(sizeof(reference_holder));
     auto ref = acquire_reference_holder(eng);
     new (ref->cell_storage) script_value(key.is_reference() ? key.deref() : key);
@@ -819,7 +821,7 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
         throw runtime_error("Cannot create array with null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_array(element_type);
+    v.set_stamp(eng->get_type_info_array(element_type));
 
     // The declared element type IS the representation: int/float element types mint
     // raw-buffer nodes, array<var> (null element type) the script_value vector. The
@@ -852,7 +854,7 @@ script_value script_value::make_map(type_info_ptr keyType, type_info_ptr valueTy
         throw runtime_error("Cannot create map with null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_map(keyType, valueType);
+    v.set_stamp(eng->get_type_info_map(keyType, valueType));
     v.storage_ = make_strong<script_map>();
     return v;
 }
@@ -893,7 +895,7 @@ script_value script_value::make_object(std::string_view type_name, uint64_t type
     }
 
     script_value v(std::monostate{}, eng);
-    v.type_info_ = class_def->get_type_info();
+    v.set_stamp(class_def->get_type_info());
 
     auto obj = acquire_object_holder(eng);
     obj->type_name = interned_type_text(eng, type_name, type_id);
@@ -906,7 +908,7 @@ script_value script_value::make_object(std::string_view type_name, uint64_t type
 
 script_value script_value::make_class_object(const class_definition& cd, std::shared_ptr<void> data, engine* eng) {
     script_value v(std::monostate{}, eng);
-    v.type_info_ = cd.get_type_info();
+    v.set_stamp(cd.get_type_info());
     auto obj = acquire_object_holder(eng);
     obj->type_name = cd.interned_name();
     obj->type_id = cd.get_type_id();
@@ -942,7 +944,7 @@ script_value script_value::make_cpp_object(std::string_view type_name, uint64_t 
     }
 
     script_value v(std::monostate{}, eng);
-    v.type_info_ = class_def->get_type_info();
+    v.set_stamp(class_def->get_type_info());
 
     auto obj = acquire_object_holder(eng);
     obj->type_name = interned_type_text(eng, type_name, type_id);
@@ -963,7 +965,7 @@ script_value script_value::make_cpp_reference(std::string_view type_name, uint64
         throw runtime_error("Cannot create cpp_reference of unregistered class '" + std::string(type_name) + "'");
     }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = class_def->get_type_info();
+    v.set_stamp(class_def->get_type_info());
     auto obj = acquire_object_holder(eng);
     obj->type_name = interned_type_text(eng, type_name, type_id);
     obj->type_id = type_id;
@@ -977,9 +979,9 @@ script_value script_value::make_cpp_reference(std::string_view type_name, uint64
 script_value script_value::make_empty_weak_ptr(type_info_ptr weak_ptr_type, engine* eng) {
     script_value v(std::monostate{}, eng);
     if (weak_ptr_type) {
-        v.type_info_ = weak_ptr_type;
+        v.set_stamp(weak_ptr_type);
     } else if (eng) {
-        v.type_info_ = eng->get_type_info_weak_ptr(nullptr);
+        v.set_stamp(eng->get_type_info_weak_ptr(nullptr));
     }
     v.storage_ = jai::weaker_ptr<object_holder>();
     return v;
@@ -989,7 +991,7 @@ script_value script_value::make_invalid(engine* eng) {
     script_value val(std::monostate{}, eng);  // Start with null
     val.storage_ = invalid_tag{};  // Change to invalid
     if (eng) {
-        val.type_info_ = eng->get_type_info_invalid();  // Set proper type info
+        val.set_stamp(eng->get_type_info_invalid());  // Set proper type info
     }
     return val;
 }
@@ -1001,7 +1003,7 @@ checked_result<script_value> script_value::make_weak_ptr(const script_value& val
             "Cannot create weak_ptr with null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_weak_ptr(value.get_type_info());
+    v.set_stamp(eng->get_type_info_weak_ptr(value.get_type_info()));
 
     // Only accept shared_ptr types for weak_ptr creation
     // Regular objects have value semantics and get cloned when passed as parameters,
@@ -1057,7 +1059,7 @@ script_value script_value::make_element_reference(const strong_ptr<script_array>
     } else {
         referent_tag = container->values()[index].get_type_info();
     }
-    v.type_info_ = eng->get_type_info_reference(referent_tag);
+    v.set_stamp(eng->get_type_info_reference(referent_tag));
     auto ref = acquire_reference_holder(eng);
     ref->container_element_type = element_type;
     ref->container = container;          // owns the node (keeps it alive) + enables re-resolve
@@ -1073,7 +1075,7 @@ script_value script_value::make_removed_element_reference(const strong_ptr<scrip
         throw runtime_error("Cannot create reference: null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(element_type);
+    v.set_stamp(eng->get_type_info_reference(element_type));
     auto ref = acquire_reference_holder(eng);
     ref->container_element_type = element_type;
     ref->container = container;
@@ -1119,7 +1121,7 @@ script_value script_value::make_field_reference(std::shared_ptr<class_instance> 
                                                 engine* eng, type_info_ptr field_type, const script_value& field_value,
                                                 uint32_t field_slot) {
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(field_value.get_type_info());
+    v.set_stamp(eng->get_type_info_reference(field_value.get_type_info()));
     auto ref = mint_field_holder(owner.get(), field_id, eng, std::move(field_type), field_slot, acquire_reference_holder(eng));
     ref->owner_shared = std::move(owner);          // pins the instance for the reference's lifetime
     v.storage_ = std::move(ref);
@@ -1130,7 +1132,7 @@ script_value script_value::make_field_reference(const strong_ptr<object_holder>&
                                                 engine* eng, type_info_ptr field_type, const script_value& field_value,
                                                 uint32_t field_slot) {
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(field_value.get_type_info());
+    v.set_stamp(eng->get_type_info_reference(field_value.get_type_info()));
     auto ref = mint_field_holder(owner, field_id, eng, std::move(field_type), field_slot, acquire_reference_holder(eng));
     ref->owner_pin = owner_pin;          // the holder's data owns the instance: pins it for the reference's lifetime
     v.storage_ = std::move(ref);
@@ -1166,7 +1168,7 @@ script_value script_value::make_referent_reference(const script_value& handle, e
         throw runtime_error("Cannot create reference to null");
     }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(handle.type_info_);
+    v.set_stamp(eng->get_type_info_reference(handle.stamp()));
     auto ref = acquire_reference_holder(eng);
     ref->property = std::make_unique<property_binding>();
     ref->property->receiver = holder;
@@ -1205,10 +1207,10 @@ script_value script_value::make_cpp_member_reference(const script_value& receive
         throw runtime_error("Cannot create reference to null");
     }
     script_value box(std::monostate{}, eng);
-    box.type_info_ = cpp_bound_type_info(eng, semantic_index);
+    box.set_stamp(cpp_bound_type_info(eng, semantic_index));
     box.storage_ = make_strong<cpp_bound_holder>(address, size_and_sign, semantic_index);
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(box.type_info_);
+    v.set_stamp(eng->get_type_info_reference(box.stamp()));
     auto ref = acquire_reference_holder(eng);
     ref->property = std::make_unique<property_binding>();
     ref->property->receiver = receiver.get_object_holder();
@@ -1229,7 +1231,7 @@ script_value script_value::make_property_reference(const script_value& receiver,
         throw runtime_error("Cannot create reference to null");
     }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(nullptr);
+    v.set_stamp(eng->get_type_info_reference(nullptr));
     auto ref = acquire_reference_holder(eng);
     ref->property = std::make_unique<property_binding>();
     ref->property->receiver = receiver.get_object_holder();
@@ -1247,7 +1249,7 @@ script_value script_value::make_string_element_reference(const script_value& pin
         throw runtime_error("Cannot create reference to null");
     }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(nullptr);
+    v.set_stamp(eng->get_type_info_reference(nullptr));
     auto ref = acquire_reference_holder(eng);
     ref->string_base = pin.storage_.get<strong_ptr<reference_holder>>();
     ref->container_index = index;
@@ -1263,7 +1265,7 @@ script_value script_value::make_component_reference(const script_value& pin, siz
         throw runtime_error("Cannot create reference to null");
     }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(nullptr);
+    v.set_stamp(eng->get_type_info_reference(nullptr));
     auto ref = acquire_reference_holder(eng);
     ref->component_base = pin.storage_.get<strong_ptr<reference_holder>>();
     ref->container_index = component;
@@ -1273,14 +1275,14 @@ script_value script_value::make_component_reference(const script_value& pin, siz
 
 script_value script_value::make_component_pin(const reference_holder& holder, engine* eng) {
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(nullptr);
+    v.set_stamp(eng->get_type_info_reference(nullptr));
     v.storage_ = holder.component_base;
     return v;
 }
 
 script_value script_value::make_string_element_pin(const reference_holder& holder, engine* eng) {
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(nullptr);
+    v.set_stamp(eng->get_type_info_reference(nullptr));
     v.storage_ = holder.string_base;
     return v;
 }
@@ -1294,7 +1296,7 @@ script_value script_value::make_function(script_function&& func, engine* eng) {
         throw runtime_error("Cannot create function with null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_untyped_function();
+    v.set_stamp(eng->get_type_info_untyped_function());
     v.storage_ = make_strong<script_function>(std::move(func));
     return v;
 }
@@ -1310,9 +1312,7 @@ namespace {
 #endif
 
 script_value::script_value(const script_value& other)
-    : type_info_(other.type_info_),
-      engine_(other.engine_),
-      storage_(other.storage_) {
+    : storage_(other.storage_) {
     // The variant copy bumps the (immutable) binding box refcount, so copies of bound values remain aliases
     // NOTE: Raw engine* is much faster to copy than weak_ptr (no atomic ops)
 #ifdef JAISCRIPT_VM_COVERAGE
@@ -1326,8 +1326,7 @@ script_value& script_value::operator=(const script_value& other) {
 #ifdef JAISCRIPT_VM_COVERAGE
         if (census_refcounted(other.raw_storage_index())) { census::hit_at(census::site::value_copy_assign, JAI_CENSUS_RA(), static_cast<uint32_t>(other.raw_storage_index())); }
 #endif
-        type_info_ = other.type_info_;
-        engine_ = other.engine_;
+        storage_.set_tag(other.storage_.tag());
         storage_ = other.storage_;
     }
     return *this;
@@ -1353,7 +1352,7 @@ script_value script_value::clone() const {
             const auto& h = src.unchecked_object_handle();
             node = h.get();
             unique = h && h.use_count() == 1 && h->data && h->data.use_count() == 1;
-            const bool shared = src.type_info_ && src.type_info_->base_type == script_value_type::jai_shared_ptr_type;
+            const bool shared = src.stamp() && src.stamp()->base_type == script_value_type::jai_shared_ptr_type;
             kind = shared ? census::copied_kind::shared_deep : (h && h->is_class_instance_wrapper) ? census::copied_kind::instance : census::copied_kind::cpp_object;
             break;
         }
@@ -1413,13 +1412,13 @@ void script_value::clone_subtree_into(script_value& dest) const {
                 if (value.element_copies_shallow()) {
                     copied.emplace(key.clone_element(), value);
                 } else {
-                    auto placed = copied.emplace(key.clone_element(), script_value(std::monostate{}, engine_));
+                    auto placed = copied.emplace(key.clone_element(), script_value(std::monostate{}, get_engine()));
                     work.push_back({step::value, &value, &placed.first->second});
                 }
                 break;
             }
             case step::slot: {
-                script_value element = static_cast<const script_array*>(item.source)->get(item.index, engine_);
+                script_value element = static_cast<const script_array*>(item.source)->get(item.index, get_engine());
                 static_cast<script_array*>(item.dest)->push(element.element_copies_shallow() ? std::move(element) : element.clone_level(work, stepped));
                 break;
             }
@@ -1432,7 +1431,7 @@ void script_value::clone_subtree_into(script_value& dest) const {
 }
 
 script_value script_value::clone_level(detail::deep_copy_work& work, unsigned depth) const {
-    if (!engine_) {
+    if (!get_engine()) {
         throw runtime_error("Cannot clone script_value: missing engine pointer");
     }
 
@@ -1445,7 +1444,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
 
     // shared_ptr<T> is a TYPE MARKER that indicates reference semantics for normal operations,
     // but clone() should perform a deep copy to create an independent instance
-    if (type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type) {
+    if (stamp() && stamp()->base_type == script_value_type::jai_shared_ptr_type) {
         auto obj_holder = storage_.get<strong_ptr<object_holder>>();
         if (!obj_holder) {
             throw runtime_error("Cannot clone shared_ptr: null object_holder");
@@ -1454,30 +1453,30 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
         if (obj_holder->is_class_instance_wrapper) {
             auto new_instance = static_cast<const class_instance*>(obj_holder->data.get())->deep_copy_level(work, depth);
 
-            auto new_holder = acquire_object_holder(engine_);
+            auto new_holder = acquire_object_holder(get_engine());
             new_holder->type_name = obj_holder->type_name;
             new_holder->type_id = obj_holder->type_id;
             new_holder->data = std::move(new_instance);
             new_holder->is_class_instance_wrapper = true;
 
-            script_value result(std::monostate{}, engine_);
-            result.type_info_ = type_info_;
+            script_value result(std::monostate{}, get_engine());
+            result.set_stamp(stamp());
             result.storage_ = new_holder;
             return result;
         }
 
-        auto class_def = engine_->get_class_definition(obj_holder->type_id);
+        auto class_def = get_engine()->get_class_definition(obj_holder->type_id);
         if (class_def && class_def->has_copy_function()) {
             auto new_cpp_obj = class_def->copy_object(obj_holder->data.get());
             if (new_cpp_obj) {
-                auto new_holder = acquire_object_holder(engine_);
+                auto new_holder = acquire_object_holder(get_engine());
                 new_holder->type_name = obj_holder->type_name;
                 new_holder->type_id = obj_holder->type_id;
                 new_holder->data = new_cpp_obj;
                 new_holder->is_class_instance_wrapper = false;
 
-                script_value result(std::monostate{}, engine_);
-                result.type_info_ = type_info_;
+                script_value result(std::monostate{}, get_engine());
+                result.set_stamp(stamp());
                 result.storage_ = new_holder;
                 return result;
             }
@@ -1489,8 +1488,8 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             "to enable deep copying.");
     }
 
-    script_value result(std::monostate{}, engine_);  // Preserve engine pointer!
-    result.type_info_ = type_info_;
+    script_value result(std::monostate{}, get_engine());  // Preserve engine pointer!
+    result.set_stamp(stamp());
 
     // Use current_type() to check what's actually stored, not the declared type
     switch (current_type()) {
@@ -1500,7 +1499,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                 // object slots keep value semantics: every element deep-clones (shared_ptr
                 // elements share, as clone_element already decides), the tag rides along
                 const size_t n = other_node.size();
-                engine_->execution_limits().memory_charge_deferred(sizeof(obj_slot) * (n + 1));
+                get_engine()->execution_limits().memory_charge_deferred(sizeof(obj_slot) * (n + 1));
                 auto new_node = make_strong<script_array>(script_array::kind_t::obj);
                 new_node->reserve(n);
                 if (depth > detail::k_inline_copy_depth) {
@@ -1508,13 +1507,13 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                     for (size_t i = n; i-- > 0;) { work.push_back({detail::deep_copy_item::step::slot, &other_node, new_node.get(), i}); }
                 } else {
                     for (size_t i = 0; i < n; ++i) {
-                        script_value element = other_node.get(i, engine_);
+                        script_value element = other_node.get(i, get_engine());
                         if (element.element_copies_shallow()) {
                             new_node->push(std::move(element));
                         } else if (depth < detail::k_inline_copy_depth) {
                             new_node->push(element.clone_level(work, depth + 1));
                         } else {
-                            script_value copied(std::monostate{}, engine_);
+                            script_value copied(std::monostate{}, get_engine());
                             element.clone_subtree_into(copied);
                             new_node->push(std::move(copied));
                         }
@@ -1525,7 +1524,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             }
             if (other_node.is_typed()) {
                 // kind-preserving deep copy = one buffer copy (8B/element)
-                engine_->execution_limits().memory_charge_deferred(sizeof(script_int) * (other_node.size() + 1));
+                get_engine()->execution_limits().memory_charge_deferred(sizeof(script_int) * (other_node.size() + 1));
                 auto new_node = make_strong<script_array>(other_node.kind());
                 new_node->assign_buffer(other_node);
                 result.storage_ = new_node;
@@ -1534,7 +1533,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             const auto& other_array = other_node.values();
             // engine::memory_cap: count the fresh container storage (raised at the next
             // loop back-edge); element clones charge themselves recursively
-            engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (other_array.size() + 1));
+            get_engine()->execution_limits().memory_charge_deferred(sizeof(script_value) * (other_array.size() + 1));
             auto new_node = make_strong<script_array>();
             auto& copied = new_node->values();
             copied.reserve(other_array.size());   // no reallocation: a deferred element's placeholder stays where it is
@@ -1543,7 +1542,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                 if (elem.element_copies_shallow()) {
                     copied.push_back(elem);
                 } else {
-                    copied.push_back(script_value(std::monostate{}, engine_));
+                    copied.push_back(script_value(std::monostate{}, get_engine()));
                     elem.clone_element_into(copied.back(), work, depth);
                 }
             }
@@ -1555,7 +1554,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             auto& other_map = *storage_.get<strong_ptr<script_map>>();
             // engine::memory_cap: count the fresh container storage (raised at the next
             // loop back-edge); key/value clones charge themselves recursively
-            engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (other_map.size() + 1));
+            get_engine()->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (other_map.size() + 1));
             auto new_map = make_strong<script_map>();
             if (depth > detail::k_inline_copy_depth) {
                 // an entry is one step (its key, then its value's whole copy) so keys and values interleave as below
@@ -1569,7 +1568,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                 if (value.element_copies_shallow()) {
                     new_map->emplace(key.clone_element(), value);
                 } else {
-                    auto placed = new_map->emplace(key.clone_element(), script_value(std::monostate{}, engine_));
+                    auto placed = new_map->emplace(key.clone_element(), script_value(std::monostate{}, get_engine()));
                     value.clone_element_into(placed.first->second, work, depth);   // map entries never move
                 }
             }
@@ -1592,7 +1591,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             if (obj_holder->is_class_instance_wrapper) {
                 auto new_instance = static_cast<const class_instance*>(obj_holder->data.get())->deep_copy_level(work, depth);
 
-                auto new_holder = acquire_object_holder(engine_);
+                auto new_holder = acquire_object_holder(get_engine());
                 new_holder->type_name = obj_holder->type_name;
                 new_holder->type_id = obj_holder->type_id;  // Preserve the cached type_id
                 new_holder->data = std::move(new_instance);
@@ -1600,8 +1599,8 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                 result.storage_ = std::move(new_holder);
             } else {
                 bool copied = false;
-                if (engine_) {
-                    auto class_def = engine_->get_class_definition(obj_holder->type_id);
+                if (get_engine()) {
+                    auto class_def = get_engine()->get_class_definition(obj_holder->type_id);
                     if (class_def && class_def->has_copy_function()) {
                         // cpp_bound references own nothing (data null) - the live object is
                         // bound_ptr. Deep copy from it and drop the binding so the
@@ -1609,7 +1608,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                         const void* copy_src = obj_holder->data ? obj_holder->data.get() : obj_holder->bound_ptr;
                         auto new_cpp_obj = copy_src ? class_def->copy_object(copy_src) : nullptr;
                         if (new_cpp_obj) {
-                            auto new_holder = acquire_object_holder(engine_);
+                            auto new_holder = acquire_object_holder(get_engine());
                             new_holder->type_name = obj_holder->type_name;
                             new_holder->type_id = obj_holder->type_id;
                             new_holder->data = new_cpp_obj;
@@ -1682,8 +1681,8 @@ script_string& script_value::unshare_string_node() {
     census::copy_scope census_scope(census::site::string_detach, JAI_CENSUS_RA(), node.get(), 0);
     census::add_weight(node->size());
 #endif
-    if (engine_) {
-        engine_->execution_limits().memory_charge_deferred(node->size() + sizeof(script_string));
+    if (get_engine()) {
+        get_engine()->execution_limits().memory_charge_deferred(node->size() + sizeof(script_string));
     }
     node = make_strong<script_string>(*node);
     return *node;
@@ -1759,7 +1758,7 @@ void script_value::parallel_detached_subtree_into(script_value& dest, std::vecto
         work.pop_back();
         if (item.what == step::entry) {
             const auto& [key, value] = *static_cast<const script_map::value_type*>(item.source);
-            auto placed = static_cast<script_map*>(item.dest)->emplace(key.parallel_detached_copy(collected_types, collected_nodes), script_value(std::monostate{}, engine_));
+            auto placed = static_cast<script_map*>(item.dest)->emplace(key.parallel_detached_copy(collected_types, collected_nodes), script_value(std::monostate{}, get_engine()));
             work.push_back({step::value, &value, &placed.first->second});
         } else {
             *static_cast<script_value*>(item.dest) = static_cast<const script_value*>(item.source)->parallel_detached_level(collected_types, collected_nodes, work, stepped);
@@ -1787,22 +1786,22 @@ script_value script_value::parallel_detached_level(std::vector<type_info*>* coll
             return;
         }
         for (const auto& [key, val] : from) {
-            auto placed = fresh.emplace(key.parallel_detached_copy(collected_types, collected_nodes), script_value(std::monostate{}, engine_));
+            auto placed = fresh.emplace(key.parallel_detached_copy(collected_types, collected_nodes), script_value(std::monostate{}, get_engine()));
             detach_into(val, placed.first->second);
         }
     };
-    if (!engine_) {
+    if (!get_engine()) {
         throw runtime_error("Cannot detach script_value: missing engine pointer");
     }
     const size_t idx = raw_storage_index();
     if (idx == TYPEID_REFERENCE) {
         return deref().parallel_detached_level(collected_types, collected_nodes, work, depth);
     }
-    if (collected_types && type_info_.get()) {
-        collected_types->push_back(type_info_.get());
+    if (collected_types && stamp()) {
+        collected_types->push_back(stamp());
     }
-    script_value result(std::monostate{}, engine_);
-    result.type_info_ = type_info_;
+    script_value result(std::monostate{}, get_engine());
+    result.set_stamp(stamp());
     switch (idx) {
         case TYPEID_NULL:
         case TYPEID_INT:
@@ -1825,7 +1824,7 @@ script_value script_value::parallel_detached_level(std::vector<type_info*>* coll
         case TYPEID_STRING: {
             const auto& handle = storage_.get<strong_ptr<script_string>>();
             if (!handle) { break; }   // null handle shares nothing
-            engine_->execution_limits().memory_charge_deferred(handle->size() + sizeof(script_string));
+            get_engine()->execution_limits().memory_charge_deferred(handle->size() + sizeof(script_string));
             auto fresh = make_strong<script_string>(*handle);
             if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
             result.storage_ = fresh;
@@ -1834,7 +1833,7 @@ script_value script_value::parallel_detached_level(std::vector<type_info*>* coll
         case TYPEID_UTF8_STRING: {
             const auto& handle = storage_.get<strong_ptr<script_utf8>>();
             if (!handle) { break; }
-            engine_->execution_limits().memory_charge_deferred(handle->bytes.size() + sizeof(script_utf8));
+            get_engine()->execution_limits().memory_charge_deferred(handle->bytes.size() + sizeof(script_utf8));
             auto fresh = make_strong<script_utf8>(handle->bytes);
             if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
             result.storage_ = fresh;
@@ -1845,27 +1844,27 @@ script_value script_value::parallel_detached_level(std::vector<type_info*>* coll
             if (!handle) { break; }
             if (handle->kind() == script_array::kind_t::obj) {
                 const size_t n = handle->size();
-                engine_->execution_limits().memory_charge_deferred(sizeof(obj_slot) * (n + 1));
+                get_engine()->execution_limits().memory_charge_deferred(sizeof(obj_slot) * (n + 1));
                 auto fresh = make_strong<script_array>(script_array::kind_t::obj);
                 fresh->reserve(n);
                 for (size_t i = 0; i < n; ++i) {
-                    fresh->push(handle->get(i, engine_).parallel_detached_level(collected_types, collected_nodes, work, depth + 1));
+                    fresh->push(handle->get(i, get_engine()).parallel_detached_level(collected_types, collected_nodes, work, depth + 1));
                 }
                 if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
                 result.storage_ = fresh;
                 break;
             }
             if (handle->is_typed()) {
-                auto fresh = detached_typed_array(*handle, engine_);
+                auto fresh = detached_typed_array(*handle, get_engine());
                 if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
                 result.storage_ = fresh;
                 break;
             }
-            engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (handle->size() + 1));
+            get_engine()->execution_limits().memory_charge_deferred(sizeof(script_value) * (handle->size() + 1));
             auto fresh = make_strong<script_array>();
             fresh->values().reserve(handle->size());   // no reallocation: a deferred element's placeholder stays where it is
             for (const auto& elem : handle->values()) {
-                fresh->values().push_back(script_value(std::monostate{}, engine_));
+                fresh->values().push_back(script_value(std::monostate{}, get_engine()));
                 detach_into(elem, fresh->values().back());
             }
             steps_in_order();
@@ -1876,7 +1875,7 @@ script_value script_value::parallel_detached_level(std::vector<type_info*>* coll
         case TYPEID_MAP: {
             const auto& handle = storage_.get<strong_ptr<script_map>>();
             if (!handle) { break; }
-            engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (handle->size() + 1));
+            get_engine()->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (handle->size() + 1));
             auto fresh = make_strong<script_map>();
             detach_entries(*handle, *fresh);
             if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
@@ -1903,23 +1902,23 @@ script_value script_value::parallel_detached_level(std::vector<type_info*>* coll
             const auto& tag = storage_.get<parallel_borrow_tag>();
             if (const auto* arr = parallel_borrow_array()) {
                 if (arr->is_typed()) {
-                    auto fresh = detached_typed_array(*arr, engine_);
+                    auto fresh = detached_typed_array(*arr, get_engine());
                     if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
                     result.storage_ = fresh;
                     break;
                 }
-                engine_->execution_limits().memory_charge_deferred(sizeof(script_value) * (arr->size() + 1));
+                get_engine()->execution_limits().memory_charge_deferred(sizeof(script_value) * (arr->size() + 1));
                 auto fresh = make_strong<script_array>();
                 fresh->values().reserve(arr->size());
                 for (const auto& elem : arr->values()) {
-                    fresh->values().push_back(script_value(std::monostate{}, engine_));
+                    fresh->values().push_back(script_value(std::monostate{}, get_engine()));
                     detach_into(elem, fresh->values().back());
                 }
                 steps_in_order();
                 if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
                 result.storage_ = fresh;
             } else if (const auto* map = parallel_borrow_map()) {
-                engine_->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (map->size() + 1));
+                get_engine()->execution_limits().memory_charge_deferred(2 * sizeof(script_value) * (map->size() + 1));
                 auto fresh = make_strong<script_map>();
                 detach_entries(*map, *fresh);
                 if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
@@ -1945,7 +1944,7 @@ script_value script_value::parallel_detached_level(std::vector<type_info*>* coll
 script_value script_value::make_parallel_borrow(const script_value& source, engine* eng, bool sliced) {
     const script_value& v = source.deref();
     script_value result(std::monostate{}, eng);
-    result.type_info_ = v.type_info_;
+    result.set_stamp(v.stamp());
     parallel_borrow_tag tag;
     if (v.raw_storage_index() == TYPEID_ARRAY) {
         const auto& handle = v.storage_.get<strong_ptr<script_array>>();
@@ -1994,7 +1993,7 @@ const script_function& script_value::as_function() const {
 
 script_value script_value::try_unwrap_transparent_wrapper() const {
     // Only objects can be transparent wrappers
-    if (!is_object() || !engine_) {
+    if (!is_object() || !get_engine()) {
         return *this;  // Return self unchanged
     }
 
@@ -2003,7 +2002,7 @@ script_value script_value::try_unwrap_transparent_wrapper() const {
         return *this;
     }
 
-    auto class_def = engine_->get_class_definition(holder->type_id);
+    auto class_def = get_engine()->get_class_definition(holder->type_id);
     if (!class_def || !class_def->is_transparent_wrapper()) {
         return *this;
     }
@@ -2094,7 +2093,7 @@ const script_value& script_value::deref_slow() const {
                 throw runtime_error("Reference to a removed array element");
             }
             if (refHolder->container->is_typed()) {
-                return refHolder->materialize_typed_element(engine_);
+                return refHolder->materialize_typed_element(get_engine());
             }
             return refHolder->container->values()[refHolder->container_index].deref();
         }
@@ -2110,13 +2109,13 @@ const script_value& script_value::deref_slow() const {
         if (refHolder->property) {
             // CPP-MEMBER: the live bound box (readers decode index 14 per touch);
             // PROPERTY: the getter result, refreshed on every touch
-            return refHolder->property->live_member ? *refHolder->cell() : refHolder->materialize_property(engine_);
+            return refHolder->property->live_member ? *refHolder->cell() : refHolder->materialize_property(get_engine());
         }
         if (refHolder->string_base) {
-            return refHolder->materialize_string_element(engine_);
+            return refHolder->materialize_string_element(get_engine());
         }
         if (refHolder->component_base) {
-            return refHolder->materialize_component(engine_);
+            return refHolder->materialize_component(get_engine());
         }
         throw runtime_error("Null reference");   // unreachable: every factory sets a mode
     }
@@ -2151,7 +2150,7 @@ script_value& script_value::deref_slow() {
                 // Materialized VIEW: reads are correct (refreshed per touch); WRITERS
                 // must never come through mutable deref on a typed element (audited -
                 // they use assign_through / the typed store chokepoints)
-                return const_cast<script_value&>(refHolder->materialize_typed_element(engine_));
+                return const_cast<script_value&>(refHolder->materialize_typed_element(get_engine()));
             }
             return refHolder->container->values()[refHolder->container_index].deref();
         }
@@ -2166,15 +2165,15 @@ script_value& script_value::deref_slow() {
             // PROPERTY hands back a materialized VIEW like typed elements do: writers go
             // through assign_through / commit_scratch, never through this deref
             return refHolder->property->live_member ? *refHolder->cell()
-                                                    : const_cast<script_value&>(refHolder->materialize_property(engine_));
+                                                    : const_cast<script_value&>(refHolder->materialize_property(get_engine()));
         }
         if (refHolder->string_base) {
             // a materialized VIEW: writers go through the string-element store (detail/string_element.hpp)
-            return const_cast<script_value&>(refHolder->materialize_string_element(engine_));
+            return const_cast<script_value&>(refHolder->materialize_string_element(get_engine()));
         }
         if (refHolder->component_base) {
             // a materialized VIEW: writers go through the component store
-            return const_cast<script_value&>(refHolder->materialize_component(engine_));
+            return const_cast<script_value&>(refHolder->materialize_component(get_engine()));
         }
         throw runtime_error("Null reference");   // unreachable: every factory sets a mode
     }
@@ -2232,23 +2231,23 @@ void script_value::assign_through(const script_value& value) {
             // CPP-MEMBER: the box's typed memory write (never a memberwise replace, which
             // would detach the box); PROPERTY: the setter
             if (refHolder->property->referent) {
-                refHolder->store_referent(value, engine_);
+                refHolder->store_referent(value, get_engine());
             } else if (refHolder->property->live_member) {
                 refHolder->cell()->assign_through(value);
             } else {
-                refHolder->store_property(value, engine_);
+                refHolder->store_property(value, get_engine());
             }
             return;
         }
         if (refHolder->string_base) {
-            auto stored = detail::store_string_element(*refHolder, value, engine_);
+            auto stored = detail::store_string_element(*refHolder, value, get_engine());
             if (!stored) {
-                throw runtime_error(format_error(stored, *engine_->get_symbolizer()));
+                throw runtime_error(format_error(stored, *get_engine()->get_symbolizer()));
             }
             return;
         }
         if (refHolder->component_base) {
-            refHolder->store_component(value, engine_);
+            refHolder->store_component(value, get_engine());
             return;
         }
         throw runtime_error("Null reference in assign_through");   // unreachable: every factory sets a mode
@@ -2345,23 +2344,23 @@ void script_value::assign_through(script_value&& value) {
         }
         if (refHolder->property) {
             if (refHolder->property->referent) {
-                refHolder->store_referent(value, engine_);
+                refHolder->store_referent(value, get_engine());
             } else if (refHolder->property->live_member) {
                 refHolder->cell()->assign_through(value);
             } else {
-                refHolder->store_property(value, engine_);
+                refHolder->store_property(value, get_engine());
             }
             return;
         }
         if (refHolder->string_base) {
-            auto stored = detail::store_string_element(*refHolder, value, engine_);
+            auto stored = detail::store_string_element(*refHolder, value, get_engine());
             if (!stored) {
-                throw runtime_error(format_error(stored, *engine_->get_symbolizer()));
+                throw runtime_error(format_error(stored, *get_engine()->get_symbolizer()));
             }
             return;
         }
         if (refHolder->component_base) {
-            refHolder->store_component(value, engine_);
+            refHolder->store_component(value, get_engine());
             return;
         }
         throw runtime_error("Null reference in assign_through");   // unreachable: every factory sets a mode

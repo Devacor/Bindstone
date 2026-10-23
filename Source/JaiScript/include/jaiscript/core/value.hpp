@@ -17,6 +17,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <bit>
 #include <jaiscript/math/types.hpp>
 #include <limits>
 #include <type_traits>
@@ -142,24 +143,24 @@ namespace detail {
     private:
         // Private default constructor - ONLY for std::map operator[] compatibility
         // This creates an invalid script_value that MUST be immediately assigned to
-        script_value() : type_info_(nullptr), storage_(std::monostate{}) {}
+        script_value() : storage_(std::monostate{}) {}
         
     public:
         
         // ALL constructors require engine context - no exceptions!
         // Special constructor for null/void values
-        explicit script_value(std::monostate, engine* eng) : type_info_(nullptr), engine_(eng), storage_(std::monostate{}) {}
+        explicit script_value(std::monostate, engine* eng) : storage_(std::monostate{}) { set_engine_tag(eng);}
         
         // AST literal constructor - ONLY for parser to create placeholder values in AST nodes
         // These values should NEVER be used directly, only as templates for interpreter
         // type_info_ is set to nullptr since these are temporary placeholders without engine context
         struct ast_literal_tag {};
-        script_value(ast_literal_tag, script_int i) : type_info_(nullptr), storage_(i) {}
-        script_value(ast_literal_tag, script_float f) : type_info_(nullptr), storage_(f) {}
-        script_value(ast_literal_tag, const script_string& s) : type_info_(nullptr), storage_(make_strong<script_string>(s)) {}
-        script_value(ast_literal_tag, script_char c) : type_info_(nullptr), storage_(c) {}
-        script_value(ast_literal_tag, script_bool b) : type_info_(nullptr), storage_(b) {}
-        script_value(ast_literal_tag, std::monostate) : type_info_(nullptr), storage_(std::monostate{}) {}
+        script_value(ast_literal_tag, script_int i) : storage_(i) {}
+        script_value(ast_literal_tag, script_float f) : storage_(f) {}
+        script_value(ast_literal_tag, const script_string& s) : storage_(make_strong<script_string>(s)) {}
+        script_value(ast_literal_tag, script_char c) : storage_(c) {}
+        script_value(ast_literal_tag, script_bool b) : storage_(b) {}
+        script_value(ast_literal_tag, std::monostate) : storage_(std::monostate{}) {}
         script_value(script_int i, engine* eng);
         script_value(script_float f, engine* eng);
         script_value(const script_string& s, engine* eng);
@@ -205,19 +206,14 @@ namespace detail {
         // clears any cpp_bound box — the binding lives in the storage), so no second
         // nulling assignment runs here
         script_value(script_value&& other) noexcept
-            : type_info_(std::move(other.type_info_)),
-              engine_(other.engine_),
-              storage_(std::move(other.storage_)) {
-            other.type_info_ = nullptr;
-            other.engine_ = nullptr;
+            : storage_(std::move(other.storage_)) {
+            other.storage_.set_tag(0);
         }
 
         script_value& operator=(script_value&& other) noexcept {
             if (this != &other) {
-                type_info_ = other.type_info_;
-                engine_ = other.engine_;
-                other.type_info_ = nullptr;
-                other.engine_ = nullptr;
+                storage_.set_tag(other.storage_.tag());
+                other.storage_.set_tag(0);
                 storage_ = std::move(other.storage_);   // last: the old payload's release may re-enter
             }
             return *this;
@@ -260,7 +256,7 @@ namespace detail {
                 case TYPEID_COLOR:
                     return true;
                 default:
-                    return type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type;
+                    return stamp() && stamp()->base_type == script_value_type::jai_shared_ptr_type;
             }
         }
         // One level of a deep copy: nested containers and instances copy inline up to detail::k_inline_copy_depth; at it
@@ -417,14 +413,14 @@ namespace detail {
         static type_info_ptr cpp_bound_type_info(engine* eng, uint8_t semantic_index);
         
         // Type information
-        type_info_ptr get_type_info() const { return type_info_; }
+        type_info_ptr get_type_info() const { return stamp(); }
         // Borrowed view of the stamp for hot guards: no handle copy. Valid while this value is
         // (type_info objects are engine-owned and outlive every value of that engine)
-        type_info* type_info_raw() const noexcept { return type_info_.get(); }
+        type_info* type_info_raw() const noexcept { return stamp(); }
 
         // Get interned type ID for error messages (falls back to enum value if type_info not set)
         uint64_t type_id() const {
-            return type_info_ ? type_info_->id : static_cast<uint64_t>(current_type());
+            return stamp() ? stamp()->id : static_cast<uint64_t>(current_type());
         }
 
         // current_type() - What type is ACTUALLY stored in the variant right now
@@ -474,11 +470,11 @@ namespace detail {
         // For any_type (var), returns current_type() since it's dynamically typed
         // Use this for type enforcement, assignment compatibility checks
         script_value_type defined_type() const {
-            if (type_info_) {
-                if (type_info_->base_type == script_value_type::jai_any_type) {
+            if (stamp()) {
+                if (stamp()->base_type == script_value_type::jai_any_type) {
                     return current_type();  // Dynamic typing - use actual value type
                 }
-                return type_info_->base_type;
+                return stamp()->base_type;
             }
             return current_type();
         }
@@ -620,12 +616,12 @@ namespace detail {
         //   NULL (opaque)       -> null value (same "Invalid operands" type_mismatch as before).
         script_value bound_decoded_temp() const {
             switch (bound_semantic_index()) {
-                case TYPEID_INT: return script_value(unchecked_as_int(), engine_);
-                case TYPEID_FLOAT: return script_value(unchecked_as_float(), engine_);
-                case TYPEID_BOOL: return script_value(unchecked_as_bool(), engine_);
-                case TYPEID_CHAR: return script_value(unchecked_as_char(), engine_);
-                case TYPEID_STRING: return script_value(unchecked_as_string(), engine_);
-                default: return script_value(std::monostate{}, engine_);
+                case TYPEID_INT: return script_value(unchecked_as_int(), get_engine());
+                case TYPEID_FLOAT: return script_value(unchecked_as_float(), get_engine());
+                case TYPEID_BOOL: return script_value(unchecked_as_bool(), get_engine());
+                case TYPEID_CHAR: return script_value(unchecked_as_char(), get_engine());
+                case TYPEID_STRING: return script_value(unchecked_as_string(), get_engine());
+                default: return script_value(std::monostate{}, get_engine());
             }
         }
 
@@ -677,11 +673,11 @@ namespace detail {
 
         // Type marker helpers - check if value has shared_ptr<T> or weak_ptr<T> type info
         bool is_shared_ptr_type() const {
-            return type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type;
+            return stamp() && stamp()->base_type == script_value_type::jai_shared_ptr_type;
         }
 
         bool is_weak_ptr_type() const {
-            return type_info_ && type_info_->base_type == script_value_type::jai_weak_ptr_type;
+            return stamp() && stamp()->base_type == script_value_type::jai_weak_ptr_type;
         }
 
         // script_value extraction (inlined for performance)
@@ -1035,7 +1031,7 @@ namespace detail {
                 if (result.message().empty()) {
                     throw_runtime_error("Type conversion failed");
                 }
-                throw_checked_error(engine_, result.message(), result.symbol_id(), result.symbol_id2());
+                throw_checked_error(get_engine(), result.message(), result.symbol_id(), result.symbol_id2());
             }
             return std::move(result.value());
         }
@@ -1092,7 +1088,7 @@ namespace detail {
 							}
 							auto result = detail::checked_native_reference(*this, typeid(base_type));
 							if (!result) [[unlikely]] {
-								throw_checked_error(engine_, result.message(), result.symbol_id(), result.symbol_id2());
+								throw_checked_error(get_engine(), result.message(), result.symbol_id(), result.symbol_id2());
 							}
 							return *static_cast<base_type*>(result.value());
 						}
@@ -1430,7 +1426,7 @@ namespace detail {
                             return checked_result<T>(const_cast<std::vector<script_value>&>(node->values()));
                         } else {
                             // By-value request: a typed buffer boxes into the copy the caller asked for
-                            return checked_result<T>(node->materialize_values(engine_));
+                            return checked_result<T>(node->materialize_values(get_engine()));
                         }
                     } else if constexpr (std::is_same_v<base_type, script_map>) {
                         auto map_result = checked_as_map();
@@ -1569,13 +1565,13 @@ namespace detail {
             // Vector types
             else if constexpr (is_specialization_v<T, std::vector>) {
                 // Use engine's conversion registry first
-                if (engine_) {
-                    auto registry = get_engine_conversion_registry(engine_);
+                if (get_engine()) {
+                    auto registry = get_engine_conversion_registry(get_engine());
                     if (registry && registry->template has_conversion<T>()) {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
-                            return conversion_exception_result<T>(engine_, e.what());
+                            return conversion_exception_result<T>(get_engine(), e.what());
                         } catch (...) {
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
@@ -1622,7 +1618,7 @@ namespace detail {
                 }
                 bool failed = false;
                 error_propagator failure;
-                node->for_each(engine_, [&](const script_value& elem) {
+                node->for_each(get_engine(), [&](const script_value& elem) {
                     if (failed) { return; }
                     if constexpr (std::is_same_v<element_type, script_value>) {
                         result.push_back(elem);
@@ -1638,13 +1634,13 @@ namespace detail {
             // Map types
             else if constexpr (is_script_map_like_v<T>) {
                 // Use engine's conversion registry first
-                if (engine_) {
-                    auto registry = get_engine_conversion_registry(engine_);
+                if (get_engine()) {
+                    auto registry = get_engine_conversion_registry(get_engine());
                     if (registry && registry->template has_conversion<T>()) {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
-                            return conversion_exception_result<T>(engine_, e.what());
+                            return conversion_exception_result<T>(get_engine(), e.what());
                         } catch (...) {
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
@@ -1757,13 +1753,13 @@ namespace detail {
                     return checked_result<T>(T{});
                 }
                 // First check if there's a registered conversion
-                if (engine_) {
-                    auto registry = get_engine_conversion_registry(engine_);
+                if (get_engine()) {
+                    auto registry = get_engine_conversion_registry(get_engine());
                     if (registry && registry->template has_conversion<T>()) {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
-                            return conversion_exception_result<T>(engine_, e.what());
+                            return conversion_exception_result<T>(get_engine(), e.what());
                         } catch (...) {
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
@@ -1791,14 +1787,14 @@ namespace detail {
 
                     // Check if we need to use the custom extractor
                     if (objHolder->is_class_instance_wrapper) {
-                        if (engine_) {
-                            auto registry = get_engine_conversion_registry(engine_);
+                        if (get_engine()) {
+                            auto registry = get_engine_conversion_registry(get_engine());
                             if (registry) {
                                 auto extracted = registry->extract_custom_object(objHolder->type_name, objHolder->data);
                                 if (extracted && extracted.use_count() == 0) {
                                     // an extended object's layer references it without owning it:
                                     // ownership comes from the object's own shared_ptr, weakly held
-                                    extracted = engine_lock_instance_cpp_object(engine_, objHolder->data);
+                                    extracted = engine_lock_instance_cpp_object(get_engine(), objHolder->data);
                                     if (!extracted) {
                                         return checked_result<T>(
                                             make_error_code(runtime_error_code::type_mismatch),
@@ -1833,7 +1829,7 @@ namespace detail {
                     if (!locked) {
                         return checked_result<T>(T{});
                     }
-                    script_value target(std::monostate{}, engine_);
+                    script_value target(std::monostate{}, get_engine());
                     target.set_object_holder(locked);
                     auto shared = target.template checked_as<shared_type>();
                     if (!shared) {
@@ -1853,13 +1849,13 @@ namespace detail {
                              !is_specialization_v<T, std::vector> &&
                              !is_script_map_like_v<T>) {
                 // Check custom converter first
-                if (engine_) {
-                    auto registry = get_engine_conversion_registry(engine_);
+                if (get_engine()) {
+                    auto registry = get_engine_conversion_registry(get_engine());
                     if (registry && registry->template has_conversion<T>()) {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
-                            return conversion_exception_result<T>(engine_, e.what());
+                            return conversion_exception_result<T>(get_engine(), e.what());
                         } catch (...) {
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
@@ -1954,7 +1950,12 @@ namespace detail {
         using conversion_func = std::function<script_value(const script_value&, const std::type_info&)>;
         
         // Get engine pointer for creating new script_values
-        engine* get_engine() const { return engine_; }
+        engine* get_engine() const noexcept {
+            const uintptr_t tag = storage_.tag();
+            if (tag & k_engine_only) { return reinterpret_cast<engine*>(tag & k_tag_pointer_mask); }
+            const auto* stamped = reinterpret_cast<const type_info*>(tag);
+            return stamped ? stamped->owner : nullptr;
+        }
 
         // Implicit conversion operators for common C++ types
         // These enable natural overload resolution in C++ function calls
@@ -2001,9 +2002,26 @@ namespace detail {
         
         
     private:
-        type_info_ptr type_info_;  // Complete type information
-        engine* engine_ = nullptr;  // Raw pointer to engine (no atomic ops on copy)
-        
+        // The storage's tag word (internal/value16_design.md): the declared type, whose owner is the value's engine, or
+        // with k_engine_only an unstamped value's engine; both are 512-aligned so the low 9 bits hold the index and flag
+        static constexpr uintptr_t k_engine_only = 0x100;
+        static constexpr uintptr_t k_tag_pointer_mask = ~uintptr_t{0x1FF};
+        JAI_FORCEINLINE type_info* stamp() const noexcept {
+            const uintptr_t tag = storage_.tag();
+            return (tag & k_engine_only) ? nullptr : reinterpret_cast<type_info*>(tag);
+        }
+        void set_stamp(type_info* stamped) noexcept {
+            if (stamped) {
+                assert(stamped->owner && "a stamp must name its engine");
+                storage_.set_tag(reinterpret_cast<uintptr_t>(stamped));
+            } else {
+                set_engine_tag(get_engine());
+            }
+        }
+        void set_engine_tag(engine* eng) noexcept {
+            storage_.set_tag(eng ? (reinterpret_cast<uintptr_t>(eng) | k_engine_only) : 0);
+        }
+
 	public: // Match the public forward declaration and holder accessors.
         // For object storage - external serialization will handle this
         struct object_holder {
@@ -2089,7 +2107,7 @@ namespace detail {
         struct reference_holder {
             type_info_ptr container_element_type = nullptr;  // For subscript/field refs: the element/field type constraint
 
-            static constexpr size_t cell_storage_size = 2 * sizeof(void*) + 16;   // == sizeof(script_value), gated in value.cpp
+            static constexpr size_t cell_storage_size = 16;   // == sizeof(script_value), gated in value.cpp
             alignas(8) unsigned char cell_storage[cell_storage_size];
             // Only an unresolved mixed-mode call uses this: cell() is its evaluated value snapshot, while this
             // retained source supplies reference/shared-handle binding after overload selection. Never script-visible.
@@ -2305,31 +2323,31 @@ namespace detail {
         // discipline (never bad_variant_access).
         class storage {
         public:
-            storage() noexcept : index_(TYPEID_NULL) {}
-            storage(std::monostate) noexcept : index_(TYPEID_NULL) {}
-            storage(script_int v) noexcept : index_(TYPEID_INT) { p_.i = v; }
-            storage(script_float v) noexcept : index_(TYPEID_FLOAT) { p_.f = v; }
-            storage(script_char v) noexcept : index_(TYPEID_CHAR) { p_.c = v; }
-            storage(script_bool v) noexcept : index_(TYPEID_BOOL) { p_.b = v; }
-            storage(invalid_tag) noexcept : index_(TYPEID_INVALID) {}
-            storage(parallel_borrow_tag v) noexcept : index_(TYPEID_PARALLEL_BORROW) { p_.pb = v; }
-            storage(strong_ptr<script_string> v) noexcept : index_(TYPEID_STRING) { new (&p_.s) strong_ptr<script_string>(std::move(v)); }
-            storage(strong_ptr<script_array> v) noexcept : index_(TYPEID_ARRAY) { new (&p_.a) strong_ptr<script_array>(std::move(v)); }
-            storage(strong_ptr<script_map> v) noexcept : index_(TYPEID_MAP) { new (&p_.m) strong_ptr<script_map>(std::move(v)); }
-            storage(strong_ptr<object_holder> v) noexcept : index_(TYPEID_OBJECT) { new (&p_.o) strong_ptr<object_holder>(std::move(v)); }
-            storage(strong_ptr<script_function> v) noexcept : index_(TYPEID_FUNCTION) { new (&p_.fn) strong_ptr<script_function>(std::move(v)); }
-            storage(strong_ptr<reference_holder> v) noexcept : index_(TYPEID_REFERENCE) { new (&p_.r) strong_ptr<reference_holder>(std::move(v)); }
-            storage(strong_ptr<shared_value_holder> v) noexcept : index_(TYPEID_SHARED_PTR) { new (&p_.sh) strong_ptr<shared_value_holder>(std::move(v)); }
-            storage(jai::weaker_ptr<object_holder> v) noexcept : index_(TYPEID_WEAK_PTR) { new (&p_.w) jai::weaker_ptr<object_holder>(std::move(v)); }
-            storage(strong_ptr<cpp_bound_holder> v) noexcept : index_(TYPEID_CPP_BOUND) { new (&p_.cb) strong_ptr<cpp_bound_holder>(std::move(v)); }
-            storage(strong_ptr<script_utf8> v) noexcept : index_(TYPEID_UTF8_STRING) { new (&p_.u) strong_ptr<script_utf8>(std::move(v)); }
+            storage() noexcept : hdr_(TYPEID_NULL) {}
+            storage(std::monostate) noexcept : hdr_(TYPEID_NULL) {}
+            storage(script_int v) noexcept : hdr_(TYPEID_INT) { p_.i = v; }
+            storage(script_float v) noexcept : hdr_(TYPEID_FLOAT) { p_.f = v; }
+            storage(script_char v) noexcept : hdr_(TYPEID_CHAR) { p_.c = v; }
+            storage(script_bool v) noexcept : hdr_(TYPEID_BOOL) { p_.b = v; }
+            storage(invalid_tag) noexcept : hdr_(TYPEID_INVALID) {}
+            storage(parallel_borrow_tag v) noexcept : hdr_(TYPEID_PARALLEL_BORROW) { p_.pb = v; }
+            storage(strong_ptr<script_string> v) noexcept : hdr_(TYPEID_STRING) { new (&p_.s) strong_ptr<script_string>(std::move(v)); }
+            storage(strong_ptr<script_array> v) noexcept : hdr_(TYPEID_ARRAY) { new (&p_.a) strong_ptr<script_array>(std::move(v)); }
+            storage(strong_ptr<script_map> v) noexcept : hdr_(TYPEID_MAP) { new (&p_.m) strong_ptr<script_map>(std::move(v)); }
+            storage(strong_ptr<object_holder> v) noexcept : hdr_(TYPEID_OBJECT) { new (&p_.o) strong_ptr<object_holder>(std::move(v)); }
+            storage(strong_ptr<script_function> v) noexcept : hdr_(TYPEID_FUNCTION) { new (&p_.fn) strong_ptr<script_function>(std::move(v)); }
+            storage(strong_ptr<reference_holder> v) noexcept : hdr_(TYPEID_REFERENCE) { new (&p_.r) strong_ptr<reference_holder>(std::move(v)); }
+            storage(strong_ptr<shared_value_holder> v) noexcept : hdr_(TYPEID_SHARED_PTR) { new (&p_.sh) strong_ptr<shared_value_holder>(std::move(v)); }
+            storage(jai::weaker_ptr<object_holder> v) noexcept : hdr_(TYPEID_WEAK_PTR) { new (&p_.w) jai::weaker_ptr<object_holder>(std::move(v)); }
+            storage(strong_ptr<cpp_bound_holder> v) noexcept : hdr_(TYPEID_CPP_BOUND) { new (&p_.cb) strong_ptr<cpp_bound_holder>(std::move(v)); }
+            storage(strong_ptr<script_utf8> v) noexcept : hdr_(TYPEID_UTF8_STRING) { new (&p_.u) strong_ptr<script_utf8>(std::move(v)); }
             // precondition: a live node (its count and element type name the index)
-            storage(strong_ptr<script_vec_node> v) noexcept : index_(vec_index_of(v->count, v->integral, v->color)) { new (&p_.vn) strong_ptr<script_vec_node>(std::move(v)); }
+            storage(strong_ptr<script_vec_node> v) noexcept : hdr_(vec_index_of(v->count, v->integral, v->color)) { new (&p_.vn) strong_ptr<script_vec_node>(std::move(v)); }
             JAI_FORCEINLINE strong_ptr<script_vec_node>& vec_node() noexcept { return p_.vn; }
             JAI_FORCEINLINE const strong_ptr<script_vec_node>& vec_node() const noexcept { return p_.vn; }
 
-            storage(const storage& o) noexcept : index_(o.index_) {
-                switch (index_) {
+            storage(const storage& o) noexcept : hdr_(o.hdr_) {
+                switch (idx_()) {
                     case TYPEID_STRING: new (&p_.s) strong_ptr<script_string>(o.p_.s); break;
                     case TYPEID_ARRAY: new (&p_.a) strong_ptr<script_array>(o.p_.a); break;
                     case TYPEID_MAP: new (&p_.m) strong_ptr<script_map>(o.p_.m); break;
@@ -2349,9 +2367,9 @@ namespace detail {
             // null — no effectful ctor/dtor is elided, refcounts are untouched (one live
             // handle before, one after). Source lands at TYPEID_NULL (script_value's
             // move contract nulls the source anyway).
-            storage(storage&& o) noexcept : index_(o.index_) {
+            storage(storage&& o) noexcept : hdr_(o.hdr_) {
                 std::memcpy(&p_, &o.p_, sizeof(p_));
-                o.index_ = TYPEID_NULL;
+                o.idx_() = TYPEID_NULL;
             }
             // Both assignments pin/steal o first (o may live inside our own payload: x = x.deref() through a map-entry
             // reference holding the last pin on a temporary map) and release the old payload LAST, after the new one is
@@ -2361,20 +2379,20 @@ namespace detail {
                 if (this != &o) {
                     storage pinned(o);
                     storage doomed(std::move(*this));
-                    index_ = pinned.index_;
+                    idx_() = pinned.idx_();
                     std::memcpy(&p_, &pinned.p_, sizeof(p_));
-                    pinned.index_ = TYPEID_NULL;
+                    pinned.idx_() = TYPEID_NULL;
                 }
                 return *this;
             }
             storage& operator=(storage&& o) noexcept {
                 if (this != &o) {
-                    const auto stolen_index = o.index_;
+                    const auto stolen_index = o.idx_();
                     payload stolen;
                     std::memcpy(&stolen, &o.p_, sizeof(p_));
-                    o.index_ = TYPEID_NULL;
+                    o.idx_() = TYPEID_NULL;
                     storage doomed(std::move(*this));
-                    index_ = stolen_index;
+                    idx_() = stolen_index;
                     std::memcpy(&p_, &stolen, sizeof(p_));
                 }
                 return *this;
@@ -2386,10 +2404,12 @@ namespace detail {
                 return *this = storage(std::forward<T>(v));
             }
             JAI_FORCEINLINE ~storage() {
-                if (!((k_trivial_mask >> index_) & 1u)) { destroy_handle(); }   // scalars: one test, no call
+                if (!((k_trivial_mask >> idx_()) & 1u)) { destroy_handle(); }   // scalars: one test, no call
             }
 
-            JAI_FORCEINLINE size_t index() const noexcept { return index_; }
+            JAI_FORCEINLINE size_t index() const noexcept { return idx_(); }
+            JAI_FORCEINLINE uintptr_t tag() const noexcept { return static_cast<uintptr_t>(hdr_ & ~uint64_t{0xFF}); }
+            JAI_FORCEINLINE void set_tag(uintptr_t bits) noexcept { hdr_ = (hdr_ & uint64_t{0xFF}) | static_cast<uint64_t>(bits); }
 
             // Index -> alternative TYPE map (must mirror alt()'s payload dispatch).
             // Explicit return types below instead of deduced auto: script_value's
@@ -2406,22 +2426,22 @@ namespace detail {
                 strong_ptr<script_vec_node>, strong_ptr<script_vec_node>>>;
 
             template <size_t I> JAI_FORCEINLINE alt_t<I>* get_if() noexcept {
-                return index_ == I ? &alt<I>() : nullptr;
+                return idx_() == I ? &alt<I>() : nullptr;
             }
             template <size_t I> JAI_FORCEINLINE const alt_t<I>* get_if() const noexcept {
-                return index_ == I ? &alt<I>() : nullptr;
+                return idx_() == I ? &alt<I>() : nullptr;
             }
             template <typename T> JAI_FORCEINLINE T* get_if() noexcept {
-                return index_ == index_of<T>() ? &alt<index_of<T>()>() : nullptr;
+                return idx_() == index_of<T>() ? &alt<index_of<T>()>() : nullptr;
             }
             template <typename T> JAI_FORCEINLINE const T* get_if() const noexcept {
-                return index_ == index_of<T>() ? &alt<index_of<T>()>() : nullptr;
+                return idx_() == index_of<T>() ? &alt<index_of<T>()>() : nullptr;
             }
             // Precondition: the alternative is engaged (callers keep check-then-get)
-            template <size_t I> JAI_FORCEINLINE alt_t<I>& get() noexcept { assert(index_ == I); return alt<I>(); }
-            template <size_t I> JAI_FORCEINLINE const alt_t<I>& get() const noexcept { assert(index_ == I); return alt<I>(); }
-            template <typename T> JAI_FORCEINLINE T& get() noexcept { assert(index_ == index_of<T>()); return alt<index_of<T>()>(); }
-            template <typename T> JAI_FORCEINLINE const T& get() const noexcept { assert(index_ == index_of<T>()); return alt<index_of<T>()>(); }
+            template <size_t I> JAI_FORCEINLINE alt_t<I>& get() noexcept { assert(idx_() == I); return alt<I>(); }
+            template <size_t I> JAI_FORCEINLINE const alt_t<I>& get() const noexcept { assert(idx_() == I); return alt<I>(); }
+            template <typename T> JAI_FORCEINLINE T& get() noexcept { assert(idx_() == index_of<T>()); return alt<index_of<T>()>(); }
+            template <typename T> JAI_FORCEINLINE const T& get() const noexcept { assert(idx_() == index_of<T>()); return alt<index_of<T>()>(); }
 
         private:
             union alignas(8) payload {   // 8-aligned on 32-bit hosts too, where int64_t may align to 4
@@ -2452,7 +2472,7 @@ namespace detail {
             static_assert(TYPEID_COLOR < 32, "k_trivial_mask is one bit per storage index");
 
             JAI_NOINLINE void destroy_handle() noexcept {
-                switch (index_) {
+                switch (idx_()) {
                     case TYPEID_STRING: p_.s.~strong_ptr(); break;
                     case TYPEID_ARRAY: p_.a.~strong_ptr(); break;
                     case TYPEID_MAP: p_.m.~strong_ptr(); break;
@@ -2515,8 +2535,12 @@ namespace detail {
                 else { static_assert(std::is_same_v<T, parallel_borrow_tag>, "not a storage alternative"); return TYPEID_PARALLEL_BORROW; }
             }
 
+            static_assert(std::endian::native == std::endian::little, "the index is the tag word's low byte");
+            JAI_FORCEINLINE uint8_t& idx_() noexcept { return *reinterpret_cast<uint8_t*>(&hdr_); }
+            JAI_FORCEINLINE uint8_t idx_() const noexcept { return *reinterpret_cast<const uint8_t*>(&hdr_); }
+
             payload p_;
-            uint8_t index_;
+            uint64_t hdr_;   // low byte: the index; above it the owner's tag bits (script_value::stamp)
         };
         static_assert(std::is_nothrow_move_constructible_v<storage> && std::is_nothrow_move_assignable_v<storage>,
                       "every alternative must stay nothrow-move (the noexcept move contract depends on it)");
@@ -2529,7 +2553,8 @@ namespace detail {
 
     public:
         // Method to set engine pointer after construction
-        void set_engine(engine* eng) { engine_ = eng; }
+        // a stamped value names its stamp's engine; only an unstamped one takes another
+        void set_engine(engine* eng) { if (!stamp()) { set_engine_tag(eng); } else { assert(!eng || stamp()->owner == eng); } }
 
         // Access raw storage for AST literals (bypasses type checking)
         const storage& get_storage() const { return storage_; }
@@ -2627,7 +2652,7 @@ namespace detail {
         
         // Check if this value has a valid engine pointer
         bool has_valid_engine() const {
-            return engine_ != nullptr;
+            return storage_.tag() != 0;
         }
 
         // Safe access to reference holder for reference types
@@ -2755,7 +2780,7 @@ namespace detail {
         
         // Set type info for special cases (like weak_ptr creation)
         void set_type_info(type_info_ptr type) {
-            type_info_ = type;
+            set_stamp(type);
             // Demote-on-stamp (internal/typed_array_design.md): re-tagging an array value 'any'
             // (var binding) or an open-element array tag (array<var>: the boundary
             // kernel rebuilds first, this is the net) demotes a typed node in place —
@@ -2769,7 +2794,7 @@ namespace detail {
                   (!type->element_type() || type->element_type()->base_type == script_value_type::jai_any_type)))) {
                 auto& node = *storage_.get_if<TYPEID_ARRAY>();
                 if (node && node->is_typed()) {
-                    node->demote_to_hetero(engine_);
+                    node->demote_to_hetero(get_engine());
                 }
             }
         }
@@ -2800,9 +2825,9 @@ namespace detail {
     }
 
 
-    // type_info_ + engine_ + 16B variant (8B max payload + index): 32 bytes on a 64-bit host, 24 on a 32-bit one
-    static_assert(sizeof(script_value) == 2 * sizeof(void*) + 16 && alignof(script_value) == 8,
-                  "script_value must stay two pointers and a 16-byte variant, 8-aligned");
+    // 8B payload + 8B tag word (index byte, engine-only flag, the type_info or engine pointer) on every host
+    static_assert(sizeof(script_value) == 16 && alignof(script_value) == 8,
+                  "script_value must stay 16 bytes / 8-aligned");
     static_assert(std::is_nothrow_move_constructible_v<script_value>);
 
     // ---- script_array kind-dispatched element access (script_value complete here) ----

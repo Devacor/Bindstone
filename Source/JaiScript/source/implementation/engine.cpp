@@ -2341,7 +2341,9 @@ checked_result<void> host_reference_store(engine* eng, const host_slot& slot, sc
 
 }
 
-engine::engine() : impl(std::make_unique<implementation>()) {}
+engine::engine() : impl(std::make_unique<implementation>()) {
+    for (auto& [key, info] : impl->type_infos_) { info.owner = this; }
+}
 
 bool engine_loading(const engine* a_engine) {
     return a_engine && a_engine->loading();
@@ -4124,6 +4126,7 @@ type_info* engine::get_type_info_array(type_info* element_type) {
     impl->deny_type_intern_in_region();
     type_info temp = type_info::make_array(impl->string_symbolizer_, element_type);
     auto result = impl->type_infos_.emplace(key, temp);
+    result.first->second.owner = this;
     type_info* ptr = &result.first->second;
     impl->type_id_index_[ptr->id] = ptr;
     return ptr;
@@ -4145,6 +4148,7 @@ type_info* engine::get_type_info_map(type_info* key_type, type_info* value_type)
     impl->deny_type_intern_in_region();
     type_info temp = type_info::make_map(impl->string_symbolizer_, key_type, value_type);
     auto result = impl->type_infos_.emplace(key, temp);
+    result.first->second.owner = this;
     type_info* ptr = &result.first->second;
     impl->type_id_index_[ptr->id] = ptr;
     return ptr;
@@ -4165,6 +4169,7 @@ type_info* engine::get_type_info_object(const std::string& class_name) {
     impl->deny_type_intern_in_region();
     type_info temp = type_info::make_object(impl->string_symbolizer_, class_name);
     auto result = impl->type_infos_.emplace(key, temp);
+    result.first->second.owner = this;
     type_info* ptr = &result.first->second;
     impl->type_id_index_[ptr->id] = ptr;
     return ptr;
@@ -4191,6 +4196,7 @@ type_info* engine::get_type_info_object(uint64_t type_id) {
     impl->deny_type_intern_in_region();
     type_info temp = type_info::make_object(impl->string_symbolizer_, class_name);
     auto result = impl->type_infos_.emplace(key, temp);
+    result.first->second.owner = this;
     type_info* ptr = &result.first->second;
     impl->type_id_index_[ptr->id] = ptr;
     return ptr;
@@ -4210,6 +4216,7 @@ type_info* engine::get_type_info_weak_ptr(type_info* pointee_type) {
     impl->deny_type_intern_in_region();
     type_info temp = type_info::make_weak_ptr(impl->string_symbolizer_, pointee_type);
     auto result = impl->type_infos_.emplace(key, temp);
+    result.first->second.owner = this;
     type_info* ptr = &result.first->second;
     impl->type_id_index_[ptr->id] = ptr;
     return ptr;
@@ -4247,6 +4254,7 @@ type_info* engine::get_type_info_shared_ptr(type_info* pointee_type) {
     impl->deny_type_intern_in_region();
     type_info temp = type_info::make_shared_ptr(impl->string_symbolizer_, pointee_type);
     auto result = impl->type_infos_.emplace(key, temp);
+    result.first->second.owner = this;
     type_info* ptr = &result.first->second;
     impl->type_id_index_[ptr->id] = ptr;
     return ptr;
@@ -4267,6 +4275,7 @@ type_info* engine::get_type_info_shared_ptr_dynamic(type_info* pointee_type) {
     type_info temp = type_info::make_shared_ptr(impl->string_symbolizer_, pointee_type);
     temp.dynamic_pointee = true;
     auto result = impl->type_infos_.emplace(key, temp);
+    result.first->second.owner = this;
     type_info* ptr = &result.first->second;
     impl->type_id_index_.try_emplace(ptr->id, ptr);   // never displace the plain spelling
     return ptr;
@@ -4288,6 +4297,7 @@ type_info* engine::get_type_info_array_dynamic(type_info* array_type) {
     temp.cached_reference_type = nullptr;
     temp.cached_declared_reference_type = nullptr;
     auto result = impl->type_infos_.emplace(key, temp);
+    result.first->second.owner = this;
     type_info* ptr = &result.first->second;
     impl->type_id_index_.try_emplace(ptr->id, ptr);   // never displace the plain spelling
     return ptr;
@@ -4304,6 +4314,7 @@ type_info* engine::get_type_info_map_dynamic(type_info* a_mapType) {
 	temp.cached_reference_type = nullptr;
 	temp.cached_declared_reference_type = nullptr;
 	auto result = impl->type_infos_.emplace(key,temp);
+	result.first->second.owner = this;
 	auto* ptr = &result.first->second;
 	impl->type_id_index_.try_emplace(ptr->id,ptr);
 	return ptr;
@@ -4326,6 +4337,7 @@ type_info* engine::get_type_info_declared_reference(type_info* referenced_type) 
         temp.cached_reference_type = nullptr;
         temp.cached_declared_reference_type = nullptr;
         auto result = impl->type_infos_.emplace(key, temp);
+        result.first->second.owner = this;
         ptr = &result.first->second;
         impl->type_id_index_.try_emplace(ptr->id, ptr);   // never displace the plain spelling
     }
@@ -4361,6 +4373,7 @@ type_info* engine::get_type_info_reference(type_info* referenced_type) {
         impl->deny_type_intern_in_region();
         type_info temp = type_info::make_reference(impl->string_symbolizer_, referenced_type);
         auto result = impl->type_infos_.emplace(key, temp);
+        result.first->second.owner = this;
         ptr = &result.first->second;
         impl->type_id_index_[ptr->id] = ptr;
     }
@@ -4448,6 +4461,7 @@ type_info* engine::get_type_info(const type_info& temp) {
     // Insert the new type_info and return pointer to it
     impl->deny_type_intern_in_region();
     auto result = impl->type_infos_.emplace(key, temp);
+    result.first->second.owner = this;
     type_info* ptr = &result.first->second;
     impl->type_id_index_[ptr->id] = ptr;
     return ptr;

@@ -103,10 +103,10 @@ depend on the pin's type.
 
 **Risk: medium**, because it touches instance ownership.
 
-## Layer 3: a reference inline in the 32-byte value, with no holder
+## Layer 3: a reference inline in the value, with no holder
 
-**The layout.** `script_value` is `type_info_ptr` (8 bytes) + `engine*` (8) + `storage` (16): an 8-byte payload
-union, a 1-byte index and 7 bytes of padding. Two static_asserts pin this: `sizeof(script_value) == 32` and
+**The layout.** `script_value` is its `storage` (16 bytes): an 8-byte payload
+union and a tag word holding the index byte and the type or engine pointer (internal/value16_design.md), so no padding is free. Two static_asserts pin this: `sizeof(script_value) == 16` and
 `sizeof(storage) == 16`.
 
 **What a reference needs.** A pin (8 bytes, the owner's handle), a target (8 bytes, or 6 with 48-bit compression), a

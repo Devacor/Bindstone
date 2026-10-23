@@ -75,9 +75,13 @@ namespace jai {
     };
 
     // Represents complete type information including generic parameters
-    class type_info {
+    class engine;
+
+    // 512-aligned: a value's tag word holds this pointer above its index byte and engine-only flag (value.hpp)
+    class alignas(512) type_info {
     public:
         script_value_type base_type;
+        engine* owner = nullptr;   // the engine that interned this type: a stamped value's engine
         std::string type_name;  // For Object<T>, this would be the class name
         uint64_t id = 0;        // Interned canonical name for O(1) type comparison
 

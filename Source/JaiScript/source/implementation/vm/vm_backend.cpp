@@ -304,12 +304,14 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		shared_ptr_ctor_symbol_ = 0; weak_ptr_ctor_symbol_ = 0;
 		symbolizer_ = engine_->get_symbolizer();
 		env_symbolizer_ = symbolizer_;
+		reference_mode_ = engine_->vm_reference_mode();
 		if (auto global = engine_->get_global_environment()) {
 			environment_ = global;
-			cached_global_env_ = global.get();   // stable for the engine's lifetime
+			cached_global_env_ = reference_mode_ ? nullptr : global.get();   // stable for the engine's lifetime
 		}
 		compiler_ = vm_compiler(symbolizer_, &builtins_);   // filled below; address stable
 		compiler_.math_aliases(engine_);
+		compiler_.reference(reference_mode_);
 		math_alias_rows_ = engine_->math_alias_rows();
 
 		op_plus_id_ = symbolizer_->intern("+");
@@ -2475,7 +2477,7 @@ env_lookup_cache_entry* vm_backend::worker_env_cache_slot(const chunk* code, siz
 }
 
 void vm_backend::worker_pin_env_cache(const std::shared_ptr<void>& pin, const chunk* code) {
-	if (worker_env_index_.count(code)) { return; }
+	if (worker_env_index_.count(code) || reference_mode_) { return; }
 	auto rec = std::make_unique<worker_chunk_env_cache>();
 	rec->pin = pin;
 	rec->code = code;
@@ -16300,6 +16302,7 @@ void vm_backend::fold_static_read(frame& f, const vm_instruction& ins, const mem
 	if (!folded) { return; }
 	const script_value& v = out.deref();
 	if (v.raw_storage_index() != folded->raw_storage_index() || !(v == *folded)) { return; }   // the general read named another member
+	if (reference_mode_) { return; }   // checked once a fold is due: the optimized read pays it once per site
 	fold_site site;
 	site.code = f.code;
 	site.pin = f.pin;
@@ -16330,6 +16333,7 @@ void vm_backend::revalidate_folds() {
 
 bool vm_backend::prefold_chunk(const std::shared_ptr<chunk>& code) {
 	bool folded_any = false;
+	if (reference_mode_) { return false; }
 	for (const auto& ins : code->code) {
 		if (ins.op == opcode::op_enum_decl) { return false; }   // its enum is the scope's: E::v in this chunk may name it
 	}

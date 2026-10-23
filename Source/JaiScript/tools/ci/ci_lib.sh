@@ -111,16 +111,18 @@ jai_gates() {
 	return 1
 }
 
-# The Debug suites on both backends, side by side, each with its own temp directory; a red side reruns alone
+# jai_debug_suites [backend...]: the Debug suites on the named backends (interp, vm, vm-reference; default all three), side by
+# side, each with its own temp directory; a red side reruns alone
 jai_debug_suites() {
-	local be pids=() rc=0
-	for be in interp vm; do
+	local be pids=() rc=0 backends=("$@")
+	[ "${#backends[@]}" -gt 0 ] || backends=(interp vm vm-reference)
+	for be in "${backends[@]}"; do
 		mkdir -p "$JAI_CI_LOG_DIR/tmp_$be"
 		TEMP="$JAI_CI_LOG_DIR/tmp_$be" TMP="$JAI_CI_LOG_DIR/tmp_$be" TMPDIR="$JAI_CI_LOG_DIR/tmp_$be" jai_gates debug "tests-$be" > "$JAI_CI_LOG_DIR/suite_$be.line" &
 		pids+=($!)
 	done
-	for be in 0 1; do wait "${pids[$be]}" || true; done
-	for be in interp vm; do
+	for be in "${pids[@]}"; do wait "$be" || true; done
+	for be in "${backends[@]}"; do
 		if grep -q "^green" "$JAI_CI_LOG_DIR/suite_$be.line"; then
 			cat "$JAI_CI_LOG_DIR/suite_$be.line"
 		else

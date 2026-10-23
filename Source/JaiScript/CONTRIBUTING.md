@@ -127,6 +127,7 @@ jaiscript_fuzz --seed 41337            # one specific program
 jaiscript_fuzz --dump 41337            # print that program and stop
 jaiscript_fuzz --seed 41337 --minimize # shrink a divergence to its smallest form
 jaiscript_fuzz --isolate               # run each program in a child process (survives a crash)
+jaiscript_fuzz --vm-reference          # the optimized VM against the VM in reference mode (every optimization off)
 jaiscript_fuzz --no-proofs             # with parse-time type proofs disabled
 jaiscript_fuzz --no-suppressions       # include already-triaged shapes
 ```
@@ -207,7 +208,8 @@ One-line commit messages — a title, no body.
 Before you open a PR:
 
 - [ ] `jaiscript_tests` and `jaiscript_tests --backend=vm` green in Debug **and** Release
-- [ ] `jaiscript_fuzz` green (or the divergence triaged as a suppression in `fuzz_harness.hpp`)
+- [ ] `jaiscript_tests --backend=vm-reference` green
+- [ ] `jaiscript_fuzz` and `jaiscript_fuzz --vm-reference` green (or the divergence triaged as a suppression in `fuzz_harness.hpp`)
 - [ ] the reference's "Run-time errors" table updated if any error text changed
 - [ ] docs updated, and any sample you touched re-run on both backends
 - [ ] no new `static` / `thread_local` mutable state
@@ -243,11 +245,14 @@ build what they run with `--build`, and end on a one-line verdict.
 
 - **Targeted, for every change.** `tools/ci/targeted.sh <rev-range>` picks the checks from the paths the range touches
   and prints each choice and why; `--plan` stops there. A documentation-site change runs `verify_site`; a test runs the
-  Debug suites; the VM, its compiler, the interpreter or a kernel both backends share runs the Debug suites on both
-  backends, the example hash gates and the fuzzer; an example runs its own gate; prose and design notes run nothing. A
+  Debug suites on the VM and the VM reference; any library change runs the VM tier (those suites, the VM against
+  VM-reference fuzz and the example hashes on the VM); a change to the interpreter, the VM's general path or compiler
+  front end, a shared `detail/` kernel or the parser/checker adds the interpreter tier (its suites, the interpreter
+  against VM fuzz, the hashes on the interpreter). `--lanes` declares a change confined to the VM's optimized lanes and
+  `--interp` forces the interpreter tier; the script's header has the rules. An example runs its own gate; prose and design notes run nothing. A
   change to the property system or the archives also prints a note for hosts, whose asset round-trips exercise them.
-- **Battery, at milestones.** `tools/ci/battery.sh` runs everything at depth: the Debug suites on both backends, then on
-  the Release build the suites, a 3000-program fuzz run, every example's hashes (GLOOM also with workers and at 600 ticks,
+- **Battery, at milestones.** `tools/ci/battery.sh` runs everything at depth: the Debug suites on the interpreter, the
+  VM and the VM reference, then on the Release build the suites, a 3000-program run of each differential, every example's hashes (GLOOM also with workers and at 600 ticks,
   and JaiDOOM's timedemo where the checkout has it), the embedding quickstart, the language server and the one-file
   build's include list. Run it before a release and after a large batch of changes, not per change.
 

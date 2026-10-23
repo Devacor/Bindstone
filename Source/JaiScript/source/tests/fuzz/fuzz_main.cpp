@@ -1,8 +1,9 @@
 // jaiscript_fuzz: differential fuzzer for the two JaiScript backends.
 //
 // Generates random-but-valid programs from a weighted grammar, runs each on
-// BOTH the tree-walking interpreter and the bytecode VM, and reports any
-// divergence in results / printed output / error text / engine liveness.
+// BOTH the tree-walking interpreter and the bytecode VM (or, with --vm-reference,
+// the optimized VM and the VM in reference mode), and reports any divergence in
+// results / printed output / error text / engine liveness.
 // Fully deterministic from the seed.
 //
 // Usage:
@@ -20,6 +21,9 @@
 //   jaiscript_fuzz --isolate                spawn a --child process per seed (crash isolation:
 //                                           a VM crash doesn't kill the run)
 //   jaiscript_fuzz --no-suppressions        report known (suppressed) divergences too
+//   jaiscript_fuzz --vm-reference           the pair is the optimized vm against the vm in engine::vm_reference_mode (every
+//                                           optimization off): a divergence is a bug of an optimized lane (the everyday pair;
+//                                           every other flag composes with it, the switches applying to the optimized side)
 //   jaiscript_fuzz --no-proofs              run both backends with engine::type_proofs(false)
 //   jaiscript_fuzz --no-param-alias         run both backends with engine::parameter_alias(false) and engine::local_alias(false)
 //   jaiscript_fuzz --local-alias-band       append the read-only local band (by-value locals beside writes of their sources) to
@@ -102,6 +106,7 @@ namespace {
 		bool proofs = true;
 		bool param_alias = true;
 		bool passes = true;
+		bool vm_reference = false;   // the pair: the optimized vm against the reference vm
 		int lowering = 0;   // compare_program's: 0 each backend's default, 1 both boxed, 2 both lowered
 		mutable uint64_t lowered_locals = 0, lowered_programs = 0;   // the census: what the vm side lowered
 		uint32_t miss_every = 0;
@@ -144,6 +149,7 @@ namespace {
 			else if (a == "--no-proofs") { opt.proofs = false; }
 			else if (a == "--no-param-alias") { opt.param_alias = false; }
 			else if (a == "--no-passes") { opt.passes = false; }
+			else if (a == "--vm-reference") { opt.vm_reference = true; }
 			else if (a == "--no-lowering") { opt.lowering = 1; }
 			else if (a == "--lowered-interp") { opt.lowering = 2; }
 			else if (a == "--element-band") { opt.band = band_mode::always; }
@@ -193,11 +199,11 @@ namespace {
 			f << "# Divergence: fuzz seed " << original.seed << "\n\n";
 			if (!suppression_id.empty()) f << "Suppressed as known divergence: `" << suppression_id << "`\n\n";
 			f << "Command: `jaiscript_fuzz --seed " << original.seed
-			  << " --max-depth " << opt.max_depth << " --timeout-ms " << opt.timeout_ms << "`\n\n";
+			  << " --max-depth " << opt.max_depth << " --timeout-ms " << opt.timeout_ms << (opt.vm_reference ? " --vm-reference" : "") << "`\n\n";
 			f << "## Diff\n\n```\n" << diff << "```\n\n";
 			const program& repro = minimized ? *minimized : original;
 			f << "## Minimized program\n\n```\n" << repro.joined() << "```\n\n";
-			f << "## Foundry test skeleton\n\n```cpp\n" << foundry_skeleton(repro, diff) << "```\n";
+			f << "## Foundry test skeleton\n\n```cpp\n" << foundry_skeleton(repro, diff, opt.vm_reference) << "```\n";
 		}
 	}
 
@@ -207,9 +213,10 @@ namespace {
 	verdict run_seed(const options& opt, uint64_t seed, bool verbose) {
 		program p = generate_program(seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band, opt.blocks, opt.local_alias_band, opt.regex_band);
 		double budget_seconds = opt.timeout_ms / 1000.0;
-		compare_result cr = compare_program(p, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering);
-		opt.lowered_locals += cr.vm.lowered_locals;
-		if (cr.vm.lowered_locals) ++opt.lowered_programs;
+		compare_result cr = compare_program(p, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering, opt.vm_reference);
+		const run_outcome& optimized_vm = opt.vm_reference ? cr.interp : cr.vm;
+		opt.lowered_locals += optimized_vm.lowered_locals;
+		if (optimized_vm.lowered_locals) ++opt.lowered_programs;
 
 		if (cr.kind == compare_result::budget_skip) {
 			if (verbose || cr.budget_suspect) {
@@ -231,11 +238,12 @@ namespace {
 			rc.lowering = opt.lowering == 0 ? -1 : opt.lowering == 2 ? 1 : 0;
 			std::string diff;
 			for (int side = 0; side < 2; ++side) {
-				rc.use_vm = side == 1;
+				rc.use_vm = opt.vm_reference || side == 1;
+				rc.vm_reference = opt.vm_reference && side == 1;
 				const run_outcome r = run_program(q, rc);
 				if (r.budget_hit) { return verdict::budget_skip; }
 				const std::string d = rename_difference(side ? cr.vm : cr.interp, r);
-				if (!d.empty()) { diff += std::string(side ? "  [vm]\n" : "  [interp]\n") + d; }
+				if (!d.empty()) { diff += std::string("  [") + (side ? right_label(opt.vm_reference) : left_label(opt.vm_reference)) + "]\n" + d; }
 			}
 			if (!diff.empty()) {
 				std::cout << "\n=== RENAME DIVERGENCE seed " << seed << " ===\n" << diff;
@@ -267,13 +275,13 @@ namespace {
 			auto still = [&](const program& cand) {
 				// Any divergence keeps the reduction: drifting into a KNOWN shape is
 				// handled by re-matching suppressions on the minimized form below.
-				return compare_program(cand, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering).kind == compare_result::diverge;
+				return compare_program(cand, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering, opt.vm_reference).kind == compare_result::diverge;
 			};
 			minimized = minimize(p, still, stats);
 			have_min = true;
 			std::cout << "--- minimized (" << stats.reductions << " reductions, " << stats.checks << " checks) ---\n";
 			std::cout << minimized.joined() << "\n";
-			compare_result mc = compare_program(minimized, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering);
+			compare_result mc = compare_program(minimized, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering, opt.vm_reference);
 			std::cout << "--- minimized diff ---\n" << mc.diff;
 			// Some shapes only become recognizable after minimization (e.g. an
 			// eval-order divergence buried under printed-output noise): re-match
@@ -328,8 +336,8 @@ namespace {
 	verdict run_order_seed(const options& opt, uint64_t seed, bool verbose, order_stats& st) {
 		const order::generated g = order::generate(seed, opt.order_args);
 		const double budget_seconds = opt.timeout_ms / 1000.0;
-		const compare_result a = compare_program(g.original, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering);
-		const compare_result b = compare_program(g.variant, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering);
+		const compare_result a = compare_program(g.original, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering, opt.vm_reference);
+		const compare_result b = compare_program(g.variant, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering, opt.vm_reference);
 		if (a.kind == compare_result::budget_skip || b.kind == compare_result::budget_skip) {
 			if (verbose) std::cout << "[seed " << seed << "] budget-skip\n";
 			return verdict::budget_skip;
@@ -468,6 +476,7 @@ namespace {
 		if (!opt.proofs) cmd += " --no-proofs";
 		if (!opt.param_alias) cmd += " --no-param-alias";
 		if (!opt.passes) cmd += " --no-passes";
+		if (opt.vm_reference) cmd += " --vm-reference";
 		if (opt.lowering == 1) cmd += " --no-lowering";
 		if (opt.lowering == 2) cmd += " --lowered-interp";
 		if (opt.band == band_mode::always) cmd += " --element-band";
@@ -531,12 +540,12 @@ int main(int argc, char** argv) {
 	if (!opt.run_file.empty()) {
 		program p;
 		if (!read_program_file(opt, p)) return 2;
-		compare_result cr = compare_program(p, opt.timeout_ms / 1000.0, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering);
+		compare_result cr = compare_program(p, opt.timeout_ms / 1000.0, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering, opt.vm_reference);
 		if (cr.kind == compare_result::diverge) {
 			std::cout << "DIVERGE\n" << cr.diff;
 			for (size_t i = 0; i < cr.interp.segment_results.size(); ++i)
-				std::cout << "segment " << i << " interp: " << cr.interp.segment_results[i] << "\n"
-				          << "segment " << i << " vm:     " << cr.vm.segment_results[i] << "\n";
+				std::cout << "segment " << i << " " << left_label(opt.vm_reference) << ": " << cr.interp.segment_results[i] << "\n"
+				          << "segment " << i << " " << right_label(opt.vm_reference) << ": " << cr.vm.segment_results[i] << "\n";
 			return 1;
 		}
 		std::cout << (cr.kind == compare_result::budget_skip ? "BUDGET-SKIP\n" : "AGREE\n");
@@ -642,14 +651,14 @@ int main(int argc, char** argv) {
 					hang_seeds.push_back(seed);
 					std::cout << "\n=== HANG seed " << seed << " (child killed by its watchdog) ===\n";
 					std::cout << "reproduce: jaiscript_fuzz --child --seed " << seed
-					          << " --max-depth " << opt.max_depth << "\n";
+					          << " --max-depth " << opt.max_depth << (opt.vm_reference ? " --vm-reference" : "") << "\n";
 					break;
 				default:
 					++crashes;
 					crash_seeds.push_back(seed);
 					std::cout << "\n=== CRASH seed " << seed << " (child exit code " << code << ") ===\n";
 					std::cout << "reproduce: jaiscript_fuzz --child --seed " << seed
-					          << " --max-depth " << opt.max_depth << "\n";
+					          << " --max-depth " << opt.max_depth << (opt.vm_reference ? " --vm-reference" : "") << "\n";
 					break;
 			}
 		} else {
@@ -667,7 +676,7 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	std::cout << "\n===== run summary =====\n";
+	std::cout << "\n===== run summary" << (opt.vm_reference ? " (vm against vm-ref)" : "") << " =====\n";
 	std::cout << "seeds:          " << begin << ".." << (end - 1) << " (" << (end - begin) << " programs)\n";
 	std::cout << "parse-valid:    " << parse_valid << " (" << (100.0 * parse_valid / (end - begin)) << "%)\n";
 	std::cout << "agree:          " << agree << "\n";
@@ -682,7 +691,7 @@ int main(int argc, char** argv) {
 		for (auto s : suppressed_seeds) std::cout << " " << s;
 	}
 	std::cout << "\nbudget-skips:   " << budget << "\n";
-	std::cout << "lowered locals: " << opt.lowered_locals << " in " << opt.lowered_programs << " programs (vm side)\n";
+	std::cout << "lowered locals: " << opt.lowered_locals << " in " << opt.lowered_programs << " programs (optimized vm side)\n";
 	std::cout << "crashes:        " << crashes;
 	if (!crash_seeds.empty()) {
 		std::cout << "  seeds:";

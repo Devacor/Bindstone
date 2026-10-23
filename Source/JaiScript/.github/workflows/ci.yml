@@ -77,8 +77,14 @@ jobs:
       - name: Tests (vm)
         run: bash tools/ci/gates.sh tests-vm
 
+      - name: Tests (vm reference)
+        run: bash tools/ci/gates.sh tests-vm-reference
+
       - name: Differential fuzz smoke
         run: bash tools/ci/gates.sh fuzz
+
+      - name: VM reference fuzz smoke
+        run: bash tools/ci/gates.sh fuzz-vm-reference
 
       - name: GLOOM hash gate
         run: bash tools/ci/gates.sh gloom

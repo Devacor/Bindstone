@@ -29,11 +29,14 @@ namespace jai::vm {
 
         // Typed scalar lowering follows the checker's proofs: off when type proofs are off,
         // so proofs-off runs are also typed-ops-off runs (the fuzz gate's second pass)
-        void typed_lowering(bool on) { typed_lowering_ = on; }
+        void typed_lowering(bool on) { typed_lowering_ = on && !reference_; }
         // the listing tool and the tests: each closed region records its canonical operations (chunk::cell_loop::ir_text)
         void ir_listing(bool on) { ir_listing_ = on; }
         // the middle end's switch (engine::ir_passes): off, no proof-based elision and no pass; the regions run their checked forms
-        void ir_passes(bool on) { ir_passes_ = on; }
+        void ir_passes(bool on) { ir_passes_ = on && !reference_; }
+        // engine::vm_reference_mode: every chunk compiles to the general forms (no superinstruction, typed or dynamic row, region,
+        // graft, counted loop, return fusion, tail-call hint or builtin dispatch index); set once, before the first compile
+        void reference(bool on) { reference_ = on; inlining_off_ = on; if (on) { typed_lowering_ = false; ir_passes_ = false; } }
         // the stdlib math aliases a bare call may lower to (engine::register_math_alias)
         void math_aliases(const engine* e) { engine_ = e; }
 
@@ -108,6 +111,7 @@ namespace jai::vm {
         bool typed_lowering_ = true;
         bool ir_listing_ = false;
         bool ir_passes_ = true;
+        bool reference_ = false;
         static constexpr size_t k_region_min_work = 16;   // a straight-line region's least number of operations it runs in place of dispatches (its entry and flush cost about ten)
         // raw typed frames (internal/typed_regions_design.md "Raw typed frames"): each parameter's scalar kind when every parameter of the callable
         // being compiled is a by-value int, float or bool in its own slot, without a default (frame_eligible_ false: the body gets no frame program)

@@ -147,9 +147,15 @@ time. Arithmetic is never undefined behavior either way.
 ```bash
 build/bin/jaiscript_tests                 # tree-walking interpreter
 build/bin/jaiscript_tests --backend=vm    # bytecode VM
+build/bin/jaiscript_tests --backend=vm-reference   # the VM in reference mode
 ```
 
-**Both must pass.** The two backends are held to identical results, output, and error text; a
+**All must pass.** The reference mode (`engine::vm_reference_mode(true)`, the runner's `--backend=vm-reference`) runs
+the VM on its plain general path: no superinstruction, typed or dynamic row, closed region, graft, counted loop, return
+fusion, tail call, builtin dispatch index, inline cache or const fold, and the shared switches (`type_proofs`,
+`ir_passes`, `parameter_alias`, `local_alias`, `aggregate_lowering`) off. It is the VM's differential partner:
+`jaiscript_fuzz --vm-reference` runs every program on the optimized VM and on the reference VM, and a divergence is a
+bug of an optimized lane. Every choice is made at compile or backend construction, so it costs the optimized VM nothing. The two backends are held to identical results, output, and error text; a
 change that only satisfies one of them is not done. See
 [../CONTRIBUTING.md](../CONTRIBUTING.md).
 

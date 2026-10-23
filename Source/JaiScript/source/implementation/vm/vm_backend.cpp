@@ -200,26 +200,6 @@ namespace {
 		return detail::convert_container_element(eng, element, element_type);
 	}
 
-	script_value vm_clone_for_capture(const script_value& value, string_symbolizer* symbolizer) {
-		auto type_info = value.get_type_info();
-		if (type_info && type_info->base_type == script_value_type::jai_shared_ptr_type) {
-			return value;
-		}
-		if (value.is_object()) {
-			auto holder = const_cast<script_value&>(value).get_object_holder();
-			if (holder) {
-				if (!holder->is_class_instance_wrapper) {
-					return value;
-				}
-				auto instance = std::static_pointer_cast<class_instance>(holder->data);
-				if (instance && symbolizer && instance->native()) {
-					return value;
-				}
-			}
-		}
-		return value.clone();
-	}
-
 	// Decl-ref (auto&/T& x = y) aliasing of a value that is already a reference: SHARE
 	// the holder, constraint included. Element/field/map-entry refs
 	// keep their bind-time type constraint through a ref decl — auto& over an
@@ -12669,7 +12649,6 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 				value = clone_for_assignment(value);
 			}
 		}
-
 		if (value.is_array() || value.is_map()) {
 			bool requires_homogeneity = false;
 			if (!decl->type) {
@@ -12713,6 +12692,8 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 						mixed_part == 1 ? "Map 'auto' requires homogeneous keys" : "Map 'auto' requires homogeneous values");
 				}
 			}
+		} else if (value.raw_storage_index() == script_value::TYPEID_OBJECT) {
+			detail::object_declaration_takes_value(value, decl->type.get(), decl->auto_spelled);   // KEEP BYTE-PARALLEL with the interpreter's decl
 		}
 	}
 
@@ -14664,7 +14645,7 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 		++profile_env_births_[4];
 #endif
 						}
-						captureEnv->define(sym, vm_clone_for_capture(slot_val->deref(), symbolizer_));
+						captureEnv->define(sym, detail::clone_for_capture(slot_val->deref()));
 					}
 				}
 			}
@@ -14835,7 +14816,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 					if (capture_by_ref_default) {
 						captureEnv->define(var_id, share_env_ref(*src.cell));
 					} else {
-						captureEnv->define(var_id, vm_clone_for_capture(src.cell->deref(), symbolizer_));
+						captureEnv->define(var_id, detail::clone_for_capture(src.cell->deref()));
 					}
 				} else if (src.what == detail::capture_source::kind::cpp_property) {
 					auto read = capture_by_ref_default
@@ -14846,7 +14827,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 						return raise_from(read);
 					}
 					captureEnv->define(var_id, capture_by_ref_default ? std::move(read.value())
-					                                                  : vm_clone_for_capture(read.value(), symbolizer_));
+					                                                  : detail::clone_for_capture(read.value()));
 				}
 			}
 		}
@@ -14911,7 +14892,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 				// place; the closure and the original share the cell
 				captureEnv->define(capture.symbol_id, share_env_ref(*src.cell));
 			} else {
-				captureEnv->define(capture.symbol_id, vm_clone_for_capture(src.cell->deref(), symbolizer_));
+				captureEnv->define(capture.symbol_id, detail::clone_for_capture(src.cell->deref()));
 			}
 		}
 
@@ -14929,7 +14910,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 						captureEnv->define(sym, share_env_ref(*slot_val));
 					} else {
 						// Automatic / [=] capture of a local: by value
-						captureEnv->define(sym, vm_clone_for_capture(slot_val->deref(), symbolizer_));
+						captureEnv->define(sym, detail::clone_for_capture(slot_val->deref()));
 					}
 				}
 			}

@@ -56,7 +56,8 @@ bool TrackedObject::verbose = false;
 // - Assignment into variables, array elements, map entries, push() and a container literal's
 //   lvalue elements deep-clones (1 C++ copy via the class copy_function), except shared_ptr-typed
 //   values which share; a literal's temporary elements move.
-// - Lambda captures share C++-backed objects (clone_for_capture) regardless of capture mode.
+// - A by-value lambda capture copies as a declaration from the variable does (1 C++ copy); [&] and a
+//   program-scope [=] (globals are read when the lambda runs) copy nothing.
 // - Calls into C++ never deep-clone args script-side; a by-value C++ param costs exactly the
 //   one copy function_binder makes, a T& param costs zero.
 class value_semantics_tests : public suite {
@@ -207,8 +208,8 @@ public:
                 f()
             )");
 
-            // C++-backed objects are reference types for capture: shared, not cloned
-            check_eq(0, TrackedObject::copy_count);
+            // [obj] copies the global at creation through the copy constructor
+            check_eq(1, TrackedObject::copy_count);
             check_eq(42, result.as<int>());
         });
 
@@ -236,7 +237,7 @@ public:
                 f()
             )");
 
-            // Same sharing rule as explicit capture: C++-backed objects are not cloned
+            // [=] takes no global: the lambda reads obj when it runs
             check_eq(0, TrackedObject::copy_count);
             check_eq(42, result.as<int>());
         });

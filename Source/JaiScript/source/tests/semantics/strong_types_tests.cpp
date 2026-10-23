@@ -3686,7 +3686,7 @@ public:
                 C v = new C(2); C w; w = new C(3); C e = shared_ptr<C>();
                 var h = new C(4); C shared = h; shared.a = 9;
                 to_string(v.a) + "," + to_string(w.a) + "," + to_string(e.a) + "," + to_string(h.a)
-            )JAI", "2,3,0,9", "a shared_ptr<C> handle binds to a C slot and stays a handle (parameter parity)");
+            )JAI", "2,3,0,4", "a C declaration from a shared_ptr<C> handle copies the pointee, as C x = *h does");
             auto [i_out, v_out] = both(R"JAI(
                 class C { int a = 0; C() {} C(int v) { a = v; } }
                 string pt(C c) { return type_of(c) + ":" + to_string(c == null); }

@@ -468,6 +468,10 @@ public:
 
     void set_type_info(type_info_ptr type_info) { type_info_ = type_info; }
 
+    // shared_ptr<this class>: the tag a host std::shared_ptr of this class carries into script (engine::marked_shared_handle)
+    type_info* handle_type() const { return handle_type_; }
+    void set_handle_type(type_info* a_handle_type) { handle_type_ = a_handle_type; }
+
     // is_auto_accessor: the registration is a SYNTHESIZED field accessor (_get_/_set_
     // minted by class build — verbatim get_field / enforce+set_field), which the
     // member site ICs may bypass. The only callers are the two backends' class-build
@@ -1341,6 +1345,7 @@ private:
     mutable std::vector<uint32_t> string_slots_cached_;
     mutable uint64_t string_slots_epoch_ = 0;
     mutable uint64_t handle_slots_epoch_ = 0;
+    type_info* handle_type_ = nullptr;
     bool flat_field_type(const type_info_ptr& t, std::vector<const class_definition*>& in_progress, bool host_values = false) const;
     bool value_tree_runs_destructor_impl(std::vector<const class_definition*>& in_progress) const;
 

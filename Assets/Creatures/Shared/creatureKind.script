@@ -74,12 +74,12 @@ nocopy class CreatureKind : ServerCreature {
 				auto spine = targeting.self().spine();
 				spine.timeScale(targeting.self().attackSpeedMultiplier());
 				spine.animate("attack", false);
-				spine.onEvent.connect("launch", [target, targeting](var& animSpine, int index, var& eventData) -> void {
+				spine.onEvent.connect("launch", [target, &targeting](var& animSpine, int index, var& eventData) -> void {
 					if (eventData.name == "launch") {
 						targeting.self().attackTarget(targeting, target);
 					}
 				});
-				spine.onEnd.connect("unlock", [targeting](var& animSpine, int index) -> void {
+				spine.onEnd.connect("unlock", [&targeting](var& animSpine, int index) -> void {
 					if (animSpine.track(index).name() == "attack") {
 						targeting.self().attacking = false;
 						animSpine.timeScale(1.0);

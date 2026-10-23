@@ -693,6 +693,11 @@ namespace jai {
         template<typename T>
         script_value make_object(std::shared_ptr<T> data);
 
+        // A host std::shared_ptr<T> entering script is a handle, as new T(...) makes one: copies share the object
+        template<typename T>
+        script_value make_handle(std::shared_ptr<T> data) { return marked_shared_handle(make_object(std::move(data))); }
+        script_value marked_shared_handle(script_value object);
+
         // Convenient script_value creation methods
         // Usage: engine->make_value(42) instead of script_value(42, engine)
         script_value make_value(const script_value& value) { return value; }
@@ -734,7 +739,7 @@ namespace jai {
             if (!value) {
                 return script_value(std::monostate{}, this);
             }
-            return make_object(value);
+            return make_handle(value);
         }
 
         template<typename T>
@@ -742,7 +747,7 @@ namespace jai {
             if (!value) {
                 return script_value(std::monostate{}, this);
             }
-            return make_object(std::move(value));
+            return make_handle(std::move(value));
         }
 
         template<typename T>

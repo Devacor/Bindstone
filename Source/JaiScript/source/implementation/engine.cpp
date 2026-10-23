@@ -3735,6 +3735,16 @@ void engine::add_class_impl(const std::string& name, std::shared_ptr<class_defin
     ++impl->check_surface_epoch_;
     impl->classes[name] = classDef;
     impl->classesByTypeId[classDef->get_type_id()] = classDef;  // Fast lookup by interned type_id
+    if (!classDef->handle_type()) {
+        // a host shared_ptr of the class arrives as this handle, and a var holding it takes the rebindable twin: both exist
+        // before any parallel region can meet one
+        type_info* object_type = get_type_info_object(name);
+        type_info* handle_type = get_type_info_shared_ptr(object_type);
+        type_info* var_handle_type = get_type_info_shared_ptr_dynamic(object_type);
+        get_type_info_reference(handle_type);
+        get_type_info_reference(var_handle_type);
+        classDef->set_handle_type(handle_type);
+    }
     // Also register with the unified class_registry for both C++ and script classes
     auto reg_result = impl->class_registry_.register_cpp_class(classDef);
     if (!reg_result) {
@@ -4203,6 +4213,24 @@ type_info* engine::get_type_info_weak_ptr(type_info* pointee_type) {
     type_info* ptr = &result.first->second;
     impl->type_id_index_[ptr->id] = ptr;
     return ptr;
+}
+
+script_value engine::marked_shared_handle(script_value object) {
+    if (object.raw_storage_index() != script_value::TYPEID_OBJECT) {
+        return object;
+    }
+    const auto* holder = object.unchecked_object_handle().get();
+    class_definition* def = nullptr;
+    if (holder->is_class_instance_wrapper && holder->data) {
+        def = static_cast<const class_instance*>(holder->data.get())->get_class_definition();
+    }
+    type_info* handle_type = def ? def->handle_type() : nullptr;
+    if (!handle_type) {
+        handle_type = get_type_info_shared_ptr(get_type_info_object(holder->type_id));
+        if (def) { def->set_handle_type(handle_type); }
+    }
+    object.set_type_info(type_info_ptr{handle_type});
+    return object;
 }
 
 type_info* engine::get_type_info_shared_ptr(type_info* pointee_type) {

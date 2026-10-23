@@ -11,6 +11,7 @@
 #include <jaiscript/detail/slot_site.hpp>
 #include <jaiscript/detail/arity_diagnostic.hpp>
 #include <jaiscript/detail/host_member.hpp>
+#include <jaiscript/detail/uniquely_held.hpp>
 
 namespace jai {
 
@@ -2698,25 +2699,39 @@ inline std::optional<checked_result<void>> user_assign_operator(const script_val
     return checked_result<void>();
 }
 
-// A value capture: C++-backed objects (make_object wrappers, raw cpp holders, a class instance wrapping a C++ object) and
-// shared_ptr handles are reference types in script, so the capture shares them; a pure script value deep-copies
-inline script_value clone_for_capture(const script_value& value, string_symbolizer* symbolizer) {
-    auto type_info = value.get_type_info();
-    if (type_info && type_info->base_type == script_value_type::jai_shared_ptr_type) {
-        return value;
+// A by-value capture copies as a declaration from the captured variable does (C++): a value, a C++ object included, copies
+// through its copy constructor; a shared_ptr handle copies the handle and shares the object
+inline script_value clone_for_capture(const script_value& value) {
+    return clone_for_assignment(value);
+}
+
+// An auto or T declaration of an object, after its initializer's copy rule, as C++ declares: a host object a T& result
+// lends copies, and a value slot (T x = handle) copies the object the handle names unless the handle is a script temporary
+// nothing else holds. A var keeps either as it is. KEEP BYTE-PARALLEL: both backends' declarations call it
+JAI_NOINLINE inline void object_declaration_copies(script_value& value, const type_info* declared, bool auto_spelled) {
+    if (declared && declared->base_type == script_value_type::jai_any_type && !auto_spelled) { return; }
+    if (borrows_host_object(value)) {
+        value = value.clone();
+        return;
     }
-    if (value.is_object()) {
-        if (auto holder = const_cast<script_value&>(value).get_object_holder()) {
-            if (!holder->is_class_instance_wrapper) {
-                return value;
-            }
-            auto instance = std::static_pointer_cast<class_instance>(holder->data);
-            if (instance && symbolizer && instance->native()) {
-                return value;
-            }
-        }
+    if (!declared || declared->base_type != script_value_type::jai_object_type) { return; }
+    const type_info* tag = value.type_info_raw();
+    if (!tag || tag->base_type != script_value_type::jai_shared_ptr_type) { return; }
+    const auto& holder = value.unchecked_object_handle();
+    const bool sole_script_object = uniquely_held(value) && !static_cast<const class_instance*>(holder->data.get())->has_cpp_object();
+    if (!sole_script_object) {
+        value = value.clone();
     }
-    return value.clone();
+}
+
+// An ordinary object declaration (no lent host object, no handle entering a class slot) returns without a call
+inline void object_declaration_takes_value(script_value& value, const type_info* declared, bool auto_spelled) {
+    if (!value.unchecked_object_handle()->bound_ptr) {
+        if (!declared || declared->base_type != script_value_type::jai_object_type) { return; }
+        const type_info* tag = value.type_info_raw();
+        if (!tag || tag->base_type != script_value_type::jai_shared_ptr_type) { return; }
+    }
+    object_declaration_copies(value, declared, auto_spelled);
 }
 
 // A store into a declared field or static: an auto slot takes the type its initialized value carries, then enforces it

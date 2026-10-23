@@ -314,6 +314,19 @@ tally();</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">live 2 pinned 1 scaled 10
 report sees hits = 0 (copied before the hits)
 hits = 2, misses = 1</code></pre></div>
+<p><strong>What a copy capture copies</strong> is what <code>auto x = name;</code> would copy, as in C++. A class instance is a value, so <code>[c]</code> and <code>[=]</code> hold their own instance, made when the lambda is made: later writes to <code>c</code> do not reach the lambda, and the lambda&#x27;s writes do not reach <code>c</code>. A bound C++ object held by value copies the same way, through its class&#x27;s copy constructor (a class without one cannot be captured by copy: <code>[&amp;c]</code> shares it). A handle copies the handle, so the lambda and the variable share one object: <code>new T()</code>, a <code>shared_ptr&lt;T&gt;</code> variable, and a host function that returns a <code>std::shared_ptr&lt;T&gt;</code>. The rule is the same through every nested lambda.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter { int n = 0; }
+
+string snapshot() {
+    Counter value = Counter();
+    auto handle = new Counter();
+    auto read = [value, handle]() { return to_string(value.n) + " " + to_string(handle.n); };
+    value.n = 5;                 // the lambda holds its own Counter
+    handle.n = 5;                // the lambda shares this one
+    return read();
+}
+print(snapshot());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">0 5</code></pre></div>
 <p>A reference capture can close a cycle: <code>var again; again = [&amp;]() { again(); };</code> stores in <code>again</code> a lambda that holds <code>again</code>. Such a cycle never outlives its frame on its own: when the frame exits, every shared local that only its own closures still hold is released, with whatever those locals own (a destructor runs at that point, as it would without the lambda). A closure that escaped the frame (returned, stored in a global or a field) keeps its shared locals for as long as anything holds it; once nothing does, the engine reclaims the cycle in a later sweep, at the latest when the engine is destroyed.</p>
 <p><strong>The JavaScript closure.</strong> An anonymous <code>function(...)</code> expression has no capture list: it closes over its scope by reference, as <code>[&amp;]</code> does, so it sees writes made after it was created, nests and curries, and keeps the shared locals alive after the creating frame returns:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function make_account(int opening) {

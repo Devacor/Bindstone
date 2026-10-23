@@ -47,10 +47,12 @@ creation**:
 `[this]` captures the instance itself (C++ captures the `this` pointer): the lambda reads and
 writes the object it was made in, never a copy.
 
-By-value capture uses `clone_for_capture`: pure script values (ints, strings, arrays,
-script objects) are deep-copied; `shared_ptr` values and C++-bound objects are **shared,
-not copied** — "by value" capture of an engine object pins *that exact object*, which is
-what UI callbacks want.
+By-value capture uses `clone_for_capture`, which copies exactly as `auto x = name;` does
+(`clone_for_assignment`, C++ semantics): a value deep-copies, a bound C++ object held by value
+included (through its copy constructor; a class without one refuses the capture), and a handle
+(`new T`, a `shared_ptr<T>` variable, a host function's `std::shared_ptr<T>` result) copies the
+handle and shares the object. A callback that must reach a host object it was handed by
+reference (`T&`) captures it by reference (`[&self]`).
 
 ## Tier 2 — globals and module-scope declarations
 

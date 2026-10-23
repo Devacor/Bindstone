@@ -1528,7 +1528,7 @@ public:
     }
 
     // Copy semantics follow the C++ base (S4): assignment deep-copies a copyable base into a
-    // second identity; a non-copyable base refuses at the copy site; capture shares.
+    // second identity; a non-copyable base refuses at the copy site; a by-value capture copies as assignment does.
     template<typename Base>
     void copy_semantics(const char* var) {
         auto eng = hybrid_engine();
@@ -1541,7 +1541,7 @@ public:
         check(original.get() != copied.get(), "two C++ identities after a copy");
         check(eng->script_layer(*copied) != nullptr, "the copy carries its own layer");
         eng->execute("auto pin = [" + v + "]() -> void { " + v + ".chomp = 55; }; pin();");
-        check_eq((script_int)55, eng->execute(v + ".chomp").as_int(), "by-value capture shares the hybrid");
+        check_eq((script_int)7, eng->execute(v + ".chomp").as_int(), "a by-value capture holds its own copy of the hybrid");
     }
 
     void forge_tests() override {

@@ -1314,7 +1314,7 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 				own_slot = identifier_slot_operand(static_cast<identifier_expr*>(rs->value.get()));
 			}
 		}
-		if (!clean_exit) {
+		if (!fuse_return) {   // the reference mode takes the site conversion everywhere: it alone carries the returned local's own slot
 			// The typed-return conversion runs at the site, inside this frame's try
 			// records (a catch around the return sees it); the op_return after the
 			// exits lands the converted value without converting or materializing again
@@ -1322,7 +1322,7 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 			operand_class = detail::return_operand_unclassified;
 		}
 		emit_region_exits(SIZE_MAX);
-		emit(opcode::op_return, 1, clean_exit ? rs->static_return_proof : return_mode_converted, operand_class);
+		emit(opcode::op_return, 1, fuse_return ? rs->static_return_proof : return_mode_converted, operand_class);
 		return;
 	}
 	case node_type::break_stmt:

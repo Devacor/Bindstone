@@ -3353,6 +3353,7 @@ public:
         });
 
         test("proof_stats_fire_and_kill_switch", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             // the runner's backend: the proof pass stamps every kind on an armed unit (the
             // counters prove the lanes are reachable), a type_proofs(false) twin stamps nothing,
             // and both read identically at every step - including a switch flipped mid-run
@@ -3477,6 +3478,7 @@ public:
         });
 
         test("accessor_proofs_on_off_identical", [this, check_proof_run, thrice_then]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             const std::string unit =
                 "class Q { int b = 1; int plain = 2; int _get_b() { return b + 100; } void _set_b(int v) { b = v * 10; } int raw() { return b; } }\n"
                 "class P { int b = 1; } class C : P { int _get_b() { return b + 100; } void _set_b(int v) { b = v * 10; } int raw() { return b; } }\n"

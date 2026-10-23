@@ -1083,6 +1083,7 @@ public:
         // engine plumbing (switch, re-stamp on surface moves, jaibite paths).
 
         test("proofs_default_on_and_switch_roundtrip", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto e = make_engine();
             check_true(e->type_proofs());
             e->type_proofs(false);
@@ -1092,6 +1093,7 @@ public:
         });
 
         test("proofs_stamp_in_off_mode_with_counters", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             // check mode off: no diagnostics anywhere, yet the proof pass stamps
             auto e = make_engine();
             e->static_checking(check_mode::off);
@@ -1120,6 +1122,7 @@ public:
         });
 
         test("proofs_not_stamped_from_uncertain_types", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto e = make_engine();
             // var/auto-no-init/shared_ptr/weak_ptr/array/map/reference decls, engine globals,
             // defaulted and by-ref params, includes-free but dynamic: nothing is certain here
@@ -1141,6 +1144,7 @@ public:
         });
 
         test("proofs_off_strips_cached_entry_and_on_restamps", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto e = make_engine();
             const std::string src = "int a = 1; a = 2; a";
             check_eq((int64_t)2, e->execute(src).as_int());
@@ -1157,6 +1161,7 @@ public:
         });
 
         test("proof_field_stamps_on_second_execute_and_hold_across_identical_reload", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto e = make_engine();
             const std::string src =
                 "class Pt { int x = 1; float y = 2.0;\n"
@@ -1263,6 +1268,7 @@ public:
         });
 
         test("proof_jaibite_paths_restamp_without_touching_diagnostics", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto e = make_engine();
             e->static_checking(check_mode::off);
             auto bite = e->jaibite("int a = 5; int b = a; b");
@@ -1308,6 +1314,7 @@ public:
         });
 
         test("proof_battery_results_equal_with_proofs_on_and_off", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             // Same backend, two engines: proofs on vs off must agree on every value and
             // every error text (consumers are guard-gated; this pins the contract).
             auto on = make_engine();
@@ -1616,6 +1623,7 @@ public:
         });
 
         test("cast_value_is_a_proof_source_reference_is_not", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             const std::string prelude =
                 "class S { int x = 1; } class T : S { int t = 2; } class H { S p = null; }\n"
                 "auto h = H(); h.p = T();\n";
@@ -2213,6 +2221,7 @@ public:
         });
 
         test("program_closure_stamps_proofs_in_units", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto dir = closure_dir("proofs");
             write_unit(dir, "typed_unit.jai",
                 "int a = 1; a = 2;\nint twice(int v) { return v * 2; }\nint r = twice(a);\n");
@@ -2339,6 +2348,7 @@ public:
         });
 
         test("program_closure_cross_unit_parent_proofs_wait_for_registration", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto dir = closure_dir("xunit_proofs");
             write_unit(dir, "pf_a.jai", "class A { int hp = 3; }\n");
             write_unit(dir, "pf_b.jai", "class B : A { int tick() { int x = hp; return hp; } }\n");   // no includes: proof gates open
@@ -2387,6 +2397,7 @@ public:
         });
 
         test("extern_typed_checks_members_and_proves_stores", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto e = make_engine();
             auto r = e->check("class Game { int v = 1; }\nextern Game G;\nfunction bad() -> int { return G.missing; }");
             check_eq((size_t)1, error_count(r));
@@ -2743,6 +2754,7 @@ public:
 
         // Accessor-bearing members ("Members"): exactly one declared user getter types the read.
         test("accessor_member_reads_typed_by_single_getter", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto e = make_engine();
             const std::string cls =
                 "class V { int hp_ = 5; string name_ = \"n\"; int _get_hp() { return hp_; } string _get_name() { return name_; } }\n"

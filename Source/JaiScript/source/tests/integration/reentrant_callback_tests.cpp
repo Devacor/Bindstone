@@ -135,8 +135,8 @@ public:
 					var d = make_host();
 					d.set_death([]() -> void { stack_deep(150); });
 					var keep = [4, 5, 6];
-					d = "gone";
-					return d + ":" + to_string(keep[2]);
+					d = null;
+					return "gone:" + to_string(keep[2]);
 				}
 				over_script() + "|" + over_host();
 			)");

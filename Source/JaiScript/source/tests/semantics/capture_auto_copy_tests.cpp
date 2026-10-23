@@ -5,6 +5,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -24,6 +25,11 @@ struct CopyCountedVec {
 struct VecHolder {
 	CopyCountedVec inner;
 	CopyCountedVec& child() { return inner; }
+};
+
+struct VecCallbacks {
+	std::function<void(CopyCountedVec&)> byReference;
+	std::function<void(std::shared_ptr<CopyCountedVec>)> byHandle;
 };
 
 }
@@ -52,6 +58,11 @@ public:
 			.constructor<>()
 			.property("inner", &VecHolder::inner)
 			.method("child", &VecHolder::child)
+			.build();
+		dynamic_binder<capture_auto_copy::VecCallbacks>(*result, "VecCallbacks")
+			.constructor<>()
+			.property("byReference", &capture_auto_copy::VecCallbacks::byReference)
+			.property("byHandle", &capture_auto_copy::VecCallbacks::byHandle)
 			.build();
 		result->add_function("make_vec", [](int64_t a_x) { return CopyCountedVec{a_x}; });
 		result->add_function("make_shared_vec", [](int64_t a_x) { return std::make_shared<CopyCountedVec>(a_x); });
@@ -587,6 +598,163 @@ public:
 				}
 				run_member()
 			)"), "a capture of a local copied from a C++ field holds its own copy");
+		});
+
+		test("var_from_a_reference_return_copies", [this]() {
+			auto eng = make_bound_engine();
+			check_eq((int64_t)1, run_int(*eng, R"(
+				int run() {
+					VecHolder holder = VecHolder();
+					var a = holder.child();
+					a.x = 9;
+					return holder.child().x;
+				}
+				run()
+			)"), "var from a call returning Vec& copies, as auto does");
+			check_eq(1, capture_auto_copy::CopyCountedVec::copies, "the var ran the copy constructor once");
+			check_eq((int64_t)1, run_int(*eng, R"(
+				int run_member() {
+					VecHolder holder = VecHolder();
+					var a = holder.inner;
+					a.x = 9;
+					return holder.inner.x;
+				}
+				run_member()
+			)"), "var from a C++ member copies it");
+			check_eq((int64_t)9, run_int(*eng, R"(
+				int run_ref() {
+					VecHolder holder = VecHolder();
+					var& a = holder.child();
+					a.x = 9;
+					return holder.child().x;
+				}
+				run_ref()
+			)"), "var& from a call returning Vec& names the member");
+			check_eq((int64_t)9, run_int(*eng, R"(
+				int run_handle() {
+					var h = make_shared_vec(1);
+					var y = h;
+					y.x = 9;
+					return h.x;
+				}
+				run_handle()
+			)"), "var from a host shared_ptr still shares");
+		});
+
+		test("by_value_parameters_copy_a_value_object", [this]() {
+			auto eng = make_bound_engine();
+			eng->execute(R"(
+				class P { int x = 1; }
+				void mutate(var p) { p.x = 9; }
+				void mutate_vec(Vec p) { p.x = 9; }
+				void mutate_script(P p) { p.x = 9; }
+				void mutate_ref(var& p) { p.x = 9; }
+			)");
+			const char* copies[] = {
+				"Vec v = Vec(1); mutate(v); return v.x;",
+				"Vec v = Vec(1); mutate_vec(v); return v.x;",
+				"P v = P(); mutate(v); return v.x;",
+				"P v = P(); mutate_script(v); return v.x;",
+				"VecHolder holder = VecHolder(); mutate(holder.child()); return holder.child().x;",
+				"VecHolder holder = VecHolder(); mutate_vec(holder.child()); return holder.child().x;",
+				"VecHolder holder = VecHolder(); mutate(holder.inner); return holder.inner.x;",
+			};
+			int index = 0;
+			for (const char* body : copies) {
+				const std::string name = "param_copy_" + std::to_string(index++);
+				check_eq((int64_t)1, run_int(*eng, "int " + name + "() { " + body + " } " + name + "()"),
+					std::string("a by-value parameter holds a copy: ") + body);
+			}
+			const char* shares[] = {
+				"Vec v = Vec(1); mutate_ref(v); return v.x;",
+				"VecHolder holder = VecHolder(); var& held = holder.child(); mutate_ref(held); return holder.child().x;",
+				"shared_ptr<Vec> m = Vec(1); mutate(m); return m.x;",
+				"auto m = make_shared_vec(1); mutate(m); return m.x;",
+				"auto m = new Vec(1); mutate(m); return m.x;",
+				"auto m = new P(); mutate(m); return m.x;",
+			};
+			index = 0;
+			for (const char* body : shares) {
+				const std::string name = "param_share_" + std::to_string(index++);
+				check_eq((int64_t)9, run_int(*eng, "int " + name + "() { " + body + " } " + name + "()"),
+					std::string("a reference parameter or a handle argument shares: ") + body);
+			}
+		});
+
+		test("by_value_returns_copy_a_value_object", [this]() {
+			auto eng = make_bound_engine();
+			check_eq((int64_t)1, run_int(*eng, R"(
+				var pick(VecHolder& h) { return h.child(); }
+				Vec pick_vec(VecHolder& h) { return h.child(); }
+				var pick_member(VecHolder& h) { return h.inner; }
+				int run() {
+					VecHolder holder = VecHolder();
+					var a = pick(holder);
+					a.x = 9;
+					Vec b = pick_vec(holder);
+					b.x = 9;
+					pick(holder).x = 9;
+					pick_member(holder).x = 9;
+					return holder.child().x;
+				}
+				run()
+			)"), "a by-value return of a host Vec& hands out a copy");
+			check_eq((int64_t)9, run_int(*eng, R"(
+				shared_ptr<Vec> pass(shared_ptr<Vec> p) { return p; }
+				var pass_var(var p) { return p; }
+				int run_handle() {
+					auto h = make_shared_vec(1);
+					pass(h).x = 4;
+					pass_var(h).x = 9;
+					return h.x;
+				}
+				run_handle()
+			)"), "a returned handle shares its object");
+		});
+
+		test("make_object_of_a_shared_ptr_is_a_handle", [this]() {
+			using capture_auto_copy::CopyCountedVec;
+			auto eng = make_bound_engine();
+			auto host = std::make_shared<CopyCountedVec>(1);
+			eng->add_global("made", eng->make_object(host));
+			eng->add_global("added", host);
+			check_eq((int64_t)9, run_int(*eng, R"(
+				var a = made;
+				a.x = 4;
+				auto b = added;
+				b.x = b.x + 5;
+				made.x
+			)"), "make_object(shared_ptr) and add_global(shared_ptr) both share the host object");
+			check_eq((int64_t)9, host->x, "the host sees the writes");
+			check_eq(0, CopyCountedVec::copies, "a handle copies no object");
+			eng->add_global("boxed", eng->make_object<CopyCountedVec>(1));
+			check_eq((int64_t)1, run_int(*eng, R"(
+				var c = boxed;
+				c.x = 9;
+				boxed.x
+			)"), "make_object<T>(args) is a value");
+		});
+
+		test("host_callbacks_copy_a_reference_argument_into_a_by_value_parameter", [this]() {
+			using capture_auto_copy::CopyCountedVec;
+			using capture_auto_copy::VecCallbacks;
+			auto eng = make_bound_engine();
+			auto callbacks = std::make_shared<VecCallbacks>();
+			eng->add_global("callbacks", callbacks);
+			CopyCountedVec target{1};
+			eng->execute("callbacks.byReference = [](var p) -> void { p.x = 9; };");
+			callbacks->byReference(target);
+			check_eq((int64_t)1, target.x, "a var parameter holds a copy of the host's Vec&");
+			eng->execute("callbacks.byReference = [](Vec p) -> void { p.x = 9; };");
+			callbacks->byReference(target);
+			check_eq((int64_t)1, target.x, "a Vec parameter holds a copy of the host's Vec&");
+			eng->execute("callbacks.byReference = [](var& p) -> void { p.x = 9; };");
+			callbacks->byReference(target);
+			check_eq((int64_t)9, target.x, "a var& parameter names the host's object");
+			auto handle = std::make_shared<CopyCountedVec>(1);
+			eng->execute("callbacks.byHandle = [](var p) -> void { p.x = 9; };");
+			callbacks->byHandle(handle);
+			check_eq((int64_t)9, handle->x, "a host shared_ptr argument shares");
 		});
 
 		test("script_class_deriving_a_bound_class_captures_by_copy", [this]() {

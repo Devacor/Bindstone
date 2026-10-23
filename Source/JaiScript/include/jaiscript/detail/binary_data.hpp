@@ -718,7 +718,7 @@ namespace jai::binary {
 			auto ctor = global->get(std::string("binary::") + cls);
 			if (ctor) { ns->variables[eng.symbolize(cls)] = ctor.value(); }
 		}
-		auto width_value = [e](kind k, uint64_t length) { return e->make_object(std::make_shared<width>(width{k, length})); };
+		auto width_value = [e](kind k, uint64_t length) { return e->make_value_object(std::make_shared<width>(width{k, length})); };
 		const std::pair<const char*, kind> widths[] = {
 			{"int8", kind::int8}, {"int16", kind::int16}, {"int32", kind::int32}, {"int64", kind::int64}, {"uint8", kind::uint8},
 			{"uint16", kind::uint16}, {"uint32", kind::uint32}, {"float32", kind::float32}, {"float64", kind::float64}};
@@ -737,7 +737,7 @@ namespace jai::binary {
 		}, &eng);
 		add_lanes(eng);
 		ns->variables[eng.symbolize("layout")] = script_value::make_function([e, width_id](const std::vector<script_value>& args) -> checked_result<script_value> {
-			return e->make_object(std::make_shared<layout>(make_layout(args.data(), args.size(), "binary::layout", e, width_id)));
+			return e->make_value_object(std::make_shared<layout>(make_layout(args.data(), args.size(), "binary::layout", e, width_id)));
 		}, &eng);
 
 		auto& strings = eng.script_namespaces()[eng.symbolize("string")];
@@ -780,7 +780,7 @@ namespace jai::binary {
 		}, &eng);
 	}
 
-	inline script_value make_reader(engine& eng, const script_value& source) { return eng.make_object(std::make_shared<reader>(source)); }
+	inline script_value make_reader(engine& eng, const script_value& source) { return eng.make_value_object(std::make_shared<reader>(source)); }
 
 	// The direct lanes (class_definition::native_method) for the members hot loops call: exact int / float / string
 	// arguments only, anything else declines to the bound method

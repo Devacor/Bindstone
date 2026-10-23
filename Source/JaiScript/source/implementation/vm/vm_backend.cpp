@@ -12693,7 +12693,7 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 				}
 			}
 		} else if (value.raw_storage_index() == script_value::TYPEID_OBJECT) {
-			detail::object_declaration_takes_value(value, decl->type.get(), decl->auto_spelled);   // KEEP BYTE-PARALLEL with the interpreter's decl
+			detail::object_declaration_takes_value(value, decl->type.get());   // KEEP BYTE-PARALLEL with the interpreter's decl
 		}
 	}
 

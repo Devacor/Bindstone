@@ -125,11 +125,11 @@ namespace jai::detail {
         return ((1u << v.raw_storage_index()) & return_plain_mask) != 0;
     }
 
-    // In place: a reference copies its target; a heavy lvalue read deep-copies (bound values
-    // decode); a heavy temporary and every plain value stay as they are.
+    // In place: a reference copies its target; a heavy lvalue read and a host object a T& result lends deep-copy (bound
+    // values decode); a heavy temporary and every plain value stay as they are.
     inline void materialize_return_value(script_value& v, bool lvalue_read) {
         if (return_value_plain(v)) return;
-        if (lvalue_read || v.is_reference()) { v = clone_for_assignment(v); }
+        if (lvalue_read || v.is_reference() || borrows_host_object(v)) { v = clone_for_assignment(v); }
     }
 
     // A yield hands out what a return of the same operand would (materialize_return_value), except that no slot moves

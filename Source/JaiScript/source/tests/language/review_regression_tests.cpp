@@ -2712,7 +2712,7 @@ public:
                     auto& r = p.value; r += 1;
                     by_ref(g.value);
                     auto& gr = g.value; gr += 1;
-                    var s = p.self(); by_ref(s.value);
+                    var& s = p.self(); by_ref(s.value);
                     by_ref_s(g.name);
                 )");
                 check_eq((int64_t)44, probe_of(*e, "p")->value, "a script-constructed C++ object binds the member (T& return handle included)");

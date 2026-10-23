@@ -301,8 +301,8 @@ namespace stdlib {
         auto skip_newline_ptr = std::make_shared<skip_newline_t>();
         auto skip_flush_ptr = std::make_shared<skip_flush_t>();
 
-        eng_ref.add_global("skip_newline", eng_ref.make_object(skip_newline_ptr));
-        eng_ref.add_global("skip_flush", eng_ref.make_object(skip_flush_ptr));
+        eng_ref.add_global("skip_newline", eng_ref.make_value_object(skip_newline_ptr));
+        eng_ref.add_global("skip_flush", eng_ref.make_value_object(skip_flush_ptr));
         // Usage:
         //   print()                           - Prints just a newline
         //   print(value)                      - Prints value followed by newline

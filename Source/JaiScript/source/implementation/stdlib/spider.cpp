@@ -455,7 +455,7 @@ namespace spider_detail {
 				it->second = script_value(it->second.deref().unchecked_text() + ", " + value, a_engine);
 			}
 		}
-		return a_engine->make_object(response);
+		return a_engine->make_value_object(response);
 	}
 
 	const script_value& argument_or_null(const std::vector<script_value>& a_args, size_t a_index, const script_value& a_null) {
@@ -555,7 +555,7 @@ namespace spider_detail {
 				response->body = a_args[1].deref().unchecked_text();
 			}
 			response->header_map(eng);
-			return eng->make_object(response);
+			return eng->make_value_object(response);
 		}, false);
 
 		auto fetcher = [eng, arity_refusal](const char* a_name, const char* a_arity_text) {

@@ -8944,11 +8944,20 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             environment_.get(), engine_, string_symbolizer_);
         const identifier_expr* ident = expr->object->get_type() == node_type::identifier_expr
             ? static_cast<const identifier_expr*>(expr->object.get()) : nullptr;
-        script_function boundMethod = [this, binding = std::move(binding), ident](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-            if (!args.empty()) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reset() takes no arguments");
+        const bool weak_receiver = objectValue.deref().raw_storage_index() == script_value::TYPEID_WEAK_PTR;
+        script_value receiver = objectValue.deref();
+        script_function boundMethod = [this, binding = std::move(binding), ident, weak_receiver, receiver](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+            if (!args.empty() && (weak_receiver || args.size() > 1)) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                    weak_receiver ? "reset() takes no arguments" : "reset() takes at most one argument");
             }
-            detail::reset_handle_storage(detail::handle_reset_storage(binding, ident ? string_receiver_cell(ident) : nullptr), engine_);
+            script_value* storage = detail::handle_reset_storage(binding, ident ? string_receiver_cell(ident) : nullptr);
+            if (args.empty()) {
+                detail::reset_handle_storage(storage, engine_);
+            } else {
+                auto repointed = detail::reset_handle_to(storage, receiver, args[0], engine_);   // KEEP BYTE-PARALLEL with vm_backend::exec_call_method
+                if (!repointed) { return repointed.error_value(); }
+            }
             binding.commit();
             return make_value();
         };

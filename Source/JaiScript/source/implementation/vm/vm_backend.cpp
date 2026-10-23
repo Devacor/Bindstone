@@ -18128,8 +18128,10 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	// that declares reset() keeps its method (KEEP BYTE-PARALLEL with interpreter::member_read_on's handle reset)
 	if (member->member_id == handle_reset_id_ && !(member->object && member->object->get_type() == node_type::super_expr) &&
 	    detail::handle_reset_applies(object.deref(), handle_reset_id_)) [[unlikely]] {
-		if (!arguments.empty()) {
-			return raise_(make_error_code(runtime_error_code::argument_count_mismatch), "reset() takes no arguments");
+		const bool weak_receiver = object.deref().raw_storage_index() == script_value::TYPEID_WEAK_PTR;
+		if (!arguments.empty() && (weak_receiver || arguments.size() > 1)) {
+			return raise_(make_error_code(runtime_error_code::argument_count_mismatch),
+				weak_receiver ? "reset() takes no arguments" : "reset() takes at most one argument");
 		}
 		if (!object.is_reference()) {
 			ensure_frame_member_scope(f, environment_.get());   // the kernel reads the frame's member scope
@@ -18138,8 +18140,15 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 			object, member->object.get(), caller_view(&f), environment_.get(), engine_, symbolizer_);
 		script_value* ident_cell = site.receiver_symbol != UINT64_MAX
 			? string_receiver_cell(f, site, static_cast<identifier_expr*>(member->object.get())) : nullptr;
+		script_value receiver = object.deref();
 		object = make_null();
-		detail::reset_handle_storage(detail::handle_reset_storage(binding, ident_cell), engine_);
+		script_value* storage = detail::handle_reset_storage(binding, ident_cell);
+		if (arguments.empty()) {
+			detail::reset_handle_storage(storage, engine_);
+		} else {
+			auto repointed = detail::reset_handle_to(storage, receiver, arguments[0], engine_);   // KEEP BYTE-PARALLEL with interpreter::member_read_on
+			if (!repointed) { return raise_from(repointed); }
+		}
 		binding.commit();
 		stack_.push_back(make_null());
 		return {};

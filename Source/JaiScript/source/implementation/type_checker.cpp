@@ -4511,6 +4511,42 @@ private:
 		return {};
 	}
 
+    // p.reset(h) as the run time judges it, where the load can see it: one argument, a handle (a value or a primitive is not), of a
+    // class a typed shared_ptr<T> receiver admits
+    void check_handle_reset(call_expr* c, member_expr* m, const ctype& recv, const std::vector<ctype>& args) {
+        if (c->arguments.size() > 1) {
+            diag(diag_level::error, c->location, "reset() takes at most one argument");
+            return;
+        }
+        const ctype& a = args.empty() ? ctype{} : args[0];
+        const expression* arg = c->arguments[0].get();
+        std::string not_handle;
+        switch (a.kind) {
+            case ctype::int_k: case ctype::float_k: case ctype::string_k: case ctype::utf8_k: case ctype::char_k: case ctype::bool_k:
+            case ctype::array_k: case ctype::map_k: case ctype::function_k: case ctype::math_k:
+                not_handle = ctype_name(a);
+                break;
+            default: break;
+        }
+        if (not_handle.empty() && a.kind == ctype::object_k && !a.cls.empty() && arg->get_type() == node_type::call_expr) {
+            const expression* callee = static_cast<const call_expr*>(arg)->callee.get();
+            if (callee && callee->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(callee)->name == a.cls) {
+                not_handle = std::string(a.cls);   // a constructor call is a value
+            }
+        }
+        if (!not_handle.empty()) {
+            diag(diag_level::error, arg->location, "reset(h) takes a handle (new T(), make_shared<T>() or a shared_ptr), not " + not_handle);
+            return;
+        }
+        if (arg->get_type() != node_type::new_expr || a.kind != ctype::object_k || a.cls.empty() || recv.cls.empty()) { return; }
+        if (m->object->get_type() != node_type::identifier_expr) { return; }
+        const var_entry* local = find_local(static_cast<const identifier_expr*>(m->object.get())->name);
+        if (!local || !local->is_handle || local->dynamic || local->is_reference) { return; }
+        if (a.cls != recv.cls && find_sclass(a.cls) && find_sclass(recv.cls) && !class_is_or_derives(a.cls, recv.cls)) {
+            diag(diag_level::error, arg->location, "Cannot reset shared_ptr<" + std::string(recv.cls) + "> to a shared_ptr<" + std::string(a.cls) + ">");
+        }
+    }
+
     // recv.m(args) on a class or a class used as a value; ov (null for a reference's referent: diagnostics only) takes the overloads
     // a proof may rest on
     ctype class_member_call(call_expr* c, member_expr* m, const ctype& recv, const std::vector<ctype>& args,
@@ -4529,7 +4565,10 @@ private:
             return {};
         }
         if (!want_static) {
-            if (ctype t; handle_builtin_result(m->member, t)) { return t; }
+            if (ctype t; handle_builtin_result(m->member, t)) {
+                if (m->member == "reset" && !c->arguments.empty()) { check_handle_reset(c, m, recv, args); }
+                return t;
+            }
         }
         if (stale_shape_receiver(recv, m->object.get())) { return {}; }
         if (hit.certain && !want_static && m->object->get_type() == node_type::this_expr && recv.cls == class_ctx_name_ &&

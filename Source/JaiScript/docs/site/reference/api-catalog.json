@@ -2028,6 +2028,18 @@
     },
     {
       "owner": "shared_ptr<T>",
+      "name": "reset",
+      "signature": "reset(shared_ptr<T> h) -> void",
+      "provider": "core",
+      "effect": "mutate",
+      "notes": "Points the handle its receiver names at h's object, as C++ p.reset(new T()) does: the object it held stays with its other owners, nothing writes through it and no operator= runs. h is a handle (new T(), make_shared<T>() or a shared_ptr; a null one empties the receiver) of a class the receiver admits as a shared_ptr<T> assignment does; a value or a primitive raises.",
+      "source": "source/implementation/interpreter.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "shared_ptr<T>.reset(shared_ptr<T> h) -> void"
+    },
+    {
+      "owner": "shared_ptr<T>",
       "name": "use_count",
       "signature": "use_count() -> int",
       "provider": "core",

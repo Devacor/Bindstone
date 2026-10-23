@@ -70,7 +70,7 @@ routes.get("/client/hop/:n", (spider::Request req) => {
 routes.post("/client/form", (spider::Request req) => spider::redirect("/client/echo?after=post"));
 routes.post("/client/keep", (spider::Request req) => spider::redirect("/client/echo", 307));
 routes.get("/client/slow", (spider::Request req) => {
-	time::sleep(0.8);
+	sleep(0.8);
 	return spider::plain_text("slow");
 });
 routes.get("/client/fetch-self-headers", (spider::Request req) => {

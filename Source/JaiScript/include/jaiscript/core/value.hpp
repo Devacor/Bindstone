@@ -206,16 +206,10 @@ namespace detail {
         // clears any cpp_bound box — the binding lives in the storage), so no second
         // nulling assignment runs here
         script_value(script_value&& other) noexcept
-            : storage_(std::move(other.storage_)) {
-            other.storage_.set_tag(0);
-        }
+            : storage_(std::move(other.storage_), storage::whole_word{}) {}
 
         script_value& operator=(script_value&& other) noexcept {
-            if (this != &other) {
-                storage_.set_tag(other.storage_.tag());
-                other.storage_.set_tag(0);
-                storage_ = std::move(other.storage_);   // last: the old payload's release may re-enter
-            }
+            storage_.assign_whole(std::move(other.storage_));   // the old payload's release, last, may re-enter
             return *this;
         }
         
@@ -1950,6 +1944,11 @@ namespace detail {
         using conversion_func = std::function<script_value(const script_value&, const std::type_info&)>;
         
         // Get engine pointer for creating new script_values
+        // the (declared type, engine) pair in one compare of the tag word: exactly this stamp (whose owner is eng), or no stamp and eng
+        JAI_FORCEINLINE bool stamped_as(const type_info* stamp, const engine* eng) const noexcept {
+            const uintptr_t expected = stamp ? reinterpret_cast<uintptr_t>(stamp) : eng ? (reinterpret_cast<uintptr_t>(eng) | k_engine_only) : 0;
+            return storage_.tag() == expected;
+        }
         engine* get_engine() const noexcept {
             const uintptr_t tag = storage_.tag();
             if (tag & k_engine_only) { return reinterpret_cast<engine*>(tag & k_tag_pointer_mask); }
@@ -2010,14 +2009,15 @@ namespace detail {
             const uintptr_t tag = storage_.tag();
             return (tag & k_engine_only) ? nullptr : reinterpret_cast<type_info*>(tag);
         }
-        void set_stamp(type_info* stamped) noexcept {
-            if (stamped) {
+        JAI_FORCEINLINE void set_stamp(type_info* stamped) noexcept {
+            if (stamped) [[likely]] {
                 assert(stamped->owner && "a stamp must name its engine");
                 storage_.set_tag(reinterpret_cast<uintptr_t>(stamped));
             } else {
-                set_engine_tag(get_engine());
+                clear_stamp();
             }
         }
+        JAI_NOINLINE void clear_stamp() noexcept { set_engine_tag(get_engine()); }
         void set_engine_tag(engine* eng) noexcept {
             storage_.set_tag(eng ? (reinterpret_cast<uintptr_t>(eng) | k_engine_only) : 0);
         }
@@ -2369,7 +2369,7 @@ namespace detail {
             // move contract nulls the source anyway).
             storage(storage&& o) noexcept : hdr_(o.hdr_) {
                 std::memcpy(&p_, &o.p_, sizeof(p_));
-                o.idx_() = TYPEID_NULL;
+                o.set_idx_(TYPEID_NULL);
             }
             // Both assignments pin/steal o first (o may live inside our own payload: x = x.deref() through a map-entry
             // reference holding the last pin on a temporary map) and release the old payload LAST, after the new one is
@@ -2379,9 +2379,9 @@ namespace detail {
                 if (this != &o) {
                     storage pinned(o);
                     storage doomed(std::move(*this));
-                    idx_() = pinned.idx_();
+                    set_idx_(pinned.idx_());
                     std::memcpy(&p_, &pinned.p_, sizeof(p_));
-                    pinned.idx_() = TYPEID_NULL;
+                    pinned.set_idx_(TYPEID_NULL);
                 }
                 return *this;
             }
@@ -2390,12 +2390,39 @@ namespace detail {
                     const auto stolen_index = o.idx_();
                     payload stolen;
                     std::memcpy(&stolen, &o.p_, sizeof(p_));
-                    o.idx_() = TYPEID_NULL;
+                    o.set_idx_(TYPEID_NULL);
                     storage doomed(std::move(*this));
-                    idx_() = stolen_index;
+                    set_idx_(stolen_index);
                     std::memcpy(&p_, &stolen, sizeof(p_));
                 }
                 return *this;
+            }
+            // The value's own move and assignments: the whole word (index and tag) travels with the payload, the source
+            // lands at a zero word, and the old payload still dies last
+            struct whole_word {};
+            storage(storage&& o, whole_word) noexcept : hdr_(o.hdr_) {
+                std::memcpy(&p_, &o.p_, sizeof(p_));
+                o.hdr_ = 0;
+            }
+            void assign_whole(storage&& o) noexcept {
+                if (this != &o) {
+                    const uint64_t word = o.hdr_;
+                    payload stolen;
+                    std::memcpy(&stolen, &o.p_, sizeof(p_));
+                    o.hdr_ = 0;
+                    storage doomed(std::move(*this));
+                    hdr_ = word;
+                    std::memcpy(&p_, &stolen, sizeof(p_));
+                }
+            }
+            void assign_whole(const storage& o) noexcept {
+                if (this != &o) {
+                    storage pinned(o);
+                    storage doomed(std::move(*this));
+                    hdr_ = pinned.hdr_;
+                    std::memcpy(&p_, &pinned.p_, sizeof(p_));
+                    pinned.hdr_ = 0;
+                }
             }
             template <typename T>
                 requires (!std::is_same_v<std::remove_cvref_t<T>, storage> &&
@@ -2536,7 +2563,8 @@ namespace detail {
             }
 
             static_assert(std::endian::native == std::endian::little, "the index is the tag word's low byte");
-            JAI_FORCEINLINE uint8_t& idx_() noexcept { return *reinterpret_cast<uint8_t*>(&hdr_); }
+            // the index is written as the whole word, never a byte store: a later 8-byte read of the word would miss store forwarding
+            JAI_FORCEINLINE void set_idx_(uint8_t index) noexcept { hdr_ = (hdr_ & ~uint64_t{0xFF}) | index; }
             JAI_FORCEINLINE uint8_t idx_() const noexcept { return *reinterpret_cast<const uint8_t*>(&hdr_); }
 
             payload p_;

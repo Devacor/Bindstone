@@ -24189,7 +24189,8 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				VM_TRY(bind_site_reference(i, *site, caller_frame, caller_code, caller_env, site_ref, bound));
 				if (bound) {
 					frame_slot_set(callee, param.slot_index, std::move(site_ref));
-				} else if (arg.is_reference() && arg.get_reference_holder()) {
+				} else if ((arg.is_reference() && arg.get_reference_holder()) || detail::borrows_host_object(arg)) {
+					// a host T& result names the host's object, an lvalue as in C++ (KEEP BYTE-PARALLEL with the interpreter)
 					// Tier 2 (general lvalues): the argument already
 					// evaluated in normal left-to-right order, and subscript/map reads over
 					// lvalue bases mint owner-pinned references with full index generality -

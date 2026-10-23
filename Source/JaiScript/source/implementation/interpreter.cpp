@@ -13842,6 +13842,11 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
         call_stack_[frame_index].set_local(param.slot_index, script_value(*evaluated_arg));
         return {};
     }
+    // a host T& result names the host's object: an lvalue, as in C++ (KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
+    if (evaluated_arg && detail::borrows_host_object(*evaluated_arg)) {
+        call_stack_[frame_index].set_local(param.slot_index, script_value(*evaluated_arg));
+        return {};
+    }
     // a string& takes a writable temporary (lambdas too); another T& takes one only when a declared function never writes
     // through it (detail/ref_param_writes.hpp)
     if (evaluated_arg && (detail::is_string_reference_temporary(param, *evaluated_arg) || param.is_const ||

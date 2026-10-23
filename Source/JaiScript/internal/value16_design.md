@@ -74,8 +74,17 @@ construction (the engine is alive while it executes). At the edge:
   goes while another member still has one, and destroys every member when the last member's last handle goes. B's
   stamps written into A's containers stay readable while A lives, with no work on any store path and no reference cycle
   (the group holds only parked members). A `weak_ptr` to a parked engine reads expired.
-- Values that cross between engines through host code other than `add_global` (a call argument, a host write into a
-  container) join no group; the cross-engine handoff is `add_global`.
+- `engine::hold(v)` is the durable conversion: C++ that keeps a value it received (a bound function's argument, a
+  signal's argument, an element it read) holds it; passing values into C++ stays a plain, zero-cost `script_value`.
+- `add_global` and `execute`'s instance variables join the group. Values that cross through a call argument (a host
+  calling a script function with another engine's value) or a host write into a container join no group: the check
+  would land on the host-to-script call path, which C++ callbacks such as sort comparators take per element.
+- A Debug-only teardown check for plain values still pointing into a dead engine needs per-copy tracking; there is none.
+- Host audit (MV, Game, Workbench, Editor, examples): the stored values are `Building::localVariables` and
+  `BattleEffect::localVariables` (script `setVar`) and the signal properties' script receivers. They stay plain: their
+  owners are scene objects the script engine itself keeps alive, so holding the engine there would form a cycle, and
+  their destruction after the engine releases payloads without reading a stamp. Every other host value is a local
+  inside one call.
 
 Tests: Review Regressions `held_values_outlive_their_engine_handle`, `exchanged_engines_share_a_lifetime` and the
 existing `cross_engine_reference_no_foreign_twin_stamp` (which crashed on vm-reference under the Debug heap's freed fill

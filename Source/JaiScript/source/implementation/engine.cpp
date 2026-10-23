@@ -2966,6 +2966,7 @@ script_value engine::execute_unheld(script_source source) {
 }
 
 script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath, bool textual, std::string_view include_scope) {
+    for (const auto& [name, value] : instanceVars) { share_lifetime_with(value.get_engine()); }
     impl->has_executed_ = true;
     impl->note_root_source(sourcePath);
     try {

@@ -1005,6 +1005,9 @@ namespace jai {
 
         // Variable access
         held_value get_variable(const std::string& name) const;
+        // A plain script_value C++ receives (a bound function's argument, a value read out of a container, a signal's argument) is
+        // valid while this engine lives; hold(v) keeps it, and every type it names, for as long as the host keeps the result
+        held_value hold(script_value value) const;
         bool has_variable(const std::string& name) const;
         // const program-scope and namespace cells (internal/const.md): marked by their declaration, consulted by the checker and the
         // host's writes (add_global / add_global_ref refuse a const)
@@ -1416,7 +1419,6 @@ namespace jai {
         script_value execute_unheld(jai::jaibite& bite);
         script_value execute_file_unheld(const std::string& scriptPath, const instance_variables& instanceVars);
         script_value get_variable_unheld(const std::string& name) const;
-        held_value hold(script_value result) const;
 
         // Parameter storage for function calls (replaces thread_local)
         detail::parameter_storage* get_current_parameter_storage() const;

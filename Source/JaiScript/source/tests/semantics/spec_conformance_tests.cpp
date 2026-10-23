@@ -2259,9 +2259,10 @@ private:
 				run();
 			)", "7|42|300|4");
 		});
-		test("an_element_store_needs_the_exact_type", [this, OK]() {
+		test("an_element_store_runs_an_operator_that_takes_the_value", [this, OK]() {
 			expect_texts({
-				{"array element", OK, "array<OK2> xs = [OK2()]; xs[0] = 5;", "Cannot assign 'int' to element of type 'OK2'", check_mode::warn},
+				{"array element", OK, "array<OK2> xs = [OK2()]; xs[0] = 5; __r = to_string(xs[0].v);", "50", check_mode::warn},
+				{"array element no overload takes", OK, "array<OK2> xs = [OK2()]; var s = \"s\"; xs[0] = s;", "Cannot assign 'string' to element of type 'OK2'", check_mode::warn},
 			});
 		});
 	}

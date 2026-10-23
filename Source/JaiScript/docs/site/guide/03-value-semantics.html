@@ -476,6 +476,15 @@ t = "warm";               // no overload takes a string: t takes the string
 print(type_of(t), " ", t);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Celsius 21
 string warm</code></pre></div>
+<p><strong>Assignment runs <code>operator=</code>.</strong> A variable, field, static, element or map value declared a class answers the same way, as C++ does: <code>=</code> into an existing object runs the class&#x27;s <code>operator=</code> when one of its overloads takes the right-hand value, and the implicit memberwise copy only when none does. A class&#x27;s implicit copy assignment runs each member&#x27;s <code>operator=</code> in turn. Initialization is copy construction: a declaration, a by-value parameter and a return copy the object and never run the operator.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Gauge { int v = 0; int writes = 0; void operator=(Gauge o) { v = o.v; writes += 1; } }
+Gauge a = Gauge();
+Gauge b = Gauge();
+b.v = 7;
+a = b;                    // operator=(Gauge) runs on a
+Gauge c = b;              // copy construction: no operator= call
+print(a.v, " ", a.writes, " ", c.writes);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">7 1 0</code></pre></div>
 
 <p>Rule of thumb: <strong>values by default; <code>&amp;</code> when a call needs the real thing; <code>new</code>/<code>shared_ptr</code> when the alias needs to live somewhere.</strong></p>
 <h2 id="clone-vs-copy-host-api-note">clone vs copy (host API note)<a class="hlink" href="#clone-vs-copy-host-api-note" aria-label="link">&#8203;</a></h2>

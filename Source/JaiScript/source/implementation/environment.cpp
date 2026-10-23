@@ -74,18 +74,8 @@ class_instance* held_instance(const script_value& v) {
 }
 
 checked_result<value_store> run_assign_operator(const script_value& self, const script_value& method, const script_value& value, uint64_t assign_id, engine* eng) {
-    if (eng->parallel_region_active()) {
-        // a chunk calls the operator through its region pin, on its own backend; an unpinned one keeps the verdict
-        if (auto called = eng->parallel_operator_call(self, assign_id, { value })) {
-            if (!*called) { return called->error_value(); }
-            return value_store::assigned;
-        }
-        return checked_result<value_store>(make_error_code(runtime_error_code::unsupported_operation),
-            "custom operator dispatch on class instances is not admitted in a parallel body");
-    }
-    std::vector<script_value> args{self, value};
-    auto result = method.as_function()(args);
-    if (!result) { return result.error_value(); }
+    auto called = call_assign_operator(self, &method, value, assign_id, eng);
+    if (!called) { return called.error_value(); }
     return value_store::assigned;
 }
 
@@ -126,6 +116,14 @@ std::optional<checked_result<value_store>> handle_value_assign(const script_valu
     if (has_operator) { return run_assign_operator(pointee, *method, value, assign_id, eng); }
     return std::nullopt;
 }
+}
+
+std::optional<checked_result<void>> run_script_assign_operator(const script_value& current, const class_definition* def, uint64_t assign_id,
+                                                               const script_value& value, engine* eng) {
+    if (value.is_null() || !binary_operator_accepts(def, assign_id, value)) { return std::nullopt; }
+    const script_value* method = def->method_ptr(assign_id);
+    if (!method || !method->is_function()) { return std::nullopt; }
+    return call_assign_operator(current, method, value, assign_id, eng);
 }
 
 std::optional<checked_result<value_store>> slot_value_assign(const script_value& storage_in, const script_value& value_in, engine* eng, bool declared_var) {

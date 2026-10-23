@@ -516,6 +516,16 @@ inline bool class_definition::may_define_to_bool() const {
     return may_define_to_bool_;
 }
 
+inline uint64_t class_definition::script_assign_operator_id() const {
+    if (assign_memo_epoch_ != method_epoch_) {
+        uint64_t id = 0;
+        if (auto eng = engine_) { id = eng->symbolize("="); }
+        script_assign_id_ = id != 0 && script_chain_defines_method(id) ? id : 0;
+        assign_memo_epoch_ = method_epoch_;
+    }
+    return script_assign_id_;
+}
+
 inline script_value class_definition::get_static_method(uint64_t id, bool throw_if_missing) const {
     auto it = static_methods_.find(id);
     if (it != static_methods_.end()) {
@@ -677,6 +687,7 @@ inline void class_definition::prime_region_memos() {
     (void)handle_bearing_slots();
     (void)string_reachable_slots();
     (void)may_define_to_bool();
+    (void)script_assign_operator_id();
 }
 
 inline std::shared_ptr<class_instance> class_definition::allocate_instance() {
@@ -2685,8 +2696,53 @@ inline std::optional<checked_result<void>> class_copy_assign(const script_value&
     return reclass_assign(const_cast<script_value&>(current), *holder, slot_class, source, source_def, eng);
 }
 
+// The class's operator= called on the slot's object with the value (a parallel chunk's through its region pin)
+inline checked_result<void> call_assign_operator(const script_value& current, const script_value* method, const script_value& value, uint64_t assign_id, engine* eng) {
+    if (eng->parallel_region_active()) {
+        // a chunk calls the operator through its region pin, on its own backend; an unpinned one keeps the verdict
+        if (auto called = eng->parallel_operator_call(current, assign_id, { value })) {
+            if (!*called) {
+                checked_result<void> failed = called->error_value();
+                return failed;
+            }
+            return checked_result<void>();
+        }
+        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+            "custom operator dispatch on class instances is not admitted in a parallel body");
+    }
+    script_value function = *method;
+    std::vector<script_value> args{current, value};
+    auto result = function.as_function()(args);
+    if (!result) {
+        checked_result<void> failed = result.error_value();
+        return failed;
+    }
+    return checked_result<void>();
+}
+
+// The overload choice and the call of script_assign_operator, out of line (environment.cpp)
+std::optional<checked_result<void>> run_script_assign_operator(const script_value& current, const class_definition* def, uint64_t assign_id,
+                                                               const script_value& value, engine* eng);
+
+// '=' into a slot holding a class instance by value whose class declares a script operator= with an overload that takes the
+// value: the operator assigns, self-assignment included (C++ assignment); nullopt otherwise. A class declaring none costs one
+// memoized check.
+inline std::optional<checked_result<void>> script_assign_operator(const script_value& current_in, const script_value& value_in, engine* eng) {
+    const script_value& current = current_in.is_reference() ? current_in.deref() : current_in;
+    if (current.raw_storage_index() != script_value::TYPEID_OBJECT || !eng) { return std::nullopt; }
+    const type_info* tag = current.type_info_raw();
+    if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return std::nullopt; }   // a handle rebinds
+    auto holder = const_cast<script_value&>(current).get_object_holder();
+    if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return std::nullopt; }
+    const class_definition* def = static_cast<class_instance*>(holder->data.get())->get_class_definition();
+    const uint64_t assign_id = def ? def->script_assign_operator_id() : 0;
+    if (assign_id == 0) { return std::nullopt; }
+    return run_script_assign_operator(current, def, assign_id, value_in.is_reference() ? value_in.deref() : value_in, eng);
+}
+
 inline std::optional<checked_result<void>> user_assign_operator(const script_value& current_in, const script_value& value_in, engine* eng,
                                                                 const type_info* declared, const type_info* bound) {
+    if (auto assigned = script_assign_operator(current_in, value_in, eng)) { return assigned; }
     if (auto copied = class_copy_assign(current_in, value_in, eng, declared, bound)) { return copied; }
     if (!eng) { return std::nullopt; }
     const script_value& current = current_in.is_reference() ? current_in.deref() : current_in;
@@ -2714,26 +2770,7 @@ inline std::optional<checked_result<void>> user_assign_operator(const script_val
     }
     const script_value* bound_assign = def->method_ptr(assign_id);
     if (!bound_assign || !bound_assign->is_function()) { return std::nullopt; }
-    if (eng->parallel_region_active()) {
-        // a chunk calls the operator through its region pin, on its own backend; an unpinned one keeps the verdict
-        if (auto called = eng->parallel_operator_call(current, assign_id, { value })) {
-            if (!*called) {
-                checked_result<void> failed = called->error_value();
-                return failed;
-            }
-            return checked_result<void>();
-        }
-        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-            "custom operator dispatch on class instances is not admitted in a parallel body");
-    }
-    script_value method = *bound_assign;
-    std::vector<script_value> args{current, value};
-    auto result = method.as_function()(args);
-    if (!result) {
-        checked_result<void> failed = result.error_value();
-        return failed;
-    }
-    return checked_result<void>();
+    return call_assign_operator(current, bound_assign, value, assign_id, eng);
 }
 
 // A by-value capture copies as a declaration from the captured variable does (C++): a value, a C++ object included, copies
@@ -2904,6 +2941,7 @@ inline checked_result<void> compound_slot_store(script_value& target, script_val
 inline std::optional<checked_result<void>> element_copy_assign(const script_value& current, const script_value& source, const type_info_ptr& element_type, engine* eng) {
     if (!element_type || element_type->base_type == script_value_type::jai_any_type) { return var_slot_assign_in_place(current, source, eng); }
     if (!element_type || element_type->base_type != script_value_type::jai_object_type || element_type->type_name.empty()) { return std::nullopt; }
+    if (auto assigned = script_assign_operator(current, source, eng)) { return assigned; }
     if (auto copied = class_copy_assign(current, source, eng, element_type.get())) { return copied; }
     const script_value& held = current.is_reference() ? current.deref() : current;
     if (!eng || held.raw_storage_index() != script_value::TYPEID_OBJECT) { return std::nullopt; }

@@ -46,11 +46,20 @@ namespace MV {
 	namespace Scene {
 
 		Drawable::~Drawable() {
-			// Free device buffers via the cached device, not owner() (gone during teardown, would throw).
-			if (deviceForCleanup) {
-				if (deviceVertexBuffer.valid()) { deviceForCleanup->destroyBuffer(deviceVertexBuffer); }
-				if (deviceIndexBuffer.valid())  { deviceForCleanup->destroyBuffer(deviceIndexBuffer); }
+			// The tracked device, not owner() (gone during teardown, would throw).
+			if (Render::Device* device = Render::DeviceBindings::untrack(this)) {
+				releaseDeviceBindings(*device);
 			}
+		}
+
+		void Drawable::releaseDeviceBindings(Render::Device& a_device) {
+			if (deviceVertexBuffer.valid()) { a_device.destroyBuffer(deviceVertexBuffer); }
+			if (deviceIndexBuffer.valid()) { a_device.destroyBuffer(deviceIndexBuffer); }
+			deviceVertexBuffer = Render::BoundBuffer();
+			deviceIndexBuffer = Render::BoundBuffer();
+			deviceVertexBufferBytes = 0;
+			deviceIndexBufferBytes = 0;
+			deviceUniformSet = Render::BoundUniformSet();
 		}
 
 		bool Drawable::draw() {
@@ -199,13 +208,13 @@ namespace MV {
 		}
 
 		void Drawable::syncDeviceBuffers(Render::Device* a_device, Render::BufferUpdateHint a_hint) {
-			deviceForCleanup = a_device;   // cached so ~Drawable frees buffers without calling owner()
 			const size_t structSize = sizeof(points[0]);
 
 			const size_t vertexBytes = points->size() * structSize;
 			if (!deviceVertexBuffer.valid() || vertexBytes != deviceVertexBufferBytes) {
 				if (deviceVertexBuffer.valid()) { a_device->destroyBuffer(deviceVertexBuffer); }
 				deviceVertexBuffer = a_device->createBuffer(Render::BufferUsage::Vertex, a_hint, points->data(), vertexBytes);
+				trackDeviceBuffers(a_device);
 				deviceVertexBufferBytes = vertexBytes;
 				dirtyVertexBuffer = false;
 			} else if (dirtyVertexBuffer) {
@@ -218,6 +227,7 @@ namespace MV {
 			if (!deviceIndexBuffer.valid() || indexBytes != deviceIndexBufferBytes) {
 				if (deviceIndexBuffer.valid()) { a_device->destroyBuffer(deviceIndexBuffer); }
 				deviceIndexBuffer = a_device->createBuffer(Render::BufferUsage::Index, a_hint, vertexIndices->data(), indexBytes);
+				trackDeviceBuffers(a_device);
 				deviceIndexBufferBytes = indexBytes;
 				dirtyIndexBuffer = false;
 			} else if (dirtyIndexBuffer) {

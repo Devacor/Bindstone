@@ -2,6 +2,7 @@
 #define _MV_SCENE_DRAWABLE_H_
 
 #include "node.h"
+#include "MV/Render/deviceBindings.h"
 #include <jaiscript/properties.hpp>
 #include <jaiscript/serialization/archive.hpp>
 
@@ -140,6 +141,7 @@ namespace MV {
 			friend Anchors;
 			friend Node;
 			friend jai::access;
+			friend Render::DeviceBindings;
 
 		public:
 
@@ -267,6 +269,8 @@ namespace MV {
 			// Create or resize+upload the device vertex+index buffers from points/vertexIndices
 			// (recreate on byte-size change since updateBuffer can't grow; else honor the dirty flags).
 			void syncDeviceBuffers(Render::Device* a_device, Render::BufferUpdateHint a_hint);
+			// Call when a device buffer is created on a_device, so the device's teardown frees it even while this drawable lives on.
+			void trackDeviceBuffers(Render::Device* a_device) { Render::DeviceBindings::track(this, a_device); }
 
 			void addTexturesToShader();
 
@@ -367,8 +371,6 @@ namespace MV {
 			uint8_t                 devicePipelineColorWriteMask = 0xF; // Stencil sets 0 to draw its mask without color.
 			uint8_t                 cachedColorWriteMask = 0xF;
 			bool                    dirtyIndexBuffer = true;
-			// Lets ~Drawable free its device buffers without calling owner() (which throws during teardown).
-			Render::Device*         deviceForCleanup = nullptr;
 
 			JAI_DELETED_PROPERTY((std::shared_ptr<TextureHandle>), ourTexture);
 
@@ -404,6 +406,8 @@ namespace MV {
 			void lazyInitializeShader();
 
 			void forceInitializeShader();
+
+			void releaseDeviceBindings(Render::Device& a_device);
 		};
 
 		template<typename Archive>

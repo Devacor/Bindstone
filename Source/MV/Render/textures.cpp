@@ -254,26 +254,29 @@ namespace MV {
 		}
 		return textureId.id();
 	}
-	LoadedTextureData::~LoadedTextureData() {
-		// Only the device-backed handle frees here; the legacy OpenGlTextureId member frees via its own dtor.
+	LoadedTextureData::LoadedTextureData(Render::Device* a_device, Render::BoundTexture a_bound, Render::BoundSampler a_sampler) :
+		textureId(0u),
+		renderDevice(a_device),
+		boundTexture(a_bound),
+		boundSampler(a_sampler) {
+
 		if (renderDevice && boundTexture.valid()) {
-			renderDevice->destroyTexture(boundTexture);
+			Render::DeviceBindings::track(this, renderDevice);
 		}
 	}
 
-	void LoadedTexture::releaseDeviceBackedEntries(Render::Device* a_device) {
-		if (!a_device) { return; }
-		std::scoped_lock guard(lock);
-		for (auto&& entry : globalLookup) {
-			auto& data = entry.second;
-			if (data && data->renderDevice == a_device) {
-				if (data->boundTexture.valid()) {
-					a_device->destroyTexture(data->boundTexture);
-				}
-				data->boundTexture = Render::BoundTexture();
-				data->renderDevice = nullptr;
-			}
+	LoadedTextureData::~LoadedTextureData() {
+		// Only the device-backed handle frees here; the legacy OpenGlTextureId member frees via its own dtor.
+		if (Render::Device* device = Render::DeviceBindings::untrack(this)) {
+			device->destroyTexture(boundTexture);
 		}
+	}
+
+	void LoadedTextureData::releaseDeviceBindings(Render::Device& a_device) {
+		a_device.destroyTexture(boundTexture);
+		renderDevice = nullptr;
+		boundTexture = Render::BoundTexture();
+		boundSampler = Render::BoundSampler();
 	}
 
 	static Render::PixelFormat rhiFormatForSurface(SDL_Surface* a_surface); // defined below
@@ -306,8 +309,10 @@ namespace MV {
 		renderDevice = a_device;
 		boundTexture = bound;
 		boundSampler = a_device->createSampler(samplerDesc);
+		Render::DeviceBindings::track(this, a_device);
 		textureId = OpenGlTextureId(0u);   // drop any legacy GL name
-		sourceSurface.reset();             	}
+		sourceSurface.reset();
+	}
 
 	void LoadedTextureData::uploadLegacyGl(SDL_Surface* a_surf, const TextureParameters& a_parameters) {
 		glBindTexture(GL_TEXTURE_2D, textureId);

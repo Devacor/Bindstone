@@ -99,6 +99,9 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\boxaabb.cpp">
       <Filter>MV\Render</Filter>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\deviceBindings.cpp">
+      <Filter>MV\Render</Filter>
+    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\formattedText.cpp">
       <Filter>MV\Render</Filter>
     </ClCompile>
@@ -280,6 +283,9 @@
       <Filter>MV\Render</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\device.h">
+      <Filter>MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\deviceBindings.h">
       <Filter>MV\Render</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Backends\glDevice.h">

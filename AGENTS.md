@@ -343,6 +343,12 @@ receiver loads armed. Run it after any change to a property, registrar or loader
   (refcounted `globalLookup`, so the entry frees and re-loads on next use), recovery goes through
   `reloadImplementation()`: re-decode for file textures, regenerate for dynamic/surface textures (their custom load
   option / `surfaceGenerator`). Any change here must keep reload able to reconstruct from source.
+- **Device objects die with their device, not with their holder.** Whatever holds a `Device`'s objects (texture data,
+  a drawable's buffers) tracks itself in `Render::DeviceBindings` when it creates them and untracks in its destructor;
+  `Draw2D`'s teardown releases every holder still tracked on its device while the context is current. A holder may
+  outlive the renderer (the client's script engine keeps scene nodes past `Managers::renderer`); it is left unbound
+  and never reaches the destroyed device. A new holder of device objects joins the same way, never caches a
+  `Device*` to free them later.
 
 ## Git
 

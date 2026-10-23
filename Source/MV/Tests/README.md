@@ -77,6 +77,10 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
   pipeline waits for a worker leaves the emitter updating and destructible (the old pipeline froze
   and its destructor spun forever); the emitter dies at once with a pipeline in flight; a stage
   that throws still finishes its pipeline and the next update starts a new one.
+- **MV Device Bindings** — texture data and a drawn drawable that outlive their renderer (the
+  client's script engine keeps scene nodes past `Managers::renderer`) have their device objects
+  released by `Draw2D`'s teardown while the device lives (`Render::DeviceBindings`), so their own
+  destruction never reaches the destroyed device; a holder destroyed first frees its own.
 
 ## Benchmarks (measurement, not assertions)
 

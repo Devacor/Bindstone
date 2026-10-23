@@ -646,7 +646,7 @@ namespace MV {
 		// Free pipelines + drain backend resources while the GL context is still current.
 		clearPipelineCache();
 		SharedTextures::resetWhite();
-		LoadedTexture::releaseDeviceBackedEntries(backend.get());
+		Render::DeviceBindings::release(backend.get());
 		if (backend) { backend->shutdown(); }
 	}
 

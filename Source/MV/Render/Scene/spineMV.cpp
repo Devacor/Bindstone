@@ -466,7 +466,6 @@ namespace MV{
 
 			auto ourOwner = owner();
 			Render::Device* dev = ourOwner->renderer().device();
-			deviceForCleanup = dev;
 			// Grow-only buffer reuse: spine regenerates geometry every frame and uploads the (growing)
 			// full vertex/index arrays per batch, drawing only [a_lastRenderedIndex, end). updateBuffer
 			// can't grow, so recreate when the data exceeds the allocation; otherwise upload in place.
@@ -474,6 +473,7 @@ namespace MV{
 			if (!deviceVertexBuffer.valid() || vertexBytes > deviceVertexBufferBytes) {
 				if (deviceVertexBuffer.valid()) { dev->destroyBuffer(deviceVertexBuffer); }
 				deviceVertexBuffer = dev->createBuffer(Render::BufferUsage::Vertex, Render::BufferUpdateHint::Stream, points->data(), vertexBytes);
+				trackDeviceBuffers(dev);
 				deviceVertexBufferBytes = vertexBytes;
 			} else {
 				dev->updateBuffer(deviceVertexBuffer, points->data(), vertexBytes, 0);
@@ -482,6 +482,7 @@ namespace MV{
 			if (!deviceIndexBuffer.valid() || indexBytes > deviceIndexBufferBytes) {
 				if (deviceIndexBuffer.valid()) { dev->destroyBuffer(deviceIndexBuffer); }
 				deviceIndexBuffer = dev->createBuffer(Render::BufferUsage::Index, Render::BufferUpdateHint::Stream, vertexIndices->data(), indexBytes);
+				trackDeviceBuffers(dev);
 				deviceIndexBufferBytes = indexBytes;
 			} else {
 				dev->updateBuffer(deviceIndexBuffer, vertexIndices->data(), indexBytes, 0);

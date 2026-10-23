@@ -113,7 +113,8 @@ namespace jai {
         bool literal_;
     };
 
-    class engine : public std::enable_shared_from_this<engine> {
+    // 512-aligned: an unstamped value's tag word holds this pointer (value.hpp)
+    class alignas(512) engine : public std::enable_shared_from_this<engine> {
     private:
         engine();
         

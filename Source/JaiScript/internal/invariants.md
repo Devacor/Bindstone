@@ -5,14 +5,14 @@ one, read the anchor first.
 
 ## 1. script_value layout gates
 
-`value.hpp` static_asserts `sizeof(script_value) == 2 * sizeof(void*) + 16` (32 on a 64-bit host, 24 on a 32-bit one),
-`alignof == 8` and nothrow move.
-`script_value::storage` is a hand-written tagged union (8-byte payload plus index byte, 16 bytes),
-with asserts pinning its size and nothrow move (the noexcept move contract depends on it); the payload union is
-`alignas(8)` so a 32-bit host, where `int64_t` may align to 4, keeps the 16-byte storage. Layout is
-`type_info_ptr` + `engine*` + 16B storage. The `engine_` and
-`type_info_` members are **the language**, not fat: zero-statics/multi-engine and the
-var/auto/int type ladder live in them — never evict either to buy payload bytes. A new storage
+`value.hpp` static_asserts `sizeof(script_value) == 16`, `alignof == 8` and nothrow move, on every host.
+`script_value::storage` is a hand-written tagged union: an 8-byte payload and an 8-byte tag word whose low byte is the
+storage index and whose upper bits hold the declared type (`type_info*`) or, flagged `k_engine_only`, an unstamped
+value's `engine*` (internal/value16_design.md); the payload union is `alignas(8)` so a 32-bit host keeps the layout. `type_info` and `engine` are `alignas(512)` so the pointer leaves bits
+0..8 free. The engine and the declared type are **the language**, not fat: zero-statics/multi-engine and the
+var/auto/int type ladder live in them. A stamped value's engine is `type_info::owner`, so every type a value can carry
+records its engine (the engine's intern sets it; a compiler-owned type takes `vm_compiler::type_owner`). Payload
+assignments write the index byte only; the value's own copy/move carry the whole word. A new storage
 alternative must be pointer-sized and nothrow-move or the asserts fire. The math vectors are one
 alternative, a copy-on-write `script_vec_node` handle: every relocation shape that carried a 12-byte
 inline payload measured 1-6% whole-program (`internal/math_types_design.md` 4.1).

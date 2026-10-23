@@ -292,6 +292,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		compiler_ = vm_compiler(symbolizer_, &builtins_);   // filled below; address stable
 		compiler_.math_aliases(engine_);
 		compiler_.reference(reference_mode_);
+		compiler_.type_owner(engine_);
 		math_alias_rows_ = engine_->math_alias_rows();
 
 		op_plus_id_ = symbolizer_->intern("+");

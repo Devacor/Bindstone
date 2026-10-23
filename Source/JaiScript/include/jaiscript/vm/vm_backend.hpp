@@ -1012,9 +1012,6 @@ namespace jai::vm {
         const chunk* debug_last_code_ = nullptr;
         size_t debug_last_depth_ = SIZE_MAX;
         environment* cached_global_env_ = nullptr;   // env_lookup_cached gate (never dereferenced)
-        // engine::vm_reference_mode, read when the backend is built and on cold paths only: the cache gate above stays null (no
-        // inline cache fills), a worker pins no cache record, no scoped const folds, the compiler emits the general forms
-        bool reference_mode_ = false;
         // stdlib math aliases (engine::register_math_alias): the engine's rows, or on a worker its own copies' rows
         const engine::math_alias_row* math_alias_rows_ = nullptr;
         std::unique_ptr<std::array<engine::math_alias_row, engine::k_math_alias_rows>> worker_math_alias_rows_;
@@ -2774,6 +2771,9 @@ namespace jai::vm {
         // blocks, as a record frame's do
         std::vector<std::unique_ptr<cell_state>> entry_areas_;
         size_t entry_areas_top_ = 0;
+        // engine::vm_reference_mode, read when the backend is built and on cold paths only (last, so no hot member moves): the
+        // cache gate stays null (no inline cache fills), a worker pins no cache record, no scoped const folds
+        bool reference_mode_ = false;
     };
 
 } // namespace jai::vm

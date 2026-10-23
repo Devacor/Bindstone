@@ -57,7 +57,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <tr><td><code>public</code> <code>private</code> <code>protected</code></td><td>access labels in a class body; <code>protected</code> is a synonym of <code>private</code>, which admits the class and its subclasses</td></tr>
 <tr><td><code>static</code> <code>override</code></td><td>a member of the class rather than of an instance (<code>C::s</code>); a method that replaces a base class&#x27;s method</td></tr>
 <tr><td><code>this</code> <code>super</code></td><td>the receiver inside a method; the base class (<code>: super(args)</code> in a constructor&#x27;s initializer list, <code>super::m()</code> in a method)</td></tr>
-<tr><td><code>new</code></td><td><code>new T(args)</code>: one shared object, a <code>shared_ptr&lt;T&gt;</code></td></tr>
+<tr><td><code>new</code></td><td><code>new T(args)</code>: one shared object, a <code>shared_ptr&lt;T&gt;</code>; <code>make_shared&lt;T&gt;(args)</code> is the same expression</td></tr>
 <tr><td><code>enum</code> <code>namespace</code></td><td>a scoped enumeration (<code>E::v</code>); a named scope (<code>ns::x</code>) (<a href="../guide/11-kitchen-sink.html">Kitchen Sink</a>)</td></tr>
 <tr><td><code>if</code> <code>else</code> <code>while</code> <code>for</code> <code>break</code> <code>continue</code> <code>return</code></td><td>control flow; <code>for</code> is the C-style loop and the range form <code>for (auto x : xs)</code></td></tr>
 <tr><td><code>switch</code> <code>case</code> <code>default</code> <code>fallthrough</code></td><td>a switch; a case breaks by default, and <code>fallthrough;</code> continues into the next one</td></tr>

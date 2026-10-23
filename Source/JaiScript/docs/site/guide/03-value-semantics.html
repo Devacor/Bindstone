@@ -262,7 +262,7 @@ poke(sp);
 print("after poke: {}", sp.x);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">sp.x = 99 (shared!)
 after poke: 42</code></pre></div>
-<p><code>new P()</code> is the direct spelling for a handle (<code>shared_ptr&lt;P&gt; sp = P();</code> wraps a value the same way), and every copy of the handle shares the object. <code>weak_ptr&lt;T&gt;</code> observes a handle without owning it:</p>
+<p><code>new P()</code> is the direct spelling for a handle (<code>shared_ptr&lt;P&gt; sp = P();</code> wraps a value the same way), and every copy of the handle shares the object. <code>make_shared&lt;P&gt;(args)</code> is the same expression as <code>new P(args)</code>: the same handle, constructor choice, checked type and errors. A bare <code>make_shared</code> not followed by <code>&lt;</code> is an ordinary name, so a function of that name stays callable. <code>weak_ptr&lt;T&gt;</code> observes a handle without owning it:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 3; }
 shared_ptr&lt;P&gt; sp = P();
 weak_ptr&lt;P&gt; w = sp;

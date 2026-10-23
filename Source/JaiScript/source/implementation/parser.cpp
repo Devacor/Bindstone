@@ -1492,9 +1492,20 @@ checked_result<expression_ptr> parser::primary() {
     // new T(args) / new T{args}: pure sugar for shared_ptr<T>(args) construction —
     // the same new_expr the shared_ptr<T>(...) spelling produces (idempotent when T
     // is already shared_ptr<...>)
-    if (match(token_type::new_keyword)) {
-        token newToken = previous();
+    // make_shared<T>(args) is the same expression as new T(args); bare make_shared stays an ordinary name
+    const bool make_shared_spelling = check(token_type::identifier) && peek().lexeme == "make_shared" &&
+        current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::less;
+    if (make_shared_spelling || match(token_type::new_keyword)) {
+        token newToken = make_shared_spelling ? advance() : previous();
+        if (make_shared_spelling) { advance(); }
         JAISCRIPT_TRY_ASSIGN(type_info_ptr pointee_type, parse_type());
+        if (make_shared_spelling) {
+            consume_greater_in_generic("Expected '>' after make_shared type");
+            if (!check(token_type::left_paren)) {
+                report_error("Expected '(' after make_shared<T>", peek());
+                return make_error_code(parse_error_code::unexpected_token);
+            }
+        }
 
         type_info_ptr type = pointee_type;
         if (!pointee_type || pointee_type->base_type != script_value_type::jai_shared_ptr_type) {

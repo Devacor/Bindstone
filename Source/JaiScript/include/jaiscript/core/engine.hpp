@@ -468,7 +468,7 @@ namespace jai {
                 // WARNING: Caller must ensure 'value' outlives the script engine!
                 auto lifetime_tracker = std::make_shared<bool>(true);
                 std::shared_ptr<T> non_owning_ptr(lifetime_tracker, &value);
-                add_global(name, make_object(non_owning_ptr), is_serializable);
+                add_global(name, make_value_object(non_owning_ptr), is_serializable);
             }
         }
         
@@ -681,21 +681,21 @@ namespace jai {
         // Object creation through registered class system
         template<typename T, typename... Args>
         script_value make_object(Args&&... args) {
-            auto data = std::make_shared<T>(std::forward<Args>(args)...);
-            // Delegate to the shared_ptr overload which handles wrapping properly
-            return make_object(data);
+            return make_value_object(std::make_shared<T>(std::forward<Args>(args)...));
         }
-        
-        // Object creation from existing shared_ptr
-        // NOTE: This method currently doesn't support property access on C++ objects
-        // For C++ objects with properties, create them via script constructor instead
+
+        // A host std::shared_ptr<T> is a handle, as add_global and a host shared_ptr result make one: copies share the object
+        template<typename T>
+        script_value make_object(std::shared_ptr<T> data) { return make_handle(std::move(data)); }
+
+        // The object data owns, as a value: a by-value copy runs the copy constructor (a host T result boxes this way).
         // Defined in engine_impl.hpp where class_definition is complete.
         template<typename T>
-        script_value make_object(std::shared_ptr<T> data);
+        script_value make_value_object(std::shared_ptr<T> data);
 
         // A host std::shared_ptr<T> entering script is a handle, as new T(...) makes one: copies share the object
         template<typename T>
-        script_value make_handle(std::shared_ptr<T> data) { return marked_shared_handle(make_object(std::move(data))); }
+        script_value make_handle(std::shared_ptr<T> data) { return marked_shared_handle(make_value_object(std::move(data))); }
         script_value marked_shared_handle(script_value object);
 
         // Convenient script_value creation methods

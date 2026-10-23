@@ -7411,7 +7411,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             }
             // else: Initializing from a temporary - use move semantics (no copy)
             if (value.raw_storage_index() == script_value::TYPEID_OBJECT) {
-                detail::object_declaration_takes_value(value, decl->type.get(), decl->auto_spelled);
+                detail::object_declaration_takes_value(value, decl->type.get());
             }
 
             // === HOMOGENEOUS CONTAINER VALIDATION ===

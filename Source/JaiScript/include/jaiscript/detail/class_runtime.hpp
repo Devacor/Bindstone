@@ -2705,11 +2705,10 @@ inline script_value clone_for_capture(const script_value& value) {
     return clone_for_assignment(value);
 }
 
-// An auto or T declaration of an object, after its initializer's copy rule, as C++ declares: a host object a T& result
-// lends copies, and a value slot (T x = handle) copies the object the handle names unless the handle is a script temporary
-// nothing else holds. A var keeps either as it is. KEEP BYTE-PARALLEL: both backends' declarations call it
-JAI_NOINLINE inline void object_declaration_copies(script_value& value, const type_info* declared, bool auto_spelled) {
-    if (declared && declared->base_type == script_value_type::jai_any_type && !auto_spelled) { return; }
+// A declaration of an object, after its initializer's copy rule, as C++ declares: a host object a T& result lends copies
+// (var, auto and T alike), and a value slot (T x = handle) copies the object the handle names unless the handle is a script
+// temporary nothing else holds. KEEP BYTE-PARALLEL: both backends' declarations call it
+JAI_NOINLINE inline void object_declaration_copies(script_value& value, const type_info* declared) {
     if (borrows_host_object(value)) {
         value = value.clone();
         return;
@@ -2725,13 +2724,13 @@ JAI_NOINLINE inline void object_declaration_copies(script_value& value, const ty
 }
 
 // An ordinary object declaration (no lent host object, no handle entering a class slot) returns without a call
-inline void object_declaration_takes_value(script_value& value, const type_info* declared, bool auto_spelled) {
+inline void object_declaration_takes_value(script_value& value, const type_info* declared) {
     if (!value.unchecked_object_handle()->bound_ptr) {
         if (!declared || declared->base_type != script_value_type::jai_object_type) { return; }
         const type_info* tag = value.type_info_raw();
         if (!tag || tag->base_type != script_value_type::jai_shared_ptr_type) { return; }
     }
-    object_declaration_copies(value, declared, auto_spelled);
+    object_declaration_copies(value, declared);
 }
 
 // A store into a declared field or static: an auto slot takes the type its initialized value carries, then enforces it

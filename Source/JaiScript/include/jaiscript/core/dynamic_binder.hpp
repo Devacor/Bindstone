@@ -1183,7 +1183,7 @@ private:
             using element_type = typename P::value_type;
             auto wrapper = std::make_shared<bound_cpp_vector<element_type>>(
                 cpp_obj->*member, engine_ptr);
-            return engine_ptr->make_object(wrapper);
+            return engine_ptr->make_value_object(wrapper);
         }
         else if constexpr (dynamic_binder_validation::is_signal_type<P>::value) {
             // Typed per-signature bindings (bind_signal_type) take precedence

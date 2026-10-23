@@ -222,7 +222,7 @@ bool bind_schema_typed(engine& a_engine, class_definition& class_def, serializat
 				return script_value(std::monostate{}, eng);
 			}
 			auto ref = std::make_shared<jai::observable_property_ref<ValueT>>(obs_prop, access.manager(self));
-			return eng->make_object(ref);
+			return eng->make_value_object(ref);
 		};
 
 		auto setter = [prop_name, access, eng](void* self, const script_value& arg) {
@@ -393,7 +393,7 @@ void ensure_signal_view_type_registered(engine& a_engine) {
 }
 
 script_value make_signal_view(engine* eng, const signal_script_ops& ops) {
-	return eng->make_object(std::make_shared<signal_script_ops>(ops));
+	return eng->make_value_object(std::make_shared<signal_script_ops>(ops));
 }
 
 } // namespace jai::detail

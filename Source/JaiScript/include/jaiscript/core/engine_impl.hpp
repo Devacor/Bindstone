@@ -75,7 +75,7 @@ std::string engine::get_registered_name() const {
 }
 
 template<typename T>
-script_value engine::make_object(std::shared_ptr<T> data) {
+script_value engine::make_value_object(std::shared_ptr<T> data) {
     // Prefer the DYNAMIC type's registration: handles cross boundaries as their base
     // static type (signal signatures, vector elements) but script wants the most-derived
     // surface (a Derived member reached through a shared_ptr<Base>). dynamic_cast<void*>
@@ -149,7 +149,7 @@ script_value engine::extend(const std::shared_ptr<T>& object, std::string_view s
     if (!object) {
         throw runtime_error("extend: cannot extend a null object with '" + std::string(script_class) + "'");
     }
-    return extend(make_object(object), script_value(std::string(script_class), this), fields_json);
+    return extend(make_value_object(object), script_value(std::string(script_class), this), fields_json);
 }
 
 template<typename T>
@@ -204,7 +204,7 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
         if (!eng) {
             throw runtime_error("Engine reference required for custom type conversion");
         }
-        return eng->make_object(sharedObj);
+        return eng->make_value_object(sharedObj);
     }
 }
 
@@ -330,7 +330,7 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
                 }
             }
             auto sharedObj = std::make_shared<T>(item);
-            arr.push(eng->make_object(sharedObj));
+            arr.push(eng->make_value_object(sharedObj));
         }
     }
 
@@ -383,11 +383,11 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
                     converted_key = registry->template convert_to_script<K>(key);
                 } else {
                     auto sharedObj = std::make_shared<K>(key);
-                    converted_key = eng->make_object(sharedObj);
+                    converted_key = eng->make_value_object(sharedObj);
                 }
             } else {
                 auto sharedObj = std::make_shared<K>(key);
-                converted_key = eng->make_object(sharedObj);
+                converted_key = eng->make_value_object(sharedObj);
             }
         }
 
@@ -407,11 +407,11 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
                     converted_value = registry->template convert_to_script<V>(value);
                 } else {
                     auto sharedObj = std::make_shared<V>(value);
-                    converted_value = eng->make_object(sharedObj);
+                    converted_value = eng->make_value_object(sharedObj);
                 }
             } else {
                 auto sharedObj = std::make_shared<V>(value);
-                converted_value = eng->make_object(sharedObj);
+                converted_value = eng->make_value_object(sharedObj);
             }
         }
 

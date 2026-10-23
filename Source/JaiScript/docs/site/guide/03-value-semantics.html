@@ -373,26 +373,26 @@ r = b;                     // runs Turret's bound operator= on a
 print(a.ammo);
 
 Tower tower = Tower();
-var c = tower.child();     // a handle to the Turret inside tower
+var c = tower.child();     // a copy of the Turret inside tower
 c.ammo = 40;
 print(tower.child().ammo);
 
-var&amp; t = tower.child();    // a reference to that same Turret
+var&amp; t = tower.child();    // a reference to that Turret
 t = b;                     // runs Turret's bound operator=
 print(tower.child().ammo);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">5 9
 6
 9
-40
+0
 9</code></pre></div>
 <p>Line by line:</p>
 <ul>
-<li><code>Turret b = a;</code> copies, as it would for a script class. The copy is a separate C++ object, built by the class&#x27;s copy constructor. A by-value parameter copies the same way.</li>
+<li><code>Turret b = a;</code> copies, as it would for a script class. The copy is a separate C++ object, built by the class&#x27;s copy constructor. A by-value parameter (<code>var p</code> or <code>Turret p</code>) and a by-value return copy the same way, whatever the argument or the returned expression is: a variable, a member or a call that returns <code>Turret&amp;</code>.</li>
 <li><code>var&amp; r = a;</code> is a reference to the variable <code>a</code>. Nothing is copied, and writes through <code>r</code> land in <code>a</code>. <code>r = b;</code> assigns into <code>a</code>, so it runs the class&#x27;s bound <code>operator=</code> (the <code>"="</code> method) on <code>a</code>&#x27;s Turret, as <code>a = b;</code> does.</li>
-<li><code>var c = tower.child();</code> keeps what the call returned. <code>child()</code> returns a <code>Turret&amp;</code>, so script receives the Turret inside the Tower, not a copy, and a variable initialized from a call takes the result as it is. Writes through <code>c</code> land in the Tower&#x27;s Turret, and <code>c</code> keeps <code>tower</code>&#x27;s object alive. Copying <code>c</code> into another variable copies the Turret, as copying <code>a</code> does. <code>auto c = tower.child();</code> or <code>Turret c = tower.child();</code> copies instead, because <code>auto</code> and a class type drop the reference as they do in C++.</li>
+<li><code>var c = tower.child();</code> copies. <code>child()</code> returns a <code>Turret&amp;</code>, and a declaration that is not a reference drops the reference, as <code>auto c = tower.child();</code> does in C++, so <code>c</code> is a new Turret made by the copy constructor and writes through it leave the Tower&#x27;s Turret alone. <code>auto c</code> and <code>Turret c</code> copy the same way.</li>
 <li><code>var&amp; t = tower.child();</code> binds a reference to the Tower&#x27;s Turret, as <code>Turret&amp; t = tower.child();</code> does in C++. <code>t = b;</code> then runs the class&#x27;s bound <code>operator=</code> on that Turret. A class that binds no <code>"="</code> refuses with <code>Cannot assign to a reference to 'Turret': its binding has no operator=</code>.</li>
 </ul>
-<p>A variable, field or element declared a bound class holds its own object, and an assignment into it, directly or through a reference, runs the bound <code>operator=</code> on that object, as C++ assigns into an object. When the class binds no <code>"="</code>, the assignment replaces the held object with a copy of the source, built by the copy constructor; script owns that storage, so nothing else holds the object it replaces. A <code>var</code> variable is dynamic and takes the new value instead: after <code>var c = tower.child();</code>, the line <code>c = b;</code> makes <code>c</code> a copy of <code>b</code> and leaves the Tower&#x27;s Turret alone.</p>
+<p>A variable, field or element declared a bound class holds its own object, and an assignment into it, directly or through a reference, runs the bound <code>operator=</code> on that object, as C++ assigns into an object. When the class binds no <code>"="</code>, the assignment replaces the held object with a copy of the source, built by the copy constructor; script owns that storage, so nothing else holds the object it replaces. A <code>var</code> variable is dynamic and takes the new value instead: after <code>var c = a;</code>, the line <code>c = b;</code> makes <code>c</code> a copy of <code>b</code>.</p>
 <p>To share one bound object between script variables, use a handle: <code>new Turret()</code> makes a <code>shared_ptr&lt;Turret&gt;</code>, and so does a host function that returns a <code>std::shared_ptr&lt;Turret&gt;</code>. Copies of a handle share the object, in a variable, a parameter or a lambda capture, as <a href="#escape-hatch-5-shared-ptr-opt-in-reference-semantics">escape hatch 5</a> shows.</p>
 <h2 id="const-set-once-then-only-read"><code>const</code>: set once, then only read<a class="hlink" href="#const-set-once-then-only-read" aria-label="link">&#8203;</a></h2>
 <p><code>const</code> marks a declaration that its initializer sets and nothing writes afterwards: a variable (<code>const int LIMIT = 10;</code>, or <code>const limit = 10;</code>, which is <code>const auto</code>), a parameter (<code>const T&amp; p</code>, <code>const T p</code>), a loop variable (<code>for (const auto&amp; x : xs)</code>) or a class constant. The rules are C++&#x27;s. A const value is read-only all the way down: its elements, its fields, and the methods that write their receiver are off limits through it. A const <em>handle</em> only stops the handle from rebinding, and the object it points at stays writable. Copies are ordinary values, so <code>auto copy = LIMIT_TABLE;</code> can change freely.</p>

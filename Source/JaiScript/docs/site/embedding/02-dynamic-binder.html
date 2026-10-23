@@ -99,7 +99,7 @@ C++ sees east.ammo = 14
 99</code></pre></div>
 <ul><li><strong>Constructors</strong> are listed by parameter types; scripts pick one by argument count and types. <code>Turret(...)</code> in script makes a value, and <code>new Turret(...)</code> makes a <code>shared_ptr</code> handle. A value copies like a script class&#x27;s, through the C++ copy constructor; copies of a handle share one object (<a href="#copies-and-handles">copies and handles</a>, below).</li>
 <li><strong>Properties</strong> read and write the C++ member directly; a getter-only property (<code>nullptr</code> setter) rejects stores with <code>Cannot assign to 'x': it is read-only</code>.</li>
-<li><strong>Objects cross by identity.</strong> <code>make_object(shared_ptr)</code> wraps the pointer without a copy, so script writes land in C++ (<code>east.ammo</code> is 14) and <code>as&lt;std::shared_ptr&lt;T&gt;&gt;()</code> returns the script's object to C++ shared, not copied.</li>
+<li><strong>Objects cross by identity.</strong> <code>make_object(shared_ptr)</code> wraps the pointer without a copy as a handle, like <code>add_global(name, shared_ptr)</code>, so script writes land in C++ (<code>east.ammo</code> is 14) and <code>as&lt;std::shared_ptr&lt;T&gt;&gt;()</code> returns the script's object to C++ shared, not copied.</li>
 <li><strong>Lifetime</strong> follows the <code>shared_ptr</code>: the object lives while either side holds it. <code>add_global_ref</code> instead binds a C++ object or variable you keep alive yourself.</li>
 <li><strong>Handles and null.</strong> A <code>std::shared_ptr&lt;T&gt;</code> or <code>std::weak_ptr&lt;T&gt;</code> parameter (by value or <code>const&amp;</code>) takes a script <code>null</code> as an empty handle, as C++ takes <code>nullptr</code>, so <code>pick(null)</code> resolves to the handle overload of an overload set. A <code>weak_ptr&lt;T&gt;</code> parameter also takes a handle or a script <code>weak_ptr&lt;T&gt;</code>, watching the same object; an expired one arrives empty. Returning a <code>std::weak_ptr&lt;T&gt;</code> to script is not supported (a script <code>weak_ptr</code> watches a script handle, and a host one has none): return <code>shared_ptr&lt;T&gt;</code>, and script takes its own <code>weak_ptr&lt;T&gt;</code> of it.</li>
 <li><strong>Errors.</strong> A C++ exception thrown by a bound method reaches the script as a catchable error carrying its <code>what()</code> text (<code>throw std::runtime_error("jammed")</code> is caught as <code>jammed</code>); <a href="17-host-api.html#error-surfaces">Error surfaces</a> lists how each call reports failures.</li></ul>
@@ -269,29 +269,31 @@ change notification crosses the boundary. Assignments from either side fire it; 
 eng-&gt;execute("gate.threat = gate.threat + 2;");      // script write; reads unwrap in expressions</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">threat 0 -&gt; 5
 threat 5 -&gt; 7</code></pre></div>
-<p>Lifetime notes: <code>eng-&gt;make_object&lt;T&gt;(args...)</code> constructs in place;
+<p>Lifetime notes: <code>eng-&gt;make_object&lt;T&gt;(args...)</code> constructs a value in place (its copies copy);
 <code>add_global_ref</code> on a class instance wraps a <strong>non-owning</strong> alias (you guarantee the
 object outlives the engine). One engine serves one thread at a time. Two engines on two threads need no
 locks, because nothing is global.</p>
 <h3 id="copies-and-handles">When a bound object is copied, and when it is shared<a class="hlink" href="#copies-and-handles" aria-label="link">&#8203;</a></h3>
-<p>The boundary hands script the C++ object itself: <code>make_object</code>, a <code>T&amp;</code> or
+<p>The boundary hands script the C++ object itself: <code>make_object(shared_ptr)</code>, a <code>T&amp;</code> or
 <code>std::shared_ptr&lt;T&gt;</code> result, and a member whose type is a registered class all arrive without a
 copy. Once the object is in script, it follows the language&#x27;s value rules, exactly as a script class
 instance does:</p>
 <ul>
-<li>A copy from a variable, a field or an element (<code>Turret b = a;</code>, <code>var g = gate;</code>), a
-by-value parameter, a container literal&#x27;s element (<code>[a]</code> as an array) and a by-value lambda capture
+<li>A copy of a value from a variable, a field or an element (<code>Turret b = a;</code>, <code>var c = b;</code>), a
+by-value parameter or return, a container literal&#x27;s element (<code>[a]</code> as an array) and a by-value lambda capture
 (<code>[a]() { ... }</code>, <code>[=]</code>) make a separate C++ object
 through the class&#x27;s copy constructor. Writes to the copy do not reach the original.</li>
-<li>An <code>auto</code> or class-typed variable initialized from a call that returns <code>T&amp;</code> copies it,
-as C++ <code>auto</code> drops the reference: <code>auto c = owner.child();</code> is a new <code>Turret</code>. A
-<code>var</code> takes the result as it is, so <code>var c = owner.child();</code> is the object
-<code>child()</code> refers to, and writes through <code>c</code> land in it.</li>
+<li>A variable, a by-value parameter or a by-value return that takes a call&#x27;s <code>T&amp;</code> result copies it, as
+C++ <code>auto</code> drops the reference: <code>var c = owner.child();</code>, <code>auto c</code> and
+<code>Turret c</code> are each a new <code>Turret</code>. A script function the host calls receives a <code>T&amp;</code>
+argument the same way: a <code>var p</code> or <code>Turret p</code> parameter is a copy, a <code>var&amp; p</code> parameter
+names the host&#x27;s object.</li>
 <li>A reference (<code>var&amp; g = gate;</code>, <code>auto&amp; c = owner.child();</code>, a <code>&amp;</code>
 parameter) names the same object.</li>
 <li>A handle shares the object with every copy of the handle, in a variable, a parameter or a lambda capture:
 <code>new Turret(...)</code>, a <code>shared_ptr&lt;Turret&gt;</code> variable, and a <code>std::shared_ptr&lt;Turret&gt;</code>
-that a host function, method or property returns (or that <code>add_global</code> stores).</li>
+that a host function, method or property returns, that a host passes to a script callback, or that <code>add_global</code>
+or <code>make_object</code> takes: <code>var g = gate;</code> names the host&#x27;s <code>gate</code>.</li>
 </ul>
 <p>So to keep working on the host&#x27;s object, use the global itself, a reference or a <code>&amp;</code> parameter.
 The guide&#x27;s <a href="../guide/03-value-semantics.html#bound-cpp-objects">Bound C++ objects</a> walks through
@@ -470,9 +472,8 @@ The idiom is safe by construction, not by luck. And <code>!=</code> worked witho
 <p>A method that returns <code>T&amp;</code> hands script the object it refers to, without a copy, and the
 declaration decides what script does with it:</p>
 <ul>
-<li><code>var c = owner.child();</code> holds that object, as <a href="#copies-and-handles">copies and handles</a>
-describes. Member writes through <code>c</code> land in it, and <code>c</code> keeps the owner&#x27;s object alive, like
-the chain above.</li>
+<li><code>var c = owner.child();</code> copies it, as <a href="#copies-and-handles">copies and handles</a>
+describes: <code>c</code> is a new object, and member writes through it leave the owner&#x27;s alone.</li>
 <li><code>var&amp; c = owner.child();</code> (or <code>auto&amp;</code>, or <code>C&amp; c</code>) binds a reference, as C++ binds
 one. Member writes land in the object the same way, and <code>c = other;</code> runs the class&#x27;s bound
 operator=.</li>

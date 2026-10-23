@@ -2858,6 +2858,27 @@ namespace detail {
                   "script_value must stay 16 bytes / 8-aligned");
     static_assert(std::is_nothrow_move_constructible_v<script_value>);
 
+    namespace detail {
+        // held_value's first base: destroyed after the value, so the value's release still finds its engine
+        struct engine_hold { std::shared_ptr<engine> engine_ref; };
+    }
+
+    // A value handed out of the engine (an execute result, get_variable): it holds the engine, so its stamps and the types
+    // they name stay valid for as long as the host keeps it. It is a script_value; a copy into a plain script_value drops
+    // the hold and lives only as long as the engine does (internal/value16_design.md)
+    class held_value : private detail::engine_hold, public script_value {
+    public:
+        held_value(script_value value, std::shared_ptr<engine> holder) noexcept
+            : detail::engine_hold{std::move(holder)}, script_value(std::move(value)) {}
+        held_value(const held_value&) = default;
+        held_value(held_value&&) noexcept = default;
+        held_value& operator=(const held_value&) = default;
+        held_value& operator=(held_value&&) noexcept = default;
+        // a plain value assigned in: the held value now holds that value's engine
+        held_value& operator=(script_value value);
+        const std::shared_ptr<engine>& held_engine() const noexcept { return engine_ref; }
+    };
+
     // ---- script_array kind-dispatched element access (script_value complete here) ----
 
     // Out-of-line SPECIAL MEMBERS + size/clear/reserve (types.hpp declares them):

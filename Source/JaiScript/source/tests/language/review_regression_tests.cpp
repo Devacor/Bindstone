@@ -3663,6 +3663,45 @@ public:
             check_eq((int64_t)730, r.as_int());
         });
 
+        // A value handed out of the engine holds it: a number, a container, a string and a map read and convert after the
+        // host dropped its last engine handle, and the engine goes when the last such value does
+        test("held_values_outlive_their_engine_handle", [this]() {
+            std::optional<held_value> number, array, text, map;
+            std::weak_ptr<engine> watch;
+            {
+                auto e = make_engine();
+                watch = e;
+                number.emplace(e->execute("41 + 1;"));
+                array.emplace(e->execute("[1, 2, 3];"));
+                text.emplace(e->execute("\"text\";"));
+                map.emplace(e->execute("var m = {\"k\": 7}; m;"));
+            }
+            check_true(!watch.expired(), "a held value keeps its engine");
+            check_eq((int64_t)42, number->as_int());
+            check_true(number->get_engine() == watch.lock().get(), "the stamp names the engine");
+            check_true(number->get_type_info() && number->get_type_info()->base_type == script_value_type::jai_int_type);
+            check_eq((size_t)3, array->unchecked_get_array_storage()->size());
+            check_eq(std::string("text"), text->as<std::string>());
+            check_true(map->is_map());
+            script_value copy = *array;   // a plain copy lives as long as the engine does
+            check_true(copy.is_array());
+            number.reset(); array.reset(); text.reset(); map.reset();
+            copy = script_value(std::monostate{}, nullptr);
+            check_true(watch.expired(), "the engine goes with its last held value");
+        });
+
+        // Two engines that exchanged values share a lifetime: B's stamps in A's memory stay readable after B's handle goes
+        test("exchanged_engines_share_a_lifetime", [this]() {
+            auto a = make_engine();
+            a->execute("var arr = [1, 2, 3];");
+            {
+                auto b = make_engine();
+                b->add_global("borrowed", a->get_variable("arr"));
+                b->execute("borrowed[0] = 9; borrowed.push(4); var& r = borrowed[1]; r = 2;");
+            }
+            check_eq((int64_t)16, a->execute("var& s = arr[0]; s = s; arr[0] + arr[1] + arr[2] + arr[3] - 2;").as_int());
+        });
+
         // Cross-engine values: engine B minting a reference to an engine-A value must not
         // stamp B's interned reference twin onto A's type_info (dangles when B dies).
         test("cross_engine_reference_no_foreign_twin_stamp", [this]() {

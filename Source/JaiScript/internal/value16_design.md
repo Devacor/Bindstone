@@ -59,12 +59,27 @@ AST `source_location`s (`ast_reader::location`): every node copies the full scri
 types: 158 in Gator (80 KB at 512 bytes each). With equal-length checkout paths the delta is gone; base builds for later
 measurements sit at a path of the worktree's length.
 
-### Open: the stamp-lifetime hazard
+### Stamp lifetime (Dev ruling 2026-10-23: two types)
 
-A value can outlive the engine that made its stamp: a host keeps it, or another engine stores it in its own container.
-`get_engine()` and every type query then read that engine's freed `type_info`. Master reads the same freed `type_info`
-(`type()`, `get_type_info_reference`); the 16-byte value adds `get_engine()` to the list. No zero-cost airtight design
-exists while the stamp is a pointer into engine-lifetime memory; see the report for the options awaiting a ruling.
+A stamp points into its engine's memory, so a value must not outlive its engine. Inside the engine that holds by
+construction (the engine is alive while it executes). At the edge:
+
+- **Values handed out hold the engine.** `held_value` (value.hpp) is a `script_value` with a `shared_ptr<engine>` base
+  destroyed after the value. `engine::execute` (every overload), `execute_file` and `get_variable` return it, so a host
+  keeps a result, a container, a string or an instance readable for as long as it keeps the value. A plain
+  `script_value` copy (a C++ bound function's argument, a value read out of a container) costs nothing and lives as long
+  as the engine. Bindings treat a `held_value` passed back in as the `script_value` it is (`detail::is_script_value_v`).
+- **Engines that exchange values share one lifetime.** When a value of engine A enters engine B (`add_global`), the two
+  join one lifetime group (`engine::share_lifetime_with`). `engine::make`'s deleter parks an engine whose last handle
+  goes while another member still has one, and destroys every member when the last member's last handle goes. B's
+  stamps written into A's containers stay readable while A lives, with no work on any store path and no reference cycle
+  (the group holds only parked members). A `weak_ptr` to a parked engine reads expired.
+- Values that cross between engines through host code other than `add_global` (a call argument, a host write into a
+  container) join no group; the cross-engine handoff is `add_global`.
+
+Tests: Review Regressions `held_values_outlive_their_engine_handle`, `exchanged_engines_share_a_lifetime` and the
+existing `cross_engine_reference_no_foreign_twin_stamp` (which crashed on vm-reference under the Debug heap's freed fill
+before the group existed).
 
 ## Verdict at stage 2
 

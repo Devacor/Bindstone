@@ -404,17 +404,17 @@ public:
                     string name = "";
                     int value = 0;
                     weak_ptr<ScriptNode> parent = weak_ptr<ScriptNode>();
-                    array<ScriptNode> children = [];
+                    array<shared_ptr<ScriptNode>> children = [];
 
                     ScriptNode(string n, int val) {
                         name = n;
                         value = val;
                     }
 
-                    auto add_child(ScriptNode child) {
-                        // Set parent on the child - when child is shared_ptr, this modifies the actual object
+                    auto add_child(shared_ptr<ScriptNode> child) {
+                        // the handle names the caller's node: the parent link lands in it
                         child.parent = weak_from_this();
-                        // Push shared_ptr - won't be cloned because it has jai_shared_ptr_type
+                        // a shared_ptr element keeps the handle (a ScriptNode element would hold a copy)
                         children.push(child);
                         print("[add_child] Added child '" + child.name + "' to '" + name + "'. Children count now: " + to_string(children.size()));
                     }

@@ -2323,8 +2323,8 @@ public:
             check_quad(q("array<K> ks = [K(1)]; type_of(ks) + \"|\" + type_of(ks[0])").c_str(), "array|K", "type_of");
             check_quad(q("array<K> ks = [K(1), K(2)]; to_json(ks)").c_str(), "[{\"$type\":\"K\",\"$val\":{\"a\":1}},{\"$type\":\"K\",\"$val\":{\"a\":2}}]", "json");
             check_quad(q("array<K> a = [K(1)]; array<K> b = a; array<K> c = [K(2)]; to_string(a == b) + \",\" + to_string(a == c) + \",\" + to_string(same_object(a, b))").c_str(), "true,false,false", "equality is memberwise (a copy equals its source, identity via same_object)");
-            check_quad(q("shared_ptr<K> sp = K(7); array<K> ks = [sp]; sp.a = 8; to_string(ks[0].a) + \"|\" + type_of(ks[0])").c_str(), "8|K", "a shared_ptr element shares its instance");
-            check_quad(q("shared_ptr<K> sp = K(7); array<K> ks = [sp]; auto c = ks; c[0].a = 9; to_string(ks[0].a) + \",\" + to_string(sp.a)").c_str(), "9,9", "copying an array keeps a shared element shared (C++ copy semantics)");
+            check_quad(q("shared_ptr<K> sp = K(7); array<K> ks = [sp]; sp.a = 8; to_string(ks[0].a) + \"|\" + type_of(ks[0])").c_str(), "7|K", "a handle stored into a class element copies its instance");
+            check_quad(q("shared_ptr<K> sp = K(7); array<shared_ptr<K>> ks = [sp]; auto c = ks; c[0].a = 9; to_string(ks[0].a) + \",\" + to_string(sp.a)").c_str(), "9,9", "copying an array keeps a shared element shared (C++ copy semantics)");
             check_quad(q("array<K> ks = [K(1), K(2), K(3)]; to_string(array::filter(ks, [](K k) { return k.a > 1; }).size())").c_str(), "2", "filter");
             check_quad(q("array<K> ks = [K(1)]; ks.clear(); ks.push(K(4)); to_string(ks.size()) + \":\" + to_string(ks[0].a)").c_str(), "1:4", "clear then push");
             check_quad(q("array<K> ks = [K(1)]; var v = ks; string r = \"\"; try { v.push(5); } catch (e) { r = e; } v.push(K(2)); v = 5; r + \"|\" + type_of(v)").c_str(), "Cannot push 'int' to array<K>|int", "a var copy keeps array<K>, the var stays a var");

@@ -131,7 +131,8 @@ namespace jai::detail {
 	// class declares no reset() of its own (a class's method wins over the builtin)
 	inline bool handle_reset_applies(const script_value& v, uint64_t reset_id) {
 		if (v.raw_storage_index() == script_value::TYPEID_WEAK_PTR) { return true; }
-		if (v.is_null() || !is_resettable_handle(v)) { return false; }
+		if (v.is_null()) { return is_resettable_handle(v); }   // an empty shared_ptr<T> resets as C++'s does
+		if (!is_resettable_handle(v)) { return false; }
 		if (auto instance = const_cast<script_value&>(v).get_class_instance()) {
 			if (const class_definition* cd = instance->get_class_definition(); cd && cd->defines_method(reset_id)) { return false; }
 		}
@@ -147,6 +148,58 @@ namespace jai::detail {
 		const type_info_ptr tag = storage->get_type_info();
 		*storage = script_value(std::monostate{}, eng);
 		storage->set_type_info(tag);
+	}
+
+	// The failing texts of p.reset(h), built on the failing path alone
+	JAI_NOINLINE inline checked_result<void> reset_argument_not_handle(const script_value& arg, engine* eng) {
+		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+			"reset(h) takes a handle (new T(), make_shared<T>() or a shared_ptr), not {0}", eng->get_symbolizer()->intern(slot_source_type_name(arg, eng)));
+	}
+	JAI_NOINLINE inline checked_result<void> reset_class_refused(const std::string& held, const script_value& arg, engine* eng) {
+		string_symbolizer* symbols = eng->get_symbolizer();
+		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), "Cannot reset shared_ptr<{0}> to a shared_ptr<{1}>",
+			symbols->intern(held), symbols->intern(shared_handle_judged_class(arg, eng)));
+	}
+
+	// p.reset(h), C++ p.reset(new T()): the receiver's storage takes h's handle (an empty one when h is null), and the object p held
+	// stays with its other owners; nothing writes through it and no operator= runs. h is a handle whose class the receiver admits
+	// as a shared_ptr<T> assignment does (an upcast, never a downcast or an unrelated class); a var holding a handle admits the
+	// class of the object it holds. The receiver keeps its own tag (a var stays rebindable). A receiver that names no storage
+	// (a call result) is a temporary: nothing is stored
+	inline checked_result<void> reset_handle_to(script_value* storage, const script_value& receiver, const script_value& arg_in, engine* eng) {
+		const script_value& arg = arg_in.is_reference() ? arg_in.deref() : arg_in;
+		if (arg.is_null()) {
+			reset_handle_storage(storage, eng);
+			return {};
+		}
+		const type_info* arg_tag = arg.type_info_raw();
+		if (arg.raw_storage_index() != script_value::TYPEID_OBJECT || !arg_tag || arg_tag->base_type != script_value_type::jai_shared_ptr_type) {
+			return reset_argument_not_handle(arg, eng);
+		}
+		const script_value& held = storage ? *storage : receiver;
+		const type_info_ptr tag = held.get_type_info();
+		if (tag && !tag->dynamic_pointee) {
+			if (!shared_handle_admits(arg, tag, eng)) {
+				const type_info* pointee = tag->element_type().get();
+				return reset_class_refused(pointee ? pointee->type_name : std::string(), arg, eng);
+			}
+		} else if (!held.is_null()) {
+			const std::string held_class = shared_handle_judged_class(held, eng);
+			const std::string* judged = shared_handle_judged_class_name(arg, eng);
+			if (!held_class.empty() && judged && *judged != held_class) {
+				auto judged_def = eng->get_class_definition(*judged);
+				if (judged_def && !judged_def->is_subtype_of(held_class)) { return reset_class_refused(held_class, arg, eng); }
+			}
+		}
+		if (!storage) { return {}; }
+		script_value repointed = arg;   // the handle itself: the new object is shared, never copied
+		if (tag && !tag->dynamic_pointee) {
+			repointed.set_type_info(tag);
+		} else if (!arg_tag->dynamic_pointee && arg_tag->element_type()) {
+			repointed.set_type_info(eng->get_type_info_shared_ptr_dynamic(arg_tag->element_type().get()));
+		}
+		*storage = std::move(repointed);
+		return {};
 	}
 
 } // namespace jai::detail

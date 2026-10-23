@@ -262,7 +262,16 @@ poke(sp);
 print("after poke: {}", sp.x);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">sp.x = 99 (shared!)
 after poke: 42</code></pre></div>
-<p><code>new P()</code> is the direct spelling for a handle (<code>shared_ptr&lt;P&gt; sp = P();</code> wraps a value the same way), and every copy of the handle shares the object. <code>make_shared&lt;P&gt;(args)</code> is the same expression as <code>new P(args)</code>: the same handle, constructor choice, checked type and errors. A bare <code>make_shared</code> not followed by <code>&lt;</code> is an ordinary name, so a function of that name stays callable. <code>weak_ptr&lt;T&gt;</code> observes a handle without owning it:</p>
+<p><code>new P()</code> is the direct spelling for a handle (<code>shared_ptr&lt;P&gt; sp = P();</code> wraps a value the same way), and every copy of the handle shares the object. <code>make_shared&lt;P&gt;(args)</code> is the same expression as <code>new P(args)</code>: the same handle, constructor choice, checked type and errors. A bare <code>make_shared</code> not followed by <code>&lt;</code> is an ordinary name, so a function of that name stays callable.</p>
+<p>A handle on the right of <code>=</code> points the variable at another object (<code>sp = new P();</code>); a value on the right assigns into the object it shares (<code>sp = P();</code>, every alias sees it). <code>sp.reset(h)</code> is the explicit repoint, C++&#x27;s <code>sp.reset(new P())</code>: <code>sp</code> takes <code>h</code>&#x27;s object, the object it held stays with its other owners, and nothing writes through it or runs <code>operator=</code>. <code>h</code> is a handle, <code>new P()</code>, <code>make_shared&lt;P&gt;()</code> or another <code>shared_ptr</code> (a null one empties <code>sp</code>), of a class <code>sp</code> admits as an assignment would; a value or a primitive raises. <code>sp.reset()</code> empties it.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 3; }
+shared_ptr&lt;P&gt; sp = new P();
+shared_ptr&lt;P&gt; alias = sp;
+sp.reset(new P());        // sp names a new object; alias keeps the old one
+sp.x = 7;
+print("{} {} {}", sp.x, alias.x, same_object(sp, alias));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">7 3 false</code></pre></div>
+<p><code>weak_ptr&lt;T&gt;</code> observes a handle without owning it:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 3; }
 shared_ptr&lt;P&gt; sp = P();
 weak_ptr&lt;P&gt; w = sp;

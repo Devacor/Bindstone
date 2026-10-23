@@ -1397,12 +1397,60 @@ public:
                 {"var d = new C(); weak_ptr<C> w = weak_ptr<C>(d); w.reset(); to_string(w.lock() == null) + \" \" + to_string(d.v)", "true 1"},
                 {"make().reset(); to_string(keep == null) + \" \" + to_string(keep.v)", "false 1"},
                 {"function local() -> bool { var x = new C(); x.reset(); return x == null; } to_string(local())", "true"},
-                {"var c = new C(); string m = \"\"; try { c.reset(1); } catch (err) { m = err; } m + \" \" + to_string(c == null)", "reset() takes no arguments false"},
+                {"var c = new C(); string m = \"\"; try { c.reset(1); } catch (err) { m = err; } m + \" \" + to_string(c == null)", "reset(h) takes a handle (new T(), make_shared<T>() or a shared_ptr), not int false"},
+                {"var d = new C(); weak_ptr<C> w = weak_ptr<C>(d); string m = \"\"; try { w.reset(d); } catch (err) { m = err; } m", "reset() takes no arguments"},
             };
             for (const auto& [source, expected] : cases) {
                 auto e = make_engine();
                 stdlib::register_all(*e);
                 check_eq(std::string(expected), e->execute(prelude + source).as<std::string>(), source);
+            }
+        });
+
+        // C++ `p.reset(new T())`: p.reset(h) points the receiver at h's object, leaves the object it held to its other owners and
+        // never writes through it or runs operator=; h is a handle of a class the receiver admits, as a shared_ptr<T> assignment
+        test("handle_reset_with_a_handle_repoints_the_receiver", [this]() {
+            const std::string prelude =
+                "class C { int v = 1; void operator=(C o) { v = 1000; } } class D : C { int w = 2; } class U { int u = 3; } "
+                "class H { shared_ptr<C> p; } function fresh(int v) -> shared_ptr<C> { var c = new C(); c.v = v; return c; } ";
+            const std::pair<const char*, const char*> cases[] = {
+                {"shared_ptr<C> p = new C(); shared_ptr<C> a = p; p.reset(fresh(5)); to_string(p.v) + \" \" + to_string(a.v) + \" \" + to_string(same_object(p, a))", "5 1 false"},
+                {"var p = new C(); var a = p; p.reset(new C()); to_string(p.v) + \" \" + to_string(a.v) + \" \" + to_string(same_object(p, a))", "1 1 false"},
+                {"shared_ptr<C> p = new C(); shared_ptr<C> q = fresh(7); p.reset(q); to_string(same_object(p, q)) + \" \" + to_string(p.v)", "true 7"},
+                {"shared_ptr<C> p = new C(); p.reset(make_shared<C>()); to_string(p.v)", "1"},
+                {"shared_ptr<C> p = new C(); p.reset(new D()); type_of(p)", "D"},
+                {"shared_ptr<C> p = new C(); shared_ptr<C> n = null; p.reset(n); to_string(p == null)", "true"},
+                {"shared_ptr<C> p = new C(); p.reset(null); to_string(p == null)", "true"},
+                {"shared_ptr<C> p = null; p.reset(fresh(4)); to_string(p.v)", "4"},
+                {"var h = H(); h.p = new C(); var old = h.p; h.p.reset(fresh(6)); to_string(h.p.v) + \" \" + to_string(old.v)", "6 1"},
+                {"var arr = [new C()]; var old = arr[0]; arr[0].reset(fresh(8)); to_string(arr[0].v) + \" \" + to_string(old.v)", "8 1"},
+                {"function local() -> int { shared_ptr<C> x = new C(); x.reset(fresh(9)); return x.v; } to_string(local())", "9"},
+                {"var p = new C(); string m = \"\"; try { p.reset(C()); } catch (err) { m = err; } m + \" \" + to_string(p.v)", "reset(h) takes a handle (new T(), make_shared<T>() or a shared_ptr), not C 1"},
+                {"var p = new D(); var c = new C(); string m = \"\"; try { p.reset(c); } catch (err) { m = err; } m", "Cannot reset shared_ptr<D> to a shared_ptr<C>"},
+                {"var p = new C(); var u = new U(); string m = \"\"; try { p.reset(u); } catch (err) { m = err; } m", "Cannot reset shared_ptr<C> to a shared_ptr<U>"},
+                {"shared_ptr<C> p = new C(); var u = new U(); string m = \"\"; try { p.reset(u); } catch (err) { m = err; } m", "Cannot reset shared_ptr<C> to a shared_ptr<U>"},
+                {"var p = new C(); string m = \"\"; try { p.reset(new C(), new C()); } catch (err) { m = err; } m", "reset() takes at most one argument"},
+            };
+            for (const auto& [source, expected] : cases) {
+                auto e = make_engine();
+                stdlib::register_all(*e);
+                std::string got;
+                try { got = e->execute(prelude + source).as<std::string>(); } catch (const std::exception& error) { got = std::string("THREW ") + error.what(); }
+                check_eq(std::string(expected), got, source);
+            }
+            // the checker reports a misuse it can see at load
+            const std::pair<const char*, const char*> loads[] = {
+                {"shared_ptr<C> p = new C(); p.reset(5);", "reset(h) takes a handle (new T(), make_shared<T>() or a shared_ptr), not int"},
+                {"shared_ptr<C> p = new C(); p.reset(C());", "reset(h) takes a handle (new T(), make_shared<T>() or a shared_ptr), not C"},
+                {"shared_ptr<C> p = new C(); p.reset(new U());", "Cannot reset shared_ptr<C> to a shared_ptr<U>"},
+                {"shared_ptr<C> p = new C(); p.reset(new C(), new C());", "reset() takes at most one argument"},
+            };
+            for (const auto& [source, expected] : loads) {
+                auto e = make_engine();
+                stdlib::register_all(*e);
+                std::string got;
+                try { e->execute(prelude + source); got = "loaded"; } catch (const std::exception& error) { got = error.what(); }
+                check_true(got.find(expected) != std::string::npos, std::string(source) + " -> " + got);
             }
         });
 

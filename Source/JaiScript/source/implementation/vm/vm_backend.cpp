@@ -9721,7 +9721,7 @@ op_status vm_backend::cells_land(frame& f, const chunk::cell_loop& loop, const c
 	}
 	const uint8_t kind = static_cast<uint8_t>(vi);
 	const int64_t bits = kind == kint ? static_cast<int64_t>(top.unchecked_as_int()) : vi == script_value::TYPEID_FLOAT ? cell_bits_of_float(top.unchecked_as_float()) : (top.unchecked_as_bool() ? 1 : 0);
-	if (!cell_land(f, loop, cc.dst, kind, bits)) { JAI_CELLS_COUNT(13); return miss(); }
+	if (!cell_land_fast(f, loop, cc.dst, kind, bits)) { JAI_CELLS_COUNT(13); return miss(); }
 	stack_.pop_back();
 	++f.ip;
 	return {};
@@ -10460,7 +10460,7 @@ op_status vm_backend::exec_c_arith_any(frame& f, size_t& ip, const vm_instructio
 		}
 		kind = kflt; out = cell_bits_of_float(r);
 	}
-	if (!ok || !cell_land(f, loop, dk, kind, out)) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
+	if (!ok || !cell_land_fast(f, loop, dk, kind, out)) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
 	++ip;
 	return {};
 }
@@ -10481,9 +10481,9 @@ op_status vm_backend::exec_c_neg(frame& f, size_t& ip, const vm_instruction& ins
 	if (sk == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 		script_int r;
 		if (!ints::try_neg(static_cast<script_int>(sb), r)) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
-		if (!cell_land(f, loop, ins.a, sk, static_cast<int64_t>(r))) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
+		if (!cell_land_fast(f, loop, ins.a, sk, static_cast<int64_t>(r))) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
 	} else if (sk == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
-		if (!cell_land(f, loop, ins.a, sk, cell_bits_of_float(-cell_float_of_bits(sb)))) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
+		if (!cell_land_fast(f, loop, ins.a, sk, cell_bits_of_float(-cell_float_of_bits(sb)))) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
 	} else { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
 	++ip;
 	return {};
@@ -10502,7 +10502,7 @@ op_status vm_backend::exec_c_bnot(frame& f, size_t& ip, const vm_instruction& in
 		if (cr.kinds[ins.b] != static_cast<uint8_t>(script_value::TYPEID_INT)) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
 		sb = cr.payload[ins.b];
 	}
-	if (!cell_land(f, loop, ins.a, static_cast<uint8_t>(script_value::TYPEID_INT), ~sb)) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
+	if (!cell_land_fast(f, loop, ins.a, static_cast<uint8_t>(script_value::TYPEID_INT), ~sb)) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
 	++ip;
 	return {};
 }
@@ -10512,7 +10512,7 @@ op_status vm_backend::exec_c_lnot(frame& f, size_t& ip, const vm_instruction& in
 	JAI_CELLS_COUNT(7);
 	const chunk::cell_loop& loop = *cr.loop;
 	bool truthy;
-	if (!cell_truthy(f, ins.b, truthy) || !cell_land(f, loop, ins.a, static_cast<uint8_t>(script_value::TYPEID_BOOL), truthy ? 0 : 1)) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
+	if (!cell_truthy(f, ins.b, truthy) || !cell_land_fast(f, loop, ins.a, static_cast<uint8_t>(script_value::TYPEID_BOOL), truthy ? 0 : 1)) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
 	++ip;
 	return {};
 }
@@ -10522,7 +10522,7 @@ op_status vm_backend::exec_c_cmpval(frame& f, size_t& ip, const vm_instruction& 
 	const chunk::cell_loop& loop = *cr.loop;
 	bool truthy;
 	const vm_instruction cmp{opcode::op_c_cmp_any, (ins.a & ~k_cell_index_mask) | ins.b, ins.c, 0};   // the compare kernel reads left from a, right from b
-	if ((!cell_cmp_any(f, cmp, truthy) && !cell_cmp_text(f, cmp, truthy)) || !cell_land(f, loop, ins.a & k_cell_index_mask, static_cast<uint8_t>(script_value::TYPEID_BOOL), truthy ? 1 : 0)) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 3); return {}; }
+	if ((!cell_cmp_any(f, cmp, truthy) && !cell_cmp_text(f, cmp, truthy)) || !cell_land_fast(f, loop, ins.a & k_cell_index_mask, static_cast<uint8_t>(script_value::TYPEID_BOOL), truthy ? 1 : 0)) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 3); return {}; }
 	++ip;
 	return {};
 }
@@ -10584,7 +10584,7 @@ op_status vm_backend::exec_c_math(frame& f, const vm_instruction& ins, const cel
 		};
 		detail::scalar_num a, b, out;
 		if (!operand(ins.b, a) || !operand(ins.c, b) || !detail::eval_scalar_pair(fn, a, b, out)) return miss();
-		if (!cell_land(f, loop, dk, static_cast<uint8_t>(out.is_int ? script_value::TYPEID_INT : script_value::TYPEID_FLOAT), out.is_int ? static_cast<int64_t>(out.i) : cell_bits_of_float(out.f))) return miss();
+		if (!cell_land_fast(f, loop, dk, static_cast<uint8_t>(out.is_int ? script_value::TYPEID_INT : script_value::TYPEID_FLOAT), out.is_int ? static_cast<int64_t>(out.i) : cell_bits_of_float(out.f))) return miss();
 		++f.ip;
 		return {};
 	}
@@ -10633,7 +10633,7 @@ op_status vm_backend::exec_c_math(frame& f, const vm_instruction& ins, const cel
 		break;
 	}
 	}
-	if (!cell_land(f, loop, dk, kind, bits)) return miss();
+	if (!cell_land_fast(f, loop, dk, kind, bits)) return miss();
 	++f.ip;
 	return {};
 }
@@ -10773,7 +10773,7 @@ op_status vm_backend::exec_c_mload(frame& f, const vm_instruction& ins) {
 	else if (vk == script_value::TYPEID_FLOAT) { kind = static_cast<uint8_t>(script_value::TYPEID_FLOAT); bits = cell_bits_of_float(fv->unchecked_as_float()); }
 	else if (vk == script_value::TYPEID_BOOL) { kind = static_cast<uint8_t>(script_value::TYPEID_BOOL); bits = fv->unchecked_as_bool() ? 1 : 0; }
 	else return miss();
-	if (!cell_land(f, loop, ins.a, kind, bits)) return miss();
+	if (!cell_land_fast(f, loop, ins.a, kind, bits)) return miss();
 	++f.ip;
 	return {};
 }

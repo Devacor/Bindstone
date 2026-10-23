@@ -1,4 +1,5 @@
 #pragma once
+#include <type_traits>
 
 #ifndef __JAISCRIPT_JAISCRIPT_FWD_HPP__
 #define __JAISCRIPT_JAISCRIPT_FWD_HPP__
@@ -31,6 +32,11 @@ namespace jai {
     
     class engine;
     class script_value;
+    class held_value;
+    namespace detail {
+        // a binding treats a held value (an execute result the host passes back in) as the script_value it is
+        template <typename T> inline constexpr bool is_script_value_v = std::is_same_v<std::remove_cvref_t<T>, script_value> || std::is_same_v<std::remove_cvref_t<T>, held_value>;
+    }
     class type_info;
     class wrapped_function;
     class class_definition;

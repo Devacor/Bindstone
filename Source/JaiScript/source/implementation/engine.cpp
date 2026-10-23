@@ -775,6 +775,7 @@ struct engine::implementation {
     };
     type_info_arena type_arena_;
     std::unordered_map<type_key, type_info*, type_key_hash> type_infos_;
+    struct engine_lifetime_group* lifetime_group = nullptr;   // shared by every engine this one exchanged values with
 
     // Secondary index for O(1) lookup by type ID (stores pointers into type_infos_)
     std::unordered_map<uint64_t, type_info*> type_id_index_;
@@ -2359,7 +2360,48 @@ checked_result<void> host_reference_store(engine* eng, const host_slot& slot, sc
 
 }
 
+struct engine_lifetime_group {
+    std::mutex lock;
+    std::vector<engine*> members;
+    std::vector<engine*> parked;   // members whose last handle went while another member lived
+    size_t live = 0;
+};
+
+void engine::share_lifetime_with(engine* other) {
+    if (!other || other == this) { return; }
+    for (;;) {
+        engine_lifetime_group* mine = impl->lifetime_group;
+        engine_lifetime_group* theirs = other->impl->lifetime_group;
+        if (mine == theirs) { return; }
+        engine_lifetime_group* first = mine < theirs ? mine : theirs;
+        engine_lifetime_group* second = mine < theirs ? theirs : mine;
+        std::scoped_lock both(first->lock, second->lock);
+        if (impl->lifetime_group != mine || other->impl->lifetime_group != theirs) { continue; }
+        for (engine* member : theirs->members) { member->impl->lifetime_group = mine; mine->members.push_back(member); }
+        mine->parked.insert(mine->parked.end(), theirs->parked.begin(), theirs->parked.end());
+        mine->live += theirs->live;
+        theirs->members.clear(); theirs->parked.clear(); theirs->live = 0;
+        break;
+    }
+}
+
+void engine::release_handle(engine* eng) noexcept {
+    engine_lifetime_group* group = eng->impl->lifetime_group;
+    std::vector<engine*> doomed;
+    {
+        std::scoped_lock hold(group->lock);
+        if (--group->live > 0) { group->parked.push_back(eng); return; }
+        doomed.swap(group->parked);
+    }
+    doomed.push_back(eng);
+    for (engine* member : doomed) { delete member; }
+    delete group;
+}
+
 engine::engine() : impl(std::make_unique<implementation>()) {
+    impl->lifetime_group = new engine_lifetime_group;
+    impl->lifetime_group->members.push_back(this);
+    impl->lifetime_group->live = 1;
     for (auto& [key, info] : impl->type_infos_) { info->owner = this; }
 }
 
@@ -2859,12 +2901,23 @@ void engine::initialize_engine_reference() {
 }
 
 
-script_value engine::execute(const std::string& scriptContent) {
+held_value& held_value::operator=(script_value value) {
+    std::shared_ptr<engine> holder = value.get_engine() ? value.get_engine()->weak_from_this().lock() : nullptr;
+    static_cast<script_value&>(*this) = std::move(value);
+    engine_ref = std::move(holder);
+    return *this;
+}
+
+held_value engine::hold(script_value result) const {
+    return held_value(std::move(result), std::const_pointer_cast<engine>(weak_from_this().lock()));
+}
+
+held_value engine::execute(const std::string& scriptContent) {
     return execute(scriptContent, instance_variables{});
 }
 
-script_value engine::execute(const std::string& scriptContent, const instance_variables& instanceVars) {
-    return execute_source(scriptContent, instanceVars, "<script>");
+held_value engine::execute(const std::string& scriptContent, const instance_variables& instanceVars) {
+    return hold(execute_source(scriptContent, instanceVars, "<script>"));
 }
 
 script_value engine::execute_file_source(const std::string& resolvedPath, const std::string& content) {
@@ -2884,7 +2937,9 @@ script_value engine::execute_include_source(const std::string& resolvedPath, con
     return execute_source(content, instance_variables{}, resolvedPath, true, scope);
 }
 
-script_value engine::execute(script_source source) {
+held_value engine::execute(script_source source) { return hold(execute_unheld(source)); }
+
+script_value engine::execute_unheld(script_source source) {
     if (source.literal()) {
         auto it = impl->literal_script_cache.find({source.data(), source.size()});
         if (it != impl->literal_script_cache.end()) {
@@ -3082,7 +3137,9 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
     }
 }
 
-script_value engine::execute(jai::jaibite& bite) {
+held_value engine::execute(jai::jaibite& bite) { return hold(execute_unheld(bite)); }
+
+script_value engine::execute_unheld(jai::jaibite& bite) {
     impl->has_executed_ = true;
     check_bite(bite, nullptr);   // diagnostics once (warn/strict); proofs re-stamp on surface moves
     backend()->prepare_for_execution();
@@ -3409,11 +3466,15 @@ uint64_t engine::registration_fingerprint() const {
     return hash;
 }
 
-script_value engine::execute_file(const std::string& scriptPath) {
+held_value engine::execute_file(const std::string& scriptPath) {
     return execute_file(scriptPath, instance_variables{});
 }
 
-script_value engine::execute_file(const std::string& scriptPath, const instance_variables& instanceVars) {
+held_value engine::execute_file(const std::string& scriptPath, const instance_variables& instanceVars) {
+    return hold(execute_file_unheld(scriptPath, instanceVars));
+}
+
+script_value engine::execute_file_unheld(const std::string& scriptPath, const instance_variables& instanceVars) {
     auto allowed = require_privilege(privilege::filesystem);
     if (!allowed) { throw runtime_error(format_error(allowed)); }
     // File fast lane (parse-avoidance ladder): canonical-path key + one-stat gate. A
@@ -3538,6 +3599,7 @@ std::string engine::jaibite_cache_path(const std::string& sourcePath) const {
 }
 
 void engine::add_global(const std::string& name, script_value value, bool is_serializable) {
+    share_lifetime_with(value.get_engine());
     if (is_const_global(name)) { throw runtime_error("Cannot assign to '" + name + "': it is read-only"); }   // internal/const.md
     ++impl->check_surface_epoch_;   // the static checker can see globals
     // Intern the name and get a stable string_view for tracking
@@ -3837,7 +3899,9 @@ std::shared_ptr<class_definition> engine::get_class_definition(uint64_t type_id)
     return nullptr;
 }
 
-script_value engine::get_variable(const std::string& name) const {
+held_value engine::get_variable(const std::string& name) const { return hold(get_variable_unheld(name)); }
+
+script_value engine::get_variable_unheld(const std::string& name) const {
     // Use backend to properly handle references
     try {
         return backend()->get_variable(name);

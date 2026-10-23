@@ -30,7 +30,7 @@ std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng
 
     // The registry is probed once per array, not once per element
     std::shared_ptr<conversions::conversion_registry> registry;
-    if constexpr (!std::is_same_v<T, script_value>) {
+    if constexpr (!detail::is_script_value_v<T>) {
         if (eng) {
             registry = get_engine_conversion_registry(eng);
             if (registry && !registry->template has_conversion<T>()) { registry.reset(); }
@@ -78,7 +78,7 @@ std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng
         }
     }
     node->for_each(eng, [&](const script_value& elem) {
-        if constexpr (std::is_same_v<T, script_value>) {
+        if constexpr (detail::is_script_value_v<T>) {
             result.push_back(elem);
         } else {
             if (registry) {
@@ -113,7 +113,7 @@ std::map<K, V> convert_script_map_to_stdmap(const script_value& v, engine* eng) 
     // members (hard error inside vector::operator=). Copy construction is all we require.
     auto registry = eng ? get_engine_conversion_registry(eng) : nullptr;
     auto convertedKey = [&](const script_value& k) -> K {
-        if constexpr (std::is_same_v<K, script_value>) {
+        if constexpr (detail::is_script_value_v<K>) {
             return k;
         } else {
             if (registry && registry->template has_conversion<K>()) {
@@ -123,7 +123,7 @@ std::map<K, V> convert_script_map_to_stdmap(const script_value& v, engine* eng) 
         }
     };
     auto convertedValue = [&](const script_value& val) -> V {
-        if constexpr (std::is_same_v<V, script_value>) {
+        if constexpr (detail::is_script_value_v<V>) {
             return val;
         } else {
             if (registry && registry->template has_conversion<V>()) {

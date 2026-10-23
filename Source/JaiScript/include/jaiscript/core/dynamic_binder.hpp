@@ -246,7 +246,7 @@ namespace dynamic_binder_validation {
                !is_std_container<inner_type>::value &&
                !is_signal_type<inner_type>::value &&
                !is_std_function<inner_type>::value &&
-               !std::is_same_v<inner_type, script_value> &&
+               !detail::is_script_value_v<inner_type> &&
                std::is_class_v<inner_type>;
     }
 
@@ -313,7 +313,7 @@ namespace detail {
 	inline constexpr bool host_member_value = (std::is_integral_v<P> && !std::is_same_v<P, char> && !std::is_same_v<P, signed char> &&
 	                                           !std::is_same_v<P, unsigned char> && !std::is_same_v<P, wchar_t> && !std::is_same_v<P, char8_t> &&
 	                                           !std::is_same_v<P, char16_t> && !std::is_same_v<P, char32_t>) ||
-	                                          std::is_floating_point_v<P> || std::is_same_v<P, std::string> || std::is_same_v<P, script_value>;
+	                                          std::is_floating_point_v<P> || std::is_same_v<P, std::string> || detail::is_script_value_v<P>;
 
 	template<typename P>
 	script_value host_member_read(const void* address, engine* eng) {
@@ -336,7 +336,7 @@ namespace detail {
 		} else if constexpr (std::is_same_v<P, std::string>) {
 			if (kind != script_value::TYPEID_STRING) { return false; }
 			*static_cast<P*>(address) = std::string(std::string_view(value.unchecked_as_string()));
-		} else if constexpr (std::is_same_v<P, script_value>) {
+		} else if constexpr (detail::is_script_value_v<P>) {
 			// a held reference stores through itself with its container's element type (the setter's business); a scalar or
 			// a string clones as itself
 			script_value& held = *static_cast<script_value*>(address);
@@ -714,7 +714,7 @@ public:
         if constexpr (is_specialization_v<D, std::shared_ptr>) {
             return std::is_class_v<typename D::element_type> && !(std::is_lvalue_reference_v<P> && !std::is_const_v<std::remove_reference_t<P>>);
         } else if constexpr (std::is_class_v<D>) {
-            return !std::is_same_v<D, std::string> && !std::is_same_v<D, script_value> && !math_adapted<D> &&
+            return !std::is_same_v<D, std::string> && !detail::is_script_value_v<D> && !math_adapted<D> &&
                    !dynamic_binder_validation::is_std_container<D>::value && !dynamic_binder_validation::is_std_function<D>::value &&
                    !is_specialization_v<D, std::weak_ptr> && !is_specialization_v<D, std::unique_ptr> &&
                    (std::is_reference_v<P> || std::is_copy_constructible_v<D>);
@@ -727,7 +727,7 @@ public:
         using D = std::remove_cvref_t<P>;
         if constexpr (lane_object_param<P>()) { return true; }
         else if constexpr (std::is_reference_v<P> && !std::is_const_v<std::remove_reference_t<P>>) { return false; }
-        else if constexpr (std::is_same_v<D, bool> || std::is_same_v<D, std::string> || std::is_same_v<D, script_value> || std::is_floating_point_v<D>) { return true; }
+        else if constexpr (std::is_same_v<D, bool> || std::is_same_v<D, std::string> || detail::is_script_value_v<D> || std::is_floating_point_v<D>) { return true; }
         else if constexpr (std::is_integral_v<D>) {
             return !std::is_same_v<D, char> && !std::is_same_v<D, signed char> && !std::is_same_v<D, unsigned char> && !std::is_same_v<D, wchar_t> &&
                    !std::is_same_v<D, char8_t> && !std::is_same_v<D, char16_t> && !std::is_same_v<D, char32_t>;
@@ -748,7 +748,7 @@ public:
             }
             return k == script_value::TYPEID_OBJECT || k == script_value::TYPEID_SHARED_PTR;
         }
-        else if constexpr (std::is_same_v<D, script_value>) { return true; }
+        else if constexpr (detail::is_script_value_v<D>) { return true; }
         else if constexpr (std::is_same_v<D, bool>) { return k == script_value::TYPEID_BOOL; }
         else if constexpr (std::is_integral_v<D>) { return k == script_value::TYPEID_INT && std::in_range<D>(a.unchecked_as_int()); }
         else if constexpr (std::is_floating_point_v<D>) { return k == script_value::TYPEID_INT || k == script_value::TYPEID_FLOAT; }
@@ -761,7 +761,7 @@ public:
     static bool lane_exact_arg(const script_value& a) {
         using D = std::remove_cvref_t<P>;
         const size_t k = a.raw_storage_index();
-        if constexpr (lane_object_param<P>() || std::is_same_v<D, script_value>) { return false; }
+        if constexpr (lane_object_param<P>() || detail::is_script_value_v<D>) { return false; }
         else if constexpr (std::is_same_v<D, bool>) { return k == script_value::TYPEID_BOOL; }
         else if constexpr (std::is_integral_v<D>) { return k == script_value::TYPEID_INT && std::in_range<D>(a.unchecked_as_int()); }
         else if constexpr (std::is_floating_point_v<D>) { return k == script_value::TYPEID_FLOAT; }
@@ -1197,7 +1197,7 @@ private:
         else if constexpr (std::is_class_v<P> &&
                            !math_adapted<P> &&
                            !std::is_same_v<P, std::string> &&
-                           !std::is_same_v<P, script_value> &&
+                           !detail::is_script_value_v<P> &&
                            !dynamic_binder_validation::is_std_container<P>::value &&
                            !dynamic_binder_validation::is_std_function<P>::value &&
                            !is_specialization_v<P, std::shared_ptr> &&
@@ -1223,7 +1223,7 @@ private:
         engine* engine_ptr = st.eng;
         T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], st.native_type_id);
 
-        if constexpr (std::is_same_v<P, script_value>) {
+        if constexpr (detail::is_script_value_v<P>) {
             script_value& held = cpp_obj->*member;
             if (held.is_reference()) {
                 auto stored = detail::store_through_held_reference(held, args[1], engine_ptr);

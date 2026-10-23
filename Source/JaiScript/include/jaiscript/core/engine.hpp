@@ -164,10 +164,15 @@ namespace jai {
         
         // Factory method to ensure engines are always created as shared_ptr
         static std::shared_ptr<engine> make() {
-            auto eng = std::shared_ptr<engine>(new engine());
+            auto eng = std::shared_ptr<engine>(new engine(), &engine::release_handle);
             eng->initialize_engine_reference();
             return eng;
         }
+
+		// Engines that exchanged values share one lifetime (internal/value16_design.md): a value one of them stamped may sit in
+		// another's memory, so the group's engines are destroyed together, when the last handle to any of them goes
+		void share_lifetime_with(engine* other);
+		static void release_handle(engine* eng) noexcept;
 
 		// Address-stable: values, bindings and backends retain this engine's address.
 		// Transfer ownership by moving shared_ptr<engine>, never the engine itself.
@@ -178,22 +183,23 @@ namespace jai {
         
         
         // Primary API - execute methods
-        script_value execute(const std::string& scriptContent);
-        script_value execute(const std::string& scriptContent, const instance_variables& instanceVars);
+        // A result handed out of the engine holds the engine (held_value, value.hpp): its stamps stay readable for as long as the host keeps it
+        held_value execute(const std::string& scriptContent);
+        held_value execute(const std::string& scriptContent, const instance_variables& instanceVars);
 
         // Literal fast lane: execute(script_source("...")) re-executes through a
         // pointer+length-keyed cache — the content is never re-keyed on a hit. A
         // string_view-wrapped dynamic falls through to the content-keyed lane, same
         // semantics as execute(std::string). Only consulted for tagged sources; the
         // std::string overloads are untouched.
-        script_value execute(script_source source);
+        held_value execute(script_source source);
 
         // execute_file attributes the script to `scriptPath`: the path is stamped onto
         // every AST node (file:line:col), so stack traces, error messages, and the
         // debugger name the originating file. Prefer this over execute() for files —
         // the source path is carried for free, no debugging-only parameter to pass.
-        script_value execute_file(const std::string& scriptPath);
-        script_value execute_file(const std::string& scriptPath, const instance_variables& instanceVars);
+        held_value execute_file(const std::string& scriptPath);
+        held_value execute_file(const std::string& scriptPath, const instance_variables& instanceVars);
 
         // Automatic jaibite disk cache (default ON). Every FILE-based load — execute_file,
         // script include (all forms), script import — transparently maintains a cache file
@@ -242,7 +248,7 @@ namespace jai {
         // backend also caches its compiled bytecode inside the bite). Engine-bound —
         // never share a jaibite across engines. Parse errors throw here.
         jai::jaibite jaibite(const std::string& scriptContent);
-        script_value execute(jai::jaibite& bite);
+        held_value execute(jai::jaibite& bite);
 
         // === SUSPENDABLE RUNS (<jaiscript/core/script_run.hpp>; docs/site/embedding/17-host-api.html#suspendable-runs) ===
         // Each starts a run on a native fiber of its own and runs it now, until a sleep suspends it or it ends; the returned
@@ -447,6 +453,7 @@ namespace jai {
 
         // Global registration
         void add_global(const std::string& name, script_value value, bool is_serializable = true);
+        void add_global(const std::string& name, const held_value& value, bool is_serializable = true) { add_global(name, static_cast<const script_value&>(value), is_serializable); }
         
         // Convenience overload for add_global that automatically wraps values
         template<typename T>
@@ -704,6 +711,9 @@ namespace jai {
         script_value make_value(const script_value& value) { return value; }
         script_value make_value(script_value& value) { return value; }
         script_value make_value(script_value&& value) { return std::move(value); }
+        script_value make_value(const held_value& value) { return static_cast<const script_value&>(value); }
+        script_value make_value(held_value& value) { return static_cast<const script_value&>(value); }
+        script_value make_value(held_value&& value) { return static_cast<script_value&&>(value); }
 
         template<typename T>
         requires (std::is_arithmetic_v<std::remove_cvref_t<T>> ||
@@ -994,7 +1004,7 @@ namespace jai {
         );
 
         // Variable access
-        script_value get_variable(const std::string& name) const;
+        held_value get_variable(const std::string& name) const;
         bool has_variable(const std::string& name) const;
         // const program-scope and namespace cells (internal/const.md): marked by their declaration, consulted by the checker and the
         // host's writes (add_global / add_global_ref refuse a const)
@@ -1402,6 +1412,11 @@ namespace jai {
         
         // Execute a file with import tracking
         script_value execute_import(const std::string& resolved_path);
+        script_value execute_unheld(script_source source);
+        script_value execute_unheld(jai::jaibite& bite);
+        script_value execute_file_unheld(const std::string& scriptPath, const instance_variables& instanceVars);
+        script_value get_variable_unheld(const std::string& name) const;
+        held_value hold(script_value result) const;
 
         // Parameter storage for function calls (replaces thread_local)
         detail::parameter_storage* get_current_parameter_storage() const;
@@ -1561,7 +1576,7 @@ namespace jai {
         static param_type_info map_cpp_type_to_param_info() {
             using decay_t = std::decay_t<T>;
 
-            if constexpr (std::is_same_v<decay_t, script_value>) {
+            if constexpr (detail::is_script_value_v<decay_t>) {
                 // Wildcard: a script_value parameter accepts ANY argument type (a generic binding,
                 // e.g. pair(script_value, script_value)). jai_null_type is the sentinel — no real
                 // C++ binding parameter is genuinely null-typed — and the overload scorer gives it a

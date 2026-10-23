@@ -259,6 +259,12 @@ class engine;
             }
         };
 
+        // A held value (an execute result a bound function returns) goes back in as the plain value it holds
+        template<>
+        struct value_converter<held_value> {
+            static script_value to(const script_value& v, engine*) { return v; }
+        };
+
         // Specialization for const script_value& - pass through directly
         template<>
         struct value_converter<const script_value&> {
@@ -586,7 +592,7 @@ class engine;
             else {
                 using D = std::remove_cv_t<std::remove_reference_t<P>>;
                 return std::is_arithmetic_v<D> || std::is_enum_v<D> || std::is_same_v<D, std::string> ||
-                       std::is_same_v<D, script_value> || is_specialization_v<D, std::vector> || is_script_map_like_v<D> ||
+                       detail::is_script_value_v<D> || is_specialization_v<D, std::vector> || is_script_map_like_v<D> ||
                        is_specialization_v<D, std::shared_ptr> || math_adapted<D>;
             }
         }
@@ -628,13 +634,13 @@ class engine;
 
         template<typename T>
         T writeback_decode(const script_value& v, engine* eng) {
-            if constexpr (std::is_same_v<T, script_value>) { return v; }
+            if constexpr (detail::is_script_value_v<T>) { return v; }
             else { return value_converter<T>::from(v, eng); }
         }
 
         template<typename T>
         script_value writeback_encode(const T& t, engine* eng) {
-            if constexpr (std::is_same_v<T, script_value>) { return t; }
+            if constexpr (detail::is_script_value_v<T>) { return t; }
             else if constexpr (std::is_same_v<T, bool>) { return script_value(t, eng); }
             else if constexpr (std::is_same_v<T, char>) { return script_value(static_cast<script_char>(t), eng); }
             else if constexpr (std::is_enum_v<T> || std::is_integral_v<T>) { return script_value(static_cast<script_int>(t), eng); }
@@ -1010,7 +1016,7 @@ class engine;
                 // Exclude string, script_value, bound_array, bound_map, and built-in container types which have special handling
                 else if constexpr (std::is_class_v<base_type> &&
                             !std::is_same_v<base_type, std::string> &&
-                            !std::is_same_v<base_type, script_value> &&
+                            !detail::is_script_value_v<base_type> &&
                             !is_bound_array_type<base_type>::value &&
                             !is_bound_map_type<base_type>::value &&
                             !is_specialization_v<base_type, std::vector> &&
@@ -1018,7 +1024,7 @@ class engine;
 					// Reference parameters borrow the live object. Ownership is only required
 					// for shared_ptr parameters; their conversion is handled above.
 					return std::ref(const_cast<script_value&>(actual_arg).as<base_type&>());
-                } else if constexpr (std::is_same_v<base_type, script_value>) {
+                } else if constexpr (detail::is_script_value_v<base_type>) {
                     // For script_value references, return directly - no conversion needed
                     return actual_arg;
                 } else {

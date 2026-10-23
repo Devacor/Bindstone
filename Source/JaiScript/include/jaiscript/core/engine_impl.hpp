@@ -289,7 +289,7 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
     }
     type_info_ptr element_type;
     if constexpr (std::is_arithmetic_v<T> ||
-                   std::is_same_v<T, std::string> || std::is_same_v<T, script_value> ||
+                   std::is_same_v<T, std::string> || detail::is_script_value_v<T> ||
                    is_specialization_v<T, std::shared_ptr> ||
                    is_specialization_v<T, std::vector> || is_script_map_like_v<T> ||
                    is_specialization_v<T, std::unordered_map>) {
@@ -304,7 +304,7 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
     auto& arr = *script_array.unchecked_get_array_storage();   // typed element types mint buffer nodes: push through the node
 
     for (const auto& item : vec) {
-        if constexpr (std::is_same_v<T, script_value>) {
+        if constexpr (detail::is_script_value_v<T>) {
             arr.push(item);
         } else if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
                            std::is_same_v<T, float> || std::is_same_v<T, double> ||
@@ -345,7 +345,7 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
     if constexpr (std::is_same_v<K, int> || std::is_same_v<K, int64_t> ||
                    std::is_same_v<K, float> || std::is_same_v<K, double> ||
                    std::is_same_v<K, bool> || std::is_same_v<K, char> ||
-                   std::is_same_v<K, std::string> || std::is_same_v<K, script_value>) {
+                   std::is_same_v<K, std::string> || detail::is_script_value_v<K>) {
         key_type = nullptr;
     } else {
         key_type = eng->get_type_info_for_cpp_type<K>();
@@ -354,7 +354,7 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
     if constexpr (std::is_same_v<V, int> || std::is_same_v<V, int64_t> ||
                    std::is_same_v<V, float> || std::is_same_v<V, double> ||
                    std::is_same_v<V, bool> || std::is_same_v<V, char> ||
-                   std::is_same_v<V, std::string> || std::is_same_v<V, script_value>) {
+                   std::is_same_v<V, std::string> || detail::is_script_value_v<V>) {
         value_type = nullptr;
     } else {
         value_type = eng->get_type_info_for_cpp_type<V>();
@@ -367,7 +367,7 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
         script_value converted_key = script_value(std::monostate{}, eng);
         script_value converted_value = script_value(std::monostate{}, eng);
 
-        if constexpr (std::is_same_v<K, script_value>) {
+        if constexpr (detail::is_script_value_v<K>) {
             converted_key = key;
         } else if constexpr (std::is_same_v<K, int> || std::is_same_v<K, int64_t> ||
                            std::is_same_v<K, float> || std::is_same_v<K, double> ||
@@ -391,7 +391,7 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
             }
         }
 
-        if constexpr (std::is_same_v<V, script_value>) {
+        if constexpr (detail::is_script_value_v<V>) {
             converted_value = value;
         } else if constexpr (std::is_same_v<V, int> || std::is_same_v<V, int64_t> ||
                            std::is_same_v<V, float> || std::is_same_v<V, double> ||

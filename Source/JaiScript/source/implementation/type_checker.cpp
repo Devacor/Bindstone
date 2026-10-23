@@ -4746,7 +4746,8 @@ private:
 				}
 				const ctype element = container_value_type(recv);
 				const ctype stored = compound ? binary_result(element, base_op, rhs) : rhs;
-				const auto issue = container_element_issue(stored, element.ti);
+				const bool assigns = !compound && element.kind == ctype::object_k && !element.cls.empty() && assign_operator_accepts(element.cls, stored);
+				const auto issue = assigns ? std::string() : container_element_issue(stored, element.ti);
 				if (!issue.empty()) {
 					diag(diag_level::error, a->location, "cannot store into '" + ctype_name(recv) + "': " + issue);
 				}

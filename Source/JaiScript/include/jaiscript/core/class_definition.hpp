@@ -711,6 +711,8 @@ public:
     // Truthiness probe memo (is_truthy on objects): does the chain define to_bool()?
     // get_method's exact chain (defines_method); valid while method_epoch_ holds
     inline bool may_define_to_bool() const;
+    // A script class of the chain declares operator=: the id it is interned as, 0 when none (valid while method_epoch_ holds)
+    inline uint64_t script_assign_operator_id() const;
 
     inline script_value get_static_method(uint64_t id, bool throw_if_missing = true) const;
 
@@ -1272,6 +1274,8 @@ private:
     mutable uint64_t to_bool_memo_epoch_ = UINT64_MAX;
     mutable uint64_t destructor_id_ = 0;
     mutable bool may_define_to_bool_ = true;
+    mutable uint64_t assign_memo_epoch_ = UINT64_MAX;
+    mutable uint64_t script_assign_id_ = 0;
 
     class_type class_type_;
     std::unordered_map<uint64_t, access_level> nonpublic_members_;

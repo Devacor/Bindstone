@@ -454,6 +454,7 @@ public:
         // clone. engine::parameter_alias_binds() counts the binds; the semantics are the
         // clone's either way (every row below runs on both backends).
         test("readonly_parameter_alias_proven_shapes", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto r = eng->execute(R"(
@@ -522,6 +523,7 @@ public:
         });
 
         test("readonly_parameter_alias_revoked_by_redefinition", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             // The proof is transitive (a callee that writes enclosing state revokes it) and
             // cached against the definition epoch: redefining the helper re-proves on the next call
             auto eng = make_engine();
@@ -559,6 +561,7 @@ public:
         // mutate, alias or compare x or write the source. engine::local_alias_binds() counts the binds; the results are the
         // copy's either way (every row runs on both backends).
         test("readonly_local_alias_proven_shapes", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto r = eng->execute(R"(
@@ -652,6 +655,7 @@ public:
         });
 
         test("readonly_local_alias_revoked_by_redefinition_and_switch", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto eng = make_engine();
             jai::stdlib::register_all(eng);
             eng->execute(R"(
@@ -740,6 +744,7 @@ public:
         // field, a reference parameter's element) without running code, so it no longer refuses the parameter's proof; a call the
         // vm grafts binds by the same verdict and counts the same binds
         test("readonly_parameter_alias_declared_chains_and_grafts", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto r = eng->execute(R"(
@@ -805,6 +810,7 @@ public:
         });
 
         test("graft_parameter_binds_take_the_calls_elisions", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             // a prvalue argument of a grafted call moves into the parameter; a mutating callee keeps the copy semantics
             auto eng = make_engine();
             jai::stdlib::register_all(eng);
@@ -828,6 +834,7 @@ public:
         // The destructor gate is per type: an elision is refused when the elided value's tree can hold an instance whose chain
         // declares a script destructor, or when such an instance can die while the elided value lives
         test("alias_destructor_gate_is_per_type", [this]() {
+            if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto eng = make_engine();
             jai::stdlib::register_all(eng);
             auto r = eng->execute(R"(

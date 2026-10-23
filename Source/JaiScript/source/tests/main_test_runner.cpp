@@ -32,6 +32,8 @@ std::shared_ptr<jai::engine> make_engine() {
     return eng;
 }
 
+bool vm_reference_run() { return g_test_vm_reference; }
+
 } // namespace jai::foundry
 
 // Parse filter from command line arguments

@@ -403,6 +403,16 @@ namespace jai {
         void anchor_bound_method_result(const script_value& this_obj, checked_result<script_value>& result);
     }
 
+    namespace detail {
+        // A host object a T& result lends script (no owner, only the borrowed address): an auto or T declaration from it
+        // copies, as C++ auto and T declarations do
+        inline bool borrows_host_object(const script_value& value) {
+            if (value.raw_storage_index() != script_value::TYPEID_OBJECT) { return false; }
+            const auto* holder = value.peek_object_holder();
+            return holder && holder->bound_ptr && !holder->data;
+        }
+    }
+
     // The ONE implicit-copy kernel for assignment-shaped store boundaries (decl from
     // lvalue, identifier/field/element assign, range-for bindings, destructuring,
     // by-value parameter binding), shared by both backends: plain values deep-copy

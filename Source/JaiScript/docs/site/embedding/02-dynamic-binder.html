@@ -279,14 +279,19 @@ locks, because nothing is global.</p>
 copy. Once the object is in script, it follows the language&#x27;s value rules, exactly as a script class
 instance does:</p>
 <ul>
-<li>A copy from a variable, a field or an element (<code>Turret b = a;</code>, <code>var g = gate;</code>) and a
-by-value parameter make a separate C++ object through the class&#x27;s copy constructor. Writes to the copy do not
-reach the original.</li>
-<li>A variable initialized from a call takes the result as it is, so <code>var c = owner.child();</code> is the
-object <code>child()</code> refers to, and writes through <code>c</code> land in it.</li>
-<li>A reference (<code>var&amp; g = gate;</code>, a <code>&amp;</code> parameter) names the same object.</li>
-<li>A script handle (<code>new Turret(...)</code>, a <code>shared_ptr&lt;Turret&gt;</code> variable) shares the
-object with every copy of the handle.</li>
+<li>A copy from a variable, a field or an element (<code>Turret b = a;</code>, <code>var g = gate;</code>), a
+by-value parameter, a container literal&#x27;s element (<code>[a]</code> as an array) and a by-value lambda capture
+(<code>[a]() { ... }</code>, <code>[=]</code>) make a separate C++ object
+through the class&#x27;s copy constructor. Writes to the copy do not reach the original.</li>
+<li>An <code>auto</code> or class-typed variable initialized from a call that returns <code>T&amp;</code> copies it,
+as C++ <code>auto</code> drops the reference: <code>auto c = owner.child();</code> is a new <code>Turret</code>. A
+<code>var</code> takes the result as it is, so <code>var c = owner.child();</code> is the object
+<code>child()</code> refers to, and writes through <code>c</code> land in it.</li>
+<li>A reference (<code>var&amp; g = gate;</code>, <code>auto&amp; c = owner.child();</code>, a <code>&amp;</code>
+parameter) names the same object.</li>
+<li>A handle shares the object with every copy of the handle, in a variable, a parameter or a lambda capture:
+<code>new Turret(...)</code>, a <code>shared_ptr&lt;Turret&gt;</code> variable, and a <code>std::shared_ptr&lt;Turret&gt;</code>
+that a host function, method or property returns (or that <code>add_global</code> stores).</li>
 </ul>
 <p>So to keep working on the host&#x27;s object, use the global itself, a reference or a <code>&amp;</code> parameter.
 The guide&#x27;s <a href="../guide/03-value-semantics.html#bound-cpp-objects">Bound C++ objects</a> walks through

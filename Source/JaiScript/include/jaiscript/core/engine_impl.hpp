@@ -190,7 +190,7 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
         if (!t) {
             return script_value(std::monostate{}, eng);
         }
-        return eng->make_object(t);
+        return eng->make_handle(t);
     } else if constexpr (is_specialization_v<NonConstT, std::weak_ptr>) {
         // a script weak_ptr watches a script handle, and a host weak_ptr has none to watch
         throw runtime_error("A host function returning std::weak_ptr<T> is not supported; return shared_ptr<T>");
@@ -225,7 +225,7 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
 template<typename T>
 std::optional<script_value> try_convert_shared_ptr_with_registry(const std::shared_ptr<T>& ptr, engine* eng) {
     if (eng && eng->template has_registered_class<T>()) {
-        return eng->make_object(ptr);
+        return eng->make_handle(ptr);
     }
     return std::nullopt;
 }
@@ -240,7 +240,7 @@ script_value convert_reference_with_registry(T& t, engine* eng) {
         if (!t) {
             return script_value(std::monostate{}, eng);
         }
-        return eng->make_object(t);
+        return eng->make_handle(t);
     } else {
         if (eng && eng->has_registered_class<NonConstT>()) {
             return script_value::make_cpp_bound(&t, eng);

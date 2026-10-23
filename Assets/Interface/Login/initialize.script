@@ -15,7 +15,7 @@ self.initialize = [=](var& self) -> void {
 			self.root().get("LoginButton").componentButton().press();
 		} else {
 			print("JAISCRIPT: Not Connected And Trying Login!");
-			messages.lobbyConnected.connect("LoginScreen", [self]() -> void {
+			messages.lobbyConnected.connect("LoginScreen", [&self]() -> void {
 				messages.lobbyConnected.disconnect("LoginScreen");
 				print("JAISCRIPT: Connection Callback And Trying Login!");
 				self.root().get("LoginButton").componentButton().press();

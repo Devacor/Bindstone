@@ -236,8 +236,9 @@ returns, a map type's layer owns the object and the returned pointer aliases the
 
 1. **Boundary identity (S1).** A bound method returning `shared_ptr<Base>` hands back the
    owning layer every call, not a fresh wrapper.
-2. **Assignment copies, capture shares (S4).** `deep_copy` copies the C++ object through the
-   registered copy function; `clone_for_capture` shares instances holding a native object.
+2. **Assignment and capture copy (S4).** `deep_copy` copies the C++ object through the
+   registered copy function; a by-value capture copies as assignment does (`clone_for_capture`), and a
+   handle (`new`, a host `std::shared_ptr` result) shares in both.
    Alternative considered: make hybrid assignment share too (entity semantics). Rejected: it
    would make `var b = a;` mean two things depending on whether `a`'s class has a C++ base.
 3. **`extend` moves foreign layers and re-derives silently-on-purpose (D7, S3b).**

@@ -307,6 +307,21 @@ namespace jai::detail {
 		return error_propagator{code, text, index_id, size_id};
 	}
 
+	// The class tag a class-typed element stores: the object's own class (a Derived in an array<Base> stays a Derived)
+	inline type_info_ptr object_element_value_tag(const script_value& object, engine* eng) {
+		if (type_info_ptr own = object_element_own_tag(object, eng)) { return own; }
+		const auto* holder = object.peek_object_holder();
+		return holder ? type_info_ptr{eng->get_type_info_object(holder->type_id)} : type_info_ptr{};
+	}
+
+	// A handle stored into a class-typed element: the element takes a copy of the object the handle names, as
+	// std::vector<T>{*h} does in C++ (a shared_ptr<T> element or an untyped one keeps the handle)
+	JAI_NOINLINE inline script_value handle_pointee_element(const script_value& handle, engine* eng) {
+		script_value out = handle.clone();
+		out.set_type_info(object_element_value_tag(handle, eng));
+		return out;
+	}
+
 	// The element boundary's numeric rows are the scalar slot's rows: a float into an int
 	// element runs the same checked kernel (`int x = 1e100` and `array<int> x = [1e100]`
 	// reject with one text), an int into a float element widens.
@@ -318,6 +333,10 @@ namespace jai::detail {
 			if (element_type && element_type->base_type == script_value_type::jai_weak_ptr_type &&
 			    actual_element.raw_storage_index() != script_value::TYPEID_NULL) {
 				return weak_element_from_shared(actual_element, eng);
+			}
+			if (element_type && element_type->base_type == script_value_type::jai_object_type &&
+			    actual_element.raw_storage_index() == script_value::TYPEID_OBJECT) {
+				return handle_pointee_element(actual_element, eng);
 			}
 			return actual_element;
 		}
@@ -406,7 +425,7 @@ namespace jai::detail {
 	// handle the boundary hands back (the copy's node would hold the same elements); anything else takes the converting copy
 	inline checked_result<script_value> convert_container_element_taking(engine* eng, script_value& element, const type_info_ptr& element_type) {
 		if (element_type && element_type->base_type == script_value_type::jai_object_type &&
-		    element.raw_storage_index() == script_value::TYPEID_OBJECT && uniquely_held(element)) {
+		    element.raw_storage_index() == script_value::TYPEID_OBJECT && !element.is_shared_ptr_type() && uniquely_held(element)) {
 			const type_info* tag = element.get_type_info().get();
 			if (!tag || tag->base_type == script_value_type::jai_any_type) {
 				if (auto own = object_element_own_tag(element, eng)) { element.set_type_info(std::move(own)); }
@@ -733,8 +752,9 @@ namespace jai::detail {
 					     target_elem_base == script_value_type::jai_bool_type || is_math_type(target_elem_base))) {
 						needs_conversion = true;
 					}
-					if (target_elem_base == script_value_type::jai_weak_ptr_type && actual.type() == script_value_type::jai_shared_ptr_type) {
-						needs_conversion = true;   // a shared handle downgrades
+					if ((target_elem_base == script_value_type::jai_weak_ptr_type || target_elem_base == script_value_type::jai_object_type) &&
+					    actual.type() == script_value_type::jai_shared_ptr_type) {
+						needs_conversion = true;   // a shared handle downgrades, or a class element copies the object it names
 					}
 					if (target_elem_base == script_value_type::jai_array_type || target_elem_base == script_value_type::jai_map_type) {
 						// nested: the inner tag decides; an untagged or differently tagged inner
@@ -752,10 +772,12 @@ namespace jai::detail {
 			auto& dest = *rebuilt.get_array_storage();
 			dest.reserve(count);
 			for (size_t i = 0; i < count; ++i) {
-				// representation change only: object handles copy as-is (ownership - clone or
-				// share - is decided by the assignment or binding site, exactly as before)
+				// representation change only: objects move as-is (ownership - clone or share - is decided by the
+				// assignment or binding site), and a handle copies the object it names into the class element
 				if (expected_kind == script_array::kind_t::obj) {
-					dest.push(src->get(i, eng));
+					script_value element = src->get(i, eng);
+					if (element.is_shared_ptr_type()) { element = handle_pointee_element(element, eng); }
+					dest.push(std::move(element));
 					continue;
 				}
 				auto converted = convert_container_element(eng, src->get(i, eng), element_type);
@@ -812,8 +834,9 @@ namespace jai::detail {
 					     value_base == script_value_type::jai_bool_type || is_math_type(value_base))) {
 						needs_conversion = true;
 					}
-					if (value_base == script_value_type::jai_weak_ptr_type && actual.type() == script_value_type::jai_shared_ptr_type) {
-						needs_conversion = true;   // a shared handle downgrades
+					if ((value_base == script_value_type::jai_weak_ptr_type || value_base == script_value_type::jai_object_type) &&
+					    actual.type() == script_value_type::jai_shared_ptr_type) {
+						needs_conversion = true;   // a shared handle downgrades, or a class value copies the object it names
 					}
 					if ((value_base == script_value_type::jai_array_type || value_base == script_value_type::jai_map_type) &&
 					    actual.get_type_info().get() != value_type.get()) {

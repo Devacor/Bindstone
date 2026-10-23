@@ -128,6 +128,19 @@ auto b = ints[0];    // static type int: locked to int
 b = 2.9;
 print("a = {} ({}), b = {} ({})", a, type_of(a), b, type_of(b));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a = now a string (string), b = 2 (int)</code></pre></div>
+<h3 id="auto-copies-a-value">auto copies a value and shares a handle<a class="hlink" href="#auto-copies-a-value" aria-label="link">&#8203;</a></h3>
+<p><code>auto y = x;</code> copies what C++ <code>auto</code> copies. When <code>x</code> is a value (a class instance, a bound C++ object held by value, an array, a map), <code>y</code> is a new value made by the copy constructor. When <code>x</code> is a handle (<code>new T()</code>, a <code>shared_ptr&lt;T&gt;</code>, or a host function&#x27;s <code>std::shared_ptr&lt;T&gt;</code> result), <code>y</code> is a copy of the handle and shares the object. A call that returns a reference, such as a host method returning <code>T&amp;</code>, is copied too, because <code>auto</code> drops the reference as in C++; <code>auto&amp; y = owner.child();</code> names the object itself. A declaration spelled with a class type copies the same way, and <code>T y = handle;</code> copies the object the handle points at.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 1; }
+P p = P();
+auto copy = p;          // a value: a new P
+copy.x = 5;
+auto h = new P();
+auto alias = h;         // a handle: the same P
+alias.x = 7;
+P detached = h;         // a value slot: a copy of the P h points at
+detached.x = 9;
+print("p.x = {}, h.x = {}, detached.x = {}", p.x, h.x, detached.x);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">p.x = 1, h.x = 7, detached.x = 9</code></pre></div>
 <h2 id="var-is-genuinely-dynamic">var is genuinely dynamic<a class="hlink" href="#var-is-genuinely-dynamic" aria-label="link">&#8203;</a></h2>
 <p><code>let</code> is another spelling of <code>var</code>, everywhere a <code>var</code> declaration may stand (<code>let x = 5;</code>, <code>for (let i = 0; ...)</code>, <code>let&amp; r = x;</code>). Like every JaiScript declaration it is scoped to its block, as JavaScript's <code>let</code> is.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var y = 5;

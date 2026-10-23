@@ -7410,6 +7410,9 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 }
             }
             // else: Initializing from a temporary - use move semantics (no copy)
+            if (value.raw_storage_index() == script_value::TYPEID_OBJECT) {
+                detail::object_declaration_takes_value(value, decl->type.get(), decl->auto_spelled);
+            }
 
             // === HOMOGENEOUS CONTAINER VALIDATION ===
             // For auto x = [...] and array<auto> x = [...], all elements must be the same type
@@ -9987,7 +9990,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                         if (capture_by_ref) {
                             captureEnv->define(var_id, share_boxed_slot(*src.cell));
                         } else {
-                            captureEnv->define(var_id, detail::clone_for_capture(src.cell->deref(), string_symbolizer_));
+                            captureEnv->define(var_id, detail::clone_for_capture(src.cell->deref()));
                         }
                     } else if (src.what == detail::capture_source::kind::cpp_property) {
                         auto read = capture_by_ref
@@ -9998,7 +10001,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                             return read.error_value();
                         }
                         captureEnv->define(var_id, capture_by_ref ? std::move(read.value())
-                                                                  : detail::clone_for_capture(read.value(), string_symbolizer_));
+                                                                  : detail::clone_for_capture(read.value()));
                     }
                 }
             }
@@ -10067,7 +10070,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 // place; the closure and the original share the cell
                 captureEnv->define(capture.symbol_id, share_boxed_slot(*src.cell));
             } else {
-                captureEnv->define(capture.symbol_id, detail::clone_for_capture(src.cell->deref(), string_symbolizer_));
+                captureEnv->define(capture.symbol_id, detail::clone_for_capture(src.cell->deref()));
             }
         }
 
@@ -10091,7 +10094,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                         captureEnv->define(ref.symbol_id, share_boxed_slot(*slot_val));
                     } else {
                         // Automatic / [=] capture of a local: by value
-                        captureEnv->define(ref.symbol_id, detail::clone_for_capture(slot_val->deref(), string_symbolizer_));
+                        captureEnv->define(ref.symbol_id, detail::clone_for_capture(slot_val->deref()));
                     }
                 }
                 // Patch the AST node so future lookups go through the env path
@@ -12891,7 +12894,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
                                 // cycle (same lifecycle hazard visit_lambda_expr documents)
                                 captureEnv = std::make_shared<environment>(get_global_environment(), string_symbolizer_);
                             }
-                            captureEnv->define(sym, detail::clone_for_capture(slot_val->deref(), string_symbolizer_));
+                            captureEnv->define(sym, detail::clone_for_capture(slot_val->deref()));
                         }
                     }
                 }

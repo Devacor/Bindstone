@@ -321,7 +321,7 @@ original:     77  copy: 0</code></pre></div>
 <li>A member of it binds by reference: <code>auto&amp; t = cast&lt;Derived&amp;&gt;(h).t</code>.</li>
 <li><code>cast&lt;int&amp;&gt;(n) += 2.5</code> and <code>cast&lt;int&amp;&gt;(n)++</code> store an int into <code>n</code>, as <code>int&amp; r = n; r += 2.5;</code> would, even when <code>n</code> is a <code>var</code>.</li>
 </ul>
-<p>Every C++ lvalue is assignable the same way: a function or method returning <code>T&amp;</code> (<code>first() = 5</code>), a conditional whose arms are lvalues (<code>(useA ? a : b) = 5</code>), <code>(a = b) = c</code> and <code>++x = v</code>. So is an element or member of any of them: <code>getref()[&quot;a&quot;] = 5</code> through a function returning <code>map&lt;string, int&gt;&amp;</code>, or <code>(useA ? xs : ys)[0] = 1</code>.</p>
+<p>Every C++ lvalue is assignable the same way: a function or method returning <code>T&amp;</code> (<code>first() = 5</code>), a conditional whose arms are lvalues (<code>(useA ? a : b) = 5</code>), <code>(a = b) = c</code> and <code>++x = v</code>. So is an element or member of any of them: <code>getref()[&quot;a&quot;] = 5</code> through a function returning <code>map&lt;string, int&gt;&amp;</code>, or <code>(useA ? xs : ys)[0] = 1</code>. Such a call also binds a reference parameter: <code>bump(holder.child())</code> writes the object a host method returning <code>T&amp;</code> names, while a call returning by value stays a temporary.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; slots = [1, 2, 3];
 int&amp; first() { return slots[0]; }
 int a = 1;

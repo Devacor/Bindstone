@@ -681,6 +681,40 @@ public:
 			}
 		});
 
+		test("a_call_returning_a_reference_binds_a_reference_parameter", [this]() {
+			auto eng = make_bound_engine();
+			eng->execute(R"(
+				class P { int x = 1; }
+				P kept = P();
+				P& kept_ref() { return kept; }
+				P kept_value() { return kept; }
+				void mutate_ref(var& p) { p.x = 9; }
+				void mutate_vec(Vec& p) { p.x = 9; }
+				void mutate_script(P& p) { p.x = 9; }
+			)");
+			const char* lvalues[] = {
+				"VecHolder holder = VecHolder(); mutate_ref(holder.child()); return holder.child().x;",
+				"VecHolder holder = VecHolder(); mutate_vec(holder.child()); return holder.inner.x;",
+				"var holder = new VecHolder(); mutate_ref(holder.child()); return holder.inner.x;",
+				"kept.x = 1; mutate_ref(kept_ref()); return kept.x;",
+				"kept.x = 1; mutate_script(kept_ref()); return kept.x;",
+			};
+			int index = 0;
+			for (const char* body : lvalues) {
+				const std::string name = "ref_call_" + std::to_string(index++);
+				check_eq((int64_t)9, run_int(*eng, "int " + name + "() { " + body + " } " + name + "()"),
+					std::string("a call returning T& is an lvalue a reference parameter binds: ") + body);
+			}
+			std::string refused;
+			try {
+				eng->execute("int by_value_call() { kept.x = 1; mutate_ref(kept_value()); return kept.x; } by_value_call()");
+			} catch (const std::exception& error) {
+				refused = error.what();
+			}
+			check_true(refused.find("Cannot pass non-lvalue to reference parameter") != std::string::npos ||
+				refused.find("pass a variable") != std::string::npos, "a by-value call result stays a temporary: " + refused);
+		});
+
 		test("by_value_returns_copy_a_value_object", [this]() {
 			auto eng = make_bound_engine();
 			check_eq((int64_t)1, run_int(*eng, R"(

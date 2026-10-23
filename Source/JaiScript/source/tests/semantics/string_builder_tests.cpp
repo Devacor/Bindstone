@@ -151,7 +151,7 @@ public:
 				string q = "q";
 				q = q + [1, 2] + {"a": 1};
 				s + " " + to_string(n) + " " + m + " " + q
-			)", "x12.5truecP|null 6 1a2 q[array][map]", "the operands' texts, numbers and objects alike");
+			)", "x12.5truecP|null 6 1a2 q[1, 2]{\"a\": 1}", "the operands' texts, numbers and objects alike");
 		});
 
 		test("an_object_operand_runs_its_to_string_where_the_chain_does", [this]() {
@@ -178,7 +178,7 @@ public:
 				string u = `${a}|${p}|${b}|${n}`;
 				string w = "x" + a + [1] + b;
 				t + " " + u + " " + w
-			)", "a-Pb17c2.5true a|P|b1|7 xa[array]b1", "an operand after an object's to_string reads the value it left");
+			)", "a-Pb17c2.5true a|P|b1|7 xa[1]b1", "an operand after an object's to_string reads the value it left");
 		});
 
 		test("lambdas_capture_a_builder_by_reference_or_by_value", [this]() {

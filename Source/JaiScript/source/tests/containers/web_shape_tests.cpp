@@ -97,7 +97,7 @@ rows[1]["extra"] = true;
 for (auto& o : rows) { for (auto [k, v] : o) { out += k + "=" + to_string(v) + ","; } }
 try { from_json("{\"a\":1,}"); } catch (e) { out += "|" + e.message; }
 try { from_json("[1 2]"); } catch (e) { out += "|" + e.message; }
-out.replace_all("\xc3\xa9", "<e9>");
+out.replace("\xc3\xa9", "<e9>");
 out;
 )JAI").to_string();
 			check_eq(std::string(R"OUT(null|null|true|true|-9223372036854775807|-9223372036854775807|1.0|1.0|0.1|0.1|-0.0|-0.0|1e+300|1e+300|0.3333333333333333|0.3333333333333333|""|""|"q\" b\\ / \n\r\t\u0007\u0001\u001f <e9>"|"q\" b\\ / \n\r\t\u0007\u0001\u001f <e9>"|{"$char":99}|{"$char":99}|[1,"two",3.0,[4,[5,{}]]]|[

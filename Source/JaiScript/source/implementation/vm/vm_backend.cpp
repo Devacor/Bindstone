@@ -5808,10 +5808,11 @@ op_status vm_backend::exec_binary_fused_decl(frame& f, const vm_instruction& ins
 bool vm_backend::store_slot_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv) {
 	if (ins.b == k_invalid_u32 || !f.locals || f.top_level) return false;
 	script_value* slot = frame_slot(f, ins.b);
-	if (!slot || slot->raw_storage_index() != kind || slot->get_engine() != engine_) return false;
+	if (!slot || slot->raw_storage_index() != kind) return false;
 	const bool is_int = kind == script_value::TYPEID_INT;
 	const type_info* st = slot->type_info_raw();
 	type_info* tag = is_int ? ti_int_ : ti_float_;
+	if (st != tag && slot->get_engine() != engine_) return false;
 	if (st && st->base_type != (is_int ? script_value_type::jai_int_type : script_value_type::jai_float_type)) {
 		if (st->base_type != script_value_type::jai_any_type || st->dynamic_slot) return false;
 		tag = const_cast<type_info*>(st);
@@ -7665,12 +7666,12 @@ bool vm_backend::cells_resync(frame& f, const chunk::cell_loop& loop) {
 			continue;
 		}
 		const script_value* s = frame_slot(f, cl.slot);
-		if (!s || s->get_engine() != engine_) return false;
+		if (!s) return false;
 		const uint8_t want = cl.kind != 0 ? cl.kind : static_cast<uint8_t>(s->raw_storage_index());
 		if ((want != kint && want != kflt && want != kbool) || s->raw_storage_index() != want) return false;
 		const type_info* canonical = want == kint ? ti_int_ : want == kflt ? ti_float_ : ti_bool_;
 		const type_info* st = s->type_info_raw();
-		if (st != canonical && !(st && st->base_type == script_value_type::jai_any_type)) return false;
+		if (st != canonical && (!(st && st->base_type == script_value_type::jai_any_type) || s->get_engine() != engine_)) return false;
 		cs.payload[k] = want == kint ? static_cast<int64_t>(s->unchecked_as_int()) : want == kflt ? cell_bits_of_float(s->unchecked_as_float()) : (s->unchecked_as_bool() ? 1 : 0);
 		cs.kind[k] = want;
 		cs.stamp[k] = cl.kind != 0 ? nullptr : const_cast<type_info*>(st);
@@ -7679,10 +7680,10 @@ bool vm_backend::cells_resync(frame& f, const chunk::cell_loop& loop) {
 		// the local the statement declared: its declared kind, or the block stays closed
 		const chunk::cell_loop::cell& cl = loop.cells[k];
 		const script_value* s = frame_slot(f, cl.slot);
-		if (!s || s->get_engine() != engine_ || s->raw_storage_index() != cl.kind) return false;
+		if (!s || s->raw_storage_index() != cl.kind) return false;
 		const type_info* st = s->type_info_raw();
 		const type_info* canonical = cl.kind == kint ? ti_int_ : cl.kind == kflt ? ti_float_ : ti_bool_;
-		if (st != canonical && st != cl.decl_stamp) return false;
+		if (st != canonical && (st != cl.decl_stamp || s->get_engine() != engine_)) return false;
 		cs.payload[k] = cl.kind == kint ? static_cast<int64_t>(s->unchecked_as_int()) : cl.kind == kflt ? cell_bits_of_float(s->unchecked_as_float()) : (s->unchecked_as_bool() ? 1 : 0);
 		cs.kind[k] = cl.kind;
 		cs.stamp[k] = nullptr;
@@ -7735,8 +7736,8 @@ JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop
 	if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 		const script_int v = static_cast<script_int>(cs.payload[k]);
 		type_info* stamp = cs.stamp[k] ? cs.stamp[k] : cl.first_decl && cl.decl_stamp ? cl.decl_stamp : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : ti_int_);
-		const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_INT && s->get_engine() == engine_ &&
-		                      (cl.landing == k_typed_dst_compound ? true : s->type_info_raw() == stamp);
+		const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_INT &&
+		                      (s->stamped_as(stamp, engine_) || (cl.landing == k_typed_dst_compound && s->get_engine() == engine_));
 		if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_int_payload(v); return; }
 		JAI_CELLS_COUNT(9);
 		script_value nv(v, engine_);
@@ -7745,8 +7746,8 @@ JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop
 	} else if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
 		const script_float v = cell_float_of_bits(cs.payload[k]);
 		type_info* stamp = cs.stamp[k] ? cs.stamp[k] : cl.first_decl && cl.decl_stamp ? cl.decl_stamp : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : ti_float_);
-		const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->get_engine() == engine_ &&
-		                      (cl.landing == k_typed_dst_compound ? true : s->type_info_raw() == stamp);
+		const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_FLOAT &&
+		                      (s->stamped_as(stamp, engine_) || (cl.landing == k_typed_dst_compound && s->get_engine() == engine_));
 		if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_float_payload(v); return; }
 		JAI_CELLS_COUNT(9);
 		script_value nv(v, engine_);
@@ -7755,7 +7756,7 @@ JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop
 	} else {
 		const bool v = cs.payload[k] != 0;
 		type_info* stamp = cs.stamp[k] ? cs.stamp[k] : cl.first_decl && cl.decl_stamp ? cl.decl_stamp : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : ti_bool_);
-		const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_BOOL && s->get_engine() == engine_ && s->type_info_raw() == stamp;
+		const bool in_place = s && s->raw_storage_index() == script_value::TYPEID_BOOL && s->stamped_as(stamp, engine_);
 		if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_bool_payload(v); return; }
 		JAI_CELLS_COUNT(9);
 		script_value nv(v, engine_);
@@ -7775,21 +7776,21 @@ JAI_FORCEINLINE void vm_backend::env_flush_one(frame& f, const chunk::cell_loop&
 	type_info* stamp = cs.stamp[k];
 	if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 		const script_int v = static_cast<script_int>(cs.payload[k]);
-		if (p->raw_storage_index() == script_value::TYPEID_INT && p->get_engine() == engine_ && p->type_info_raw() == stamp) { JAI_CELLS_COUNT(8); p->unchecked_set_int_payload(v); return; }
+		if (p->raw_storage_index() == script_value::TYPEID_INT && p->stamped_as(stamp, engine_)) { JAI_CELLS_COUNT(8); p->unchecked_set_int_payload(v); return; }
 		JAI_CELLS_COUNT(9);
 		script_value nv(v, engine_);
 		if (stamp && stamp != ti_int_) { nv.set_type_info(type_info_ptr{stamp}); }
 		*p = std::move(nv);
 	} else if (cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
 		const script_float v = cell_float_of_bits(cs.payload[k]);
-		if (p->raw_storage_index() == script_value::TYPEID_FLOAT && p->get_engine() == engine_ && p->type_info_raw() == stamp) { JAI_CELLS_COUNT(8); p->unchecked_set_float_payload(v); return; }
+		if (p->raw_storage_index() == script_value::TYPEID_FLOAT && p->stamped_as(stamp, engine_)) { JAI_CELLS_COUNT(8); p->unchecked_set_float_payload(v); return; }
 		JAI_CELLS_COUNT(9);
 		script_value nv(v, engine_);
 		if (stamp && stamp != ti_float_) { nv.set_type_info(type_info_ptr{stamp}); }
 		*p = std::move(nv);
 	} else {
 		const bool v = cs.payload[k] != 0;
-		if (p->raw_storage_index() == script_value::TYPEID_BOOL && p->get_engine() == engine_ && p->type_info_raw() == stamp) { JAI_CELLS_COUNT(8); p->unchecked_set_bool_payload(v); return; }
+		if (p->raw_storage_index() == script_value::TYPEID_BOOL && p->stamped_as(stamp, engine_)) { JAI_CELLS_COUNT(8); p->unchecked_set_bool_payload(v); return; }
 		JAI_CELLS_COUNT(9);
 		script_value nv(v, engine_);
 		if (stamp && stamp != ti_bool_) { nv.set_type_info(type_info_ptr{stamp}); }
@@ -8677,7 +8678,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 		if (!s || (want != kint && want != kflt && want != kbool && want != kstr) || s->raw_storage_index() != want ||
 		    (st != canonical && !(st && st->base_type == script_value_type::jai_any_type) &&
 		     !(!st && loop.frame_program && cl.kind != 0 && cl.slot < loop.param_cells.size() && loop.param_cells[cl.slot] == k)) ||
-		    s->get_engine() != engine_) {
+		    (st != canonical && s->get_engine() != engine_)) {
 			JAI_CELLS_COUNT(1);
 #ifdef JAISCRIPT_VM_PROFILE
 			++profile_cells_refused_slot_[k < 64 ? k : 63];
@@ -10896,7 +10897,7 @@ bool vm_backend::typed_land_int(frame& f, uint32_t a, script_int v) {
 	switch (a >> k_typed_dst_shift) {
 	case k_typed_dst_temp:
 		// a temp this engine built already carries the canonical int stamp and the engine pointer the construct path would give it
-		if (s && s->raw_storage_index() == script_value::TYPEID_INT && s->type_info_raw() == ti_int_ && s->get_engine() == engine_) { JAI_TYPED_LAND(0); s->unchecked_set_int_payload(v); return true; }
+		if (s && s->raw_storage_index() == script_value::TYPEID_INT && s->stamped_as(ti_int_, engine_)) { JAI_TYPED_LAND(0); s->unchecked_set_int_payload(v); return true; }
 		JAI_TYPED_LAND(1);
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_temp_miss_[!s ? 0 : s->raw_storage_index() != script_value::TYPEID_INT ? 1 : 2];
@@ -10944,7 +10945,7 @@ bool vm_backend::typed_land_float(frame& f, uint32_t a, script_float v) {
 	script_value* s = frame_slot(f, slot);   // null = a window slot not yet live: the landing grows it, a store does not
 	switch (a >> k_typed_dst_shift) {
 	case k_typed_dst_temp:
-		if (s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->type_info_raw() == ti_float_ && s->get_engine() == engine_) { JAI_TYPED_LAND(0); s->unchecked_set_float_payload(v); return true; }
+		if (s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->stamped_as(ti_float_, engine_)) { JAI_TYPED_LAND(0); s->unchecked_set_float_payload(v); return true; }
 		JAI_TYPED_LAND(1);
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_temp_miss_[!s ? 0 : s->raw_storage_index() != script_value::TYPEID_FLOAT ? 1 : 2];

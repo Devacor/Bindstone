@@ -1326,8 +1326,7 @@ script_value& script_value::operator=(const script_value& other) {
 #ifdef JAISCRIPT_VM_COVERAGE
         if (census_refcounted(other.raw_storage_index())) { census::hit_at(census::site::value_copy_assign, JAI_CENSUS_RA(), static_cast<uint32_t>(other.raw_storage_index())); }
 #endif
-        storage_.set_tag(other.storage_.tag());
-        storage_ = other.storage_;
+        storage_.assign_whole(other.storage_);
     }
     return *this;
 }

@@ -46,7 +46,7 @@ bytes 8..15   tag word      bits 0..7   storage index (TYPEID_*), read as one by
 | stage | sha | notes |
 |---|---|---|
 | 1 layout | 91a6c4a7e | 16-byte value. A/B vs 3f2f97007, 5 rounds: dict -13/-8%, particles -6/-7%, sort +26/+29% (store-forwarding stall: a byte index store, then an 8-byte tag read), fib_recursive_dyn +18%, GLOOM +1.3%, OSSUARY +3.8%, Gator +3.0%, JaiDOOM 0% |
-| 2 whole-word tag | 1905c36f8 | index written as the whole word; one-compare `stamped_as` at the VM landings; type_info slabs. A/B 5 rounds (busy machine, both sides ~10% slower in absolute terms): sort -16/-19%, dict -12/-9%, particles -7/-8%, fib_recursive_dyn -10%, queen_typed -6%; GLOOM +1.8%, OSSUARY +1.8%, JaiDOOM +5.3% (1.70 vs 1.79 ms/tic), Gator -0.8%; mandelbrot_dyn +9%, spectral_norm +5%, string2float_dyn +6%. Peak memory: container kernels -8..-19 MB, Gator +6.8 MB, JaiDOOM +1.6 MB, GLOOM +0.7 MB |
+| 2 whole-word tag | e1683c27e | index written as the whole word; one-compare `stamped_as` at the VM landings; type_info slabs. A/B 5 rounds (busy machine, both sides ~10% slower in absolute terms): sort -16/-19%, dict -12/-9%, particles -7/-8%, fib_recursive_dyn -10%, queen_typed -6%; GLOOM +1.8%, OSSUARY +1.8%, JaiDOOM +5.3% (1.70 vs 1.79 ms/tic), Gator -0.8%; mandelbrot_dyn +9%, spectral_norm +5%, string2float_dyn +6%. Peak memory: container kernels -8..-19 MB, Gator +6.8 MB, JaiDOOM +1.6 MB, GLOOM +0.7 MB |
 
 ## Verdict at stage 2
 

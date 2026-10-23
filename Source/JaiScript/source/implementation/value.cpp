@@ -1726,15 +1726,15 @@ script_value script_value::parallel_host_view() const {
     if (!cd || !native_holder || !native_holder->data) { throw runtime_error("parallel_host_view: the instance owns no C++ object"); }
     auto view = cd->allocate_instance();
     view->set_class_definition(cd);
-    view->set_native(make_cpp_object(native_holder->type_name, native_holder->type_id, native_holder->data, engine_));
+    view->set_native(make_cpp_object(native_holder->type_name, native_holder->type_id, native_holder->data, get_engine()));
     cd->register_live_instance(view.get());
-    auto view_holder = acquire_object_holder(engine_);
+    auto view_holder = acquire_object_holder(get_engine());
     view_holder->type_name = holder->type_name;
     view_holder->type_id = holder->type_id;
     view_holder->data = std::move(view);
     view_holder->is_class_instance_wrapper = true;
-    script_value result(std::monostate{}, engine_);
-    result.type_info_ = type_info_;
+    script_value result(std::monostate{}, get_engine());
+    result.set_stamp(stamp());
     result.storage_ = view_holder;
     return result;
 }

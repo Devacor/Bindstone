@@ -360,6 +360,28 @@ public:
 			)"), "Vec a = a call returning Vec& copies");
 		});
 
+		test("shared_ptr_passes_by_value_as_a_handle_and_a_value_slot_copies", [this]() {
+			auto eng = make_bound_engine();
+			check_eq((int64_t)9, run_int(*eng, R"(
+				void mutate(var i) { i.x = 9; }
+				int run_param() {
+					shared_ptr<Vec> m = make_shared_vec(1);
+					mutate(m);
+					return m.x;
+				}
+				run_param()
+			)"), "a shared_ptr passed to a by-value var parameter shares");
+			check_eq((int64_t)1, run_int(*eng, R"(
+				int run_copy() {
+					shared_ptr<Vec> m = make_shared_vec(1);
+					Vec b = m;
+					b.x = 9;
+					return m.x;
+				}
+				run_copy()
+			)"), "Vec b = m copies the object a shared_ptr names");
+		});
+
 		test("host_shared_ptr_results_are_handles", [this]() {
 			auto eng = make_bound_engine();
 			check_eq((int64_t)9, run_int(*eng, R"(

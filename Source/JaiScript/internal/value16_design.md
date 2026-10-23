@@ -48,6 +48,24 @@ bytes 8..15   tag word      bits 0..7   storage index (TYPEID_*), read as one by
 | 1 layout | 91a6c4a7e | 16-byte value. A/B vs 3f2f97007, 5 rounds: dict -13/-8%, particles -6/-7%, sort +26/+29% (store-forwarding stall: a byte index store, then an 8-byte tag read), fib_recursive_dyn +18%, GLOOM +1.3%, OSSUARY +3.8%, Gator +3.0%, JaiDOOM 0% |
 | 2 whole-word tag | e1683c27e | index written as the whole word; one-compare `stamped_as` at the VM landings; type_info slabs. A/B 5 rounds (busy machine, both sides ~10% slower in absolute terms): sort -16/-19%, dict -12/-9%, particles -7/-8%, fib_recursive_dyn -10%, queen_typed -6%; GLOOM +1.8%, OSSUARY +1.8%, JaiDOOM +5.3% (1.70 vs 1.79 ms/tic), Gator -0.8%; mandelbrot_dyn +9%, spectral_norm +5%, string2float_dyn +6%. Peak memory: container kernels -8..-19 MB, Gator +6.8 MB, JaiDOOM +1.6 MB, GLOOM +0.7 MB |
 
+| rebase | (this commit) | onto b0031f17d. Debug: interpreter 4622/4622, vm 4622/4622; vm-reference aborts in Review Regressions `cross_engine_reference_no_foreign_twin_stamp`: engine B stores a B-stamped int into engine A's array, B dies, A mints an element reference and reads the freed B type (the stamp-lifetime hazard below) |
+
+### Gator's +6.8 MB is a measurement artifact
+
+An allocation histogram (live blocks at peak by request size) over `gatorquest smoke ticks 10` shows one row moving:
+154,271 blocks of 80 bytes in base become 156,152 blocks of 128 bytes on the branch. These blocks are the `filename` strings of
+AST `source_location`s (`ast_reader::location`): every node copies the full script path. The base tree was built in
+`D:\v16base` (a short path), the branch in the worktree (58 characters), so each copy crossed a heap size class. Interned
+types: 158 in Gator (80 KB at 512 bytes each). With equal-length checkout paths the delta is gone; base builds for later
+measurements sit at a path of the worktree's length.
+
+### Open: the stamp-lifetime hazard
+
+A value can outlive the engine that made its stamp: a host keeps it, or another engine stores it in its own container.
+`get_engine()` and every type query then read that engine's freed `type_info`. Master reads the same freed `type_info`
+(`type()`, `get_type_info_reference`); the 16-byte value adds `get_engine()` to the list. No zero-cost airtight design
+exists while the stamp is a pointer into engine-lifetime memory; see the report for the options awaiting a ruling.
+
 ## Verdict at stage 2
 
 This is below the landing bar. The container-heavy kernels win by 7-19%, but no whole program wins by 1.5%, and GLOOM,

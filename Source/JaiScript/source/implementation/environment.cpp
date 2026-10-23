@@ -7,6 +7,7 @@
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/member_scope.hpp>
 #include <jaiscript/detail/typed_slot.hpp>
+#include <jaiscript/core/overload_resolution.hpp>
 #include <algorithm>
 
 #if defined(_WIN32)
@@ -64,6 +65,86 @@ bool native_stack_low() noexcept {
 checked_result<slot_conversion> convert_typed_slot_script_rows(slot_conversion pending, const script_value& value,
                                                               const type_info_ptr& target_type, engine* eng) {
     return convert_typed_slot_script_rows_impl(std::move(pending), value, target_type, eng);
+}
+
+namespace {
+class_instance* held_instance(const script_value& v) {
+    auto holder = const_cast<script_value&>(v).get_object_holder();
+    return holder && holder->is_class_instance_wrapper && holder->data ? static_cast<class_instance*>(holder->data.get()) : nullptr;
+}
+
+checked_result<value_store> run_assign_operator(const script_value& self, const script_value& method, const script_value& value, uint64_t assign_id, engine* eng) {
+    if (eng->parallel_region_active()) {
+        // a chunk calls the operator through its region pin, on its own backend; an unpinned one keeps the verdict
+        if (auto called = eng->parallel_operator_call(self, assign_id, { value })) {
+            if (!*called) { return called->error_value(); }
+            return value_store::assigned;
+        }
+        return checked_result<value_store>(make_error_code(runtime_error_code::unsupported_operation),
+            "custom operator dispatch on class instances is not admitted in a parallel body");
+    }
+    std::vector<script_value> args{self, value};
+    auto result = method.as_function()(args);
+    if (!result) { return result.error_value(); }
+    return value_store::assigned;
+}
+
+std::optional<checked_result<value_store>> handle_value_assign(const script_value& current, const type_info* tag, const script_value& value, bool dynamic, engine* eng) {
+    const type_info* expected = tag->element_type().get();
+    const std::string& expected_name = expected ? expected->type_name : std::string();
+    bool compatible = false;
+    if (value.raw_storage_index() == script_value::TYPEID_OBJECT) {
+        if (const class_instance* source = held_instance(value); source && source->get_class_definition()) {
+            const class_definition* source_def = source->get_class_definition();
+            compatible = !expected_name.empty() && (source_def->get_name() == expected_name || source_def->is_subtype_of(expected_name));
+        }
+    }
+    if (dynamic && !compatible) { return value_store::rebind; }
+    auto holder = const_cast<script_value&>(current).get_object_holder();
+    if (!holder || !holder->data) {
+        return checked_result<value_store>(make_error_code(runtime_error_code::invalid_reference), "Cannot assign to null shared_ptr");
+    }
+    class_instance* instance = held_instance(current);
+    if (!instance || !instance->get_class_definition()) {
+        auto value_tag = value.get_type_info();
+        return checked_result<value_store>(make_error_code(runtime_error_code::type_mismatch),
+            "Cannot assign {0} to shared_ptr - object is not a class instance", value_tag ? value_tag->id : 0);
+    }
+    const class_definition* def = instance->get_class_definition();
+    const uint64_t assign_id = eng->get_symbolizer()->intern("=");
+    const script_value* method = def->method_ptr(assign_id);
+    const bool has_operator = method && method->is_function();
+    script_value pointee = current;   // shares the holder: a store into it is a store into the shared object
+    pointee.set_type_info(def->get_type_info());
+    if (compatible) {
+        if (has_operator && binary_operator_accepts(def, assign_id, value)) { return run_assign_operator(pointee, *method, value, assign_id, eng); }
+        if (auto copied = class_copy_assign(pointee, value, eng, expected)) {
+            if (!*copied) { return copied->error_value(); }
+            return value_store::assigned;
+        }
+    }
+    if (has_operator) { return run_assign_operator(pointee, *method, value, assign_id, eng); }
+    return std::nullopt;
+}
+}
+
+std::optional<checked_result<value_store>> slot_value_assign(const script_value& storage_in, const script_value& value_in, engine* eng, bool declared_var) {
+    if (!eng) { return std::nullopt; }
+    const script_value& storage = storage_in.is_reference() ? storage_in.deref() : storage_in;
+    const script_value& value = value_in.is_reference() ? value_in.deref() : value_in;
+    if (!slot_value_assign_candidate(storage) || value.is_null() || value.is_weak_ptr()) { return std::nullopt; }
+    const type_info* value_tag = value.type_info_raw();
+    if (value_tag && value_tag->base_type == script_value_type::jai_shared_ptr_type) { return std::nullopt; }   // a handle rebinds
+    const type_info* tag = storage.type_info_raw();
+    if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return handle_value_assign(storage, tag, value, declared_var || tag->dynamic_pointee, eng); }
+    if (!declared_var && tag && !var_slot(tag)) { return std::nullopt; }
+    class_instance* instance = held_instance(storage);
+    const class_definition* def = instance ? instance->get_class_definition() : nullptr;
+    if (!def) { return std::nullopt; }
+    const uint64_t assign_id = eng->get_symbolizer()->intern("=");
+    const script_value* method = def->method_ptr(assign_id);
+    if (!method || !method->is_function() || !binary_operator_accepts(def, assign_id, value)) { return std::nullopt; }
+    return run_assign_operator(storage, *method, value, assign_id, eng);
 }
 
 } // namespace detail

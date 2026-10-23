@@ -973,7 +973,7 @@ public:
                 s += p.name + "," + to_string(p.built);
                 s;
             )").as_string();
-            check_eq(std::string("bee!,1;bee!,2;bee!,1;bee!,1;bee!,1;bee,0;q,1"), out);
+            check_eq(std::string("bee!,1;bee!,2;bee!,1;bee!,1;bee!,1;bee!,1;q,1"), out, "a var holding the object runs its bound operator= too");
         });
 
         test("a_bound_operator_assign_runs_the_classes_own", [this]() {

@@ -1065,11 +1065,9 @@ public:
                 a = b;
                 a.x;
             )");
-            // pins today's behavior (probed both backends): plain variable assignment
-            // does NOT dispatch script operator=; a becomes a clone of b (x == 1).
-            // The point of this test: `function operator=` must keep parsing as a METHOD
-            // and never fall into the function-typed-field lookahead.
-            check_eq(int64_t(1), r.as_int());
+            // a var holding a V runs V's operator=, which takes any value (x == 101); the point of this test: `function operator=`
+            // keeps parsing as a METHOD and never falls into the function-typed-field lookahead
+            check_eq(int64_t(101), r.as_int());
         });
 
         test("function_keyword_declaration_unchanged", [this]() {

@@ -2141,6 +2141,7 @@ bool vm_compiler::try_emit_text_builder_store(identifier_expr* ident, assignment
 	emit_text_builder_chain(chain);
 	uint32_t flags = store_flag_no_result;
 	if (!ident->names_value_decl) flags |= store_flag_ref_alias;
+	if (ident->names_var_decl) flags |= store_flag_var_target;
 	else if (assign->typed_store_provable) flags |= store_flag_type_provable;
 	if (ident->global_qualified) flags |= store_flag_global_only;
 	if (assign->static_store_proof == proof_same_type) flags |= store_flag_same_type;
@@ -2270,6 +2271,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 				uint32_t flags = store_flag_no_result;
 				if (is_lvalue_shaped(assign->value.get())) flags |= store_flag_rhs_lvalue;
 				if (!ident->names_value_decl) flags |= store_flag_ref_alias;
+				if (ident->names_var_decl) flags |= store_flag_var_target;
 				else if (assign->typed_store_provable) flags |= store_flag_type_provable;
 				if (ident->global_qualified) flags |= store_flag_global_only;
 				if (assign->static_store_proof == proof_same_type) flags |= store_flag_same_type;
@@ -7266,6 +7268,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 		if (!compound) {
 			uint32_t flags = is_lvalue_shaped(expr->value.get()) ? store_flag_rhs_lvalue : 0;
 			if (!ident->names_value_decl) flags |= store_flag_ref_alias;
+			if (ident->names_var_decl) flags |= store_flag_var_target;
 			else if (expr->typed_store_provable && !reference_) flags |= store_flag_type_provable;
 			if (ident->global_qualified) flags |= store_flag_global_only;
 			if (expr->static_store_proof == proof_same_type) flags |= store_flag_same_type;

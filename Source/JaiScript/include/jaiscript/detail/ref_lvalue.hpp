@@ -890,6 +890,17 @@ namespace jai::detail {
 			storage = std::move(result);
 			return {};
 		}
+		if (slot_value_assign_candidate(storage)) {   // the held object decides
+			if (auto stored = slot_value_assign(storage, value, eng)) {
+				if (!*stored) { return stored->error_value(); }
+				if (stored->value() == value_store::rebind) {
+					script_value v = clone_for_assignment(value);
+					var_stamp(v, nullptr, eng);
+					storage = std::move(v);
+				}
+				return {};
+			}
+		}
 		if (tag && var_slot(tag.get())) {   // a var stays a var (a typed array keeps its element type)
 			script_value v = clone_for_assignment(value);
 			if (!v.get_type_info() || v.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) { var_stamp(v, tag, eng); }

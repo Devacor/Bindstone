@@ -3379,6 +3379,25 @@ static JAI_FORCEINLINE script_value taken_for_reference_store(script_value& valu
 	return clone_for_assignment(value);
 }
 
+JAI_NOINLINE bool vm_backend::held_object_store(script_value& storage, script_value& value, bool result_used, op_status& status, bool declared_var) {
+	auto stored = detail::slot_value_assign(storage, value, engine_, declared_var);
+	if (!stored) { return false; }
+	if (!*stored) {
+		status = raise_from(*stored);
+		return true;
+	}
+	if (stored->value() == detail::value_store::assigned) {
+		stack_.push_back(result_used ? clone_for_assignment(storage) : std::move(value));   // KEEP BYTE-PARALLEL with interpreter::held_object_store
+	} else {
+		script_value rebound = clone_for_assignment(value);
+		detail::var_stamp(rebound, nullptr, engine_);
+		storage = std::move(rebound);
+		stack_.push_back(std::move(value));
+	}
+	status = op_status::ok;
+	return true;
+}
+
 JAI_NOINLINE bool vm_backend::store_ref_alias_var(frame& f, const vm_instruction& ins, script_value& value) {
 	script_value* slot = frame_slot(f, ins.b);
 	if (!slot || slot->raw_storage_index() != script_value::TYPEID_REFERENCE) return false;
@@ -3411,7 +3430,7 @@ JAI_NOINLINE bool vm_backend::store_ref_alias_var(frame& f, const vm_instruction
 	}
 	script_value& storage = slot->deref();
 	const type_info* tag = storage.type_info_raw();
-	if (storage.raw_storage_index() == script_value::TYPEID_CPP_BOUND || !tag || !detail::var_slot(tag)) return false;
+	if (storage.raw_storage_index() == script_value::TYPEID_CPP_BOUND || !tag || !detail::var_slot(tag) || detail::slot_value_assign_candidate(storage)) return false;
 	script_value v = taken_for_reference_store(value, ins.c);
 	if (!v.get_type_info() || v.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) { detail::var_stamp(v, storage.get_type_info(), engine_); }
 	storage = std::move(v);
@@ -3438,8 +3457,10 @@ JAI_FORCEINLINE bool vm_backend::store_scalar_lane(script_value& slot, script_va
 	const script_value_type vb = vt ? vt->base_type : script_value_type::jai_any_type;
 	const type_info* tag = vt;
 	bool lane = !st;
+	if (lane && detail::slot_value_assign_candidate(slot)) return false;   // an untagged or var slot holding an object: its object decides
 	if (!lane && st->base_type == script_value_type::jai_any_type && !st->dynamic_slot &&
 	    (vb == script_value_type::jai_any_type || vb == value.current_type())) {
+		if (detail::slot_value_assign_candidate(slot)) return false;
 		lane = true;
 		tag = st;
 	} else if (!lane) {
@@ -3547,6 +3568,14 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			// V-S1: a same_type proof whose payload guard holds makes enforcement the identity
 			const bool proven_identity = (ins.c & store_flag_same_type) && slot_type &&
 			                             detail::same_type_payload(value, slot_type.get());
+			if (detail::slot_value_assign_candidate(*storage) && !proven_identity && (!slot_type || slot_type->base_type != script_value_type::jai_object_type)) {
+				// a var parameter or loop variable holds a handle under the handle's own tag: the store names a var declaration
+				const type_info* held_tag = storage->type_info_raw();
+				const bool declared_var = held_tag && held_tag->base_type == script_value_type::jai_shared_ptr_type && !held_tag->dynamic_pointee &&
+				                          (ins.c & store_flag_var_target) != 0;
+				op_status held_status = op_status::ok;
+				if (held_object_store(*storage, value, result_used(), held_status, declared_var)) { return held_status; }
+			}
 			// A user operator= writes the held instance (KEEP BYTE-PARALLEL with interpreter::visit_assignment_expr)
 			if (slot_type && slot_type->base_type == script_value_type::jai_object_type) {   // a proven same-class store copy-assigns too
 				if (auto assigned = detail::user_assign_operator(*storage, value, engine_)) {
@@ -3574,6 +3603,9 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 				    (!value.get_type_info() ||
 				     value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
 					detail::var_stamp(value, slot_type, engine_);
+				} else if (detail::var_slot(slot_type.get()) && value.get_type_info()->element_type() && !value.get_type_info()->dynamic_pointee) {
+					// var target adopting a handle: mark it rebindable (the environment row's twin)
+					value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(value.get_type_info()->element_type().get()));
 				}
 			}
 			if (detail::uniquely_held(value)) {   // a prvalue is the stored object
@@ -3638,7 +3670,8 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			if (bare_field_proof_frame(f)) {
 				if (const identifier_expr* idn = ident_node_at(f); idn && idn->proven_class && idn->proven_field_write &&
 				    !detail::by_value_class_type(idn->proven_field_type)) {
-					if (class_instance* inst = detail::proven_field_instance(*f.locals->scope_this, idn->proven_class, idn->proven_epoch)) {
+					if (class_instance* inst = detail::proven_field_instance(*f.locals->scope_this, idn->proven_class, idn->proven_epoch);
+					    inst && !detail::proven_field_holds_object(inst, idn->proven_slot, idn->proven_field_type)) {
 						if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 							value = value.detached_for_store();
 						}
@@ -3764,26 +3797,6 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			script_value result = value;
 			auto ptr_type_info = currentVal->get_type_info();
 			auto expected_type = ptr_type_info->element_type();
-			const std::string& expected_type_name = expected_type ? expected_type->type_name : k_empty_type_name;
-
-			// Monotonic-ladder rule: a var-held
-			// (dynamic_pointee) holder behaves IDENTICALLY to a typed holder wherever
-			// typed is legal - a VALUE rhs of a COMPATIBLE class (same class or subclass
-			// of the held pointee) assigns INTO the shared pointee (aliases see it).
-			// var's ONLY extra power is rebinding on an INCOMPATIBLE value or a primitive.
-			bool dynamic_value_compatible = false;
-			if (ptr_type_info->dynamic_pointee &&
-			    value.type() == script_value_type::jai_object_type) {
-				auto src_ti = value.get_type_info();
-				const std::string& src_name = src_ti ? src_ti->type_name : k_empty_type_name;
-				if (!src_name.empty()) {
-					dynamic_value_compatible = (src_name == expected_type_name);
-					if (!dynamic_value_compatible && engine_) {
-						auto src_class = engine_->get_class_definition(src_name);
-						dynamic_value_compatible = src_class && src_class->is_subtype_of(expected_type_name);
-					}
-				}
-			}
 
 			if (value.is_null()) {
 				VM_TRY(store_back(std::move(value)));
@@ -3815,81 +3828,12 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 					value.set_type_info(ptr_type_info);
 					VM_TRY(store_back(std::move(value)));
 				}
-			} else if (ptr_type_info->dynamic_pointee && !dynamic_value_compatible) {
-				// var-held handle receiving an INCOMPATIBLE value or a primitive: REBIND
-				// (var's dynamic power where typed would error). A COMPATIBLE value falls
-				// through to the auto-unwrap path below, IDENTICAL to a typed holder.
-				// Replace the stored handle with a
-				// value-copy of the rhs and keep the 'any' marker so the variable stays
-				// dynamic for the next '='.
-				script_value rebound = clone_for_assignment(value);
-				if (engine_) {
-					detail::var_stamp(rebound, nullptr, engine_);
-				}
-				VM_TRY(store_back(std::move(rebound)));
 			} else {
-				auto holder = currentVal->get_object_holder();
-				if (!holder || !holder->data) {
-					return raise_(make_error_code(runtime_error_code::invalid_reference),
-						"Cannot assign to null shared_ptr");
-				}
-
-				auto instance = currentVal->get_class_instance();
-				if (!instance) {
-					auto type_info = value.get_type_info();
-					uint64_t type_id = type_info ? type_info->id : 0;
-					return raise_(make_error_code(runtime_error_code::type_mismatch),
-						"Cannot assign {0} to shared_ptr - object is not a class instance", type_id);
-				}
-
-				auto source_type_info = value.get_type_info();
-				const std::string& source_type_name = source_type_info ? source_type_info->type_name : k_unknown_type_name;
-
-				bool handled = false;
-				if (source_type_name == expected_type_name) {
-					if (value.type() == script_value_type::jai_object_type ||
-					    value.type() == script_value_type::jai_shared_ptr_type) {
-						auto source_holder = const_cast<script_value&>(value).get_object_holder();
-						if (source_holder && source_holder->data && source_holder->is_class_instance_wrapper) {
-							auto source_instance = std::static_pointer_cast<class_instance>(source_holder->data);
-							if (source_instance) {
-								instance->copy_fields_from(*source_instance);
-								handled = true;
-							}
-						}
-					}
-				}
-
-				if (!handled) {
-					// a worker's operator= runs through its region pin; an unpinned one keeps the verdict
-					if (parallel_worker_ &&
-					    instance->get_class_definition() &&
-					    instance->get_class_definition()->defines_method(assign_operator_id_)) [[unlikely]] {
-						const detail::parallel_method_pin* pin = parallel_method_pins_ ? parallel_method_pins_->find_operator(instance->get_class_definition(), assign_operator_id_) : nullptr;
-						if (!pin) {
-							return raise_(make_error_code(runtime_error_code::unsupported_operation),
-								"custom operator dispatch on class instances is not admitted in a parallel body");
-						}
-						auto call_result = detail::call_parallel_operator_pin(*this, *pin, assign_operator_id_, *currentVal, { std::move(value) }, engine_);
-						if (!call_result) {
-							return raise_from(call_result);
-						}
-					} else if (script_value method = instance->get_method(assign_operator_id_, false); method.is_function()) {
-						const script_function& func = method.as_function();
-						std::vector<script_value> args;
-						args.push_back(*currentVal);
-						args.push_back(std::move(value));
-						auto call_result = call_value(func, args);
-						if (!call_result) {
-							return raise_from(call_result);   // the operator's own error, never a stand-in text
-						}
-					} else {
-						// No operator=: family D's assignment shape names the handle variable
-						// (KEEP BYTE-PARALLEL with the interpreter's assignment twin)
-						return raise_from(detail::typed_slot_rejection(value, *ptr_type_info,
-							detail::slot_site{detail::slot_kind::assignment, symbolizer_->get_string(sym), {}}, engine_));
-					}
-				}
+				// a value: the held object decides (a var rebinds to what its object does not take; KEEP BYTE-PARALLEL with the interpreter)
+				op_status held_status = op_status::ok;
+				if (held_object_store(*currentVal, value, result_used(), held_status)) { return held_status; }
+				return raise_from(detail::typed_slot_rejection(value, *ptr_type_info,
+					detail::slot_site{detail::slot_kind::assignment, symbolizer_->get_string(sym), {}}, engine_));
 			}
 			stack_.push_back(std::move(result));
 			return {};
@@ -3900,6 +3844,11 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 		profile_store_last_path_ = 4;
 #endif
 		type_info_ptr target_type = currentVal ? currentVal->get_type_info() : nullptr;
+
+		if (currentVal && detail::slot_value_assign_candidate(*currentVal) && (!target_type || target_type->base_type != script_value_type::jai_object_type)) {
+			op_status held_status = op_status::ok;
+			if (held_object_store(*currentVal, value, result_used(), held_status)) { return held_status; }
+		}
 
 		// A user operator= writes the held instance (KEEP BYTE-PARALLEL with interpreter::visit_assignment_expr)
 		if (target_type && target_type->base_type == script_value_type::jai_object_type && currentVal) {
@@ -11358,14 +11307,14 @@ op_status vm_backend::exec_typed_store_mov(frame& f, const vm_instruction& ins) 
 		if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL ||
 		    vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING) {
 			const type_info* slot_type = dst->type_info_raw();
-			if (!slot_type || detail::same_type_payload(v, slot_type)) {
+			if (!slot_type ? !detail::slot_value_assign_candidate(*dst) : detail::same_type_payload(v, slot_type)) {
 				JAI_TYPED_INPLACE(2);
 				*dst = v;
 				return {};
 			}
 			// a var slot: the store stamps the slot's own tag on the value (store_popped_value's var row)
 			const type_info* vt = v.type_info_raw();
-			if (slot_type->base_type == script_value_type::jai_any_type && !slot_type->dynamic_slot &&
+			if (slot_type && slot_type->base_type == script_value_type::jai_any_type && !slot_type->dynamic_slot && !detail::slot_value_assign_candidate(*dst) &&
 			    (!vt || vt->base_type == script_value_type::jai_any_type || vt->base_type == v.current_type())) {
 				JAI_TYPED_INPLACE(2);
 				*dst = v;
@@ -11373,7 +11322,7 @@ op_status vm_backend::exec_typed_store_mov(frame& f, const vm_instruction& ins) 
 				return {};
 			}
 			// an int into a float slot: the store's table row (int -> float)
-			if (vi == script_value::TYPEID_INT && slot_type->base_type == script_value_type::jai_float_type) {
+			if (vi == script_value::TYPEID_INT && slot_type && slot_type->base_type == script_value_type::jai_float_type) {
 				JAI_TYPED_INPLACE(2);
 				*dst = script_value(static_cast<script_float>(v.unchecked_as_int()), engine_);
 				return {};
@@ -11390,14 +11339,14 @@ op_status vm_backend::exec_typed_store_const(frame& f, const vm_instruction& ins
 	script_value v = materialize_constant(*f.code, ins.b);
 	if (script_value* dst = frame_slot(f, ins.a); dst && !dst->is_reference()) {
 		const type_info* slot_type = dst->type_info_raw();
-		if (!slot_type || detail::same_type_payload(v, slot_type)) {
+		if (!slot_type ? !detail::slot_value_assign_candidate(*dst) : detail::same_type_payload(v, slot_type)) {
 			JAI_TYPED_INPLACE(2);
 			*dst = std::move(v);
 			return {};
 		}
 		const size_t vi = v.raw_storage_index();
 		const type_info* vt = v.type_info_raw();
-		if (slot_type->base_type == script_value_type::jai_any_type && !slot_type->dynamic_slot &&
+		if (slot_type && slot_type->base_type == script_value_type::jai_any_type && !slot_type->dynamic_slot && !detail::slot_value_assign_candidate(*dst) &&
 		    (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL ||
 		     vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING) &&
 		    (!vt || vt->base_type == script_value_type::jai_any_type || vt->base_type == v.current_type())) {
@@ -11649,6 +11598,13 @@ op_status vm_backend::map_scalar_store(script_value& container, const script_val
 		limits_->memory_charge_deferred(2 * sizeof(script_value) + (key.is_string() ? key.unchecked_as_string().size() : 0));
 	}
 	if (!value_ref.has_valid_engine()) { value_ref.set_engine(container.get_engine()); }
+	if ((!value_type || value_type->base_type == script_value_type::jai_any_type) && detail::slot_value_assign_candidate(value_ref)) {
+		if (auto in_place = detail::var_slot_assign_in_place(value_ref, value, engine_)) {   // a var value's object takes it
+			if (!*in_place) { return raise_from(*in_place); }
+			stored = &value_ref;
+			return {};
+		}
+	}
 	const size_t vk = value.raw_storage_index();
 	auto exact_row = [&]() {   // the value already has the element's kind: the kernel's row is its copy (clone_element of a scalar)
 		switch (value_type->base_type) {
@@ -16524,7 +16480,7 @@ op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins)
 								if (current->type_info_raw() != entry.scalar_type) { current->set_type_info(type_info_ptr{entry.scalar_type}); }
 								return {};
 							}
-						} else if (entry.scalar_kind == k_member_ic_var_field &&
+						} else if (entry.scalar_kind == k_member_ic_var_field && !detail::field_slot_holds_object(inst, entry.slot) &&
 						           (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL ||
 						            vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING)) {
 							inst->field_slot_write(entry.slot, script_value(*vp));
@@ -16696,7 +16652,8 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 	// V-M2 proven field write: == the member_ic hit with the conversion gated by the
 	// proof (KEEP BYTE-PARALLEL with interpreter I-M2)
 	if (member->proven_class && member->proven_field_write && (cached_global_env_ || parallel_worker_) && !detail::by_value_class_type(member->proven_field_type)) {
-		if (class_instance* inst = detail::proven_field_instance(dereferenced, member->proven_class, member->proven_epoch)) {
+		if (class_instance* inst = detail::proven_field_instance(dereferenced, member->proven_class, member->proven_epoch);
+		    inst && !detail::proven_field_holds_object(inst, member->proven_slot, member->proven_field_type)) {
 			script_value incoming = clone_for_assignment(value);
 			if (proof == proof_same_type && member->proven_field_type &&
 			    detail::same_type_payload(incoming, member->proven_field_type)) {
@@ -16743,7 +16700,7 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 							}
 							return op_status{};
 						}
-						if (entry.scalar_kind == k_member_ic_var_field) {
+						if (entry.scalar_kind == k_member_ic_var_field && !detail::field_slot_holds_object(inst, entry.slot)) {
 							// a var field takes a scalar or a string as field_store leaves it: unconverted, its own copy
 							const size_t vi = value.raw_storage_index();
 							if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL ||
@@ -16879,7 +16836,8 @@ op_status vm_backend::exec_set_static(frame& f, const vm_instruction& ins) {
 class_instance* vm_backend::plain_member_store_slot(frame& f, size_t ins_index, member_expr* member, const script_value& object, uint32_t& slot) {
 	if (parallel_worker_ || member->member_id == UINT64_MAX) return nullptr;
 	if (member->proven_class && member->proven_field_write && cached_global_env_ && !detail::by_value_class_type(member->proven_field_type)) {
-		if (class_instance* inst = detail::proven_field_instance(object, member->proven_class, member->proven_epoch)) {
+		if (class_instance* inst = detail::proven_field_instance(object, member->proven_class, member->proven_epoch);
+		    inst && !detail::proven_field_holds_object(inst, member->proven_slot, member->proven_field_type)) {
 			slot = member->proven_slot;
 			return inst;
 		}

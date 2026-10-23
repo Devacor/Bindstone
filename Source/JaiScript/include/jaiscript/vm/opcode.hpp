@@ -380,6 +380,7 @@ namespace jai::vm {
     inline constexpr uint32_t store_flag_same_type = 32; // assignment_expr::static_store_proof == proof_same_type
                                                          // (frozen at compile; exec skips enforcement only behind
                                                          // detail::same_type_payload, so a stale bit costs the skip)
+    inline constexpr uint32_t store_flag_var_target = 64; // the target names a by-value var declaration (identifier_expr::names_var_decl)
 
     // op_compound_store c layout: low 4 bits = kind, upper bits = flags
     inline constexpr uint32_t compound_kind_mask = 0xF;

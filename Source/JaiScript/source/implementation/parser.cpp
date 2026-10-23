@@ -169,6 +169,36 @@ namespace {
             return false;
         }
 
+        // True when the innermost scope that declares `symbol` declares it a by-value var (a var local, a var or untyped
+        // parameter, a var loop variable): a store to it rebinds whatever handle it holds (detail::slot_value_assign)
+        bool names_var_decl(uint64_t symbol) const {
+            if (symbol == UINT64_MAX) {
+                return false;
+            }
+            auto dynamic = [](const type_info* t) { return !t || t->base_type == script_value_type::jai_any_type; };
+            for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
+                auto vr = it->vars.equal_range(symbol);
+                auto pr = it->params.equal_range(symbol);
+                auto rr = it->range_vars.equal_range(symbol);
+                if (vr.first == vr.second && pr.first == pr.second && rr.first == rr.second) {
+                    if (it->destructures.count(symbol)) { return false; }
+                    continue;
+                }
+                bool result = true;
+                for (auto v = vr.first; v != vr.second; ++v) {
+                    if (!v->second->type || v->second->type->base_type != script_value_type::jai_any_type) { result = false; }
+                }
+                for (auto q = pr.first; q != pr.second; ++q) {
+                    if (q->second->is_reference || !dynamic(q->second->type.get())) { result = false; }
+                }
+                for (auto r = rr.first; r != rr.second; ++r) {
+                    if (r->second->is_reference || !r->second->element_type || r->second->element_type->base_type != script_value_type::jai_any_type) { result = false; }
+                }
+                return result;
+            }
+            return false;
+        }
+
         // The T of the `T& name` declaration or `T& p` parameter a name resolves to, slot-resident with a concrete T (the store
         // decides by T)
         type_info* names_declared_reference(uint64_t symbol) const {
@@ -557,6 +587,7 @@ namespace {
                 case node_type::identifier_expr: {
                     auto* id = static_cast<identifier_expr*>(e);
                     id->names_value_decl = !names_reference_decl(id->symbol_id);
+                    id->names_var_decl = !id->global_qualified && names_var_decl(id->symbol_id);
                     id->names_known_value = names_known_value_decl(id->symbol_id);
                     id->declared_ref = id->global_qualified ? nullptr : names_declared_reference(id->symbol_id);
                     id->declared_ref_kind = detail::declared_ref_kind(id->declared_ref);

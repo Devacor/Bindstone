@@ -189,6 +189,9 @@ namespace jai {
         // when the storage holds a cell: value-decl names write the cell like the variable
         // itself (typed enforcement); ref-alias names store through unconstrained.
         bool names_value_decl = true;
+        // Parser resolution: the name resolves to a by-value var declaration (a var local, a var or untyped parameter, a var
+        // loop variable): a store into it treats a handle it holds as rebindable whatever the handle's own tag
+        bool names_var_decl = false;
         // Parser resolution: true when this name statically resolves to a VALUE declaration the unit can see (a
         // local, a parameter, a program-level declaration of this unit); false for reference declarations and
         // for names the unit does not declare. A reference bound to such a name dereferences a cell, never a getter.

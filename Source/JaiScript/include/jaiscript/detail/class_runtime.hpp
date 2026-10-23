@@ -2540,6 +2540,43 @@ inline checked_result<void> enforce_member_access(const class_definition* cls, u
 inline std::optional<checked_result<void>> user_assign_operator(const script_value& current_in, const script_value& value_in, engine* eng,
                                                                 const type_info* declared = nullptr, const type_info* bound = nullptr);
 
+// '=' of a value into a slot whose held object decides the store (docs/site/guide/03-value-semantics.html "A var holding a
+// handle", "A var holding an object"). A slot holding a handle (shared_ptr<T> or a var holding one) and a value that is no
+// handle: a value of the held class or a subclass assigns into the shared object, through the class's operator= when one of
+// its overloads takes the value, else the implicit copy assignment; a var rebinds to any other value, a typed holder runs the
+// class's operator= (its own error when it takes nothing). A var holding a class instance by value: the class's operator=
+// assigns into the object when one of its overloads takes the value (never for a handle or null). nullopt: none applies (a
+// typed holder's rejection, a var's plain store). declared_var: the slot is declared var whatever its value's tag (a field, an
+// element, a map value). Defined out of line (environment.cpp).
+enum class value_store : uint8_t { assigned, rebind };
+std::optional<checked_result<value_store>> slot_value_assign(const script_value& storage, const script_value& value, engine* eng, bool declared_var = false);
+
+// The cheap head every store site asks first: storage holding an object (a handle or an instance)
+inline bool slot_value_assign_candidate(const script_value& storage) noexcept {
+    const size_t si = storage.raw_storage_index();
+    return si == script_value::TYPEID_OBJECT || si == script_value::TYPEID_SHARED_PTR;
+}
+
+// A var field, element or map value whose held object takes the value in place (slot_value_assign's assigned verdict); nullopt:
+// the store replaces (a rebind included)
+inline std::optional<checked_result<void>> var_slot_assign_in_place(const script_value& current, const script_value& source, engine* eng) {
+    if (!slot_value_assign_candidate(current.is_reference() ? current.deref() : current)) { return std::nullopt; }
+    auto stored = slot_value_assign(current, source, eng, true);
+    if (!stored || (*stored && stored->value() == value_store::rebind)) { return std::nullopt; }
+    if (!*stored) {
+        checked_result<void> failed = stored->error_value();
+        return failed;
+    }
+    return checked_result<void>();
+}
+
+// A field lane writing slot directly steps aside when the field holds an object a store asks first (var_slot_assign_in_place)
+inline bool field_slot_holds_object(class_instance* inst, uint32_t slot);
+// The same for a proven write: only a field declared var (or untyped) can hold the object
+inline bool proven_field_holds_object(class_instance* inst, uint32_t slot, const type_info* proven_type) {
+    return (!proven_type || proven_type->base_type == script_value_type::jai_any_type) && field_slot_holds_object(inst, slot);
+}
+
 // The members `layout` declares (its whole chain, base first) copied from source into dest
 inline checked_result<void> implicit_copy_assign(class_instance* dest, const class_definition* layout, class_instance* source, engine* eng) {
     const uint32_t n = layout->field_slot_count();
@@ -2798,10 +2835,19 @@ inline checked_result<script_value> class_instance::enforce_field_write(uint64_t
 inline std::optional<checked_result<void>> class_instance::assign_field_in_place(uint64_t id, const script_value& source) const {
     if (!class_def_) { return std::nullopt; }
     const type_info_ptr declared = class_def_->get_field_declared_type(id);
-    if (!declared || declared->base_type != script_value_type::jai_object_type || declared->type_name.empty()) { return std::nullopt; }
+    if (!declared || declared->base_type == script_value_type::jai_any_type) {
+        const script_value* current = find_field_value(id);
+        return current ? detail::var_slot_assign_in_place(*current, source, engine_) : std::nullopt;
+    }
+    if (declared->base_type != script_value_type::jai_object_type || declared->type_name.empty()) { return std::nullopt; }
     const script_value* current = find_field_value(id);
     if (!current) { return std::nullopt; }
     return detail::user_assign_operator(*current, source, engine_, declared.get());
+}
+
+inline bool detail::field_slot_holds_object(class_instance* inst, uint32_t slot) {
+    const script_value* current = inst->field_slot_value(slot);
+    return current && slot_value_assign_candidate(*current);
 }
 
 template <class Copy>
@@ -2817,6 +2863,14 @@ inline checked_result<script_value> class_instance::field_store(uint64_t id, con
 template <class Copy>
 inline checked_result<script_value> class_definition::static_store(uint64_t id, const script_value& source, Copy&& copy) const {
     auto it = static_declared_types_.find(id);
+    if (it == static_declared_types_.end() || !it->second || it->second->base_type == script_value_type::jai_any_type) {
+        if (const script_value* current = get_static_field_ptr(id)) {
+            if (auto in_place = detail::var_slot_assign_in_place(*current, source, engine_)) {
+                if (!*in_place) { return in_place->error_value(); }
+                return script_value(current->deref());
+            }
+        }
+    }
     if (it != static_declared_types_.end() && it->second && it->second->base_type == script_value_type::jai_object_type && !it->second->type_name.empty()) {
         if (const script_value* current = get_static_field_ptr(id)) {
             if (auto in_place = detail::user_assign_operator(*current, source, engine_, it->second.get())) {
@@ -2848,6 +2902,7 @@ inline checked_result<void> compound_slot_store(script_value& target, script_val
 // assignment (a bound class's bound "="), the element keeping its object; nullopt for a var element or any other store, which
 // replaces
 inline std::optional<checked_result<void>> element_copy_assign(const script_value& current, const script_value& source, const type_info_ptr& element_type, engine* eng) {
+    if (!element_type || element_type->base_type == script_value_type::jai_any_type) { return var_slot_assign_in_place(current, source, eng); }
     if (!element_type || element_type->base_type != script_value_type::jai_object_type || element_type->type_name.empty()) { return std::nullopt; }
     if (auto copied = class_copy_assign(current, source, eng, element_type.get())) { return copied; }
     const script_value& held = current.is_reference() ? current.deref() : current;

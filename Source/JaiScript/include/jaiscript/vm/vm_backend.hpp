@@ -2443,7 +2443,7 @@ namespace jai::vm {
         bool cell_takes_string(const frame& f, const chunk::cell_loop& loop, uint32_t dk) const noexcept;
         void cell_land_string(frame& f, const chunk::cell_loop& loop, uint32_t dk, script_value&& v);
         bool cells_store_string(frame& f, const chunk::cell_loop& loop, uint32_t dk, script_value& v);
-        bool cells_concat(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint32_t left, uint32_t right, uint32_t origin);
+        JAI_NOINLINE bool cells_concat(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint32_t left, uint32_t right, uint32_t origin);   // cold: kept out of exec_c_arith_any, whose numeric rows are hot
         bool cells_self_concat(frame& f, const chunk::cell_loop& loop, uint32_t dk, const script_string* b);
         JAI_FORCEINLINE op_status exec_c_load(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool adopted);
         JAI_FORCEINLINE op_status exec_c_index_store(frame& f, const vm_instruction& ins, const cell_regs& cr);

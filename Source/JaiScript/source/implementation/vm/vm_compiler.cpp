@@ -554,14 +554,14 @@ size_t vm_compiler::emit(opcode op, uint32_t a, uint32_t b, uint32_t c) {
 // then-arm's exit jump targets one PAST it, so rewriting would let the then path skip
 // the test and fall into the body with its value stranded on the stack.
 size_t vm_compiler::emit_cond_jump_false(const expression* cond_expr) {
-	const uint32_t proved = expression_returns_bool(cond_expr) ? 1u : 0u;
+	const uint32_t proved = !reference_ && expression_returns_bool(cond_expr) ? 1u : 0u;
 	if (fuse_cond_compare(cond_expr, k_invalid_u32, proved)) return chunk_->code.size() - 1;
 	return emit(opcode::op_jump_if_false, k_invalid_u32, proved);
 }
 // the true sense of a leaf comparison: the compare-jump falls through to a jump taken when it holds and skips it otherwise, so the
 // comparison stays a compare-jump (a typed one where proven) instead of a value pushed for JUMP_IF_TRUE. Returns the jump to patch
 size_t vm_compiler::emit_cond_jump_true(const expression* cond_expr) {
-	const uint32_t proved = expression_returns_bool(cond_expr) ? 1u : 0u;
+	const uint32_t proved = !reference_ && expression_returns_bool(cond_expr) ? 1u : 0u;
 	if (fuse_cond_compare(cond_expr, static_cast<uint32_t>(chunk_->code.size() + 1), proved)) return emit(opcode::op_jump, k_invalid_u32);
 	return emit(opcode::op_jump_if_true, k_invalid_u32, proved);
 }
@@ -598,7 +598,7 @@ void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint
 	// ::name targets stay on the plain op (compound_fused's fast path resolves its
 	// target through the frame/env ladder; the global-only door lives in
 	// exec_compound_store and this path is cold by definition)
-	if (!code.empty() && rhs && !(kind_flags & compound_flag_global_only) && !compound_kind_bitwise(kind_flags)) {   // &= |= ^= <<= >>= take the plain op
+	if (!reference_ && !code.empty() && rhs && !(kind_flags & compound_flag_global_only) && !compound_kind_bitwise(kind_flags)) {   // &= |= ^= <<= >>= take the plain op
 		compound_fused_proto cp;
 		bool fuse = false;
 		switch (rhs->get_type()) {
@@ -946,18 +946,20 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 		compile_declaration(decl, false);
 	}
 	emit(opcode::op_halt);
-	result->needs_frame_env = body_needs_frame_env(*result);
+	result->needs_frame_env = reference_ || body_needs_frame_env(*result);   // the reference mode keeps the eager per-call env
 	result->shares_cells = body->shares_cells;
 	if (result->shares_cells) { result->needs_frame_env = true; }
 	// The lazy safe list is a strict subset of the sticky list, so env-free bodies qualify
-	result->method_env_reusable = !result->needs_frame_env || method_body_env_reusable(*result);
+	result->method_env_reusable = !reference_ && (!result->needs_frame_env || method_body_env_reusable(*result));
 	// Register-file temps live above local_count: raise it to the watermark so the
 	// window null-fill (and fiber set_local growth) covers every temp slot
 	if (temp_high_ > result->local_count) {
 		result->local_count = temp_high_;
 	}
-	lower_typed_ops(*result);
-	lower_dynamic_ops(*result);
+	if (!reference_) {
+		lower_typed_ops(*result);
+		lower_dynamic_ops(*result);
+	}
 	frame_param_kinds_.clear();
 	frame_eligible_ = false;
 	temps_active_ = false;
@@ -1256,9 +1258,10 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 				break;
 			}
 		}
+		const bool fuse_return = clean_exit && !reference_;   // the reference mode returns through the general op_return
 		if (rs->value) {
 			if (rs->binds_reference && compile_storage_reference(rs->value)) {
-			} else if (clean_exit && rs->value->get_type() == node_type::identifier_expr) {
+			} else if (fuse_return && rs->value->get_type() == node_type::identifier_expr) {
 				// Structural LOAD+RETURN fusion (`return n;` - half of fib's dynamic
 				// returns): whole-node gate, resolution mirrors op_load exactly at runtime
 				auto* ident = static_cast<identifier_expr*>(rs->value.get());
@@ -1278,7 +1281,7 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 			} else {
 				// Calls that already yield a reference pass through; anything else
 				// rejects in the ref-return conversion (return site / completion door)
-				if (clean_exit && rs->value->get_type() == node_type::call_expr &&
+				if (fuse_return && rs->value->get_type() == node_type::call_expr &&
 				    static_cast<call_expr*>(rs->value.get())->callee->get_type() == node_type::identifier_expr) {
 					pending_tail_call_ = true;
 				}
@@ -1287,7 +1290,7 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 				// node's own shape AND the tail opcode must both agree - a logical
 				// && / || root ends in an arm's op, never rewrite those). Non-logical
 				// binary roots always emit their own op_binary LAST.
-				if (clean_exit && rs->value->get_type() == node_type::binary_expr && !chunk_->code.empty()) {
+				if (fuse_return && rs->value->get_type() == node_type::binary_expr && !chunk_->code.empty()) {
 					const auto* bin = static_cast<const binary_expr*>(rs->value.get());
 					const token_type bop = bin->op.type;
 					const bool logical = (bop == token_type::ampersand_ampersand || bop == token_type::pipe_pipe || bop == token_type::question_question);
@@ -1608,6 +1611,7 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 // Fast iterations run through op_cfor_prep/op_cfor_back with cached int pointers; when
 // runtime types don't cooperate the SAME loop runs its generic cond/update bytecode.
 bool vm_compiler::compile_counted_for(for_stmt* stmt) {
+	if (reference_) return false;
 	if (!stmt->initializer || !stmt->condition || !stmt->update) return false;
 	if (detail::const_site_of(stmt->update.get()) || detail::const_site_of(stmt->initializer.get())) return false;
 
@@ -2191,7 +2195,7 @@ bool vm_compiler::try_emit_text_builder_index(binary_expr* sub, assignment_expr*
 }
 
 bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
-	if (detail::const_site_of(expr.get())) return false;   // compile_expression emits its guard first
+	if (reference_ || detail::const_site_of(expr.get())) return false;   // the reference mode: the value form and its pop   // compile_expression emits its guard first
 	if (expr->get_type() == node_type::assignment_expr) {
 		auto* assign = static_cast<assignment_expr*>(expr.get());
 		if (assign->op.type == token_type::equal && assign->target->get_type() == node_type::member_expr &&
@@ -2468,7 +2472,7 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 		compile_assignment(std::static_pointer_cast<assignment_expr>(expr), as_statement);
 		return;
 	case node_type::call_expr:
-		if (as_statement && try_emit_fused_push(std::static_pointer_cast<call_expr>(expr))) return;
+		if (as_statement && !reference_ && try_emit_fused_push(std::static_pointer_cast<call_expr>(expr))) return;
 		compile_call(std::static_pointer_cast<call_expr>(expr));
 		return;
 	case node_type::lambda_expr:
@@ -2709,7 +2713,7 @@ chunk::typed_site& vm_compiler::typed_site_at(size_t ip) {
 // emitted becomes one typed move and no DECL_VAR follows. The op's guard is the decl fast
 // path's admission; its fallback is the pair it replaced.
 bool vm_compiler::try_lower_decl_move(const std::shared_ptr<variable_decl>& decl, const expression* init) {
-	if (!callable_.active) return false;
+	if (reference_ || !callable_.active) return false;
 	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store ||
 	    decl->ref_escaping || decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask) return false;
 	auto& code = chunk_->code;
@@ -2761,7 +2765,7 @@ bool vm_compiler::try_lower_decl_move(const std::shared_ptr<variable_decl>& decl
 // from the typed site), so it is the general form of the move and needs neither a proof nor the proofs flag; the
 // proofs flag gates the arithmetic and compare rows only
 bool vm_compiler::try_lower_store_move(identifier_expr* ident, const expression_ptr& value, uint32_t flags) {
-	if (!callable_.active) return false;
+	if (reference_ || !callable_.active) return false;
 	const uint32_t need = store_flag_no_result;
 	if ((flags & need) != need || (flags & (store_flag_ref_alias | store_flag_global_only))) return false;
 	const uint32_t dst = identifier_slot_operand(ident);
@@ -5532,7 +5536,7 @@ static bool index_proto_speculative_shape(const chunk& code, const fused_index_p
 // identifier or literal index, a member-base container, or an identifier container with a computed index
 // chain whose innermost node has a flat fused shape (the three cases try_emit_fused_index emits)
 bool vm_compiler::fusable_index_expr(const expression* e) {
-	if (!e || e->get_type() != node_type::binary_expr) return false;
+	if (reference_ || !e || e->get_type() != node_type::binary_expr) return false;
 	auto* b = static_cast<binary_expr*>(const_cast<expression*>(e));
 	if (b->op.type != token_type::left_bracket) return false;
 	const bool operand_index = b->right->get_type() == node_type::identifier_expr || b->right->get_type() == node_type::literal_expr;
@@ -5820,7 +5824,7 @@ bool vm_compiler::math_alias_call(const expression* e) {
 // a unary minus, complement or not whose operand is an operand shape or lands in a temp: a definition into a compiler
 // value wherever a consumer wants an operand (the lift, the flat pre-step, a math argument, a declaration, a store)
 bool vm_compiler::unary_temp_operand(const expression* e) {
-	if (!temps_active_ || !chunk_ || !chunk_->is_function_body) return false;
+	if (reference_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return false;
 	if (!e || e->get_type() != node_type::unary_expr) return false;
 	const auto* u = static_cast<const unary_expr*>(e);
 	if (u->op.type != token_type::minus && u->op.type != token_type::tilde && u->op.type != token_type::bang) return false;
@@ -6413,6 +6417,7 @@ std::shared_ptr<identifier_expr> vm_compiler::take_subscript_guard(const binary_
 }
 
 bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
+	if (reference_) return false;
 	const size_t protos = chunk_->fused_index_protos.size();
 	const bool emitted = try_emit_fused_index_shape(expr, flags);
 	if (emitted && chunk_->fused_index_protos.size() > protos) { chunk_->fused_index_protos.back().receiver = expr->subscript_receiver; }
@@ -6780,7 +6785,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		return;
 	}
 
-	if (string_append_chain(expr.get())) {
+	if (!reference_ && string_append_chain(expr.get())) {
 		// the literal, then each operand and its append, the order the chain evaluates in
 		std::vector<const binary_expr*> chain;
 		for (const expression* e = expr.get(); e->get_type() == node_type::binary_expr; e = static_cast<const binary_expr*>(e)->left.get()) {
@@ -6836,7 +6841,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 
 	if (expr->op.type == token_type::left_bracket) {
 		uint32_t flags = is_lvalue_shaped(expr->left.get()) ? index_flag_lvalue_shape : 0;
-		if (expr->transient_element_read) {
+		if (expr->transient_element_read && !reference_) {
 			flags |= index_flag_transient_read;
 		}
 		if (try_emit_fused_index(expr.get(), flags)) return;
@@ -6897,7 +6902,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		}
 	}
 
-	const uint32_t shape = binary_shape(expr.get());
+	const uint32_t shape = reference_ ? binary_shape_none : binary_shape(expr.get());
 	// the left operand is read before the right in the language's order: an in-op subscript on the right may run user code
 	// (an operator[] on a class instance, a getter behind the container) that rebinds a left identifier user code can reach,
 	// so that identifier's value is taken ahead of the op (a private local needs no snapshot); without temps the general
@@ -6924,7 +6929,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	// resolves at op time (only an undefined name or a getter-backed field could observe
 	// that, and the shape is the method-body hot path). Gated to real function-body
 	// chunks (top level and default-arg chunks have no window of their own).
-	if (temps_active_ && chunk_->is_function_body) {
+	if (!reference_ && temps_active_ && chunk_->is_function_body) {
 		auto operand_shape = [this](const expression* e) -> bool { return lift_operand_shape(e); };
 		// a subscript only a temp can carry (not a chain operand) needs a partner that cannot raise first;
 		// the rule holds at every node of the lifted tree, the outer one included
@@ -7112,6 +7117,7 @@ uint32_t vm_compiler::string_target_site_for(const expression_ptr& target) {
 }
 
 bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site, uint32_t compound) {
+	if (reference_) return false;
 	const size_t protos = chunk_->fused_index_protos.size();
 	const bool emitted = try_emit_fused_index_store_shape(sub, value, no_result, string_site, compound);
 	if (emitted && chunk_->fused_index_protos.size() > protos) { chunk_->fused_index_protos.back().receiver = sub->subscript_receiver; }
@@ -7260,7 +7266,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 		if (!compound) {
 			uint32_t flags = is_lvalue_shaped(expr->value.get()) ? store_flag_rhs_lvalue : 0;
 			if (!ident->names_value_decl) flags |= store_flag_ref_alias;
-			else if (expr->typed_store_provable) flags |= store_flag_type_provable;
+			else if (expr->typed_store_provable && !reference_) flags |= store_flag_type_provable;
 			if (ident->global_qualified) flags |= store_flag_global_only;
 			if (expr->static_store_proof == proof_same_type) flags |= store_flag_same_type;
 			// Dest-addressed peephole: a fused-binary rhs runs
@@ -7636,7 +7642,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 				site.chain_root_symbol = root_ident->symbol_id;
 				site.chain_root_slot = identifier_slot_operand(root_ident);
 			}
-			if (builtins_) {
+			if (builtins_ && !reference_) {
 				auto builtin_index_for = [&](const std::unordered_map<uint64_t, uint16_t>& index) -> uint16_t {
 					auto it = index.find(member->member_id);
 					return it != index.end() ? it->second : builtin_method_registries::k_no_builtin;
@@ -7667,7 +7673,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			}
 			for (const size_t ip : capture_ips) { chunk_->code[ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1); }
 			uint32_t builtin_kind = 0;   // the checker proved the receiver and the name is that kind's builtin, or the receiver's kind picks at run time
-			if (builtins_ && !member->null_safe && member->object->get_type() != node_type::super_expr) {
+			if (builtins_ && !reference_ && !member->null_safe && member->object->get_type() != node_type::super_expr) {
 				const call_site& cs = chunk_->call_sites.back();
 				bool args_callout_free = true;   // an identifier string receiver is re-read after the arguments: none may run code
 				if (member->object->get_type() == node_type::identifier_expr) {
@@ -7978,6 +7984,7 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 
 	{
 		vm_compiler body_compiler(symbolizer_, builtins_);
+		body_compiler.reference(reference_);
 		body_compiler.typed_lowering(typed_lowering_);
 		body_compiler.ir_listing(ir_listing_);
 		body_compiler.ir_passes(ir_passes_);
@@ -8088,7 +8095,7 @@ uint32_t vm_compiler::declared_ref_at_bind(const variable_decl* decl) const {
 // initializer of a slot declaration lands each arm this way under the condition's jumps, so no value crosses a jump on
 // the operand stack (the block form admits the arms as moves); the interpreter evaluates the same arm and converts once.
 void vm_compiler::compile_decl_value(const std::shared_ptr<variable_decl>& decl, const expression_ptr& init) {
-	if (init->get_type() == node_type::ternary_expr && callable_.active &&
+	if (!reference_ && init->get_type() == node_type::ternary_expr && callable_.active &&
 	    (decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store && !decl->ref_escaping &&
 	    decl->slot_index != SIZE_MAX && decl->slot_index < k_typed_slot_mask) {
 		auto* t = static_cast<ternary_expr*>(init.get());

@@ -1,9 +1,9 @@
 #pragma once
 
-// Differential fuzzing harness: runs one generated program on BOTH backends
-// (tree-walking interpreter + bytecode VM) and compares final results, printed
-// output, error text, and engine-alive-afterward. Any mismatch is a divergence.
-// Fully deterministic: everything derives from an explicit uint64 seed.
+// Differential fuzzing harness: runs one generated program on a pair of engines and compares final results, printed
+// output, error text, and engine-alive-afterward. Any mismatch is a divergence. The pair is the tree-walking interpreter
+// against the bytecode VM, or (--vm-reference) the optimized VM against the VM in engine::vm_reference_mode, where a
+// divergence is a bug of an optimized lane. Fully deterministic: everything derives from an explicit uint64 seed.
 
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/value.hpp>
@@ -194,6 +194,7 @@ namespace jai::fuzz {
 
 	struct run_config {
 		bool use_vm = false;
+		bool vm_reference = false;                // engine::vm_reference_mode (the vm side of the --vm-reference pair)
 		double budget_seconds = 0.25;
 		size_t print_cap = 32 * 1024;
 		// Memory bombs (e.g. seed 8356's exponential `s += s`) stall inside allocations
@@ -219,6 +220,7 @@ namespace jai::fuzz {
 		run_outcome out;
 		auto eng = jai::engine::make();
 		eng->set_backend(cfg.use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+		eng->vm_reference_mode(cfg.vm_reference);
 		// both backends run under one call-depth cap (the interpreter's): the documented defaults differ (256 / 10,000),
 		// and the contract compared here is that equal caps raise the same catchable error at the same call
 		eng->max_call_depth(jai::backend_type::vm, eng->max_call_depth(jai::backend_type::interpreter));
@@ -267,7 +269,7 @@ namespace jai::fuzz {
 
 		const bool trace = std::getenv("JAI_FUZZ_TRACE") != nullptr;   // triage: name each segment before it runs (a hang's location)
 		for (const auto& seg : p.segments) {
-			if (trace) { std::fprintf(stderr, "[trace] %s segment %zu\n", cfg.use_vm ? "vm" : "interp", out.segment_results.size()); std::fflush(stderr); }
+			if (trace) { std::fprintf(stderr, "[trace] %s segment %zu\n", cfg.vm_reference ? "vm-ref" : cfg.use_vm ? "vm" : "interp", out.segment_results.size()); std::fflush(stderr); }
 			std::string r;
 			auto seg_start = std::chrono::steady_clock::now();
 			try {
@@ -303,6 +305,7 @@ namespace jai::fuzz {
 	// ------------------------------------------------------------------
 	// Comparison
 	// ------------------------------------------------------------------
+	// interp and vm are the pair's two sides: with vm_reference_pair, interp holds the optimized vm and vm the reference vm
 	struct compare_result {
 		enum kind_t { agree, diverge, budget_skip } kind = agree;
 		bool budget_suspect = false; // only ONE backend hit the budget (possible hang divergence, wall-clock noise more likely)
@@ -311,7 +314,10 @@ namespace jai::fuzz {
 		run_outcome vm;
 	};
 
-	inline std::string first_difference(const std::string& a, const std::string& b) {
+	inline const char* left_label(bool vm_reference_pair) { return vm_reference_pair ? "vm" : "interp"; }
+	inline const char* right_label(bool vm_reference_pair) { return vm_reference_pair ? "vm-ref" : "vm"; }
+
+	inline std::string first_difference(const std::string& a, const std::string& b, bool vm_reference_pair = false) {
 		size_t i = 0;
 		while (i < a.size() && i < b.size() && a[i] == b[i]) ++i;
 		auto excerpt = [i](const std::string& s) {
@@ -320,16 +326,19 @@ namespace jai::fuzz {
 			for (auto& c : e) if (c == '\n') c = '|';
 			return e;
 		};
+		auto padded = [](std::string s) { s.resize(6, ' '); return s; };
 		return "at byte " + std::to_string(i) +
-			"\n      interp(len " + std::to_string(a.size()) + "): ..." + excerpt(a) +
-			"\n      vm    (len " + std::to_string(b.size()) + "): ..." + excerpt(b);
+			"\n      " + padded(left_label(vm_reference_pair)) + "(len " + std::to_string(a.size()) + "): ..." + excerpt(a) +
+			"\n      " + padded(right_label(vm_reference_pair)) + "(len " + std::to_string(b.size()) + "): ..." + excerpt(b);
 	}
 
 	// lowering: 0 each backend's default (the interpreter boxed against the vm lowered: the lowering's differential), 1 both boxed,
-	// 2 both lowered (with the other two it pins lowered == boxed on both backends)
-	inline compare_result compare_program(const program& p, double budget_seconds, bool proofs = true, bool param_alias = true, bool passes = true, uint32_t miss_every = 0, int lowering = 0) {
+	// 2 both lowered (with the other two it pins lowered == boxed on both backends). vm_reference_pair: the optimized vm (the
+	// switches as given) against the reference vm (every optimization off whatever the switches say)
+	inline compare_result compare_program(const program& p, double budget_seconds, bool proofs = true, bool param_alias = true, bool passes = true, uint32_t miss_every = 0, int lowering = 0, bool vm_reference_pair = false) {
 		compare_result cr;
 		run_config interp_cfg;
+		interp_cfg.use_vm = vm_reference_pair;
 		interp_cfg.budget_seconds = budget_seconds;
 		interp_cfg.proofs = proofs;
 		interp_cfg.param_alias = param_alias;
@@ -338,6 +347,7 @@ namespace jai::fuzz {
 		interp_cfg.lowering = lowering == 0 ? -1 : lowering == 2 ? 1 : 0;
 		run_config vm_cfg = interp_cfg;
 		vm_cfg.use_vm = true;
+		vm_cfg.vm_reference = vm_reference_pair;
 		cr.interp = run_program(p, interp_cfg);
 		cr.vm = run_program(p, vm_cfg);
 		if (cr.interp.budget_hit || cr.vm.budget_hit) {
@@ -353,15 +363,16 @@ namespace jai::fuzz {
 			const auto& a = cr.interp.segment_results[i];
 			const auto& b = cr.vm.segment_results[i];
 			if (a != b) {
-				diff += "  segment " + std::to_string(i) + " result:\n    interp: " + a + "\n    vm:     " + b + "\n";
+				auto padded = [](std::string s) { s += ":"; s.resize(8, ' '); return s; };
+				diff += "  segment " + std::to_string(i) + " result:\n    " + padded(left_label(vm_reference_pair)) + a + "\n    " + padded(right_label(vm_reference_pair)) + b + "\n";
 			}
 		}
 		if (cr.interp.printed != cr.vm.printed) {
-			diff += "  printed output differs " + first_difference(cr.interp.printed, cr.vm.printed) + "\n";
+			diff += "  printed output differs " + first_difference(cr.interp.printed, cr.vm.printed, vm_reference_pair) + "\n";
 		}
 		if (cr.interp.alive != cr.vm.alive) {
-			diff += std::string("  engine-alive-after: interp=") + (cr.interp.alive ? "yes" : "NO") +
-				" vm=" + (cr.vm.alive ? "yes" : "NO") + "\n";
+			diff += std::string("  engine-alive-after: ") + left_label(vm_reference_pair) + "=" + (cr.interp.alive ? "yes" : "NO") +
+				" " + right_label(vm_reference_pair) + "=" + (cr.vm.alive ? "yes" : "NO") + "\n";
 		}
 		if (!diff.empty()) {
 			cr.kind = compare_result::diverge;
@@ -420,6 +431,8 @@ namespace jai::fuzz {
 	// Suppressions for KNOWN divergences (fixes currently in flight on this
 	// branch). A suppression matches when every program needle appears in the
 	// program text AND every diff needle appears in the divergence summary.
+	// One list serves both pairs: an entry names the side at fault (interp, vm,
+	// or an optimized vm lane against vm-ref) in its description.
 	// ------------------------------------------------------------------
 	struct suppression {
 		std::string id;
@@ -438,8 +451,9 @@ namespace jai::fuzz {
 			// Both backends run under the interpreter's call-depth cap (run_program), so a deep recursion raises at the same
 			// call on both; what remains of this accepted class is the vm's bare self
 			// tail call, which reuses its frame (guide ch.6, G06-080) and completes where the interpreter raises
-			// (uncaught or caught: the text is the same)
-			{"KD-ENV-RECURSION-LIMIT", "vm tail call reuses its frame where the interpreter's depth cap raises",
+			// (uncaught or caught: the text is the same). The reference vm makes no tail call, so the --vm-reference pair
+			// splits the same way: the optimized vm completes where vm-ref raises
+			{"KD-ENV-RECURSION-LIMIT", "vm tail call reuses its frame where the interpreter's (or vm-ref's) depth cap raises",
 				{}, {"Maximum recursion depth exceeded"}},
 			// The FZ-* matchers (typed-fn-no-return, undef-var eval order,
 			// neg-zero, overflow op names, float divzero text, recursion text,
@@ -619,8 +633,8 @@ namespace jai::fuzz {
 		return p;
 	}
 
-	// Ready-to-paste Foundry test skeleton for a minimized repro.
-	inline std::string foundry_skeleton(const program& p, const std::string& diff) {
+	// Ready-to-paste Foundry test skeleton for a minimized repro (vm_reference_pair: the optimized vm against the reference vm)
+	inline std::string foundry_skeleton(const program& p, const std::string& diff, bool vm_reference_pair = false) {
 		std::ostringstream os;
 		os << "// Divergence repro, fuzz seed " << p.seed << "\n";
 		os << "// Diff observed:\n";
@@ -630,9 +644,14 @@ namespace jai::fuzz {
 		os << "test(\"fuzz_seed_" << p.seed << "_divergence\", [this]() {\n";
 		os << "\tstd::string out[2];\n";
 		os << "\tint idx = 0;\n";
-		os << "\tfor (bool use_vm : {false, true}) {\n";
+		os << "\tfor (bool " << (vm_reference_pair ? "reference" : "use_vm") << " : {false, true}) {\n";
 		os << "\t\tauto e = jai::engine::make();\n";
-		os << "\t\te->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);\n";
+		if (vm_reference_pair) {
+			os << "\t\te->set_backend(jai::backend_type::vm);\n";
+			os << "\t\te->vm_reference_mode(reference);\n";
+		} else {
+			os << "\t\te->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);\n";
+		}
 		os << "\t\te->max_call_depth(jai::backend_type::vm, e->max_call_depth(jai::backend_type::interpreter));\n";
 		os << "\t\te->static_checking(jai::check_mode::warn);\n";
 		os << "\t\te->execution_budget(0);\n";
@@ -642,7 +661,7 @@ namespace jai::fuzz {
 		}
 		os << "\t\t++idx;\n";
 		os << "\t}\n";
-		os << "\tcheck_eq(out[0], out[1], \"backend parity, fuzz seed " << p.seed << "\");\n";
+		os << "\tcheck_eq(out[0], out[1], \"" << (vm_reference_pair ? "vm reference parity" : "backend parity") << ", fuzz seed " << p.seed << "\");\n";
 		os << "});\n";
 		return os.str();
 	}

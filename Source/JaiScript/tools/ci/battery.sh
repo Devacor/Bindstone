@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# The milestone tier: every gate, at milestone depth. The Debug suites on both backends, then on the Release build the
-# suites, a 3000-program fuzz run (BATTERY_FUZZ_ITERATIONS), every example's hashes (GLOOM with and without workers and at
-# 600 ticks, the demoreel, the crawler, Gator Quest, JaiDOOM's timedemo where the checkout has it), the embedding
-# quickstart, the language server and the one-file build's include list.
+# The milestone tier: every gate, at milestone depth, on both tiers of tools/ci/targeted.sh. The Debug suites on the
+# interpreter, the VM and the VM reference, then on the Release build the same suites, a 3000-program run of each
+# differential (BATTERY_FUZZ_ITERATIONS: the interpreter against the VM, the VM against the VM reference), every example's
+# hashes on both backends (GLOOM with and without workers and at 600 ticks, the demoreel, the crawler, Gator Quest,
+# JaiDOOM's timedemo where the checkout has it), the embedding quickstart, the language server and the one-file build's
+# include list.
 #
 #   tools/ci/battery.sh [--build]
 #
@@ -22,9 +24,10 @@ FAILED=""
 if [ "${BATTERY_SKIP_DEBUG:-0}" = 1 ]; then
 	echo "skipped: the Debug suites (already green at this commit)"
 else
-	jai_debug_suites || FAILED="$FAILED debug-suites"
+	jai_debug_suites interp vm vm-reference || FAILED="$FAILED debug-suites"
 fi
-for gate in tests-interp tests-vm fuzz gloom gloom-workers gloom-long demoreel crawler gatorquest timedemo embed-quickstart lsp lsp-latency amalgamation; do
+export HASH_BACKENDS="vm interp"
+for gate in tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom gloom-workers gloom-long demoreel crawler gatorquest timedemo embed-quickstart lsp lsp-latency amalgamation; do
 	FUZZ_ITERATIONS="${BATTERY_FUZZ_ITERATIONS:-3000}" jai_gates release "$gate" || FAILED="$FAILED $gate"
 done
 

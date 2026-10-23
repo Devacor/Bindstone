@@ -346,6 +346,17 @@ namespace jai {
         // next compile; a chunk already compiled keeps its form.
         void ir_passes(bool on);
         bool ir_passes() const;
+        // === THE VM REFERENCE MODE (docs/site/embedding/03-backends.html) ===
+        // Off by default. On, the VM compiles and runs its plain general path: type_proofs, ir_passes, parameter_alias,
+        // local_alias and aggregate_lowering answer off whatever they were set to, and the compiler emits no superinstruction,
+        // typed or dynamic slot row, closed region, graft, counted loop, return or tail-call fusion, builtin dispatch index or
+        // compile-time builtin lane; the VM fills no inline cache (member, call, method, lookup fast heads) and folds no scoped
+        // const. Every program gives the optimized VM's values, output and error text (the differential gate is
+        // `jaiscript_fuzz --vm-reference`); a deep self tail call raises where the optimized VM reuses its frame. Every choice
+        // is made when a chunk compiles or the backend is built, so the optimized VM pays nothing for the mode. Set before the
+        // first execute, like the backend.
+        void vm_reference_mode(bool on);
+        bool vm_reference_mode() const;
         // === MISS INJECTION (a testing lever; internal/typed_regions_design.md, the cell block section) ===
         // Built only when JAISCRIPT_MISS_INJECTION is defined (the fuzz's MISS configuration): every nth cell
         // instruction whose own miss re-runs its original instruction misses before it runs, as a failed guard

@@ -21,11 +21,13 @@ namespace jai::foundry {
 
 namespace {
     jai::backend_type g_test_backend = jai::backend_type::interpreter;
+    bool g_test_vm_reference = false;   // --backend=vm-reference: the vm in engine::vm_reference_mode
 }
 
 std::shared_ptr<jai::engine> make_engine() {
     auto eng = jai::engine::make();
     eng->set_backend(g_test_backend);
+    eng->vm_reference_mode(g_test_vm_reference);
     eng->import_recheck_interval(0);   // test engines touch a file and re-import at once: every reach checks (the throttle has its own tests)
     return eng;
 }
@@ -204,15 +206,18 @@ int main(int argc, char** argv) {
         else if (arg.rfind("--filter=", 0) == 0) {
             filter = test_filter_config::parse(arg.substr(9));
         }
-        // backend selection: --backend=interpreter|vm
+        // backend selection: --backend=interpreter|vm|vm-reference
         else if (arg.rfind("--backend=", 0) == 0) {
             std::string backend_name = arg.substr(10);
             if (backend_name == "interpreter") {
                 g_test_backend = jai::backend_type::interpreter;
             } else if (backend_name == "vm") {
                 g_test_backend = jai::backend_type::vm;
+            } else if (backend_name == "vm-reference") {
+                g_test_backend = jai::backend_type::vm;
+                g_test_vm_reference = true;
             } else {
-                std::cout << "Unknown backend: \"" << backend_name << "\" (expected interpreter or vm)\n";
+                std::cout << "Unknown backend: \"" << backend_name << "\" (expected interpreter, vm or vm-reference)\n";
                 return 1;
             }
         }
@@ -228,7 +233,7 @@ int main(int argc, char** argv) {
     std::cout << "/*----------------------------*\\\n";
     std::cout << "| JaiScript Foundry Test Suite |\n";
     std::cout << "\\*----------------------------*/\n";
-    std::cout << "Backend: " << (g_test_backend == jai::backend_type::vm ? "vm" : "interpreter") << "\n";
+    std::cout << "Backend: " << (g_test_vm_reference ? "vm-reference" : g_test_backend == jai::backend_type::vm ? "vm" : "interpreter") << "\n";
 
     if (!verbose) {
         std::cout << "Performing Tests, One Moment ..." << std::flush;

@@ -200,7 +200,8 @@ void print_usage() {
 		"                                     the program keeps its old code.\n"
 		"\n"
 		"options:\n"
-		"  --backend=vm|interp   execution backend (default vm; interp = tree-walking interpreter)\n"
+		"  --backend=vm|interp|vm-reference   execution backend (default vm; interp = tree-walking interpreter; vm-reference =\n"
+		"                        the vm with every optimization off, engine::vm_reference_mode)\n"
 		"  --miss-every=<n>      the vm misses at every nth plain cell instruction (a build with JAISCRIPT_MISS_INJECTION; the flush at every position)\n"
 		"  --workers=<n>         the worker count of parallel_for, parallel_transform and parallel_reduce (default: the engine's own)\n"
 		"  --check=strict|warn|off\n"
@@ -327,8 +328,8 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		return 2;
 	}
 	if (opt.backend == "interpreter") { opt.backend = "interp"; }
-	if (opt.backend != "vm" && opt.backend != "interp") {
-		std::fprintf(stderr, "%s\n", con.red("unknown backend: " + opt.backend + " (use vm or interp)").c_str());
+	if (opt.backend != "vm" && opt.backend != "interp" && opt.backend != "vm-reference") {
+		std::fprintf(stderr, "%s\n", con.red("unknown backend: " + opt.backend + " (use vm, interp or vm-reference)").c_str());
 		return 2;
 	}
 	if (opt.check != "strict" && opt.check != "warn" && opt.check != "off") {
@@ -1032,6 +1033,7 @@ std::string slurp_file(const std::string& path) {
 std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream* engine_out) {
 	auto eng = jai::engine::make();
 	eng->set_backend(opt.backend == "interp" ? jai::backend_type::interpreter : jai::backend_type::vm);
+	eng->vm_reference_mode(opt.backend == "vm-reference");
 	if (opt.workers) { eng->parallel_thread_count(opt.workers); }
 	if (opt.miss_every) {
 		if (!jai::engine::miss_injection_available()) { std::fprintf(stderr, "--miss-every: this build carries no miss injection (configure with -DJAISCRIPT_MISS_INJECTION=ON)\n"); std::exit(2); }
@@ -1409,7 +1411,7 @@ const char* repl_help =
 	":help                 this text\n"
 	":load <path>          run a .jai file into this session (pasting/dropping a path works too)\n"
 	":reset                fresh engine (keeps backend, budget, debugger)\n"
-	":backend vm|interp    switch backend (resets the engine)\n"
+	":backend vm|interp|vm-reference   switch backend (resets the engine)\n"
 	":time on|off          print wall time per execute\n"
 	":quit / :exit         leave (Ctrl+Z+Enter or Ctrl+C also work)\n"
 	"\n"
@@ -1544,8 +1546,8 @@ struct repl_session {
 		}
 		if (cmd == ":backend") {
 			if (arg == "interpreter") { arg = "interp"; }
-			if (arg != "vm" && arg != "interp") {
-				out << con->red("usage: :backend vm|interp (switching resets the engine)") << "\n";
+			if (arg != "vm" && arg != "interp" && arg != "vm-reference") {
+				out << con->red("usage: :backend vm|interp|vm-reference (switching resets the engine)") << "\n";
 				return true;
 			}
 			opt.backend = arg;

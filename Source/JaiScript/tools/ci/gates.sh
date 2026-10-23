@@ -2,12 +2,12 @@
 # The CI gates, one per argument, so the workflow can give each its own step and a
 # local run can reproduce any of them:
 #
-#   BIN=build/bin tools/ci/gates.sh tests-interp tests-vm fuzz gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider
+#   BIN=build/bin tools/ci/gates.sh tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider
 #   tools/ci/gates.sh all
 #
 # BIN is the directory holding the built executables (default: build/bin under the
 # repository root; a relative BIN is taken from the repository root too). FUZZ_ITERATIONS
-# sets the fuzz run's program count (default 300) and FUZZ_CORPUS a directory it keeps divergent programs in. The milestone gates outside `all`
+# sets a fuzz run's program count (default 300) and FUZZ_CORPUS a directory it keeps divergent programs in. The milestone gates outside `all`
 # (gloom-workers, gloom-long, timedemo, amalgamation) are the battery's (tools/ci/battery.sh).
 #
 # The android gate cross-compiles the library and the suites with the Android NDK (libc++, the standard library Apple
@@ -15,6 +15,13 @@
 # message when no NDK is found. ANDROID_NDK_ROOT names the NDK (else ANDROID_NDK_HOME, ANDROID_NDK, or the newest ndk/
 # under ANDROID_HOME, ANDROID_SDK_ROOT or the SDK's default home); ANDROID_ABIS the ABIs (default arm64-v8a armeabi-v7a);
 # ANDROID_BUILD_DIR the build tree (default build-android, one directory per ABI; relative to the repository root).
+#
+# The two differentials: `fuzz` runs each program on the interpreter and the optimized VM, `fuzz-vm-reference` on the
+# optimized VM and the VM in reference mode (engine::vm_reference_mode: every optimization off), so a divergence there is a
+# bug of an optimized lane. tests-vm-reference runs the suite with --backend=vm-reference.
+#
+# HASH_BACKENDS names the backends the example hash gates run (default "vm interp"; the per-change tier passes "vm" unless
+# its interpreter tier is picked, tools/ci/targeted.sh).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -56,20 +63,31 @@ want() {
 	grep -Eq -- "$2" "$LOG" || { echo "::error::$1"; exit 1; }
 }
 
+HASH_BACKENDS="${HASH_BACKENDS:-vm interp}"
+hash_on() { case " $HASH_BACKENDS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
 gate_tests_interp() { run "$BIN/jaiscript_tests"; }
 gate_tests_vm() { run "$BIN/jaiscript_tests" --backend=vm; }
+gate_tests_vm_reference() { run "$BIN/jaiscript_tests" --backend=vm-reference; }
 
-gate_fuzz() {
+fuzz_run() {
 	local corpus=()
 	[ -n "${FUZZ_CORPUS:-}" ] && corpus=(--corpus "$FUZZ_CORPUS")
-	run_logged "$BIN/jaiscript_fuzz" --seed-start 1 --iterations "${FUZZ_ITERATIONS:-300}" --max-depth 3 --timeout-ms 250 --isolate "${corpus[@]+"${corpus[@]}"}"
+	run_logged "$BIN/jaiscript_fuzz" --seed-start 1 --iterations "${FUZZ_ITERATIONS:-300}" --max-depth 3 --timeout-ms 250 --isolate "${corpus[@]+"${corpus[@]}"}" "$@"
 	want "fuzz: expected no new divergence" "new divergences: ?0\\b"
 }
 
+gate_fuzz() { fuzz_run; }
+gate_fuzz_vm_reference() { fuzz_run --vm-reference; }
+
 gloom_hashes() {
 	cd "$ROOT/examples/gloom"
-	run_logged "$BIN/jai_gloom" --smoke --ticks "$1" --seed 666 --workers "$2"
+	local narrow=()
+	hash_on interp || narrow=(--backend vm)
+	hash_on vm || narrow=(--backend interpreter)
+	run_logged "$BIN/jai_gloom" --smoke --ticks "$1" --seed 666 --workers "$2" "${narrow[@]+"${narrow[@]}"}"
 	for backend in interpreter vm; do
+		hash_on "${backend/interpreter/interp}" || continue
 		want "GLOOM $backend ($1 ticks, $2 workers): expected frame hash $3 and STATE_HASH $4" \
 			"^$backend +\\|.*\\| $3 +\\| $4\$"
 	done
@@ -85,6 +103,7 @@ gate_timedemo() {
 	[ -f "$dir/p10_timedemo.jai" ] || { echo "timedemo: examples/jaidoom is not in this checkout, skipped"; return 0; }
 	cd "$dir"
 	for backend in vm interp; do
+		hash_on "$backend" || continue
 		rm -rf ./.cache
 		run_logged "$BIN/jaiscript" --no-debug --no-pause --backend="$backend" p10_timedemo.jai -- 120x78
 		want "timedemo $backend: expected STATE_HASH $TIMEDEMO_STATE" "STATE_HASH: $TIMEDEMO_STATE\\b"
@@ -111,11 +130,15 @@ PYEOF
 }
 
 gate_demoreel() {
-	run "$BIN/jai_demoreel" --smoke --expect "$DEMOREEL_STREAM"
+	local narrow=()
+	hash_on interp || narrow=(--backend vm)
+	hash_on vm || narrow=(--backend interpreter)
+	run "$BIN/jai_demoreel" --smoke --expect "$DEMOREEL_STREAM" "${narrow[@]+"${narrow[@]}"}"
 }
 
 gate_crawler() {
 	for backend in vm interpreter; do
+		hash_on "${backend/interpreter/interp}" || continue
 		run_logged "$BIN/jai_crawler" --smoke --seed 99 --turns 1500 --backend "$backend"
 		want "crawler $backend: expected STATE_HASH $CRAWLER_STATE" "STATE_HASH: $CRAWLER_STATE\$"
 	done
@@ -151,6 +174,7 @@ gate_lsp_latency() { lsp_test --only latency; }
 gate_gatorquest() {
 	cd "$ROOT/examples/gatorquest"
 	for backend in vm interp; do
+		hash_on "$backend" || continue
 		run_logged "$BIN/jaiscript" --backend="$backend" scripts/gatorquest.jai -- smoke ticks 2000 bots 2
 		want "Gator Quest $backend: expected STATE_HASH $GATORQUEST_STATE" "STATE_HASH: $GATORQUEST_STATE\$"
 	done
@@ -200,6 +224,7 @@ gate_embed_quickstart() {
 	work="$(mktemp -d)"
 	cd "$work"
 	for backend in vm interp; do
+		hash_on "$backend" || continue
 		local flags=()
 		[ "$backend" = interp ] && flags=(--interp)
 		run_logged "$BIN/embed_quickstart" "${flags[@]+"${flags[@]}"}"
@@ -220,7 +245,7 @@ gate_spider() {
 	want "spider: expected every check to hold" "^jai_spider: every check holds\$"
 }
 
-ALL=(tests-interp tests-vm fuzz gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider)
+ALL=(tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider)
 MILESTONE=(gloom-workers gloom-long timedemo amalgamation)
 CROSS=(android)
 
@@ -229,7 +254,7 @@ CROSS=(android)
 
 for gate in "$@"; do
 	case "$gate" in
-		tests-interp | tests-vm | fuzz | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency | spider) ;;
+		tests-interp | tests-vm | tests-vm-reference | fuzz | fuzz-vm-reference | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency | spider) ;;
 		gloom-workers | gloom-long | timedemo | amalgamation | android) ;;
 		*) echo "unknown gate: $gate (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]})" >&2; exit 2 ;;
 	esac

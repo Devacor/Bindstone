@@ -1037,6 +1037,19 @@ struct engine::implementation {
     // Parse-time type proofs (engine::type_proofs): the proof pass rides the same walk.
     bool type_proofs_ = true;
     bool ir_passes_ = true;
+    // engine::vm_reference_mode: the switches it turns off hold their effective values (type_proofs_, ir_passes_,
+    // parameter_alias_, local_alias_ are read where they decide), the *_set_ fields what the host asked for
+    bool vm_reference_ = false;
+    bool type_proofs_set_ = true;
+    bool ir_passes_set_ = true;
+    bool parameter_alias_set_ = true;
+    bool local_alias_set_ = true;
+    void apply_vm_reference() {
+        type_proofs_ = type_proofs_set_ && !vm_reference_;
+        ir_passes_ = ir_passes_set_ && !vm_reference_;
+        parameter_alias_ = parameter_alias_set_ && !vm_reference_;
+        local_alias_ = local_alias_set_ && !vm_reference_;
+    }
     uint32_t cells_miss_every_ = 0;   // the miss injection lever; the VM reads it at block entry under JAISCRIPT_MISS_INJECTION
 #ifdef JAISCRIPT_VM_COVERAGE
     std::mutex coverage_mutex_;
@@ -1266,7 +1279,7 @@ struct engine::implementation {
     // still stamp.
     // The lowering runs where it pays: the vm's typed rows and cells run component slots at the float-local floor, while the
     // interpreter's per-node dispatch makes a scalarized vector slower than the boxed kernel (an explicit setting wins)
-    bool lowering_on() const { return aggregate_lowering_ < 0 ? current_backend_type == backend_type::vm : aggregate_lowering_ != 0; }
+    bool lowering_on() const { return !vm_reference_ && (aggregate_lowering_ < 0 ? current_backend_type == backend_type::vm : aggregate_lowering_ != 0); }
 
     // The view the backends run: the lowered bodies (built on first use) or the parsed ones
     void lowering_view(engine& self, const std::vector<declaration_ptr>& declarations, detail::aggregate_lowering_state& state) {
@@ -3161,7 +3174,8 @@ check_mode engine::static_checking() const {
 }
 
 void engine::type_proofs(bool on) {
-    impl->type_proofs_ = on;   // the next checked_report/check_bite re-runs with stamp or clear
+    impl->type_proofs_set_ = on;
+    impl->apply_vm_reference();   // the next checked_report/check_bite re-runs with stamp or clear
 }
 
 bool engine::type_proofs() const {
@@ -3189,11 +3203,26 @@ uint64_t engine::aggregate_lowered_sites() const {
 }
 
 void engine::ir_passes(bool on) {
-    impl->ir_passes_ = on;   // the next compile follows it
+    impl->ir_passes_set_ = on;
+    impl->apply_vm_reference();   // the next compile follows it
 }
 
 bool engine::ir_passes() const {
     return impl->ir_passes_;
+}
+
+void engine::vm_reference_mode(bool on) {
+    if (impl->vm_reference_ == on) { return; }
+    if (impl->has_executed_) {
+        throw runtime_error("vm_reference_mode after execute() is unsupported: defined functions and classes capture the executing backend");
+    }
+    impl->vm_reference_ = on;
+    impl->apply_vm_reference();
+    impl->backend.reset();   // built lazily by engine::backend() in the mode
+}
+
+bool engine::vm_reference_mode() const {
+    return impl->vm_reference_;
 }
 
 void engine::cells_miss_every(uint32_t n) {
@@ -4470,7 +4499,8 @@ void engine::note_parameter_alias_bind() {
 }
 
 void engine::parameter_alias(bool on) {
-    impl->parameter_alias_ = on;
+    impl->parameter_alias_set_ = on;
+    impl->apply_vm_reference();
 }
 
 bool engine::parameter_alias() const {
@@ -4497,7 +4527,8 @@ void engine::note_local_alias_bind() {
 }
 
 void engine::local_alias(bool on) {
-    impl->local_alias_ = on;
+    impl->local_alias_set_ = on;
+    impl->apply_vm_reference();
 }
 
 bool engine::local_alias() const {

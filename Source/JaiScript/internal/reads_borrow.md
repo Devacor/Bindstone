@@ -65,6 +65,12 @@ caches) and in a worker (which keeps its proofs and reads its own member_ic rows
 half of the old gate was already `member_ic_rows`, which returns null on the vm-reference backend and the worker's own rows in a
 worker.
 
+## Measured
+
+Release (LTCG), interleaved, 7 rounds against the base at an equal-length path: `chain_reads_dyn` 187.9 to 94.2 us (-50%; the
+marker alone -26%); JaiDOOM, Gator Quest, OSSUARY and GLOOM within their noise floors, hashes held. Kernels with no bytecode
+change move by up to 5% either way between builds of the same source (code layout); the manifests confirm which programs changed.
+
 ## Not changed
 
 By-value arguments (`merge(lower.right, ...)`) copy because the callee keeps the value. Reference parameters bind a reference.

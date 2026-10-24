@@ -2477,7 +2477,7 @@ expression_ptr parser::try_constant_fold(expression_ptr left, const token& op, e
         }
 
         // Create a folded literal with the computed value
-        return std::make_shared<literal_expr>(op.location, script_value(result, leftVal.get_engine()));
+        return std::make_shared<literal_expr>(op.location, script_value(script_value::ast_literal_tag{}, result));
     }
 
     // Fold float arithmetic
@@ -2516,13 +2516,13 @@ expression_ptr parser::try_constant_fold(expression_ptr left, const token& op, e
         }
 
         // Create a folded literal with the computed value
-        return std::make_shared<literal_expr>(op.location, script_value(result, leftVal.get_engine()));
+        return std::make_shared<literal_expr>(op.location, script_value(script_value::ast_literal_tag{}, result));
     }
 
     // Fold string concatenation
     if (op.type == token_type::plus && leftVal.is_string() && rightVal.is_string()) {
         script_string result = leftVal.as_string() + rightVal.as_string();
-        return std::make_shared<literal_expr>(op.location, script_value(result, leftVal.get_engine()));
+        return std::make_shared<literal_expr>(op.location, script_value(script_value::ast_literal_tag{}, result));
     }
 
     // Can't fold this operation
@@ -2594,10 +2594,10 @@ checked_result<expression_ptr> parser::unary() {
             const script_value& lv = static_cast<literal_expr*>(right.get())->value;
             script_int negated = 0;
             if (lv.raw_storage_index() == script_value::TYPEID_INT && ints::try_neg(lv.unchecked_as_int(), negated)) {
-                return std::make_shared<literal_expr>(op.location, script_value(negated, lv.get_engine()));
+                return std::make_shared<literal_expr>(op.location, script_value(script_value::ast_literal_tag{}, negated));
             }
             if (lv.raw_storage_index() == script_value::TYPEID_FLOAT) {
-                return std::make_shared<literal_expr>(op.location, script_value(-lv.unchecked_as_float(), lv.get_engine()));
+                return std::make_shared<literal_expr>(op.location, script_value(script_value::ast_literal_tag{}, -lv.unchecked_as_float()));
             }
         }
         return std::make_shared<unary_expr>(op.location, op, right);

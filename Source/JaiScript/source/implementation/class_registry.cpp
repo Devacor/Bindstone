@@ -1228,7 +1228,7 @@ void class_definition::add_field(std::string_view name, const script_value& defa
     uint64_t name_id = eng->symbolize(name);
     if (std::find(bound_field_order_.begin(), bound_field_order_.end(), name_id) == bound_field_order_.end()) { bound_field_order_.push_back(name_id); }
 
-    if (default_value.get_engine() == nullptr && !!engine_) {
+    if (!default_value.has_valid_engine() && !!engine_) {
         script_value value_with_engine(default_value);
         value_with_engine.set_engine(engine_);
         field_defaults_.insert_or_assign(name_id, value_with_engine);

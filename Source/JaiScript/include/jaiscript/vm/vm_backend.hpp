@@ -861,7 +861,7 @@ namespace jai::vm {
                 } else {
                     // Build-up writes (pooled-arg binding, defaults): fill the gap with
                     // live nulls exactly like call_frame::set_local's slot>size path
-                    stack_.fill_null_to(idx, value.get_engine());
+                    stack_.fill_null_to(idx, engine_);
                     stack_.push_back(std::move(value));
                 }
                 if (slot >= f.window_live) { f.window_live = static_cast<uint32_t>(slot + 1); }

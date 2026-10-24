@@ -3031,7 +3031,7 @@ script_value engine::import_value(const script_value& value) {
                         for (auto& text : copy.strs()) { text = make_strong<script_string>(*text); }
                     }
                 } else if (items.is_typed()) {
-                    for (size_t i = 0; i < items.size(); ++i) { copy.push(import_value(items.get(i, from.get_engine()))); }
+                    for (size_t i = 0; i < items.size(); ++i) { copy.push(import_value(items.get(i, this))); }
                 } else {
                     copy.values().resize(items.size(), script_value(std::monostate{}, this));
                     for (size_t i = items.size(); i-- > 0;) { pending.push_back({&items.values()[i], &copy.values()[i]}); }

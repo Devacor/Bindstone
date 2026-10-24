@@ -155,8 +155,8 @@ namespace {
 	// Element compatibility/conversion live in the shared kernel
 	// (detail/container_enforce.hpp, used verbatim by both backends and the field
 	// kernel). These forwards keep the historical local names.
-	bool vm_is_element_type_compatible(const script_value& element, type_info_ptr element_type, script_value& array_owner) {
-		return detail::container_element_compatible(element, element_type, array_owner.get_engine());
+	bool vm_is_element_type_compatible(const script_value& element, type_info_ptr element_type, engine* eng) {
+		return detail::container_element_compatible(element, element_type, eng);
 	}
 
 	checked_result<script_value> vm_convert_array_element(engine* eng, const script_value& element, type_info_ptr element_type) {
@@ -797,6 +797,7 @@ void vm_backend::pop_external_call_scope() {
 // in the storage below (see run_fiber's fiber_stacks_swap guard).
 struct vm_backend::vm_coroutine_state : coroutine_backend_state {
 	std::shared_ptr<chunk> body_chunk;
+	engine* eng = nullptr;
 	call_frame locals;                      // frame-kind metadata (name, method receiver)
 	frame f;                                // PERSISTENT fiber frame: window over the fiber stack,
 	                                        // ip survives suspends, try_record.owner stays valid
@@ -826,7 +827,6 @@ struct vm_backend::vm_coroutine_state : coroutine_backend_state {
 		const size_t end = std::min(stack_storage.size(), f.window_base + f.window_live);
 		if (end > f.window_base) { script_value::gather_shared_cells(&stack_storage[f.window_base], end - f.window_base, shared); }
 		if (shared.empty()) { return; }
-		engine* eng = shared.front().get_engine();
 		stack_storage.clear();
 		script_value::release_cell_cycles(shared, eng);
 	}
@@ -1021,6 +1021,7 @@ vm_backend::vm_coroutine_state& vm_backend::coroutine_fiber_state(coroutine_hand
 	auto* state = static_cast<vm_coroutine_state*>(handle.backend_state());
 	if (!state) {
 		auto owned = std::make_unique<vm_coroutine_state>();
+		owned->eng = engine_;
 		state = owned.get();
 		handle.set_backend_state(std::move(owned));
 	}
@@ -3476,7 +3477,7 @@ JAI_FORCEINLINE bool vm_backend::store_scalar_lane(script_value& slot, script_va
 	if (!lane) return false;
 	if (tag != vt) { value.set_type_info(type_info_ptr{const_cast<type_info*>(tag)}); }
 	// storage already holding this kind from this engine takes the payload and the tag (the copy below writes nothing else)
-	if (slot.raw_storage_index() == vi && slot.get_engine() == value.get_engine() && vi != script_value::TYPEID_CHAR) {
+	if (slot.raw_storage_index() == vi && slot.has_valid_engine() == value.has_valid_engine() && vi != script_value::TYPEID_CHAR) {
 		if (vi == script_value::TYPEID_INT) { slot.unchecked_set_int_payload(value.unchecked_as_int()); }
 		else if (vi == script_value::TYPEID_FLOAT) { slot.unchecked_set_float_payload(value.unchecked_as_float()); }
 		else { slot.unchecked_set_bool_payload(value.unchecked_as_bool()); }
@@ -5818,7 +5819,7 @@ bool vm_backend::store_slot_raw(frame& f, const vm_instruction& ins, size_t kind
 	const bool is_int = kind == script_value::TYPEID_INT;
 	const type_info* st = slot->type_info_raw();
 	type_info* tag = is_int ? ti_int_ : ti_float_;
-	if (st != tag && slot->get_engine() != engine_) return false;
+	if (st != tag && !slot->has_valid_engine()) return false;
 	if (st && st->base_type != (is_int ? script_value_type::jai_int_type : script_value_type::jai_float_type)) {
 		if (st->base_type != script_value_type::jai_any_type || st->dynamic_slot) return false;
 		tag = const_cast<type_info*>(st);
@@ -6491,7 +6492,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 				// Auto-insert so the assignment has somewhere to write through
 				script_value key = right;
 				if (!key.has_valid_engine()) {
-					key.set_engine(left.has_valid_engine() ? left.get_engine() : engine_);
+					key.set_engine(engine_);
 				}
 				// Declared key type: keys never coerce, checked BEFORE the auto-insert
 				if (auto map_tag = left.get_type_info()) {
@@ -6512,7 +6513,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 						return raise_(make_error_code(runtime_error_code::unsupported_operation),
 							"Invalid script_value: both map and new entry missing engine reference");
 					}
-					value_ref.set_engine(left.get_engine());
+					value_ref.set_engine(left.has_valid_engine() ? engine_ : nullptr);
 				}
 				auto map_type_info = left.get_type_info();
 				type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
@@ -6525,7 +6526,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 				if (it != map.end()) {
 					script_value& value_ref = const_cast<script_value&>(it->second);
 					if (!value_ref.has_valid_engine()) {
-						value_ref.set_engine(left.has_valid_engine() ? left.get_engine() : engine_);
+						value_ref.set_engine(engine_);
 					}
 					auto map_type_info = left.get_type_info();
 					type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
@@ -6706,7 +6707,7 @@ op_status vm_backend::exec_index_assign(frame& f, const vm_instruction& ins) {
 	if (in_place_1 && !*in_place_1) { return raise_from(*in_place_1); }
 	if (in_place_1) {
 	} else if (element_type) {
-		if (!vm_is_element_type_compatible(value, element_type, *target_ptr)) {
+		if (!vm_is_element_type_compatible(value, element_type, engine_)) {
 			return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", value, element_type));
 		}
 		auto converted_result = detail::convert_container_element_taking(engine_, value, element_type);
@@ -6830,7 +6831,7 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 	if (in_place_2 && !*in_place_2) { return raise_from(*in_place_2); }
 	if (in_place_2) {
 	} else if (element_type) {
-		if (!vm_is_element_type_compatible(resultValue, element_type, *target_ptr)) {
+		if (!vm_is_element_type_compatible(resultValue, element_type, engine_)) {
 			return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", resultValue, element_type));
 		}
 		auto converted_result = vm_convert_array_element(engine_, resultValue, element_type);
@@ -6911,7 +6912,7 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 				if (in_place_3 && !*in_place_3) { return raise_from(*in_place_3); }
 				if (in_place_3) {
 				} else if (element_type) {
-					if (!vm_is_element_type_compatible(value, element_type, *target_ptr)) {
+					if (!vm_is_element_type_compatible(value, element_type, engine_)) {
 						return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", value, element_type));
 					}
 					auto converted_result = detail::convert_container_element_taking(engine_, value, element_type);
@@ -7689,7 +7690,7 @@ bool vm_backend::cells_resync(frame& f, const chunk::cell_loop& loop) {
 		if ((want != kint && want != kflt && want != kbool) || s->raw_storage_index() != want) return false;
 		const type_info* canonical = want == kint ? ti_int_ : want == kflt ? ti_float_ : ti_bool_;
 		const type_info* st = s->type_info_raw();
-		if (st != canonical && (!(st && st->base_type == script_value_type::jai_any_type) || s->get_engine() != engine_)) return false;
+		if (st != canonical && (!(st && st->base_type == script_value_type::jai_any_type) || !s->has_valid_engine())) return false;
 		cs.cells[k].bits = cell_bits(*s, want);
 		cs.cells[k].kind = want;
 		cs.cells[k].set_stamp(cl.kind != 0 ? nullptr : st);
@@ -7701,7 +7702,7 @@ bool vm_backend::cells_resync(frame& f, const chunk::cell_loop& loop) {
 		if (!s || s->raw_storage_index() != cl.kind) return false;
 		const type_info* st = s->type_info_raw();
 		const type_info* canonical = cl.kind == kint ? ti_int_ : cl.kind == kflt ? ti_float_ : ti_bool_;
-		if (st != canonical && (st != cl.decl_stamp || s->get_engine() != engine_)) return false;
+		if (st != canonical && (st != cl.decl_stamp || !s->has_valid_engine())) return false;
 		cs.cells[k].bits = cell_bits(*s, cl.kind);
 		cs.cells[k].kind = cl.kind;
 		cs.cells[k].set_stamp(nullptr);
@@ -7755,7 +7756,7 @@ JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop
 	type_info* const canonical = kind == script_value::TYPEID_INT ? ti_int_ : kind == script_value::TYPEID_FLOAT ? ti_float_ : ti_bool_;
 	type_info* stamp = cs.cells[k].stamp() ? cs.cells[k].stamp() : cl.first_decl && cl.decl_stamp ? cl.decl_stamp : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : canonical);
 	const bool in_place = s && s->raw_storage_index() == kind &&
-	                      (s->stamped_as(stamp, engine_) || (kind != script_value::TYPEID_BOOL && cl.landing == k_typed_dst_compound && s->get_engine() == engine_));
+	                      (s->stamped_as(stamp, engine_) || (kind != script_value::TYPEID_BOOL && cl.landing == k_typed_dst_compound && s->has_valid_engine()));
 	if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_payload_bits(cs.cells[k].bits); return; }
 	JAI_CELLS_COUNT(9);
 	script_value nv = cell_scalar(kind, cs.cells[k].bits, engine_);
@@ -8660,7 +8661,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 		if (!s || (want != kint && want != kflt && want != kbool && want != kstr) || s->raw_storage_index() != want ||
 		    (st != canonical && !(st && st->base_type == script_value_type::jai_any_type) &&
 		     !(!st && loop.frame_program && cl.kind != 0 && cl.slot < loop.param_cells.size() && loop.param_cells[cl.slot] == k)) ||
-		    (st != canonical && s->get_engine() != engine_)) {
+		    (st != canonical && !s->has_valid_engine())) {
 			JAI_CELLS_COUNT(1);
 #ifdef JAISCRIPT_VM_PROFILE
 			++profile_cells_refused_slot_[k < 64 ? k : 63];
@@ -11544,7 +11545,7 @@ op_status vm_backend::map_scalar_store(script_value& container, const script_val
 	}
 	handled = true;
 	std::optional<script_value> rekeyed;   // an engine-less key (a chunk template) takes the map's engine; any other key is used as it is
-	if (!key_in.has_valid_engine()) { rekeyed.emplace(key_in); rekeyed->set_engine(container.get_engine()); }
+	if (!key_in.has_valid_engine()) { rekeyed.emplace(key_in); rekeyed->set_engine(engine_); }
 	const script_value& key = rekeyed ? *rekeyed : key_in;
 	if (map_tag) {
 		if (const type_info_ptr& key_type = map_tag->type_params.empty() ? no_type : map_tag->type_params[0];
@@ -11558,7 +11559,7 @@ op_status vm_backend::map_scalar_store(script_value& container, const script_val
 	if (map.size() != prior_map_size) {
 		limits_->memory_charge_deferred(2 * sizeof(script_value) + (key.is_string() ? key.unchecked_as_string().size() : 0));
 	}
-	if (!value_ref.has_valid_engine()) { value_ref.set_engine(container.get_engine()); }
+	if (!value_ref.has_valid_engine()) { value_ref.set_engine(engine_); }
 	if ((!value_type || value_type->base_type == script_value_type::jai_any_type) && detail::slot_value_assign_candidate(value_ref)) {
 		if (auto in_place = detail::var_slot_assign_in_place(value_ref, value, engine_)) {   // a var value's object takes it
 			if (!*in_place) { return raise_from(*in_place); }
@@ -11580,7 +11581,7 @@ op_status vm_backend::map_scalar_store(script_value& container, const script_val
 	if (value_type && exact_row() && !(value.type_info_raw() && value.type_info_raw()->base_type == script_value_type::jai_shared_ptr_type)) {
 		value_ref = value;
 	} else if (value_type) {
-		if (!vm_is_element_type_compatible(value, value_type, value_ref)) {
+		if (!vm_is_element_type_compatible(value, value_type, engine_)) {
 			return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", value, value_type));
 		}
 		auto converted_result = vm_convert_array_element(engine_, value, value_type);
@@ -11825,7 +11826,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 							target.unchecked_set_float_payload(rhs_peek.unchecked_as_float());
 						}
 						target.set_type_info(rhs_peek.get_type_info());
-						target.set_engine(rhs_peek.get_engine());
+						target.set_engine(rhs_peek.has_valid_engine() ? engine_ : nullptr);
 						if (value_operand) {
 							if (!no_result) { stack_.push_back(*value_ptr); }
 						} else if (no_result) {
@@ -11848,7 +11849,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 			if (in_place_4 && !*in_place_4) { return raise_from(*in_place_4); }
 			if (in_place_4) {
 			} else if (element_type) {
-				if (!vm_is_element_type_compatible(value, element_type, *target_ptr)) {
+				if (!vm_is_element_type_compatible(value, element_type, engine_)) {
 					return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", value, element_type));
 				}
 				auto converted_result = detail::convert_container_element_taking(engine_, value, element_type);
@@ -11998,7 +11999,7 @@ JAI_NOINLINE op_status vm_backend::map_numeric_compound(frame& f, const vm_instr
 	script_value resultValue = make_null();
 	VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(target, op, rhs, detail::compound_index(op)));
 	if (element_type) {
-		if (!vm_is_element_type_compatible(resultValue, element_type, target)) {
+		if (!vm_is_element_type_compatible(resultValue, element_type, engine_)) {
 			return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", resultValue, element_type));
 		}
 		auto converted_result = vm_convert_array_element(engine_, resultValue, element_type);
@@ -12107,7 +12108,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 					if (in_place_5 && !*in_place_5) { return raise_from(*in_place_5); }
 					if (in_place_5) {
 					} else if (element_type) {
-						if (!vm_is_element_type_compatible(resultValue, element_type, *target_ptr)) {
+						if (!vm_is_element_type_compatible(resultValue, element_type, engine_)) {
 							return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", resultValue, element_type));
 						}
 						// Numeric-to-numeric conversion: no user code (int/float only)
@@ -12315,7 +12316,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 		type_info* const t = decl->type.get();
 		if (variable_decl::identity_payload(vi, t)) {
 			script_value* slot = frame_slot(f, decl->slot_index);
-			if (slot && slot->raw_storage_index() == vi && slot->get_engine() == seen->get_engine() &&
+			if (slot && slot->raw_storage_index() == vi && slot->has_valid_engine() == seen->has_valid_engine() &&
 			    (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL)) {
 				if (vi == script_value::TYPEID_INT) { slot->unchecked_set_int_payload(seen->unchecked_as_int()); }
 				else if (vi == script_value::TYPEID_FLOAT) { slot->unchecked_set_float_payload(seen->unchecked_as_float()); }
@@ -17341,7 +17342,7 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 #endif
 			auto array_type_info = objd.get_type_info();
 			type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
-			if (!vm_is_element_type_compatible(*val, element_type, const_cast<script_value&>(objd))) {
+			if (!vm_is_element_type_compatible(*val, element_type, engine_)) {
 				return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", val->deref(), element_type));
 			}
 			// The unfused pair pinned the node through the receiver's stack copy; a
@@ -18053,7 +18054,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 #endif
 					auto array_type_info = objd.get_type_info();
 					type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
-					if (!vm_is_element_type_compatible(stack_[args_base], element_type, objd)) {
+					if (!vm_is_element_type_compatible(stack_[args_base], element_type, engine_)) {
 						return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", stack_[args_base].deref(), element_type));
 					}
 #ifdef JAISCRIPT_VM_PROFILE

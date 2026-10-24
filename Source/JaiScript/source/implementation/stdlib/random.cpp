@@ -197,13 +197,13 @@ namespace random_detail {
 		const auto random_class = eng_ref.get_class_definition("random");
 		const uint64_t type_id = random_class->get_type_id();
 		// shuffle writes its argument in place, and a refused state store raises a catchable error: both are checked methods
-		random_class->add_method("shuffle", host_writeback_function{ [type_id](const std::vector<script_value>& a_args) -> R {
+		random_class->add_method("shuffle", host_writeback_function{ [type_id, eng](const std::vector<script_value>& a_args) -> R {
 			random* generator = a_args.size() == 2 ? as_random(a_args[0], type_id) : nullptr;
 			if (!generator || !a_args[1].deref().is_array()) { return shuffle_needs_array(); }
 			script_value& target = const_cast<script_value&>(a_args[1].deref());
 			script_array& elements = *target.unchecked_get_array_storage();
 			for (size_t i = elements.size(); i > 1; --i) { elements.swap_elements(i - 1, generator->next_index(i)); }
-			return script_value(std::monostate{}, target.get_engine());
+			return script_value(std::monostate{}, eng);
 		}, 1 }, 1);
 		random_class->add_method("_set_state", [type_id, eng](const std::vector<script_value>& a_args) -> R {
 			random* generator = a_args.size() == 2 ? as_random(a_args[0], type_id) : nullptr;

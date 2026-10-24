@@ -77,8 +77,10 @@ namespace jai {
     // Represents complete type information including generic parameters
     class engine;
 
-    // 512-aligned: a value's tag word holds this pointer above its index byte and engine-only flag (value.hpp)
-    class alignas(512) type_info {
+    // a value's tag word holds a type_info or engine pointer above its index byte and engine-only flag (value.hpp)
+    inline constexpr size_t k_value_tag_alignment = 512;
+
+    class alignas(k_value_tag_alignment) type_info {
     public:
         script_value_type base_type;
         engine* owner = nullptr;   // the engine that interned this type: a stamped value's engine

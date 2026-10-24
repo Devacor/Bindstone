@@ -2067,6 +2067,23 @@ struct engine::implementation {
         }
     }
 
+    type_info* find_type(const type_key& a_key) const {
+        auto found = type_infos_.find(a_key);
+        return found == type_infos_.end() ? nullptr : found->second;
+    }
+    bool interned_here(const type_info* a_type) const {
+        auto found = type_id_index_.find(a_type->id);
+        return found != type_id_index_.end() && found->second == a_type;
+    }
+    // a twin spelling (var-held, declared reference) never displaces the plain spelling in the id index
+    type_info* intern_type(const type_key& a_key, const type_info& a_prototype, engine* a_owner, bool a_twin = false) {
+        deny_type_intern_in_region();
+        type_info* result = type_infos_.emplace(a_key, type_arena_.make(a_prototype)).first->second;
+        result->owner = a_owner;
+        if (a_twin) { type_id_index_.try_emplace(result->id, result); } else { type_id_index_[result->id] = result; }
+        return result;
+    }
+
     // Helper to ensure overload set has conversion registry
     OverloadSet& getOrCreateOverloadSet(const std::string& name) {
         auto& overloadSet = overloadedFunctions[name];
@@ -2111,46 +2128,35 @@ engine::implementation::implementation()
     // Initialize commonly used type_info objects for fast access
     // These are interned immediately so basic types are always available
     type_info int_info = type_info::make_int(string_symbolizer_);
-    type_info_int_ = type_infos_.emplace(type_key{script_value_type::jai_int_type, 0, 0}, type_arena_.make(int_info)).first->second;
-    type_id_index_[type_info_int_->id] = type_info_int_;
+    type_info_int_ = intern_type(type_key{script_value_type::jai_int_type, 0, 0}, int_info, nullptr);
 
     type_info float_info = type_info::make_float(string_symbolizer_);
-    type_info_float_ = type_infos_.emplace(type_key{script_value_type::jai_float_type, 0, 0}, type_arena_.make(float_info)).first->second;
-    type_id_index_[type_info_float_->id] = type_info_float_;
+    type_info_float_ = intern_type(type_key{script_value_type::jai_float_type, 0, 0}, float_info, nullptr);
 
     type_info string_info = type_info::make_string(string_symbolizer_);
-    type_info_string_ = type_infos_.emplace(type_key{script_value_type::jai_string_type, 0, 0}, type_arena_.make(string_info)).first->second;
-    type_id_index_[type_info_string_->id] = type_info_string_;
+    type_info_string_ = intern_type(type_key{script_value_type::jai_string_type, 0, 0}, string_info, nullptr);
     type_info utf8_info = type_info::make_utf8_string(string_symbolizer_);
-    type_info_utf8_string_ = type_infos_.emplace(type_key{script_value_type::jai_utf8_string_type, 0, 0}, type_arena_.make(utf8_info)).first->second;
-    type_id_index_[type_info_utf8_string_->id] = type_info_utf8_string_;
+    type_info_utf8_string_ = intern_type(type_key{script_value_type::jai_utf8_string_type, 0, 0}, utf8_info, nullptr);
 
     type_info bool_info = type_info::make_bool(string_symbolizer_);
-    type_info_bool_ = type_infos_.emplace(type_key{script_value_type::jai_bool_type, 0, 0}, type_arena_.make(bool_info)).first->second;
-    type_id_index_[type_info_bool_->id] = type_info_bool_;
+    type_info_bool_ = intern_type(type_key{script_value_type::jai_bool_type, 0, 0}, bool_info, nullptr);
 
     type_info char_info = type_info::make_char(string_symbolizer_);
-    type_info_char_ = type_infos_.emplace(type_key{script_value_type::jai_char_type, 0, 0}, type_arena_.make(char_info)).first->second;
-    type_id_index_[type_info_char_->id] = type_info_char_;
+    type_info_char_ = intern_type(type_key{script_value_type::jai_char_type, 0, 0}, char_info, nullptr);
 
     type_info uint8_info = type_info::make_uint8(string_symbolizer_);
-    type_info_uint8_ = type_infos_.emplace(type_key{script_value_type::jai_int_type, uint8_info.id, 0}, type_arena_.make(uint8_info)).first->second;
-    type_id_index_[type_info_uint8_->id] = type_info_uint8_;
+    type_info_uint8_ = intern_type(type_key{script_value_type::jai_int_type, uint8_info.id, 0}, uint8_info, nullptr);
     type_info int8_info = type_info::make_int8(string_symbolizer_);
-    type_info_int8_ = type_infos_.emplace(type_key{script_value_type::jai_int_type, int8_info.id, 0}, type_arena_.make(int8_info)).first->second;
-    type_id_index_[type_info_int8_->id] = type_info_int8_;
+    type_info_int8_ = intern_type(type_key{script_value_type::jai_int_type, int8_info.id, 0}, int8_info, nullptr);
 
     type_info void_info = type_info::make_void(string_symbolizer_);
-    type_info_void_ = type_infos_.emplace(type_key{script_value_type::jai_null_type, 0, 0}, type_arena_.make(void_info)).first->second;
-    type_id_index_[type_info_void_->id] = type_info_void_;
+    type_info_void_ = intern_type(type_key{script_value_type::jai_null_type, 0, 0}, void_info, nullptr);
 
     type_info invalid_info = type_info::make_invalid(string_symbolizer_);
-    type_info_invalid_ = type_infos_.emplace(type_key{script_value_type::jai_invalid_type, 0, 0}, type_arena_.make(invalid_info)).first->second;
-    type_id_index_[type_info_invalid_->id] = type_info_invalid_;
+    type_info_invalid_ = intern_type(type_key{script_value_type::jai_invalid_type, 0, 0}, invalid_info, nullptr);
 
     type_info any_info = type_info::make_any(string_symbolizer_);
-    type_info_any_ = type_infos_.emplace(type_key{script_value_type::jai_any_type, 0, 0}, type_arena_.make(any_info)).first->second;
-    type_id_index_[type_info_any_->id] = type_info_any_;
+    type_info_any_ = intern_type(type_key{script_value_type::jai_any_type, 0, 0}, any_info, nullptr);
 
     // after the older canonical types, so their interned ids stay put
     const script_value_type math_kinds[6] = {script_value_type::jai_vec2_type, script_value_type::jai_vec3_type,
@@ -2158,8 +2164,7 @@ engine::implementation::implementation()
                                              script_value_type::jai_vec4_type, script_value_type::jai_color_type};
     for (size_t k = 0; k < 6; ++k) {
         type_info math_info = type_info::make_math(string_symbolizer_, math_kinds[k]);
-        type_info_math_[k] = type_infos_.emplace(type_key{math_kinds[k], 0, 0}, type_arena_.make(math_info)).first->second;
-        type_id_index_[type_info_math_[k]->id] = type_info_math_[k];
+        type_info_math_[k] = intern_type(type_key{math_kinds[k], 0, 0}, math_info, nullptr);
     }
 
     // Register standard C++ implicit conversions
@@ -4358,20 +4363,8 @@ type_info* engine::get_type_info_array(type_info* element_type) {
     // Use composite key for fast lookup - no string construction needed on cache hit
     implementation::type_key key{script_value_type::jai_array_type, element_type ? element_type->id : 0, 0};
 
-    // Check if we already have this type interned
-    auto it = impl->type_infos_.find(key);
-    if (it != impl->type_infos_.end()) {
-        return it->second;
-    }
-
-    // Cache miss - construct full type_info and insert
-    impl->deny_type_intern_in_region();
-    type_info temp = type_info::make_array(impl->string_symbolizer_, element_type);
-    auto result = impl->type_infos_.emplace(key, impl->type_arena_.make(temp));
-    result.first->second->owner = this;
-    type_info* ptr = result.first->second;
-    impl->type_id_index_[ptr->id] = ptr;
-    return ptr;
+    if (auto* found = impl->find_type(key)) { return found; }
+    return impl->intern_type(key, type_info::make_array(impl->string_symbolizer_, element_type), this);
 }
 
 type_info* engine::get_type_info_map(type_info* key_type, type_info* value_type) {
@@ -4380,20 +4373,8 @@ type_info* engine::get_type_info_map(type_info* key_type, type_info* value_type)
                               key_type ? key_type->id : 0,
                               value_type ? value_type->id : 0};
 
-    // Check if we already have this type interned
-    auto it = impl->type_infos_.find(key);
-    if (it != impl->type_infos_.end()) {
-        return it->second;
-    }
-
-    // Cache miss - construct full type_info and insert
-    impl->deny_type_intern_in_region();
-    type_info temp = type_info::make_map(impl->string_symbolizer_, key_type, value_type);
-    auto result = impl->type_infos_.emplace(key, impl->type_arena_.make(temp));
-    result.first->second->owner = this;
-    type_info* ptr = result.first->second;
-    impl->type_id_index_[ptr->id] = ptr;
-    return ptr;
+    if (auto* found = impl->find_type(key)) { return found; }
+    return impl->intern_type(key, type_info::make_map(impl->string_symbolizer_, key_type, value_type), this);
 }
 
 type_info* engine::get_type_info_object(const std::string& class_name) {
@@ -4401,31 +4382,15 @@ type_info* engine::get_type_info_object(const std::string& class_name) {
     uint64_t class_name_id = impl->string_symbolizer_.intern(class_name);
     implementation::type_key key{script_value_type::jai_object_type, class_name_id, 0};
 
-    // Check if we already have this type interned
-    auto it = impl->type_infos_.find(key);
-    if (it != impl->type_infos_.end()) {
-        return it->second;
-    }
-
-    // Cache miss - construct full type_info and insert
-    impl->deny_type_intern_in_region();
-    type_info temp = type_info::make_object(impl->string_symbolizer_, class_name);
-    auto result = impl->type_infos_.emplace(key, impl->type_arena_.make(temp));
-    result.first->second->owner = this;
-    type_info* ptr = result.first->second;
-    impl->type_id_index_[ptr->id] = ptr;
-    return ptr;
+    if (auto* found = impl->find_type(key)) { return found; }
+    return impl->intern_type(key, type_info::make_object(impl->string_symbolizer_, class_name), this);
 }
 
 type_info* engine::get_type_info_object(uint64_t type_id) {
     // Use composite key for fast lookup
     implementation::type_key key{script_value_type::jai_object_type, type_id, 0};
 
-    // Check if we already have this type interned
-    auto it = impl->type_infos_.find(key);
-    if (it != impl->type_infos_.end()) {
-        return it->second;
-    }
+    if (auto* found = impl->find_type(key)) { return found; }
 
     // If not found, we need to look up the class name from the type_id
     // This should only happen if the type_id was created but the type_info wasn't interned yet
@@ -4433,35 +4398,15 @@ type_info* engine::get_type_info_object(uint64_t type_id) {
     if (class_name.empty()) {
         return nullptr; // Invalid type_id
     }
-
-    // Cache miss - construct full type_info and insert
-    impl->deny_type_intern_in_region();
-    type_info temp = type_info::make_object(impl->string_symbolizer_, class_name);
-    auto result = impl->type_infos_.emplace(key, impl->type_arena_.make(temp));
-    result.first->second->owner = this;
-    type_info* ptr = result.first->second;
-    impl->type_id_index_[ptr->id] = ptr;
-    return ptr;
+    return impl->intern_type(key, type_info::make_object(impl->string_symbolizer_, class_name), this);
 }
 
 type_info* engine::get_type_info_weak_ptr(type_info* pointee_type) {
     // Use composite key for fast lookup - no string construction needed on cache hit
     implementation::type_key key{script_value_type::jai_weak_ptr_type, pointee_type ? pointee_type->id : 0, 0};
 
-    // Check if we already have this type interned
-    auto it = impl->type_infos_.find(key);
-    if (it != impl->type_infos_.end()) {
-        return it->second;
-    }
-
-    // Cache miss - construct full type_info and insert
-    impl->deny_type_intern_in_region();
-    type_info temp = type_info::make_weak_ptr(impl->string_symbolizer_, pointee_type);
-    auto result = impl->type_infos_.emplace(key, impl->type_arena_.make(temp));
-    result.first->second->owner = this;
-    type_info* ptr = result.first->second;
-    impl->type_id_index_[ptr->id] = ptr;
-    return ptr;
+    if (auto* found = impl->find_type(key)) { return found; }
+    return impl->intern_type(key, type_info::make_weak_ptr(impl->string_symbolizer_, pointee_type), this);
 }
 
 script_value engine::marked_shared_handle(script_value object) {
@@ -4486,20 +4431,8 @@ type_info* engine::get_type_info_shared_ptr(type_info* pointee_type) {
     // Use composite key for fast lookup - no string construction needed on cache hit
     implementation::type_key key{script_value_type::jai_shared_ptr_type, pointee_type ? pointee_type->id : 0, 0};
 
-    // Check if we already have this type interned
-    auto it = impl->type_infos_.find(key);
-    if (it != impl->type_infos_.end()) {
-        return it->second;
-    }
-
-    // Cache miss - construct full type_info and insert
-    impl->deny_type_intern_in_region();
-    type_info temp = type_info::make_shared_ptr(impl->string_symbolizer_, pointee_type);
-    auto result = impl->type_infos_.emplace(key, impl->type_arena_.make(temp));
-    result.first->second->owner = this;
-    type_info* ptr = result.first->second;
-    impl->type_id_index_[ptr->id] = ptr;
-    return ptr;
+    if (auto* found = impl->find_type(key)) { return found; }
+    return impl->intern_type(key, type_info::make_shared_ptr(impl->string_symbolizer_, pointee_type), this);
 }
 
 type_info* engine::get_type_info_shared_ptr_dynamic(type_info* pointee_type) {
@@ -4507,20 +4440,10 @@ type_info* engine::get_type_info_shared_ptr_dynamic(type_info* pointee_type) {
     // name/id/element so every existing read behaves identically; dynamic_pointee
     // lets the assignment route rebind unchecked
     implementation::type_key key{script_value_type::jai_shared_ptr_type, pointee_type ? pointee_type->id : 0, 1};
-
-    auto it = impl->type_infos_.find(key);
-    if (it != impl->type_infos_.end()) {
-        return it->second;
-    }
-
-    impl->deny_type_intern_in_region();
+    if (auto* found = impl->find_type(key)) { return found; }
     type_info temp = type_info::make_shared_ptr(impl->string_symbolizer_, pointee_type);
     temp.dynamic_pointee = true;
-    auto result = impl->type_infos_.emplace(key, impl->type_arena_.make(temp));
-    result.first->second->owner = this;
-    type_info* ptr = result.first->second;
-    impl->type_id_index_.try_emplace(ptr->id, ptr);   // never displace the plain spelling
-    return ptr;
+    return impl->intern_type(key, temp, this, true);
 }
 
 type_info* engine::get_type_info_array_dynamic(type_info* array_type) {
@@ -4529,48 +4452,32 @@ type_info* engine::get_type_info_array_dynamic(type_info* array_type) {
     if (!array_type || array_type->dynamic_slot) { return array_type; }
     const type_info_ptr element = array_type->element_type();
     implementation::type_key key{script_value_type::jai_array_type, element ? element->id : 0, 1};
-    auto it = impl->type_infos_.find(key);
-    if (it != impl->type_infos_.end()) {
-        return it->second;
-    }
-    impl->deny_type_intern_in_region();
+    if (auto* found = impl->find_type(key)) { return found; }
     type_info temp = *array_type;
     temp.dynamic_slot = true;
     temp.cached_reference_type = nullptr;
     temp.cached_declared_reference_type = nullptr;
-    auto result = impl->type_infos_.emplace(key, impl->type_arena_.make(temp));
-    result.first->second->owner = this;
-    type_info* ptr = result.first->second;
-    impl->type_id_index_.try_emplace(ptr->id, ptr);   // never displace the plain spelling
-    return ptr;
+    return impl->intern_type(key, temp, this, true);
 }
 
 type_info* engine::get_type_info_map_dynamic(type_info* a_mapType) {
 	if (!a_mapType || a_mapType->dynamic_slot) { return a_mapType; }
 	const auto keyType = a_mapType->key_type(), valueType = a_mapType->value_type();
 	implementation::type_key key{script_value_type::jai_map_type, keyType ? keyType->id : 0, valueType ? valueType->id : 0, true};
-	if (auto found = impl->type_infos_.find(key); found != impl->type_infos_.end()) { return found->second; }
-	impl->deny_type_intern_in_region();
+	if (auto* found = impl->find_type(key)) { return found; }
 	type_info temp = *a_mapType;
 	temp.dynamic_slot = true;
 	temp.cached_reference_type = nullptr;
 	temp.cached_declared_reference_type = nullptr;
-	auto result = impl->type_infos_.emplace(key, impl->type_arena_.make(temp));
-	result.first->second->owner = this;
-	auto* ptr = result.first->second;
-	impl->type_id_index_.try_emplace(ptr->id,ptr);
-	return ptr;
+	return impl->intern_type(key, temp, this, true);
 }
 
 type_info* engine::get_type_info_declared_reference(type_info* referenced_type) {
     if (!referenced_type) { return nullptr; }
     if (referenced_type->cached_declared_reference_type) { return referenced_type->cached_declared_reference_type; }
     implementation::type_key key{script_value_type::jai_reference_type, referenced_type->id, 1};
-    type_info* ptr = nullptr;
-    auto it = impl->type_infos_.find(key);
-    if (it != impl->type_infos_.end()) {
-        ptr = it->second;
-    } else {
+    type_info* ptr = impl->find_type(key);
+    if (!ptr) {
         impl->deny_type_intern_in_region();
         type_info temp = *get_type_info_reference(referenced_type);
         temp.declared_reference = true;
@@ -4578,18 +4485,9 @@ type_info* engine::get_type_info_declared_reference(type_info* referenced_type) 
         temp.declared_kind = detail::declared_ref_kind(referenced_type) ? detail::declared_ref_kind(referenced_type) : uint8_t{0xFF};
         temp.cached_reference_type = nullptr;
         temp.cached_declared_reference_type = nullptr;
-        auto result = impl->type_infos_.emplace(key, impl->type_arena_.make(temp));
-        result.first->second->owner = this;
-        ptr = result.first->second;
-        impl->type_id_index_.try_emplace(ptr->id, ptr);   // never displace the plain spelling
+        ptr = impl->intern_type(key, temp, this, true);
     }
-    // the get_type_info_reference rule: only a type this engine interned, never inside a parallel region
-    if (!parallel_region_active()) {
-        auto owned = impl->type_id_index_.find(referenced_type->id);
-        if (owned != impl->type_id_index_.end() && owned->second == referenced_type) {
-            referenced_type->cached_declared_reference_type = ptr;
-        }
-    }
+    if (!parallel_region_active() && impl->interned_here(referenced_type)) { referenced_type->cached_declared_reference_type = ptr; }
     return ptr;
 }
 
@@ -4606,19 +4504,8 @@ type_info* engine::get_type_info_reference(type_info* referenced_type) {
     // Use composite key for fast lookup - no string construction needed on cache hit
     implementation::type_key key{script_value_type::jai_reference_type, referenced_type ? referenced_type->id : 0, 0};
 
-    type_info* ptr = nullptr;
-    auto it = impl->type_infos_.find(key);
-    if (it != impl->type_infos_.end()) {
-        ptr = it->second;
-    } else {
-        // Cache miss - construct full type_info and insert
-        impl->deny_type_intern_in_region();
-        type_info temp = type_info::make_reference(impl->string_symbolizer_, referenced_type);
-        auto result = impl->type_infos_.emplace(key, impl->type_arena_.make(temp));
-        result.first->second->owner = this;
-        ptr = result.first->second;
-        impl->type_id_index_[ptr->id] = ptr;
-    }
+    type_info* ptr = impl->find_type(key);
+    if (!ptr) { ptr = impl->intern_type(key, type_info::make_reference(impl->string_symbolizer_, referenced_type), this); }
 
     // Fill the twin cache only on the region-free path: workers may reach here for a
     // shape that was interned but never prewarmed, and must not race the cache write.
@@ -4626,13 +4513,10 @@ type_info* engine::get_type_info_reference(type_info* referenced_type) {
     // a value minted by another engine must not carry our twin pointer, which would
     // dangle in ITS engine if we are destroyed first.
     if (!parallel_region_active()) {
-        if (referenced_type) {
-            auto owned = impl->type_id_index_.find(referenced_type->id);
-            if (owned != impl->type_id_index_.end() && owned->second == referenced_type) {
-                referenced_type->cached_reference_type = ptr;
-            }
-        } else {
+        if (!referenced_type) {
             impl->type_info_reference_null_ = ptr;
+        } else if (impl->interned_here(referenced_type)) {
+            referenced_type->cached_reference_type = ptr;
         }
     }
     return ptr;
@@ -4694,19 +4578,9 @@ type_info* engine::get_type_info(const type_info& temp) {
 
     implementation::type_key key{temp.base_type, param1_id, param2_id};
 
-    // Check if we already have this type interned
-    auto it = impl->type_infos_.find(key);
-    if (it != impl->type_infos_.end()) {
-        return it->second;
-    }
+    if (auto* found = impl->find_type(key)) { return found; }
 
-    // Insert the new type_info and return pointer to it
-    impl->deny_type_intern_in_region();
-    auto result = impl->type_infos_.emplace(key, impl->type_arena_.make(temp));
-    result.first->second->owner = this;
-    type_info* ptr = result.first->second;
-    impl->type_id_index_[ptr->id] = ptr;
-    return ptr;
+    return impl->intern_type(key, temp, this);
 }
 
 type_info* engine::get_type_info_by_id(uint64_t type_id) {

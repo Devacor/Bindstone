@@ -9,6 +9,13 @@ bytes 8..15   tag word      bits 0..7   storage index (TYPEID_*), read as one by
                             bits 9..63  a 512-aligned pointer: the declared type (type_info) or the engine
 ```
 
+`k_value_tag_alignment` (type_info.hpp) is the one alignment both `type_info` and `engine` declare and the pointer mask
+derives from; `script_value` static-asserts that the flag sits above the index byte and below that alignment, and only
+`stamp()`, `set_stamp()`, `set_engine_tag()`, `get_engine()`, `stamped_as()` and `is_outlived()` decode the word. Every
+interned type goes through one engine routine (`intern_type`) that sets its `owner`. Review Regressions
+`tag_word_stamps_and_engines` pins alignment, stamped, unstamped and literal words, the outlived sentinel and the import
+restamp.
+
 ## Decisions
 
 - **One value type, not two.** The brief proposed a 16-byte internal value and a 32-byte host value converted at the

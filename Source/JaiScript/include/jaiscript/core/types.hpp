@@ -76,8 +76,6 @@ namespace jai {
         // ~reference_holder). Zero lets a parallel fork prove exclusivity of a value-semantic
         // typed object array without walking the elements.
         uint32_t live_elem_refs = 0;
-        // the engine that made this node: its typed reads, copies and memory charges run against it
-        engine* owner = nullptr;
         // b8/c8/u8/i8 share one byte buffer (bool, char, uint8 and int8 payloads); the kind says how to box
         // str holds shared string handles (the same handle a boxed element would carry)
         // obj holds {object handle, class tag} slots (array<UserType>; 16 bytes vs 32 boxed)
@@ -207,6 +205,9 @@ namespace jai {
         std::vector<uint8_t> bytes_;
         std::vector<strong_ptr<script_string>> strs_;
         std::vector<obj_slot> objs_;
+    public:
+        // the engine that made this node (after the hot fields): its typed reads, copies and memory charges run against it
+        engine* owner = nullptr;
     };
     // Transparent probe for CONSTANT string keys: map lookups compare against the raw
     // constant bytes instead of materializing a script_value per access (`rec["px"]`

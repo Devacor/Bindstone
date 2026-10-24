@@ -2031,7 +2031,6 @@ namespace detail {
 	public: // Match the public forward declaration and holder accessors.
         // For object storage - external serialization will handle this
         struct object_holder {
-            engine* owner = nullptr;   // the engine that made this object: copies and class lookups run against it
             std::string_view type_name;      // the type's name: the engine's interned text or a literal (never an owned string)
             uint64_t type_id = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
             std::shared_ptr<void> data;     // The actual object
@@ -2054,9 +2053,7 @@ namespace detail {
             // that owner WITHOUT participating in extraction (bound_ptr remains the
             // authoritative target). Empty for owning objects.
             std::shared_ptr<void> keep_alive;
-
-            // Note: Serialization functions will be managed externally
-            // by ISerializer implementations to keep JaiScript dependency-free
+            engine* owner = nullptr;   // the engine that made this object (after the hot fields): copies and class lookups run against it
         };
 
 	private:
@@ -2113,7 +2110,6 @@ namespace detail {
             const class_definition* referent_class = nullptr;
         };
         struct reference_holder {
-            engine* owner = nullptr;   // the engine that minted this reference: materializing and storing through it run against it
             type_info_ptr container_element_type = nullptr;  // For subscript/field refs: the element/field type constraint
 
             static constexpr size_t cell_storage_size = 16;   // == sizeof(script_value), gated in value.cpp
@@ -2213,6 +2209,8 @@ namespace detail {
             // null when the element/entry/field is gone. Defined in value.cpp
             // (class_instance complete there).
             script_value* resolve_target();
+
+            engine* owner = nullptr;   // the engine that minted this reference (after the hot fields): materializing and storing run against it
         };
 
         // Per-engine block pools for reference_holder and object_holder mints (value.cpp, state behind the engine's

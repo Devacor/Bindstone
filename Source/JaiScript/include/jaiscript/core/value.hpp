@@ -2013,7 +2013,9 @@ namespace detail {
         // The storage's tag word (internal/value16_design.md): the declared type, whose owner is the value's engine, or
         // with k_engine_only an unstamped value's engine; both are 512-aligned so the low 9 bits hold the index and flag
         static constexpr uintptr_t k_engine_only = 0x100;
-        static constexpr uintptr_t k_tag_pointer_mask = ~uintptr_t{0x1FF};
+        static constexpr uintptr_t k_tag_pointer_mask = ~uintptr_t{k_value_tag_alignment - 1};
+        static_assert(alignof(type_info) >= k_value_tag_alignment && (k_engine_only & 0xFF) == 0 && k_engine_only < k_value_tag_alignment,
+                      "the tag word's pointer bits sit above the index byte and the engine-only flag");
         JAI_FORCEINLINE type_info* stamp() const noexcept {
             const uintptr_t tag = storage_.tag();
             return (tag & k_engine_only) ? nullptr : reinterpret_cast<type_info*>(tag);
@@ -2021,6 +2023,7 @@ namespace detail {
         JAI_FORCEINLINE void set_stamp(type_info* stamped) noexcept {
             if (stamped) [[likely]] {
                 assert(stamped->owner && "a stamp must name its engine");
+                assert((reinterpret_cast<uintptr_t>(stamped) & ~k_tag_pointer_mask) == 0 && "a stamp is tag-aligned");
                 storage_.set_tag(reinterpret_cast<uintptr_t>(stamped));
             } else {
                 clear_stamp();
@@ -2028,6 +2031,7 @@ namespace detail {
         }
         JAI_NOINLINE void clear_stamp() noexcept { set_engine_tag(get_engine()); }
         void set_engine_tag(engine* eng) noexcept {
+            assert((reinterpret_cast<uintptr_t>(eng) & ~k_tag_pointer_mask) == 0 && "an engine is tag-aligned");
             storage_.set_tag(eng ? (reinterpret_cast<uintptr_t>(eng) | k_engine_only) : 0);
         }
 

@@ -3663,6 +3663,30 @@ public:
             check_eq((int64_t)730, r.as_int());
         });
 
+        // The tag word (internal/value16_design.md): a stamped value reaches its engine through its type, an unstamped one carries the
+        // engine itself, a literal carries neither; an import restamps with the receiving engine's types
+        test("tag_word_stamps_and_engines", [this]() {
+            auto a = make_engine();
+            auto b = make_engine();
+            check_eq((uintptr_t)0, reinterpret_cast<uintptr_t>(a.get()) % k_value_tag_alignment, "an engine is tag-aligned");
+            const script_value stamped = a->make_value(script_int{7});
+            check_true(stamped.get_type_info().get() != nullptr, "an engine-made int is stamped");
+            check_eq((uintptr_t)0, reinterpret_cast<uintptr_t>(stamped.get_type_info().get()) % k_value_tag_alignment, "a stamp is tag-aligned");
+            check_true(stamped.get_type_info()->owner == a.get() && stamped.get_engine() == a.get(), "a stamp names its engine");
+            check_true(stamped.raw_storage_index() == script_value::TYPEID_INT, "the index byte survives the stamp");
+            const script_value null_with_engine(std::monostate{}, a.get());
+            check_true(null_with_engine.get_type_info().get() == nullptr && null_with_engine.get_engine() == a.get(), "an unstamped value carries its engine");
+            check_true(null_with_engine.raw_storage_index() == script_value::TYPEID_NULL && null_with_engine.is_null(), "the engine-only flag leaves the index alone");
+            const script_value bare(std::monostate{}, nullptr);
+            check_true(bare.get_engine() == nullptr && bare.get_type_info().get() == nullptr && !bare.has_valid_engine(), "a literal carries no engine");
+            check_false(stamped.is_outlived() || null_with_engine.is_outlived() || bare.is_outlived());
+            check_true(script_value::outlived().is_outlived() && script_value::outlived().get_engine() == nullptr && script_value::outlived().get_type_info().get() == nullptr);
+            b->add_global("n", a->execute("int k = 3; k;"));
+            const held_value imported = b->get_variable("n");
+            check_true(imported.get_engine() == b.get() && imported.get_type_info()->owner == b.get(), "an import restamps with the receiving engine's type");
+            check_eq((int64_t)3, imported.as_int());
+        });
+
         // Values die with their engine: held values give up their payloads at teardown (a held instance's destructor runs while the
         // engine still runs script), then read as outlived; nothing pins the engine, nothing reads freed memory
         test("held_values_die_with_their_engine", [this]() {

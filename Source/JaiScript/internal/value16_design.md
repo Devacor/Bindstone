@@ -112,6 +112,20 @@ min-max]; hashes GLOOM 3580805725, JaiDOOM 1746772898, Gator 3218840367, OSSUARY
 The verdict stands: no whole program wins by 1.5% on either configuration, and OSSUARY regresses past 1.5% on both (its
 v16 range sits above the base median in both). The same-binary floor reaches 5% on GLOOM and 7% on one kernel.
 
+### S0: where the regressions come from (RIP sampler over /Z7 builds of f3204b611 and b0031f17d, equal paths)
+
+| workload | v16 vs base | profile delta (pp of samples) | attribution |
+|---|---|---|---|
+| fib_loop_typed | +5-6% | `cells_run_frame` 98.5 -> 98.6; its dispatch head 30.8 -> 41.5 | register allocation in `cells_run_frame`: base keeps the image base in r9 across dispatch, v16 rematerializes it with two `lea` per dispatched cell op (disassembly at the head, `+0x133..0x169`). The function reads no value header on that path: no tag RMW, mask, engine chain or `stamped_as` |
+| primes_typed | +3% | `cells_run_frame` 97.4 -> 97.3, the same head | the same register-allocation shift |
+| OSSUARY | +3-4% | `cells_run_frame` 46.2 -> 48.2 (+2.0), `exec_typed_arith` -0.6, out-of-line `storage::storage` +0.4 | mostly the same shift (OSSUARY is half register-cell code; Gator and JaiDOOM run far less of it), plus copy-constructor calls now emitted out of line |
+| string2float_typed | +6% | `run_dispatch` +3.0, `store_popped_value` +0.7, `get_array_storage`/`get_reference_holder` +0.6 each (now out of line), `exec_call_builtin` -1.6, `truncate` -1.0 | value mechanics: accessors that stopped inlining and stamp writes on the generic store path; partly offset by cheaper truncation and copies |
+| float2string_dyn | +4-5% | `run_dispatch` +3.6, `set_type_info` +1.1 (base: `operator=` 1.1), `range_for_bind` +1.4, `var_stamp` +0.6, `exec_iter_next` -1.7 | stamp writes: a range-for's var binding restamps each element (`set_type_info` -> tag RMW, `var_stamp`) where base assigned the type pointer |
+
+The typed scalar loops and most of OSSUARY regress from MSVC's register allocation in one 29 KB function that never
+touches the value layout, so the brief's hypotheses (a)-(c) do not explain them. Hypothesis (a) does explain the
+string kernels' few points: generic stores that restamp (`set_type_info`) and accessors that fell out of inlining.
+
 ### Gator's +6.8 MB is a measurement artifact
 
 An allocation histogram (live blocks at peak by request size) over `gatorquest smoke ticks 10` shows one row moving:

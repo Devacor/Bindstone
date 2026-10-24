@@ -16134,9 +16134,11 @@ op_status vm_backend::exec_get_member_path(frame& f, const vm_instruction& ins) 
 		for (; k > 0; --k) {
 			script_value out = make_null();
 			if (path.links[k].subscript) {
-				const script_value* index = path_index_value(f, path.links[k].index);
+				const fused_operand& operand = path.links[k].index;
+				const script_value* index = operand.const_index != k_invalid_u32 ? nullptr : path_index_value(f, operand);
 				stack_.push_back(std::move(object));
-				stack_.push_back(index ? *index : make_null());
+				if (operand.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, operand.const_index)); }
+				else { stack_.push_back(index ? *index : make_null()); }
 				VM_TRY(exec_index(f, vm_instruction{opcode::op_index, path.links[k].index_flags, 0, 0}));
 				out = std::move(stack_.back());
 				stack_.pop_back();

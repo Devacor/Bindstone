@@ -3983,6 +3983,26 @@ public:
 			}
 		});
 
+		test("member_path_string_subscript_reads_on_workers", [this]() {
+			// a member path's general walk pushes its constant key as a fresh string, never the chunk's shared literal (the XTHREAD
+			// canary build aborts at the first worker touch of the literal's count; plain builds tore it ~30% of runs)
+			const std::string src = R"(
+				class Leaf { int v = 1; }
+				class Node { map<string, array<Leaf>> groups = {"a": [Leaf()], "b": [Leaf(), Leaf()]}; }
+				array<Node> nodes = [];
+				for (int i = 0; i < 512; i++) { nodes.push(Node()); }
+				for (int r = 0; r < 8; r++) {
+					parallel_for (auto& n : nodes) { n.groups["b"][1].v = n.groups["b"][1].v + n.groups["a"][0].v; }
+				}
+				return nodes[511].groups["b"][1].v;
+			)";
+			for (int round = 0; round < 8; ++round) {
+				auto e = make_engine();
+				e->parallel_thread_count(8);
+				check_eq((int64_t)9, e->execute(src).as_int());
+			}
+		});
+
 		test("prewarm_reaches_nested_classes_without_the_element_proof", [this]() {
 			// An untyped source never scans the slot tags for element classes: the classes the body reaches must come from the
 			// seed shapes and the members the body names

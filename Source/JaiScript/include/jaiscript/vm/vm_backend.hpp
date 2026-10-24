@@ -508,6 +508,9 @@ namespace jai::vm {
         worker_chunk_env_cache* worker_chunk_record_slow(const chunk* code);
         // the member IC rows a site reads and fills: the chunk's on the main engine, a worker's own in its record of the chunk (the chunk is
         // shared); null: no rows, the probe answers each read
+        // the checker's proofs serve reads: off on the vm-reference backend (its null cached_global_env_), on in a worker (whose
+        // cached_global_env_ is null too)
+        bool proofs_on() const { return cached_global_env_ || parallel_worker_; }
         std::vector<chunk::member_ic_entry>* member_ic_rows(const chunk& code) {
             if (!parallel_worker_) { return cached_global_env_ ? &code.member_ic : nullptr; }
             worker_chunk_env_cache* rec = worker_chunk_record(&code);
@@ -2167,6 +2170,8 @@ namespace jai::vm {
         op_status exec_operand_temp(frame& f, const vm_instruction& ins);
         op_status exec_call_temp(frame& f, const vm_instruction& ins);   // a call's result into a compiler temp (op_call_temp)
         op_status exec_member_temp(frame& f, const vm_instruction& ins);
+        op_status exec_get_member_path(frame& f, const vm_instruction& ins);
+        const script_value* path_index_value(frame& f, const fused_operand& index);
         op_status local_member_receiver(frame& f, const member_expr* member, uint32_t slot, script_value& out);   // a member site's receiver from its base slot (a nested site's prefix read)
         op_status exec_set_member_fused(frame& f, const vm_instruction& ins);
         op_status exec_math_temp(frame& f, const vm_instruction& ins);
@@ -2588,6 +2593,7 @@ namespace jai::vm {
         // fill (slot UINT32_MAX = negative: same_as / nonpublic chain / sp-builtin name /
         // custom-getter shadow / no field slot)
         uint32_t member_read_slot_probe(class_definition* cd, member_expr* expr);
+        const script_value* site_field(const chunk& code, const script_value& objd, member_expr* expr, size_t site, script_value& host_value);
         // a negative member_ic row on a bound C++ class: the member's in-place lane when the ladder would reach its accessors
         void fill_host_member_hit(class_definition* cd, const class_instance* inst, uint64_t member_id, const script_value& receiver,
                                   chunk::member_ic_entry& entry);

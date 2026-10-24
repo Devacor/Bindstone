@@ -122,6 +122,13 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 				out << " node=" << ins.a;
 				if (ins.b != 0) { out << " base_slot=" << ins.b - 1; }
 				break;
+			case opcode::op_get_member_path:
+				out << " node=" << ins.a << " path=" << ins.b;
+				if (ins.b < ch.member_path_protos.size()) {
+					out << " links=" << ch.member_path_protos[ins.b].links.size();
+					if (ch.member_path_protos[ins.b].root_slot != k_invalid_u32) { out << " base_slot=" << ch.member_path_protos[ins.b].root_slot; }
+				}
+				break;
 			case opcode::op_get_static:
 			case opcode::op_set_member:
 			case opcode::op_set_static:

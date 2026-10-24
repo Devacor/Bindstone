@@ -328,6 +328,7 @@ namespace jai::vm {
         op_concat_operands, // a = concat_protos index: stack [acc] -> acc + piece1 + ... + pieceN, each piece read at its step (op_concat_append's join)
         op_concat_store,    // a = symbols index, b = frame slot (k_invalid_u32 = env), c = store_flag_*: [snapshot, tail] -> the target takes the tail in place when it still holds the snapshot's node, else op_store's tail over snapshot + tail; [null, value] -> op_store's tail
         op_sleep,           // op_call_from_scratch's word for `sleep(x)`: the pending callee is the core sleep, so engine::sleep_builtin runs in place; any other callee is the call
+        op_get_member_path, // a=nodes index (the chain's outer member_expr), b=member_path_protos index: `a.b.c`, `grid[y][x].cost` read through, each inner link borrowed where it lives, the final value pushed as op_get_member pushes it
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -446,6 +447,7 @@ namespace jai::vm {
     inline constexpr uint32_t binary_shape_subscript = 4;   // >=1 operand is a fusable a[i] read
 
     // op_index a flags
+    inline constexpr uint32_t k_member_path_links = 8;   // op_get_member_path's longest chain
     inline constexpr uint32_t index_flag_lvalue_shape = 1; // container expr was identifier/member/subscript
     inline constexpr uint32_t index_flag_lvalue_write = 2; // outermost target of an assignment
     inline constexpr uint32_t index_flag_transient_read = 4; // read consumed transiently: elide the reference mint (transient_read.hpp)
@@ -600,6 +602,7 @@ namespace jai::vm {
             case opcode::op_binary_fused_store: return "BINARY_FUSED_STORE";
             case opcode::op_binary_fused_temp: return "BINARY_FUSED_TEMP";
             case opcode::op_member_temp: return "MEMBER_TEMP";
+            case opcode::op_get_member_path: return "GET_MEMBER_PATH";
             case opcode::op_set_member_fused: return "SET_MEMBER_FUSED";
             case opcode::op_operand_temp: return "OPERAND_TEMP";
             case opcode::op_call_temp: return "CALL_TEMP";

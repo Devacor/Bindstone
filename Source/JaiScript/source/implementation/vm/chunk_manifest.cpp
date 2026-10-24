@@ -193,6 +193,13 @@ namespace {
 				for (int8_t c : p.comp) { out << static_cast<int>(c) << ","; }
 				out << " value=" << operand(ch, p.value) << "\n";
 			}
+			out << pre << "member_path_protos " << ch.member_path_protos.size() << "\n";
+			for (size_t i = 0; i < ch.member_path_protos.size(); ++i) {
+				const member_path_proto& p = ch.member_path_protos[i];
+				out << pre << " " << i << " root=" << u(p.root_slot) << " links=";
+				for (const auto& l : p.links) { out << (l.subscript ? "[" + operand(ch, l.index) + " flags=" + std::to_string(l.index_flags) + "]" : std::string(".")); }
+				out << "\n";
+			}
 			out << pre << "counted_for_protos " << ch.counted_for_protos.size() << "\n";
 			for (size_t i = 0; i < ch.counted_for_protos.size(); ++i) {
 				const counted_for_proto& p = ch.counted_for_protos[i];

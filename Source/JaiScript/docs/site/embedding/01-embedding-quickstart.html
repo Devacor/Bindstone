@@ -70,6 +70,7 @@ int main() {
 jaiscript
 true</code></pre></div>
 <p>The standard library is opt-in. A bare engine has a basic <code>print</code> and template-string formatting (<code>${hp:.1f}</code>), nothing else; <code>jai::stdlib::register_all</code> adds formatted printing, <code>to_string</code>, math, the container and string libraries and JSON. Output goes to <code>std::cout</code> unless you hand the engine another stream with <code>set_output_stream</code>.</p>
+<p>A result is a <code>jai::held_value</code>: keep it as long as you like while the engine lives. It never keeps the engine alive; once the engine is destroyed, reading it throws <code>Value outlived its engine.</code> A plain <code>script_value</code> your C++ receives is valid for the call; <code>eng-&gt;hold(v)</code> keeps one. Values pass between engines by copy (<a href="17-host-api.html#reading-script-state-back">Host API</a>).</p>
 <h2 id="bind-a-class">3. Bind a class and a function<a class="hlink" href="#bind-a-class" aria-label="link">&#8203;</a></h2>
 <p>A C++ class needs no macros. <code>jai::dynamic_binder</code> names the constructors, members and methods scripts may use, and <code>add_function</code> registers any C++ callable. The samples from here on run inside <code>main</code> after the engine is made:</p>
 <div class="codeblock cb-cpp" data-sample="quickstart-bind"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Player {

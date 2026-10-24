@@ -3663,60 +3663,149 @@ public:
             check_eq((int64_t)730, r.as_int());
         });
 
-        // A value handed out of the engine holds it: a number, a container, a string and a map read and convert after the
-        // host dropped its last engine handle, and the engine goes when the last such value does
-        test("held_values_outlive_their_engine_handle", [this]() {
-            std::optional<held_value> number, array, text, map;
+        // Values die with their engine: held values give up their payloads at teardown (a held instance's destructor runs while the
+        // engine still runs script), then read as outlived; nothing pins the engine, nothing reads freed memory
+        test("held_values_die_with_their_engine", [this]() {
+            const auto error_of = [](const auto& read) -> std::string {
+                try { read(); } catch (const std::exception& err) { return err.what(); }
+                return "no error";
+            };
+            std::optional<held_value> number, text, array, map, instance;
             std::weak_ptr<engine> watch;
+            int destroyed = 0;
             {
                 auto e = make_engine();
                 watch = e;
+                e->add_function("note_destroyed", [&destroyed]() { ++destroyed; });
+                e->execute("class Tracked { int v = 5; ~Tracked() { note_destroyed(); } }");
                 number.emplace(e->execute("41 + 1;"));
-                array.emplace(e->execute("[1, 2, 3];"));
                 text.emplace(e->execute("\"text\";"));
+                array.emplace(e->execute("[1, [2, 3], \"x\"];"));
                 map.emplace(e->execute("var m = {\"k\": 7}; m;"));
+                instance.emplace(e->execute("Tracked();"));
+                check_eq((int64_t)42, number->as_int());
+                check_true(instance->valid() && instance->is_object());
+                check_eq(0, destroyed, "a held instance lives while its engine does");
             }
-            check_true(!watch.expired(), "a held value keeps its engine");
-            check_eq((int64_t)42, number->as_int());
-            check_true(number->get_engine() == watch.lock().get(), "the stamp names the engine");
-            check_true(number->get_type_info() && number->get_type_info()->base_type == script_value_type::jai_int_type);
-            check_eq((size_t)3, array->unchecked_get_array_storage()->size());
-            check_eq(std::string("text"), text->as<std::string>());
-            check_true(map->is_map());
-            script_value copy = *array;   // a plain copy lives as long as the engine does
-            check_true(copy.is_array());
-            number.reset(); array.reset(); text.reset(); map.reset();
-            copy = script_value(std::monostate{}, nullptr);
-            check_true(watch.expired(), "the engine goes with its last held value");
+            check_true(watch.expired(), "a held value never keeps its engine");
+            check_eq(1, destroyed, "the held instance's destructor ran at teardown");
+            for (held_value* held : {&*number, &*text, &*array, &*map, &*instance}) {
+                check_false(held->valid(), "outlived");
+                check_true(held->get_engine() == nullptr, "an outlived value names no engine");
+                check_eq(std::string("Value outlived its engine."), error_of([&]() { (void)held->as_int(); }));
+                check_eq(std::string("Value outlived its engine."), error_of([&]() { (void)held->to_string(); }));
+                check_eq(std::string("Value outlived its engine."), error_of([&]() { (void)held->as<std::string>(); }));
+            }
+            number.reset(); text.reset(); array.reset(); map.reset(); instance.reset();
         });
 
-        // Two engines that exchanged values share a lifetime: B's stamps in A's memory stay readable after B's handle goes
-        test("exchanged_engines_share_a_lifetime", [this]() {
-            auto a = make_engine();
-            a->execute("var arr = [1, 2, 3];");
+        test("held_value_copies_and_moves_across_teardown", [this]() {
+            const auto error_of = [](const auto& read) -> std::string {
+                try { read(); } catch (const std::exception& err) { return err.what(); }
+                return "no error";
+            };
+            std::optional<held_value> copied, moved, assigned, reassigned;
             {
-                auto b = make_engine();
-                b->add_global("borrowed", a->get_variable("arr"));
-                b->execute("borrowed[0] = 9; borrowed.push(4); var& r = borrowed[1]; r = 2;");
+                auto e = make_engine();
+                held_value original = e->execute("[1, 2, 3];");
+                copied.emplace(original);
+                moved.emplace(std::move(original));
+                held_value other = e->execute("\"other\";");
+                assigned.emplace(e->execute("0;"));
+                *assigned = other;
+                check_eq(std::string("other"), assigned->as<std::string>());
             }
-            check_eq((int64_t)16, a->execute("var& s = arr[0]; s = s; arr[0] + arr[1] + arr[2] + arr[3] - 2;").as_int());
+            for (held_value* held : {&*copied, &*moved, &*assigned}) {
+                check_false(held->valid());
+                check_eq(std::string("Value outlived its engine."), error_of([&]() { (void)held->as_array(); }));
+            }
+            held_value copy_of_outlived = *copied;
+            check_false(copy_of_outlived.valid(), "a copy of an outlived value is outlived");
+            held_value moved_outlived = std::move(copy_of_outlived);
+            check_false(moved_outlived.valid());
+            auto live = make_engine();
+            reassigned.emplace(live->execute("7;"));
+            *reassigned = moved_outlived;
+            check_false(reassigned->valid(), "assigning an outlived value outlives the target");
+            *reassigned = live->execute("8;");
+            check_true(reassigned->valid(), "a live value assigned over an outlived one");
+            check_eq((int64_t)8, reassigned->as_int());
+            check_eq(std::string("Value outlived its engine."), error_of([&]() { live->add_global("g", moved_outlived); }));
+            check_eq(std::string("Value outlived its engine."), error_of([&]() { live->add_global("g", static_cast<const script_value&>(moved_outlived)); }));
+            live.reset();
+            check_false(reassigned->valid(), "a reassigned value dies with its new engine");
         });
 
-        // Cross-engine values: engine B minting a reference to an engine-A value must not
-        // stamp B's interned reference twin onto A's type_info (dangles when B dies).
-        test("cross_engine_reference_no_foreign_twin_stamp", [this]() {
+        // A host thread may hold values while the engine lives; destroying the engine on another thread afterwards (not racing the
+        // holder, as with any C++ object) outlives them
+        test("held_values_from_a_host_thread", [this]() {
+            auto e = make_engine();
+            e->execute("var shared = [1, 2, 3];");
+            std::vector<held_value> kept;
+            std::thread holder([&]() {
+                for (int i = 0; i < 8; ++i) { kept.push_back(e->get_variable("shared")); }
+            });
+            holder.join();
+            check_eq((size_t)8, kept.size());
+            check_true(kept[3].valid());
+            std::thread destroyer([&]() { e.reset(); });
+            destroyer.join();
+            for (const held_value& held : kept) { check_false(held.valid()); }
+        });
+
+        // Values cross engines by copy: numbers, strings and containers convert into the receiving engine; an instance, a function or
+        // a reference into the other engine is refused
+        test("cross_engine_values_import_by_copy", [this]() {
+            const auto error_of = [](const auto& run) -> std::string {
+                try { run(); } catch (const std::exception& err) { return err.what(); }
+                return "no error";
+            };
             auto a = make_engine();
-            a->execute("var arr = [1, 2, 3];");
-            script_value shared_arr = a->get_variable("arr");
+            a->execute("class Thing { int v = 1; } var arr = [1, [2, 3], \"s\"]; array<int> ints = [4, 5]; array<string> words = [\"p\", \"q\"]; var m = {\"k\": [6], \"n\": 2}; var thing = Thing(); var fn = []() { return 1; };");
+            auto b = make_engine();
+            b->add_global("n", a->execute("12;"));
+            b->add_global("t", a->execute("\"text\";"));
+            b->add_global("arr", a->get_variable("arr"));
+            b->add_global("ints", a->get_variable("ints"));
+            b->add_global("words", a->get_variable("words"));
+            b->add_global("m", a->get_variable("m"));
+            check_true(b->get_variable("arr").get_engine() == b.get(), "an imported value belongs to the receiving engine");
+            check_eq((int64_t)12, b->execute("n;").as_int());
+            check_eq(std::string("text!"), b->execute("t + \"!\";").as<std::string>());
+            check_eq((int64_t)15, b->execute("arr[0] = 9; arr[1][0] = 4; arr[0] + arr[1][0] + arr[1][1] - 1;").as_int());
+            check_eq((int64_t)19, b->execute("ints.push(10); ints[0] + ints[1] + ints[2];").as_int());
+            check_eq(std::string("pq!"), b->execute("words[1] += \"!\"; words[0] + words[1];").as<std::string>());
+            check_eq((int64_t)8, b->execute("m[\"k\"].push(1); m[\"k\"][0] + m[\"k\"][1] + m[\"n\"] - 1;").as_int());
+            b.reset();
+            check_eq((int64_t)6, a->execute("arr[0] + arr[1][0] + arr[1][1];").as_int());
+            check_eq((int64_t)2, a->execute("ints.size();").as_int());
+            check_eq(std::string("pq"), a->execute("words[0] + words[1];").as<std::string>());
+            check_eq((int64_t)1, a->execute("m[\"k\"].size();").as_int());
+
+            auto c = make_engine();
+            const std::string object_text = "Cannot pass an object from another engine: values cross engines by copy (numbers, strings, math values and arrays and maps of them).";
+            check_eq(object_text, error_of([&]() { c->add_global("thing", a->get_variable("thing")); }));
+            check_eq(object_text, error_of([&]() { c->add_global("things", a->execute("[Thing()];")); }));
+            check_eq(std::string("Cannot pass a function from another engine: values cross engines by copy (numbers, strings, math values and arrays and maps of them)."),
+                     error_of([&]() { c->add_global("fn", a->get_variable("fn")); }));
+            c->execute("var seen = 0; function take(var x) { seen = x[0]; }");
+            auto take = convert_script_function<void(script_value)>(c->get_variable("take"));
+            take(a->get_variable("ints"));
+            check_eq((int64_t)4, c->execute("seen;").as_int());
+            check_eq(object_text, error_of([&]() { take(a->execute("[Thing()];")); }));
+        });
+
+        // A host's script callback and a suspended run go inert when their engine dies, as held values do
+        test("callbacks_go_inert_with_their_engine", [this]() {
+            std::function<int()> callback;
             {
-                auto b = make_engine();
-                b->add_global("borrowed", shared_arr);
-                b->execute("var& r = borrowed[0]; r = 9;");
+                auto e = make_engine();
+                callback = convert_script_function<int()>(e->execute("var f = []() { return 3; }; f;"));
+                check_eq(3, callback());
             }
-            // B is gone; A minting references for the same element type must not
-            // resolve through a pointer B cached onto A's type_info.
-            auto r = a->execute("var& s = arr[1]; s = 5; arr[0] + arr[1];");
-            check_eq((int64_t)14, r.as_int());
+            std::string text;
+            try { callback(); } catch (const std::exception& err) { text = err.what(); }
+            check_eq(std::string("Cannot call a script function after its engine was destroyed"), text);
         });
 
         // ---- Stage 2: fused subscript stores + flat operator table ----

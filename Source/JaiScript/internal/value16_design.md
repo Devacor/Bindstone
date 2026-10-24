@@ -175,36 +175,39 @@ AST `source_location`s (`ast_reader::location`): every node copies the full scri
 types: 158 in Gator (80 KB at 512 bytes each). With equal-length checkout paths the delta is gone; base builds for later
 measurements sit at a path of the worktree's length.
 
-### Stamp lifetime (Dev ruling 2026-10-23: two types)
+### Stamp lifetime (Dev ruling 2026-10-23: values die with their engine)
 
-A stamp points into its engine's memory, so a value must not outlive its engine. Inside the engine that holds by
-construction (the engine is alive while it executes). At the edge:
+A stamp points into its engine's memory, so a value must not be read after its engine is gone. Inside the engine that holds
+by construction. At the edge:
 
-- **Values handed out hold the engine.** `held_value` (value.hpp) is a `script_value` with a `shared_ptr<engine>` base
-  destroyed after the value. `engine::execute` (every overload), `execute_file` and `get_variable` return it, so a host
-  keeps a result, a container, a string or an instance readable for as long as it keeps the value. A plain
-  `script_value` copy (a C++ bound function's argument, a value read out of a container) costs nothing and lives as long
-  as the engine. Bindings treat a `held_value` passed back in as the `script_value` it is (`detail::is_script_value_v`).
-- **Engines that exchange values share one lifetime.** When a value of engine A enters engine B (`add_global`), the two
-  join one lifetime group (`engine::share_lifetime_with`). `engine::make`'s deleter parks an engine whose last handle
-  goes while another member still has one, and destroys every member when the last member's last handle goes. B's
-  stamps written into A's containers stay readable while A lives, with no work on any store path and no reference cycle
-  (the group holds only parked members). A `weak_ptr` to a parked engine reads expired.
-- `engine::hold(v)` is the durable conversion: C++ that keeps a value it received (a bound function's argument, a
-  signal's argument, an element it read) holds it; passing values into C++ stays a plain, zero-cost `script_value`.
-- `add_global` and `execute`'s instance variables join the group. Values that cross through a call argument (a host
-  calling a script function with another engine's value) or a host write into a container join no group: the check
-  would land on the host-to-script call path, which C++ callbacks such as sort comparators take per element.
-- A Debug-only teardown check for plain values still pointing into a dead engine needs per-copy tracking; there is none.
-- Host audit (MV, Game, Workbench, Editor, examples): the stored values are `Building::localVariables` and
-  `BattleEffect::localVariables` (script `setVar`) and the signal properties' script receivers. They stay plain: their
-  owners are scene objects the script engine itself keeps alive, so holding the engine there would form a cycle, and
-  their destruction after the engine releases payloads without reading a stamp. Every other host value is a local
-  inside one call.
+- **Plain values are borrows.** A `script_value` C++ receives (a bound function's argument, a container element, a signal's
+  argument) is valid for the call, like a C++ reference parameter. No copy, no count, no check on those paths.
+- **Held values are registered, not pinning.** `held_value` (value.hpp) is a `script_value` plus its engine pointer and a link
+  in the engine's registry (an intrusive list under a mutex in `engine::implementation`). `execute`, `execute_file`,
+  `get_variable` and `hold` return one. The registry is touched only when a host constructs, copies, moves, assigns or drops a
+  held value. Teardown (`~engine`, right after suspended runs are cancelled and before program-scope values die, then once more
+  at the end for holds a destructor made) unlinks each held value under the lock, marks it outlived (engine null), swaps in the
+  outlived sentinel and releases the payload outside the lock while the engine still runs destructors. The lifetime token
+  expires after the whole destructor, so signal receivers and callbacks a held instance's destructor fires still run.
+- **The outlived sentinel** is `TYPEID_INVALID` under a tag of `k_engine_only` with a null pointer, a word no live value
+  carries: `get_engine()` and `get_type_info()` read null without a load. `held_value` hides the reading accessors (`as<T>`,
+  `as_int`, `to_string`, `deref`, the conversion operators...) with versions that throw `Value outlived its engine.` first;
+  `valid()` and `get_engine()` answer without throwing. The import below throws the same text for a sliced copy.
+- **Values cross engines by copy.** `engine::make_value(script_value)`, `add_global`, `execute`'s instance variables and so
+  `convert_script_function` arguments test `owns_value` (the value's engine is this one, or none) and otherwise run
+  `import_value`: numbers, strings, utf8 strings and math values are remade with this engine, arrays and maps convert on an
+  explicit work stack (typed buffers copy as buffers when their element type translates, strings are copied), and objects,
+  functions and references (including `cpp_bound` and parallel borrows) throw `Cannot pass an object|a function|a reference
+  from another engine: ...`. The check is one tag test and at most one load at those host APIs; no script path runs it.
+- **Builtin type records stay per engine.** `type_info` carries mutable per-engine state (`owner`, which `get_engine()` reads,
+  and the reference-twin caches written at run time), so one shared static record per builtin cannot serve every engine
+  without retiring `get_engine()` from stamps (phase B). A reserved "builtin int" tag would put a branch on every stamp guard.
+  The import restamps instead: a translated type is looked up in the receiving engine by name (scalars) or rebuilt from its
+  translated parameters (arrays, maps), never interned from the foreign record (its symbol ids are the other engine's).
 
-Tests: Review Regressions `held_values_outlive_their_engine_handle`, `exchanged_engines_share_a_lifetime` and the
-existing `cross_engine_reference_no_foreign_twin_stamp` (which crashed on vm-reference under the Debug heap's freed fill
-before the group existed).
+Tests: Review Regressions (in the Element Read Elision suite) `held_values_die_with_their_engine`,
+`held_value_copies_and_moves_across_teardown`, `held_values_from_a_host_thread`, `cross_engine_values_import_by_copy`,
+`callbacks_go_inert_with_their_engine`.
 
 ## Verdict at stage 2
 

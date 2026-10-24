@@ -7376,6 +7376,73 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(oracle.find("throw:") == std::string::npos, "runs: " + oracle);
 			check_eq(oracle, session(true), "a callee redefined inside a raw chain and one redefined with another parameter kind");
 		});
+		// what a caller learns of a callee at its call sites (its result kind, whether it raises, whether it runs user code, whether a reference
+		// escapes) holds only for the callee's definition: each reload below changes one of these facts under callers that already ran
+		auto reload_session = [](bool vm, const std::vector<std::string>& steps, const std::string& probe) {
+			auto e = engine::make();
+			e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+			stdlib::register_all(*e); register_host_math_fixture(*e);
+			std::string out;
+			for (const std::string& step : steps) {
+				try {
+					e->execute(step);
+					out += e->execute(probe).as_string() + "|";
+				} catch (const std::exception& ex) { out += std::string("throw:") + ex.what() + "|"; }
+			}
+			return out;
+		};
+		test("call_facts_follow_a_reloaded_callee_through_its_callers", [this, reload_session]() {
+			const std::vector<std::string> steps = {
+				"int leaf(int x) { return x + 1; }\nint mid(int n) { if (n < 1) { return 0; } return leaf(n) + mid(n - 1); }\nint top(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + mid(i); } return s; }",
+				"int leaf(int x) { return x * 3; }",
+				"float leaf(int x) { return x * 0.5; }",
+				"int leaf(int x) { return x - 2; }",
+			};
+			const std::string probe = "to_string(top(12)) + \" \" + to_string(mid(9));";
+			const std::string oracle = reload_session(false, steps, probe);
+			check_true(oracle.find("throw:") == std::string::npos, "runs: " + oracle);
+			check_eq(oracle, reload_session(true, steps, probe), "a leaf reloaded under two levels of callers, its result kind changed once");
+		});
+		test("call_facts_follow_a_callee_that_starts_raising", [this, reload_session]() {
+			const std::vector<std::string> steps = {
+				"int leaf(int x) { return x + 1; }\nint mid(int n) { if (n < 1) { return 0; } return leaf(n) + mid(n - 1); }\n"
+				"string top(int n) { try { return to_string(mid(n)); } catch (e) { return \"caught:\" + e; } }",
+				"int leaf(int x) { if (x == 5) { throw \"leaf five\"; } return x + 1; }",
+				"int leaf(int x) { return x + 9223372036854775800; }",
+				"int leaf(int x) { array<int> a = [1, 2]; return a[x]; }",
+				"int leaf(int x) { return x + 1; }",
+			};
+			const std::string probe = "top(8) + \" \" + top(3);";
+			const std::string oracle = reload_session(false, steps, probe);
+			check_true(oracle.find("caught:leaf five") != std::string::npos, "the thrown text reaches the caller: " + oracle);
+			check_eq(oracle, reload_session(true, steps, probe), "a no-raise callee reloaded to throw, overflow and index out of range, then back");
+		});
+		test("call_facts_follow_a_callee_that_starts_running_user_code", [this, reload_session]() {
+			const std::vector<std::string> steps = {
+				"int G = 0;\nclass V { int v = 0; V(int x) { v = x; } V operator+(V o) { G = G + 1; return V(v + o.v); } ~V() { G = G + 100; } }\n"
+				"int leaf(int x) { return x + 1; }\nint mid(int n) { if (n < 1) { return 0; } int a = leaf(n); return a + G + mid(n - 1); }",
+				"int leaf(int x) { V a = V(x); V b = a + V(1); return b.v; }",
+				"var HOOK = [](int x) { G = G + x; return x; };\nint leaf(int x) { return HOOK(x) + 1; }",
+				"int leaf(int x) { return x + 1; }",
+			};
+			const std::string probe = "G = 0; string r = to_string(mid(6)); r + \" G=\" + to_string(G);";
+			const std::string oracle = reload_session(false, steps, probe);
+			check_true(oracle.find("throw:") == std::string::npos, "runs: " + oracle);
+			check_eq(oracle, reload_session(true, steps, probe), "a plain callee reloaded to run an operator, a destructor and a callback that write a global the caller reads");
+		});
+		test("call_facts_follow_a_reference_that_starts_escaping", [this, reload_session]() {
+			const std::vector<std::string> steps = {
+				"var KEPT = []() {};\nvoid bump(int& r) { r = r + 1; }\n"
+				"int mid(int n) { int s = 0; for (int i = 0; i < n; ++i) { bump(s); } KEPT(); return s; }",
+				"void bump(int& r) { r = r + 1; KEPT = [&r]() { r = r + 1000; }; }",
+				"array<int> HELD = [];\nvoid bump(int& r) { r = r + 2; HELD.push(r); KEPT = []() {}; }",
+				"void bump(int& r) { r = r + 1; KEPT = []() {}; }",
+			};
+			const std::string probe = "to_string(mid(5)) + \" \" + to_string(mid(2));";
+			const std::string oracle = reload_session(false, steps, probe);
+			check_true(oracle.find("throw:") == std::string::npos, "runs: " + oracle);
+			check_eq(oracle, reload_session(true, steps, probe), "a reference parameter reloaded to escape into a lambda the caller runs, then to be copied out");
+		});
 		test("raw_frames_inside_coroutines_and_around_yields", [this]() {
 			// a coroutine's body runs on its fiber frame (never a frame program); the raw chains it starts end before its yields
 			const std::string src =

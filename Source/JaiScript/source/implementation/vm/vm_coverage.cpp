@@ -71,7 +71,7 @@ namespace {
 		case opcode::op_return: case opcode::op_return_ident: case opcode::op_return_binary: case opcode::op_return_convert: case opcode::op_implicit_return:
 		case opcode::op_halt: case opcode::op_ref_return_bind: case opcode::op_ref_return_lvalue:
 			return fam::ret;
-		case opcode::op_get_member: case opcode::op_place_arg: case opcode::op_get_static: case opcode::op_set_member: case opcode::op_set_static: case opcode::op_member_compound:
+		case opcode::op_get_member: case opcode::op_get_member_path: case opcode::op_place_arg: case opcode::op_get_static: case opcode::op_set_member: case opcode::op_set_static: case opcode::op_member_compound:
 		case opcode::op_member_temp: case opcode::op_set_member_fused: case opcode::op_set_member_value: case opcode::op_this: case opcode::op_super:
 		case opcode::op_from_this: case opcode::op_null_guard: case opcode::op_velem_load: case opcode::op_velem_store:
 			return fam::member;
@@ -182,7 +182,7 @@ namespace {
 			else if (cs.callee.symbol != k_invalid_u32) name = sym_name(c, sym, cs.callee.symbol);
 		} else {
 			switch (ins.op) {
-			case opcode::op_get_member: case opcode::op_get_static: case opcode::op_set_member: case opcode::op_set_static: case opcode::op_member_compound:
+			case opcode::op_get_member: case opcode::op_get_member_path: case opcode::op_get_static: case opcode::op_set_member: case opcode::op_set_static: case opcode::op_member_compound:
 			case opcode::op_member_temp: case opcode::op_set_member_fused: case opcode::op_decl_var: case opcode::op_decl_ref_ident: case opcode::op_decl_ref_value:
 			case opcode::op_new: case opcode::op_cast:
 				name = node_name(c, ins.a); break;
@@ -627,6 +627,7 @@ void vm_backend::coverage_observe(frame& f, const vm_instruction& ins, coverage_
 	bool member = true;
 	switch (ins.op) {
 	case opcode::op_get_member: recv = ins.b ? slot_at(ins.b - 1) : stack_at(0); break;
+	case opcode::op_get_member_path: if (ins.b < c.member_path_protos.size()) { recv = c.member_path_protos[ins.b].root_slot != k_invalid_u32 ? slot_at(c.member_path_protos[ins.b].root_slot) : stack_at(0); } break;
 	case opcode::op_set_member: case opcode::op_probe_member: recv = stack_at(0); break;
 	case opcode::op_member_temp: case opcode::op_set_member_fused: recv = slot_at(ins.c); break;
 	case opcode::op_set_member_value: if (ins.a < c.member_store_protos.size()) { recv = slot_at(c.member_store_protos[ins.a].base); } break;

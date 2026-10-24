@@ -79,6 +79,17 @@ namespace jai::vm {
     // `a[i].x` (op_velem_load) and `a[i].x op= v;` (op_velem_store) where the checker proved `a` a math vector buffer, `a` a frame
     // slot and `i` a frame slot or an int literal: the subscript as a one-level fused operand, the member node, the component each
     // vector kind names (-1 none, indexed by kind - v2) and, for a store, the compound kind and flags, the store proof and the value
+    // op_get_member_path: the chain's links, the outer member first; a subscript link reads its index from a frame slot or a constant
+    // and replays as op_index under its flags, a member link names its member_expr through the chain
+    struct member_path_proto {
+        struct link {
+            fused_operand index;
+            uint32_t index_flags = 0;
+            bool subscript = false;
+        };
+        std::vector<link> links;
+        uint32_t root_slot = k_invalid_u32;   // the root identifier's frame slot (k_invalid_u32: the root's value was pushed)
+    };
     struct velem_proto {
         fused_operand sub;
         uint32_t node = k_invalid_u32;
@@ -615,7 +626,7 @@ namespace jai::vm {
             case opcode::op_cfor_prep: case opcode::op_cfor_back: case opcode::op_cfor_pop: case opcode::op_loop_back: case opcode::op_cells_back:
             case opcode::op_cells_cfor_back: case opcode::op_fused_cmp_jump: case opcode::op_cast: case opcode::op_index_store_fused: case opcode::op_index_compound_operand:
                 return cell_refusal_translation;
-            case opcode::op_get_member: case opcode::op_set_member: case opcode::op_member_compound: case opcode::op_get_static: case opcode::op_set_static:
+            case opcode::op_get_member: case opcode::op_get_member_path: case opcode::op_set_member: case opcode::op_member_compound: case opcode::op_get_static: case opcode::op_set_static:
             case opcode::op_this: case opcode::op_super: case opcode::op_from_this: case opcode::op_null_guard: case opcode::op_probe_member:
             case opcode::op_array: case opcode::op_map: case opcode::op_new: case opcode::op_decl_ref_ident: case opcode::op_decl_ref_value: case opcode::op_destructure:
                 return cell_refusal_representation;
@@ -634,6 +645,7 @@ namespace jai::vm {
         std::vector<push_proto> push_protos;
         std::vector<member_store_proto> member_store_protos;
         std::vector<velem_proto> velem_protos;
+        std::vector<member_path_proto> member_path_protos;
         // an inlined leaf (internal/typed_regions_design.md, Inlined leaves): the guard at guard_ip admits [begin_ip, fallback_ip) when the callee
         // name binds the function whose body is `body`; otherwise the fallback [fallback_ip, join_ip) runs the original statement
         struct inline_site {

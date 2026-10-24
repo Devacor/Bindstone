@@ -3336,7 +3336,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 					return op_status::ok;
 				}
 			}
-		} else if (!(ins.c & store_flag_global_only) && (cached_global_env_ || parallel_worker_)) {
+		} else if (!(ins.c & store_flag_global_only) && proofs_on()) {
 			// an environment variable through the load's armed cache: the full path's walk resolves the same cell (get_env_var_ptr
 			// and vm_storage_lookup share the ladder), and a frame whose member scope is active keeps the full path's member rules
 			bool plain = !f.locals || f.top_level;
@@ -15857,6 +15857,39 @@ uint32_t vm_backend::member_read_slot_probe(class_definition* cd, member_expr* e
 	return fslot;
 }
 
+// A member read's field, borrowed where it lives: the checker's proof, else the site's member_ic row (its class and method epoch), the
+// raw cell as the ladder hands a field back; a bound C++ member's lane value lands in `host_value`. Null sends the read to the ladder:
+// a first sight or a new class fills the row, so the ladder serves that one read and hits serve from then on
+const script_value* vm_backend::site_field(const chunk& code, const script_value& objd, member_expr* expr, size_t site, script_value& host_value) {
+	if (expr->proven_class && proofs_on()) {
+		if (script_value* cell = detail::proven_field_cell(objd, expr->proven_class, expr->proven_epoch, expr->proven_slot, nullptr)) { return cell; }
+	}
+	std::vector<chunk::member_ic_entry>* rows = member_ic_rows(code);
+	if (!rows || objd.raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
+	const auto& holder = objd.unchecked_object_handle();
+	if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return nullptr; }
+	auto* inst = static_cast<class_instance*>(holder->data.get());
+	class_definition* cd = inst->get_class_definition();
+	if (!cd) { return nullptr; }
+	if (rows->size() <= site) { rows->resize(std::max(site + 1, code.code.size())); }
+	auto& entry = (*rows)[site];
+	if (entry.cd == cd && entry.epoch == cd->method_epoch()) {
+		if (entry.slot != UINT32_MAX) { return inst->field_slot_value(entry.slot); }
+		if (entry.host.lane) {
+			if (void* address = detail::host_member_address(inst, entry.host); address && detail::host_member_serves(*entry.host.lane, address)) {
+				host_value = entry.host.lane->read(address, engine_);
+				return &host_value;
+			}
+		}
+		return nullptr;
+	}
+	entry.cd = cd;
+	entry.epoch = cd->method_epoch();
+	entry.slot = member_read_slot_probe(cd, expr);
+	fill_host_member_hit(cd, inst, expr->member_id, objd, entry);
+	return nullptr;
+}
+
 // Mirrors exec_get_member's structure EXACTLY (site IC hit serves the raw cell, the
 // fill round resolves through the ladder once, absent cells fall to the ladder for
 // chain-default materialization) at the fused op's own member_ic row — a fused ip is
@@ -15866,32 +15899,15 @@ op_status vm_backend::fused_member_container(frame& f, size_t site, const script
                                              uint32_t member_node, std::optional<script_value>& scratch,
                                              const script_value*& out) {
 	auto* expr = static_cast<member_expr*>(f.code->nodes[member_node].get());
-	if (std::vector<chunk::member_ic_entry>* rows = member_ic_rows(*f.code)) {
-		const script_value& objd = base.deref();
-		if (objd.raw_storage_index() == script_value::TYPEID_OBJECT) {
-			auto& holder = const_cast<script_value&>(objd).unchecked_get_object_storage();
-			if (holder && holder->is_class_instance_wrapper && holder->data) {
-				auto* inst = static_cast<class_instance*>(holder->data.get());
-				if (class_definition* cd = inst->get_class_definition()) {
-					if (rows->size() < f.code->code.size()) { rows->resize(f.code->code.size()); }
-					auto& entry = (*rows)[site];
-					if (entry.cd == cd && entry.epoch == cd->method_epoch()) {
-						if (entry.slot != UINT32_MAX) {
-							if (script_value* v = inst->field_slot_value(entry.slot)) {
-								out = &v->deref();
-								return {};
-							}
-						}
-					} else {
-						const uint32_t slot = member_read_slot_probe(cd, expr);
-						entry.cd = cd;
-						entry.epoch = cd->method_epoch();
-						entry.slot = slot;
-						// resolve through the ladder this once; hits serve from here on
-					}
-				}
-			}
+	script_value host_value{std::monostate{}, nullptr};
+	if (const script_value* cell = site_field(*f.code, base.deref(), expr, site, host_value)) {
+		if (cell != &host_value) {
+			out = &cell->deref();
+			return {};
 		}
+		scratch = std::move(host_value);
+		out = &scratch->deref();
+		return {};
 	}
 	script_value member_out = make_null();
 	VM_TRY(member_access_value(f, base, expr, member_out));
@@ -15952,59 +15968,14 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 			return {};
 		}
 	}
-	// Field-read site IC (flat classes tier-1 stage B): epoch-validated {class, slot}
-	// per ip replaces the resolve ladder with one slot load. The fill probes mirror
-	// member_access_value's precedence EXACTLY (same_as, access, sp-builtin-name
-	// branch, per-member getter shadow — all epoch-covered); negative entries pin
-	// non-cacheable sites off the probes. A hit pushes the RAW cell copy (reference
-	// fields stay references, the ladder's field spelling); an absent cell falls to
-	// the ladder for chain-default materialization and errors.
-	// V-M1 proven field read: node-borne class + shape-epoch guard, present cell (== the
-	// member_ic hit's raw cell copy); a miss falls to the IC / ladder below
-	if (expr->proven_class && (cached_global_env_ || parallel_worker_)) {
-		if (script_value* cell = detail::proven_field_cell(*receiver, expr->proven_class, expr->proven_epoch,
-		                                                   expr->proven_slot, nullptr)) {
+	{
+		script_value host_value{std::monostate{}, nullptr};
+		if (const script_value* cell = site_field(*f.code, receiver->deref(), expr, static_cast<size_t>(&ins - f.code->code.data()), host_value)) {
+#ifdef JAISCRIPT_VM_PROFILE
+			profile_get_member_paths_[0]++;
+#endif
 			stack_.push_back(*cell);
 			return {};
-		}
-	}
-	if (std::vector<chunk::member_ic_entry>* rows = member_ic_rows(*f.code)) {
-		const script_value& objd = receiver->deref();
-		if (objd.raw_storage_index() == script_value::TYPEID_OBJECT) {
-			const auto& holder = objd.unchecked_object_handle();
-			if (holder && holder->is_class_instance_wrapper && holder->data) {
-				auto* inst = static_cast<class_instance*>(holder->data.get());
-				if (class_definition* cd = inst->get_class_definition()) {
-					if (rows->size() < f.code->code.size()) { rows->resize(f.code->code.size()); }
-					auto& entry = (*rows)[static_cast<size_t>(&ins - f.code->code.data())];
-					if (entry.cd == cd && entry.epoch == cd->method_epoch()) {
-						if (entry.slot != UINT32_MAX) {
-							if (script_value* v = inst->field_slot_value(entry.slot)) {
-#ifdef JAISCRIPT_VM_PROFILE
-								profile_get_member_paths_[0]++;
-#endif
-								stack_.push_back(*v);
-								return {};
-							}
-						} else if (entry.host.lane) {
-							if (void* address = detail::host_member_address(inst, entry.host); address && detail::host_member_serves(*entry.host.lane, address)) {
-								stack_.push_back(entry.host.lane->read(address, engine_));
-								return {};
-							}
-						}
-#ifdef JAISCRIPT_VM_PROFILE
-						profile_get_member_paths_[1]++;
-#endif
-					} else {
-						const uint32_t slot = member_read_slot_probe(cd, expr);
-						entry.cd = cd;
-						entry.epoch = cd->method_epoch();
-						entry.slot = slot;
-						fill_host_member_hit(cd, inst, expr->member_id, objd, entry);
-						// resolve through the ladder this once; hits serve from here on
-					}
-				}
-			}
 		}
 	}
 #ifdef JAISCRIPT_VM_PROFILE
@@ -16056,47 +16027,33 @@ op_status vm_backend::local_member_receiver(frame& f, const member_expr* member,
 	return {};
 }
 
+// A member read of a frame-slot base (`o.x`, `o.p.x`) into a temp: each link borrows its field where it lives (site_field: the
+// prefix at its own member_ic row past the code), and only the final value is copied into the temp. A link the site cannot serve
+// hands the read to the general path from there on: the receiver pushed as its LOAD and GET_MEMBER would have, op_get_member whole
 op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
-	const script_value* base = frame_slot(f, ins.c);
+	const size_t ip = static_cast<size_t>(&ins - f.code->code.data());
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
-	// exec_get_member's proven and cached field reads over the slot itself: the cell lands in the temp with no receiver copy
-	std::vector<chunk::member_ic_entry>* temp_rows = member_ic_rows(*f.code);
-	if (base && (cached_global_env_ || parallel_worker_) && !(member->object && member->object->get_type() == node_type::member_expr)) {
-		const script_value& objd = base->deref();
-		if (member->proven_class) {
-			if (script_value* cell = detail::proven_field_cell(objd, member->proven_class, member->proven_epoch, member->proven_slot, nullptr)) {
-				frame_slot_set(f, ins.b, *cell);
-				return {};
-			}
-		}
-		if (objd.raw_storage_index() == script_value::TYPEID_OBJECT && temp_rows && temp_rows->size() >= f.code->code.size()) {
-			const auto& holder = objd.unchecked_object_handle();
-			if (holder && holder->is_class_instance_wrapper && holder->data) {
-				auto* inst = static_cast<class_instance*>(holder->data.get());
-				const auto& entry = (*temp_rows)[static_cast<size_t>(&ins - f.code->code.data())];
-				if (class_definition* cd = inst->get_class_definition(); cd && entry.cd == cd && entry.epoch == cd->method_epoch()) {
-					if (entry.slot != UINT32_MAX) {
-						if (script_value* v = inst->field_slot_value(entry.slot)) {
-							frame_slot_set(f, ins.b, *v);
-							return {};
-						}
-					} else if (entry.host.lane) {
-						if (void* address = detail::host_member_address(inst, entry.host); address && detail::host_member_serves(*entry.host.lane, address)) {
-							frame_slot_set(f, ins.b, entry.host.lane->read(address, engine_));
-							return {};
-						}
-					}
-				}
-			}
-		}
+	const bool nested = member->object && member->object->get_type() == node_type::member_expr;
+	const script_value* base = frame_slot(f, ins.c);
+	const script_value* receiver = base;
+	script_value prefix_host{std::monostate{}, nullptr};
+	if (receiver && nested) {
+		receiver = site_field(*f.code, base->deref(), static_cast<member_expr*>(member->object.get()), f.code->code.size() + ip, prefix_host);
 	}
-	if (member->object && member->object->get_type() == node_type::member_expr) {
-		script_value receiver = make_null();
-		VM_TRY(local_member_receiver(f, member, ins.c, receiver));
+	if (receiver) {
+		script_value host_value{std::monostate{}, nullptr};
+		if (const script_value* cell = site_field(*f.code, receiver->deref(), member, ip, host_value)) {
+			frame_slot_set(f, ins.b, *cell);
+			return {};
+		}
+		stack_.push_back(*receiver);
+	} else if (nested) {
+		script_value prefix = make_null();
+		VM_TRY(local_member_receiver(f, member, ins.c, prefix));
 		if (is_unwinding_) { frame_slot_set(f, ins.b, make_null()); return {}; }
-		stack_.push_back(std::move(receiver));
+		stack_.push_back(std::move(prefix));
 	} else {
-		stack_.push_back(base ? *base : make_null());
+		stack_.push_back(make_null());
 	}
 	VM_TRY(exec_get_member(f, ins));
 	if (switch_to_) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "member temp across a frame switch"); }
@@ -16105,6 +16062,93 @@ op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
 	frame_slot_set(f, ins.b, std::move(out));
 	return {};
 }
+
+// A chain read through (`a.b.c`, `grid[y][x].cost`, `self.target.hp`): each inner link borrows where its value lives (a member's field
+// through site_field at the link's own member_ic row, ip + k * the code's size for the link k steps in from the outer one; an
+// untyped array's element in range), so no intermediate handle is copied, and the outer link is op_get_member's read over the last
+// receiver, which copies the final value. Nothing runs between a borrow and its use. A link the walk cannot serve hands the rest of
+// the chain to the general reads (member_access_value, op_index under the link's flags) over an owned copy of its receiver, exactly
+// as the LOAD, INDEX and GET_MEMBER sequence reads it
+const script_value* vm_backend::path_index_value(frame& f, const fused_operand& index) {
+	if (index.const_index != k_invalid_u32) { return &f.code->constants[index.const_index]; }
+	if (!f.locals || f.top_level) { return nullptr; }
+	const script_value* slot = frame_slot(f, index.slot);
+	return slot ? &slot->deref() : nullptr;
+}
+
+op_status vm_backend::exec_get_member_path(frame& f, const vm_instruction& ins) {
+	const size_t ip = static_cast<size_t>(&ins - f.code->code.data());
+	const size_t stride = f.code->code.size();
+	const member_path_proto& path = f.code->member_path_protos[ins.b];
+	const size_t count = path.links.size();
+	const expression* links[k_member_path_links];
+	links[0] = static_cast<const expression*>(f.code->nodes[ins.a].get());
+	for (size_t k = 1; k < count; ++k) {
+		links[k] = path.links[k - 1].subscript ? static_cast<const binary_expr*>(links[k - 1])->left.get() : static_cast<const member_expr*>(links[k - 1])->object.get();
+	}
+	script_value root{std::monostate{}, nullptr};
+	const script_value* receiver = nullptr;
+	if (path.root_slot != k_invalid_u32) {
+		const script_value* base = frame_slot(f, path.root_slot);
+		if (base) { receiver = &base->deref(); }
+		else { root = make_null(); receiver = &root; }
+	} else {
+		root = std::move(stack_.back());
+		stack_.pop_back();
+		receiver = &root;
+	}
+	script_value host[2] = {script_value{std::monostate{}, nullptr}, script_value{std::monostate{}, nullptr}};
+	size_t k = count - 1;
+	for (; k > 0; --k) {
+		const script_value* next = nullptr;
+		if (path.links[k].subscript) {
+			const script_value& container = receiver->deref();
+			if (!has_custom_binary_ops_ && !parallel_worker_ && container.raw_storage_index() == script_value::TYPEID_ARRAY) {   // a worker's element reads are the region's borrows
+				const script_array* node = container.unchecked_array_node();
+				const script_value* index = path_index_value(f, path.links[k].index);
+				if (!node->is_typed() && index && index->is_int() && index->unchecked_as_int() >= 0 &&
+				    index->unchecked_as_int() < static_cast<script_int>(node->size())) {
+					next = &node->values()[static_cast<size_t>(index->unchecked_as_int())];
+				}
+			}
+		} else {
+			next = site_field(*f.code, receiver->deref(), static_cast<member_expr*>(const_cast<expression*>(links[k])), ip + k * stride, host[k & 1]);
+		}
+		if (!next) { break; }
+		receiver = next;
+	}
+	if (k > 0) {
+		script_value object = receiver == &root ? std::move(root) : *receiver;
+		for (; k > 0; --k) {
+			script_value out = make_null();
+			if (path.links[k].subscript) {
+				const script_value* index = path_index_value(f, path.links[k].index);
+				stack_.push_back(std::move(object));
+				stack_.push_back(index ? *index : make_null());
+				VM_TRY(exec_index(f, vm_instruction{opcode::op_index, path.links[k].index_flags, 0, 0}));
+				out = std::move(stack_.back());
+				stack_.pop_back();
+			} else if (const script_value* cell = site_field(*f.code, object.deref(), static_cast<member_expr*>(const_cast<expression*>(links[k])), ip + k * stride, host[k & 1])) {
+				out = *cell;
+			} else {
+				VM_TRY(member_access_value(f, object, static_cast<member_expr*>(const_cast<expression*>(links[k])), out));
+			}
+			if (is_unwinding_) { stack_.push_back(make_null()); return {}; }
+			if (switch_to_) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "member path across a frame switch"); }
+			object = std::move(out);
+		}
+		stack_.push_back(std::move(object));
+		return exec_get_member(f, ins);
+	}
+	script_value host_value{std::monostate{}, nullptr};
+	if (const script_value* cell = site_field(*f.code, receiver->deref(), static_cast<member_expr*>(const_cast<expression*>(links[0])), ip, host_value)) {
+		stack_.push_back(*cell);
+		return {};
+	}
+	stack_.push_back(receiver == &root ? std::move(root) : *receiver);
+	return exec_get_member(f, ins);
+}
+
 // a member store on a frame-slot base: the base pushed as its LOAD would have, then op_set_member whole (the value below it on the
 // stack, the proof in b, the result landed as it lands it)
 op_status vm_backend::exec_set_member_fused(frame& f, const vm_instruction& ins) {
@@ -16606,7 +16650,7 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
                                                              const script_value& dereferenced, const script_value& value) {
 	// V-M2 proven field write: == the member_ic hit with the conversion gated by the
 	// proof (KEEP BYTE-PARALLEL with interpreter I-M2)
-	if (member->proven_class && member->proven_field_write && (cached_global_env_ || parallel_worker_) && !detail::by_value_class_type(member->proven_field_type)) {
+	if (member->proven_class && member->proven_field_write && proofs_on() && !detail::by_value_class_type(member->proven_field_type)) {
 		if (class_instance* inst = detail::proven_field_instance(dereferenced, member->proven_class, member->proven_epoch);
 		    inst && !detail::proven_field_holds_object(inst, member->proven_slot, member->proven_field_type)) {
 			script_value incoming = clone_for_assignment(value);
@@ -17499,7 +17543,7 @@ script_value* vm_backend::text_builder_target(frame& f, const vm_instruction& in
 	field_tag = nullptr;
 	if (ins.b != k_invalid_u32 && f.locals && !f.top_level) {
 		target = frame_slot(f, ins.b);
-	} else if (!(ins.c & store_flag_global_only) && (cached_global_env_ || parallel_worker_)) {
+	} else if (!(ins.c & store_flag_global_only) && proofs_on()) {
 		bool plain = !f.locals || f.top_level;
 		if (!plain) {
 			ensure_frame_member_scope(f, environment_.get());
@@ -20360,6 +20404,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_from_this: return exec_from_this(f, ins);
 		case opcode::op_get_member: return exec_get_member(f, ins);
 		case opcode::op_member_temp: return exec_member_temp(f, ins);
+		case opcode::op_get_member_path: return exec_get_member_path(f, ins);
 		case opcode::op_size_temp: return exec_size_temp(f, ins);
 		case opcode::op_velem_load: return exec_velem_load(f, ins);
 		case opcode::op_velem_store: return exec_velem_store(f, ins);
@@ -21775,6 +21820,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				JAI_NEXT_OP();
 			case opcode::op_member_temp: JAI_OP_LABEL(op_member_temp)
 				VM_TRY_OP_SHARED(exec_member_temp(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				JAI_NEXT_OP();
+			case opcode::op_get_member_path:
+				VM_TRY_OP_SHARED(exec_get_member_path(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				JAI_NEXT_OP();
 			case opcode::op_size_temp:

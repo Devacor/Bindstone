@@ -258,6 +258,7 @@ namespace {
 			// for env-untouched frames = no class context, exactly a plain function's
 			// lexical truth); exec_new never touches environment_
 			case opcode::op_get_member:
+			case opcode::op_get_member_path:
 			case opcode::op_set_member:
 			case opcode::op_set_member_fused:
 			case opcode::op_member_compound:
@@ -478,6 +479,7 @@ namespace {
 			case opcode::op_cfor_pop:
 			case opcode::op_halt:
 			case opcode::op_get_member:
+			case opcode::op_get_member_path:
 			case opcode::op_get_static:
 			case opcode::op_set_member:
 			case opcode::op_set_member_fused:
@@ -7863,8 +7865,70 @@ void vm_compiler::compile_member(const std::shared_ptr<member_expr>& expr) {
 			return;
 		}
 	}
+	member_path_proto path;
+	if (const expression* root = elem_member_operand(expr.get()) ? nullptr : member_path(expr.get(), path)) {   // an element's member keeps the alias temps the cell translation takes
+		if (typed_lowering_ && temps_active_ && chunk_->is_function_body && root->get_type() == node_type::identifier_expr &&
+		    !static_cast<const identifier_expr*>(root)->global_qualified) {
+			path.root_slot = identifier_slot_operand(static_cast<identifier_expr*>(const_cast<expression*>(root)));
+			if (path.root_slot >= k_typed_slot_mask) { path.root_slot = k_invalid_u32; }
+		}
+		if (path.root_slot == k_invalid_u32) {
+			const expression* inner = expr.get();
+			for (size_t k = 1; k < path.links.size(); ++k) {
+				inner = path.links[k - 1].subscript ? static_cast<const binary_expr*>(inner)->left.get() : static_cast<const member_expr*>(inner)->object.get();
+			}
+			compile_expression(path.links.back().subscript ? static_cast<const binary_expr*>(inner)->left : static_cast<const member_expr*>(inner)->object);
+		}
+		const uint32_t node = add_node(expr);
+		chunk_->member_path_protos.push_back(std::move(path));
+		emit(opcode::op_get_member_path, node, static_cast<uint32_t>(chunk_->member_path_protos.size() - 1));
+		return;
+	}
 	compile_expression(expr->object);
 	emit(opcode::op_get_member, add_node(expr));
+}
+
+// A chain read through as one path (`a.b.c`, `grid[y][x].cost`), the outer link a member: plain instance members (none static,
+// null-safe, an arrow, an enum's value, a stamped place read or a super member) and transient subscripts whose index is a frame
+// slot or a constant, at most k_member_path_links. The root expression when the chain has two links or more, else null
+const expression* vm_compiler::member_path(const expression* e, member_path_proto& out) {
+	out.links.clear();
+	while (e && out.links.size() < k_member_path_links) {
+		member_path_proto::link link;
+		const expression* next = nullptr;
+		if (e->get_type() == node_type::member_expr) {
+			const auto* m = static_cast<const member_expr*>(e);
+			if (m->is_static || m->null_safe || m->is_arrow || m->enum_constant || m->place_read || !m->object ||
+			    m->object->get_type() == node_type::super_expr) {
+				break;
+			}
+			next = m->object.get();
+		} else if (e->get_type() == node_type::binary_expr && !out.links.empty()) {
+			const auto* b = static_cast<const binary_expr*>(e);
+			if (b->op.type != token_type::left_bracket || !b->transient_element_read || !b->left || !b->right) { break; }
+			const node_type it = b->right->get_type();
+			if (it == node_type::identifier_expr) {
+				auto* id = static_cast<identifier_expr*>(b->right.get());
+				const uint32_t slot = id->global_qualified ? k_invalid_u32 : identifier_slot_operand(id);
+				if (slot == k_invalid_u32 || slot >= k_typed_slot_mask) { break; }
+			} else if (it != node_type::literal_expr) {
+				break;
+			}
+			link.index = make_fused_operand(b->right.get());
+			if (link.index.is_subscript() || link.index.load_flags || link.index.member_node != k_invalid_u32 ||
+			    (link.index.const_index == k_invalid_u32 && (link.index.slot == k_invalid_u32 || link.index.slot >= k_typed_slot_mask))) {
+				break;
+			}
+			link.subscript = true;
+			link.index_flags = (is_lvalue_shaped(b->left.get()) ? index_flag_lvalue_shape : 0) | index_flag_transient_read;
+			next = b->left.get();
+		} else {
+			break;
+		}
+		out.links.push_back(std::move(link));
+		e = next;
+	}
+	return out.links.size() >= 2 ? e : nullptr;
 }
 
 void vm_compiler::compile_new(const std::shared_ptr<new_expr>& expr) {

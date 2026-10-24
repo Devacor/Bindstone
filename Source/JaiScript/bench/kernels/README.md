@@ -11,6 +11,8 @@ in two forms:
 
 `jai/cell_compares_typed.jai` is outside dasProfile: a breadth-first search's inner compares (an element read and a local
 against typed globals, a bool's truth test) in a counted loop, kept as the VM's regression detector for pinned compares.
+`jai/chain_reads_dyn.jai` is outside it too: member and index chains read through (`n.right.left.value`,
+`w.grid[k][k].value`) in dynamic code, the detector for borrowed reads (`internal/reads_borrow.md`).
 
 Every program prints `"<board name>", <seconds per run>, <runs>` and a `checksum` line. A sample runs the kernel as
 many times as fit a 0.5 s budget and reports the per-run time (dasProfile's protocol, timed with a `time::stopwatch`).

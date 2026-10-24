@@ -135,6 +135,7 @@ namespace jai::vm {
         bool try_emit_fused_index_shape(binary_expr* expr, uint32_t flags);
         bool compile_subscript_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out);
         const expression* member_path(const expression* e, member_path_proto& out);
+        const expression* member_path_root(const expression* e) const;
         uint32_t member_base_slot(const expression* e) const;   // a member read or store whose base is a frame-slot identifier: the base's slot, else invalid
         void note_component_base(uint32_t node, const member_expr* m);   // chunk::component_base_slots for a math component store
         bool member_temp_operand(const expression* e) const;
@@ -313,6 +314,9 @@ namespace jai::vm {
         uint32_t place_argument_base(const expression* arg);
         void compile_call(const std::shared_ptr<call_expr>& expr);
         void compile_member(const std::shared_ptr<member_expr>& expr);
+        void compile_member_read(const std::shared_ptr<member_expr>& expr);
+        const expression* held_root_ = nullptr;   // the temporary a read chain holds, until compile_expression reaches it (detail::held_chain_root)
+        bool held_root_fired_ = false;
         void member_tail_into_temp(const expression* e);
         bool size_temp_operand(const expression* e) const;
         bool enum_temp_operand(const expression* e) const;

@@ -118,6 +118,7 @@ namespace {
 			case opcode::op_false:
 			case opcode::op_pop:
 			case opcode::op_dup:
+			case opcode::op_drop_under:
 			case opcode::op_to_bool:
 			case opcode::op_deref_top:
 			case opcode::op_capture_arg:
@@ -343,6 +344,7 @@ namespace {
 			case opcode::op_false:
 			case opcode::op_pop:
 			case opcode::op_dup:
+			case opcode::op_drop_under:
 			case opcode::op_to_bool:
 			case opcode::op_deref_top:
 			case opcode::op_capture_arg:
@@ -2458,6 +2460,14 @@ void vm_compiler::emit_const_guard(const std::shared_ptr<ast_node>& node) {
 }
 
 void vm_compiler::compile_expression(const expression_ptr& expr, bool as_statement) {
+	if (held_root_ && expr.get() == held_root_) [[unlikely]] {
+		// a read chain's temporary: a copy stays under the chain until its outer read completes (compile_member)
+		held_root_ = nullptr;
+		compile_expression(expr, as_statement);
+		emit(opcode::op_dup);
+		held_root_fired_ = true;
+		return;
+	}
 	emit_const_guard(expr);
 	switch (expr->get_type()) {
 	case node_type::literal_expr:
@@ -7853,6 +7863,24 @@ void vm_compiler::compile_member(const std::shared_ptr<member_expr>& expr) {
 		emit(opcode::op_get_static, add_node(expr));
 		return;
 	}
+	if (!held_root_ && !expr->place_read) {
+		// a chain over a temporary the member path does not start from: the temporary is held under the chain (the path holds its own root)
+		if (const expression* root = jai::detail::held_chain_root(expr.get())) {
+			if (velem_operand(expr.get()) || elem_member_operand(expr.get()) || member_path_root(expr.get()) != root) {
+				held_root_ = root;
+				held_root_fired_ = false;
+				compile_member_read(expr);
+				held_root_ = nullptr;
+				if (held_root_fired_) { emit(opcode::op_drop_under); }
+				held_root_fired_ = false;
+				return;
+			}
+		}
+	}
+	compile_member_read(expr);
+}
+
+void vm_compiler::compile_member_read(const std::shared_ptr<member_expr>& expr) {
 	if (velem_operand(expr.get()) && !expr->place_read) {
 		fused_operand t;
 		compile_member_into_temp(expr, t);
@@ -7891,6 +7919,43 @@ void vm_compiler::compile_member(const std::shared_ptr<member_expr>& expr) {
 // A chain read through as one path (`a.b.c`, `grid[y][x].cost`), the outer link a member: plain instance members (none static,
 // null-safe, an arrow, an enum's value, a stamped place read or a super member) and transient subscripts whose index is a frame
 // slot or a constant, at most k_member_path_links. The root expression when the chain has two links or more, else null
+// member_path's root without its side effects (no symbol or constant is added): the walk's link rules, read only
+const expression* vm_compiler::member_path_root(const expression* e) const {
+	size_t links = 0;
+	while (e && links < k_member_path_links) {
+		const expression* next = nullptr;
+		if (e->get_type() == node_type::member_expr) {
+			const auto* m = static_cast<const member_expr*>(e);
+			if (m->is_static || m->null_safe || m->is_arrow || m->enum_constant || m->place_read || !m->object ||
+			    m->object->get_type() == node_type::super_expr) {
+				break;
+			}
+			next = m->object.get();
+		} else if (e->get_type() == node_type::binary_expr && links != 0) {
+			const auto* b = static_cast<const binary_expr*>(e);
+			if (b->op.type != token_type::left_bracket || !b->transient_element_read || !b->left || !b->right) { break; }
+			if (b->right->get_type() == node_type::identifier_expr) {
+				auto* id = static_cast<identifier_expr*>(b->right.get());
+				if (id->global_qualified) { break; }
+				const uint32_t slot = identifier_slot_operand(id);
+				if (slot == k_invalid_u32 || slot >= k_typed_slot_mask) { break; }
+				if (!id->name.empty() && (id->name.front() == 'w' || id->name.front() == 's') &&
+				    (id->name.find("weak_ptr<") == 0 || id->name.find("shared_ptr<") == 0)) {
+					break;
+				}
+			} else if (b->right->get_type() != node_type::literal_expr) {
+				break;
+			}
+			next = b->left.get();
+		} else {
+			break;
+		}
+		++links;
+		e = next;
+	}
+	return links >= 2 ? e : nullptr;
+}
+
 const expression* vm_compiler::member_path(const expression* e, member_path_proto& out) {
 	out.links.clear();
 	while (e && out.links.size() < k_member_path_links) {

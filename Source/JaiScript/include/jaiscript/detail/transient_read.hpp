@@ -483,6 +483,39 @@ namespace jai::detail {
         }
     }
 
+    // ---- Read chains (internal/reads_borrow.md, "Temporaries") ----
+    // A link is a member read or a subscript. A chain whose outer link is a member read and which has two links or more holds
+    // the value it starts from until the outer read completes when that value is a temporary (anything but a name): C++ keeps a
+    // temporary until its full-expression ends, so `make().mid.peek.v` runs peek while make()'s object is alive, and the object
+    // dies after peek's own result (both backends hold it; KEEP BYTE-PARALLEL)
+    inline bool read_chain_link(const expression* e) {
+        if (e->get_type() == node_type::member_expr) { return !static_cast<const member_expr*>(e)->is_static; }
+        return e->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket;
+    }
+
+    inline bool chain_root_is_temporary(const expression* root) {
+        switch (root->get_type()) {
+            case node_type::identifier_expr:
+            case node_type::this_expr:
+            case node_type::super_expr:
+            case node_type::member_expr:   // a static read (C::x, ns::v): a link would have continued the walk
+                return false;
+            default:
+                return true;
+        }
+    }
+
+    // The temporary a member read's chain holds, else null
+    inline const expression* held_chain_root(const member_expr* outer) {
+        if (outer->is_static || !outer->object || !read_chain_link(outer->object.get())) { return nullptr; }
+        const expression* e = outer->object.get();
+        while (read_chain_link(e)) {
+            e = e->get_type() == node_type::member_expr ? static_cast<const member_expr*>(e)->object.get() : static_cast<const binary_expr*>(e)->left.get();
+            if (!e) { return nullptr; }
+        }
+        return chain_root_is_temporary(e) ? e : nullptr;
+    }
+
 } // namespace jai::detail
 
 #endif // __JAISCRIPT_DETAIL_TRANSIENT_READ_HPP__

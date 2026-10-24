@@ -2479,6 +2479,13 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 }
 
 namespace detail {
+// Hands a read chain's hold (detail::held_chain_root) to the operand about to be evaluated, and takes it back however the evaluation ends
+struct chain_root_handoff {
+    script_value*& hold;
+    chain_root_handoff(script_value*& a_hold, script_value* a_to) : hold(a_hold) { hold = a_to; }
+    ~chain_root_handoff() { hold = nullptr; }
+};
+
 void warn_shadowed_handle_builtins(engine& eng, const class_definition& def) {
     auto* sym = eng.get_symbolizer();
     if (!sym) { return; }
@@ -3914,6 +3921,7 @@ checked_result<bool> interpreter::scalar_lane(token_type op, const script_value&
 
 template<bool Replaying>
 checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const replay_point* rs) {
+    script_value* const chain_root = std::exchange(chain_root_hold_, nullptr);
     // Track if we've pre-fetched values to avoid duplicate lookups
     bool already_have_values = false;
     std::optional<script_value> pre_fetched_left, pre_fetched_right;
@@ -4056,6 +4064,8 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 
     // Evaluate operands once and use them throughout (or use pre-fetched values)
     std::optional<script_value> left_raw_opt, left_opt, right_opt;
+    const bool subscript = expr->op.type == token_type::left_bracket;
+    const bool left_links = subscript && detail::read_chain_link(expr->left.get());
 
     if (already_have_values) {
         // Use pre-fetched values from fast path (already dereferenced)
@@ -4067,10 +4077,14 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
         if (parked<Replaying>(rs, 0)) {
             left_raw_opt = *pre_fetched_left;   // evaluated before the yield, never re-run
         } else {
-            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->left.get(), rs, 0), expr, rp_operand, 0, {});
+            {
+                detail::chain_root_handoff handoff{chain_root_hold_, left_links ? chain_root : nullptr};
+                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->left.get(), rs, 0), expr, rp_operand, 0, {});
+            }
             if (is_unwinding_) { return {}; }   // the left operand raised: the right one never runs (the vm's order)
             left_raw_opt = pop_value();  // Keep raw value for subscript handling
         }
+        if (chain_root && subscript && !left_links) { *chain_root = *left_raw_opt; }
         left_opt = left_raw_opt->deref();  // Dereferenced version for most operations
 
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->right.get(), rs, 1), expr, rp_operand, 1, (std::vector<script_value>{*left_raw_opt}));
@@ -8537,6 +8551,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
     // Consumed at entry: a nested receiver's own member reads are accesses
     const bool as_callee = member_callee_lookup_;
     member_callee_lookup_ = false;
+    script_value* const chain_root = std::exchange(chain_root_hold_, nullptr);
     // A structured binding's half reads the loop variable's entry cursor; without one (the container was not a map) it is the
     // member read it is spelled as (KEEP BYTE-PARALLEL with vm_backend::exec_iter_entry)
     if (expr->entry_half) [[unlikely]] {
@@ -8849,9 +8864,17 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
             "class {0} has no static member '{1}'", name_id, expr->member_id);
     }
 
-    // Evaluate the object expression
-    JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->object.get(), rs, 0), expr, rp_operand, 0, {});
+    std::optional<script_value> held_root;
+    const bool object_links = detail::read_chain_link(expr->object.get());
+    {
+        script_value* hold = chain_root ? chain_root : (detail::held_chain_root(expr) ? &held_root.emplace(make_value()) : nullptr);
+        detail::chain_root_handoff handoff{chain_root_hold_, object_links ? hold : nullptr};
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->object.get(), rs, 0), expr, rp_operand, 0, {});
+    }
     script_value objectValue = pop_value();
+    if (chain_root && !object_links) {
+        *chain_root = objectValue;
+    }
     if (is_unwinding_) {
         push_value(make_value());
         return {};
@@ -13466,8 +13489,7 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
             auto method_env = get_pooled_method_environment(payload.definition_env, *payload.this_obj, payload.cls.get());
             method_env->define("this", *payload.this_obj);
             auto result = execute_method_ast(payload.ast, method_env, args);
-            // Always release the method environment back to the pool (even on error!)
-            release_environment(method_env, false);
+            release_environment(method_env, true);   // the receiver dies with the call, as the vm's method frame drops it
             return result;
         }
         case script_callable::kind_type::static_method: {

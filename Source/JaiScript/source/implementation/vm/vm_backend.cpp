@@ -14463,6 +14463,12 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	}
 #endif
 
+	// the arguments were moved off the stack: a prvalue among them is the parameter itself, as the stack's arguments are
+	struct owned_scope {
+		vm_backend* vm; std::vector<script_value>* saved;
+		~owned_scope() { vm->owned_args_ = saved; }
+	} owned{this, owned_args_};
+	owned_args_ = &arguments;
 	if (in_loop) {
 		// Same in-loop entry as exec_call; op_call_method's dispatch case consumes switch_to_
 		try {
@@ -20514,6 +20520,11 @@ checked_result<void> vm_backend::run(frame& entry) {
 #endif
 	frame* fp = &entry;
 	const size_t records_base = call_records_top_;
+	// a callee pushed but not yet entered (a destructor of the caller's argument temporaries runs here) stays the caller's to enter
+	struct parked_switch {
+		vm_backend* vm; frame* parked;
+		~parked_switch() { if (parked) { vm->switch_to_ = parked; } }
+	} park{this, std::exchange(switch_to_, nullptr)};
 	if (debug_hook_) [[unlikely]] { debug_last_frame_ = nullptr; }   // a host-entered frame at ip 0 is a new frame, whatever record holds it
 #ifdef JAISCRIPT_VM_PROFILE
 	// host-entered frames (execute, execute_callable, a fiber's body) never go through the
@@ -21608,6 +21619,12 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (!stack_.empty()) { stack_.pop_back(); }
 				JAI_NEXT_OP();
 			case opcode::op_dup: stack_.push_back(stack_.back()); break;
+			case opcode::op_drop_under: {
+				script_value held = std::move(stack_[stack_.size() - 2]);   // dies once the stack is whole: its destructor may reenter
+				stack_[stack_.size() - 2] = std::move(stack_.back());
+				stack_.pop_back();
+				break;
+			}
 			case opcode::op_parallel_advance: {
 				if (!parallel_cursors_ || stack_.empty()) {
 					VM_TRY_OP(checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),

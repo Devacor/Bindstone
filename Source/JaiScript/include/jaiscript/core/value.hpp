@@ -2482,6 +2482,9 @@ namespace detail {
             template <size_t I> JAI_FORCEINLINE const alt_t<I>& get() const noexcept { assert(idx_() == I); return alt<I>(); }
             template <typename T> JAI_FORCEINLINE T& get() noexcept { assert(idx_() == index_of<T>()); return alt<index_of<T>()>(); }
             template <typename T> JAI_FORCEINLINE const T& get() const noexcept { assert(idx_() == index_of<T>()); return alt<index_of<T>()>(); }
+            // the payload word as raw bits (an int, a float's bits, a handle's pointer), whatever the index
+            JAI_FORCEINLINE int64_t payload_bits() const noexcept { int64_t b; std::memcpy(&b, &p_, sizeof b); return b; }
+            JAI_FORCEINLINE void set_payload_bits(int64_t b) noexcept { std::memcpy(&p_, &b, sizeof b); }
 
         private:
             union alignas(8) payload {   // 8-aligned on 32-bit hosts too, where int64_t may align to 4
@@ -2605,6 +2608,9 @@ namespace detail {
         void unchecked_set_int_payload(script_int v) noexcept { storage_.get<script_int>() = v; }
         void unchecked_set_float_payload(script_float v) noexcept { storage_.get<script_float>() = v; }
         void unchecked_set_bool_payload(script_bool v) noexcept { storage_.get<script_bool>() = v; }
+        // the payload word's raw bits: a trivial payload's int, float bits or 0/1 bool (the vm's cells hold exactly these words)
+        JAI_FORCEINLINE int64_t unchecked_payload_bits() const noexcept { return storage_.payload_bits(); }
+        JAI_FORCEINLINE void unchecked_set_payload_bits(int64_t b) noexcept { storage_.set_payload_bits(b); }
 
         // A vec (caller proved the index): its node, its kind, its components read out, and one component written in place
         // (binary32 bits for vec kinds, int32 for ivec kinds; a node shared with another value is unshared first, so a copy

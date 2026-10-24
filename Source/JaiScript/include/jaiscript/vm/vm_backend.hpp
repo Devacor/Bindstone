@@ -228,7 +228,7 @@ namespace jai::vm {
         // cell loops: [0]=entries taken [1]=entries refused by a live-in guard [2]=cell iterations
         // [3]=unboxes [4]=flushes at exit [5]=flushes at miss [6]=misses [7]=cell instructions dispatched
         uint64_t profile_cells_[14] = {};                // [8] flushed cells written in place [9] flushed cells fully replaced [10] entries refused by a container site [11] calls made from a block [12] landings after a call that missed [13] of those, missed by the result's kind
-        uint64_t profile_cells_area_bytes_max_ = 0;      // the largest raw area on any record: payload plus kind capacity
+        uint64_t profile_cells_area_bytes_max_ = 0;      // the largest raw area on any record: the cells' capacity
         uint64_t profile_cells_records_ = 0;             // records that allocated a raw area
         uint64_t profile_cells_refused_slot_[64] = {};   // refused entries by live-in cell index
         std::map<std::string, uint64_t> profile_cells_entry_refusals_;   // refused entries by function, cell and the kinds involved
@@ -632,13 +632,22 @@ namespace jai::vm {
             chunk::cell_mask mask(size_t n) const noexcept { chunk::cell_mask m; for (uint32_t k = 0; k < n; ++k) { if (b[k]) m.set(k); } return m; }
             bool any_of(const std::vector<uint32_t>& cells) const noexcept { for (const uint32_t k : cells) { if (b[k]) return true; } return false; }
         };
-        // Cell loops: a call record's raw area. Payload bits (floats bit-preserved), a kind byte per
-        // cell (0 empty, else the script_value storage index), the active loop, and a dirty byte per
-        // cell. Cleared at record push and on every exit, miss and raise.
+        // Cell loops: a call record's raw area: the cells, the active loop and a dirty byte per cell. Cleared at record push and
+        // on every exit, miss and raise.
+        // A cell is laid out as a script_value: the payload word, then the tag word whose low byte is the kind (0 empty, else the
+        // storage index) and whose high bits are the stamp, the slot's type stamp at entry (a local's declared type: int, float or
+        // any; null for temps, pinned cells and env values). A float's payload is its bits, a string's the borrowed node, a bool's 0 or 1
+        struct alignas(8) cell_word {
+            int64_t bits;
+            uint8_t kind;
+            uint8_t stamp_high[7];
+            type_info* stamp() const noexcept { uint64_t w; std::memcpy(&w, &kind, sizeof w); return reinterpret_cast<type_info*>(static_cast<uintptr_t>(w & ~uint64_t{0x1FF})); }
+            void set_stamp(const type_info* t) noexcept { const uint64_t w = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(t)) | kind; std::memcpy(&kind, &w, sizeof w); }
+            void set_kind_stamp(uint8_t k, const type_info* t) noexcept { const uint64_t w = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(t)) | k; std::memcpy(&kind, &w, sizeof w); }
+        };
+        static_assert(sizeof(cell_word) == sizeof(script_value) && offsetof(cell_word, kind) == 8);
         struct cell_state {
-            std::vector<int64_t> payload;
-            std::vector<uint8_t> kind;
-            std::vector<type_info*> stamp;   // per cell: the slot's type stamp at entry (a local's declared type: int, float or any); null for temps and env values
+            std::vector<cell_word> cells;
             uint32_t loop = k_invalid_u32;
             // a raw call in flight from this frame: 1 + the call index (its landing, if the callee comes back through the general return, binds
             // nothing of this frame's by reference); and 1 + the call index whose probe found a raw callee without parking it (its arguments
@@ -2299,9 +2308,9 @@ namespace jai::vm {
         op_status cells_counted_head_entry(frame& f, uint32_t li);             // a counted loop's entry at its CFOR_PREP after the first compare
         bool cells_enter(frame& f, const chunk::cell_loop& loop, bool head = false);   // the guards, the container sites and the unboxing; false = the general form runs (a loop's head entry refuses softly: the back edge tries again)
         op_status cells_run(frame& f, const chunk::cell_loop& loop);           // the copy as one block until an exit, a miss or a raise
-        // the block loop's registers: the cells' payloads, kinds and dirty bytes, the chunk's constants, the copy's code and
+        // the block loop's registers: the cells, their dirty bytes, the chunk's constants, the copy's code and
         // the loop, read once per run; every executor on the hot switch reads through them instead of re-deriving frame -> cells -> vectors
-        struct cell_regs { int64_t* payload; uint8_t* kinds; cell_dirty* dirty; const script_value* consts; const vm_instruction* code; const chunk::cell_loop* loop; };
+        struct cell_regs { cell_word* cells; cell_dirty* dirty; const script_value* consts; const vm_instruction* code; const chunk::cell_loop* loop; };
 #if defined(_MSC_VER)
         __declspec(noinline)
 #endif
@@ -2434,8 +2443,8 @@ namespace jai::vm {
         bool cell_land_fast(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint8_t kind, int64_t bits) {
             cell_state& cs = *f.cells;
             const chunk::cell_loop::cell& cl = loop.cells[dk];
-            if (cl.temp ? (cl.kind == 0 || cl.kind == kind) : (cs.kind[dk] == kind && kind != 0)) {
-                cs.payload[dk] = bits; cs.kind[dk] = kind; cs.dirty.set(dk);
+            if (cl.temp ? (cl.kind == 0 || cl.kind == kind) : (cs.cells[dk].kind == kind && kind != 0)) {
+                cs.cells[dk].bits = bits; cs.cells[dk].kind = kind; cs.dirty.set(dk);
                 return true;
             }
             return cell_land(f, loop, dk, kind, bits);

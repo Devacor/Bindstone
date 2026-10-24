@@ -523,7 +523,7 @@ operands are cell indices). The loop's original back edge becomes `op_cells_back
 ordinary iteration it polls the budget, checks every cell's slot (the cell's kind, the engine's
 canonical stamp, the engine), resolves each load and store site's container once (a site whose
 container is not a plain array node keeps the loop on the general form), unboxes the live-in slots
-into the call record's raw area (an 8-byte payload and a kind byte per cell, floats bit-preserved),
+into the call record's raw area (a cell word laid out as a value: the payload word, floats bit-preserved, then the kind byte; internal/cell_collapse_design.md),
 and runs the copy as one block, each cell instruction through its own handler with no dispatch
 between them.
 
@@ -821,7 +821,7 @@ Two literals in a comparison and a literal argument of a math operation have no 
 A frame whose parameters and locals the checker proves scalar keeps those values as raw cells for the whole
 activation, and a call between two such frames passes its arguments and its result raw. The universal 32-byte
 `script_value` stays the one value of the language and of every boundary (each value carries its engine: the
-multi-engine invariant); a raw cell is an 8-byte payload and a kind byte inside a frame, and nothing outside the frame
+multi-engine invariant); a raw cell is a payload word and a kind byte inside a frame, and nothing outside the frame
 ever sees one.
 
 ### The frame program

@@ -339,7 +339,7 @@ class engine;
                 }
                 else if constexpr (std::is_same_v<T, std::string>) {
                     // Direct reference to stored string - ZERO COPY
-                    return target.as_string_ref();
+                    return target.as_string_ref(eng);
                 }
                 else if constexpr (std::is_same_v<T, std::vector<script_value>>) {
                     // Direct reference to stored array - ZERO COPY

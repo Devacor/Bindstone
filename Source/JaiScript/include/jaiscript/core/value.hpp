@@ -1011,7 +1011,8 @@ namespace detail {
             return val.storage_.get<script_char>();
         }
 
-        inline script_string& as_string_ref() {
+        // a_engine takes the copy-on-write's memory charge (a bound function's string& parameter passes its engine)
+        inline script_string& as_string_ref(engine* a_engine = nullptr) {
             script_value& val = deref();
             if (val.type() != script_value_type::jai_string_type) {
                 throw runtime_error("script_value is not a string");
@@ -1020,7 +1021,7 @@ namespace detail {
                 // string bindings are only ever created over std::string/script_string - exact type
                 return *static_cast<script_string*>(box->ptr);
             }
-            return val.unchecked_as_string_ref(nullptr);   // the copy-on-write gate: a host write stays in this value
+            return val.unchecked_as_string_ref(a_engine);   // the copy-on-write gate: a host write stays in this value
         }
         
         // Generic extraction with type checking
@@ -2891,7 +2892,14 @@ namespace detail {
         const script_value& value() const { check_alive(); return *this; }
 
         template<typename T> T as() const { check_alive(); return script_value::template as<T>(); }
-        template<typename T> T as() { check_alive(); return script_value::template as<T>(); }
+        template<typename T> T as() {
+            check_alive();
+            if constexpr (std::is_same_v<T, script_string&>) {
+                return script_value::as_string_ref(engine_);   // a host write through the held value is charged to its engine
+            } else {
+                return script_value::template as<T>();
+            }
+        }
         script_int as_int() const { check_alive(); return script_value::as_int(); }
         script_float as_float() const { check_alive(); return script_value::as_float(); }
         const script_string& as_string() const { check_alive(); return script_value::as_string(); }

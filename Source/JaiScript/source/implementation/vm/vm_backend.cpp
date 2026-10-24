@@ -15860,7 +15860,7 @@ uint32_t vm_backend::member_read_slot_probe(class_definition* cd, member_expr* e
 // A member read's field, borrowed where it lives: the checker's proof, else the site's member_ic row (its class and method epoch), the
 // raw cell as the ladder hands a field back; a bound C++ member's lane value lands in `host_value`. Null sends the read to the ladder:
 // a first sight or a new class fills the row, so the ladder serves that one read and hits serve from then on
-const script_value* vm_backend::site_field(const chunk& code, const script_value& objd, member_expr* expr, size_t site, script_value& host_value) {
+JAI_FORCEINLINE const script_value* vm_backend::site_field(const chunk& code, const script_value& objd, member_expr* expr, size_t site, script_value& host_value) {
 	if (expr->proven_class && proofs_on()) {
 		if (script_value* cell = detail::proven_field_cell(objd, expr->proven_class, expr->proven_epoch, expr->proven_slot, nullptr)) { return cell; }
 	}

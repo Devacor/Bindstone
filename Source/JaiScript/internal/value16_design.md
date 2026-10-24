@@ -126,6 +126,46 @@ The typed scalar loops and most of OSSUARY regress from MSVC's register allocati
 touches the value layout, so the brief's hypotheses (a)-(c) do not explain them. Hypothesis (a) does explain the
 string kernels' few points: generic stores that restamp (`set_type_info`) and accessors that fell out of inlining.
 
+### Option 2 (8197c756a): targeted fixes
+
+`cells_run_frame` stabilization was tried first, on master: moving `exec_c_load`, `exec_c_index_store` and
+`exec_c_back` out of line made the dispatch head identical across master and value16 (insensitive to the value layout),
+but in the slower form (the image base rematerialized per dispatch) and the moved rows cost 15-23% on the typed loops,
+so it was dropped. The base-vs-base floor is the same binary twice: it is machine noise, not code layout.
+
+The value fixes: `set_type_info` writes nothing when the stamp is unchanged and runs the array demote out of line; the
+storage copy is inline with the scalar case first (`copy_handle` out of line); `get_array_storage` and
+`get_reference_holder` inline. Same protocol (7 rounds, equal-path master base, same session floor):
+
+| workload | Shipping | Release | base vs base | was (f3204b611, Shipping) |
+|---|---|---|---|---|
+| GLOOM | -1.1% | -1.0% | -2.3% | -0.5% |
+| JaiDOOM | -0.7% | 0.0% | +1.0% | -0.7% |
+| Gator Quest | +0.4% | +0.7% | +0.6% | +0.5% |
+| OSSUARY | +0.3% | +0.8% | -0.1% | +4.3% |
+| OSSUARY in Lua 5.4.8 (same session) | 175.5 / 174.7 ms | | | |
+| sort dyn / typed | -18.0 / -16.9% | -17.8 / -17.7% | +2.7 / +1.1% | -16.6 / -16.0% |
+| dict dyn / typed | -6.6 / -6.5% | -8.1 / -11.5% | -4.2 / +1.2% | -5.9 / -4.7% |
+| tree dyn / typed | -4.8 / -5.7% | -4.6 / -6.6% | -0.8 / +1.1% | -3.1 / -2.2% |
+| particles dyn / typed | -5.7 / -8.0% | -5.9 / -5.5% | -0.2 / -0.3% | -9.7 / -6.9% |
+| exp dyn | -5.4% | -4.4% | +1.3% | -3.5% |
+| fib_recursive dyn | -4.0% | -3.2% | -1.7% | -3.9% |
+| float2string dyn / typed | -1.7 / -3.7% | 0.0 / -3.1% | -0.1 / +1.5% | +5.1 / +5.7% |
+| string2float dyn / typed | -1.6 / +6.2% | -2.2 / +6.2% | -1.5 / -0.7% | +2.4 / +6.0% |
+| fib_loop typed | +3.3% | +4.0% | +2.1% | +6.3% |
+| primes typed | +3.4% | +3.6% | -1.2% | +3.1% |
+
+Attribution (sampler): OSSUARY's `cells_run_frame` share is now within 0.4 pp of master (it was +2.0), and no other
+function moves more than 0.6 pp. The function's codegen changed again (0x732c to 0x6bc0 bytes) with the inline copy;
+its dispatch head still rematerializes the image base, so the typed loops keep 3-4%. string2float_typed's +6% is the
+range-for var bind (`range_for_bind` +1.1 pp, `element_cursor_holder` +0.6) against a cheaper `exec_iter_next` (-3.0).
+JaiScript runs OSSUARY 21% faster than Lua 5.4.8 on both builds; value16 does not move that gap. LuaJIT has no OSSUARY
+port.
+
+Verdict: below the bar. No whole program wins by 1.5%, and none regresses past it. The cell-to-value boundary
+(`cells_enter` 4.8%, `cells_writeback` 4.0%, `typed_land_float` 1.7%, `cell_land` 0.3% of OSSUARY) is the remaining
+surface an S2 redesign (frame cells as 16-byte values) would act on: about a tenth of OSSUARY.
+
 ### Gator's +6.8 MB is a measurement artifact
 
 An allocation histogram (live blocks at peak by request size) over `gatorquest smoke ticks 10` shows one row moving:

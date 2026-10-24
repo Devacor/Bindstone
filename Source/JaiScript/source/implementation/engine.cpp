@@ -775,7 +775,8 @@ struct engine::implementation {
     };
     type_info_arena type_arena_;
     std::unordered_map<type_key, type_info*, type_key_hash> type_infos_;
-    struct engine_lifetime_group* lifetime_group = nullptr;   // shared by every engine this one exchanged values with
+    std::mutex held_lock;   // the held values' registry (held_value): touched only when a host constructs, copies, moves or drops one
+    held_value* held_head = nullptr;
 
     // Secondary index for O(1) lookup by type ID (stores pointers into type_infos_)
     std::unordered_map<uint64_t, type_info*> type_id_index_;
@@ -2360,48 +2361,7 @@ checked_result<void> host_reference_store(engine* eng, const host_slot& slot, sc
 
 }
 
-struct engine_lifetime_group {
-    std::mutex lock;
-    std::vector<engine*> members;
-    std::vector<engine*> parked;   // members whose last handle went while another member lived
-    size_t live = 0;
-};
-
-void engine::share_lifetime_with(engine* other) {
-    if (!other || other == this) { return; }
-    for (;;) {
-        engine_lifetime_group* mine = impl->lifetime_group;
-        engine_lifetime_group* theirs = other->impl->lifetime_group;
-        if (mine == theirs) { return; }
-        engine_lifetime_group* first = mine < theirs ? mine : theirs;
-        engine_lifetime_group* second = mine < theirs ? theirs : mine;
-        std::scoped_lock both(first->lock, second->lock);
-        if (impl->lifetime_group != mine || other->impl->lifetime_group != theirs) { continue; }
-        for (engine* member : theirs->members) { member->impl->lifetime_group = mine; mine->members.push_back(member); }
-        mine->parked.insert(mine->parked.end(), theirs->parked.begin(), theirs->parked.end());
-        mine->live += theirs->live;
-        theirs->members.clear(); theirs->parked.clear(); theirs->live = 0;
-        break;
-    }
-}
-
-void engine::release_handle(engine* eng) noexcept {
-    engine_lifetime_group* group = eng->impl->lifetime_group;
-    std::vector<engine*> doomed;
-    {
-        std::scoped_lock hold(group->lock);
-        if (--group->live > 0) { group->parked.push_back(eng); return; }
-        doomed.swap(group->parked);
-    }
-    doomed.push_back(eng);
-    for (engine* member : doomed) { delete member; }
-    delete group;
-}
-
 engine::engine() : impl(std::make_unique<implementation>()) {
-    impl->lifetime_group = new engine_lifetime_group;
-    impl->lifetime_group->members.push_back(this);
-    impl->lifetime_group->live = 1;
     for (auto& [key, info] : impl->type_infos_) { info->owner = this; }
 }
 
@@ -2480,6 +2440,8 @@ engine::~engine() {
         }
         // A run still suspended ends here: its sleep raises the cancel, its frames unwind and its destructors run
         cancel_suspended_runs();
+        // Held values give up their payloads while the engine still runs destructors, then read as outlived
+        release_held_values();
         impl->runs.release_pools();
         impl->runs.sleep_function = script_value(std::monostate{}, nullptr);
         impl->runs.sleep_identity = nullptr;
@@ -2505,6 +2467,8 @@ engine::~engine() {
         for (auto& [name, def] : impl->class_registry_.script_classes_) { if (def) { def->release_values_for_teardown(); } }
         for (auto& [name, def] : impl->classes) { if (def && def->is_script_class()) { def->release_values_for_teardown(); } }
         script_value::release_deferred_cell_cycles(this);
+        // a destructor that ran during teardown may have held a value
+        release_held_values();
     }
 }
 
@@ -2901,15 +2865,211 @@ void engine::initialize_engine_reference() {
 }
 
 
-held_value& held_value::operator=(script_value value) {
-    std::shared_ptr<engine> holder = value.get_engine() ? value.get_engine()->weak_from_this().lock() : nullptr;
-    static_cast<script_value&>(*this) = std::move(value);
-    engine_ref = std::move(holder);
+held_value::held_value(script_value value, engine* holder) : script_value(std::move(value)), engine_(holder) {
+    if (engine_) { engine_->register_held(this); }
+}
+
+held_value::held_value(const held_value& other) : script_value(static_cast<const script_value&>(other)), engine_(other.engine_), outlived_(other.outlived_) {
+    if (engine_) { engine_->register_held(this); }
+}
+
+held_value::held_value(held_value&& other) noexcept : script_value(static_cast<script_value&&>(other)), engine_(other.engine_), outlived_(other.outlived_) {
+    if (engine_) { engine_->register_held(this); }
+}
+
+void held_value::rebind(engine* holder, bool outlived) {
+    if (engine_ != holder) {
+        if (engine_) { engine_->unregister_held(this); }
+        engine_ = holder;
+        if (engine_) { engine_->register_held(this); }
+    }
+    outlived_ = outlived;
+}
+
+held_value& held_value::operator=(const held_value& other) {
+    if (this != &other) {
+        static_cast<script_value&>(*this) = static_cast<const script_value&>(other);
+        rebind(other.engine_, other.outlived_);
+    }
     return *this;
 }
 
+held_value& held_value::operator=(held_value&& other) noexcept {
+    if (this != &other) {
+        engine* holder = other.engine_;
+        const bool outlived = other.outlived_;
+        static_cast<script_value&>(*this) = static_cast<script_value&&>(other);
+        rebind(holder, outlived);
+    }
+    return *this;
+}
+
+held_value& held_value::operator=(script_value value) {
+    const bool outlived = value.is_outlived();
+    engine* holder = value.get_engine();
+    static_cast<script_value&>(*this) = std::move(value);
+    rebind(holder, outlived);
+    return *this;
+}
+
+held_value::~held_value() {
+    if (engine_) { engine_->unregister_held(this); }
+}
+
+void held_value::throw_outlived() {
+    throw runtime_error("Value outlived its engine.");
+}
+
+void engine::register_held(held_value* held) {
+    std::scoped_lock lock(impl->held_lock);
+    held->previous_ = nullptr;
+    held->next_ = impl->held_head;
+    if (impl->held_head) { impl->held_head->previous_ = held; }
+    impl->held_head = held;
+}
+
+void engine::unregister_held(held_value* held) noexcept {
+    std::scoped_lock lock(impl->held_lock);
+    if (held->previous_) { held->previous_->next_ = held->next_; } else if (impl->held_head == held) { impl->held_head = held->next_; }
+    if (held->next_) { held->next_->previous_ = held->previous_; }
+    held->previous_ = held->next_ = nullptr;
+}
+
+void engine::release_held_values() noexcept {
+    for (;;) {
+        script_value doomed(std::monostate{}, nullptr);
+        {
+            std::scoped_lock lock(impl->held_lock);
+            held_value* held = impl->held_head;
+            if (!held) { return; }
+            impl->held_head = held->next_;
+            if (held->next_) { held->next_->previous_ = nullptr; }
+            held->previous_ = held->next_ = nullptr;
+            held->engine_ = nullptr;
+            held->outlived_ = true;
+            doomed = std::move(static_cast<script_value&>(*held));
+            static_cast<script_value&>(*held) = script_value::outlived();
+        }
+        // released outside the lock: a destructor it runs may hold or drop values of its own
+    }
+}
+
 held_value engine::hold(script_value result) const {
-    return held_value(std::move(result), std::const_pointer_cast<engine>(weak_from_this().lock()));
+    return held_value(std::move(result), const_cast<engine*>(this));
+}
+
+namespace {
+[[noreturn]] JAI_NOINLINE void throw_foreign_value(const char* what) {
+    throw runtime_error(std::string("Cannot pass ") + what + " from another engine: values cross engines by copy (numbers, strings, math values and arrays and maps of them).");
+}
+
+// a foreign builtin type as this engine's: the scalars by name, arrays and maps by their translated parameters; nullptr for any type
+// this engine cannot name without the other engine (a class, a function, a pointer)
+type_info* translate_foreign_type(engine& self, const type_info* foreign, size_t depth = 0) {
+    if (!foreign || depth > 64) { return nullptr; }
+    switch (foreign->base_type) {
+        case script_value_type::jai_int_type:
+        case script_value_type::jai_float_type:
+        case script_value_type::jai_bool_type:
+        case script_value_type::jai_char_type:
+        case script_value_type::jai_string_type: {
+            type_info* result = self.get_type_info_by_name(foreign->type_name);
+            return result && result->base_type == foreign->base_type ? result : nullptr;
+        }
+        case script_value_type::jai_array_type: {
+            if (!foreign->element_type()) { return self.get_type_info_array(nullptr); }
+            type_info* element = translate_foreign_type(self, foreign->element_type(), depth + 1);
+            return element ? self.get_type_info_array(element) : nullptr;
+        }
+        case script_value_type::jai_map_type: {
+            type_info* key = foreign->key_type() ? translate_foreign_type(self, foreign->key_type(), depth + 1) : nullptr;
+            type_info* value = foreign->value_type() ? translate_foreign_type(self, foreign->value_type(), depth + 1) : nullptr;
+            if ((foreign->key_type() && !key) || (foreign->value_type() && !value)) { return nullptr; }
+            return self.get_type_info_map(key, value);
+        }
+        default:
+            if (script_array::vec_kind_of(foreign->base_type) != script_array::kind_t::hetero) { return self.get_type_info_math(foreign->base_type); }
+            return nullptr;
+    }
+}
+}
+
+script_value engine::import_value(const script_value& value) {
+    if (value.is_outlived()) { held_value::throw_outlived(); }
+    struct import_step { const script_value* from; script_value* to; };
+    script_value result(std::monostate{}, nullptr);
+    std::vector<import_step> pending{{&value, &result}};
+    while (!pending.empty()) {
+        const import_step step = pending.back();
+        pending.pop_back();
+        const script_value& from = *step.from;
+        script_value& to = *step.to;
+        switch (from.raw_storage_index()) {
+            case script_value::TYPEID_NULL: to = script_value(std::monostate{}, this); break;
+            case script_value::TYPEID_INT: to = script_value(from.unchecked_as_int(), this); break;
+            case script_value::TYPEID_FLOAT: to = script_value(from.unchecked_as_float(), this); break;
+            case script_value::TYPEID_BOOL: to = script_value(from.unchecked_as_bool(), this); break;
+            case script_value::TYPEID_CHAR: to = script_value(from.unchecked_as_char(), this); break;
+            case script_value::TYPEID_STRING: to = script_value(from.unchecked_as_string(), this); break;
+            case script_value::TYPEID_UTF8_STRING: to = script_value::make_utf8(from.unchecked_as_utf8().bytes, this); break;
+            case script_value::TYPEID_ARRAY: {
+                const script_array& items = *from.unchecked_get_array_storage();
+                const type_info* declared = from.get_type_info();
+                type_info* element = declared && declared->element_type() ? translate_foreign_type(*this, declared->element_type()) : nullptr;
+                if (items.kind() == script_array::kind_t::obj && !items.empty()) { throw_foreign_value("an object"); }
+                const bool typed_copy = items.is_typed() && element && items.kind() != script_array::kind_t::obj;
+                to = script_value::make_array(typed_copy ? element : nullptr, this);
+                script_array& copy = *to.get_array_storage();
+                if (typed_copy) {
+                    copy.assign_buffer(items);
+                    if (copy.kind() == script_array::kind_t::str) {
+                        for (auto& text : copy.strs()) { text = make_strong<script_string>(*text); }
+                    }
+                } else if (items.is_typed()) {
+                    for (size_t i = 0; i < items.size(); ++i) { copy.push(import_value(items.get(i, from.get_engine()))); }
+                } else {
+                    copy.values().resize(items.size(), script_value(std::monostate{}, this));
+                    for (size_t i = items.size(); i-- > 0;) { pending.push_back({&items.values()[i], &copy.values()[i]}); }
+                }
+                break;
+            }
+            case script_value::TYPEID_MAP: {
+                const script_map& entries = from.unchecked_as_map();
+                const type_info* declared = from.get_type_info();
+                type_info* key_type = declared && declared->key_type() ? translate_foreign_type(*this, declared->key_type()) : nullptr;
+                type_info* value_type = declared && declared->value_type() ? translate_foreign_type(*this, declared->value_type()) : nullptr;
+                to = script_value::make_map(key_type, value_type, this);
+                script_map& copy = to.as_map();
+                std::vector<std::pair<script_value, const script_value*>> keyed;
+                keyed.reserve(entries.size());
+                for (const auto& [key, item] : entries) {
+                    keyed.emplace_back(import_value(key), &item);
+                    copy[keyed.back().first] = script_value(std::monostate{}, this);
+                }
+                for (auto& [key, item] : keyed) { pending.push_back({item, &copy[key]}); }
+                break;
+            }
+            case script_value::TYPEID_OBJECT:
+            case script_value::TYPEID_SHARED_PTR:
+            case script_value::TYPEID_WEAK_PTR:
+                throw_foreign_value("an object");
+            case script_value::TYPEID_FUNCTION:
+                throw_foreign_value("a function");
+            case script_value::TYPEID_REFERENCE:
+            case script_value::TYPEID_CPP_BOUND:
+            case script_value::TYPEID_PARALLEL_BORROW:
+                throw_foreign_value("a reference");
+            default:
+                if (script_value::is_math_index(from.raw_storage_index())) {
+                    uint32_t words[4] = {};
+                    from.math_words_as(from.type(), words);
+                    to = script_value::make_vec(from.type(), words, this);
+                    break;
+                }
+                throw_foreign_value("a value");
+        }
+    }
+    return result;
 }
 
 held_value engine::execute(const std::string& scriptContent) {
@@ -2966,7 +3126,6 @@ script_value engine::execute_unheld(script_source source) {
 }
 
 script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath, bool textual, std::string_view include_scope) {
-    for (const auto& [name, value] : instanceVars) { share_lifetime_with(value.get_engine()); }
     impl->has_executed_ = true;
     impl->note_root_source(sourcePath);
     try {
@@ -3044,7 +3203,7 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
         if (hasInstanceVars) {
             be->push_instance_scope();
             for (const auto& [name, value] : *instanceVars) {
-                be->define_variable(name, value);
+                be->define_variable(name, make_value(value));
             }
         }
 
@@ -3600,7 +3759,7 @@ std::string engine::jaibite_cache_path(const std::string& sourcePath) const {
 }
 
 void engine::add_global(const std::string& name, script_value value, bool is_serializable) {
-    share_lifetime_with(value.get_engine());
+    if (!owns_value(value)) { value = import_value(value); }
     if (is_const_global(name)) { throw runtime_error("Cannot assign to '" + name + "': it is read-only"); }   // internal/const.md
     ++impl->check_surface_epoch_;   // the static checker can see globals
     // Intern the name and get a stable string_view for tracking

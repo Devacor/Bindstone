@@ -164,15 +164,10 @@ namespace jai {
         
         // Factory method to ensure engines are always created as shared_ptr
         static std::shared_ptr<engine> make() {
-            auto eng = std::shared_ptr<engine>(new engine(), &engine::release_handle);
+            auto eng = std::shared_ptr<engine>(new engine());
             eng->initialize_engine_reference();
             return eng;
         }
-
-		// Engines that exchanged values share one lifetime (internal/value16_design.md): a value one of them stamped may sit in
-		// another's memory, so the group's engines are destroyed together, when the last handle to any of them goes
-		void share_lifetime_with(engine* other);
-		static void release_handle(engine* eng) noexcept;
 
 		// Address-stable: values, bindings and backends retain this engine's address.
 		// Transfer ownership by moving shared_ptr<engine>, never the engine itself.
@@ -183,7 +178,7 @@ namespace jai {
         
         
         // Primary API - execute methods
-        // A result handed out of the engine holds the engine (held_value, value.hpp): its stamps stay readable for as long as the host keeps it
+        // A result handed out of the engine is a held_value (value.hpp): readable until the engine is destroyed, then it throws
         held_value execute(const std::string& scriptContent);
         held_value execute(const std::string& scriptContent, const instance_variables& instanceVars);
 
@@ -453,7 +448,7 @@ namespace jai {
 
         // Global registration
         void add_global(const std::string& name, script_value value, bool is_serializable = true);
-        void add_global(const std::string& name, const held_value& value, bool is_serializable = true) { add_global(name, static_cast<const script_value&>(value), is_serializable); }
+        void add_global(const std::string& name, const held_value& value, bool is_serializable = true) { add_global(name, make_value(value), is_serializable); }
         
         // Convenience overload for add_global that automatically wraps values
         template<typename T>
@@ -708,12 +703,21 @@ namespace jai {
 
         // Convenient script_value creation methods
         // Usage: engine->make_value(42) instead of script_value(42, engine)
-        script_value make_value(const script_value& value) { return value; }
-        script_value make_value(script_value& value) { return value; }
-        script_value make_value(script_value&& value) { return std::move(value); }
-        script_value make_value(const held_value& value) { return static_cast<const script_value&>(value); }
-        script_value make_value(held_value& value) { return static_cast<const script_value&>(value); }
-        script_value make_value(held_value&& value) { return static_cast<script_value&&>(value); }
+        // A value of another engine enters by copy (import_value); this engine's own values pass as they are
+        script_value make_value(const script_value& value) { return owns_value(value) ? value : import_value(value); }
+        script_value make_value(script_value& value) { return owns_value(value) ? value : import_value(value); }
+        script_value make_value(script_value&& value) { return owns_value(value) ? std::move(value) : import_value(value); }
+        script_value make_value(const held_value& value) { return make_value(value.value()); }
+        script_value make_value(held_value& value) { return make_value(value.value()); }
+        script_value make_value(held_value&& value) { return make_value(value.value()); }
+        // A value this engine made, or one that names no engine (a host literal)
+        bool owns_value(const script_value& value) const noexcept {
+            const engine* owner = value.get_engine();
+            return owner == this || (!owner && !value.is_outlived());
+        }
+        // Another engine's value as this engine's: numbers, strings and math values copy, arrays and maps convert deeply; an
+        // object, a function or a reference into the other engine's memory throws, as does a held value that outlived its engine
+        script_value import_value(const script_value& value);
 
         template<typename T>
         requires (std::is_arithmetic_v<std::remove_cvref_t<T>> ||
@@ -1006,7 +1010,7 @@ namespace jai {
         // Variable access
         held_value get_variable(const std::string& name) const;
         // A plain script_value C++ receives (a bound function's argument, a value read out of a container, a signal's argument) is
-        // valid while this engine lives; hold(v) keeps it, and every type it names, for as long as the host keeps the result
+        // a borrow, valid for the call; hold(v) keeps it until this engine is destroyed (held_value)
         held_value hold(script_value value) const;
         bool has_variable(const std::string& name) const;
         // const program-scope and namespace cells (internal/const.md): marked by their declaration, consulted by the checker and the
@@ -1485,6 +1489,10 @@ namespace jai {
         void defer_post_load(const script_value& self, script_int version);
 
     private:
+        friend class held_value;
+        void register_held(held_value* held);
+        void unregister_held(held_value* held) noexcept;
+        void release_held_values() noexcept;
         // declared ahead of impl: alive through the whole teardown, expired once the engine is gone
         std::shared_ptr<const void> lifetime_ = std::make_shared<char>('\0');
         struct implementation;

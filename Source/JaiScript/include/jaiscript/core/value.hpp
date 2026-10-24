@@ -512,6 +512,15 @@ namespace detail {
                     d.get_cpp_bound_ptr() == nullptr);
         }
         bool is_invalid() const { return deref().raw_storage_index() == TYPEID_INVALID; }
+        // A held value whose engine was destroyed (held_value): the invalid index under an engine-only tag that names no engine,
+        // a word no live value carries; it reads no engine and no type
+        static script_value outlived() noexcept {
+            script_value result;
+            result.storage_ = invalid_tag{};
+            result.storage_.set_tag(k_engine_only);
+            return result;
+        }
+        bool is_outlived() const noexcept { return raw_storage_index() == TYPEID_INVALID && storage_.tag() == k_engine_only; }
         bool is_int() const {
             const script_value& d = deref();
             const size_t idx = d.raw_storage_index();
@@ -2864,25 +2873,54 @@ namespace detail {
                   "script_value must stay 16 bytes / 8-aligned");
     static_assert(std::is_nothrow_move_constructible_v<script_value>);
 
-    namespace detail {
-        // held_value's first base: destroyed after the value, so the value's release still finds its engine
-        struct engine_hold { std::shared_ptr<engine> engine_ref; };
-    }
-
-    // A value handed out of the engine (an execute result, get_variable): it holds the engine, so its stamps and the types
-    // they name stay valid for as long as the host keeps it. It is a script_value; a copy into a plain script_value drops
-    // the hold and lives only as long as the engine does (internal/value16_design.md)
-    class held_value : private detail::engine_hold, public script_value {
+    // A value handed out of the engine (execute, execute_file, get_variable, hold): it keeps its payload until its engine is
+    // destroyed, never the engine itself. The engine's teardown releases the payload while the engine still runs destructors and
+    // leaves the held value outlived: valid() is false, get_engine() is null and every read throws "Value outlived its engine."
+    // A copy into a plain script_value is a borrow, valid while the engine lives (internal/value16_design.md)
+    class held_value : public script_value {
     public:
-        held_value(script_value value, std::shared_ptr<engine> holder) noexcept
-            : detail::engine_hold{std::move(holder)}, script_value(std::move(value)) {}
-        held_value(const held_value&) = default;
-        held_value(held_value&&) noexcept = default;
-        held_value& operator=(const held_value&) = default;
-        held_value& operator=(held_value&&) noexcept = default;
-        // a plain value assigned in: the held value now holds that value's engine
+        held_value(script_value value, engine* holder);
+        held_value(const held_value& other);
+        held_value(held_value&& other) noexcept;
+        held_value& operator=(const held_value& other);
+        held_value& operator=(held_value&& other) noexcept;
+        // a plain value assigned in: the held value is now registered with that value's engine
         held_value& operator=(script_value value);
-        const std::shared_ptr<engine>& held_engine() const noexcept { return engine_ref; }
+        ~held_value();
+
+        bool valid() const noexcept { return !outlived_; }
+        const script_value& value() const { check_alive(); return *this; }
+
+        template<typename T> T as() const { check_alive(); return script_value::template as<T>(); }
+        template<typename T> T as() { check_alive(); return script_value::template as<T>(); }
+        script_int as_int() const { check_alive(); return script_value::as_int(); }
+        script_float as_float() const { check_alive(); return script_value::as_float(); }
+        const script_string& as_string() const { check_alive(); return script_value::as_string(); }
+        script_bool as_bool() const { check_alive(); return script_value::as_bool(); }
+        script_char as_char() const { check_alive(); return script_value::as_char(); }
+        const std::vector<script_value>& as_array() const { check_alive(); return script_value::as_array(); }
+        std::vector<script_value>& as_array() { check_alive(); return script_value::as_array(); }
+        const script_map& as_map() const { check_alive(); return script_value::as_map(); }
+        script_map& as_map() { check_alive(); return script_value::as_map(); }
+        const script_function& as_function() const { check_alive(); return script_value::as_function(); }
+        std::string to_string() const { check_alive(); return script_value::to_string(); }
+        const script_value& deref() const { check_alive(); return script_value::deref(); }
+        script_value& deref() { check_alive(); return script_value::deref(); }
+        script_value_type type() const { check_alive(); return script_value::type(); }
+        operator int() const { check_alive(); return script_value::operator int(); }
+        operator int64_t() const { check_alive(); return script_value::operator int64_t(); }
+        operator double() const { check_alive(); return script_value::operator double(); }
+        operator float() const { check_alive(); return script_value::operator float(); }
+
+    private:
+        friend class engine;
+        void check_alive() const { if (outlived_) [[unlikely]] { throw_outlived(); } }
+        void rebind(engine* holder, bool outlived);
+        [[noreturn]] JAI_NOINLINE static void throw_outlived();
+        engine* engine_ = nullptr;
+        held_value* previous_ = nullptr;   // the engine's registry of held values: an intrusive list under its lock
+        held_value* next_ = nullptr;
+        bool outlived_ = false;
     };
 
     // ---- script_array kind-dispatched element access (script_value complete here) ----

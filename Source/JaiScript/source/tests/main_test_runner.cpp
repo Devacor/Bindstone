@@ -186,6 +186,8 @@ int main(int argc, char** argv) {
     bool verbose = false;
 #endif
     test_filter_config filter;
+    int shard_index = 0;
+    int shard_count = 1;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -223,6 +225,20 @@ int main(int argc, char** argv) {
                 return 1;
             }
         }
+        // --shard=i/n: runs every n-th suite starting at suite i (0-based), so n processes cover the suites once
+        else if (arg.rfind("--shard=", 0) == 0) {
+            auto slash = arg.find('/', 8);
+            try {
+                shard_index = slash == std::string::npos ? -1 : std::stoi(arg.substr(8, slash - 8));
+                shard_count = slash == std::string::npos ? 0 : std::stoi(arg.substr(slash + 1));
+            } catch (...) {
+                shard_count = 0;
+            }
+            if (shard_count < 1 || shard_index < 0 || shard_index >= shard_count) {
+                std::cout << "Bad shard: \"" << arg.substr(8) << "\" (expected i/n with 0 <= i < n)\n";
+                return 1;
+            }
+        }
         // positional argument (filter)
         else if (arg[0] != '-') {
             filter = test_filter_config::parse(arg);
@@ -257,7 +273,11 @@ int main(int argc, char** argv) {
         original_cerr = std::cerr.rdbuf(null_stream.rdbuf());
     }
 
-    for (auto& suite : suites) {
+    for (size_t suite_position = 0; suite_position < suites.size(); ++suite_position) {
+        auto& suite = suites[suite_position];
+        if (static_cast<int>(suite_position % shard_count) != shard_index) {
+            continue;
+        }
         bool suite_matches = filter.matches_suite(suite->get_name());
 
         std::string test_pattern_for_suite;

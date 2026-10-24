@@ -101,7 +101,7 @@ jai_build_failed() {
 jai_gates() {
 	local cfg="$1" log
 	shift
-	log="$JAI_CI_LOG_DIR/gates_${cfg}_$(echo "$*" | tr ' ' '_').log"
+	log="$JAI_CI_LOG_DIR/gates_${cfg}_$(echo "$*" | tr ' ' '_')${JAI_TEST_SHARD:+_shard${JAI_TEST_SHARD%%/*}}.log"
 	if BIN="$(jai_dir_of "$cfg")/bin" bash "$JAI_ROOT/tools/ci/gates.sh" "$@" > "$log" 2>&1; then
 		echo "green: $* ($cfg)"
 		return 0
@@ -138,23 +138,46 @@ jai_gates_side_by_side() {
 }
 
 # jai_debug_suites [backend...]: the Debug suites on the named backends (interp, vm, vm-reference; default all three), side by
-# side, each with its own temp directory; a red side reruns alone
+# side, each backend split into JAI_DEBUG_SHARDS processes (jaiscript_tests --shard; default from the core count), each
+# shard with its own temp directory; one line per backend, and a red shard reruns alone
+jai_debug_shards() {
+	local cores
+	[ -n "${JAI_DEBUG_SHARDS:-}" ] && { echo "$JAI_DEBUG_SHARDS"; return; }
+	cores="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+	# a quarter of the cores per backend: other work shares the machine
+	cores=$((cores / 4))
+	[ "$cores" -lt 1 ] && cores=1
+	[ "$cores" -gt 8 ] && cores=8
+	echo "$cores"
+}
+
 jai_debug_suites() {
-	local be pids=() rc=0 backends=("$@")
+	local be shard dir pids=() rc=0 red backends=("$@") shards
 	[ "${#backends[@]}" -gt 0 ] || backends=(interp vm vm-reference)
+	shards="$(jai_debug_shards)"
 	for be in "${backends[@]}"; do
-		mkdir -p "$JAI_CI_LOG_DIR/tmp_$be"
-		TEMP="$JAI_CI_LOG_DIR/tmp_$be" TMP="$JAI_CI_LOG_DIR/tmp_$be" TMPDIR="$JAI_CI_LOG_DIR/tmp_$be" jai_gates debug "tests-$be" > "$JAI_CI_LOG_DIR/suite_$be.line" &
-		pids+=($!)
+		for ((shard = 0; shard < shards; shard++)); do
+			dir="$JAI_CI_LOG_DIR/tmp_${be}_$shard"
+			mkdir -p "$dir"
+			TEMP="$dir" TMP="$dir" TMPDIR="$dir" JAI_TEST_SHARD="$shard/$shards" jai_gates debug "tests-$be" > "$JAI_CI_LOG_DIR/suite_${be}_$shard.line" &
+			pids+=($!)
+		done
 	done
 	for be in "${pids[@]}"; do wait "$be" || true; done
 	for be in "${backends[@]}"; do
-		if grep -q "^green" "$JAI_CI_LOG_DIR/suite_$be.line"; then
-			cat "$JAI_CI_LOG_DIR/suite_$be.line"
-		else
-			echo "rerunning the $be suites alone (the side-by-side run was red)"
-			jai_gates debug "tests-$be" || rc=1
+		red=""
+		for ((shard = 0; shard < shards; shard++)); do
+			grep -q "^green" "$JAI_CI_LOG_DIR/suite_${be}_$shard.line" || red="$red $shard"
+		done
+		if [ -z "$red" ]; then
+			echo "green: tests-$be (debug; $shards shards)"
+			continue
 		fi
+		for shard in $red; do
+			echo "rerunning the $be suites' shard $shard/$shards alone (the side-by-side run was red)"
+			dir="$JAI_CI_LOG_DIR/tmp_${be}_$shard"
+			TEMP="$dir" TMP="$dir" TMPDIR="$dir" JAI_TEST_SHARD="$shard/$shards" jai_gates debug "tests-$be" || rc=1
+		done
 	done
 	return $rc
 }

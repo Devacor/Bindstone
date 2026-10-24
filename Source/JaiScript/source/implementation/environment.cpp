@@ -211,7 +211,7 @@ void environment::define(uint64_t id, const script_value& value) {
     // New local variable - add to stable storage
     // engine::memory_cap: environment growth counts toward the script's allowance
     // (approximate slot cost; the raise happens at the next loop back-edge)
-    if (engine_ && value.has_valid_engine()) {
+    if (engine_) {
         engine_->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
     }
     flat_lookup_[id] = &local_storage_.push_back(value);  // Update/shadow in flat lookup
@@ -233,7 +233,7 @@ void environment::define(uint64_t id, script_value&& value) {
     // New local variable - add to stable storage
     // engine::memory_cap: environment growth counts toward the script's allowance
     // (approximate slot cost; the raise happens at the next loop back-edge)
-    if (engine_ && value.has_valid_engine()) {
+    if (engine_) {
         engine_->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
     }
     flat_lookup_[id] = &local_storage_.push_back(std::move(value));  // Update/shadow in flat lookup
@@ -524,7 +524,7 @@ bool environment::define_variable(uint64_t id, script_value&& value) {
         return true;
     }
     r.versions[id].push_back({flat_unit, *flat});
-    if (engine_ && value.has_valid_engine()) {
+    if (engine_) {
         engine_->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
     }
     *flat = &local_storage_.push_back(std::move(value));

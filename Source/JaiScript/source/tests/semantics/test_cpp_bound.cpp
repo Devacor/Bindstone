@@ -166,7 +166,7 @@ public:
             check_true(w.is_cpp_bound(), "moved-to keeps the binding");
             check_false(v.is_cpp_bound(), "moved-from loses the binding");
             check_true(v.is_null(), "moved-from reads as null");
-            check_null(v.get_engine(), "moved-from engine is null");
+            check_null(v.value().payload_engine(), "moved-from names no engine");
             v = w;
             check_true(v.is_cpp_bound(), "moved-from is reassignable");
             mvv = 11;

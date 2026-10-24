@@ -929,9 +929,6 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
                         return init_result.error_value();
                     }
                     default_val = initializer_store_value(std::move(init_result.value()), initializer_ast.get());
-                    if (!default_val.has_valid_engine() && eng) {
-                        default_val.set_engine(eng);
-                    }
                 }
                 // Declared type ('auto' parses as null and infers; 'var' stores the any tag); the initializer converts through
                 // the field table like an instance initializer
@@ -1061,9 +1058,6 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
                     host.discard_unwinding();
                     per_instance_fields.push_back(field_id);
                 }
-            }
-            if (!evaluated_value.has_valid_engine() && eng) {
-                evaluated_value.set_engine(eng);
             }
             field_defaults_with_engine[field_id] = evaluated_value;
         }
@@ -1228,13 +1222,7 @@ void class_definition::add_field(std::string_view name, const script_value& defa
     uint64_t name_id = eng->symbolize(name);
     if (std::find(bound_field_order_.begin(), bound_field_order_.end(), name_id) == bound_field_order_.end()) { bound_field_order_.push_back(name_id); }
 
-    if (!default_value.has_valid_engine() && !!engine_) {
-        script_value value_with_engine(default_value);
-        value_with_engine.set_engine(engine_);
-        field_defaults_.insert_or_assign(name_id, value_with_engine);
-    } else {
-        field_defaults_.insert_or_assign(name_id, default_value);
-    }
+    field_defaults_.insert_or_assign(name_id, default_value);
     field_defaults_cache_valid_ = false; ++defaults_version_;
     field_slots_current_ = false;
     bump_field_shape_epoch();

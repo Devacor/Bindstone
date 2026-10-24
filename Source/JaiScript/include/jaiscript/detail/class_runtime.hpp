@@ -310,13 +310,7 @@ inline type_info_ptr class_definition::get_field_declared_type(uint64_t id) cons
 inline void class_definition::add_static_field(uint64_t id, const script_value& initial_value) {
     static_fields_.insert(id);
 
-    if (!initial_value.has_valid_engine() && !!engine_) {
-        script_value value_with_engine(initial_value);
-        value_with_engine.set_engine(engine_);
-        static_field_values_.insert_or_assign(id, value_with_engine);
-    } else {
-        static_field_values_.insert_or_assign(id, initial_value);
-    }
+    static_field_values_.insert_or_assign(id, initial_value);
 }
 
 inline void class_definition::replace_static_declared_types(std::unordered_map<uint64_t, type_info_ptr> new_types) {
@@ -1480,13 +1474,7 @@ inline void class_definition::store_field_defaults(const std::unordered_map<uint
     field_slots_current_ = false;
     bump_method_epoch();
     for (const auto& [id, value] : new_field_defaults) {
-        if (!value.has_valid_engine() && engine_ref) {
-            script_value value_with_engine(value);
-            value_with_engine.set_engine(engine_ref);
-            field_defaults_[id] = value_with_engine;
-        } else {
-            field_defaults_[id] = value;
-        }
+        field_defaults_[id] = value;
     }
 }
 inline checked_result<script_value> class_definition::cpp_method_dispatch::operator()(const std::vector<script_value>& raw_args) const {

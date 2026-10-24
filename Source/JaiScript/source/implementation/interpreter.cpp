@@ -3665,7 +3665,6 @@ checked_result<void> interpreter::visit_literal_expr(literal_expr* expr) {
             break;
         default:
             // For other types, try to set engine ref (though this shouldn't happen with literals)
-            expr->value.set_engine(engine_);
             push_value(expr->value);
             break;
     }
@@ -3976,7 +3975,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 					}
 					// Fast path didn't fully handle - copy for slow path (literal needs hydration)
 					pre_fetched_left = leftVal;
-					pre_fetched_right = rightVal.has_valid_engine() ? rightVal : hydrate_literal(rightVal);
+					pre_fetched_right = rightVal.type_info_raw() ? rightVal : hydrate_literal(rightVal);
 					already_have_values = true;
 				}
 			}
@@ -3996,7 +3995,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 						if (lane.value()) { return {}; }
 					}
 					// Fast path didn't fully handle - save for slow path (literal needs hydration)
-					pre_fetched_left = leftVal.has_valid_engine() ? leftVal : hydrate_literal(leftVal);
+					pre_fetched_left = leftVal.type_info_raw() ? leftVal : hydrate_literal(leftVal);
 					pre_fetched_right = std::move(rightVal);
 					already_have_values = true;
 				}
@@ -4220,9 +4219,6 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     // the map; an engine-less key (a raw AST literal reaching here via the
                     // binary fast path) would poison the whole map for clone().
                     script_value key = right;
-                    if (!key.has_valid_engine()) {
-                        key.set_engine(engine_);
-                    }
                     // Declared key type: keys never coerce, so the
                     // check runs BEFORE the auto-insert (KEEP BYTE-PARALLEL with the vm)
                     if (auto map_tag = left.get_type_info()) {
@@ -4239,15 +4235,6 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                         limits_->memory_charge_deferred(2 * sizeof(script_value) + (key.is_string() ? key.unchecked_as_string().size() : 0));
                     }
 
-                    // If this created a new entry with default constructor, it has invalid engine reference
-                    if (!value_ref.has_valid_engine()) {
-                        if (!left.has_valid_engine()) {
-                            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                                "Invalid script_value: both map and new entry missing engine reference");
-                        }
-                        value_ref.set_engine(engine_);
-                    }
-
                     // Get value type constraint from the map's type_info for validation on assignment
                     auto map_type_info = left.get_type_info();
                     type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
@@ -4262,9 +4249,6 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     auto it = map.find(right);
                     if (it != map.end()) {
                         script_value& value_ref = const_cast<script_value&>(it->second);
-                        if (!value_ref.has_valid_engine()) {
-                            value_ref.set_engine(engine_);
-                        }
                         auto map_type_info = left.get_type_info();
                         type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
                         push_value(script_value::make_map_entry_reference(left.get_map_storage(), right, &value_ref, engine_, value_type));
@@ -4278,9 +4262,6 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     if (it != map.end()) {
                         // Ensure the value has an engine ref before pushing
                         script_value val = it->second;
-                        if (!val.has_valid_engine()) {
-                            val.set_engine(engine_);
-                        }
                         push_value(std::move(val));
                     } else {
                         push_value(script_value(std::monostate{}, engine_));
@@ -4293,9 +4274,6 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                 if (it != map.end()) {
                     // Ensure the value has an engine ref before pushing
                     script_value val = it->second;
-                    if (!val.has_valid_engine()) {
-                        val.set_engine(engine_);
-                    }
                     push_value(std::move(val));
                 } else {
                     push_value(script_value(std::monostate{}, engine_));
@@ -13353,9 +13331,6 @@ checked_result<void> interpreter::evaluate_field_initializers(std::shared_ptr<cl
         auto result = dispatch_expr(initializer_ast.get());
         if (!result) { return result.error_value(); }   // KEEP BYTE-PARALLEL with the vm: the initializer's own error
         script_value field_value = initializer_store_value(pop_value(), initializer_ast.get());
-        if (!field_value.has_valid_engine() && engine_) {
-            field_value.set_engine(engine_);
-        }
         instance->set_field(field_id, field_value);
         return {};
     };

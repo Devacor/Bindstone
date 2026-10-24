@@ -7,8 +7,7 @@ one, read the anchor first.
 
 `value.hpp` static_asserts `sizeof(script_value) == 16`, `alignof == 8` and nothrow move, on every host.
 `script_value::storage` is a hand-written tagged union: an 8-byte payload and an 8-byte tag word whose low byte is the
-storage index and whose upper bits hold the declared type (`type_info*`), or the `k_engine_only` flag on an unstamped value
-an engine made (internal/value16_design.md); the payload union is `alignas(8)` so a 32-bit host keeps the layout.
+storage index and whose upper bits hold the declared type (`type_info*`) or zero (internal/value16_design.md); the payload union is `alignas(8)` so a 32-bit host keeps the layout.
 `type_info` is `alignas(512)` so the pointer leaves bits 0..8 free. The declared type is **the language**, not fat: the
 var/auto/int type ladder lives in it. A plain value names no engine: a heap payload records its engine (`owner`, read by
 `payload_engine()`), and code that mints values takes its engine from context. Payload

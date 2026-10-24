@@ -83,7 +83,8 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
 
 - No non-const `static` or `thread_local` storage. State that outlives a call belongs to an engine; one static cache
   breaks multiple engines on multiple threads. `static const` non-pointer data is fine.
-- Every `script_value` carries its engine: `script_value(v, eng)`, `script_value(std::monostate{}, eng)` for null.
+- A value is made with its engine (`script_value(v, eng)` stamps the engine's type) and names none afterwards: code that mints
+  values takes the engine from context (a heap payload's `payload_engine()`, the backend's `engine_`, a parameter).
 - `operator==`, `operator<=>` and `map_key_hash` stay consistent: `<=>` is a strict weak ordering (map iteration and
   serialization order) and equivalent keys hash alike. Float keys order totally (a NaN key is found again; `0.0` and
   `-0.0` are one key); complex values order and hash by held-pointer identity, except a class value map key, which keys

@@ -5,14 +5,14 @@
 ```
 bytes 0..7    payload       int64 / double / char / bool / one strong_ptr / weaker_ptr / parallel borrow
 bytes 8..15   tag word      bits 0..7   storage index (TYPEID_*), read as one byte
-                            bit  8      k_engine_only: an engine made this unstamped value
+                            bit  8      k_outlived: a held value whose engine is gone
                             bits 9..63  a 512-aligned pointer: the declared type (type_info), or zero
 ```
 
 `k_value_tag_alignment` (type_info.hpp) is the alignment `type_info` declares and the pointer mask derives from;
 `script_value` static-asserts that the flag sits above the index byte and below that alignment, and only `stamp()`,
-`set_stamp()`, `clear_stamp()`, `set_engine_tag()`, `stamped_as()` and `is_outlived()` decode the word. Review Regressions
-`tag_word_stamps_and_payload_engines` pins the stamped, flagged and literal words, the outlived sentinel, the payload engines,
+`set_stamp()`, `clear_stamp()`, `stamped_as()` and `is_outlived()` decode the word. Review Regressions
+`tag_word_stamps_and_payload_engines` pins the stamped and unstamped words, the outlived sentinel, the payload engines,
 ownership and the import restamp.
 
 ## Decisions
@@ -28,9 +28,9 @@ ownership and the import restamp.
   container's), read by `payload_engine()`: a deep copy, a reference's materialize and store, a class map key's operators,
   a host conversion through the registry and a callback's `std::function` run against it. Scalars, strings and math values
   answer null. A `held_value` keeps its engine beside the value (`get_engine()`).
-- **The engine-made flag stays.** An unstamped value an engine made (`script_value(std::monostate{}, eng)`, a cleared stamp)
-  carries `k_engine_only`, a literal carries a zero tag; `has_valid_engine()` and the VM's in-place landings tell them apart
-  with one tag test.
+- **Unstamped is unstamped.** A null an engine made and a parse-time literal carry the same zero tag: nothing tells them
+  apart, so nothing re-engines a value (no `set_engine`), and a VM landing that writes a payload in place requires the slot's
+  stamp, never an engine.
 - **The declared type stays a pointer, not a 32-bit id.** The pointer resolves itself and keeps every hot guard
   (`type_info_raw() == expected`) a compare of one word. `type_info` is `alignas(512)`, which frees bits 0..8 for the index
   and the flag while keeping every high bit of the pointer, so tagged heap pointers (Android's top-byte tags, MTE) survive.
@@ -199,8 +199,8 @@ by construction. At the edge:
   at the end for holds a destructor made) unlinks each held value under the lock, marks it outlived (engine null), swaps in the
   outlived sentinel and releases the payload outside the lock while the engine still runs destructors. The lifetime token
   expires after the whole destructor, so signal receivers and callbacks a held instance's destructor fires still run.
-- **The outlived sentinel** is `TYPEID_INVALID` under `k_outlived` (the flag over a pointer no `type_info` has), a word no
-  live value carries: `get_type_info()` reads null without a load. `held_value` hides the reading accessors (`as<T>`,
+- **The outlived sentinel** is `TYPEID_INVALID` under `k_outlived`, a word no live value carries: `get_type_info()` reads
+  null without a load. `held_value` hides the reading accessors (`as<T>`,
   `as_int`, `to_string`, `deref`, the conversion operators...) with versions that throw `Value outlived its engine.` first;
   `valid()` and `get_engine()` answer without throwing. The import below throws the same text for a sliced copy.
 - **Values cross engines by copy.** `engine::make_value(script_value)`, `add_global`, `execute`'s instance variables and so

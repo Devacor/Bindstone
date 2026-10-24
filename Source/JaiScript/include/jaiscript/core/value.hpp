@@ -149,7 +149,7 @@ namespace detail {
         
         // ALL constructors require engine context - no exceptions!
         // Special constructor for null/void values
-        explicit script_value(std::monostate, engine* eng) : storage_(std::monostate{}) { set_engine_tag(eng);}
+        explicit script_value(std::monostate, engine*) : storage_(std::monostate{}) {}
         
         // AST literal constructor - ONLY for parser to create placeholder values in AST nodes
         // These values should NEVER be used directly, only as templates for interpreter
@@ -1954,9 +1954,8 @@ namespace detail {
         
         // Get engine pointer for creating new script_values
         // the (declared type, engine) pair in one compare of the tag word: exactly this stamp (whose owner is eng), or no stamp and eng
-        JAI_FORCEINLINE bool stamped_as(const type_info* stamp, const engine* eng) const noexcept {
-            const uintptr_t expected = stamp ? reinterpret_cast<uintptr_t>(stamp) : eng ? k_engine_only : 0;
-            return storage_.tag() == expected;
+        JAI_FORCEINLINE bool stamped_as(const type_info* stamp) const noexcept {
+            return storage_.tag() == reinterpret_cast<uintptr_t>(stamp);
         }
         // The engine a heap payload belongs to (a container, object, reference or bound box records the engine that made it);
         // scalars, strings and math values name none: code that mints from them takes its engine from context
@@ -2010,16 +2009,14 @@ namespace detail {
         
     private:
         // The storage's tag word (internal/value16_design.md): the declared type (512-aligned, so the low 9 bits hold the
-        // index and the flag), or k_engine_only for an unstamped value an engine made; k_outlived marks a held value whose
-        // engine is gone (no type_info sits at that address)
-        static constexpr uintptr_t k_engine_only = 0x100;
-        static constexpr uintptr_t k_outlived = k_engine_only | k_value_tag_alignment;
+        // index and the flag) or zero; k_outlived marks a held value whose engine is gone
+        static constexpr uintptr_t k_outlived = 0x100;
         static constexpr uintptr_t k_tag_pointer_mask = ~uintptr_t{k_value_tag_alignment - 1};
-        static_assert(alignof(type_info) >= k_value_tag_alignment && (k_engine_only & 0xFF) == 0 && k_engine_only < k_value_tag_alignment,
-                      "the tag word's pointer bits sit above the index byte and the engine-only flag");
+        static_assert(alignof(type_info) >= k_value_tag_alignment && (k_outlived & 0xFF) == 0 && k_outlived < k_value_tag_alignment,
+                      "the tag word's pointer bits sit above the index byte and the outlived flag");
         JAI_FORCEINLINE type_info* stamp() const noexcept {
             const uintptr_t tag = storage_.tag();
-            return (tag & k_engine_only) ? nullptr : reinterpret_cast<type_info*>(tag);
+            return (tag & k_outlived) ? nullptr : reinterpret_cast<type_info*>(tag);
         }
         JAI_FORCEINLINE void set_stamp(type_info* stamped) noexcept {
             if (stamped) [[likely]] {
@@ -2029,10 +2026,7 @@ namespace detail {
                 clear_stamp();
             }
         }
-        void clear_stamp() noexcept { storage_.set_tag(storage_.tag() ? k_engine_only : 0); }
-        void set_engine_tag(const engine* eng) noexcept {
-            storage_.set_tag(eng ? k_engine_only : 0);
-        }
+        void clear_stamp() noexcept { storage_.set_tag(0); }
 
 	public: // Match the public forward declaration and holder accessors.
         // For object storage - external serialization will handle this
@@ -2602,9 +2596,6 @@ namespace detail {
                                                               uint32_t field_slot, strong_ptr<reference_holder> ref);
 
     public:
-        // Method to set engine pointer after construction
-        // a stamped value names its stamp's engine; only an unstamped one takes another
-        void set_engine(const engine* eng) { if (!stamp()) { set_engine_tag(eng); } }
 
         // Access raw storage for AST literals (bypasses type checking)
         const storage& get_storage() const { return storage_; }
@@ -2702,10 +2693,6 @@ namespace detail {
         // Factory method for invalid values (used as sentinel for non-existent fields/methods)
         static script_value make_invalid(engine* eng);
         
-        // Check if this value has a valid engine pointer
-        bool has_valid_engine() const {
-            return storage_.tag() != 0;
-        }
 
         // Safe access to reference holder for reference types
         // current_type(): a reference's type_info may name a different base_type
@@ -2902,7 +2889,7 @@ namespace detail {
 
         bool valid() const noexcept { return !outlived_; }
         // the engine the held value is registered with; null once outlived or moved from
-        engine* get_engine() const noexcept { return has_valid_engine() && !outlived_ ? engine_ : nullptr; }
+        engine* get_engine() const noexcept { return outlived_ ? nullptr : engine_; }
         const script_value& value() const { check_alive(); return *this; }
 
         template<typename T> T as() const { check_alive(); return script_value::template as<T>(); }

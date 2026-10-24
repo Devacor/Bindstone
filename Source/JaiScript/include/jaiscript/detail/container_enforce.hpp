@@ -56,7 +56,6 @@ namespace jai::detail {
 		auto def = map_value_default(map_value, eng);
 		if (!def) { return nullptr; }
 		script_value k = key;
-		if (!k.has_valid_engine()) { k.set_engine(eng); }
 		auto tag = map_value.get_type_info();
 		def->set_type_info(tag->value_type());
 		script_value& slot = map[k];

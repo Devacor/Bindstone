@@ -675,7 +675,6 @@ namespace jai::detail {
 				script_value key(std::monostate{}, eng);
 				if (b->right->get_type() == node_type::literal_expr) {
 					key = static_cast<const literal_expr*>(b->right.get())->value;
-					key.set_engine(eng);
 				} else {
 					const script_value* index_ptr = resolve_identifier_ptr(static_cast<const identifier_expr*>(b->right.get()));
 					if (!index_ptr) {
@@ -705,7 +704,6 @@ namespace jai::detail {
 						}
 						return script_value(value_ref);
 					}
-					if (!value_ref.has_valid_engine()) { value_ref.set_engine(eng); }
 					auto map_type_info = cur.get_type_info();
 					return rooted(script_value::make_map_entry_reference(map_storage, entry->first, &value_ref, eng,
 						map_type_info ? map_type_info->value_type() : nullptr));

@@ -3673,10 +3673,10 @@ public:
             check_eq((uintptr_t)0, reinterpret_cast<uintptr_t>(stamped.get_type_info().get()) % k_value_tag_alignment, "a stamp is tag-aligned");
             check_true(stamped.raw_storage_index() == script_value::TYPEID_INT && stamped.payload_engine() == nullptr, "a scalar names no engine");
             const script_value null_with_engine(std::monostate{}, a.get());
-            check_true(null_with_engine.get_type_info().get() == nullptr && null_with_engine.has_valid_engine(), "an unstamped engine value carries the flag");
-            check_true(null_with_engine.raw_storage_index() == script_value::TYPEID_NULL && null_with_engine.is_null(), "the flag leaves the index alone");
+            check_true(null_with_engine.get_type_info().get() == nullptr, "an engine-made null carries no type");
+            check_true(null_with_engine.raw_storage_index() == script_value::TYPEID_NULL && null_with_engine.is_null());
             const script_value bare(std::monostate{}, nullptr);
-            check_true(!bare.has_valid_engine() && bare.get_type_info().get() == nullptr, "a literal carries nothing");
+            check_true(bare.get_type_info().get() == nullptr, "a literal carries nothing");
             check_false(stamped.is_outlived() || null_with_engine.is_outlived() || bare.is_outlived());
             check_true(script_value::outlived().is_outlived() && script_value::outlived().get_type_info().get() == nullptr);
             const held_value array = a->execute("[1, 2];");

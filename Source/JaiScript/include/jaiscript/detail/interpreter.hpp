@@ -337,7 +337,7 @@ namespace jai {
                 case 4: return make_value(storage.get<script_char>());
                 case 5: return make_value(storage.get<script_bool>());
                 case 0: return make_value();
-                default: { script_value v = lit; v.set_engine(engine_); return v; }
+                default: return lit;
             }
         }
 
@@ -986,19 +986,16 @@ namespace jai {
         // Fast value factories — skip null checks, cache comparisons, and engine indirection
         inline script_value make_int_fast(script_int i) const noexcept {
             script_value v(script_value::ast_literal_tag{}, i);
-            v.set_engine_tag(engine_);
             v.set_stamp(cached_type_info_int_);
             return v;
         }
         inline script_value make_float_fast(script_float f) const noexcept {
             script_value v(script_value::ast_literal_tag{}, f);
-            v.set_engine_tag(engine_);
             v.set_stamp(cached_type_info_float_);
             return v;
         }
         inline script_value make_bool_fast(script_bool b) const noexcept {
             script_value v(script_value::ast_literal_tag{}, b);
-            v.set_engine_tag(engine_);
             v.set_stamp(cached_type_info_bool_);
             return v;
         }

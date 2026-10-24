@@ -57,7 +57,7 @@ namespace {
 			auto evaluated = host.evaluate(arg_expr, env);
 			if (!evaluated) { return evaluated.error_value(); }
 			result.push_back(std::move(evaluated.value()));
-			capture_initializer_argument(initializer, result.size() - 1, fields_run_code, result.back(),
+			capture_initializer_argument(host.eng, initializer, result.size() - 1, fields_run_code, result.back(),
 			                             [&] { return constructor_binding(binding_class, result.size() - 1); });
 			if (host.unwinding) { return {}; }
 		}
@@ -350,7 +350,7 @@ checked_result<script_value> initialize_members(construction_host& host, const s
 		if (captured_out && later_capture_candidate(0, args.size(), [&](size_t j) -> const script_value& { return args[j]; })) {
 			*captured_out = args;
 			for (size_t j = 0; j < captured_out->size(); ++j) {
-				capture_argument((*captured_out)[j], transient_read_marker::arg_capture_full, parameters_binding(ctor->parameters, j));
+				capture_argument(host.eng, (*captured_out)[j], transient_read_marker::arg_capture_full, parameters_binding(ctor->parameters, j));
 			}
 			argv = captured_out;
 		}

@@ -177,14 +177,14 @@ inline bool object_declares_method(const script_value& arg, std::string_view nam
 
 // A one-parameter script constructor of the parameter's class takes the argument (the table's converting row, no chaining;
 // defined beside script_class_definition)
-inline bool converting_constructor_takes(const script_value& arg, const type_info& target);
+inline bool converting_constructor_takes(const script_value& arg, const type_info& target, engine* eng);
 
 // The assignment table's rows past the exact type that a by-value parameter takes (docs/site/embedding/06-static-checking.html "One conversion table"), as overload costs:
 // int<->float and bool to a number 1 (a conversion, ahead of a var parameter); a to_int/to_float/to_char method and the string
 // and bool rows 2 and a converting constructor 3 (k_loose_conversion and up: after a var parameter, which takes the value as it
 // is); 0 = not viable. Among several overloads a string never makes a bool parameter viable.
 inline constexpr size_t k_loose_conversion = 2;
-inline size_t table_conversion_cost(const script_value& arg, const parameter& param, bool in_set) {
+inline size_t table_conversion_cost(const script_value& arg, const parameter& param, bool in_set, engine* eng) {
     using t = script_value_type;
     const t to = param.type->base_type;
     const t from = arg.type();
@@ -204,7 +204,7 @@ inline size_t table_conversion_cost(const script_value& arg, const parameter& pa
         case t::jai_utf8_string_type:
             return 2;
         case t::jai_object_type:
-            return converting_constructor_takes(arg, *param.type) ? 3 : 0;
+            return converting_constructor_takes(arg, *param.type, eng) ? 3 : 0;
         default:
             return 0;
     }
@@ -237,7 +237,7 @@ struct overload_verdict {
 // Returns a null best when no overload is viable for these arguments.
 // Span core (call-arg windows: the vm resolves against the caller's stack slice without collecting a vector).
 template <typename Range, typename Params>
-inline auto score_overloads(const Range& overloads, Params&& params_of, const script_value* args, size_t argc) {
+inline auto score_overloads(const Range& overloads, Params&& params_of, const script_value* args, size_t argc, engine* eng) {
     using candidate = std::remove_cv_t<std::remove_reference_t<decltype(*std::begin(overloads))>>;
     overload_verdict<candidate> verdict;
     int best_score = INT_MAX;  // Lower is better: 0=exact, 1-N=conversions, 1000=has_var
@@ -277,7 +277,7 @@ inline auto score_overloads(const Range& overloads, Params&& params_of, const sc
                 auto arg_type = arg.type();
                 auto convert_or_mismatch = [&]() {
                     all_exact = false;
-                    if (const size_t cost = table_conversion_cost(arg, param, overloads.size() > 1)) {
+                    if (const size_t cost = table_conversion_cost(arg, param, overloads.size() > 1, eng)) {
                         conversion_count += cost;
                         loose = loose || cost >= k_loose_conversion;
                     } else {
@@ -377,27 +377,8 @@ inline auto score_overloads(const Range& overloads, Params&& params_of, const sc
 }
 
 inline overload_verdict<std::shared_ptr<function_decl>> score_declarations(
-    const std::vector<std::shared_ptr<function_decl>>& overloads, const script_value* args, size_t argc) {
-    return score_overloads(overloads, [](const std::shared_ptr<function_decl>& fn) -> const std::vector<parameter>& { return fn->parameters; }, args, argc);
-}
-
-inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
-    const std::vector<std::shared_ptr<function_decl>>& overloads,
-    const script_value* args, size_t argc) {
-    return score_declarations(overloads, args, argc).best;
-}
-
-inline std::shared_ptr<function_decl> pick_best_overload(
-    const std::vector<std::shared_ptr<function_decl>>& overloads,
-    const script_value* args, size_t argc) {
-    const auto* best = pick_best_overload_ref(overloads, args, argc);
-    return best ? *best : nullptr;
-}
-
-inline std::shared_ptr<function_decl> pick_best_overload(
-    const std::vector<std::shared_ptr<function_decl>>& overloads,
-    const std::vector<script_value>& args) {
-    return pick_best_overload(overloads, args.data(), args.size());
+    const std::vector<std::shared_ptr<function_decl>>& overloads, const script_value* args, size_t argc, engine* eng) {
+    return score_overloads(overloads, [](const std::shared_ptr<function_decl>& fn) -> const std::vector<parameter>& { return fn->parameters; }, args, argc, eng);
 }
 
 namespace detail {
@@ -516,7 +497,7 @@ inline std::shared_ptr<function_decl> sole_arity_candidate(const std::vector<std
 
 inline checked_result<std::shared_ptr<function_decl>> select_declaration(const std::vector<std::shared_ptr<function_decl>>& overloads,
                                                                        const script_value* args, size_t argc, uint64_t name_id, engine* eng) {
-    const auto verdict = score_declarations(overloads, args, argc);
+    const auto verdict = score_declarations(overloads, args, argc, eng);
     if (verdict.rival) [[unlikely]] {
         return detail::ambiguous_call(name_id, (*verdict.best)->parameters, (*verdict.rival)->parameters, args, argc, eng);
     }
@@ -560,7 +541,7 @@ inline const std::shared_ptr<function_decl>* class_definition::resolve_method_ov
         }
     }
 
-    const auto verdict = score_declarations(overloads, args, argc);
+    const auto verdict = score_declarations(overloads, args, argc, get_engine());
     if (verdict.rival) [[unlikely]] {
         ec = make_error_code(runtime_error_code::ambiguous_call);
         return nullptr;
@@ -625,7 +606,7 @@ inline checked_result<const std::shared_ptr<function_decl>*> class_definition::r
 inline error_propagator class_definition::method_overload_miss(std::error_code ec, uint64_t name_id, const script_value* args, size_t argc) const {
     auto it = method_overloads_.find(name_id);
     if (ec == make_error_code(runtime_error_code::ambiguous_call) && it != method_overloads_.end()) {
-        const auto verdict = score_declarations(it->second, args, argc);
+        const auto verdict = score_declarations(it->second, args, argc, get_engine());
         if (verdict.rival) { return detail::ambiguous_call(name_id, (*verdict.best)->parameters, (*verdict.rival)->parameters, args, argc, get_engine()); }
     }
     if (it != method_overloads_.end() && it->second.size() == 1 && !arity_accepts(it->second.front()->parameters, argc)) {

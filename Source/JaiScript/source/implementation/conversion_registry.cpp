@@ -56,17 +56,17 @@ checked_result<void*> checked_native_reference(const script_value& value, const 
 			return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch), "Cannot extract C++ receiver from null");
 		}
 		if (instance->script_layer_retired()) {
-			return retired_layer_error<checked_result<void*>>(value.get_engine(), *instance);
+			return retired_layer_error<checked_result<void*>>(holder->owner, *instance);
 		}
 		auto* native = instance->native();
 		const auto* native_holder = native ? native->peek_object_holder() : nullptr;
 		if (!native_holder || native_holder->is_class_instance_wrapper) {
 			return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch), "Object type mismatch");
 		}
-		return checked_native_pointer(value.get_engine(), native_holder->type_id, target, target_id,
+		return checked_native_pointer(holder->owner, native_holder->type_id, target, target_id,
 			native_holder->data ? native_holder->data.get() : native_holder->bound_ptr);
 	}
-	return checked_native_pointer(value.get_engine(), holder->type_id, target, target_id,
+	return checked_native_pointer(holder->owner, holder->type_id, target, target_id,
 		holder->data ? holder->data.get() : holder->bound_ptr);
 }
 
@@ -82,7 +82,7 @@ bool lane_object_handle(const script_value& value, const std::type_info& target,
 	}
 	const auto* holder = value.peek_object_holder();
 	if (!holder) { return false; }
-	auto object = checked_native_object(value.get_engine(), *holder, target);
+	auto object = checked_native_object(holder->owner, *holder, target);
 	if (!object) { return false; }
 	out = std::move(object.value());
 	return true;

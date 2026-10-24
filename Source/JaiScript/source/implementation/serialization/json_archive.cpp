@@ -468,7 +468,7 @@ const script_value* json_archive_writer::next_child(write_frame& f, script_value
             const script_array* node = f.source.unchecked_array_node();
             const size_t i = f.index++;
             if (node->kind() == script_array::kind_t::hetero) { return &node->values()[i]; }
-            scratch = node->get(i, f.source.get_engine());
+            scratch = node->get(i, node->owner);
             return &scratch;
         }
         case write_shape::map: {

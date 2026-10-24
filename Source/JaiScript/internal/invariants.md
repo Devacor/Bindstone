@@ -7,11 +7,11 @@ one, read the anchor first.
 
 `value.hpp` static_asserts `sizeof(script_value) == 16`, `alignof == 8` and nothrow move, on every host.
 `script_value::storage` is a hand-written tagged union: an 8-byte payload and an 8-byte tag word whose low byte is the
-storage index and whose upper bits hold the declared type (`type_info*`) or, flagged `k_engine_only`, an unstamped
-value's `engine*` (internal/value16_design.md); the payload union is `alignas(8)` so a 32-bit host keeps the layout. `type_info` and `engine` are `alignas(512)` so the pointer leaves bits
-0..8 free. The engine and the declared type are **the language**, not fat: zero-statics/multi-engine and the
-var/auto/int type ladder live in them. A stamped value's engine is `type_info::owner`, so every type a value can carry
-records its engine (the engine's intern sets it; a compiler-owned type takes `vm_compiler::type_owner`). Payload
+storage index and whose upper bits hold the declared type (`type_info*`), or the `k_engine_only` flag on an unstamped value
+an engine made (internal/value16_design.md); the payload union is `alignas(8)` so a 32-bit host keeps the layout.
+`type_info` is `alignas(512)` so the pointer leaves bits 0..8 free. The declared type is **the language**, not fat: the
+var/auto/int type ladder lives in it. A plain value names no engine: a heap payload records its engine (`owner`, read by
+`payload_engine()`), and code that mints values takes its engine from context. Payload
 assignments write the index byte only; the value's own copy/move carry the whole word. A new storage
 alternative must be pointer-sized and nothrow-move or the asserts fire. The math vectors are one
 alternative, a copy-on-write `script_vec_node` handle: every relocation shape that carried a 12-byte

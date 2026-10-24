@@ -259,7 +259,7 @@ namespace detail {
 		if (val.raw_storage_index() == script_value::TYPEID_CPP_BOUND) {
 			return val.get_cpp_bound_as<T>();
 		}
-		return static_cast<T*>(native_cast_or_throw(checked_native_reference(val, typeid(T), target_id), val.get_engine()));
+		return static_cast<T*>(native_cast_or_throw(checked_native_reference(val, typeid(T), target_id), val.payload_engine()));
 	}
 
 	// A bound class's own conversions (schema_binding.cpp); the name is the one bound, which a later rename does not change
@@ -2032,6 +2032,8 @@ private:
                                                                          args, std::index_sequence<Is...>{}, eng);
             if (!result) { throw_checked_error(eng, result.message(), result.symbol_id(), result.symbol_id2()); }
             return made;
+        } else if constexpr (std::is_constructible_v<T, engine*, Args...>) {
+            return std::make_shared<T>(eng, detail::value_converter<Args>::from(args[Is], eng)...);   // an engine-first constructor takes the constructing engine
         } else {
             return std::make_shared<T>(detail::value_converter<Args>::from(args[Is], eng)...);
         }

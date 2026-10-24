@@ -225,6 +225,7 @@ namespace jai {
         // Set engine pointer for script_value creation
         void set_engine_reference(engine* eng) override {
             engine_ = eng;
+            if (environment_) { environment_->bind_engine(eng); }
 
             // Initialize cached common values to avoid repeated allocations
             cached_null_ = script_value(std::monostate{}, engine_);

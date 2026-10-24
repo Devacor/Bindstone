@@ -463,9 +463,13 @@ namespace jai {
         using iterator = basic_iterator<false>;
         using const_iterator = basic_iterator<true>;
 
+        // the engine that made this node: its copies and memory charges run against it
+        engine* owner = nullptr;
+
         script_map() = default;
-        script_map(const script_map& o) { copy_from(o); }
-        script_map(script_map&& o) noexcept { take_from(o); o.changed(); }
+        explicit script_map(engine* a_owner) : owner(a_owner) {}
+        script_map(const script_map& o) : owner(o.owner) { copy_from(o); }
+        script_map(script_map&& o) noexcept : owner(o.owner) { take_from(o); o.changed(); }
         bool has_class_keys() const noexcept { return class_keys_ != nullptr; }
         script_map& operator=(const script_map& o) {
             if (this != &o) {

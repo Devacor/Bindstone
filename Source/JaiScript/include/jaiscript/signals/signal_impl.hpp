@@ -42,14 +42,14 @@ inline instance_variables build_script_locals(
 template<typename T, typename Sync>
 typename signal_emitter<T, Sync>::shared_receiver_type signal_emitter<T, Sync>::connect(const std::string& id, const script_value& fn_callback) {
 	auto recv = connect(id, convert_script_function<T>(fn_callback));
-	if (recv) { recv->bind_engine(fn_callback.get_engine(), engine_lifetime_token(fn_callback.get_engine())); }
+	if (recv) { recv->bind_engine(fn_callback.payload_engine(), engine_lifetime_token(fn_callback.payload_engine())); }
 	return recv;
 }
 
 template<typename T, typename Sync>
 typename signal_emitter<T, Sync>::shared_receiver_type signal_emitter<T, Sync>::connect_immediate(const std::string& id, const script_value& fn_callback) {
 	auto recv = connect_immediate(id, convert_script_function<T>(fn_callback));
-	if (recv) { recv->bind_engine(fn_callback.get_engine(), engine_lifetime_token(fn_callback.get_engine())); }
+	if (recv) { recv->bind_engine(fn_callback.payload_engine(), engine_lifetime_token(fn_callback.payload_engine())); }
 	return recv;
 }
 

@@ -145,7 +145,7 @@ namespace jai::vm {
         fused_operand callee;
         mutable const script_function* ic_identity = nullptr;
         mutable const script_defined_function* ic_fn = nullptr;
-        mutable strong_ptr<script_function> ic_pin;
+        mutable strong_ptr<script_function_node> ic_pin;
         mutable uint32_t ic_argc = 0;
         mutable bool ic_native = false;   // the cached callee is a host callable (ic_fn null): the call invokes it with the arguments as they are
         mutable bool ic_host_checked = false;   // the lane was looked for since the last refill (filled on a hit: a binding that holds)
@@ -193,7 +193,7 @@ namespace jai::vm {
         // redefinition mints a new value; the pin keeps a cached identity from being recycled) and its script class
         // cast once per class (definitions are engine-lifetime pinned). Same cached_global_env_ gate as the caches above.
         mutable const script_function* ctor_identity = nullptr;
-        mutable strong_ptr<script_function> ctor_pin;
+        mutable strong_ptr<script_function_node> ctor_pin;
         mutable const void* ctor_thunk = nullptr;
         mutable const class_definition* ctor_cls_key = nullptr;
         mutable std::shared_ptr<script_class_definition> ctor_cls;
@@ -203,7 +203,7 @@ namespace jai::vm {
         mutable checked_result<script_value> (*ic_host_invoke)(const void*, const script_value*, size_t) = nullptr;
         mutable uint32_t ic_host_argc = 0;
         mutable script_value_type ic_host_kinds[8]{};
-        mutable strong_ptr<script_function> ic_host_owner;
+        mutable strong_ptr<script_function_node> ic_host_owner;
         mutable const uint64_t* ic_host_gen = nullptr;   // the overload set's mutation count: a registration of the name since the fill declines the lane
         mutable uint64_t ic_host_at = 0;
         mutable const void* call_host_seen = nullptr;   // op_call: the callee identity the site last looked a direct entry up for
@@ -664,7 +664,7 @@ namespace jai::vm {
             bool plain_numeric = false;            // a renamed reference parameter's stores were proven by the kinds of plain arithmetic: the guard holds only while no numeric operator is registered
             mutable const class_definition* holds_cd = nullptr;   // the last class the guard validated, at its method epoch
             mutable uint64_t holds_epoch = 0;
-            mutable strong_ptr<script_function> holds_fn;   // the free function the guard last validated: the same object holds again
+            mutable strong_ptr<script_function_node> holds_fn;   // the free function the guard last validated: the same object holds again
             // the program-scope names the call's argument proofs read (call_expr::proof_globals: symbol id, kind): the guard holds only
             // while each still holds its kind, re-checked when a run moved engine::definition_epoch past globals_epoch
             std::vector<proof_global> proof_globals;

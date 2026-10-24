@@ -5,48 +5,51 @@
 ```
 bytes 0..7    payload       int64 / double / char / bool / one strong_ptr / weaker_ptr / parallel borrow
 bytes 8..15   tag word      bits 0..7   storage index (TYPEID_*), read as one byte
-                            bit  8      k_engine_only: the pointer above is the value's engine, not a type
-                            bits 9..63  a 512-aligned pointer: the declared type (type_info) or the engine
+                            bit  8      k_engine_only: an engine made this unstamped value
+                            bits 9..63  a 512-aligned pointer: the declared type (type_info), or zero
 ```
 
-`k_value_tag_alignment` (type_info.hpp) is the one alignment both `type_info` and `engine` declare and the pointer mask
-derives from; `script_value` static-asserts that the flag sits above the index byte and below that alignment, and only
-`stamp()`, `set_stamp()`, `set_engine_tag()`, `get_engine()`, `stamped_as()` and `is_outlived()` decode the word. Every
-interned type goes through one engine routine (`intern_type`) that sets its `owner`. Review Regressions
-`tag_word_stamps_and_engines` pins alignment, stamped, unstamped and literal words, the outlived sentinel and the import
-restamp.
+`k_value_tag_alignment` (type_info.hpp) is the alignment `type_info` declares and the pointer mask derives from;
+`script_value` static-asserts that the flag sits above the index byte and below that alignment, and only `stamp()`,
+`set_stamp()`, `clear_stamp()`, `set_engine_tag()`, `stamped_as()` and `is_outlived()` decode the word. Review Regressions
+`tag_word_stamps_and_payload_engines` pins the stamped, flagged and literal words, the outlived sentinel, the payload engines,
+ownership and the import restamp.
 
 ## Decisions
 
-- **One value type, not two.** The brief proposed a 16-byte internal value and a 32-byte host value converted at the
-  boundary. Every host-facing container accessor (`script_array` elements, map entries, `as<std::vector<...>>`, signal
-  arguments, archive reads) hands out `script_value&` into internal storage, so a second type would put a conversion
-  (or a proxy) on every one of them and double the surface both backends and the binders compile against. The tagged
-  word keeps one type, keeps `get_engine()` and `get_type_info()` as they were, and leaves the public API source
-  compatible: no host, example or docs sample changes.
-- **The engine is reachable from the value with no static state.** A stamped value's engine is its type's `owner`
-  (every `type_info` the engine interns, and every chunk-owned declared type, records the engine that made it). An
-  unstamped value with an engine (`script_value(std::monostate{}, eng)`, a value whose stamp was cleared) stores the
-  engine pointer itself with `k_engine_only`. A value with neither (an AST literal) has a zero tag, as before. No
-  table, no `thread_local`, no static lookup: multiple engines on multiple threads stay independent.
-- **The declared type stays a pointer, not a 32-bit id.** A 32-bit id needs a table to resolve, and the table needs
-  the engine, which the value no longer carries separately; the pointer resolves itself and keeps every hot guard
-  (`type_info_raw() == expected`) a compare of one masked word. `type_info` and `engine` are `alignas(512)`, which
-  frees bits 0..8 for the index and the flag while keeping every high bit of the pointer, so tagged heap pointers
-  (Android's top-byte tags, MTE) survive untouched.
+- **One value type, not two.** A 16-byte internal value beside a 32-byte host value would put a conversion (or a proxy) on
+  every host-facing accessor that hands out `script_value&` into internal storage (`script_array` elements, map entries,
+  `as<std::vector<...>>`, signal arguments, archive reads) and double the surface both backends and the binders compile
+  against.
+- **A plain value names no engine.** A value is its payload and its declared type; code that mints a value takes the engine
+  from its context: the VM's and the interpreter's own `engine_`, a builtin's `builtin_method_context`, a binder's engine, a
+  construction host, a parameter. A heap payload records the engine that made it (`owner` on `script_array`, `script_map`,
+  `object_holder`, `reference_holder`, `cpp_bound_holder` and `script_function_node`; a parallel borrow answers its
+  container's), read by `payload_engine()`: a deep copy, a reference's materialize and store, a class map key's operators,
+  a host conversion through the registry and a callback's `std::function` run against it. Scalars, strings and math values
+  answer null. A `held_value` keeps its engine beside the value (`get_engine()`).
+- **The engine-made flag stays.** An unstamped value an engine made (`script_value(std::monostate{}, eng)`, a cleared stamp)
+  carries `k_engine_only`, a literal carries a zero tag; `has_valid_engine()` and the VM's in-place landings tell them apart
+  with one tag test.
+- **The declared type stays a pointer, not a 32-bit id.** The pointer resolves itself and keeps every hot guard
+  (`type_info_raw() == expected`) a compare of one word. `type_info` is `alignas(512)`, which frees bits 0..8 for the index
+  and the flag while keeping every high bit of the pointer, so tagged heap pointers (Android's top-byte tags, MTE) survive.
+- **Ownership is the payload's or the stamp's.** `engine::owns_value` reads a heap payload's engine, else compares the stamp
+  with this engine's canonical scalar types, else looks it up among the engine's interned types; any other stamp is
+  another engine's (or a chunk's) and the value enters by `import_value`.
 - **The index stays a byte load.** `storage::idx_()` reads the word's low byte (little-endian, static-asserted), so
-  dispatch on the index is the same `movzx` it was. Payload assignments write the index byte and leave the type bits;
-  copy and move constructors carry the whole word; the value's copy and move assignments set the tag bits before the
-  payload, keeping the release-last order (invariants §2c).
+  dispatch on the index is one `movzx`. Payload assignments write the index byte and leave the type bits; copy and move
+  constructors carry the whole word; the value's copy and move assignments set the tag bits before the payload, keeping the
+  release-last order (invariants §2c).
 - **The interpreter moves with the VM.** There is one value type, so both backends hold the same 16 bytes.
 - **32-bit hosts.** The tag word stays 8 bytes (a 4-byte pointer above the index), so the value is 16 bytes there too.
 
 ## Costs
 
-- `get_engine()` on a stamped value is one dependent load (`type_info::owner`). The VM and interpreter keep their own
-  `engine_` and read it from context on hot paths; the value's engine is read on boundary and cold paths.
+- A heap payload is 8 bytes larger (its `owner`).
 - `type_info` objects round up to 512 bytes each (the engine interns a few hundred).
-- `set_engine` on a stamped value cannot name a different engine than its stamp's (Debug-asserted); no caller does.
+- A host write through `as<std::string&>()` and a shared math value's copy-on-write name no engine: the first is not charged
+  to a memory cap, the second takes a plain allocation instead of the engine's pool.
 
 ## Ledger
 
@@ -196,21 +199,21 @@ by construction. At the edge:
   at the end for holds a destructor made) unlinks each held value under the lock, marks it outlived (engine null), swaps in the
   outlived sentinel and releases the payload outside the lock while the engine still runs destructors. The lifetime token
   expires after the whole destructor, so signal receivers and callbacks a held instance's destructor fires still run.
-- **The outlived sentinel** is `TYPEID_INVALID` under a tag of `k_engine_only` with a null pointer, a word no live value
-  carries: `get_engine()` and `get_type_info()` read null without a load. `held_value` hides the reading accessors (`as<T>`,
+- **The outlived sentinel** is `TYPEID_INVALID` under `k_outlived` (the flag over a pointer no `type_info` has), a word no
+  live value carries: `get_type_info()` reads null without a load. `held_value` hides the reading accessors (`as<T>`,
   `as_int`, `to_string`, `deref`, the conversion operators...) with versions that throw `Value outlived its engine.` first;
   `valid()` and `get_engine()` answer without throwing. The import below throws the same text for a sliced copy.
 - **Values cross engines by copy.** `engine::make_value(script_value)`, `add_global`, `execute`'s instance variables and so
-  `convert_script_function` arguments test `owns_value` (the value's engine is this one, or none) and otherwise run
+  `convert_script_function` arguments test `owns_value` (the payload's engine, else the stamp, is this engine's) and otherwise run
   `import_value`: numbers, strings, utf8 strings and math values are remade with this engine, arrays and maps convert on an
   explicit work stack (typed buffers copy as buffers when their element type translates, strings are copied), and objects,
   functions and references (including `cpp_bound` and parallel borrows) throw `Cannot pass an object|a function|a reference
-  from another engine: ...`. The check is one tag test and at most one load at those host APIs; no script path runs it.
-- **Builtin type records stay per engine.** `type_info` carries mutable per-engine state (`owner`, which `get_engine()` reads,
-  and the reference-twin caches written at run time), so one shared static record per builtin cannot serve every engine
-  without retiring `get_engine()` from stamps (phase B). A reserved "builtin int" tag would put a branch on every stamp guard.
-  The import restamps instead: a translated type is looked up in the receiving engine by name (scalars) or rebuilt from its
-  translated parameters (arrays, maps), never interned from the foreign record (its symbol ids are the other engine's).
+  from another engine: ...`. The check is a payload read, a stamp compare and at most one lookup at those host APIs; no script
+  path runs it.
+- **Builtin type records stay per engine.** A `type_info`'s `id` is its engine's interned symbol and its reference-twin
+  caches point at that engine's types, so one record cannot serve two engines. The import restamps: a translated type is
+  looked up in the receiving engine by name (scalars) or rebuilt from its translated parameters (arrays, maps), never
+  interned from the foreign record.
 
 Tests: Review Regressions (in the Element Read Elision suite) `held_values_die_with_their_engine`,
 `held_value_copies_and_moves_across_teardown`, `held_values_from_a_host_thread`, `cross_engine_values_import_by_copy`,

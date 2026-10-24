@@ -87,7 +87,7 @@ void ensure_observable_ref_type_registered(engine& a_engine) {
 				throw runtime_error("Invalid observable property reference");
 			}
 
-			engine* eng = callback.get_engine();
+			engine* eng = callback.payload_engine();
 			const script_function& script_func = callback.as_function();
 
 			auto cpp_callback = [script_func, eng](const ValueT& old_val, const ValueT& new_val) {
@@ -365,7 +365,7 @@ std::shared_ptr<void> bound_class_conversion::unwrap_shared(const script_value& 
 	if (!holder) {
 		throw_concat("Cannot convert script_value to shared_ptr<", name, ">");
 	}
-	return native_cast_or_throw(checked_native_object(v.get_engine(), *holder, type, def->get_type_id()), v.get_engine());
+	return native_cast_or_throw(checked_native_object(holder->owner, *holder, type, def->get_type_id()), holder->owner);
 }
 
 void bound_class_conversion::require_object(const script_value& v) const {

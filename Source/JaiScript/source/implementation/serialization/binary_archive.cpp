@@ -191,7 +191,7 @@ const script_value* binary_archive_writer::next_child(value_frame& f, script_val
             const script_array* node = f.source.unchecked_array_node();
             const size_t i = f.index++;
             if (node->kind() == script_array::kind_t::hetero) { return &node->values()[i]; }
-            scratch = node->get(i, f.source.get_engine());
+            scratch = node->get(i, node->owner);
             return &scratch;
         }
         case frame_shape::map: {

@@ -142,7 +142,7 @@ namespace jai::fuzz {
 					const script_array* node = v.deref().unchecked_array_node();
 					out.put("array<"); out.put(array_kind_tag(*node)); out.put(">[");
 					size_t i = 0;
-					node->for_each(v.get_engine(), [&](const script_value& elem) {
+					node->for_each(node->owner, [&](const script_value& elem) {
 						if (i++) out.put(", ");
 						stream_value(elem, out, depth + 1);
 					});

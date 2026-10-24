@@ -542,7 +542,7 @@ namespace jai::detail::regex_library {
 	bool match_text_lane(void* self, const script_value& receiver, const script_value*, size_t argc, script_value& out) {
 		if (argc != 0) { return false; }
 		const regex_match& m = *static_cast<const regex_match*>(self);
-		out = text_value(receiver.get_engine(), m.text, m.utf8);
+		out = text_value(receiver.payload_engine(), m.text, m.utf8);
 		return true;
 	}
 	template <bool End>
@@ -557,7 +557,7 @@ namespace jai::detail::regex_library {
 			if (i < 0 || static_cast<uint64_t>(i) >= m.offsets.size() / 2) { return false; }
 			g = static_cast<size_t>(i);
 		}
-		out = script_value(m.positions[2 * g + (End ? 1 : 0)], receiver.get_engine());
+		out = script_value(m.positions[2 * g + (End ? 1 : 0)], receiver.payload_engine());
 		return true;
 	}
 

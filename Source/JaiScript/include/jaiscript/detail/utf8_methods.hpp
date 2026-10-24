@@ -23,7 +23,7 @@ namespace jai::detail {
     // the value a utf8_string method hands back: a string becomes a utf8_string, an array of strings an array of utf8_strings
     inline script_value utf8_result(const builtin_method_context& ctx, script_value r) {
         const size_t k = r.raw_storage_index();
-        if (k == script_value::TYPEID_STRING) return script_value::make_utf8(std::move(r.unchecked_as_string_ref()), ctx.get_engine());
+        if (k == script_value::TYPEID_STRING) return script_value::make_utf8(std::move(r.unchecked_as_string_ref(ctx.get_engine())), ctx.get_engine());
         if (k == script_value::TYPEID_ARRAY) {
             const script_array* node = r.unchecked_array_node();
             bool strings = node && node->size() > 0 && (node->kind() == script_array::kind_t::hetero || node->kind() == script_array::kind_t::str);

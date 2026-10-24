@@ -241,7 +241,7 @@ namespace jai::binary {
 		}
 		size_t i = 0;
 		bool ok = true;
-		node->for_each(v.get_engine(), [&](const script_value& el) {
+		node->for_each(node->owner, [&](const script_value& el) {
 			if (!ok) { return; }
 			const script_value& e = el.deref();
 			if (e.is_int() && e.as_int() >= 0 && e.as_int() <= 255) { out[i] = static_cast<char>(e.as_int()); }
@@ -291,11 +291,11 @@ namespace jai::binary {
 
 	class reader {
 	public:
-		explicit reader(engine* eng) : source_(std::string(), eng) {}
-		explicit reader(const script_value& source) : source_(snapshot(source)) {}
+		explicit reader(engine* eng) : engine_(eng), source_(std::string(), eng) {}
+		reader(engine* eng, const script_value& source) : engine_(eng), source_(snapshot(eng, source)) {}
 
 		const std::string& data() const noexcept { return source_.unchecked_text(); }
-		engine* get_engine() const noexcept { return source_.get_engine(); }
+		engine* get_engine() const noexcept { return engine_; }
 		size_t pos() const noexcept { return pos_; }
 		size_t size() const noexcept { return data().size(); }
 		size_t remaining() const noexcept { return size() - pos_; }
@@ -415,15 +415,16 @@ namespace jai::binary {
 		}
 
 	private:
-		static script_value snapshot(const script_value& v) {
+		static script_value snapshot(engine* eng, const script_value& v) {
 			const script_value& d = v.deref();
 			const size_t k = d.raw_storage_index();
 			if (k == script_value::TYPEID_STRING || k == script_value::TYPEID_UTF8_STRING) { return d; }
-			if (const std::string* bytes = d.text_bytes()) { return script_value(*bytes, d.get_engine()); }
-			if (d.is_string()) { return script_value(d.as_string(), d.get_engine()); }
+			if (const std::string* bytes = d.text_bytes()) { return script_value(*bytes, eng); }
+			if (d.is_string()) { return script_value(d.as_string(), eng); }
 			raise("binary::reader expects a string, got " + value_kind_name(d));
 		}
 
+		engine* engine_;
 		script_value source_;
 		size_t pos_ = 0;
 		bool big_ = false;
@@ -780,7 +781,7 @@ namespace jai::binary {
 		}, &eng);
 	}
 
-	inline script_value make_reader(engine& eng, const script_value& source) { return eng.make_value_object(std::make_shared<reader>(source)); }
+	inline script_value make_reader(engine& eng, const script_value& source) { return eng.make_value_object(std::make_shared<reader>(&eng, source)); }
 
 	// The direct lanes (class_definition::native_method) for the members hot loops call: exact int / float / string
 	// arguments only, anything else declines to the bound method
@@ -793,18 +794,18 @@ namespace jai::binary {
 	}
 	template <kind K> bool read_integer_lane(void* s, const script_value& recv, const script_value*, size_t argc, script_value& out) {
 		if (argc != 0) { return false; }
-		out = script_value(static_cast<reader*>(s)->integer(K), recv.get_engine());
+		out = script_value(static_cast<reader*>(s)->integer(K), recv.payload_engine());
 		return true;
 	}
 	template <kind K> bool read_float_lane(void* s, const script_value& recv, const script_value*, size_t argc, script_value& out) {
 		if (argc != 0) { return false; }
-		out = script_value(static_cast<reader*>(s)->floating(K), recv.get_engine());
+		out = script_value(static_cast<reader*>(s)->floating(K), recv.payload_engine());
 		return true;
 	}
 	template <kind K> bool write_integer_lane(void* s, const script_value& recv, const script_value* args, size_t argc, script_value& out) {
 		script_int v;
 		if (!lane_int(args, argc, v)) { return false; }
-		static_cast<writer*>(s)->charged_to(recv.get_engine()).integer(K, v);
+		static_cast<writer*>(s)->charged_to(recv.payload_engine()).integer(K, v);
 		out = recv;
 		return true;
 	}
@@ -826,12 +827,12 @@ namespace jai::binary {
 		on(r, "float64", &read_float_lane<kind::float64>);
 		on(r, "text", [](void* s, const script_value& recv, const script_value* args, size_t argc, script_value& out) {
 			if (argc == 0) {
-				out = script_value(static_cast<reader*>(s)->text(), recv.get_engine());
+				out = script_value(static_cast<reader*>(s)->text(), recv.payload_engine());
 				return true;
 			}
 			script_int n;
 			if (!lane_int(args, argc, n)) { return false; }
-			out = script_value(static_cast<reader*>(s)->text(n), recv.get_engine());
+			out = script_value(static_cast<reader*>(s)->text(n), recv.payload_engine());
 			return true;
 		});
 		on(r, "bytes", [](void* s, const script_value&, const script_value* args, size_t argc, script_value& out) {
@@ -856,17 +857,17 @@ namespace jai::binary {
 		});
 		on(r, "pos", [](void* s, const script_value& recv, const script_value*, size_t argc, script_value& out) {
 			if (argc != 0) { return false; }
-			out = script_value(static_cast<script_int>(static_cast<reader*>(s)->pos()), recv.get_engine());
+			out = script_value(static_cast<script_int>(static_cast<reader*>(s)->pos()), recv.payload_engine());
 			return true;
 		});
 		on(r, "remaining", [](void* s, const script_value& recv, const script_value*, size_t argc, script_value& out) {
 			if (argc != 0) { return false; }
-			out = script_value(static_cast<script_int>(static_cast<reader*>(s)->remaining()), recv.get_engine());
+			out = script_value(static_cast<script_int>(static_cast<reader*>(s)->remaining()), recv.payload_engine());
 			return true;
 		});
 		on(r, "at_end", [](void* s, const script_value& recv, const script_value*, size_t argc, script_value& out) {
 			if (argc != 0) { return false; }
-			out = script_value(static_cast<reader*>(s)->at_end(), recv.get_engine());
+			out = script_value(static_cast<reader*>(s)->at_end(), recv.payload_engine());
 			return true;
 		});
 		class_definition& w = *writer_def;
@@ -881,7 +882,7 @@ namespace jai::binary {
 			if (argc != 1) { return false; }
 			const script_value& a = args[0].deref();
 			if (a.raw_storage_index() != script_value::TYPEID_STRING) { return false; }
-			static_cast<writer*>(s)->charged_to(recv.get_engine()).text(a.unchecked_as_string());
+			static_cast<writer*>(s)->charged_to(recv.payload_engine()).text(a.unchecked_as_string());
 			out = recv;
 			return true;
 		});

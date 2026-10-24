@@ -1447,7 +1447,7 @@ public:
 			)");
 			const script_array* src = table.deref().unchecked_array_node();
 			check_true(src->is_typed());
-			script_value copy = table.deref().parallel_detached_copy();
+			script_value copy = table.deref().parallel_detached_copy(e.get());
 			const script_array* dst = copy.unchecked_array_node();
 			check_true(dst->is_typed());
 			check_eq(src->size(), dst->size());

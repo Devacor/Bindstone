@@ -335,7 +335,7 @@ public:
                 check_eq((int64_t)20, e->execute("go(a, 5)").as_int(), "the withdrawn lane's ordinary call" + tag);
                 def->add_native_method(e->symbolize("add"), [](void*, const script_value& receiver, const script_value*, size_t argc, script_value& out) {
                     if (argc != 1) { return false; }
-                    out = script_value(script_int(1000), receiver.get_engine());
+                    out = script_value(script_int(1000), receiver.payload_engine());
                     return true;
                 });
                 check_eq(vm ? (int64_t)5000 : (int64_t)20, e->execute("go(a, 5)").as_int(), "a lane added later" + tag);

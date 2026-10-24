@@ -31,12 +31,12 @@ namespace detail {
 			// a null callback is an empty std::function, as a null function pointer converts in C++; any other non-function is
 			// the conversion's failure
 			if (fn.deref().is_null()) { return {}; }
-			if (!fn.is_function() || !fn.get_engine()) { throw runtime_error("Cannot convert a value that is not a function to a std::function callback"); }
-			std::weak_ptr<const void> alive = fn.get_engine()->lifetime_token();
+			if (!fn.is_function() || !fn.payload_engine()) { throw runtime_error("Cannot convert a value that is not a function to a std::function callback"); }
+			std::weak_ptr<const void> alive = fn.payload_engine()->lifetime_token();
 			return [fn = std::move(fn), alive = std::move(alive)](Args... args) -> R {
 				// a callback the host kept past its engine never reaches the dead engine
 				if (alive.expired()) { throw runtime_error("Cannot call a script function after its engine was destroyed"); }
-				engine* eng = fn.get_engine();
+				engine* eng = fn.payload_engine();
 				engine::external_call_guard scope(eng);
 				std::vector<script_value> values;
 				values.reserve(sizeof...(Args));

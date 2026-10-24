@@ -39,7 +39,7 @@ namespace jai {
         if (eng) {
             if constexpr (encoding::semantic_index != TYPEID_NULL) {
                 val.set_stamp(cpp_bound_type_info(eng, encoding::semantic_index));
-                val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, encoding::semantic_index);
+                val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, encoding::semantic_index, eng);
             } else if constexpr (std::is_class_v<T>) {
                 if (std::shared_ptr<detail::first_type_t<class_definition, T>> bound_def = eng->get_class_definition_by_type(std::type_index(typeid(T)))) {
                     // This enables non-owning reference semantics for T& returns
@@ -54,15 +54,15 @@ namespace jai {
                     val.storage_ = std::move(holder);
                 } else {
                     val.set_stamp(eng->get_type_info_object(typeid(T).name()));
-                    val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, static_cast<uint8_t>(TYPEID_NULL));
+                    val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, static_cast<uint8_t>(TYPEID_NULL), eng);
                 }
             } else {
                 val.set_stamp(eng->get_type_info_object(typeid(T).name()));
-                val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, static_cast<uint8_t>(TYPEID_NULL));
+                val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, static_cast<uint8_t>(TYPEID_NULL), eng);
             }
         } else {
             // No engine: keep the binding observable (is_cpp_bound), semantics opaque
-            val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, static_cast<uint8_t>(TYPEID_NULL));
+            val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, static_cast<uint8_t>(TYPEID_NULL), eng);
         }
         return val;
     }

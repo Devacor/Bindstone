@@ -2187,12 +2187,10 @@ public:
 
 		test("variadic_cpp_function", [this]() {
 			auto e = vm_engine();
-			e->add_variadic_function("sum_all", [](const std::vector<script_value>& args) -> checked_result<script_value> {
+			e->add_variadic_function("sum_all", [eng = e.get()](const std::vector<script_value>& args) -> checked_result<script_value> {
 				script_int total = 0;
-				jai::engine* eng = nullptr;
 				for (const auto& a : args) {
 					total += a.as_int();
-					eng = a.get_engine();
 				}
 				return script_value(total, eng);
 			});

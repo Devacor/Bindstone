@@ -276,13 +276,13 @@ namespace detail {
         // pre-warm pass; collected_nodes (optional) receives the address of every heavy
         // node the copy MINTED (string/array/map payloads) so the region can later
         // recognize results that alias a worker-provisioned value.
-        script_value parallel_detached_copy(std::vector<type_info*>* collected_types = nullptr,
+        script_value parallel_detached_copy(engine* eng, std::vector<type_info*>* collected_types = nullptr,
                                             std::vector<const void*>* collected_nodes = nullptr) const;
         // One level of the detach, its nested values inline up to detail::k_inline_copy_depth and on a work list below, as
         // clone_level
-        script_value parallel_detached_level(std::vector<type_info*>* collected_types, std::vector<const void*>* collected_nodes,
+        script_value parallel_detached_level(engine* eng, std::vector<type_info*>* collected_types, std::vector<const void*>* collected_nodes,
                                              detail::deep_copy_work& work, unsigned depth) const;
-        void parallel_detached_subtree_into(script_value& dest, std::vector<type_info*>* collected_types,
+        void parallel_detached_subtree_into(engine* eng, script_value& dest, std::vector<type_info*>* collected_types,
                                             std::vector<const void*>* collected_nodes) const;
         // A parallel worker's view of a captured C++ class instance (the barrier makes one per worker): a new instance and
         // holders of its own over the same C++ object, so no count a worker moves is another thread's
@@ -517,10 +517,10 @@ namespace detail {
         static script_value outlived() noexcept {
             script_value result;
             result.storage_ = invalid_tag{};
-            result.storage_.set_tag(k_engine_only);
+            result.storage_.set_tag(k_outlived);
             return result;
         }
-        bool is_outlived() const noexcept { return raw_storage_index() == TYPEID_INVALID && storage_.tag() == k_engine_only; }
+        bool is_outlived() const noexcept { return raw_storage_index() == TYPEID_INVALID && storage_.tag() == k_outlived; }
         bool is_int() const {
             const script_value& d = deref();
             const size_t idx = d.raw_storage_index();
@@ -546,8 +546,8 @@ namespace detail {
         inline const std::string& unchecked_text() const noexcept {
             return storage_.index() == TYPEID_UTF8_STRING ? storage_.get<strong_ptr<script_utf8>>()->bytes : unchecked_as_string();
         }
-        inline std::string& unchecked_text_ref() {
-            return storage_.index() == TYPEID_UTF8_STRING ? unchecked_as_utf8_ref().bytes : unchecked_as_string_ref();
+        inline std::string& unchecked_text_ref(engine* a_engine) {
+            return storage_.index() == TYPEID_UTF8_STRING ? unchecked_as_utf8_ref().bytes : unchecked_as_string_ref(a_engine);
         }
         // the bytes of a string or a utf8_string (a C++-bound string box excluded); null for anything else
         const std::string* text_bytes() const noexcept {
@@ -619,12 +619,12 @@ namespace detail {
         //   NULL (opaque)       -> null value (same "Invalid operands" type_mismatch as before).
         script_value bound_decoded_temp() const {
             switch (bound_semantic_index()) {
-                case TYPEID_INT: return script_value(unchecked_as_int(), get_engine());
-                case TYPEID_FLOAT: return script_value(unchecked_as_float(), get_engine());
-                case TYPEID_BOOL: return script_value(unchecked_as_bool(), get_engine());
-                case TYPEID_CHAR: return script_value(unchecked_as_char(), get_engine());
-                case TYPEID_STRING: return script_value(unchecked_as_string(), get_engine());
-                default: return script_value(std::monostate{}, get_engine());
+                case TYPEID_INT: return script_value(unchecked_as_int(), payload_engine());
+                case TYPEID_FLOAT: return script_value(unchecked_as_float(), payload_engine());
+                case TYPEID_BOOL: return script_value(unchecked_as_bool(), payload_engine());
+                case TYPEID_CHAR: return script_value(unchecked_as_char(), payload_engine());
+                case TYPEID_STRING: return script_value(unchecked_as_string(), payload_engine());
+                default: return script_value(std::monostate{}, payload_engine());
             }
         }
 
@@ -810,17 +810,17 @@ namespace detail {
         // the write lands in *this alone, which must therefore be the storage the script
         // named (a variable cell, element, field, map value, holder scratch), never a
         // transient copy. Bound strings return the LIVE C++ string (write-through).
-        inline script_string& unchecked_as_string_ref() {
+        inline script_string& unchecked_as_string_ref(engine* a_engine) {
             if (auto* b = storage_.get_if<TYPEID_CPP_BOUND>()) [[unlikely]] {
                 return *static_cast<script_string*>((*b)->ptr);
             }
             auto& node = *storage_.get_if<TYPEID_STRING>();
             if (!node.unique()) [[unlikely]] {
-                return unshare_string_node();
+                return unshare_string_node(a_engine);
             }
             return *node;
         }
-        script_string& unshare_string_node();   // value.cpp: the fresh node, memory-cap charged deferred
+        script_string& unshare_string_node(engine* a_engine);   // value.cpp: the fresh node, charged to a_engine's memory cap
         void unshare_vec_node();
 
         inline script_char unchecked_as_char() const noexcept {
@@ -1020,7 +1020,7 @@ namespace detail {
                 // string bindings are only ever created over std::string/script_string - exact type
                 return *static_cast<script_string*>(box->ptr);
             }
-            return val.unchecked_as_string_ref();   // the copy-on-write gate: a host write stays in this value
+            return val.unchecked_as_string_ref(nullptr);   // the copy-on-write gate: a host write stays in this value
         }
         
         // Generic extraction with type checking
@@ -1034,7 +1034,7 @@ namespace detail {
                 if (result.message().empty()) {
                     throw_runtime_error("Type conversion failed");
                 }
-                throw_checked_error(get_engine(), result.message(), result.symbol_id(), result.symbol_id2());
+                throw_checked_error(payload_engine(), result.message(), result.symbol_id(), result.symbol_id2());
             }
             return std::move(result.value());
         }
@@ -1091,7 +1091,7 @@ namespace detail {
 							}
 							auto result = detail::checked_native_reference(*this, typeid(base_type));
 							if (!result) [[unlikely]] {
-								throw_checked_error(get_engine(), result.message(), result.symbol_id(), result.symbol_id2());
+								throw_checked_error(payload_engine(), result.message(), result.symbol_id(), result.symbol_id2());
 							}
 							return *static_cast<base_type*>(result.value());
 						}
@@ -1429,7 +1429,7 @@ namespace detail {
                             return checked_result<T>(const_cast<std::vector<script_value>&>(node->values()));
                         } else {
                             // By-value request: a typed buffer boxes into the copy the caller asked for
-                            return checked_result<T>(node->materialize_values(get_engine()));
+                            return checked_result<T>(node->materialize_values(node->owner));
                         }
                     } else if constexpr (std::is_same_v<base_type, script_map>) {
                         auto map_result = checked_as_map();
@@ -1568,13 +1568,13 @@ namespace detail {
             // Vector types
             else if constexpr (is_specialization_v<T, std::vector>) {
                 // Use engine's conversion registry first
-                if (get_engine()) {
-                    auto registry = get_engine_conversion_registry(get_engine());
+                if (payload_engine()) {
+                    auto registry = get_engine_conversion_registry(payload_engine());
                     if (registry && registry->template has_conversion<T>()) {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
-                            return conversion_exception_result<T>(get_engine(), e.what());
+                            return conversion_exception_result<T>(payload_engine(), e.what());
                         } catch (...) {
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
@@ -1621,7 +1621,7 @@ namespace detail {
                 }
                 bool failed = false;
                 error_propagator failure;
-                node->for_each(get_engine(), [&](const script_value& elem) {
+                node->for_each(node->owner, [&](const script_value& elem) {
                     if (failed) { return; }
                     if constexpr (std::is_same_v<element_type, script_value>) {
                         result.push_back(elem);
@@ -1637,13 +1637,13 @@ namespace detail {
             // Map types
             else if constexpr (is_script_map_like_v<T>) {
                 // Use engine's conversion registry first
-                if (get_engine()) {
-                    auto registry = get_engine_conversion_registry(get_engine());
+                if (payload_engine()) {
+                    auto registry = get_engine_conversion_registry(payload_engine());
                     if (registry && registry->template has_conversion<T>()) {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
-                            return conversion_exception_result<T>(get_engine(), e.what());
+                            return conversion_exception_result<T>(payload_engine(), e.what());
                         } catch (...) {
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
@@ -1756,13 +1756,13 @@ namespace detail {
                     return checked_result<T>(T{});
                 }
                 // First check if there's a registered conversion
-                if (get_engine()) {
-                    auto registry = get_engine_conversion_registry(get_engine());
+                if (payload_engine()) {
+                    auto registry = get_engine_conversion_registry(payload_engine());
                     if (registry && registry->template has_conversion<T>()) {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
-                            return conversion_exception_result<T>(get_engine(), e.what());
+                            return conversion_exception_result<T>(payload_engine(), e.what());
                         } catch (...) {
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
@@ -1790,14 +1790,14 @@ namespace detail {
 
                     // Check if we need to use the custom extractor
                     if (objHolder->is_class_instance_wrapper) {
-                        if (get_engine()) {
-                            auto registry = get_engine_conversion_registry(get_engine());
+                        if (payload_engine()) {
+                            auto registry = get_engine_conversion_registry(payload_engine());
                             if (registry) {
                                 auto extracted = registry->extract_custom_object(objHolder->type_name, objHolder->data);
                                 if (extracted && extracted.use_count() == 0) {
                                     // an extended object's layer references it without owning it:
                                     // ownership comes from the object's own shared_ptr, weakly held
-                                    extracted = engine_lock_instance_cpp_object(get_engine(), objHolder->data);
+                                    extracted = engine_lock_instance_cpp_object(payload_engine(), objHolder->data);
                                     if (!extracted) {
                                         return checked_result<T>(
                                             make_error_code(runtime_error_code::type_mismatch),
@@ -1832,7 +1832,7 @@ namespace detail {
                     if (!locked) {
                         return checked_result<T>(T{});
                     }
-                    script_value target(std::monostate{}, get_engine());
+                    script_value target(std::monostate{}, locked->owner);
                     target.set_object_holder(locked);
                     auto shared = target.template checked_as<shared_type>();
                     if (!shared) {
@@ -1852,13 +1852,13 @@ namespace detail {
                              !is_specialization_v<T, std::vector> &&
                              !is_script_map_like_v<T>) {
                 // Check custom converter first
-                if (get_engine()) {
-                    auto registry = get_engine_conversion_registry(get_engine());
+                if (payload_engine()) {
+                    auto registry = get_engine_conversion_registry(payload_engine());
                     if (registry && registry->template has_conversion<T>()) {
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
-                            return conversion_exception_result<T>(get_engine(), e.what());
+                            return conversion_exception_result<T>(payload_engine(), e.what());
                         } catch (...) {
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
@@ -1955,15 +1955,14 @@ namespace detail {
         // Get engine pointer for creating new script_values
         // the (declared type, engine) pair in one compare of the tag word: exactly this stamp (whose owner is eng), or no stamp and eng
         JAI_FORCEINLINE bool stamped_as(const type_info* stamp, const engine* eng) const noexcept {
-            const uintptr_t expected = stamp ? reinterpret_cast<uintptr_t>(stamp) : eng ? (reinterpret_cast<uintptr_t>(eng) | k_engine_only) : 0;
+            const uintptr_t expected = stamp ? reinterpret_cast<uintptr_t>(stamp) : eng ? k_engine_only : 0;
             return storage_.tag() == expected;
         }
-        engine* get_engine() const noexcept {
-            const uintptr_t tag = storage_.tag();
-            if (tag & k_engine_only) { return reinterpret_cast<engine*>(tag & k_tag_pointer_mask); }
-            const auto* stamped = reinterpret_cast<const type_info*>(tag);
-            return stamped ? stamped->owner : nullptr;
-        }
+        // The engine a heap payload belongs to (a container, object, reference or bound box records the engine that made it);
+        // scalars, strings and math values name none: code that mints from them takes its engine from context
+        engine* payload_engine() const noexcept;
+        // null under this value's tag word: its stamp, or the engine-made flag
+        script_value tagged_null() const noexcept;
 
         // Implicit conversion operators for common C++ types
         // These enable natural overload resolution in C++ function calls
@@ -2010,9 +2009,11 @@ namespace detail {
         
         
     private:
-        // The storage's tag word (internal/value16_design.md): the declared type, whose owner is the value's engine, or
-        // with k_engine_only an unstamped value's engine; both are 512-aligned so the low 9 bits hold the index and flag
+        // The storage's tag word (internal/value16_design.md): the declared type (512-aligned, so the low 9 bits hold the
+        // index and the flag), or k_engine_only for an unstamped value an engine made; k_outlived marks a held value whose
+        // engine is gone (no type_info sits at that address)
         static constexpr uintptr_t k_engine_only = 0x100;
+        static constexpr uintptr_t k_outlived = k_engine_only | k_value_tag_alignment;
         static constexpr uintptr_t k_tag_pointer_mask = ~uintptr_t{k_value_tag_alignment - 1};
         static_assert(alignof(type_info) >= k_value_tag_alignment && (k_engine_only & 0xFF) == 0 && k_engine_only < k_value_tag_alignment,
                       "the tag word's pointer bits sit above the index byte and the engine-only flag");
@@ -2022,22 +2023,21 @@ namespace detail {
         }
         JAI_FORCEINLINE void set_stamp(type_info* stamped) noexcept {
             if (stamped) [[likely]] {
-                assert(stamped->owner && "a stamp must name its engine");
                 assert((reinterpret_cast<uintptr_t>(stamped) & ~k_tag_pointer_mask) == 0 && "a stamp is tag-aligned");
                 storage_.set_tag(reinterpret_cast<uintptr_t>(stamped));
             } else {
                 clear_stamp();
             }
         }
-        JAI_NOINLINE void clear_stamp() noexcept { set_engine_tag(get_engine()); }
-        void set_engine_tag(engine* eng) noexcept {
-            assert((reinterpret_cast<uintptr_t>(eng) & ~k_tag_pointer_mask) == 0 && "an engine is tag-aligned");
-            storage_.set_tag(eng ? (reinterpret_cast<uintptr_t>(eng) | k_engine_only) : 0);
+        void clear_stamp() noexcept { storage_.set_tag(storage_.tag() ? k_engine_only : 0); }
+        void set_engine_tag(const engine* eng) noexcept {
+            storage_.set_tag(eng ? k_engine_only : 0);
         }
 
 	public: // Match the public forward declaration and holder accessors.
         // For object storage - external serialization will handle this
         struct object_holder {
+            engine* owner = nullptr;   // the engine that made this object: copies and class lookups run against it
             std::string_view type_name;      // the type's name: the engine's interned text or a literal (never an owned string)
             uint64_t type_id = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
             std::shared_ptr<void> data;     // The actual object
@@ -2072,8 +2072,9 @@ namespace detail {
             void*   ptr = nullptr;        // address of the live C++ variable
             uint8_t size_and_sign = 0;    // low 7 bits: sizeof(T); bit 7: unsigned
             uint8_t semantic_index = 0;   // TYPEID_NULL/INT/FLOAT/STRING/CHAR/BOOL - the old shadow index
-            cpp_bound_holder(void* p, uint8_t ss, uint8_t sem) noexcept
-                : ptr(p), size_and_sign(ss), semantic_index(sem) {}
+            engine* owner = nullptr;      // the engine that bound it: a decoded temporary is stamped from it
+            cpp_bound_holder(void* p, uint8_t ss, uint8_t sem, engine* o) noexcept
+                : ptr(p), size_and_sign(ss), semantic_index(sem), owner(o) {}
         };
 
         // Boxes the (never runtime-constructed) shared_ptr alternative 11 so the variant's
@@ -2118,6 +2119,7 @@ namespace detail {
             const class_definition* referent_class = nullptr;
         };
         struct reference_holder {
+            engine* owner = nullptr;   // the engine that minted this reference: materializing and storing through it run against it
             type_info_ptr container_element_type = nullptr;  // For subscript/field refs: the element/field type constraint
 
             static constexpr size_t cell_storage_size = 16;   // == sizeof(script_value), gated in value.cpp
@@ -2348,7 +2350,7 @@ namespace detail {
             storage(strong_ptr<script_array> v) noexcept : hdr_(TYPEID_ARRAY) { new (&p_.a) strong_ptr<script_array>(std::move(v)); }
             storage(strong_ptr<script_map> v) noexcept : hdr_(TYPEID_MAP) { new (&p_.m) strong_ptr<script_map>(std::move(v)); }
             storage(strong_ptr<object_holder> v) noexcept : hdr_(TYPEID_OBJECT) { new (&p_.o) strong_ptr<object_holder>(std::move(v)); }
-            storage(strong_ptr<script_function> v) noexcept : hdr_(TYPEID_FUNCTION) { new (&p_.fn) strong_ptr<script_function>(std::move(v)); }
+            storage(strong_ptr<script_function_node> v) noexcept : hdr_(TYPEID_FUNCTION) { new (&p_.fn) strong_ptr<script_function_node>(std::move(v)); }
             storage(strong_ptr<reference_holder> v) noexcept : hdr_(TYPEID_REFERENCE) { new (&p_.r) strong_ptr<reference_holder>(std::move(v)); }
             storage(strong_ptr<shared_value_holder> v) noexcept : hdr_(TYPEID_SHARED_PTR) { new (&p_.sh) strong_ptr<shared_value_holder>(std::move(v)); }
             storage(jai::weaker_ptr<object_holder> v) noexcept : hdr_(TYPEID_WEAK_PTR) { new (&p_.w) jai::weaker_ptr<object_holder>(std::move(v)); }
@@ -2369,7 +2371,7 @@ namespace detail {
                     case TYPEID_ARRAY: new (&p_.a) strong_ptr<script_array>(o.p_.a); break;
                     case TYPEID_MAP: new (&p_.m) strong_ptr<script_map>(o.p_.m); break;
                     case TYPEID_OBJECT: new (&p_.o) strong_ptr<object_holder>(o.p_.o); break;
-                    case TYPEID_FUNCTION: new (&p_.fn) strong_ptr<script_function>(o.p_.fn); break;
+                    case TYPEID_FUNCTION: new (&p_.fn) strong_ptr<script_function_node>(o.p_.fn); break;
                     case TYPEID_REFERENCE: new (&p_.r) strong_ptr<reference_holder>(o.p_.r); break;
                     case TYPEID_SHARED_PTR: new (&p_.sh) strong_ptr<shared_value_holder>(o.p_.sh); break;
                     case TYPEID_WEAK_PTR: new (&p_.w) jai::weaker_ptr<object_holder>(o.p_.w); break;
@@ -2463,7 +2465,7 @@ namespace detail {
             template <size_t I> using alt_t = std::tuple_element_t<I, std::tuple<
                 std::monostate, script_int, script_float, strong_ptr<script_string>,
                 script_char, script_bool, strong_ptr<script_array>, strong_ptr<script_map>,
-                strong_ptr<object_holder>, strong_ptr<script_function>, strong_ptr<reference_holder>,
+                strong_ptr<object_holder>, strong_ptr<script_function_node>, strong_ptr<reference_holder>,
                 strong_ptr<shared_value_holder>, jai::weaker_ptr<object_holder>, invalid_tag,
                 strong_ptr<cpp_bound_holder>, parallel_borrow_tag, strong_ptr<script_utf8>,
                 strong_ptr<script_vec_node>, strong_ptr<script_vec_node>, strong_ptr<script_vec_node>, strong_ptr<script_vec_node>,
@@ -2502,7 +2504,7 @@ namespace detail {
                 strong_ptr<script_array> a;
                 strong_ptr<script_map> m;
                 strong_ptr<object_holder> o;
-                strong_ptr<script_function> fn;
+                strong_ptr<script_function_node> fn;
                 strong_ptr<reference_holder> r;
                 strong_ptr<shared_value_holder> sh;
                 jai::weaker_ptr<object_holder> w;
@@ -2572,7 +2574,7 @@ namespace detail {
                 else if constexpr (std::is_same_v<T, strong_ptr<script_array>>) { return TYPEID_ARRAY; }
                 else if constexpr (std::is_same_v<T, strong_ptr<script_map>>) { return TYPEID_MAP; }
                 else if constexpr (std::is_same_v<T, strong_ptr<object_holder>>) { return TYPEID_OBJECT; }
-                else if constexpr (std::is_same_v<T, strong_ptr<script_function>>) { return TYPEID_FUNCTION; }
+                else if constexpr (std::is_same_v<T, strong_ptr<script_function_node>>) { return TYPEID_FUNCTION; }
                 else if constexpr (std::is_same_v<T, strong_ptr<reference_holder>>) { return TYPEID_REFERENCE; }
                 else if constexpr (std::is_same_v<T, strong_ptr<shared_value_holder>>) { return TYPEID_SHARED_PTR; }
                 else if constexpr (std::is_same_v<T, jai::weaker_ptr<object_holder>>) { return TYPEID_WEAK_PTR; }
@@ -2602,7 +2604,7 @@ namespace detail {
     public:
         // Method to set engine pointer after construction
         // a stamped value names its stamp's engine; only an unstamped one takes another
-        void set_engine(engine* eng) { if (!stamp()) { set_engine_tag(eng); } else { assert(!eng || stamp()->owner == eng); } }
+        void set_engine(const engine* eng) { if (!stamp()) { set_engine_tag(eng); } }
 
         // Access raw storage for AST literals (bypasses type checking)
         const storage& get_storage() const { return storage_; }
@@ -2847,7 +2849,7 @@ namespace detail {
                   (!type->element_type() || type->element_type()->base_type == script_value_type::jai_any_type)))) {
                 auto& node = *storage_.get_if<TYPEID_ARRAY>();
                 if (node && node->is_typed()) {
-                    node->demote_to_hetero(get_engine());
+                    node->demote_to_hetero(node->owner);
                 }
             }
         }
@@ -2894,11 +2896,13 @@ namespace detail {
         held_value(held_value&& other) noexcept;
         held_value& operator=(const held_value& other);
         held_value& operator=(held_value&& other) noexcept;
-        // a plain value assigned in: the held value is now registered with that value's engine
+        // a plain value assigned in: a heap payload registers the held value with its engine, any other value keeps the held one's
         held_value& operator=(script_value value);
         ~held_value();
 
         bool valid() const noexcept { return !outlived_; }
+        // the engine the held value is registered with; null once outlived or moved from
+        engine* get_engine() const noexcept { return has_valid_engine() && !outlived_ ? engine_ : nullptr; }
         const script_value& value() const { check_alive(); return *this; }
 
         template<typename T> T as() const { check_alive(); return script_value::template as<T>(); }

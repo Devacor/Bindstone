@@ -211,8 +211,8 @@ void environment::define(uint64_t id, const script_value& value) {
     // New local variable - add to stable storage
     // engine::memory_cap: environment growth counts toward the script's allowance
     // (approximate slot cost; the raise happens at the next loop back-edge)
-    if (engine* eng = value.get_engine()) {
-        eng->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
+    if (engine_ && value.has_valid_engine()) {
+        engine_->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
     }
     flat_lookup_[id] = &local_storage_.push_back(value);  // Update/shadow in flat lookup
     local_ids_[id] = true;
@@ -233,8 +233,8 @@ void environment::define(uint64_t id, script_value&& value) {
     // New local variable - add to stable storage
     // engine::memory_cap: environment growth counts toward the script's allowance
     // (approximate slot cost; the raise happens at the next loop back-edge)
-    if (engine* eng = value.get_engine()) {
-        eng->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
+    if (engine_ && value.has_valid_engine()) {
+        engine_->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
     }
     flat_lookup_[id] = &local_storage_.push_back(std::move(value));  // Update/shadow in flat lookup
     local_ids_[id] = true;
@@ -383,8 +383,8 @@ checked_result<script_value> environment::get(uint64_t id) const {
                     payload.this_obj = this_object_;
                     payload.bound_dispatch = std::move(method);
                     bound_method_storage_ = script_value::make_function(
-                        script_callable_thunk{this_object_.get_engine(), std::move(payload)},
-                        this_object_.get_engine());
+                        script_callable_thunk{this_object_.payload_engine(), std::move(payload)},
+                        this_object_.payload_engine());
                     return bound_method_storage_;
                 }
 
@@ -524,8 +524,8 @@ bool environment::define_variable(uint64_t id, script_value&& value) {
         return true;
     }
     r.versions[id].push_back({flat_unit, *flat});
-    if (engine* eng = value.get_engine()) {
-        eng->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
+    if (engine_ && value.has_valid_engine()) {
+        engine_->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
     }
     *flat = &local_storage_.push_back(std::move(value));
     r.unit_of[id] = unit;
@@ -999,6 +999,7 @@ void environment::reset(std::shared_ptr<environment> new_parent) {
     }
 
     parent_ = std::move(new_parent);
+    if (parent_) { engine_ = parent_->engine_; }
 
     // Reset to standard kind and clear kind-specific fields
     kind_ = env_kind::standard;
@@ -1023,6 +1024,7 @@ void environment::reset_as_method(std::shared_ptr<environment> parent, script_va
     }
 
     parent_ = std::move(parent);
+    if (parent_) { engine_ = parent_->engine_; }
 
     // Set to method kind with this object (caller stamps set_access_context after)
     kind_ = env_kind::method;
@@ -1047,6 +1049,7 @@ void environment::reset_as_static_method(std::shared_ptr<environment> parent, st
     }
 
     parent_ = std::move(parent);
+    if (parent_) { engine_ = parent_->engine_; }
 
     // Set to static_method kind with class definition
     kind_ = env_kind::static_method;
@@ -1247,7 +1250,7 @@ void detail::anchor_bound_method_result(const script_value& this_obj, checked_re
 }
 
 script_value make_bound_method(const script_value& this_obj, const script_value& method) {
-    auto eng = this_obj.get_engine();
+    auto eng = this_obj.payload_engine();
     return script_value::make_function(bound_method_fn{this_obj, method}, eng);
 }
 

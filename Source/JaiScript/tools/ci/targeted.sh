@@ -170,10 +170,23 @@ if [ "$BUILD" = 1 ]; then
 fi
 
 FAILED=""
+SIDE_GATES=()
+TIMING_GATES=()
+debug_pid=""
 for check in $CHECKS; do
 	case "$check" in
 		# shellcheck disable=SC2086
-		debug-suites) jai_debug_suites $SUITE_BACKENDS || FAILED="$FAILED debug-suites" ;;
+		debug-suites)
+			{ jai_debug_suites $SUITE_BACKENDS || echo "DEBUG-SUITES-RED"; } > "$JAI_CI_LOG_DIR/targeted_debug.out" 2>&1 &
+			debug_pid=$!
+			;;
+		verify-site | ci-scripts) ;;
+		*) if jai_timing_gate "$check"; then TIMING_GATES+=("$check"); else SIDE_GATES+=("$check"); fi ;;
+	esac
+done
+[ "${#SIDE_GATES[@]}" = 0 ] || { jai_gates_side_by_side release "${SIDE_GATES[@]}"; FAILED="$FAILED$JAI_RED"; }
+for check in $CHECKS; do
+	case "$check" in
 		verify-site)
 			runner="$JAI_RELEASE_DIR/bin/jaiscript"
 			if (cd "$JAI_ROOT" && "$(jai_python)" docs/site_tools/verify_site.py --runner "$runner") > "$JAI_CI_LOG_DIR/verify_site.log" 2>&1; then
@@ -189,8 +202,13 @@ for check in $CHECKS; do
 			for script in "$JAI_ROOT"/tools/ci/*.sh; do bash -n "$script" || bad=1; done
 			if [ "$bad" = 0 ]; then echo "green: ci-scripts (every tools/ci script parses)"; else echo "red: ci-scripts"; FAILED="$FAILED ci-scripts"; fi
 			;;
-		*) jai_gates release "$check" || FAILED="$FAILED $check" ;;
 	esac
 done
+if [ -n "$debug_pid" ]; then
+	wait "$debug_pid" || true
+	cat "$JAI_CI_LOG_DIR/targeted_debug.out"
+	grep -q "DEBUG-SUITES-RED" "$JAI_CI_LOG_DIR/targeted_debug.out" && FAILED="$FAILED debug-suites"
+fi
+for check in "${TIMING_GATES[@]+"${TIMING_GATES[@]}"}"; do jai_gates release "$check" || FAILED="$FAILED $check"; done
 
 if [ -z "$FAILED" ]; then echo "TARGETED GREEN:$CHECKS"; else echo "TARGETED RED:$FAILED"; exit 1; fi

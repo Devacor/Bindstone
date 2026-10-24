@@ -21,14 +21,22 @@ if [ "${1:-}" = "--build" ]; then
 fi
 
 FAILED=""
+export HASH_BACKENDS="vm interp"
+export FUZZ_ITERATIONS="${BATTERY_FUZZ_ITERATIONS:-3000}"
 if [ "${BATTERY_SKIP_DEBUG:-0}" = 1 ]; then
 	echo "skipped: the Debug suites (already green at this commit)"
+	: > "$JAI_CI_LOG_DIR/battery_debug.out"
 else
-	jai_debug_suites interp vm vm-reference || FAILED="$FAILED debug-suites"
+	{ jai_debug_suites interp vm vm-reference || echo "DEBUG-SUITES-RED"; } > "$JAI_CI_LOG_DIR/battery_debug.out" 2>&1 &
+	debug_pid=$!
 fi
-export HASH_BACKENDS="vm interp"
-for gate in tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom gloom-workers gloom-long demoreel crawler gatorquest timedemo embed-quickstart lsp lsp-latency amalgamation; do
-	FUZZ_ITERATIONS="${BATTERY_FUZZ_ITERATIONS:-3000}" jai_gates release "$gate" || FAILED="$FAILED $gate"
-done
+jai_gates_side_by_side release tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom gloom-workers gloom-long demoreel crawler gatorquest timedemo embed-quickstart lsp amalgamation
+FAILED="$FAILED$JAI_RED"
+if [ -n "${debug_pid:-}" ]; then
+	wait "$debug_pid" || true
+	cat "$JAI_CI_LOG_DIR/battery_debug.out"
+	grep -q "DEBUG-SUITES-RED" "$JAI_CI_LOG_DIR/battery_debug.out" && FAILED="$FAILED debug-suites"
+fi
+jai_gates release lsp-latency || FAILED="$FAILED lsp-latency"
 
 if [ -z "$FAILED" ]; then echo "BATTERY GREEN"; else echo "BATTERY RED:$FAILED"; exit 1; fi

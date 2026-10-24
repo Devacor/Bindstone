@@ -5816,7 +5816,6 @@ bool vm_backend::store_slot_raw(frame& f, const vm_instruction& ins, size_t kind
 	const bool is_int = kind == script_value::TYPEID_INT;
 	const type_info* st = slot->type_info_raw();
 	type_info* tag = is_int ? ti_int_ : ti_float_;
-	if (st != tag && !st) return false;
 	if (st && st->base_type != (is_int ? script_value_type::jai_int_type : script_value_type::jai_float_type)) {
 		if (st->base_type != script_value_type::jai_any_type || st->dynamic_slot) return false;
 		tag = const_cast<type_info*>(st);
@@ -7675,7 +7674,7 @@ bool vm_backend::cells_resync(frame& f, const chunk::cell_loop& loop) {
 		if (!s || s->raw_storage_index() != cl.kind) return false;
 		const type_info* st = s->type_info_raw();
 		const type_info* canonical = cl.kind == kint ? ti_int_ : cl.kind == kflt ? ti_float_ : ti_bool_;
-		if (st != canonical && (st != cl.decl_stamp || !st)) return false;
+		if (st != canonical && st != cl.decl_stamp) return false;
 		cs.cells[k].bits = cell_bits(*s, cl.kind);
 		cs.cells[k].kind = cl.kind;
 		cs.cells[k].set_stamp(nullptr);
@@ -7729,7 +7728,7 @@ JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop
 	type_info* const canonical = kind == script_value::TYPEID_INT ? ti_int_ : kind == script_value::TYPEID_FLOAT ? ti_float_ : ti_bool_;
 	type_info* stamp = cs.cells[k].stamp() ? cs.cells[k].stamp() : cl.first_decl && cl.decl_stamp ? cl.decl_stamp : (cl.landing == k_typed_dst_decl && cl.stamp ? cl.stamp : canonical);
 	const bool in_place = s && s->raw_storage_index() == kind &&
-	                      (s->stamped_as(stamp) || (kind != script_value::TYPEID_BOOL && cl.landing == k_typed_dst_compound && s->type_info_raw()));
+	                      (s->stamped_as(stamp) || (kind != script_value::TYPEID_BOOL && cl.landing == k_typed_dst_compound));
 	if (in_place) { JAI_CELLS_COUNT(8); s->unchecked_set_payload_bits(cs.cells[k].bits); return; }
 	JAI_CELLS_COUNT(9);
 	script_value nv = cell_scalar(kind, cs.cells[k].bits, engine_);
@@ -8633,8 +8632,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 		// (a frame program's parameter bound from an untagged argument, a literal or a temp, holds its declared kind: the flush stamps it with that kind)
 		if (!s || (want != kint && want != kflt && want != kbool && want != kstr) || s->raw_storage_index() != want ||
 		    (st != canonical && !(st && st->base_type == script_value_type::jai_any_type) &&
-		     !(!st && loop.frame_program && cl.kind != 0 && cl.slot < loop.param_cells.size() && loop.param_cells[cl.slot] == k)) ||
-		    (st != canonical && !st)) {
+		     !(!st && loop.frame_program && cl.kind != 0 && cl.slot < loop.param_cells.size() && loop.param_cells[cl.slot] == k))) {
 			JAI_CELLS_COUNT(1);
 #ifdef JAISCRIPT_VM_PROFILE
 			++profile_cells_refused_slot_[k < 64 ? k : 63];

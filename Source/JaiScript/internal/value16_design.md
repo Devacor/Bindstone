@@ -87,6 +87,31 @@ Verdict: shelve. GLOOM's -3.8% on Shipping does not survive a rebuild that chang
 regresses 1.8% (Shipping) and 2.7% (Release), and the typed scalar kernels regress 4-12%; the container kernels' 5-17%
 wins and their peak-memory drops are real but are not a whole-program win.
 
+Quiet-machine re-run (f3204b611 vs master b0031f17d, equal paths, 7 interleaved rounds, medians [base min-max / v16
+min-max]; hashes GLOOM 3580805725, JaiDOOM 1746772898, Gator 3218840367, OSSUARY f5ca54c216432104 on both sides):
+
+| workload | Shipping | Release | base vs base (Shipping, 2 rounds) |
+|---|---|---|---|
+| GLOOM | -0.5% [224-236 / 222-241 ms] | -1.3% [230-236 / 223-233] | +5.2% |
+| JaiDOOM | -0.7% [1.51-1.53 / 1.51-1.54] | 0.0% | -0.3% |
+| Gator Quest | +0.5% [764-780 / 766-774 us] | +1.7% [760-771 / 770-791] | -0.7% |
+| OSSUARY | +4.3% [135-154 / 140-146 ms] | +3.3% [137-139 / 141-151] | +1.2% |
+| sort dyn / typed | -16.6 / -16.0% | -17.1 / -16.6% | +1.5 / 0.0% |
+| dict dyn / typed | -5.9 / -4.7% | -8.4 / -5.4% | +2.1 / +0.4% |
+| particles dyn / typed | -9.7 / -6.9% | -10.0 / -7.0% | -2.3 / +7.1% |
+| tree dyn / typed | -3.1 / -2.2% | -3.1 / -5.4% | -1.6 / -0.4% |
+| fib_recursive_dyn | -3.9% | -3.6% | +1.1% |
+| exp_dyn | -3.5% | -4.1% | +0.3% |
+| fib_loop_typed | +6.3% | +5.0% | +0.6% |
+| string2float_typed | +6.0% | +6.1% | +1.2% |
+| float2string dyn / typed | +5.1 / +5.7% | +3.8 / +4.8% | +0.7 / -0.4% |
+| primes dyn / typed | +3.1 / +3.1% | +4.6 / +3.0% | +0.4 / +0.4% |
+| nbodies dyn / typed | +3.0 / +1.3% | +2.3 / +2.0% | -1.8 / -0.7% |
+| mandelbrot typed | +2.1% | +3.6% | +1.2% |
+
+The verdict stands: no whole program wins by 1.5% on either configuration, and OSSUARY regresses past 1.5% on both (its
+v16 range sits above the base median in both). The same-binary floor reaches 5% on GLOOM and 7% on one kernel.
+
 ### Gator's +6.8 MB is a measurement artifact
 
 An allocation histogram (live blocks at peak by request size) over `gatorquest smoke ticks 10` shows one row moving:

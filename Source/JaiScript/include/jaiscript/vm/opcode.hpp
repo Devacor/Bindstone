@@ -285,7 +285,7 @@ namespace jai::vm {
         op_size_temp,       // a = frame slot (a compiler temp), b = call site (a slot receiver, no arguments), c = the proven kind (1 string, 2 array, 3 map): the receiver's size into the temp, else op_call_method's result
         op_c_size,          // a = dst cell, b = the receiver slot (an array container site): the site node's live size, an int
         op_concat_append,   // stack [acc, x] -> acc + x: the general `+`, appending in place when acc is a string and x a string or scalar
-        op_deref_top,       // the top's dereferenced value in its place: an element read ahead of a sibling that may run user code; a = 1: its copy (a literal's existing object ahead of such a sibling)
+        op_deref_top,       // the top's dereferenced value in its place: an element read ahead of a sibling that may run user code; a = 1: its copy (a literal's existing object ahead of such a sibling); a = 2: the value under the top dies, the top takes its place (a read chain's held temporary, detail::held_chain_root)
         op_capture_arg,     // a = call site (new: expression node; stack: argument count), b = argument index, c = capture kind | form << 2 | place node + 1 << capture_place_shift: the argument on top takes its value as the callee binds it (detail/arg_capture.hpp)
         op_place_arg,       // a = member node, b = its frame-slot base + 1, c = argument index: a field argument whose pending callee binds it by reference pushes the reference it binds, else op_get_member's read (both at the argument's evaluation)
         op_c_ret,           // a = the value (a cell, or k_typed_const_bit | constant), b = the return pad (an op_return after the copy), c = the general ip of the return's tail: a frame program's return (raw into the caller's cell from a raw-entered frame, else boxed through the pad)
@@ -329,7 +329,6 @@ namespace jai::vm {
         op_concat_store,    // a = symbols index, b = frame slot (k_invalid_u32 = env), c = store_flag_*: [snapshot, tail] -> the target takes the tail in place when it still holds the snapshot's node, else op_store's tail over snapshot + tail; [null, value] -> op_store's tail
         op_sleep,           // op_call_from_scratch's word for `sleep(x)`: the pending callee is the core sleep, so engine::sleep_builtin runs in place; any other callee is the call
         op_get_member_path, // a=nodes index (the chain's outer member_expr), b=member_path_protos index: `a.b.c`, `grid[y][x].cost` read through, each inner link borrowed where it lives, the final value pushed as op_get_member pushes it
-        op_drop_under,      // [held, value] -> [value]: the temporary a read chain started from dies after the chain's outer read (detail::held_chain_root)
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -603,9 +602,7 @@ namespace jai::vm {
             case opcode::op_binary_fused_store: return "BINARY_FUSED_STORE";
             case opcode::op_binary_fused_temp: return "BINARY_FUSED_TEMP";
             case opcode::op_member_temp: return "MEMBER_TEMP";
-            case opcode::op_get_member_path: return "GET_MEMBER_PATH";
-            case opcode::op_drop_under: return "DROP_UNDER";
-            case opcode::op_set_member_fused: return "SET_MEMBER_FUSED";
+            case opcode::op_get_member_path: return "GET_MEMBER_PATH";            case opcode::op_set_member_fused: return "SET_MEMBER_FUSED";
             case opcode::op_operand_temp: return "OPERAND_TEMP";
             case opcode::op_call_temp: return "CALL_TEMP";
             case opcode::op_math_temp: return "MATH_TEMP";

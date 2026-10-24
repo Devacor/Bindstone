@@ -2229,6 +2229,12 @@ std::vector<script_value> vm_backend::acquire_arg_vector(size_t reserve) {
 }
 
 void vm_backend::release_arg_vector(std::vector<script_value> vec) {
+	if (switch_to_ && !vec.empty()) [[unlikely]] {
+		// a callee pushed but not yet entered: an argument's destructor runs its own entry, never the callee
+		frame* parked = std::exchange(switch_to_, nullptr);
+		vec.clear();
+		switch_to_ = parked;
+	}
 	if (arg_vector_pool_.size() < 32) {
 		vec.clear();   // drop value refs promptly, keep capacity
 		arg_vector_pool_.push_back(std::move(vec));
@@ -20520,11 +20526,6 @@ checked_result<void> vm_backend::run(frame& entry) {
 #endif
 	frame* fp = &entry;
 	const size_t records_base = call_records_top_;
-	// a callee pushed but not yet entered (a destructor of the caller's argument temporaries runs here) stays the caller's to enter
-	struct parked_switch {
-		vm_backend* vm; frame* parked;
-		~parked_switch() { if (parked) { vm->switch_to_ = parked; } }
-	} park{this, std::exchange(switch_to_, nullptr)};
 	if (debug_hook_) [[unlikely]] { debug_last_frame_ = nullptr; }   // a host-entered frame at ip 0 is a new frame, whatever record holds it
 #ifdef JAISCRIPT_VM_PROFILE
 	// host-entered frames (execute, execute_callable, a fiber's body) never go through the
@@ -21619,12 +21620,6 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (!stack_.empty()) { stack_.pop_back(); }
 				JAI_NEXT_OP();
 			case opcode::op_dup: stack_.push_back(stack_.back()); break;
-			case opcode::op_drop_under: {
-				script_value held = std::move(stack_[stack_.size() - 2]);   // dies once the stack is whole: its destructor may reenter
-				stack_[stack_.size() - 2] = std::move(stack_.back());
-				stack_.pop_back();
-				break;
-			}
 			case opcode::op_parallel_advance: {
 				if (!parallel_cursors_ || stack_.empty()) {
 					VM_TRY_OP(checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
@@ -21658,6 +21653,12 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			}
 			case opcode::op_deref_top:
+				if (ins.a == 2) {
+					script_value held = std::move(stack_[stack_.size() - 2]);   // dies once the stack is whole: its destructor may reenter
+					stack_[stack_.size() - 2] = std::move(stack_.back());
+					stack_.pop_back();
+					break;
+				}
 				if (ins.a) { script_value v = clone_for_assignment(stack_.back()); stack_.back() = std::move(v); break; }
 				if (stack_.back().raw_storage_index() == script_value::TYPEID_REFERENCE) { script_value v = stack_.back().deref(); stack_.back() = std::move(v); }
 				break;

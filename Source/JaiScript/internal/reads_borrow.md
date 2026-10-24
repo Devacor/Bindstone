@@ -58,6 +58,20 @@ owned copy.
 `elem_member_operand` shapes (`a[i].x` in a loop with an identifier base) keep their alias-temp lowering, which the cell
 translation closes.
 
+## Temporaries
+
+A chain whose outer link is a member read, with two links or more, over a temporary (a call's result, a construction, a literal,
+an operator's value: anything but a name) holds the temporary until the outer read completes, as C++ keeps a temporary until its
+full-expression ends: `make().mid.peek.v` runs `peek` while `make()`'s object lives, and the object dies after `peek`'s result
+(the final receiver dies first, then the temporary). `detail::held_chain_root` names the temporary for both backends. The member
+path holds its own root; a chain the path does not start from the temporary (a computed or typed index, `?.`, more than eight
+links) compiles the temporary with a copy under it (`op_dup`), and `op_drop_under` drops that copy after the outer read. The
+interpreter's outer link keeps the temporary its innermost link evaluated (`chain_root_hold_`). A chain over a name holds
+nothing: the variable owns the value.
+
+A getter's or a method's receiver dies when the call returns, once nothing else owns it: the interpreter's pooled method
+environment releases its receiver at the call's end, as the vm's frame does.
+
 ## The `cached_global_env_ || parallel_worker_` gate
 
 It is not a safety requirement. `cached_global_env_` is null on the vm-reference backend (which validates without proofs or

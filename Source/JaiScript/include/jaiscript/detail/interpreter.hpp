@@ -897,6 +897,7 @@ namespace jai {
         detail::arity_count_symbols arity_count_ids_;   // arity text count spellings, interned at construction
         bool identifier_callee_lookup_ = false;   // visit_call_expr -> visit_identifier: the bare name is being called
         bool member_callee_lookup_ = false;   // visit_call_expr -> visit_member_expr: the member is being called (null-receiver text)
+        script_value* chain_root_hold_ = nullptr;   // a read chain's outer link -> its inner links: where the innermost leaves the chain's root (held until the outer read completes)
 
         // Cached symbol IDs for operator overloading (initialized in constructor)
         uint64_t op_plus_id_;

@@ -617,7 +617,7 @@ namespace jai::vm {
         static uint8_t cell_refusal_of(opcode op) {
             if (op >= opcode::op_t_add_ii && op <= opcode::op_t_load) return cell_refusal_translation;   // the typed scalar set (opcode.hpp)
             switch (op) {
-            case opcode::op_const: case opcode::op_null: case opcode::op_true: case opcode::op_false: case opcode::op_pop: case opcode::op_dup:
+            case opcode::op_const: case opcode::op_null: case opcode::op_true: case opcode::op_false: case opcode::op_pop: case opcode::op_dup: case opcode::op_drop_under:
             case opcode::op_to_bool: case opcode::op_load: case opcode::op_store: case opcode::op_compound_store: case opcode::op_incdec:
             case opcode::op_decl_var: case opcode::op_binary: case opcode::op_binary_fused: case opcode::op_index: case opcode::op_index_assign:
             case opcode::op_index_compound: case opcode::op_unary: case opcode::op_jump_if_false: case opcode::op_jump_if_true:

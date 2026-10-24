@@ -118,7 +118,6 @@ namespace {
 			case opcode::op_false:
 			case opcode::op_pop:
 			case opcode::op_dup:
-			case opcode::op_drop_under:
 			case opcode::op_to_bool:
 			case opcode::op_deref_top:
 			case opcode::op_capture_arg:
@@ -344,7 +343,6 @@ namespace {
 			case opcode::op_false:
 			case opcode::op_pop:
 			case opcode::op_dup:
-			case opcode::op_drop_under:
 			case opcode::op_to_bool:
 			case opcode::op_deref_top:
 			case opcode::op_capture_arg:
@@ -7871,7 +7869,7 @@ void vm_compiler::compile_member(const std::shared_ptr<member_expr>& expr) {
 				held_root_fired_ = false;
 				compile_member_read(expr);
 				held_root_ = nullptr;
-				if (held_root_fired_) { emit(opcode::op_drop_under); }
+				if (held_root_fired_) { emit(opcode::op_deref_top, 2); }
 				held_root_fired_ = false;
 				return;
 			}

@@ -65,7 +65,7 @@ an operator's value: anything but a name) holds the temporary until the outer re
 full-expression ends: `make().mid.peek.v` runs `peek` while `make()`'s object lives, and the object dies after `peek`'s result
 (the final receiver dies first, then the temporary). `detail::held_chain_root` names the temporary for both backends. The member
 path holds its own root; a chain the path does not start from the temporary (a computed or typed index, `?.`, more than eight
-links) compiles the temporary with a copy under it (`op_dup`), and `op_drop_under` drops that copy after the outer read. The
+links) compiles the temporary with a copy under it (`op_dup`), and `op_deref_top` with a = 2 drops that copy after the outer read. The
 interpreter's outer link keeps the temporary its innermost link evaluated (`chain_root_hold_`). A chain over a name holds
 nothing: the variable owns the value.
 

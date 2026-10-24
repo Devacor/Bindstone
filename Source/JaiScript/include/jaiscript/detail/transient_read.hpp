@@ -32,6 +32,8 @@ namespace jai::detail {
     //     again only when the index subtree is callout_free
     //   - the VALUE of an assignment (simple or compound) when the target subtree is
     //     callout_free (both backends deref the RHS before storing - byte-parallel)
+    //   - the object of a member read used as a value (anything but a bind, a write or a call through it): the read only
+    //     looks through the object, so `grid[y][x].cost` and `a[i].pos.x` copy the final field and mint no element reference
     //   - both branches of a ternary propagate the ternary's own consumer context
     //   - the initializer of an int/float/bool/char declaration and the value of a by-value return from a function or lambda
     //     declaring one (the slot converts it; coroutines excluded)
@@ -216,8 +218,9 @@ namespace jai::detail {
         // the innermost function returns a hard scalar by value
         bool scalar_return = false;
 
-        // transient_ctx: this expression's RESULT is consumed as a transient value by its parent.
-        void walk_expr(expression* e, bool transient_ctx) {
+        // transient_ctx: this expression's RESULT is consumed as a transient value by its parent. place: the parent may bind,
+        // write or call through the result (an lvalue use); a value use (place false) of a member only looks through its object.
+        void walk_expr(expression* e, bool transient_ctx, bool place = true) {
             if (!e) {
                 return;
             }
@@ -241,7 +244,7 @@ namespace jai::detail {
                         return;
                     }
                     if (is_value_binary_op(b->op.type)) {
-                        walk_expr(b->left.get(), callout_free(b->right.get()));
+                        walk_expr(b->left.get(), callout_free(b->right.get()), false);
                         walk_expr(b->right.get(), true);   // consumed by the op immediately
                         return;
                     }
@@ -255,7 +258,7 @@ namespace jai::detail {
                 case node_type::assignment_expr: {
                     auto* a = static_cast<assignment_expr*>(e);
                     walk_expr(a->target.get(), false);     // store/compound target: always mint
-                    walk_expr(a->value.get(), callout_free(a->target.get()));
+                    walk_expr(a->value.get(), callout_free(a->target.get()), false);
                     return;
                 }
                 case node_type::call_expr: {
@@ -269,7 +272,7 @@ namespace jai::detail {
                     return;
                 }
                 case node_type::member_expr:
-                    walk_expr(static_cast<member_expr*>(e)->object.get(), false);
+                    walk_expr(static_cast<member_expr*>(e)->object.get(), transient_ctx || !place);
                     return;
                 case node_type::lambda_expr: {
                     auto* l = static_cast<lambda_expr*>(e);
@@ -301,23 +304,23 @@ namespace jai::detail {
                 case node_type::ternary_expr: {
                     auto* t = static_cast<ternary_expr*>(e);
                     walk_expr(t->condition.get(), true);   // consumed before either branch runs
-                    walk_expr(t->then_expression.get(), transient_ctx);
-                    walk_expr(t->else_expression.get(), transient_ctx);
+                    walk_expr(t->then_expression.get(), transient_ctx, place);
+                    walk_expr(t->else_expression.get(), transient_ctx, place);
                     return;
                 }
                 case node_type::array_literal_expr:
                     for (const auto& el : static_cast<array_literal_expr*>(e)->elements) {
-                        walk_expr(el.get(), false);
+                        walk_expr(el.get(), false, false);
                     }
                     return;
                 case node_type::map_literal_expr:
                     for (const auto& [k, v] : static_cast<map_literal_expr*>(e)->entries) {
-                        walk_expr(k.get(), false);
-                        walk_expr(v.get(), false);
+                        walk_expr(k.get(), false, false);
+                        walk_expr(v.get(), false, false);
                     }
                     return;
                 case node_type::throw_expr:
-                    walk_expr(static_cast<throw_expr*>(e)->value.get(), false);
+                    walk_expr(static_cast<throw_expr*>(e)->value.get(), false, false);
                     return;
                 case node_type::yield_expr:
                     walk_expr(static_cast<yield_expr*>(e)->value.get(), false);
@@ -378,7 +381,8 @@ namespace jai::detail {
                     return;
                 }
                 case node_type::return_stmt:
-                    walk_expr(static_cast<return_stmt*>(s)->value.get(), scalar_return && !static_cast<return_stmt*>(s)->binds_reference);
+                    walk_expr(static_cast<return_stmt*>(s)->value.get(), scalar_return && !static_cast<return_stmt*>(s)->binds_reference,
+                              static_cast<return_stmt*>(s)->binds_reference);
                     if (static_cast<return_stmt*>(s)->binds_reference) { stamp_place_read(static_cast<return_stmt*>(s)->value.get(), member_expr::place_read_field); }
                     return;
                 case node_type::try_stmt: {
@@ -423,7 +427,7 @@ namespace jai::detail {
                     // un-cloned transient copy would alias the element); reference-typed
                     // decls bind their initializer and compile via the decl_ref ops.
                     auto* d = static_cast<variable_decl*>(s);
-                    walk_expr(d->initializer.get(), hard_scalar(d->type));
+                    walk_expr(d->initializer.get(), hard_scalar(d->type), d->type && d->type->base_type == script_value_type::jai_reference_type);
                     if (d->type && d->type->base_type == script_value_type::jai_reference_type) { stamp_place_read(d->initializer.get(), member_expr::place_read_field); }
                     return;
                 }

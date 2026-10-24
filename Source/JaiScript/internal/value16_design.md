@@ -50,6 +50,43 @@ bytes 8..15   tag word      bits 0..7   storage index (TYPEID_*), read as one by
 
 | rebase | (this commit) | onto b0031f17d. Debug: interpreter 4622/4622, vm 4622/4622; vm-reference aborts in Review Regressions `cross_engine_reference_no_foreign_twin_stamp`: engine B stores a B-stamped int into engine A's array, B dies, A mints an element reference and reads the freed B type (the stamp-lifetime hazard below) |
 
+| held values | fc55b931d, f3204b611 | Debug: interpreter, vm, vm-reference 4624/4624 each |
+
+Against master b0031f17d built at a path of the worktree's length, 5 interleaved rounds under the timing lock, medians
+(hashes held everywhere; memory is peak commit):
+
+| workload | Shipping (LTCG), fc55b931d | Release, fc55b931d | Shipping, + inline copies (reverted) |
+|---|---|---|---|
+| GLOOM serial | -3.8% | -3.9% | +1.7% |
+| JaiDOOM timedemo | +1.3% | 0.0% | +0.6% |
+| Gator Quest | +1.8% | +2.7% | +1.1% |
+| OSSUARY | +1.2% | +1.6% | +2.2% |
+| dict dyn / typed | -7.2 / -8.1% | -7.9 / -6.3% | -6.2 / -4.9% |
+| sort dyn / typed | -14.5 / -15.9% | -14.4 / -16.0% | -15.4 / -17.0% |
+| particles dyn / typed | -9.5 / -5.8% | -6.5 / -6.3% | -4.4 / -8.2% |
+| tree dyn / typed | -1.9 / -4.9% | -1.0 / -4.3% | -2.6 / -4.4% |
+| fib_recursive_dyn | -4.4% | -5.0% | -5.3% |
+| fib_loop_typed | +11.6% | +10.8% | +6.3% |
+| mandelbrot_typed | +9.1% | +7.6% | +3.6% |
+| string2float_typed | +6.1% | +6.3% | +5.3% |
+| float2string dyn | +7.2% | +7.3% | +3.2% |
+| primes dyn / typed | +2.5 / +1.6% | +3.4 / +3.9% | +2.9 / +3.1% |
+| nbodies dyn | +1.7% | +2.6% | +3.1% |
+| peak memory | Gator -1.2 MB, dict -16.7 / -6.7 MB, particles -19 / -17.5 MB, sort -8.3 MB; others within 0.5 MB | same | same |
+
+The inline-copy change (copy constructor and assignment inline, scalars copied as two words without dispatch) did not
+measure and was reverted. GLOOM's sign flips between two builds that differ only in code it does not run (-3.8% to
++1.7%): whole-program deltas within about 4% are per-build code layout in the register-cell loop, not the value.
+
+Gates at f3204b611: `battery.sh --build` BATTERY GREEN (Debug and Release suites on three backends, fuzz,
+fuzz-vm-reference, every example hash, timedemo, LSP, amalgamation); `gates.sh android` built the library and suites with
+NDK 27.2 for armeabi-v7a (the 32-bit build); Bindstone client Release built, `-verifyassets` 76 passed, `-loginshot 60`
+60/60 frames, `-workbenchsmoke` 120 frames; `mv_tests` 146/146.
+
+Verdict: shelve. GLOOM's -3.8% on Shipping does not survive a rebuild that changes nothing GLOOM runs, Gator Quest
+regresses 1.8% (Shipping) and 2.7% (Release), and the typed scalar kernels regress 4-12%; the container kernels' 5-17%
+wins and their peak-memory drops are real but are not a whole-program win.
+
 ### Gator's +6.8 MB is a measurement artifact
 
 An allocation histogram (live blocks at peak by request size) over `gatorquest smoke ticks 10` shows one row moving:

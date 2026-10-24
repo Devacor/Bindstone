@@ -96,3 +96,18 @@ re-validation key (the owning node or instance, 512-aligned, or a slot generatio
 stage 2 such a cell is an extension cell, never a window slot: the general form must not see a kind it cannot destroy, so a
 flush materializes it as an ordinary field or element reference, as an alias cell (`TYPEID_REFERENCE` with an element-index
 payload) is materialized by `cell_flush_one` today.
+
+Tree (typed) today, RIP sampler over the `/Z7` build: `deref_slow` 3.4%, `field_cell` 2.9%, the pool's `acquire` 2.0% and
+`return_block` 0.8%, `~reference_holder` 1.6%, `make_field_reference` 1.4%, `plain_field_reference` 1.1%,
+`reference_binding_admits` 1.2%, `ref_declare` 0.9%, `declared_ref_kind` 0.7%: about 16%. A borrowed reference removes the mint,
+the pool and the destructor (about 6 pp) and shortens the dereference to its one mode; the re-validation (`field_cell`'s class
+and epoch compare) and the owner's pin stay, since the owner can be re-classed, retyped or released while the reference is
+bound. `Borrowed References` (source/tests/language/borrowed_reference_tests.cpp) pins today's behaviour for those cases on
+every backend: a reallocating push, a shrink, a reload that retypes the field, a re-class that drops it, and a destructor that
+runs while the field is bound (the destructor runs at the drop and the field's storage stays readable until the reference ends).
+
+What building it needs, beyond the cell word: a borrowed reference reaches every consumer of a frame slot (the general
+executors' `deref`, stores into containers and fields, captures, host calls, the debugger), so either it is a storage kind the
+value itself understands (`deref`'s inline test grows by one kind, for both backends and every host), or every VM path that can
+copy a slot out of the frame converts it to a minted reference first. Both are a change to the value or frame contract, and an
+escape the analysis misses must convert rather than dangle.

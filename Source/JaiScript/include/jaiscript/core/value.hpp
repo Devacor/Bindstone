@@ -2346,7 +2346,11 @@ namespace detail {
             JAI_FORCEINLINE strong_ptr<script_vec_node>& vec_node() noexcept { return p_.vn; }
             JAI_FORCEINLINE const strong_ptr<script_vec_node>& vec_node() const noexcept { return p_.vn; }
 
-            storage(const storage& o) noexcept : hdr_(o.hdr_) {
+            JAI_FORCEINLINE storage(const storage& o) noexcept : hdr_(o.hdr_) {
+                if ((k_trivial_mask >> idx_()) & 1u) { std::memcpy(&p_, &o.p_, sizeof(p_)); }   // scalars: one test, no call
+                else { copy_handle(o); }
+            }
+            JAI_NOINLINE void copy_handle(const storage& o) noexcept {
                 switch (idx_()) {
                     case TYPEID_STRING: new (&p_.s) strong_ptr<script_string>(o.p_.s); break;
                     case TYPEID_ARRAY: new (&p_.a) strong_ptr<script_array>(o.p_.a); break;
@@ -2645,12 +2649,11 @@ namespace detail {
         }
 
         // Get the array NODE handle for interpreter operations
-        strong_ptr<script_array>& get_array_storage() {
-            if (type() != script_value_type::jai_array_type) {
-                throw runtime_error("script_value is not an array");
-            }
+        JAI_FORCEINLINE strong_ptr<script_array>& get_array_storage() {
+            if (type() != script_value_type::jai_array_type) [[unlikely]] { throw_not_an_array(); }
             return storage_.get<strong_ptr<script_array>>();
         }
+        [[noreturn]] JAI_NOINLINE static void throw_not_an_array() { throw runtime_error("script_value is not an array"); }
 
         // Get raw map storage for interpreter operations
         strong_ptr<script_map>& get_map_storage() {
@@ -2685,15 +2688,15 @@ namespace detail {
 
         // Safe access to reference holder for reference types
         // current_type(): a reference's type_info may name a different base_type
-        reference_holder* get_reference_holder() {
-            if (current_type() == script_value_type::jai_reference_type) {
+        JAI_FORCEINLINE reference_holder* get_reference_holder() {
+            if (raw_storage_index() == TYPEID_REFERENCE) {
                 return storage_.get<strong_ptr<reference_holder>>().get();
             }
             return nullptr;
         }
 
-        const reference_holder* get_reference_holder() const {
-            if (current_type() == script_value_type::jai_reference_type) {
+        JAI_FORCEINLINE const reference_holder* get_reference_holder() const {
+            if (raw_storage_index() == TYPEID_REFERENCE) {
                 return storage_.get<strong_ptr<reference_holder>>().get();
             }
             return nullptr;
@@ -2807,8 +2810,11 @@ namespace detail {
         static checked_result<script_value> make_weak_ptr(const script_value& obj, engine* eng);
         
         // Set type info for special cases (like weak_ptr creation)
-        void set_type_info(type_info_ptr type) {
-            set_stamp(type);
+        JAI_FORCEINLINE void set_type_info(type_info_ptr type) {
+            if (!type || storage_.tag() != reinterpret_cast<uintptr_t>(type.get())) { set_stamp(type); }   // an unchanged stamp writes nothing
+            if (raw_storage_index() == TYPEID_ARRAY) [[unlikely]] { demote_after_stamp(type); }
+        }
+        JAI_NOINLINE void demote_after_stamp(type_info_ptr type) {
             // Demote-on-stamp (internal/typed_array_design.md): re-tagging an array value 'any'
             // (var binding) or an open-element array tag (array<var>: the boundary
             // kernel rebuilds first, this is the net) demotes a typed node in place —
@@ -2816,7 +2822,7 @@ namespace detail {
             // fresh clones/moved temps, so the node is unique here; a shared demote
             // would still be value-correct (identity + contents preserved), merely
             // losing the raw-buffer form.
-            if (type && raw_storage_index() == TYPEID_ARRAY &&
+            if (type &&
                 (type->base_type == script_value_type::jai_any_type ||
                  (type->base_type == script_value_type::jai_array_type &&
                   (!type->element_type() || type->element_type()->base_type == script_value_type::jai_any_type)))) {

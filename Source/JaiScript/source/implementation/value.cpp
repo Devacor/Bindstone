@@ -76,8 +76,8 @@ script_value::script_value(script_string&& s, engine* eng) : storage_(make_stron
     }
 }
 
-script_value::script_value(strong_ptr<object_holder> handle, type_info_ptr tag, engine* eng) : storage_(std::move(handle)) {
-    if (tag) { set_stamp(tag); } else { set_engine_tag(eng); }
+script_value::script_value(strong_ptr<object_holder> handle, type_info_ptr tag, engine*) : storage_(std::move(handle)) {
+    if (tag) { set_stamp(tag); }
 }
 
 script_value script_value::make_utf8(std::string bytes, engine* eng) {

@@ -1519,7 +1519,6 @@ namespace jai::vm {
             case script_value::TYPEID_NULL: stack_.push_back(make_null()); break;
             default: {
                 script_value copy = tmpl;
-                copy.set_engine(engine_);
                 stack_.push_back(std::move(copy));
                 break;
             }
@@ -2500,7 +2499,7 @@ namespace jai::vm {
             // int/float constructors install it), with this engine's pointer, so a payload write into such a slot is the same value
             void raw_int(script_int iv) {
                 script_value* s = vm->frame_slot(fr, slot);
-                if (s && s->raw_storage_index() == script_value::TYPEID_INT && s->stamped_as(vm->engine_->get_type_info_int(), vm->engine_)) {
+                if (s && s->raw_storage_index() == script_value::TYPEID_INT && s->stamped_as(vm->engine_->get_type_info_int())) {
                     s->unchecked_set_int_payload(iv);
                     return;
                 }
@@ -2511,7 +2510,7 @@ namespace jai::vm {
             }
             void raw_float(script_float fv) {
                 script_value* s = vm->frame_slot(fr, slot);
-                if (s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->stamped_as(vm->engine_->get_type_info_float(), vm->engine_)) {
+                if (s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->stamped_as(vm->engine_->get_type_info_float())) {
                     s->unchecked_set_float_payload(fv);
                     return;
                 }

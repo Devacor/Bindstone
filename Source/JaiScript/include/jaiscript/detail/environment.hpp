@@ -443,7 +443,6 @@ namespace jai {
             case script_value::TYPEID_STRING:
             case script_value::TYPEID_CHAR:
             case script_value::TYPEID_BOOL:
-                assert(target.has_valid_engine());   // clone() would throw; copies are for live values only
                 return target;
             default:
                 break;

@@ -149,8 +149,9 @@ Match the surrounding code. Beyond that:
 - **No non-const `static` or `thread_local` storage.** State that outlives a call belongs to an
   engine instance. This is what makes multiple engines on multiple threads safe, and one static
   cache silently breaks it. `static const` non-pointer data is fine.
-- **Every `script_value` carries an engine reference** — `script_value(v, eng)`, or
-  `script_value(std::monostate{}, eng)` for null.
+- **A value is made with its engine** — `script_value(v, eng)` stamps the engine's type; a plain value
+  names no engine afterwards, so code that mints values takes the engine from its context (a heap payload's
+  `payload_engine()`, the backend's engine, a parameter).
 - **Integer arithmetic goes through `jai::ints::try_add` / `try_sub` / `try_mul` / `try_div` /
   `mod`**, never raw `a + b` on a `script_int`. The overflow policy is a build-time choice and
   those helpers are where it lives.

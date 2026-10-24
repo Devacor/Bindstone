@@ -148,7 +148,6 @@ inline checked_result<void> aggregate_fill_own_fields(class_instance& instance, 
             if (!converted) { return converted.error_value(); }
             value = std::move(converted.value());
         }
-        if (!value.has_valid_engine() && eng) { value.set_engine(eng); }
         instance.set_field(id, value);
     }
     return {};

@@ -3663,27 +3663,32 @@ public:
             check_eq((int64_t)730, r.as_int());
         });
 
-        // The tag word (internal/value16_design.md): a stamped value reaches its engine through its type, an unstamped one carries the
-        // engine itself, a literal carries neither; an import restamps with the receiving engine's types
-        test("tag_word_stamps_and_engines", [this]() {
+        // The tag word (internal/value16_design.md): a value names its declared type, or carries the engine-made flag, or nothing (a
+        // literal); a heap payload records its engine; an import restamps with the receiving engine's types
+        test("tag_word_stamps_and_payload_engines", [this]() {
             auto a = make_engine();
             auto b = make_engine();
-            check_eq((uintptr_t)0, reinterpret_cast<uintptr_t>(a.get()) % k_value_tag_alignment, "an engine is tag-aligned");
             const script_value stamped = a->make_value(script_int{7});
-            check_true(stamped.get_type_info().get() != nullptr, "an engine-made int is stamped");
+            check_true(stamped.get_type_info().get() == a->get_type_info_int(), "an engine-made int carries the engine's int type");
             check_eq((uintptr_t)0, reinterpret_cast<uintptr_t>(stamped.get_type_info().get()) % k_value_tag_alignment, "a stamp is tag-aligned");
-            check_true(stamped.get_type_info()->owner == a.get() && stamped.get_engine() == a.get(), "a stamp names its engine");
-            check_true(stamped.raw_storage_index() == script_value::TYPEID_INT, "the index byte survives the stamp");
+            check_true(stamped.raw_storage_index() == script_value::TYPEID_INT && stamped.payload_engine() == nullptr, "a scalar names no engine");
             const script_value null_with_engine(std::monostate{}, a.get());
-            check_true(null_with_engine.get_type_info().get() == nullptr && null_with_engine.get_engine() == a.get(), "an unstamped value carries its engine");
-            check_true(null_with_engine.raw_storage_index() == script_value::TYPEID_NULL && null_with_engine.is_null(), "the engine-only flag leaves the index alone");
+            check_true(null_with_engine.get_type_info().get() == nullptr && null_with_engine.has_valid_engine(), "an unstamped engine value carries the flag");
+            check_true(null_with_engine.raw_storage_index() == script_value::TYPEID_NULL && null_with_engine.is_null(), "the flag leaves the index alone");
             const script_value bare(std::monostate{}, nullptr);
-            check_true(bare.get_engine() == nullptr && bare.get_type_info().get() == nullptr && !bare.has_valid_engine(), "a literal carries no engine");
+            check_true(!bare.has_valid_engine() && bare.get_type_info().get() == nullptr, "a literal carries nothing");
             check_false(stamped.is_outlived() || null_with_engine.is_outlived() || bare.is_outlived());
-            check_true(script_value::outlived().is_outlived() && script_value::outlived().get_engine() == nullptr && script_value::outlived().get_type_info().get() == nullptr);
+            check_true(script_value::outlived().is_outlived() && script_value::outlived().get_type_info().get() == nullptr);
+            const held_value array = a->execute("[1, 2];");
+            const held_value map = a->execute("var m = {\"k\": 1}; m;");
+            const held_value fn = a->execute("[]() { return 1; };");
+            check_true(array.value().payload_engine() == a.get() && map.value().payload_engine() == a.get() && fn.value().payload_engine() == a.get(),
+                "a container and a function record their engine");
+            check_true(array.get_engine() == a.get(), "a held value keeps its engine");
+            check_true(a->owns_value(stamped) && !b->owns_value(stamped) && !b->owns_value(array.value()), "ownership: the stamp's or the payload's engine");
             b->add_global("n", a->execute("int k = 3; k;"));
             const held_value imported = b->get_variable("n");
-            check_true(imported.get_engine() == b.get() && imported.get_type_info()->owner == b.get(), "an import restamps with the receiving engine's type");
+            check_true(imported.get_type_info().get() == b->get_type_info_int(), "an import restamps with the receiving engine's type");
             check_eq((int64_t)3, imported.as_int());
         });
 

@@ -289,7 +289,7 @@ namespace jai::detail {
 				}
 				if (holder->container->is_typed()) {
 					// materialized view per touch (no script_value element exists)
-					return holder->container->get(holder->container_index, v.get_engine());
+					return holder->container->get(holder->container_index, holder->owner);
 				}
 				cur = &holder->container->values()[holder->container_index];
 				continue;
@@ -307,11 +307,11 @@ namespace jai::detail {
 				if (holder->property->live_member) {
 					return script_value(*holder->cell());
 				}
-				return holder->read_property(v.get_engine(), /*bind_point*/ true);
+				return holder->read_property(holder->owner, /*bind_point*/ true);
 			}
 			if (holder->component_base) {
 				try {
-					return script_value(const_cast<std::remove_const_t<std::remove_reference_t<decltype(*holder)>>*>(holder)->materialize_component(v.get_engine()));
+					return script_value(const_cast<std::remove_const_t<std::remove_reference_t<decltype(*holder)>>*>(holder)->materialize_component(holder->owner));
 				} catch (const std::exception&) {
 					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a component of a value that is no longer a vector");
 				}
@@ -831,7 +831,7 @@ namespace jai::detail {
 	// the referent's current base type (no conversion can apply through a reference;
 	// null referents pass - typed object refs stay nullable like typed fields do).
 	inline checked_result<script_value> ref_return_pass_through(script_value&& result, type_info_ptr return_type,
-	                                                            string_symbolizer* symbolizer) {
+	                                                            string_symbolizer* symbolizer, engine* eng) {
 		if (!result.is_reference()) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference),
 				"Function with reference return type must return an lvalue reference");
@@ -841,7 +841,7 @@ namespace jai::detail {
 		    referent->base_type != script_value_type::jai_null_type &&
 		    referent->type_name != "auto") {
 			const script_value& actual = result.deref();
-			if (!reference_binding_admits(referent.get(), actual, actual.get_engine())) {
+			if (!reference_binding_admits(referent.get(), actual, eng)) {
 				return ref_return_mismatch(symbolizer, actual, *return_type);
 			}
 		}

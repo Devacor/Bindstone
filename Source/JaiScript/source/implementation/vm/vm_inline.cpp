@@ -1400,7 +1400,6 @@ type_info_ptr vm_compiler::inline_ref_type() {
 	auto ref = std::make_unique<type_info>(script_value_type::jai_reference_type, std::string_view("var&"));
 	ref->type_params.push_back(any);
 	ref->id = symbolizer_->intern(ref->canonical_name());
-	chunk_->owned_types.back()->owner = ref->owner = type_owner_;
 	chunk_->owned_types.push_back(std::move(ref));
 	return type_info_ptr(chunk_->owned_types.back().get());
 }
@@ -1409,7 +1408,6 @@ type_info_ptr vm_compiler::inline_type(script_value_type kind) {
 	for (auto& t : chunk_->owned_types) { if (t->base_type == kind) return type_info_ptr(t.get()); }
 	const char* name = kind == script_value_type::jai_int_type ? "int" : kind == script_value_type::jai_float_type ? "float" : kind == script_value_type::jai_bool_type ? "bool" : "string";
 	chunk_->owned_types.push_back(std::make_unique<type_info>(kind, std::string_view(name)));
-	chunk_->owned_types.back()->owner = type_owner_;
 	return type_info_ptr(chunk_->owned_types.back().get());
 }
 

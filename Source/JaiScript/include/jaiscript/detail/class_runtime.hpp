@@ -18,13 +18,13 @@ namespace jai {
 namespace detail {
 // A region's copy of a class's shared default: a string or a container gets nodes of its own (a plain copy would touch the
 // shared node's count from several threads)
-inline script_value region_field_default(const script_value& value) {
+inline script_value region_field_default(const script_value& value, engine* eng) {
     switch (value.raw_storage_index()) {
     case script_value::TYPEID_NULL: case script_value::TYPEID_INT: case script_value::TYPEID_FLOAT:
     case script_value::TYPEID_BOOL: case script_value::TYPEID_CHAR:
         return value;
     default:
-        return value.parallel_detached_copy();
+        return value.parallel_detached_copy(eng);
     }
 }
 }
@@ -310,7 +310,7 @@ inline type_info_ptr class_definition::get_field_declared_type(uint64_t id) cons
 inline void class_definition::add_static_field(uint64_t id, const script_value& initial_value) {
     static_fields_.insert(id);
 
-    if (initial_value.get_engine() == nullptr && !!engine_) {
+    if (!initial_value.has_valid_engine() && !!engine_) {
         script_value value_with_engine(initial_value);
         value_with_engine.set_engine(engine_);
         static_field_values_.insert_or_assign(id, value_with_engine);
@@ -742,14 +742,14 @@ inline std::shared_ptr<class_instance> class_definition::create_instance() {
             const auto& parent_fields = parent->get_all_field_defaults();
             for (const auto& [field_id, default_value] : parent_fields) {
                 if (!instance->has_field(field_id)) {
-                    instance->set_field(field_id, in_region ? detail::region_field_default(default_value) : default_value);
+                    instance->set_field(field_id, in_region ? detail::region_field_default(default_value, engine_) : default_value);
                 }
             }
         }
     }
 
     for (const auto& [field_id, default_value] : field_defaults_) {
-        instance->set_field(field_id, in_region ? detail::region_field_default(default_value) : default_value);
+        instance->set_field(field_id, in_region ? detail::region_field_default(default_value, engine_) : default_value);
     }
 
     return instance;
@@ -1480,7 +1480,7 @@ inline void class_definition::store_field_defaults(const std::unordered_map<uint
     field_slots_current_ = false;
     bump_method_epoch();
     for (const auto& [id, value] : new_field_defaults) {
-        if (value.get_engine() == nullptr && engine_ref) {
+        if (!value.has_valid_engine() && engine_ref) {
             script_value value_with_engine(value);
             value_with_engine.set_engine(engine_ref);
             field_defaults_[id] = value_with_engine;
@@ -1490,7 +1490,8 @@ inline void class_definition::store_field_defaults(const std::unordered_map<uint
     }
 }
 inline checked_result<script_value> class_definition::cpp_method_dispatch::operator()(const std::vector<script_value>& raw_args) const {
-    if (raw_args.empty() || raw_args[0].get_engine() == nullptr) {
+    engine* const eng = cls->get_engine();
+    if (raw_args.empty() || !eng) {
         return checked_result<script_value>(make_error_code(runtime_error_code::class_not_found),
                                             "Class definition no longer exists");
     }
@@ -1507,7 +1508,7 @@ inline checked_result<script_value> class_definition::cpp_method_dispatch::opera
     auto it = overloads_for_name.find(script_arg_count);
     if (it == overloads_for_name.end() || it->second.empty()) {
         return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
-                                     name_id, args.data() + 1, script_arg_count, args[0].get_engine());
+                                     name_id, args.data() + 1, script_arg_count, eng);
     }
 
     auto& entries = it->second;
@@ -1524,16 +1525,16 @@ inline checked_result<script_value> class_definition::cpp_method_dispatch::opera
     for (const auto& e : entries) {
         sigs.push_back(e.param_types);
     }
-    int best = args[0].get_engine()->select_cpp_overload(args, sigs);
+    int best = eng->select_cpp_overload(args, sigs);
     if (best < 0) {
         return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
-                                     name_id, args.data() + 1, script_arg_count, args[0].get_engine());
+                                     name_id, args.data() + 1, script_arg_count, eng);
     }
     return entries[static_cast<size_t>(best)].func(args);
     } catch (const std::exception& e) {
         std::vector<script_value> scratch;
         if (auto miss = single_overload_miss(detail::deref_builtin_args(raw_args, scratch))) { return *miss; }
-        return host_exception_result(raw_args[0].get_engine(), e);
+        return host_exception_result(eng, e);
     }
 }
 
@@ -1545,7 +1546,7 @@ inline std::optional<checked_result<script_value>> class_definition::cpp_method_
     if (name_it == cls->cpp_method_overloads_.end()) { return std::nullopt; }
     auto it = name_it->second.find(args.size() - 1);
     if (it == name_it->second.end() || it->second.size() != 1 || it->second.front().param_types.empty()) { return std::nullopt; }
-    engine* eng = args[0].get_engine();
+    engine* eng = cls->get_engine();
     if (!eng || eng->select_cpp_overload(args, {it->second.front().param_types}) >= 0) { return std::nullopt; }
     return checked_result<script_value>(detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch), name_id, args.data() + 1, args.size() - 1, eng));
 }
@@ -1594,7 +1595,7 @@ inline void class_instance::seed_fields_from_plan(const std::vector<std::pair<ui
     for (const auto& [slot, value] : plan) {
         auto& cell = flat_fields_[slot];
         if (detach) [[unlikely]] {
-            if (!cell) { cell = make_cell(detail::region_field_default(value)); } else { *cell = detail::region_field_default(value); }
+            if (!cell) { cell = make_cell(detail::region_field_default(value, engine_)); } else { *cell = detail::region_field_default(value, engine_); }
             continue;
         }
         if (!cell) { cell = make_cell(script_value(value)); } else { *cell = value; }
@@ -3147,7 +3148,7 @@ inline void class_instance::finish_deep_copy_level(class_instance& copy, bool ov
                     throw runtime_error("Failed to copy C++ object of type '" + std::string(get_class_name()) +
                         "'. The registered copy function returned null.");
                 }
-                copy.set_native(script_value::make_cpp_object(get_class_name(), class_def_->get_type_id(), new_cpp_obj, value.get_engine()));
+                copy.set_native(script_value::make_cpp_object(get_class_name(), class_def_->get_type_id(), new_cpp_obj, engine_));
                 copied = true;
                 if (engine_ && engine_->parallel_region_active()) [[unlikely]] { copy.region_tag(engine_->parallel_region_serial()); }
             }

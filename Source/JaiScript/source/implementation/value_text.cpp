@@ -183,7 +183,7 @@ namespace value_text_walk {
 						out_ += "null";
 						return {};
 					}
-					script_value target = script_value::make_object(shared->type_name, shared->type_id, shared->data, v.get_engine(),
+					script_value target = script_value::make_object(shared->type_name, shared->type_id, shared->data, shared->owner,
 					                                                shared->is_class_instance_wrapper);
 					return enter_object(target, &target, nested);
 				}
@@ -345,7 +345,7 @@ namespace value_text_walk {
 								if (const auto& text = node->strs()[i]) { append_quoted(out_, *text, '"'); } else { out_ += "\"\""; }
 								break;
 							default:
-								scratch_ = node->get(i, eng_);
+								scratch_ = node->get(i, node->owner);
 								return &scratch_;
 						}
 					}
@@ -399,7 +399,7 @@ namespace value_text_walk {
 } // namespace value_text_walk
 
 checked_result<std::string> value_text(const script_value& v, const own_text_hook& hook, size_t limit) {
-	value_text_walk::walker walk(hook, limit, v.get_engine());
+	value_text_walk::walker walk(hook, limit, v.payload_engine());
 	return walk.run(v);
 }
 

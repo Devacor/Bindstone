@@ -292,7 +292,6 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		compiler_ = vm_compiler(symbolizer_, &builtins_);   // filled below; address stable
 		compiler_.math_aliases(engine_);
 		compiler_.reference(reference_mode_);
-		compiler_.type_owner(engine_);
 		math_alias_rows_ = engine_->math_alias_rows();
 
 		op_plus_id_ = symbolizer_->intern("+");
@@ -881,7 +880,7 @@ struct vm_backend::vm_run_state : backend_run_state {
 	uint32_t host_site_calls = 0;
 	frame* raw_switch = nullptr;
 	frame* cells_frame = nullptr;
-	std::vector<strong_ptr<script_function>> retired_callees;
+	std::vector<strong_ptr<script_function_node>> retired_callees;
 	std::vector<std::unique_ptr<callback_session>> callback_sessions;
 	size_t callback_depth = 0;
 	std::vector<std::unique_ptr<cell_state>> entry_areas;
@@ -1742,7 +1741,7 @@ static std::string& replacing_text_storage(script_value& target) {
 // or as the concatenation a `replacing` row stands for), so the storage that appends is the target's alone, and an append of the
 // target's own node reads a copy
 void vm_backend::append_text_in_place(script_value& target, const script_value& rhs, bool replacing) {
-	std::string& out = replacing ? replacing_text_storage(target) : target.unchecked_text_ref();
+	std::string& out = replacing ? replacing_text_storage(target) : target.unchecked_text_ref(engine_);
 	if (rhs.raw_storage_index() == script_value::TYPEID_CHAR) {
 		out.push_back(rhs.unchecked_as_char());
 		return;
@@ -4196,7 +4195,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 						if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
 							return raise_from(detail::raise_memory_cap(*limits_));
 						}
-						target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
+						target.unchecked_as_string_ref(engine_) += derefRight.unchecked_as_string();
 					} else {
 						return raise_from(detail::compound_mismatch(0, target, derefRight, engine_));
 					}
@@ -4326,7 +4325,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 					if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
 						return raise_from(detail::raise_memory_cap(*limits_));
 					}
-					target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
+					target.unchecked_as_string_ref(engine_) += derefRight.unchecked_as_string();
 				} else if (leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_CHAR) {
 					// string += char appends the char as TEXT (out += to_char(b),
 					// the binary-writer shape) — a char is a text unit. Non-char
@@ -10131,7 +10130,7 @@ bool vm_backend::cells_self_concat(frame& f, const chunk::cell_loop& loop, uint3
 	const strong_ptr<script_string>& h = s->unchecked_string_handle();
 	if (reinterpret_cast<int64_t>(h.get()) != f.cells->cells[dk].bits || !h.unique()) return false;
 	if (!limits_->memory_charge(sizeof(script_value) + h->size() + b->size())) return false;
-	script_string& out = s->unchecked_as_string_ref();
+	script_string& out = s->unchecked_as_string_ref(engine_);
 	if (b == &out) { out.append(script_string(*b)); }
 	else { out += *b; }
 	return true;
@@ -10319,7 +10318,7 @@ op_status vm_backend::exec_c_append(frame& f, size_t& ip, const vm_instruction& 
 	if (reinterpret_cast<int64_t>(h.get()) != cr.cells[lk].bits || !h.unique()) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }   // rebound, or shared: the general form unshares
 	const script_string* src = rconst ? cr.consts[ins.c & ~k_typed_const_bit].unchecked_string_handle().get() : reinterpret_cast<const script_string*>(cr.cells[ins.c].bits);
 	if (!src || !limits_->memory_charge(src->size())) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }   // the cap: the general form raises its own text
-	s->unchecked_as_string_ref() += *src;   // in place (unique, so no unshare): the slot owns the node, the cell's borrow stays valid
+	s->unchecked_as_string_ref(engine_) += *src;   // in place (unique, so no unshare): the slot owns the node, the cell's borrow stays valid
 	++ip;
 	return {};
 }
@@ -13353,11 +13352,11 @@ op_status vm_backend::capture_arg(frame& f, const vm_instruction& ins) {
 		bool bound = false;
 		VM_TRY(bind_place_reference(static_cast<const expression*>(f.code->nodes[place - 1].get()), &f, environment_, minted, bound));
 		if (bound) {
-			detail::hold_minted_reference(stack_.back(), b, std::move(minted));
+			detail::hold_minted_reference(engine_, stack_.back(), b, std::move(minted));
 			return {};
 		}
 	}
-	if (detail::capture_candidate(stack_.back(), kind)) { detail::capture_argument(stack_.back(), kind, b); }
+	if (detail::capture_candidate(stack_.back(), kind)) { detail::capture_argument(engine_, stack_.back(), kind, b); }
 	return {};
 }
 
@@ -13599,7 +13598,7 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 	if (top.fn) {
 		JAI_COARSE(coarse_push_, coarse_pushes_)
 		const script_defined_function& fn = *top.fn;
-		strong_ptr<script_function> pin = std::move(top.pin);
+		strong_ptr<script_function_node> pin = std::move(top.pin);
 		pending_callees_.pop_back();
 		return call_parked_script(f, ins, fn, std::move(pin));
 	}
@@ -13630,7 +13629,7 @@ op_status vm_backend::exec_sleep(frame& f, const vm_instruction& ins) {
 }
 
 // a parked script function: the tail splice or the record push; a throw ahead of the record leaves the args on the stack
-op_status vm_backend::call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function> pin) {
+op_status vm_backend::call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function_node> pin) {
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
 	const size_t args_base = stack_.size() - argc;
@@ -14046,7 +14045,7 @@ bool vm_backend::bind_plain_references(const script_defined_function& function, 
 // The plain frame: a function without a frame environment (a closure's not a method's), a plain one called outside a block scope, whose
 // arguments are already its parameter slots (or its T& parameters name the caller's frame-slot locals), takes push_script_frame_pinned's
 // lazy lane (env-untouched, or the closure environment installed) with nothing that can throw; false = the general push
-bool vm_backend::push_plain_frame(frame& caller, const call_site& site, const script_defined_function& function, strong_ptr<script_function>& pin, size_t args_base, size_t argc) {
+bool vm_backend::push_plain_frame(frame& caller, const call_site& site, const script_defined_function& function, strong_ptr<script_function_node>& pin, size_t args_base, size_t argc) {
 #ifdef JAISCRIPT_VM_PROFILE
 	return false;   // the profile's push sections account the general push
 #endif
@@ -14119,7 +14118,7 @@ bool vm_backend::push_plain_frame(frame& caller, const call_site& site, const sc
 // function; the pin releases at pop exactly where the callee slot died).
 op_status vm_backend::push_script_frame_pinned(frame& caller,
                                                           const script_defined_function& function,
-                                                          strong_ptr<script_function> pin,
+                                                          strong_ptr<script_function_node> pin,
                                                           size_t args_base, size_t argc,
                                                           const call_site* site) {
 #ifdef JAISCRIPT_VM_PROFILE
@@ -14261,7 +14260,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 // rec.caller / stack_base / try-iter-cfor bases / depth all stay: the spliced
 // activation returns directly to the ORIGINAL caller through the unchanged pop.
 op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_function& function,
-                                        strong_ptr<script_function> pin,
+                                        strong_ptr<script_function_node> pin,
                                         size_t args_base, size_t argc, const call_site* site) {
 	chunk* body_chunk = rec.f.code;
 	frame tf;
@@ -17454,7 +17453,7 @@ op_status vm_backend::concat_step(const script_value& right, uint32_t hint) {
 				node->reserve(want);
 			}
 		}
-		acc.unchecked_as_string_ref().append(text);
+		acc.unchecked_as_string_ref(engine_).append(text);
 		acc.set_type_info(nullptr);
 		return {};
 	}
@@ -17529,7 +17528,7 @@ op_status vm_backend::exec_concat_pending(frame& f, const vm_instruction& ins) {
 				return raise_from(detail::raise_memory_cap(*limits_));
 			}
 			if (first) { stack_.push_back(script_value(script_string(text), engine_)); }
-			else { stack_.back().unchecked_as_string_ref().append(text); }
+			else { stack_.back().unchecked_as_string_ref(engine_).append(text); }
 			return {};
 		}
 	}
@@ -23053,7 +23052,7 @@ bool vm_backend::enter_static_method(frame& caller, script_value& callee, const 
 	const auto& table = dispatch->cls->script_static_method_overloads();
 	const auto it = table.find(dispatch->name_id);
 	if (it != table.end() && it->second.size() > 1) {
-		const auto verdict = score_declarations(it->second, arguments.data(), arguments.size());
+		const auto verdict = score_declarations(it->second, arguments.data(), arguments.size(), engine_);
 		if (verdict.rival) return false;   // the dispatcher raises the tie
 		if (verdict.best) { ast = *verdict.best; }
 	}
@@ -23686,7 +23685,7 @@ checked_result<script_value> vm_backend::convert_return_at_site(script_value res
 		conv = classify_return_conv(return_type);
 	}
 	if (conv == return_conv::ref) {
-		return detail::ref_return_pass_through(std::move(result), return_type, symbolizer_);
+		return detail::ref_return_pass_through(std::move(result), return_type, symbolizer_, engine_);
 	}
 	if (result.is_reference()) {
 		result = result.deref();
@@ -23784,7 +23783,7 @@ checked_result<script_value> vm_backend::convert_return_value(script_value resul
 		// Reference return (int& f()): the HANDLE passes through - the holder's
 		// owner pin is the lifetime, so escaping the frame is legal. KEEP BYTE-
 		// PARALLEL with the interpreter's call_function epilogue ref branch.
-		return detail::ref_return_pass_through(std::move(result), return_type, symbolizer_);
+		return detail::ref_return_pass_through(std::move(result), return_type, symbolizer_, engine_);
 	}
 	if (result.is_reference()) {
 		// Value returns flatten: a plain function's result is a copy, never an alias
@@ -23997,7 +23996,7 @@ op_status vm_backend::bind_later_places(const std::vector<parameter>& parameters
 		script_value minted = make_null();
 		bool bound = false;
 		VM_TRY(bind_place_reference(static_cast<const expression*>(caller_code->nodes[node].get()), caller_frame, caller_env, minted, bound));
-		if (bound) { detail::hold_minted_reference(held ? (*held)[j] : stack_[args_base + j], detail::arg_binding::reference, std::move(minted)); }   // read after the resolution, which may run code
+		if (bound) { detail::hold_minted_reference(engine_, held ? (*held)[j] : stack_[args_base + j], detail::arg_binding::reference, std::move(minted)); }   // read after the resolution, which may run code
 	}
 	return {};
 }
@@ -24349,13 +24348,13 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 						held.reserve(argc);
 						for (size_t j = 0; j < argc; ++j) { held.push_back(args[args_base + j]); }
 						for (size_t j = i + 1; j < argc; ++j) {
-							detail::capture_argument(held[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(parameters, j));
+							detail::capture_argument(engine_, held[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(parameters, j));
 						}
 						VM_TRY(bind_later_places(parameters, &held, 0, i + 1, argc, site, caller_frame, caller_code, caller_env, caller_unit));
 						return bind_parameters(parameters, held, 0, argc, callee, body_chunk, caller_env, site, caller_frame, caller_code, arg_proofs, alias_fn, caller_unit, i, true, callee_body);
 					}
 					for (size_t j = i + 1; j < argc; ++j) {
-						detail::capture_argument(stack_[args_base + j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(parameters, j));
+						detail::capture_argument(engine_, stack_[args_base + j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(parameters, j));
 					}
 					VM_TRY(bind_later_places(parameters, nullptr, args_base, i + 1, argc, site, caller_frame, caller_code, caller_env, caller_unit));
 				}

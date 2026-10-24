@@ -432,7 +432,7 @@ static int compute_param_match_cost(
                 totalCost += 1;                  // an expired weak_ptr is an empty one
                 continue;
             }
-            script_value target(std::monostate{}, arg.get_engine());
+            script_value target(std::monostate{}, locked->owner);
             target.set_object_holder(locked);
             const int cost = object_param_cost(target, script_value_type::jai_shared_ptr_type, paramInfo, classes_by_type, classes_by_name);
             if (cost < 0) {
@@ -2076,10 +2076,9 @@ struct engine::implementation {
         return found != type_id_index_.end() && found->second == a_type;
     }
     // a twin spelling (var-held, declared reference) never displaces the plain spelling in the id index
-    type_info* intern_type(const type_key& a_key, const type_info& a_prototype, engine* a_owner, bool a_twin = false) {
+    type_info* intern_type(const type_key& a_key, const type_info& a_prototype, bool a_twin = false) {
         deny_type_intern_in_region();
         type_info* result = type_infos_.emplace(a_key, type_arena_.make(a_prototype)).first->second;
-        result->owner = a_owner;
         if (a_twin) { type_id_index_.try_emplace(result->id, result); } else { type_id_index_[result->id] = result; }
         return result;
     }
@@ -2128,35 +2127,35 @@ engine::implementation::implementation()
     // Initialize commonly used type_info objects for fast access
     // These are interned immediately so basic types are always available
     type_info int_info = type_info::make_int(string_symbolizer_);
-    type_info_int_ = intern_type(type_key{script_value_type::jai_int_type, 0, 0}, int_info, nullptr);
+    type_info_int_ = intern_type(type_key{script_value_type::jai_int_type, 0, 0}, int_info);
 
     type_info float_info = type_info::make_float(string_symbolizer_);
-    type_info_float_ = intern_type(type_key{script_value_type::jai_float_type, 0, 0}, float_info, nullptr);
+    type_info_float_ = intern_type(type_key{script_value_type::jai_float_type, 0, 0}, float_info);
 
     type_info string_info = type_info::make_string(string_symbolizer_);
-    type_info_string_ = intern_type(type_key{script_value_type::jai_string_type, 0, 0}, string_info, nullptr);
+    type_info_string_ = intern_type(type_key{script_value_type::jai_string_type, 0, 0}, string_info);
     type_info utf8_info = type_info::make_utf8_string(string_symbolizer_);
-    type_info_utf8_string_ = intern_type(type_key{script_value_type::jai_utf8_string_type, 0, 0}, utf8_info, nullptr);
+    type_info_utf8_string_ = intern_type(type_key{script_value_type::jai_utf8_string_type, 0, 0}, utf8_info);
 
     type_info bool_info = type_info::make_bool(string_symbolizer_);
-    type_info_bool_ = intern_type(type_key{script_value_type::jai_bool_type, 0, 0}, bool_info, nullptr);
+    type_info_bool_ = intern_type(type_key{script_value_type::jai_bool_type, 0, 0}, bool_info);
 
     type_info char_info = type_info::make_char(string_symbolizer_);
-    type_info_char_ = intern_type(type_key{script_value_type::jai_char_type, 0, 0}, char_info, nullptr);
+    type_info_char_ = intern_type(type_key{script_value_type::jai_char_type, 0, 0}, char_info);
 
     type_info uint8_info = type_info::make_uint8(string_symbolizer_);
-    type_info_uint8_ = intern_type(type_key{script_value_type::jai_int_type, uint8_info.id, 0}, uint8_info, nullptr);
+    type_info_uint8_ = intern_type(type_key{script_value_type::jai_int_type, uint8_info.id, 0}, uint8_info);
     type_info int8_info = type_info::make_int8(string_symbolizer_);
-    type_info_int8_ = intern_type(type_key{script_value_type::jai_int_type, int8_info.id, 0}, int8_info, nullptr);
+    type_info_int8_ = intern_type(type_key{script_value_type::jai_int_type, int8_info.id, 0}, int8_info);
 
     type_info void_info = type_info::make_void(string_symbolizer_);
-    type_info_void_ = intern_type(type_key{script_value_type::jai_null_type, 0, 0}, void_info, nullptr);
+    type_info_void_ = intern_type(type_key{script_value_type::jai_null_type, 0, 0}, void_info);
 
     type_info invalid_info = type_info::make_invalid(string_symbolizer_);
-    type_info_invalid_ = intern_type(type_key{script_value_type::jai_invalid_type, 0, 0}, invalid_info, nullptr);
+    type_info_invalid_ = intern_type(type_key{script_value_type::jai_invalid_type, 0, 0}, invalid_info);
 
     type_info any_info = type_info::make_any(string_symbolizer_);
-    type_info_any_ = intern_type(type_key{script_value_type::jai_any_type, 0, 0}, any_info, nullptr);
+    type_info_any_ = intern_type(type_key{script_value_type::jai_any_type, 0, 0}, any_info);
 
     // after the older canonical types, so their interned ids stay put
     const script_value_type math_kinds[6] = {script_value_type::jai_vec2_type, script_value_type::jai_vec3_type,
@@ -2164,7 +2163,7 @@ engine::implementation::implementation()
                                              script_value_type::jai_vec4_type, script_value_type::jai_color_type};
     for (size_t k = 0; k < 6; ++k) {
         type_info math_info = type_info::make_math(string_symbolizer_, math_kinds[k]);
-        type_info_math_[k] = intern_type(type_key{math_kinds[k], 0, 0}, math_info, nullptr);
+        type_info_math_[k] = intern_type(type_key{math_kinds[k], 0, 0}, math_info);
     }
 
     // Register standard C++ implicit conversions
@@ -2367,7 +2366,7 @@ checked_result<void> host_reference_store(engine* eng, const host_slot& slot, sc
 }
 
 engine::engine() : impl(std::make_unique<implementation>()) {
-    for (auto& [key, info] : impl->type_infos_) { info->owner = this; }
+    impl->global_environment_->bind_engine(this);
 }
 
 bool engine_loading(const engine* a_engine) {
@@ -2880,6 +2879,7 @@ held_value::held_value(const held_value& other) : script_value(static_cast<const
 
 held_value::held_value(held_value&& other) noexcept : script_value(static_cast<script_value&&>(other)), engine_(other.engine_), outlived_(other.outlived_) {
     if (engine_) { engine_->register_held(this); }
+    other.rebind(nullptr, false);   // the moved-from value is a plain null: it names no engine
 }
 
 void held_value::rebind(engine* holder, bool outlived) {
@@ -2905,13 +2905,14 @@ held_value& held_value::operator=(held_value&& other) noexcept {
         const bool outlived = other.outlived_;
         static_cast<script_value&>(*this) = static_cast<script_value&&>(other);
         rebind(holder, outlived);
+        other.rebind(nullptr, false);
     }
     return *this;
 }
 
 held_value& held_value::operator=(script_value value) {
     const bool outlived = value.is_outlived();
-    engine* holder = value.get_engine();
+    engine* holder = outlived ? nullptr : value.payload_engine() ? value.payload_engine() : engine_;
     static_cast<script_value&>(*this) = std::move(value);
     rebind(holder, outlived);
     return *this;
@@ -3075,6 +3076,17 @@ script_value engine::import_value(const script_value& value) {
         }
     }
     return result;
+}
+
+bool engine::owns_value(const script_value& value) const noexcept {
+    if (value.is_outlived()) { return false; }
+    if (const engine* owner = value.payload_engine()) { return owner == this; }
+    const type_info* stamp = value.type_info_raw();
+    if (!stamp || stamp == impl->type_info_int_ || stamp == impl->type_info_float_ || stamp == impl->type_info_string_ ||
+        stamp == impl->type_info_bool_ || stamp == impl->type_info_char_) {
+        return true;
+    }
+    return impl->interned_here(stamp);
 }
 
 held_value engine::execute(const std::string& scriptContent) {
@@ -4364,7 +4376,7 @@ type_info* engine::get_type_info_array(type_info* element_type) {
     implementation::type_key key{script_value_type::jai_array_type, element_type ? element_type->id : 0, 0};
 
     if (auto* found = impl->find_type(key)) { return found; }
-    return impl->intern_type(key, type_info::make_array(impl->string_symbolizer_, element_type), this);
+    return impl->intern_type(key, type_info::make_array(impl->string_symbolizer_, element_type));
 }
 
 type_info* engine::get_type_info_map(type_info* key_type, type_info* value_type) {
@@ -4374,7 +4386,7 @@ type_info* engine::get_type_info_map(type_info* key_type, type_info* value_type)
                               value_type ? value_type->id : 0};
 
     if (auto* found = impl->find_type(key)) { return found; }
-    return impl->intern_type(key, type_info::make_map(impl->string_symbolizer_, key_type, value_type), this);
+    return impl->intern_type(key, type_info::make_map(impl->string_symbolizer_, key_type, value_type));
 }
 
 type_info* engine::get_type_info_object(const std::string& class_name) {
@@ -4383,7 +4395,7 @@ type_info* engine::get_type_info_object(const std::string& class_name) {
     implementation::type_key key{script_value_type::jai_object_type, class_name_id, 0};
 
     if (auto* found = impl->find_type(key)) { return found; }
-    return impl->intern_type(key, type_info::make_object(impl->string_symbolizer_, class_name), this);
+    return impl->intern_type(key, type_info::make_object(impl->string_symbolizer_, class_name));
 }
 
 type_info* engine::get_type_info_object(uint64_t type_id) {
@@ -4398,7 +4410,7 @@ type_info* engine::get_type_info_object(uint64_t type_id) {
     if (class_name.empty()) {
         return nullptr; // Invalid type_id
     }
-    return impl->intern_type(key, type_info::make_object(impl->string_symbolizer_, class_name), this);
+    return impl->intern_type(key, type_info::make_object(impl->string_symbolizer_, class_name));
 }
 
 type_info* engine::get_type_info_weak_ptr(type_info* pointee_type) {
@@ -4406,7 +4418,7 @@ type_info* engine::get_type_info_weak_ptr(type_info* pointee_type) {
     implementation::type_key key{script_value_type::jai_weak_ptr_type, pointee_type ? pointee_type->id : 0, 0};
 
     if (auto* found = impl->find_type(key)) { return found; }
-    return impl->intern_type(key, type_info::make_weak_ptr(impl->string_symbolizer_, pointee_type), this);
+    return impl->intern_type(key, type_info::make_weak_ptr(impl->string_symbolizer_, pointee_type));
 }
 
 script_value engine::marked_shared_handle(script_value object) {
@@ -4432,7 +4444,7 @@ type_info* engine::get_type_info_shared_ptr(type_info* pointee_type) {
     implementation::type_key key{script_value_type::jai_shared_ptr_type, pointee_type ? pointee_type->id : 0, 0};
 
     if (auto* found = impl->find_type(key)) { return found; }
-    return impl->intern_type(key, type_info::make_shared_ptr(impl->string_symbolizer_, pointee_type), this);
+    return impl->intern_type(key, type_info::make_shared_ptr(impl->string_symbolizer_, pointee_type));
 }
 
 type_info* engine::get_type_info_shared_ptr_dynamic(type_info* pointee_type) {
@@ -4443,7 +4455,7 @@ type_info* engine::get_type_info_shared_ptr_dynamic(type_info* pointee_type) {
     if (auto* found = impl->find_type(key)) { return found; }
     type_info temp = type_info::make_shared_ptr(impl->string_symbolizer_, pointee_type);
     temp.dynamic_pointee = true;
-    return impl->intern_type(key, temp, this, true);
+    return impl->intern_type(key, temp, true);
 }
 
 type_info* engine::get_type_info_array_dynamic(type_info* array_type) {
@@ -4457,7 +4469,7 @@ type_info* engine::get_type_info_array_dynamic(type_info* array_type) {
     temp.dynamic_slot = true;
     temp.cached_reference_type = nullptr;
     temp.cached_declared_reference_type = nullptr;
-    return impl->intern_type(key, temp, this, true);
+    return impl->intern_type(key, temp, true);
 }
 
 type_info* engine::get_type_info_map_dynamic(type_info* a_mapType) {
@@ -4469,7 +4481,7 @@ type_info* engine::get_type_info_map_dynamic(type_info* a_mapType) {
 	temp.dynamic_slot = true;
 	temp.cached_reference_type = nullptr;
 	temp.cached_declared_reference_type = nullptr;
-	return impl->intern_type(key, temp, this, true);
+	return impl->intern_type(key, temp, true);
 }
 
 type_info* engine::get_type_info_declared_reference(type_info* referenced_type) {
@@ -4485,7 +4497,7 @@ type_info* engine::get_type_info_declared_reference(type_info* referenced_type) 
         temp.declared_kind = detail::declared_ref_kind(referenced_type) ? detail::declared_ref_kind(referenced_type) : uint8_t{0xFF};
         temp.cached_reference_type = nullptr;
         temp.cached_declared_reference_type = nullptr;
-        ptr = impl->intern_type(key, temp, this, true);
+        ptr = impl->intern_type(key, temp, true);
     }
     if (!parallel_region_active() && impl->interned_here(referenced_type)) { referenced_type->cached_declared_reference_type = ptr; }
     return ptr;
@@ -4505,7 +4517,7 @@ type_info* engine::get_type_info_reference(type_info* referenced_type) {
     implementation::type_key key{script_value_type::jai_reference_type, referenced_type ? referenced_type->id : 0, 0};
 
     type_info* ptr = impl->find_type(key);
-    if (!ptr) { ptr = impl->intern_type(key, type_info::make_reference(impl->string_symbolizer_, referenced_type), this); }
+    if (!ptr) { ptr = impl->intern_type(key, type_info::make_reference(impl->string_symbolizer_, referenced_type)); }
 
     // Fill the twin cache only on the region-free path: workers may reach here for a
     // shape that was interned but never prewarmed, and must not race the cache write.
@@ -4580,7 +4592,7 @@ type_info* engine::get_type_info(const type_info& temp) {
 
     if (auto* found = impl->find_type(key)) { return found; }
 
-    return impl->intern_type(key, temp, this);
+    return impl->intern_type(key, temp);
 }
 
 type_info* engine::get_type_info_by_id(uint64_t type_id) {

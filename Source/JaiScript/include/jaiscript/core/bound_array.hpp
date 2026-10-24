@@ -90,7 +90,7 @@ private:
         if (is_signed ? (x < -128 || x > 127) : (x < 0 || x > 255)) {
             throw_byte_range(is_signed, x);
         }
-        return script_value(x, v.get_engine());
+        return script_value(x, n.owner);
     }
 
 public:
@@ -185,13 +185,13 @@ public:
             if (!val.is_array()) {
                 throw runtime_error("Cannot extract bound_array from non-array script_value");
             }
-            return T(const_cast<script_value&>(val), val.get_engine());
+            return T(const_cast<script_value&>(val), val.payload_engine());
         } else if constexpr (is_bound_map_v<T>) {
             // For nested bound_map, create a zero-copy wrapper
             if (!val.is_map()) {
                 throw runtime_error("Cannot extract bound_map from non-map script_value");
             }
-            return T(const_cast<script_value&>(val).as_map(), val.get_engine());
+            return T(const_cast<script_value&>(val).as_map(), val.payload_engine());
         } else {
             // For custom types, use the same logic as script_value::as<T>()
             // which will check conversion registry if engine reference is available
@@ -225,7 +225,7 @@ public:
      * @param val Script value containing an array
      */
     explicit bound_array(const script_value& val)
-        : handle_(std::monostate{}, val.get_engine()), owned_(true), engine_ref_(val.get_engine()) {
+        : handle_(std::monostate{}, val.payload_engine()), owned_(true), engine_ref_(val.payload_engine()) {
         if (!val.is_array()) {
             throw runtime_error("Cannot create bound_array from non-array script_value");
         }

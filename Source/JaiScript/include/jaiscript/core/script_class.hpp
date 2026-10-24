@@ -396,7 +396,7 @@ inline checked_result<script_value> script_static_method_dispatch::call(const st
     const auto& table = cls->script_static_method_overloads();
     const auto it = table.find(name_id);
     if (it != table.end() && it->second.size() > 1) {
-        const auto verdict = score_declarations(it->second, args.data(), args.size());
+        const auto verdict = score_declarations(it->second, args.data(), args.size(), eng);
         if (verdict.rival) [[unlikely]] { return detail::ambiguous_call(name_id, (*verdict.best)->parameters, (*verdict.rival)->parameters, args.data(), args.size(), eng); }
         if (verdict.best) { payload.ast = *verdict.best; }
     }
@@ -537,8 +537,7 @@ inline checked_result<void> enforce_constructor_access(const script_class_defini
         "Cannot access private constructor of class '{0}'", cls.get_type_id());
 }
 
-inline bool converting_constructor_takes(const script_value& arg, const type_info& target) {
-    engine* eng = arg.get_engine();
+inline bool converting_constructor_takes(const script_value& arg, const type_info& target, engine* eng) {
     auto cls = eng ? eng->get_class_definition(target.type_name) : nullptr;
     if (!cls || !cls->is_script_class()) { return false; }
     for (const auto& ctor : static_cast<const script_class_definition&>(*cls).get_constructor_asts()) {

@@ -1286,7 +1286,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 				extra += argument.unchecked_text().size();
 			}
 			if (!detail::builtin_memory_charge(a_context.get_engine(), extra)) [[unlikely]] { return detail::builtin_memory_cap(a_context.get_engine()); }
-			auto& text = a_self.unchecked_text_ref();
+			auto& text = a_self.unchecked_text_ref(a_context.get_engine());
 			text.reserve(text.size() + extra);
 			for (const auto& argument : a_args) { text.append(argument.unchecked_text()); }
 			return a_self;
@@ -1704,7 +1704,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_lower() takes no arguments");
             }
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             for (auto& c : str) {
                 if (c >= 'A' && c <= 'Z') {
                     c = c + ('a' - 'A');
@@ -1717,7 +1717,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_upper() takes no arguments");
             }
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             for (auto& c : str) {
                 if (c >= 'a' && c <= 'z') {
                     c = c - ('a' - 'A');
@@ -1738,7 +1738,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "trim() takes at most 1 argument");
             }
 
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             size_t start = str.find_first_not_of(chars);
             if (start == std::string::npos) {
                 str.clear();
@@ -1761,7 +1761,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "trim_left() takes at most 1 argument");
             }
 
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             size_t start = str.find_first_not_of(chars);
             if (start == std::string::npos) {
                 str.clear();
@@ -1783,7 +1783,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "trim_right() takes at most 1 argument");
             }
 
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             size_t end = str.find_last_not_of(chars);
             if (end == std::string::npos) {
                 str.clear();
@@ -1817,7 +1817,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 }
             }
 
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             if (target_len > static_cast<script_int>(str.size())) {
                 if (!detail::builtin_memory_charge(ctx.get_engine(), detail::saturating_count(target_len) - str.size())) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
                 str.insert(0, detail::saturating_count(target_len) - str.size(), pad_char);
@@ -1849,7 +1849,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 }
             }
 
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             if (target_len > static_cast<script_int>(str.size())) {
                 if (!detail::builtin_memory_charge(ctx.get_engine(), detail::saturating_count(target_len) - str.size())) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
                 str.append(detail::saturating_count(target_len) - str.size(), pad_char);
@@ -1881,7 +1881,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 }
             }
 
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             if (target_len > static_cast<script_int>(str.size())) {
                 size_t total_pad = static_cast<size_t>(target_len) - str.size();
                 if (!detail::builtin_memory_charge(ctx.get_engine(), total_pad)) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
@@ -1907,7 +1907,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "replace_first() search string cannot be empty");
             }
 
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             size_t pos = str.find(old_str);
             if (pos != std::string::npos) {
                 str.replace(pos, old_str.size(), new_str);
@@ -1929,7 +1929,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "replace_last() search string cannot be empty");
             }
 
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             size_t pos = str.rfind(old_str);
             if (pos != std::string::npos) {
                 str.replace(pos, old_str.size(), new_str);
@@ -1952,7 +1952,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
 
             // One pass builds the result: replacing in place shifts the tail at every hit, quadratic in the hits
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             size_t hits = 0;
             for (size_t at = str.find(old_str); at != std::string::npos; at = str.find(old_str, at + old_str.size())) { ++hits; }
             if (hits == 0) { return self; }
@@ -1983,7 +1983,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "insert() second argument must be a string");
             }
 
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             script_int pos = args[0].unchecked_as_int();
             const auto& text = args[1].unchecked_text();
             script_int len = static_cast<script_int>(str.size());
@@ -2014,7 +2014,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "erase() first argument must be an integer");
             }
 
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             script_int pos = args[0].unchecked_as_int();
             script_int len = static_cast<script_int>(str.size());
 
@@ -2046,7 +2046,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove_prefix() argument must be an integer");
             }
 
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             script_int n = args[0].unchecked_as_int();
             if (n < 0) n = 0;
             if (n > 0) {
@@ -2064,7 +2064,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove_suffix() argument must be an integer");
             }
 
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             script_int n = args[0].unchecked_as_int();
             if (n < 0) n = 0;
             if (n > 0) {
@@ -2078,7 +2078,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (!args.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reverse() takes no arguments");
             }
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             std::reverse(str.begin(), str.end());
             return self;
         }},
@@ -2096,11 +2096,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "string::repeat count cannot be negative");
             }
             if (count == 0) {
-                self.unchecked_text_ref().clear();
+                self.unchecked_text_ref(ctx.get_engine()).clear();
                 return self;
             }
 
-            auto& str = self.unchecked_text_ref();
+            auto& str = self.unchecked_text_ref(ctx.get_engine());
             // engine::memory_cap chokepoint: deny the growth before it exists
             if (count > 1 && !detail::builtin_memory_charge(ctx.get_engine(), str.size(), detail::saturating_count(count - 1))) [[unlikely]] {
                 return detail::builtin_memory_cap(ctx.get_engine());
@@ -5175,7 +5175,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                 if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
                                     return detail::raise_memory_cap(*limits_);
                                 }
-                                target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
+                                target.unchecked_as_string_ref(engine_) += derefRight.unchecked_as_string();
                             } else {
                                 return detail::compound_mismatch(0, target, derefRight, engine_);
                             }
@@ -5300,7 +5300,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
                                 return detail::raise_memory_cap(*limits_);
                             }
-                            target.unchecked_as_string_ref() += derefRight.unchecked_as_string();
+                            target.unchecked_as_string_ref(engine_) += derefRight.unchecked_as_string();
                         } else if (leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_CHAR) {
                             // string += char appends the char as TEXT (out += to_char(b),
                             // the binary-writer shape) — a char is a text unit. Non-char
@@ -5310,7 +5310,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             if (!limits_->memory_charge(sizeof(script_value) + target.unchecked_as_string().size() + 1)) [[unlikely]] {
                                 return detail::raise_memory_cap(*limits_);
                             }
-                            target.unchecked_as_string_ref().push_back(derefRight.unchecked_as_char());
+                            target.unchecked_as_string_ref(engine_).push_back(derefRight.unchecked_as_char());
                         } else {
                             return detail::compound_mismatch(0, target, derefRight, engine_);
                         }
@@ -7928,7 +7928,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         push_value(make_value());
                         return {};
                     }
-                    capture_call_argument(expr->arg_captures, ai, *margs[ai], [] { return detail::arg_binding::opaque; });
+                    capture_call_argument(engine_, expr->arg_captures, ai, *margs[ai], [] { return detail::arg_binding::opaque; });
                 }
                 const script_value* argp[8] = {};
                 for (size_t i = 0; i < argc; ++i) {
@@ -8031,7 +8031,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                             push_value(make_value());
                             return {};
                         }
-                        capture_call_argument(expr->arg_captures, ai, arguments.back(), [] { return detail::arg_binding::opaque; });
+                        capture_call_argument(engine_, expr->arg_captures, ai, arguments.back(), [] { return detail::arg_binding::opaque; });
                     }
                     if (pre_args) {
                         recv_cell = string_receiver_cell(ident);
@@ -8132,7 +8132,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                                 push_value(make_value());
                                 return {};
                             }
-                            if (auto taken = capture_call_argument(expr->arg_captures, ai, arguments.back(), [&] {
+                            if (auto taken = capture_call_argument(engine_, expr->arg_captures, ai, arguments.back(), [&] {
                                     return detail::method_binding(cls_raw, member_id, ai, expr->arguments.size());
                                 }, [&](script_value& out) { return mint_argument_place(argExpr.get(), out); }); !taken) {
                                 return taken.error_value();
@@ -8297,7 +8297,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                             push_value(make_value());
                             return {};
                         }
-                        if (auto taken = capture_call_argument(expr->arg_captures, ai, arguments.back(), [&] {
+                        if (auto taken = capture_call_argument(engine_, expr->arg_captures, ai, arguments.back(), [&] {
                                 return parallel_pin_decl ? detail::parameters_binding(parallel_pin_decl->parameters, ai)
                                                          : detail::method_binding(cls_pin.get(), dispatch->name_id, ai, expr->arguments.size());
                             }, [&](script_value& out) { return mint_argument_place(argExpr.get(), out); }); !taken) {
@@ -8484,7 +8484,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                 push_value(make_value());
                 return {};
             }
-            if (auto taken = capture_call_argument(expr->arg_captures, ai, arguments.back(), [&] { return detail::callee_binding(callee, ai, false, expr->arguments.size()); },
+            if (auto taken = capture_call_argument(engine_, expr->arg_captures, ai, arguments.back(), [&] { return detail::callee_binding(callee, ai, false, expr->arguments.size()); },
                                                    [&](script_value& out) { return mint_argument_place(argExpr.get(), out); }); !taken) {
                 return taken.error_value();
             }
@@ -10367,7 +10367,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
         for (size_t ai = args.size(); ai < expr->arguments.size(); ++ai) {
             JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_new_shared, ai, args);
             args.push_back(pop_value());
-            if (auto taken = capture_call_argument(expr->arg_captures, ai, args.back(), [&] {
+            if (auto taken = capture_call_argument(engine_, expr->arg_captures, ai, args.back(), [&] {
                     auto ctor = environment_->get(innerTypeName, *string_symbolizer_);
                     return ctor ? detail::callee_binding(ctor.value(), ai, false, expr->arguments.size()) : detail::arg_binding::opaque;
                 }, [&](script_value& out) { return mint_argument_place(expr->arguments[ai].get(), out); }); !taken) {
@@ -10406,7 +10406,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
     for (size_t ai = args.size(); ai < expr->arguments.size(); ++ai) {
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_new_class, ai, args);
         args.push_back(pop_value());
-        if (auto taken = capture_call_argument(expr->arg_captures, ai, args.back(), [&] {
+        if (auto taken = capture_call_argument(engine_, expr->arg_captures, ai, args.back(), [&] {
                 auto ctor = environment_->get(className, *string_symbolizer_);
                 return ctor ? detail::callee_binding(ctor.value(), ai, false, expr->arguments.size()) : detail::arg_binding::opaque;
             }, [&](script_value& out) { return mint_argument_place(expr->arguments[ai].get(), out); }); !taken) {
@@ -12335,7 +12335,7 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
         if (const script_defined_function* fn = call_stack_.back().function) {
             const auto conv = detail::return_conv_of(*fn);
             if (conv == detail::return_conv::ref) {
-                auto passed = detail::ref_return_pass_through(std::move(*out), fn->return_type, string_symbolizer_);
+                auto passed = detail::ref_return_pass_through(std::move(*out), fn->return_type, string_symbolizer_, engine_);
                 if (!passed) {
                     return passed.error_value();
                 }
@@ -13862,7 +13862,7 @@ checked_result<void> interpreter::bind_later_places(const script_defined_functio
         script_value minted(std::monostate{}, engine_);
         auto placed = bind_site_reference(e, frame_index >= 1 ? &call_stack_[frame_index - 1] : nullptr, caller_env, minted);
         if (!placed) { return placed.error_value(); }
-        if (placed.value()) { detail::hold_minted_reference(args[j], detail::arg_binding::reference, std::move(minted)); }
+        if (placed.value()) { detail::hold_minted_reference(engine_, args[j], detail::arg_binding::reference, std::move(minted)); }
     }
     return {};
 }
@@ -14375,7 +14375,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                      later_place_argument(function, call_ctx, i + 1, args))) [[unlikely]] {
                     held_args = args;
                     for (size_t j = i + 1; j < held_args.size(); ++j) {
-                        detail::capture_argument(held_args[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(function.parameters(), j));
+                        detail::capture_argument(engine_, held_args[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(function.parameters(), j));
                     }
                     if (auto placed = bind_later_places(function, call_ctx, i + 1, held_args, frame_index, previousEnv, caller_unit); !placed) {
                         cleanup();
@@ -15038,7 +15038,7 @@ bool interpreter::call_static_method(const script_function& callee, const std::v
     const auto& table = dispatch->cls->script_static_method_overloads();
     const auto it = table.find(dispatch->name_id);
     if (it != table.end() && it->second.size() > 1) {
-        const auto verdict = score_declarations(it->second, arguments.data(), arguments.size());
+        const auto verdict = score_declarations(it->second, arguments.data(), arguments.size(), engine_);
         if (verdict.rival) return false;   // the dispatcher raises the tie
         if (verdict.best) { ast = *verdict.best; }
     }

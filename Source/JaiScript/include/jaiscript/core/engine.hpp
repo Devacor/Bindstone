@@ -113,7 +113,7 @@ namespace jai {
         bool literal_;
     };
 
-    class alignas(k_value_tag_alignment) engine : public std::enable_shared_from_this<engine> {
+    class engine : public std::enable_shared_from_this<engine> {
     private:
         engine();
         
@@ -709,11 +709,9 @@ namespace jai {
         script_value make_value(const held_value& value) { return make_value(value.value()); }
         script_value make_value(held_value& value) { return make_value(value.value()); }
         script_value make_value(held_value&& value) { return make_value(value.value()); }
-        // A value this engine made, or one that names no engine (a host literal)
-        bool owns_value(const script_value& value) const noexcept {
-            const engine* owner = value.get_engine();
-            return owner == this || (!owner && !value.is_outlived());
-        }
+        // A value this engine made, or one that names no engine (a host literal): a heap payload records its engine, a
+        // scalar's stamp is one of this engine's types
+        bool owns_value(const script_value& value) const noexcept;
         // Another engine's value as this engine's: numbers, strings and math values copy, arrays and maps convert deeply; an
         // object, a function or a reference into the other engine's memory throws, as does a held value that outlived its engine
         script_value import_value(const script_value& value);

@@ -3847,7 +3847,7 @@ namespace {
 			auto& handle = v.unchecked_get_array_storage();
 			if (!handle) { return true; }
 			if (handle.use_count() > 1) {
-				v = v.parallel_detached_copy();
+				v = v.parallel_detached_copy(&eng);
 				return normalize_element_inplace(v, eng, reach, unreferenced_array, nullptr, types);
 			}
 			if (handle->is_typed()) {
@@ -3867,7 +3867,7 @@ namespace {
 			auto& handle = v.unchecked_get_map_storage();
 			if (!handle) { return true; }
 			if (handle.use_count() > 1) {
-				v = v.parallel_detached_copy();
+				v = v.parallel_detached_copy(&eng);
 				return normalize_element_inplace(v, eng, reach, unreferenced_array, nullptr, types);
 			}
 			// A shared KEY string (a literal every map built from the same source holds)
@@ -3890,7 +3890,7 @@ namespace {
 				++it;
 			}
 			if (structured_key) {
-				v = v.parallel_detached_copy();
+				v = v.parallel_detached_copy(&eng);
 				return normalize_element_inplace(v, eng, reach, unreferenced_array, nullptr, types);
 			}
 			for (auto& [key, val] : *handle) {
@@ -4006,7 +4006,7 @@ namespace {
 			if (!node) { return nullptr; }
 			if (node->kind() == script_array::kind_t::obj) {
 				for (size_t i = 0; i < node->size(); ++i) {
-					if (const char* w = non_value_semantic_what(node->get(i, v.get_engine()))) { return w; }
+					if (const char* w = non_value_semantic_what(node->get(i, node->owner))) { return w; }
 				}
 				return nullptr;
 			}
@@ -4471,7 +4471,7 @@ namespace {
 #endif
 		std::vector<const void*> capture_nodes;
 		std::vector<type_info*> fresh_types;
-		provisioned = source.parallel_detached_copy(&fresh_types, &capture_nodes);
+		provisioned = source.parallel_detached_copy(&eng, &fresh_types, &capture_nodes);
 #ifdef JAISCRIPT_VM_PROFILE
 		prof.cache_miss_cyc[std::string(prof_name)] += __rdtsc() - prof_detach0;
 #endif
@@ -4583,8 +4583,7 @@ void release_deferred_in_order(const std::vector<std::vector<deferred_release>*>
 	}
 	std::stable_sort(ordered.begin(), ordered.end(), [](const deferred_release& a, const deferred_release& b) { return a.element < b.element; });
 	for (auto& released : ordered) {
-		engine* eng = released.value.get_engine();
-		released.value = script_value(std::monostate{}, eng);
+		released.value = script_value(std::monostate{}, nullptr);
 	}
 }
 
@@ -5501,7 +5500,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 					break;
 				case parallel_capture_kind::written:   // a fresh copy each region: the join reads back what this worker wrote
 					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
-					provisioned = cap.shares_slots ? shared_slot_copy(*cap.source, eng) : cap.source->parallel_detached_copy();
+					provisioned = cap.shares_slots ? shared_slot_copy(*cap.source, eng) : cap.source->parallel_detached_copy(&eng);
 					break;
 				}
 			} catch (const std::exception& e) {
@@ -6704,7 +6703,7 @@ checked_result<script_value> parallel_borrow_subscript_read(const script_value& 
 		case script_value::TYPEID_STRING:
 			return script_value(script_string(*elem.unchecked_string_handle()), eng);   // bytes, not the handle
 		default:
-			return elem.parallel_detached_copy();   // tier 3 (defensive: borrows are primitives and strings)
+			return elem.parallel_detached_copy(eng);   // tier 3 (defensive: borrows are primitives and strings)
 		}
 	}
 	if (const auto* map = borrow.parallel_borrow_map()) {
@@ -6723,7 +6722,7 @@ checked_result<script_value> parallel_borrow_subscript_read(const script_value& 
 		case script_value::TYPEID_STRING:
 			return script_value(script_string(*elem.unchecked_string_handle()), eng);   // bytes, not the handle
 		default:
-			return elem.parallel_detached_copy();
+			return elem.parallel_detached_copy(eng);
 		}
 	}
 	return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),

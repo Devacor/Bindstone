@@ -133,13 +133,13 @@ public:
             if (!val.is_array()) {
                 throw runtime_error("Cannot extract bound_array from non-array script_value");
             }
-            return T(const_cast<script_value&>(val), val.get_engine());
+            return T(const_cast<script_value&>(val), val.payload_engine());
         } else if constexpr (is_bound_map_v<T>) {
             // For nested bound_map, create a zero-copy wrapper
             if (!val.is_map()) {
                 throw runtime_error("Cannot extract bound_map from non-map script_value");
             }
-            return T(const_cast<script_value&>(val).as_map(), val.get_engine());
+            return T(const_cast<script_value&>(val).as_map(), val.payload_engine());
         } else {
             return val.as<T>();
         }
@@ -185,7 +185,7 @@ public:
         if (!val.is_map()) {
             throw runtime_error("Cannot create bound_map from non-map script_value");
         }
-        engine_ref_ = val.get_engine();
+        engine_ref_ = val.payload_engine();
         owned_value_ = std::make_shared<script_value>(val.clone());
         map_ = &owned_value_->as_map();
     }

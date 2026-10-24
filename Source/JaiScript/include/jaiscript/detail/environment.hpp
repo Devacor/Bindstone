@@ -49,7 +49,7 @@ namespace jai {
 
         // Standard environment with parent
         environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer)
-            : parent_(parent), symbolizer_(symbolizer), kind_(env_kind::standard),
+            : parent_(parent), symbolizer_(symbolizer), engine_(parent ? parent->engine_ : nullptr), kind_(env_kind::standard),
               this_object_(std::monostate{}, static_cast<engine*>(nullptr)),
               bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
             bump_env_epoch();
@@ -57,7 +57,7 @@ namespace jai {
 
         // Method environment constructor (with 'this' object)
         environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer, script_value this_obj)
-            : parent_(parent), symbolizer_(symbolizer), kind_(env_kind::method),
+            : parent_(parent), symbolizer_(symbolizer), engine_(parent ? parent->engine_ : nullptr), kind_(env_kind::method),
               this_object_(std::move(this_obj)),
               bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
             bump_env_epoch();
@@ -65,13 +65,17 @@ namespace jai {
 
         // Static method environment constructor (with class definition)
         environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer, std::shared_ptr<class_definition> class_def)
-            : parent_(parent), symbolizer_(symbolizer), kind_(env_kind::static_method),
+            : parent_(parent), symbolizer_(symbolizer), engine_(parent ? parent->engine_ : nullptr), kind_(env_kind::static_method),
               class_def_(class_def),
               this_object_(std::monostate{}, static_cast<engine*>(nullptr)),
               bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)),
               access_context_(class_def.get()) {
             bump_env_epoch();
         }
+
+        // the engine whose allowance this scope's growth counts toward; a child scope takes its parent's
+        void bind_engine(engine* a_engine) noexcept { engine_ = a_engine; }
+        engine* bound_engine() const noexcept { return engine_; }
 
         // reverse declaration order (C++), as clear_values; past the engine's release depth the values die on its release machine
         ~environment();
@@ -310,6 +314,7 @@ namespace jai {
         // Set parent environment (use this instead of directly setting parent_)
         void set_parent(std::shared_ptr<environment> new_parent) {
             parent_ = new_parent;
+            if (parent_) { engine_ = parent_->engine_; }
             bump_env_epoch();
         }
 
@@ -359,6 +364,7 @@ namespace jai {
         // Parent pointer kept for: closure semantics, 'this' lookup, debugging
         std::shared_ptr<environment> parent_;
         string_symbolizer* symbolizer_;
+        engine* engine_ = nullptr;   // a root's is bound by its engine (or backend); a child takes its parent's
 
         // === Unified environment fields (replaces method_environment / static_method_environment) ===
         env_kind kind_;
@@ -582,7 +588,7 @@ struct call_frame {
                 // engine context as the value being stored.
                 locals.reserve(slot + 1);
                 while (locals.size() < slot) {
-                    locals.emplace_back(std::monostate{}, value.get_engine());
+                    locals.emplace_back(std::monostate{}, nullptr);
                 }
                 locals.push_back(std::move(value));
             }

@@ -483,7 +483,7 @@ namespace jai::vm {
             std::vector<const script_function*> inline_holds;
             // per call site: the callee the worker's probe last parked (call_site::ic_*'s rule), held by the row; a hit parks it as the
             // general probe would, pinned
-            struct call_ic { const script_function* identity = nullptr; const script_defined_function* fn = nullptr; strong_ptr<script_function> pin; uint32_t argc = 0; bool native = false; };
+            struct call_ic { const script_function* identity = nullptr; const script_defined_function* fn = nullptr; strong_ptr<script_function_node> pin; uint32_t argc = 0; bool native = false; };
             std::vector<call_ic> call_ics;
             // per inline site of a method graft: the class (at its method epoch) the worker validated the graft for against the region's pin
             std::vector<std::pair<const class_definition*, uint64_t>> method_holds;
@@ -901,7 +901,7 @@ namespace jai::vm {
             call_frame locals;                         // record-owned slot storage; vector capacity reused across calls
             cell_state cells;                          // cell loops: the raw area, capacity reused across calls
             script_value callee_pin{std::monostate{}, nullptr};   // moved-off-stack callee value: pins the callable
-            strong_ptr<script_function> direct_pin;    // probe-called frames: pin without a callee value/slot
+            strong_ptr<script_function_node> direct_pin;    // probe-called frames: pin without a callee value/slot
             type_info_ptr return_type;                 // pop drivers convert the result against this
             uint8_t return_conv_class = 0;             // return_conv stamped at push (0 = legacy decision)
             // the caller's unit is the frame below's (vm_backend::caller_frame_unit); no stamp is saved per call
@@ -1081,7 +1081,7 @@ namespace jai::vm {
         struct pending_callee {
             script_value value{std::monostate{}, nullptr};   // opaque/default-arg path; a sibling method's dispatcher
             const script_defined_function* fn = nullptr;     // direct path
-            strong_ptr<script_function> pin;
+            strong_ptr<script_function_node> pin;
             const std::vector<uint32_t>* staged_slots = nullptr;
             const script_method_dispatch* method = nullptr;   // a bare sibling method of this frame's class: value is its dispatcher, the receiver the frame's this
             const script_function* host_fn = nullptr;   // a host callable the call's site cached at the probe, borrowed: the site's while it caches it, else retired
@@ -2667,7 +2667,7 @@ namespace jai::vm {
             return engine_->active_run_pins() ? detail::call_function_value(f, args) : f(args);
         }
         op_status exec_call_from_scratch_general(frame& f, const vm_instruction& ins);
-        op_status call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function> pin);
+        op_status call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function_node> pin);
         // the call paths' catch: the active exception becomes the unwinding state (out of line, no texts on the caller's
         // frame); truncate_to drops the stack first (SIZE_MAX keeps it)
         op_status call_threw(size_t truncate_to);
@@ -2681,20 +2681,20 @@ namespace jai::vm {
             if (site.ic_host_owner) { site.ic_host_owner = {}; }
         }
         uint32_t host_site_calls_ = 0;   // host callees running through call_host_site: a refill retires the site's pins while one runs
-        bool push_plain_frame(frame& caller, const call_site& site, const script_defined_function& function, strong_ptr<script_function>& pin, size_t args_base, size_t argc);
+        bool push_plain_frame(frame& caller, const call_site& site, const script_defined_function& function, strong_ptr<script_function_node>& pin, size_t args_base, size_t argc);
         bool bind_plain_references(const script_defined_function& function, frame& caller, const call_site& site, size_t args_base, size_t argc);
         // Callee-first probe for member / computed callees (op_probe_member)
         op_status exec_probe_member(frame& f, const vm_instruction& ins);
         op_status push_script_frame_pinned(frame& caller,
                                                const script_defined_function& function,
-                                               strong_ptr<script_function> pin,
+                                               strong_ptr<script_function_node> pin,
                                                size_t args_base, size_t argc,
                                                const call_site* site);
         // Real TCO: a tail-flagged bare self-call reuses the live record + window in
         // place — no record push, no depth tick (no artificial depth limit)
         op_status tail_splice_frame(call_record& rec,
                                                const script_defined_function& function,
-                                               strong_ptr<script_function> pin,
+                                               strong_ptr<script_function_node> pin,
                                                size_t args_base, size_t argc,
                                                const call_site* site);
         op_status exec_func_decl(frame& f, const vm_instruction& ins);
@@ -2781,7 +2781,7 @@ namespace jai::vm {
         uint64_t raw_epoch_ = 1;
         cell_counters cells_counters_{};   // entries, boundaries, resumes, misses (engine::cells_counters)
         void raw_epoch_advance() { raw_epoch_ += 2; }
-        std::vector<strong_ptr<script_function>> retired_callees_;   // site callees replaced while a borrowed call of theirs was live
+        std::vector<strong_ptr<script_function_node>> retired_callees_;   // site callees replaced while a borrowed call of theirs was live
         std::vector<std::unique_ptr<callback_session>> callback_sessions_;   // by nesting depth: frames_ holds &f while a call runs
         size_t callback_depth_ = 0;
         // the native-entry frames' raw areas, by nesting depth (a parallel region's chunk body, an opaque call's frame): their loops run as

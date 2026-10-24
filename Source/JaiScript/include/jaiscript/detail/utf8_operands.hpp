@@ -24,7 +24,7 @@ namespace jai::detail {
 
 	inline checked_result<script_value> utf8_rewrapped(checked_result<script_value> result, engine* eng) {
 		if (result && result.value().raw_storage_index() == script_value::TYPEID_STRING) {
-			return script_value::make_utf8(std::move(result.value().unchecked_as_string_ref()), eng);
+			return script_value::make_utf8(std::move(result.value().unchecked_as_string_ref(eng)), eng);
 		}
 		return result;
 	}

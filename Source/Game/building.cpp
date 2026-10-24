@@ -46,9 +46,9 @@ void Building::jai_auto_bind(jai::dynamic_binder<Building>& builder) {
 	builder.method("setVar", [](Building& a_self, jai::script_value a_key, jai::script_value a_value) {
 		a_self.localVariables[a_key.as_string()] = std::move(a_value);
 	});
-	builder.method("getVar", [](Building& a_self, jai::script_value a_key) {
+	builder.method("getVar", [eng = &builder.bound_engine()](Building& a_self, jai::script_value a_key) {
 		auto found = a_self.localVariables.find(a_key.as_string());
-		return found != a_self.localVariables.end() ? found->second : jai::script_value(std::monostate{}, a_key.get_engine());
+		return found != a_self.localVariables.end() ? found->second : jai::script_value(std::monostate{}, eng);
 	});
 }
 

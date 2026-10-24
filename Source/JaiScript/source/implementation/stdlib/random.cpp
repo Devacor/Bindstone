@@ -142,12 +142,12 @@ namespace random_detail {
 	}
 
 	bool is_random(const script_value& a_value) {
-		engine* owner = a_value.deref().get_engine();
+		engine* owner = a_value.deref().payload_engine();
 		return owner && as_random(a_value, random_type_id(owner)) != nullptr;
 	}
 
 	uint64_t draw_region_seed(const script_value& a_value) {
-		random* source = as_random(a_value, random_type_id(a_value.deref().get_engine()));
+		random* source = as_random(a_value, random_type_id(a_value.deref().payload_engine()));
 		return source ? source->next() : 0;
 	}
 
@@ -159,7 +159,7 @@ namespace random_detail {
 	}
 
 	void begin_region(const script_value& a_copy, const std::vector<script_value>* a_cursors, uint64_t a_seed) {
-		if (random* copy = as_random(a_copy, random_type_id(a_copy.deref().get_engine()))) { copy->begin_region(a_cursors, a_seed); }
+		if (random* copy = as_random(a_copy, random_type_id(a_copy.deref().payload_engine()))) { copy->begin_region(a_cursors, a_seed); }
 	}
 
 	JAI_NOINLINE checked_result<script_value> shuffle_needs_array() {

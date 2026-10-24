@@ -39,8 +39,6 @@ namespace jai::vm {
         void reference(bool on) { reference_ = on; inlining_off_ = on; if (on) { typed_lowering_ = false; ir_passes_ = false; } }
         // the stdlib math aliases a bare call may lower to (engine::register_math_alias)
         void math_aliases(const engine* e) { engine_ = e; }
-        // the engine that owns the types the compiler makes for itself (chunk::owned_types): a stamped value names its engine
-        void type_owner(engine* e) { type_owner_ = e; }
 
         std::shared_ptr<chunk> compile_program(const std::vector<declaration_ptr>& declarations);
         std::shared_ptr<chunk> compile_callable(std::string_view name,
@@ -98,7 +96,6 @@ namespace jai::vm {
         string_symbolizer* symbolizer_;
         const builtin_method_registries* builtins_ = nullptr;   // compile-time bi_* fill
         const engine* engine_ = nullptr;
-        engine* type_owner_ = nullptr;
         // Scope exits destroy the frame-slot locals that may own a script destructor (C++ lifetimes): one scope per block,
         // case body, for initializer and range-for iteration, its slots killed in reverse at its close and by the jumps that
         // leave it; a catch entry kills what its try block declared

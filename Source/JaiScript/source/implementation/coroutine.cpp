@@ -22,7 +22,7 @@ void coroutine_handle::set_function(std::shared_ptr<function_decl> func,
     // the call's arguments take their values at the call; the body binds them at the first resume
     for (size_t i = 0; i < initial_args_.size(); ++i) {
         if (!detail::capture_candidate(initial_args_[i], detail::transient_read_marker::arg_capture_full)) continue;
-        detail::capture_argument(initial_args_[i], detail::transient_read_marker::arg_capture_full,
+        detail::capture_argument(engine_, initial_args_[i], detail::transient_read_marker::arg_capture_full,
                                  function_ ? detail::parameters_binding(function_->parameters, i) : detail::arg_binding::opaque);
     }
 }

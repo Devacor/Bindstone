@@ -80,7 +80,7 @@ namespace jai::detail {
     // text); a tie raises, and no viable member is the overload miss
     inline checked_result<const script_value*> select_overload_member(const function_overload_set& set, const script_value* args, size_t argc, engine* eng) {
         const auto params_of = [](const std::shared_ptr<script_defined_function>& f) -> const std::vector<parameter>& { return f->parameters(); };
-        const auto verdict = score_overloads(set.members, params_of, args, argc);
+        const auto verdict = score_overloads(set.members, params_of, args, argc, eng);
         if (verdict.rival) [[unlikely]] {
             return ambiguous_call(set.name_id, (*verdict.best)->parameters(), (*verdict.rival)->parameters(), args, argc, eng);
         }

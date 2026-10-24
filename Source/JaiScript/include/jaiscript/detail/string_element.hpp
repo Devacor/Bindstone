@@ -67,9 +67,9 @@ namespace jai::detail {
 			return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Invalid reference in assignment");
 		}
 		const size_t size = storage.raw_storage_index() == script_value::TYPEID_STRING ? storage.unchecked_as_string().size()
-		                                                                                 : storage.unchecked_as_string_ref().size();
+		                                                                                 : storage.unchecked_as_string_ref(eng).size();
 		if (index >= size) { return string_element_out_of_bounds(index, size, eng); }
-		script_string& bytes = storage.unchecked_as_string_ref();
+		script_string& bytes = storage.unchecked_as_string_ref(eng);
 		if (text.size() == 1) {
 			bytes[index] = text[0];
 		} else {

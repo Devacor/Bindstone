@@ -76,6 +76,8 @@ namespace jai {
         // ~reference_holder). Zero lets a parallel fork prove exclusivity of a value-semantic
         // typed object array without walking the elements.
         uint32_t live_elem_refs = 0;
+        // the engine that made this node: its typed reads, copies and memory charges run against it
+        engine* owner = nullptr;
         // b8/c8/u8/i8 share one byte buffer (bool, char, uint8 and int8 payloads); the kind says how to box
         // str holds shared string handles (the same handle a boxed element would carry)
         // obj holds {object handle, class tag} slots (array<UserType>; 16 bytes vs 32 boxed)
@@ -224,6 +226,11 @@ namespace jai {
     // Function type for script functions
     // Returns checked_result to allow proper error propagation without exceptions
     using script_function = std::function<checked_result<script_value>(const std::vector<script_value>&)>;
+    // A function value's payload: the callable and the engine that made it (callbacks, signals and conversions run against it)
+    struct script_function_node : script_function {
+        engine* owner = nullptr;
+        script_function_node(script_function&& a_function, engine* a_owner) : script_function(std::move(a_function)), owner(a_owner) {}
+    };
 
     // A host callable with non-const T& parameters (bit i = script argument i): the argument capture binds those
     // positions as lvalues, as it does a script function's T& parameters (detail/arg_capture.hpp)

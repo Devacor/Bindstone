@@ -8115,7 +8115,6 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 	{
 		vm_compiler body_compiler(symbolizer_, builtins_);
 		body_compiler.reference(reference_);
-		body_compiler.type_owner(type_owner_);
 		body_compiler.typed_lowering(typed_lowering_);
 		body_compiler.ir_listing(ir_listing_);
 		body_compiler.ir_passes(ir_passes_);

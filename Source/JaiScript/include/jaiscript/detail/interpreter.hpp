@@ -113,6 +113,7 @@ namespace jai {
         // The body's function object outlives its first resume: the saved frames point at
         // it across every later resume (return-site conversion, debugger locals)
         std::optional<script_defined_function> function;
+        engine* eng = nullptr;
 
         // A coroutine dropped while suspended: its frames die here, then the cells they shared are checked for cycles
         ~interpreter_coroutine_state() override {
@@ -123,7 +124,6 @@ namespace jai {
                 }
             }
             if (shared.empty()) { return; }
-            engine* eng = shared.front().get_engine();
             saved_call_stack.clear();
             script_value::release_cell_cycles(shared, eng);
         }

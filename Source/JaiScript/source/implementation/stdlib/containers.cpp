@@ -42,11 +42,10 @@ namespace stdlib {
     };
 
     // Merge two maps, with the second map's values overriding the first's on key collision
-	inline checked_result<script_value> map_merge(const script_value& a_left, const script_value& a_right) {
+	inline checked_result<script_value> map_merge(engine* engine, const script_value& a_left, const script_value& a_right) {
 		if (!a_left.is_map() || !a_right.is_map()) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "merge() requires two map arguments");
 		}
-		auto* engine = a_left.get_engine();
 		const auto tag = a_left.get_type_info();
 		const auto keyType = tag ? tag->key_type() : nullptr, valueType = tag ? tag->value_type() : nullptr;
 		script_value result = script_value::make_map(keyType, valueType, engine);
@@ -86,17 +85,17 @@ namespace stdlib {
             .build();
 
         // Register container utility functions using variadic approach
-        eng.add_variadic_function("merge", [](const std::vector<script_value>& args) -> checked_result<script_value> {
+        eng.add_variadic_function("merge", [owner = &eng](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 2) {
                 // {0} is a symbol: the count rides the interned spelling of the number
-                engine* eng = args.empty() ? nullptr : args[0].get_engine();
+                engine* eng = args.empty() ? nullptr : owner;
                 const auto ec = make_error_code(runtime_error_code::argument_count_mismatch);
                 if (!eng) { return checked_result<script_value>(ec, "merge() expects exactly 2 arguments, got 0"); }
                 auto* symbols = eng->get_symbolizer();
                 if (symbols->frozen()) { return checked_result<script_value>(ec, "merge() expects exactly 2 arguments"); }
                 return checked_result<script_value>(ec, "merge() expects exactly 2 arguments, got {0}", symbols->intern(std::to_string(args.size())));
             }
-            return map_merge(args[0], args[1]);
+            return map_merge(owner, args[0], args[1]);
         });
 
 

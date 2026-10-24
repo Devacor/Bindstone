@@ -297,10 +297,11 @@ namespace {
 
     // A handle's backend_state is always interpreter-owned here: an engine's backend
     // is fixed before its first execute, so no other backend can have populated it.
-    interpreter_coroutine_state& coroutine_state(coroutine_handle& handle) {
+    interpreter_coroutine_state& coroutine_state(coroutine_handle& handle, engine* a_engine) {
         auto* state = static_cast<interpreter_coroutine_state*>(handle.backend_state());
         if (!state) {
             auto owned = std::make_unique<interpreter_coroutine_state>();
+            owned->eng = a_engine;
             state = owned.get();
             handle.set_backend_state(std::move(owned));
         }
@@ -356,7 +357,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 
         // Validate element type compatibility
-        if (!detail::container_element_compatible(args[0], element_type, self.get_engine())) {
+        if (!detail::container_element_compatible(args[0], element_type, ctx.get_engine())) {
             return detail::element_type_error(ctx.get_string_symbolizer(), runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", args[0], element_type);
         }
 
@@ -4220,7 +4221,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     // binary fast path) would poison the whole map for clone().
                     script_value key = right;
                     if (!key.has_valid_engine()) {
-                        key.set_engine(left.has_valid_engine() ? left.get_engine() : engine_);
+                        key.set_engine(engine_);
                     }
                     // Declared key type: keys never coerce, so the
                     // check runs BEFORE the auto-insert (KEEP BYTE-PARALLEL with the vm)
@@ -4244,7 +4245,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                             return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
                                 "Invalid script_value: both map and new entry missing engine reference");
                         }
-                        value_ref.set_engine(left.get_engine());
+                        value_ref.set_engine(engine_);
                     }
 
                     // Get value type constraint from the map's type_info for validation on assignment
@@ -4262,7 +4263,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     if (it != map.end()) {
                         script_value& value_ref = const_cast<script_value&>(it->second);
                         if (!value_ref.has_valid_engine()) {
-                            value_ref.set_engine(left.has_valid_engine() ? left.get_engine() : engine_);
+                            value_ref.set_engine(engine_);
                         }
                         auto map_type_info = left.get_type_info();
                         type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
@@ -6791,7 +6792,7 @@ checked_result<void> interpreter::store_through_subscript_reference(script_value
     if (in_place && !*in_place) { return *in_place; }
     if (in_place) {
     } else if (element_type) {
-        if (!detail::container_element_compatible(value, element_type, target_ptr->get_engine())) {
+        if (!detail::container_element_compatible(value, element_type, engine_)) {
             return detail::element_type_error(string_symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", value, element_type);
         }
         // Convert element if needed (e.g., int -> float for array<float>)
@@ -6863,7 +6864,7 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
     size_t start_index = 0;
     bool resuming = false;
     if (active_coroutine_) {
-        auto& coro_state = coroutine_state(*active_coroutine_);
+        auto& coro_state = coroutine_state(*active_coroutine_, engine_);
         auto* cont = coro_state.peek_continuation(stmt);
         if (cont) {
             start_index = cont->index;
@@ -6919,7 +6920,7 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
             // On yield: record continuation and return without releasing environment
             if (hasYieldRequest_) {
                 if (active_coroutine_) {
-                    auto& coro_state = coroutine_state(*active_coroutine_);
+                    auto& coro_state = coroutine_state(*active_coroutine_, engine_);
                     // If inner constructs (if/while/for/block) pushed continuations,
                     // we need to re-enter this statement on resume (save i).
                     // If no inner continuations exist, the yield was a direct child
@@ -10844,7 +10845,7 @@ checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
 
     // Check if we're resuming into a branch from a coroutine yield
     if (active_coroutine_) {
-        auto& coro_state = coroutine_state(*active_coroutine_);
+        auto& coro_state = coroutine_state(*active_coroutine_, engine_);
         auto* cont = coro_state.peek_continuation(stmt);
         if (cont) {
             resume_cond = cont->phase == rp_cond;   // suspended in the condition itself
@@ -10885,7 +10886,7 @@ checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
     if (branch) {
         JAISCRIPT_TRY(resuming ? dispatch_stmt_resuming(branch) : dispatch_stmt(branch));
         if (hasYieldRequest_ && active_coroutine_) {
-            auto& coro_state = coroutine_state(*active_coroutine_);
+            auto& coro_state = coroutine_state(*active_coroutine_, engine_);
             if (coro_state.has_continuations()) {
                 coro_state.push_continuation(stmt, is_true ? 0 : 1);
             }
@@ -10903,7 +10904,7 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
     bool replay_condition = false;
     bool resume_body = false;
     if (active_coroutine_) {
-        auto& coro_state = coroutine_state(*active_coroutine_);
+        auto& coro_state = coroutine_state(*active_coroutine_, engine_);
         auto* cont = coro_state.peek_continuation(stmt);
         if (cont) {
             replay_condition = cont->phase == rp_cond;   // suspended in the condition itself
@@ -10986,7 +10987,7 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
         // On yield: record continuation and return
         if (hasYieldRequest_) {
             if (active_coroutine_) {
-                auto& coro_state = coroutine_state(*active_coroutine_);
+                auto& coro_state = coroutine_state(*active_coroutine_, engine_);
                 if (coro_state.has_continuations()) coro_state.push_continuation(stmt, 0);
                 else coro_state.push_replay(stmt, rp_body_done, 0);
             }
@@ -11448,7 +11449,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
     bool resuming_loop = false;
     uint32_t resume_phase = rp_none;
     if (active_coroutine_) {
-        auto& coro_state = coroutine_state(*active_coroutine_);
+        auto& coro_state = coroutine_state(*active_coroutine_, engine_);
         auto* cont = coro_state.peek_continuation(stmt);
         if (cont) {
             resuming_loop = true;
@@ -11486,7 +11487,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
             if (hasYieldRequest_) [[unlikely]] {
                 // the initializer suspended: its own frames are parked, keep the loop scope
                 if (active_coroutine_) {
-                    coroutine_state(*active_coroutine_).push_replay(stmt, rp_init, 0, {}, environment_);
+                    coroutine_state(*active_coroutine_, engine_).push_replay(stmt, rp_init, 0, {}, environment_);
                 }
                 environment_ = previous;
                 return {};
@@ -11500,7 +11501,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
         }
         if (hasYieldRequest_) [[unlikely]] {
             if (active_coroutine_) {
-                coroutine_state(*active_coroutine_).push_replay(stmt, rp_init, 0, {}, environment_);
+                coroutine_state(*active_coroutine_, engine_).push_replay(stmt, rp_init, 0, {}, environment_);
             }
             environment_ = previous;
             return {};
@@ -11528,7 +11529,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
         if (!result) {
             if (is_yield_signal(result)) {
                 if (active_coroutine_) {
-                    coroutine_state(*active_coroutine_).push_replay(stmt, rp_cond, 0, {}, environment_);
+                    coroutine_state(*active_coroutine_, engine_).push_replay(stmt, rp_cond, 0, {}, environment_);
                 }
                 park_loop_env = true;
                 return false;
@@ -11569,7 +11570,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
         if (!result) {
             if (is_yield_signal(result)) {
                 if (active_coroutine_) {
-                    coroutine_state(*active_coroutine_).push_replay(stmt, rp_update, 0, {}, environment_);
+                    coroutine_state(*active_coroutine_, engine_).push_replay(stmt, rp_update, 0, {}, environment_);
                 }
                 park_loop_env = true;
                 return;
@@ -11648,7 +11649,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
                 // Save the current environment (for-loop scope or deeper) so we can
                 // restore it on resume. For-loop variables are environment-based
                 // (not slot-based) and must be accessible.
-                auto& coro_state = coroutine_state(*active_coroutine_);
+                auto& coro_state = coroutine_state(*active_coroutine_, engine_);
                 if (coro_state.has_continuations()) coro_state.push_continuation(stmt, 0, environment_);
                 else coro_state.push_replay(stmt, rp_body_done, 0, {}, environment_);
             }
@@ -11726,7 +11727,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
     size_t resume_index = 0;
     script_value container = make_value();
     if (active_coroutine_) {
-        auto& coro_state = coroutine_state(*active_coroutine_);
+        auto& coro_state = coroutine_state(*active_coroutine_, engine_);
         if (auto* cont = coro_state.peek_continuation(stmt)) {
             replay_container = cont->phase == rp_container;   // suspended in the source expression
             if (cont->saved_container) {
@@ -11912,7 +11913,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                 // iteration instead of re-evaluating the container from scratch.
                 if (hasYieldRequest_) {
                     if (active_coroutine_) {
-                        auto& coro_state = coroutine_state(*active_coroutine_);
+                        auto& coro_state = coroutine_state(*active_coroutine_, engine_);
                         if (coro_state.has_continuations()) coro_state.push_continuation(stmt, i, nullptr, container);
                         else coro_state.push_replay(stmt, rp_body_done, i + 1, {}, nullptr, container);
                     }
@@ -12002,7 +12003,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                 }
                 if (hasYieldRequest_) {
                     if (active_coroutine_) {
-                        auto& coro_state = coroutine_state(*active_coroutine_);
+                        auto& coro_state = coroutine_state(*active_coroutine_, engine_);
                         if (coro_state.has_continuations()) coro_state.push_continuation(stmt, i, nullptr, container);
                         else coro_state.push_replay(stmt, rp_body_done, i + 1, {}, nullptr, container);
                     }
@@ -12113,7 +12114,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                 // On yield: don't pop scope, let environment stay for coroutine to save
                 if (hasYieldRequest_) {
                     if (active_coroutine_) {
-                        auto& coro_state = coroutine_state(*active_coroutine_);
+                        auto& coro_state = coroutine_state(*active_coroutine_, engine_);
                         if (coro_state.has_continuations()) coro_state.push_continuation(stmt, entry_index, nullptr, container);
                         else coro_state.push_replay(stmt, rp_body_done, entry_index + 1, {}, nullptr, container);
                     }
@@ -12189,7 +12190,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                 if (hasReturnValue_) break;
                 if (hasYieldRequest_) {
                     if (active_coroutine_) {
-                        auto& coro_state = coroutine_state(*active_coroutine_);
+                        auto& coro_state = coroutine_state(*active_coroutine_, engine_);
                         if (coro_state.has_continuations()) coro_state.push_continuation(stmt, 0, nullptr, container);
                         else coro_state.push_replay(stmt, rp_body_done, 0, {}, nullptr, container);
                     }
@@ -12387,7 +12388,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
     // restored - the try block already ran and must not run again
     bool resuming_catch = false;
     if (active_coroutine_) {
-        auto& coro_state = coroutine_state(*active_coroutine_);
+        auto& coro_state = coroutine_state(*active_coroutine_, engine_);
         if (auto* cont = coro_state.peek_continuation(stmt)) {
             if (cont->phase == rp_catch) {
                 resuming_catch = true;
@@ -12501,7 +12502,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         // instead of re-running the try block
         if (hasYieldRequest_) [[unlikely]] {
             if (active_coroutine_) {
-                coroutine_state(*active_coroutine_).push_replay(stmt, rp_catch, 0, {}, nullptr,
+                coroutine_state(*active_coroutine_, engine_).push_replay(stmt, rp_catch, 0, {}, nullptr,
                     active_exception_value_ ? *active_exception_value_ : make_value());
             }
             current_catch_var_id_ = saved_catch_var_id;
@@ -12548,7 +12549,7 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
     script_value switch_value;
     std::shared_ptr<environment> resumed_case_env;
     if (active_coroutine_) {
-        auto& coro_state = coroutine_state(*active_coroutine_);
+        auto& coro_state = coroutine_state(*active_coroutine_, engine_);
         if (auto* cont = coro_state.peek_continuation(stmt)) {
             resume_phase = cont->phase;
             resume_case = cont->index;
@@ -12646,7 +12647,7 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                     // On yield the scope must survive for coroutine resume — skip the release.
                     if (hasYieldRequest_) {
                         if (active_coroutine_) {
-                            coroutine_state(*active_coroutine_).push_replay(stmt, rp_case_body, case_idx, {switch_value}, case_env);
+                            coroutine_state(*active_coroutine_, engine_).push_replay(stmt, rp_case_body, case_idx, {switch_value}, case_env);
                         }
                         environment_ = previous;
                         in_switch_ = old_in_switch;
@@ -12706,7 +12707,7 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                 // On yield the scope must survive for coroutine resume — skip the release.
                 if (hasYieldRequest_) {
                     if (active_coroutine_) {
-                        coroutine_state(*active_coroutine_).push_replay(stmt, rp_default_body, 0, {switch_value}, default_env);
+                        coroutine_state(*active_coroutine_, engine_).push_replay(stmt, rp_default_body, 0, {switch_value}, default_env);
                     }
                     environment_ = previous;
                     in_switch_ = old_in_switch;
@@ -12745,7 +12746,7 @@ checked_result<void> interpreter::run_case_body(ast_node* self, const std::vecto
     size_t start_index = 0;
     bool resume_entry = false;
     if (active_coroutine_) {
-        auto& coro_state = coroutine_state(*active_coroutine_);
+        auto& coro_state = coroutine_state(*active_coroutine_, engine_);
         if (auto* cont = coro_state.peek_continuation(self)) {
             start_index = cont->index;
             coro_state.pop_continuation();
@@ -12765,7 +12766,7 @@ checked_result<void> interpreter::run_case_body(ast_node* self, const std::vecto
         }
         if (hasYieldRequest_) {
             if (active_coroutine_) {
-                auto& coro_state = coroutine_state(*active_coroutine_);
+                auto& coro_state = coroutine_state(*active_coroutine_, engine_);
                 coro_state.push_continuation(self, coro_state.has_continuations() ? i : i + 1);
             }
             return {};
@@ -14487,7 +14488,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         active_coroutine_->get_function() && active_coroutine_->get_function()->body == function.body) {
         {
             result = active_coroutine_->last_value();
-            auto& coro_state = coroutine_state(*active_coroutine_);
+            auto& coro_state = coroutine_state(*active_coroutine_, engine_);
             // Record where to resume in the function body.
             // If inner constructs pushed continuations, re-enter this statement.
             // If no inner continuations, the yield was a direct child, skip it.
@@ -14663,7 +14664,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
     const unit_stamp replay_unit = declared ? declared->unit : current_unit();
     unit_override_scope unitScope(this, &replay_unit);
 
-    auto& state = coroutine_state(handle);
+    auto& state = coroutine_state(handle, engine_);
 
     coroutine_handle* prev_coroutine = active_coroutine_;
     bool prev_yield_request = hasYieldRequest_;
@@ -15284,7 +15285,7 @@ checked_result<void> interpreter::visit_destructuring_decl_t(destructuring_decl*
 
 void interpreter::park_operands(ast_node* node, uint32_t phase, size_t index, std::vector<script_value> partial) {
     if (active_coroutine_) {
-        coroutine_state(*active_coroutine_).push_replay(node, phase, index, std::move(partial));
+        coroutine_state(*active_coroutine_, engine_).push_replay(node, phase, index, std::move(partial));
     }
 }
 
@@ -15293,7 +15294,7 @@ void interpreter::park_operands(ast_node* node, uint32_t phase, size_t index, st
 // dispatch_decl_resuming. A bare `yield x;` parks nothing - the block skips it as before.
 void interpreter::note_statement_yield(ast_node* stmt, expression* root) {
     if (!active_coroutine_) return;
-    auto& coro_state = coroutine_state(*active_coroutine_);
+    auto& coro_state = coroutine_state(*active_coroutine_, engine_);
     const node_type kind = stmt->get_type();
     if ((kind == node_type::expression_stmt || kind == node_type::expression_decl) &&
         root->get_type() == node_type::yield_expr && coro_state.back_node() != root) {
@@ -15305,7 +15306,7 @@ void interpreter::note_statement_yield(ast_node* stmt, expression* root) {
 // Resume side: run the suspended child of a parked expression node. A child with no frame
 // of its own is the recorded yield - consumed exactly once, its operand never re-evaluated.
 checked_result<void> interpreter::replay_expression(expression* expr) {
-    auto& coro_state = coroutine_state(*active_coroutine_);
+    auto& coro_state = coroutine_state(*active_coroutine_, engine_);
     if (coro_state.back_node() != expr) {
         if (expr->get_type() == node_type::yield_expr) {
             push_value(make_value());   // vm exec_yield: the yield expression is null on resume
@@ -15337,7 +15338,7 @@ checked_result<void> interpreter::replay_expression(expression* expr) {
 // other statement runs cold
 checked_result<void> interpreter::dispatch_stmt_resuming(statement* stmt) {
     if (!active_coroutine_) return dispatch_stmt(stmt);
-    auto& coro_state = coroutine_state(*active_coroutine_);
+    auto& coro_state = coroutine_state(*active_coroutine_, engine_);
     auto* cont = coro_state.peek_continuation(stmt);
     if (!cont) return dispatch_stmt(stmt);
     if (cont->phase != rp_root) {
@@ -15358,7 +15359,7 @@ checked_result<void> interpreter::dispatch_decl_resuming(declaration* decl) {
     if (decl->get_type() == node_type::statement_decl) {
         return dispatch_stmt_resuming(static_cast<statement_decl*>(decl)->statement.get());
     }
-    auto& coro_state = coroutine_state(*active_coroutine_);
+    auto& coro_state = coroutine_state(*active_coroutine_, engine_);
     auto* cont = coro_state.peek_continuation(decl);
     if (!cont) return dispatch_decl(decl);
     if (cont->phase != rp_root) {

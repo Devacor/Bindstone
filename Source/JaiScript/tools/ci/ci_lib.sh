@@ -111,6 +111,32 @@ jai_gates() {
 	return 1
 }
 
+# jai_timing_gate <gate>: gates that measure time run alone, after everything else
+jai_timing_gate() { case "$1" in lsp-latency) return 0 ;; *) return 1 ;; esac; }
+
+# jai_gates_side_by_side <cfg> <gate>...: the gates at once, each with its own temp directory; a red gate reruns alone so
+# load from its neighbours never decides a verdict; prints one line per gate, returns the red ones in JAI_RED
+jai_gates_side_by_side() {
+	local cfg="$1" gate pids=() tmp
+	shift
+	JAI_RED=""
+	for gate in "$@"; do
+		tmp="$JAI_CI_LOG_DIR/tmp_${cfg}_$gate"
+		mkdir -p "$tmp"
+		TEMP="$tmp" TMP="$tmp" TMPDIR="$tmp" jai_gates "$cfg" "$gate" > "$JAI_CI_LOG_DIR/gate_${cfg}_$gate.line" 2>&1 &
+		pids+=($!)
+	done
+	for gate in "${pids[@]}"; do wait "$gate" || true; done
+	for gate in "$@"; do
+		if grep -q "^green" "$JAI_CI_LOG_DIR/gate_${cfg}_$gate.line"; then
+			cat "$JAI_CI_LOG_DIR/gate_${cfg}_$gate.line"
+		else
+			echo "rerunning $gate alone (the side-by-side run was red)"
+			jai_gates "$cfg" "$gate" || JAI_RED="$JAI_RED $gate"
+		fi
+	done
+}
+
 # jai_debug_suites [backend...]: the Debug suites on the named backends (interp, vm, vm-reference; default all three), side by
 # side, each with its own temp directory; a red side reruns alone
 jai_debug_suites() {

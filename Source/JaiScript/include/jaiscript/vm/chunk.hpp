@@ -170,6 +170,18 @@ namespace jai::vm {
         mutable std::shared_ptr<function_decl> mic_resolved;
         mutable bool mic_static = false;
         mutable bool mic_field_free = false;   // no field in the class chain is named like the method
+        // the classes a polymorphic method site met before the one above, each under the same (class identity, method_epoch) rule
+        struct mic_entry {
+            const class_definition* cd = nullptr;
+            uint64_t epoch = 0;
+            bool field_free = false;
+            script_value method{std::monostate{}, nullptr};
+            const script_method_dispatch* dispatch = nullptr;
+            std::shared_ptr<function_decl> resolved;
+        };
+        static constexpr uint8_t k_mic_poly = 3;
+        mutable mic_entry mic_poly[k_mic_poly];
+        mutable uint8_t mic_poly_next = 0;
         // op_probe_member memo for sites the mic never arms (multi-overload methods):
         // "the lookup succeeds for this class at this method_epoch"; same gates as mic_*
         mutable const class_definition* probe_cd = nullptr;

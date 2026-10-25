@@ -855,6 +855,44 @@ public:
             check_eq(std::string("879 Reference to a removed array element"), r.as<std::string>());
         });
 
+        test("map_contains_map_entry_references_and_object_array_member_paths", [this]() {
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                class E { int x = 0; E(int a) { x = a; } }
+                class W { array<E> es = []; }
+                string run() {
+                    string out = "";
+                    map<int, array<int>> m = {};
+                    m[1] = [10];
+                    var open = m;
+                    out += to_string(m.contains(1)) + to_string(m.contains(2)) + to_string(open.contains(1)) + to_string(open.contains(3));
+                    string s = "abc";
+                    var os = s;
+                    out += to_string(os.contains("b")) + "|";
+                    array<int>& b = m[1];
+                    b.push(11);
+                    m[5] = [50];
+                    out += to_string(b.size()) + to_string(b[1]);
+                    b = [7];
+                    out += to_string(m[1][0]);
+                    m.erase(1);
+                    try { out += to_string(b.size()); } catch (err) { out += " " + err; }
+                    out += "|";
+                    W w = W();
+                    for (int i = 0; i < 4; ++i) { w.es.push(E(i)); }
+                    int t = 0;
+                    for (int k = 0; k < 4; ++k) { t += w.es[k].x; }
+                    w.es[2] = E(40);
+                    t += w.es[2].x;
+                    out += to_string(t);
+                    try { int v = w.es[9].x; out += to_string(v); } catch (err) { out += " " + err; }
+                    return out;
+                }
+                run()
+            )");
+            check_eq(std::string("truefalsetruefalsetrue|2117 Reference to a removed map entry|46 Array index 9 out of bounds for array of size 4"), r.as<std::string>());
+        });
+
         test("global_read_in_method_yields_to_a_static_added_on_reload", [this]() {
             auto e = make_stdlib_engine();
             e->execute(R"(

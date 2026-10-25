@@ -7972,7 +7972,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 					if (name == "pop" && n == 0) inline_op = 11;
 				}
 				if (inline_op == 0 && (builtin_kind == 3 || builtin_kind >= 4)) {
-					if (name == "has" && n == 1) inline_op = 9;
+					if ((name == "has" || name == "contains") && n == 1) inline_op = 9;   // a map's contains is its has
 					else if (name == "get" && n == 2) inline_op = 10;
 				}
 				emit(opcode::op_call_builtin, static_cast<uint32_t>(expr->arguments.size()),

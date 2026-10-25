@@ -17828,7 +17828,8 @@ op_status vm_backend::exec_call_builtin(frame& f, const vm_instruction& ins) {
 	if (!fn) {
 		return exec_call_method(f, vm_instruction{opcode::op_call_method, ins.a, ins.b, 0});
 	}
-	const uint32_t inline_op = ins.c >> 4;
+	uint32_t inline_op = ins.c >> 4;
+	if (inline_op == 4 && kind == script_value::TYPEID_MAP) { inline_op = 9; }   // an open receiver's contains on a map is the map's has
 	if (inline_op != 0 && (receiver_rule <= 3 || open_receiver_inline_fits(inline_op, kind))) {
 		// the builtin's body on its happy path (the argument kinds it accepts); any other argument calls the builtin for its text
 		std::optional<script_value> result;

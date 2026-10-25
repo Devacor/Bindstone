@@ -13150,8 +13150,21 @@ bool vm_backend::park_sibling_method(frame& f, const call_site& site) {
 	if (!holder || !holder->is_class_instance_wrapper || !holder->data) return false;
 	const class_instance& inst = *static_cast<class_instance*>(holder->data.get());
 	const class_definition* cd = inst.get_class_definition();
-	if (cd != site.mic_cd || cd->method_epoch() != site.mic_epoch) return false;
 	const uint64_t sym = f.code->symbols[site.callee.symbol];
+	if (cd != site.mic_cd || cd->method_epoch() != site.mic_epoch) {
+		// a receiver of another class (a base method running on several subclasses): the row of classes the site met before
+		for (const call_site::mic_entry& entry : site.mic_poly) {
+			if (!cd || entry.cd != cd || cd->method_epoch() != entry.epoch) { continue; }
+			if ((!(entry.field_free && !inst.has_user_overflow_fields()) && inst.has_field(sym)) || detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) return false;
+			pending_callee& pc = pending_callees_.emplace_back();
+			pc.value = entry.method;
+			pc.method = entry.dispatch;
+			pc.native_entry = nullptr;
+			pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
+			return true;
+		}
+		return false;
+	}
 	if (mic_field_shadowed(site, inst, sym) || detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) return false;
 	pending_callee& pc = pending_callees_.emplace_back();
 	pc.value = site.mic_method;
@@ -13217,7 +13230,17 @@ void vm_backend::arm_sibling_method(frame& f, const call_site& site, const scrip
 		site.mic_dispatch = nullptr;
 		return;
 	}
-	if (dispatch->eng != engine_ || !cd->single_method_overload(sym)) return;
+	if (dispatch->eng != engine_ || !dispatch->cls || !dispatch->cls->single_method_overload(dispatch->name_id)) return;   // the declaring class's table: an inherited method arms too
+	if (site.mic_cd && site.mic_cd != cd && site.mic_dispatch) {
+		call_site::mic_entry& slot = site.mic_poly[site.mic_poly_next];
+		site.mic_poly_next = static_cast<uint8_t>((site.mic_poly_next + 1) % call_site::k_mic_poly);
+		slot.cd = site.mic_cd;
+		slot.epoch = site.mic_epoch;
+		slot.field_free = site.mic_field_free;
+		slot.method = site.mic_method;
+		slot.dispatch = site.mic_dispatch;
+		slot.resolved.reset();
+	}
 	site.mic_native = detail::host_method_hit{};
 	site.mic_cd = cd;
 	site.mic_epoch = cd->method_epoch();
@@ -13775,8 +13798,16 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 	if (pc.method) {
 		// a sibling method parked by the probe's IC: entered as its bound method would be, else minted for the opaque path
 		const size_t slice_base = stack_.size() - argc;
-		auto resolved = parallel_worker_ ? pc.method->cls->resolve_method_overload_shared(pc.method->name_id, stack_.data() + slice_base, argc)
-		                                 : pc.method->cls->resolve_method_overload_ref(pc.method->name_id, stack_.data() + slice_base, argc);
+		const script_method_dispatch& md = *pc.method;
+		const bool memo_holds = !parallel_worker_ && md.resolved_memo && md.resolved_memo_epoch == md.cls->method_epoch() && md.resolved_memo_argc == argc;
+		auto resolved = memo_holds ? checked_result<const std::shared_ptr<function_decl>*>(md.resolved_memo)
+		                           : parallel_worker_ ? md.cls->resolve_method_overload_shared(md.name_id, stack_.data() + slice_base, argc)
+		                                              : md.cls->resolve_method_overload_ref(md.name_id, stack_.data() + slice_base, argc);
+		if (!memo_holds && resolved && !parallel_worker_ && !engine_->parallel_region_active() && md.cls->method_arity_decides(md.name_id, argc)) {
+			md.resolved_memo = resolved.value();   // the dispatcher's own memo (script_method_dispatch::resolve's rule)
+			md.resolved_memo_epoch = md.cls->method_epoch();
+			md.resolved_memo_argc = argc;
+		}
 		if (resolved && (*resolved.value())->body && !(*resolved.value())->is_coroutine) {
 #ifdef JAISCRIPT_VM_PROFILE
 			cfs_probe_.bucket = 1;

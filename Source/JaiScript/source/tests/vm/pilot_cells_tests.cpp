@@ -5068,6 +5068,16 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined tail_of") != std::string::npos, "tail_of grafts with its string reads: " + l);
 			check_true(l.find("-- inlined logs") != std::string::npos, "logs grafts, its push a call the graft keeps: " + l);
 		});
+		test("bitwise_compound_stores_run_in_the_block", [this]() {
+			// &= |= ^= <<= >>= on int locals take the typed rows and the block's arithmetic as += does (they were a bail per iteration);
+			// on a var local they take the any-kind row, and a float target raises the general form's error
+			const std::string src =
+				"int run(int n) { int acc = 7; int m = 3; for (int i = 0; i < n; ++i) { acc ^= i; acc |= 1; acc &= 0xFFFF; m <<= 2; m >>= 1; acc += m & 15; } return acc * 100 + m; }\n"
+				"var dyn(var n) { var acc = 5; for (var i = 0; i < n; ++i) { acc ^= i * 3; acc >>= 1; acc <<= 1; } return acc; }\n";
+			both(src + "to_string(run(50)) + \"|\" + to_string(dyn(40));", "3377699720531172|44", "bitwise compounds");
+			const std::string l = listing_run(src + "run(50);");
+			check_true(l.find("-- cell loop") != std::string::npos && l.find("C_BAIL") == std::string::npos, "the loop closes without a bail: " + l);
+		});
 		test("a_push_onto_an_array_of_arrays_is_a_boundary_of_a_closed_loop", [this]() {
 			// the bytecode app's NEWARR: `heap.push(zeros(n))` converts each value on the general form, so it is a boundary statement and the
 			// dispatch loop around it closes (a push site the entry refused kept the whole loop on the general form)

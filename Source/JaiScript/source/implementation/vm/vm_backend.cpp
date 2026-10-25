@@ -8780,6 +8780,16 @@ next_frame:
 			if (ci.c == 1 && (execution_limit_exhausted() || debug_hook_)) [[unlikely]] { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 0); break; }
 			ip = ci.a;
 			JAI_CELL_NEXT;
+		case opcode::op_switch_table: {
+			const chunk::switch_table& t = f.code->switch_tables[ci.b];
+			if (hot.cells[ci.a].kind == static_cast<uint8_t>(script_value::TYPEID_INT) && switch_table_ready(f, t)) {
+				const uint32_t k = switch_case_of(t, static_cast<script_int>(hot.cells[ci.a].bits));
+				ip = loop.switch_targets[ci.c + (k != k_invalid_u32 ? k : static_cast<uint32_t>(t.targets.size()))];
+			} else {
+				++ip;
+			}
+			JAI_CELL_NEXT;
+		}
 		case opcode::op_c_guard: f.ip = ip; st = exec_c_guard(f, ci, regs); ip = f.ip; break;
 		case opcode::op_c_arith_any: { size_t at = ip; st = exec_c_arith_any(f, at, ci, regs); ip = at; } break;
 		case opcode::op_c_mov: st = exec_c_mov(f, ip, ci, regs); break;
@@ -19648,6 +19658,68 @@ op_status vm_backend::exec_case_eq(frame&, const vm_instruction&) {
 	return {};
 }
 
+// An int subject jumps to its case's body (or the no-match target) when the table holds; anything else, and a custom numeric operator
+// (int == int may be user code), runs the case tests that follow
+void vm_backend::exec_switch_table(frame& f, const vm_instruction& ins) {
+	const chunk::switch_table& t = f.code->switch_tables[ins.b];
+	const script_value* subject = fused_cmp_operand(f, t.subject, f.ip * 3);
+	if (subject && subject->raw_storage_index() == script_value::TYPEID_INT && switch_table_ready(f, t)) {
+		const uint32_t k = switch_case_of(t, subject->unchecked_as_int());
+		f.ip = k != k_invalid_u32 ? t.targets[k] : t.no_match;
+		return;
+	}
+	++f.ip;
+}
+
+// the keys as they stand: int constants, or names that resolve (no member scope in the way) to program-scope const cells holding ints;
+// a span too sparse for a dense table, or any other key, leaves the switch on its tests until the stamps move
+JAI_NOINLINE bool vm_backend::build_switch_table(frame& f, const chunk::switch_table& t) {
+	if (!switch_const_epoch_) {
+		switch_const_epoch_ = engine_->const_epoch_counter();
+		switch_definition_epoch_ = engine_->definition_epoch_counter();
+	}
+	t.built = true;
+	t.usable = false;
+	t.env = environment_.get();
+	t.env_serial = env_symbolizer_->env_epoch();
+	t.const_epoch = *switch_const_epoch_;
+	t.definition_epoch = *switch_definition_epoch_;
+	bool member_scope_checked = false;
+	std::vector<int64_t> values;
+	values.reserve(t.keys.size());
+	for (const fused_operand& key : t.keys) {
+		const script_value* v = nullptr;
+		if (key.const_index != k_invalid_u32) {
+			v = &f.code->constants[key.const_index];
+		} else {
+			if (!member_scope_checked) {
+				member_scope_checked = true;
+				if (f.locals && !f.top_level) {
+					ensure_frame_member_scope(f, environment_.get());
+					if (frame_scope_active(f)) { return false; }
+				}
+			}
+			const script_value* cell = environment_->get_value_ptr(f.code->symbols[key.symbol]);
+			if (!cell || !engine_->const_cell(cell)) { return false; }
+			v = &cell->deref();
+		}
+		if (v->raw_storage_index() != script_value::TYPEID_INT) { return false; }
+		values.push_back(v->unchecked_as_int());
+	}
+	const int64_t low = *std::min_element(values.begin(), values.end());
+	const int64_t high = *std::max_element(values.begin(), values.end());
+	const uint64_t span = static_cast<uint64_t>(high) - static_cast<uint64_t>(low) + 1;
+	if (span == 0 || span > 4 * values.size() + 64) { return false; }
+	t.low = low;
+	t.dense.assign(static_cast<size_t>(span), k_invalid_u32);
+	for (size_t k = 0; k < values.size(); ++k) {
+		uint32_t& slot = t.dense[static_cast<size_t>(static_cast<uint64_t>(values[k]) - static_cast<uint64_t>(low))];
+		if (slot == k_invalid_u32) { slot = static_cast<uint32_t>(k); }   // the first case of a key wins, as the tests run in order
+	}
+	t.usable = true;
+	return true;
+}
+
 op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 	script_value container = std::move(stack_.back());
 	stack_.pop_back();
@@ -21942,6 +22014,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 
 			case opcode::op_jump: JAI_OP_LABEL(op_jump)
 				f.ip = ins.a;
+				JAI_DISPATCH_HERE();
+
+			case opcode::op_switch_table:
+				exec_switch_table(f, ins);
 				JAI_DISPATCH_HERE();
 
 			case opcode::op_jump_if_false: JAI_OP_LABEL(op_jump_if_false) {

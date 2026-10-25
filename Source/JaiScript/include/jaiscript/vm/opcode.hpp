@@ -82,6 +82,7 @@ namespace jai::vm {
         op_try_pop,         // normal try-block completion
         op_catch_end,       // normal catch-block completion
         op_case_eq,         // pops case value + switch value copy, pushes the language's v == cv (an error raises)
+        op_switch_table,    // b=switch_tables index: an int subject jumps through the table to its case's body; anything else runs the case tests that follow. In a cell copy a=the subject's cell, c=the first of the loop's switch_targets (per case, then no match)
         op_iter_init,       // a=iter proto index; pops container, pushes iteration state + loop-var scope
         op_iter_next,       // a=iter proto index; assigns loop var, pushes bool(has element); budget check
         op_iter_pop,        // pops iteration state + loop-var scope
@@ -569,6 +570,7 @@ namespace jai::vm {
             case opcode::op_try_pop: return "TRY_POP";
             case opcode::op_catch_end: return "CATCH_END";
             case opcode::op_case_eq: return "CASE_EQ";
+            case opcode::op_switch_table: return "SWITCH_TABLE";
             case opcode::op_iter_init: return "ITER_INIT";
             case opcode::op_iter_next: return "ITER_NEXT";
             case opcode::op_iter_pop: return "ITER_POP";

@@ -2705,6 +2705,23 @@ namespace jai::vm {
         op_status exec_try_pop(frame& f, const vm_instruction& ins);
         op_status exec_catch_end(frame& f, const vm_instruction& ins);
         op_status exec_case_eq(frame& f, const vm_instruction& ins);
+        void exec_switch_table(frame& f, const vm_instruction& ins);
+        bool build_switch_table(frame& f, const chunk::switch_table& t);
+        // the table holds for the names' environment, the program-scope consts and the definitions as they stand (custom numeric operators,
+        // the debugger and a worker run the case tests instead)
+        bool switch_table_ready(frame& f, const chunk::switch_table& t) {
+            if (has_custom_numeric_ops_ || debug_hook_ || parallel_worker_) return false;
+            if (t.built && t.constant_keys) return t.usable;
+            if (t.built && switch_const_epoch_ && t.env == environment_.get() && t.env_serial == env_symbolizer_->env_epoch() &&
+                t.const_epoch == *switch_const_epoch_ && t.definition_epoch == *switch_definition_epoch_) return t.usable;
+            return build_switch_table(f, t);
+        }
+        const uint64_t* switch_const_epoch_ = nullptr;        // the engine's counters (engine::const_epoch_counter), taken at the first table build
+        const uint64_t* switch_definition_epoch_ = nullptr;
+        static uint32_t switch_case_of(const chunk::switch_table& t, script_int v) {
+            const uint64_t at = static_cast<uint64_t>(v) - static_cast<uint64_t>(t.low);
+            return at < t.dense.size() ? t.dense[at] : k_invalid_u32;
+        }
         op_status exec_iter_init(frame& f, const vm_instruction& ins);
         op_status exec_iter_next(frame& f, const vm_instruction& ins);
         op_status iter_next_map_entry(frame& f, const iter_proto& proto, iter_state& state);

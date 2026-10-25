@@ -299,6 +299,60 @@ public:
             check_eq((int64_t)71117, result.as_int());
         });
 
+        test("int_tables_keep_first_match_negative_sparse_and_non_int_subjects", [this]() {
+            auto engine = make_engine();
+            auto result = engine->execute(R"(
+                int dense(var v) {
+                    switch (v) {
+                        case -2: return 1;
+                        case 0: return 2;
+                        case 3: return 3;
+                        case 0: return 4;
+                        case 7: return 5;
+                        default: return 9;
+                    }
+                }
+                int sparse(int v) {
+                    switch (v) {
+                        case 1: return 1;
+                        case 1000000: return 2;
+                        case -1000000: return 3;
+                        case 5: return 4;
+                    }
+                    return 0;
+                }
+                int total = 0;
+                for (int i = -3; i < 9; ++i) { total = total * 10 + dense(i); }
+                array<int> out = [total, dense(3.0), dense(-2.0), dense(2.5), sparse(1000000), sparse(-1000000), sparse(5), sparse(6)];
+                out
+            )");
+            check_eq(std::string("[919299399959, 3, 1, 9, 2, 3, 4, 0]"), result.to_string());
+        });
+
+        test("const_keys_follow_a_redeclaration", [this]() {
+            // the same unit re-run (a reload of its file) re-initializes its consts in place: the table built from the old values goes stale
+            auto engine = make_engine();
+            engine->disable(jai::filesystem);
+            const std::string path = "D:/virtual/switch/const_keys.jai";
+            const std::string pick = R"(
+                int pick(int v) {
+                    switch (v) {
+                        case A: return 10;
+                        case B: return 20;
+                        case C: return 30;
+                        case D: return 40;
+                        default: return 0;
+                    }
+                }
+                int sum = pick(1) + pick(2) + pick(5);
+            )";
+            engine->execute_file_source(path, "const int A = 1; const int B = 2; const int C = 3; const int D = 4;" + pick);
+            check_eq((int64_t)30, engine->execute("sum").as_int());
+            engine->execute_file_source(path, "const int A = 5; const int B = 2; const int C = 3; const int D = 4;");
+            check_eq((int64_t)10, engine->execute("pick(5)").as_int());
+            check_eq((int64_t)0, engine->execute("pick(1)").as_int());
+        });
+
         test("fallthrough_only_in_switch", [this]() {
             auto engine = make_engine();
             // This should fail to parse - fallthrough outside switch

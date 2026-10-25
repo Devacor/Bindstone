@@ -1014,6 +1014,10 @@ namespace jai {
         // host's writes (add_global / add_global_ref refuse a const)
         void mark_const_cell(const script_value* cell, bool is_const);
         bool const_cell(const script_value* cell) const;
+        // the counters a value read once from a program-scope const validates against, read in place on a hot path: the first moves
+        // at every program-scope declaration (each marks its cell), the second is definition_epoch's
+        const uint64_t* const_epoch_counter() const;
+        const uint64_t* definition_epoch_counter() const;
         bool is_const_global(const std::string& name) const;
         bool has_function(const std::string& name) const;
         bool is_type_name(const std::string& name) const;

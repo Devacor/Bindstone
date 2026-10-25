@@ -225,6 +225,15 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			case opcode::op_const_guard:
 				out << " node=" << ins.a;
 				break;
+			case opcode::op_switch_table:
+				out << " cell=" << ins.a << " table=" << ins.b << " copy_targets=" << ins.c;
+				if (ins.b < ch.switch_tables.size()) {
+					const auto& t = ch.switch_tables[ins.b];
+					out << " ->";
+					for (uint32_t target : t.targets) { out << " " << target; }
+					out << " else " << t.no_match;
+				}
+				break;
 			case opcode::op_const_folded:
 				out << " " << ins.a;
 				if (ins.a < ch.constants.size()) { out << " (" << constant_text(ch.constants[ins.a]) << ")"; }

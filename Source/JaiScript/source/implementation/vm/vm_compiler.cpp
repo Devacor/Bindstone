@@ -249,6 +249,7 @@ namespace {
 			case opcode::op_null_guard:
 			case opcode::op_throw:
 			case opcode::op_case_eq:
+			case opcode::op_switch_table:
 			case opcode::op_cfor_prep:
 			case opcode::op_cfor_back:
 			case opcode::op_cfor_pop:
@@ -474,6 +475,7 @@ namespace {
 			case opcode::op_null_guard:
 			case opcode::op_throw:
 			case opcode::op_case_eq:
+			case opcode::op_switch_table:
 			case opcode::op_cfor_prep:
 			case opcode::op_cfor_back:
 			case opcode::op_cfor_pop:
@@ -2015,6 +2017,43 @@ bool vm_compiler::compile_switch_branches(switch_stmt* stmt) {
 		chunk_->nodes.push_back(subject_temp);
 	}
 
+	// the table: four or more cases whose keys are int literals or program-scope names (resolved, and required const ints, at run time)
+	size_t table_index = SIZE_MAX;
+	if (stmt->cases.size() >= 4) {
+		chunk::switch_table table;
+		table.subject = make_fused_operand(subject_temp ? static_cast<const expression*>(subject_temp.get()) : stmt->condition.get());
+		bool keyed = table.subject.load_flags == 0;
+		for (const auto& case_node : stmt->cases) {
+			if (!keyed) break;
+			const uint8_t cls = case_node->static_operand_class;
+			if (cls != operand_class_unknown && cls != operand_class_int_int) { keyed = false; break; }
+			const expression* key = case_node->value.get();
+			if (key->get_type() == node_type::literal_expr) {
+				const script_value& v = static_cast<const literal_expr*>(key)->value;
+				if (v.type() != script_value_type::jai_int_type) { keyed = false; break; }
+				table.keys.push_back(make_fused_operand(key));
+			} else if (key->get_type() == node_type::unary_expr && static_cast<const unary_expr*>(key)->op.type == token_type::minus &&
+			           static_cast<const unary_expr*>(key)->operand->get_type() == node_type::literal_expr &&
+			           static_cast<const literal_expr*>(static_cast<const unary_expr*>(key)->operand.get())->value.type() == script_value_type::jai_int_type) {
+				fused_operand k;
+				k.const_index = add_constant(script_value(-static_cast<const literal_expr*>(static_cast<const unary_expr*>(key)->operand.get())->value.unchecked_as_int(), nullptr));
+				table.keys.push_back(k);
+			} else if (key->get_type() == node_type::identifier_expr) {
+				fused_operand k = make_fused_operand(key);
+				if (k.slot != k_invalid_u32 || k.load_flags != 0) { keyed = false; break; }
+				table.keys.push_back(k);
+			} else {
+				keyed = false;
+			}
+		}
+		if (keyed) {
+			table.constant_keys = std::all_of(table.keys.begin(), table.keys.end(), [](const fused_operand& k) { return k.const_index != k_invalid_u32; });
+			table_index = chunk_->switch_tables.size();
+			chunk_->switch_tables.push_back(std::move(table));
+			emit(opcode::op_switch_table, 0, static_cast<uint32_t>(table_index));
+		}
+	}
+
 	std::vector<std::vector<size_t>> body_jumps(stmt->cases.size());
 	token equal_token;
 	equal_token.type = token_type::equal_equal;
@@ -2054,6 +2093,7 @@ bool vm_compiler::compile_switch_branches(switch_stmt* stmt) {
 			emit(opcode::op_pop);
 		}
 		for (size_t at : body_jumps[i]) { patch_jump(at, chunk_->code.size()); }
+		if (table_index != SIZE_MAX) { chunk_->switch_tables[table_index].targets.push_back(static_cast<uint32_t>(chunk_->code.size())); }
 		compile_case_body(case_node->body);
 		current_stmt_ = case_node.get();
 		falls_in = !case_node->body.empty() && case_node->body.back()->get_type() == node_type::fallthrough_stmt;
@@ -2070,11 +2110,12 @@ bool vm_compiler::compile_switch_branches(switch_stmt* stmt) {
 	const size_t end = chunk_->code.size();
 	for (size_t at : end_jumps) { patch_jump(at, end); }
 	for (size_t at : loops_[region_index].break_patches) { patch_jump(at, end); }
+	if (table_index != SIZE_MAX) { chunk_->switch_tables[table_index].no_match = static_cast<uint32_t>(chunk_->code[no_match].a); }
 	loops_.pop_back();
 	return true;
 }
 
-// a case or default body: its own scope when it declares into one, its declarations killed at its end; a trailing fallthrough emits nothing
+// a case or default body: its own scope when it declares into one, its declarations killed at its end; a trailing fallthrough is only its debugger stop
 void vm_compiler::compile_case_body(const std::vector<statement_ptr>& body) {
 	bool case_scope = false;
 	for (const auto& body_stmt : body) {
@@ -2086,7 +2127,14 @@ void vm_compiler::compile_case_body(const std::vector<statement_ptr>& body) {
 	}
 	kill_scopes_.emplace_back();
 	for (size_t k = 0; k < body.size(); ++k) {
-		if (k + 1 == body.size() && body[k]->get_type() == node_type::fallthrough_stmt) { break; }
+		if (k + 1 == body.size() && body[k]->get_type() == node_type::fallthrough_stmt) {
+			// a jump onto the next instruction: the debugger's stop at the statement, nothing to run (a block elides it)
+			current_stmt_ = body[k].get();
+			const size_t start = chunk_->code.size();
+			emit(opcode::op_jump, static_cast<uint32_t>(start + 1));
+			note_debug_span(body[k].get(), start);
+			break;
+		}
 		compile_statement(body[k]);
 		note_kill_decl(body[k].get());
 	}
@@ -4011,6 +4059,18 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				continue;
 			}
 			if (st.op == opcode::op_graft_depth) { op.kind = ir::depth; op.a = st.a; ops.push_back(op); continue; }   // a graft whose body makes calls: its level in the call depth
+			if (st.op == opcode::op_switch_table) {   // a switch's table over a frame slot's cell, its case tests the fallback; any other subject runs the tests
+				if (st.b < c.switch_tables.size() && direct_slot(c.switch_tables[st.b].subject)) {
+					const uint32_t subject = c.switch_tables[st.b].subject.slot;
+					op.kind = ir::dispatch; op.a = st.b; op.b = subject;
+					use_slot(subject, 0, false, 0, nullptr, ip);
+					slot_read(op, subject);
+				} else {
+					op.kind = ir::skip;
+				}
+				ops.push_back(op);
+				continue;
+			}
 			if (st.op == opcode::op_math_guard) {   // a stdlib alias's guard: its name holds at the entry and after every effect point, no copy instruction
 				loop_alias_sites.push_back(chunk::cell_loop::math_alias_site{ st.a, static_cast<uint8_t>(st.c), static_cast<uint32_t>(ip * 3) });
 				op.kind = ir::skip; ops.push_back(op); continue;
@@ -5321,6 +5381,16 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			}
 			case ir::probe: { const chunk::cell_loop::cell_call& cc = loop.calls[op.a]; append(vm_instruction{opcode::op_c_probe, op.a, loop_index, cc.probe_ip}, cc.probe_ip); break; }   // the callee resolved at its own place
 			case ir::skip: break;
+			case ir::dispatch: {
+				const chunk::switch_table& t = c.switch_tables[op.a];
+				const uint32_t base = static_cast<uint32_t>(loop.switch_targets.size());
+				for (size_t k = 0; k <= t.targets.size(); ++k) {
+					fixups.push_back(fixup{ base + static_cast<uint32_t>(k), 3, k < t.targets.size() ? t.targets[k] : t.no_match, 0 });
+					loop.switch_targets.push_back(0);
+				}
+				append(vm_instruction{opcode::op_switch_table, cell_of(op.b), op.a, base}, ip);
+				break;
+			}
 			case ir::depth: append(vm_instruction{opcode::op_c_gdepth, op.a, 0, 0}, ip); break;
 			case ir::exit: append(vm_instruction{opcode::op_c_exit, op.target, 0, 0}, ip); break;
 			case ir::rebind: {
@@ -5520,6 +5590,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			const uint32_t to = fx.target > back ? exit_at(fx.target) : copy_at[fx.target - head];   // a target without a copy instruction lands on the next one; one past the back edge exits
 			if (fx.field == 0) { code[fx.at].a = to; }
 			else if (fx.field == 1) { code[fx.at].c = to | fx.bits; }
+			else if (fx.field == 3) { loop.switch_targets[fx.at] = to; }   // a C_SWITCH target (fx.at indexes the loop's switch_targets)
 			else { code[fx.at].b = fx.bits | ((to - loop.copy_head) << 9); }
 		}
 		bool inside_graft = false;   // a block inside a graft's body: the graft's code after a miss (the rest of the caller's statement) reads its values

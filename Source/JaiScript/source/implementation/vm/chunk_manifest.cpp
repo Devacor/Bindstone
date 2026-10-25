@@ -115,6 +115,15 @@ namespace {
 				    << " root=" << id(s.chain_root_symbol) << "/" << u(s.chain_root_slot) << " bi=" << s.bi_array << "," << s.bi_map << "," << s.bi_string
 				    << " callee=" << operand(ch, s.callee) << "\n";
 			}
+			if (!ch.switch_tables.empty()) {
+				out << pre << "switch_tables " << ch.switch_tables.size() << "\n";
+				for (size_t i = 0; i < ch.switch_tables.size(); ++i) {
+					const chunk::switch_table& t = ch.switch_tables[i];
+					out << pre << " " << i << " subject=" << operand(ch, t.subject) << " no_match=" << t.no_match << " constant=" << b(t.constant_keys) << " cases=[";
+					for (size_t k = 0; k < t.keys.size(); ++k) { out << (k ? " " : "") << operand(ch, t.keys[k]) << "->" << t.targets[k]; }
+					out << "]\n";
+				}
+			}
 			out << pre << "function_protos " << ch.function_protos.size() << "\n";
 			for (size_t i = 0; i < ch.function_protos.size(); ++i) {
 				const function_proto& p = ch.function_protos[i];

@@ -330,7 +330,7 @@ inline member_probe_hit probe_member_scope(member_scope_state state,
         const auto this_type = this_val.type();
         if (this_type != script_value_type::jai_object_type &&
             this_type != script_value_type::jai_shared_ptr_type) return hit;
-        auto instance = this_val.get_class_instance();
+        class_instance* instance = this_val.peek_class_instance();   // the frame holds the receiver
         if (!instance) return hit;
         class_definition* class_def = instance->get_class_definition();
         const uint32_t slot = class_def ? class_def->field_slot(sym) : class_definition::k_no_field_slot;
@@ -346,7 +346,7 @@ inline member_probe_hit probe_member_scope(member_scope_state state,
                             hit.what = member_probe_hit::kind::cpp_property;
                             hit.getter_id = getter_id;
                             hit.method_value = std::move(getter);
-                            hit.instance = instance.get();
+                            hit.instance = instance;
                             hit.class_def = class_def;
                             return hit;
                         }
@@ -361,14 +361,14 @@ inline member_probe_hit probe_member_scope(member_scope_state state,
             if (cell) {
                 hit.what = member_probe_hit::kind::field;
                 hit.value_ptr = cell;
-                hit.instance = instance.get();
+                hit.instance = instance;
                 hit.class_def = class_def;
                 return hit;
             }
         } else if (script_value* present = instance->find_field_value(sym)) {   // runtime-added field
             hit.what = member_probe_hit::kind::field;
             hit.value_ptr = present;
-            hit.instance = instance.get();
+            hit.instance = instance;
             hit.class_def = class_def;
             return hit;
         }
@@ -377,7 +377,7 @@ inline member_probe_hit probe_member_scope(member_scope_state state,
             if (!method.is_invalid()) {
                 hit.what = member_probe_hit::kind::method;
                 hit.method_value = std::move(method);
-                hit.instance = instance.get();
+                hit.instance = instance;
                 hit.class_def = instance->get_class_definition();
                 return hit;
             }
@@ -410,7 +410,7 @@ inline bool member_scope_has_method(member_scope_state state,
         if (scope_this->is_null() ||
             (this_type != script_value_type::jai_object_type &&
              this_type != script_value_type::jai_shared_ptr_type)) return false;
-        auto instance = scope_this->get_class_instance();
+        class_instance* instance = scope_this->peek_class_instance();
         if (!instance) return false;
         script_value method = instance->get_method(sym, false);
         if (!method.is_invalid()) return true;

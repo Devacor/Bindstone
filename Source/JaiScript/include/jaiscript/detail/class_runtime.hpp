@@ -2114,6 +2114,14 @@ inline bool shared_handle_admits(const script_value& v, const type_info_ptr& dec
     if (tag && tag->base_type == script_value_type::jai_shared_ptr_type && !tag->dynamic_pointee && tag->element_type().get() == expected) {
         return true;   // the same static pointee
     }
+    const bool static_pointee = tag && tag->base_type == script_value_type::jai_shared_ptr_type && !tag->dynamic_pointee && tag->element_type() &&
+                                !tag->element_type()->type_name.empty() && tag->element_type()->base_type != script_value_type::jai_any_type;
+    if (!static_pointee) {
+        // the class the object really has, judged by its own definition (no registry lookup by name)
+        auto view = resolve_slot_class(v, eng);
+        if (!view.instance || !view.def || view.def->get_name() == expected->type_name) { return true; }
+        return view.def->is_subtype_of(expected->type_name);
+    }
     const std::string* judged = shared_handle_judged_class_name(v, eng);
     if (!judged || *judged == expected->type_name) {
         return true;

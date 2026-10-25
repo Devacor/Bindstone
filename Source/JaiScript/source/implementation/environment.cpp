@@ -215,7 +215,7 @@ void environment::define(uint64_t id, const script_value& value) {
         engine_->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
     }
     flat_lookup_[id] = &local_storage_.push_back(value);  // Update/shadow in flat lookup
-    local_ids_[id] = true;
+    local_ids_.insert(id);
     bump_env_epoch();   // a new name can shadow what the vm's lookup caches resolved
 }
 
@@ -237,7 +237,7 @@ void environment::define(uint64_t id, script_value&& value) {
         engine_->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
     }
     flat_lookup_[id] = &local_storage_.push_back(std::move(value));  // Update/shadow in flat lookup
-    local_ids_[id] = true;
+    local_ids_.insert(id);
     bump_env_epoch();   // a new name can shadow what the vm's lookup caches resolved
 }
 

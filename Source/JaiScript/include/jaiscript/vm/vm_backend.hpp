@@ -906,6 +906,17 @@ namespace jai::vm {
             uint8_t return_conv_class = 0;             // return_conv stamped at push (0 = legacy decision)
             // the caller's unit is the frame below's (vm_backend::caller_frame_unit); no stamp is saved per call
             std::shared_ptr<function_decl> ast_pin;    // method frames: resolved overload outlives a mid-call hot reload
+            // the overloads this pooled record pinned before: a depth that alternates among a few methods swaps pins without counting them
+            std::shared_ptr<function_decl> ast_pin_ring[3];
+            uint8_t ast_pin_next = 0;
+            void pin_ast(const std::shared_ptr<function_decl>& ast) {
+                for (auto& kept : ast_pin_ring) {
+                    if (kept.get() == ast.get()) { ast_pin.swap(kept); return; }
+                }
+                ast_pin.swap(ast_pin_ring[ast_pin_next]);
+                ast_pin_next = static_cast<uint8_t>((ast_pin_next + 1) % 3);
+                ast_pin = ast;
+            }
             bool method_result_anchor = false;         // method frames: replicate make_bound_method's keep-alive fix-up
             // In-loop ctor-body frames (exec_new shared_ptr arm): stamp the completed
             // frame's OBJECT result with this type, replicating the native arm's

@@ -2800,6 +2800,16 @@ namespace detail {
             return *storage_.get_if<TYPEID_OBJECT>();
         }
 
+        // The class instance this value holds, borrowed (no handle copy): the caller keeps this value alive and does not keep
+        // the pointer past it
+        class_instance* peek_class_instance() const noexcept {
+            const auto t = current_type();
+            if (t != script_value_type::jai_object_type && t != script_value_type::jai_shared_ptr_type) { return nullptr; }
+            const auto* holder = storage_.get_if<strong_ptr<object_holder>>();
+            if (!holder || !*holder || !(*holder)->is_class_instance_wrapper) { return nullptr; }
+            return static_cast<class_instance*>((*holder)->data.get());
+        }
+
         // Safe class_instance extraction from object_holder
         std::shared_ptr<class_instance> get_class_instance() {
             JAI_CENSUS(holder_inspect);

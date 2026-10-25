@@ -800,6 +800,51 @@ public:
             check_eq(std::string("member"), e->execute("cup.flavor()").as<std::string>());
             check_eq(std::string("global"), e->execute("flavor(1)").as<std::string>());
         });
+
+        test("global_read_in_method_follows_receiver_class_and_live_value", [this]() {
+            // a site that resolved a global past the member probe keeps resolving it per receiver: a subclass field shadows it there
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                int LIMIT = 10;
+                class A {
+                    int count() {
+                        int n = 0;
+                        for (int i = 0; i < 20; ++i) { if (i < LIMIT) { n += 1; } }
+                        return n;
+                    }
+                    int read() { return LIMIT + 0; }
+                }
+                class B : A { int LIMIT = 3; }
+                A a = A();
+                B b = B();
+                string r = "";
+                for (int k = 0; k < 3; ++k) {
+                    r += to_string(a.count()) + "/" + to_string(b.count()) + "/" + to_string(a.read()) + "/" + to_string(b.read()) + " ";
+                    LIMIT = LIMIT + 1;
+                }
+                r
+            )");
+            check_eq(std::string("10/3/10/3 11/3/11/3 12/3/12/3 "), r.as<std::string>());
+        });
+
+        test("global_read_in_method_yields_to_a_static_added_on_reload", [this]() {
+            auto e = make_stdlib_engine();
+            e->execute(R"(
+                int LIMIT = 10;
+                class A { int read() { return LIMIT + 0; } }
+                A a = A();
+                int first = 0;
+                for (int k = 0; k < 4; ++k) { first = a.read(); }
+            )");
+            check_eq((int64_t)10, e->execute("first").as_int());
+            e->execute(R"(
+                class A {
+                    static int LIMIT = 4;
+                    int read() { return LIMIT + 0; }
+                }
+            )");
+            check_eq((int64_t)4, e->execute("a.read()").as_int());
+        });
     }
 };
 

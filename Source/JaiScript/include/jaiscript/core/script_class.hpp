@@ -446,6 +446,7 @@ inline void class_definition::add_static_script_method(std::string_view name, st
 
     static_methods_.insert_or_assign(name_id, script_value::make_function(
         script_static_method_dispatch{eng, class_def, method_name_id, definition_env, ast}, eng));
+    bump_method_epoch();
 }
 
 // Implementation of has_static_method_with_arity (needs full function_decl definition)

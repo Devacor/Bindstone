@@ -3198,12 +3198,14 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 					}
 				}
 			}
-			if (script_value read = make_null(); bare_host_read(f, f.ip * 3, read)) {
+			const bool member_missed = member_miss_proven(f, f.ip * 3, sym);
+			if (script_value read = make_null(); !member_missed && bare_host_read(f, f.ip * 3, read)) {
 				stack_.push_back(std::move(read));
 				return {};
 			}
-			auto member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
+			auto member = member_missed ? detail::member_probe_hit{} : detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
 			                                         f.locals->scope_static, sym, /*want_methods*/ true);
+			if (!member && !member_missed) { member_miss_arm(f, f.ip * 3, sym); }
 			if (member) {
 				VM_TRY(detail::bare_member_access(member, sym, frame_access_context(f)));
 				if (member.what == detail::member_probe_hit::kind::method) {
@@ -4984,12 +4986,14 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 					}
 				}
 			}
-			if (script_value read = make_null(); bare_host_read(f, cache_slot, read)) {
+			const bool member_missed = member_miss_proven(f, cache_slot, sym);
+			if (script_value read = make_null(); !member_missed && bare_host_read(f, cache_slot, read)) {
 				scratch.emplace(std::move(read));
 				return &scratch.value();
 			}
-			auto member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
+			auto member = member_missed ? detail::member_probe_hit{} : detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
 			                                         f.locals->scope_static, sym, /*want_methods*/ true);
+			if (!member && !member_missed) { member_miss_arm(f, cache_slot, sym); }
 			if (member) {
 				if (auto access = detail::bare_member_access(member, sym, frame_access_context(f)); !access) {
 					(void)raise_from(access);

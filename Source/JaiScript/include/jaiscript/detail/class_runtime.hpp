@@ -308,8 +308,7 @@ inline type_info_ptr class_definition::get_field_declared_type(uint64_t id) cons
 }
 
 inline void class_definition::add_static_field(uint64_t id, const script_value& initial_value) {
-    static_fields_.insert(id);
-
+    if (static_fields_.insert(id).second) { bump_method_epoch(); }   // a new static can shadow a global for bare names in the chain
     static_field_values_.insert_or_assign(id, initial_value);
 }
 

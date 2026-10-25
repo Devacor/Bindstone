@@ -327,6 +327,15 @@ namespace jai::vm {
         uint8_t this_store_state = 0;   // 0 unarmed, 1 armed
         uint64_t this_store_epoch = 0;
         type_info* this_store_type = nullptr;
+        // Member-miss proof (a bare name in a method that no member answers, a global read): the receiver's script class and the
+        // declaring class, each under its method_epoch (every field, method and static change bumps it, derived classes too),
+        // when the full member probe missed for miss_sym. While both hold and the instance grew no runtime field, the probe
+        // provably misses again and resolution goes straight to the environment.
+        const void* miss_dynamic = nullptr;
+        const void* miss_static = nullptr;
+        uint64_t miss_sym = 0;
+        uint64_t miss_dynamic_epoch = 0;
+        uint64_t miss_static_epoch = 0;
     };
 
     // op_compound_fused: `target op= <rhs>` in one dispatch. Binary mode: rhs_proto indexes

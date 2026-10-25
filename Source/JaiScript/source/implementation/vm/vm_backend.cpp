@@ -12676,9 +12676,27 @@ JAI_VM_COLD_PATH static std::optional<error_propagator> reference_admission(cons
 	return detail::reference_decl_rejection(decl, value, eng);
 }
 
+static script_value::object_holder* element_object_in_place(const script_value& v);
+
+// `T& e = objects[i];` over an object-typed array whose element is an instance of exactly T: the admission kernel's exact-class row,
+// read on the holder the array keeps (no materialized element)
+static bool element_of_declared_class(const variable_decl& decl, const script_value& value) {
+	const type_info* t = decl.type.get();
+	if (!t || t->base_type != script_value_type::jai_reference_type || t->type_params.empty() || !t->type_params[0]) { return false; }
+	const type_info* referent = t->type_params[0].get();
+	if (referent->base_type != script_value_type::jai_object_type || referent->type_name.empty()) { return false; }
+	const script_value::object_holder* holder = element_object_in_place(value);
+	if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return false; }
+	const auto* inst = static_cast<const class_instance*>(holder->data.get());
+	const class_definition* def = inst->get_class_definition();
+	return def && def->get_type_id() == referent->id && !def->wrapped_object_has_layer(*inst);
+}
+
 op_status vm_backend::define_ref_decl_value(frame& f, const vm_instruction& ins, const variable_decl* decl, script_value value) {
 	if (ins.c & 2) [[unlikely]] {   // a reference must reference
-		if (auto rejected = reference_admission(*decl, value, engine_)) { return raise_from(*rejected); }
+		if (!element_of_declared_class(*decl, value)) {
+			if (auto rejected = reference_admission(*decl, value, engine_)) { return raise_from(*rejected); }
+		}
 	}
 	return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), false, decl);
 }
@@ -15897,6 +15915,32 @@ uint32_t vm_backend::member_read_slot_probe(class_definition* cd, member_expr* e
 // A member read's field, borrowed where it lives: the checker's proof, else the site's member_ic row (its class and method epoch), the
 // raw cell as the ladder hands a field back; a bound C++ member's lane value lands in `host_value`. Null sends the read to the ladder:
 // a first sight or a new class fills the row, so the ladder serves that one read and hits serve from then on
+// An element reference into an object-typed array, its element's holder read where the array keeps it: the value a deref would
+// materialize holds this holder; null for any other reference, a removed element (the deref raises) or a null element
+static script_value::object_holder* element_object_in_place(const script_value& v) {
+	if (v.raw_storage_index() != script_value::TYPEID_REFERENCE) { return nullptr; }
+	const auto* rh = v.get_reference_holder();
+	if (!rh || rh->has_cell || rh->has_map_key || !rh->container || rh->container->kind() != script_array::kind_t::obj) { return nullptr; }
+	if (rh->container_index >= rh->container->objs().size()) { return nullptr; }
+	return rh->container->objs()[rh->container_index].handle.get();
+}
+
+// site_field's read over a class instance's holder: the proven cell, else the site's member IC; null leaves the read to the caller
+JAI_FORCEINLINE const script_value* vm_backend::site_field_of_holder(const chunk& code, script_value::object_holder* holder, member_expr* expr, size_t site) {
+	if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return nullptr; }
+	auto* inst = static_cast<class_instance*>(holder->data.get());
+	class_definition* cd = inst->get_class_definition();
+	if (!cd) { return nullptr; }
+	if (expr->proven_class && proofs_on() && cd == expr->proven_class && cd->field_shape_epoch() == expr->proven_epoch) {
+		if (script_value* cell = inst->field_slot_value(expr->proven_slot)) { return cell; }
+	}
+	std::vector<chunk::member_ic_entry>* rows = member_ic_rows(code);
+	if (!rows || rows->size() <= site) { return nullptr; }
+	const auto& entry = (*rows)[site];
+	if (entry.cd == cd && entry.epoch == cd->method_epoch() && entry.slot != UINT32_MAX) { return inst->field_slot_value(entry.slot); }
+	return nullptr;
+}
+
 JAI_FORCEINLINE const script_value* vm_backend::site_field(const chunk& code, const script_value& objd, member_expr* expr, size_t site, script_value& host_value) {
 	if (expr->proven_class && proofs_on()) {
 		if (script_value* cell = detail::proven_field_cell(objd, expr->proven_class, expr->proven_epoch, expr->proven_slot, nullptr)) { return cell; }
@@ -16078,6 +16122,14 @@ op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
 		receiver = site_field(*f.code, base->deref(), static_cast<member_expr*>(member->object.get()), f.code->code.size() + ip, prefix_host);
 	}
 	if (receiver) {
+		if (!nested) {
+			if (script_value::object_holder* in_place = element_object_in_place(*receiver)) {
+				if (const script_value* cell = site_field_of_holder(*f.code, in_place, member, ip)) {
+					frame_slot_set(f, ins.b, *cell);
+					return {};
+				}
+			}
+		}
 		script_value host_value{std::monostate{}, nullptr};
 		if (const script_value* cell = site_field(*f.code, receiver->deref(), member, ip, host_value)) {
 			frame_slot_set(f, ins.b, *cell);

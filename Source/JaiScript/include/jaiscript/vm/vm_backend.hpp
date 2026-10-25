@@ -2671,6 +2671,7 @@ namespace jai::vm {
         // custom-getter shadow / no field slot)
         uint32_t member_read_slot_probe(class_definition* cd, member_expr* expr);
         const script_value* site_field(const chunk& code, const script_value& objd, member_expr* expr, size_t site, script_value& host_value);
+        const script_value* site_field_of_holder(const chunk& code, script_value::object_holder* holder, member_expr* expr, size_t site);
         // a negative member_ic row on a bound C++ class: the member's in-place lane when the ladder would reach its accessors
         void fill_host_member_hit(class_definition* cd, const class_instance* inst, uint64_t member_id, const script_value& receiver,
                                   chunk::member_ic_entry& entry);

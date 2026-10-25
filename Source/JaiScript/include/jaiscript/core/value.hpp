@@ -2121,6 +2121,10 @@ namespace detail {
             bool has_cell = false;      // inline storage holds the OWNED value
             bool has_map_key = false;   // inline storage holds the map KEY (container_map set)
             strong_ptr<script_map> container_map;
+            // the key's entry as the last touch found it, valid while the map's generation holds (script_map::recall)
+            mutable uint64_t map_memo_gen = 0;
+            mutable const void* map_memo_entry = nullptr;
+            script_value* map_entry_value() const;   // value.cpp: the entry's live value, null when the key is gone
             script_value* cell() noexcept { return reinterpret_cast<script_value*>(cell_storage); }
             const script_value* cell() const noexcept { return reinterpret_cast<const script_value*>(cell_storage); }
 

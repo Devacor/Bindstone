@@ -16198,6 +16198,19 @@ op_status vm_backend::exec_get_member_path(frame& f, const vm_instruction& ins) 
 				if (!node->is_typed() && index && index->is_int() && index->unchecked_as_int() >= 0 &&
 				    index->unchecked_as_int() < static_cast<script_int>(node->size())) {
 					next = &node->values()[static_cast<size_t>(index->unchecked_as_int())];
+				} else if (node->kind() == script_array::kind_t::obj && !path.links[k - 1].subscript && index && index->is_int() &&
+				           index->unchecked_as_int() >= 0 && index->unchecked_as_int() < static_cast<script_int>(node->objs().size())) {
+					// an object array's element and the member read of it as one link: the field read on the holder the array keeps
+					script_value::object_holder* holder = node->objs()[static_cast<size_t>(index->unchecked_as_int())].handle.get();
+					if (const script_value* cell = site_field_of_holder(*f.code, holder, static_cast<member_expr*>(const_cast<expression*>(links[k - 1])), ip + (k - 1) * stride)) {
+						if (k == 1) {
+							stack_.push_back(*cell);
+							return {};
+						}
+						receiver = cell;
+						--k;
+						continue;
+					}
 				}
 			}
 		} else {

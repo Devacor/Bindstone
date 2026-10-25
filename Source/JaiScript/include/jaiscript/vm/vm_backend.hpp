@@ -1825,6 +1825,59 @@ namespace jai::vm {
                    s == detail::member_scope_state::statics;
         }
 
+        // The member-miss proof's subjects: the receiver's script class (instance scope) and the declaring class; false when either
+        // is a class the proof does not cover (a host class or base: its properties and lanes answer outside the epochs)
+        static bool member_miss_subject(const class_definition* cd) {
+            return !cd || (cd->is_script_class() && !cd->find_cpp_base_class());
+        }
+        const class_definition* member_miss_dynamic_class(frame& f) const {
+            const script_value& this_val = *f.locals->scope_this;
+            if (this_val.raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
+            auto* oh = const_cast<script_value&>(this_val).unchecked_get_object_storage().get();
+            if (!oh || !oh->is_class_instance_wrapper || !oh->data) { return nullptr; }
+            const auto* instance = static_cast<const class_instance*>(oh->data.get());
+            if (instance->has_user_overflow_fields()) { return nullptr; }
+            return instance->get_class_definition();
+        }
+        // true: no member of the frame's scope can answer sym (the proof armed at this site holds)
+        bool member_miss_proven(frame& f, size_t cache_slot, uint64_t sym) {
+            if (cache_slot == SIZE_MAX) { return false; }
+            std::vector<env_lookup_cache_entry>* rows = frame_lookup_rows(f);
+            if (!rows || rows->size() <= cache_slot) { return false; }
+            const env_lookup_cache_entry& e = (*rows)[cache_slot];
+            if (e.miss_sym != sym || e.miss_sym == 0) { return false; }
+            const class_definition* st = f.locals->scope_static;
+            if (st != e.miss_static || (st && st->method_epoch() != e.miss_static_epoch)) { return false; }
+            const auto state = frame_scope_state(f);
+            if (state == detail::member_scope_state::statics) { return e.miss_dynamic == nullptr; }
+            if (state != detail::member_scope_state::instance || !f.locals->scope_this) { return false; }
+            const class_definition* dyn = member_miss_dynamic_class(f);
+            return dyn && dyn == e.miss_dynamic && dyn->method_epoch() == e.miss_dynamic_epoch;
+        }
+        // after a full probe missed (no field, method or static of the name)
+        void member_miss_arm(frame& f, size_t cache_slot, uint64_t sym) {
+            if (cache_slot == SIZE_MAX || sym == 0) { return; }
+            std::vector<env_lookup_cache_entry>* rows = frame_lookup_rows(f);
+            if (!rows) { return; }
+            if (rows->size() < f.code->code.size() * 3) [[unlikely]] { rows->resize(f.code->code.size() * 3); }
+            if (rows->size() <= cache_slot) { return; }
+            const class_definition* st = f.locals->scope_static;
+            const class_definition* dyn = nullptr;
+            const auto state = frame_scope_state(f);
+            if (state == detail::member_scope_state::instance) {
+                if (!f.locals->scope_this || !(dyn = member_miss_dynamic_class(f))) { return; }
+            } else if (state != detail::member_scope_state::statics) {
+                return;
+            }
+            if (!member_miss_subject(st) || !member_miss_subject(dyn)) { return; }
+            env_lookup_cache_entry& e = (*rows)[cache_slot];
+            e.miss_sym = sym;
+            e.miss_static = st;
+            e.miss_static_epoch = st ? st->method_epoch() : 0;
+            e.miss_dynamic = dyn;
+            e.miss_dynamic_epoch = dyn ? dyn->method_epoch() : 0;
+        }
+
         // The non-slot rungs of the member-scope ladder for POINTER resolvers (the
         // funnel twins of the interpreter's scoped_env_lookup): own scopes below the
         // floor, then fields/statics, then (post-member-miss) the per-site cache and
@@ -1843,6 +1896,16 @@ namespace jai::vm {
                     return cell;
                 }
             }
+            if (script_value* ic_field = this_field_ic_probe(f, cache_slot, symbol_id)) {
+                return ic_field;   // the walk-miss proof covers the own scopes; a field is the probe's first rung
+            }
+            if (member_miss_proven(f, cache_slot, symbol_id)) {
+                if (script_value* cached = env_lookup_cached(f, cache_slot, symbol_id)) {
+                    return cached;
+                }
+                return f.locals->scope_floor ? f.locals->scope_floor->get_value_ptr(symbol_id)
+                                             : environment_->get_value_ptr(symbol_id);
+            }
             auto hit = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
                                                   f.locals->scope_static, symbol_id, /*want_methods*/ false);
             if (hit) {
@@ -1850,12 +1913,16 @@ namespace jai::vm {
                     !detail::bare_member_access(hit, symbol_id, frame_access_context(f))) [[unlikely]] {
                     return nullptr;   // out of reach: the value site raises the access text
                 }
+                if (hit.what == detail::member_probe_hit::kind::field && hit.instance) {
+                    this_field_ic_arm(f, cache_slot, hit.instance, symbol_id);
+                }
                 return hit.value_ptr;   // a C++ property answers nullptr: a shadow, minted by value sites
             }
             if (detail::member_scope_has_method(frame_scope_state(f), f.locals->scope_this,
                                                 f.locals->scope_static, symbol_id)) {
                 return nullptr;
             }
+            member_miss_arm(f, cache_slot, symbol_id);
             if (cache_slot != SIZE_MAX) {
                 if (script_value* cached = env_lookup_cached(f, cache_slot, symbol_id)) {
                     return cached;

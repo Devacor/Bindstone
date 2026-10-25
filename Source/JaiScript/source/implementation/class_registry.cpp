@@ -1209,6 +1209,7 @@ void class_definition::add_static_method(uint64_t name_id, script_function func,
     };
     if (writeback_mask != 0) { call = host_writeback_function{ std::move(call), writeback_mask }; }
     static_methods_.insert_or_assign(name_id, script_value::make_function(std::move(call), engine_));
+    bump_method_epoch();
 
     if (arity != SIZE_MAX) {
         static_method_arities_[name_id].push_back(arity);

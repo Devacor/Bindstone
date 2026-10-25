@@ -22,6 +22,7 @@ public:
 		auto e = engine::make();
 		e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 		stdlib::register_all(*e);
+		e->execution_budget(0);   // a loaded machine runs the Debug interpreter's defs past the default budget, cutting its serial loop short
 		if (workers) { e->parallel_thread_count(workers); }
 		outcome result;
 		try { result.defs = e->execute(defs).to_string(); } catch (const std::exception& ex) { result.defs = std::string("throw:") + ex.what(); }
@@ -36,6 +37,7 @@ public:
 		for (size_t workers : { size_t(1), size_t(4) }) {
 			const outcome interp = run_split(false, defs, run, workers), vm = run_split(true, defs, run, workers);
 			const std::string tag = what + " (" + std::to_string(workers) + " workers)";
+			check(interp.defs.rfind("throw:", 0) != 0 && vm.defs.rfind("throw:", 0) != 0, tag + ": the defs run (" + interp.defs + " | " + vm.defs + ")");
 			check_eq(interp.run, vm.run, tag + ": both backends");
 			if (!expected.empty()) { check_eq(expected, vm.run, tag + ": the value"); }
 			check(vm.entries >= min_entries, tag + ": the loops enter their blocks (" + std::to_string(vm.entries) + " entries)");

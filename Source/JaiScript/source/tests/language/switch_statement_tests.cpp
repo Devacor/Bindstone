@@ -199,6 +199,106 @@ public:
             check_eq(result.template as<std::string>(), std::string("two"));
         });
         
+        test("case_values_run_in_order_until_a_match_and_once_on_a_fallthrough", [this]() {
+            auto engine = make_engine();
+            auto result = engine->execute(R"(
+                int trace = 0;
+                int mark(int v) { trace = trace * 10 + v; return v; }
+                array<int> run(int x) {
+                    trace = 0;
+                    int hits = 0;
+                    switch (x) {
+                        case mark(1): hits += 1; fallthrough;
+                        case mark(2): hits += 10;
+                        case mark(3): hits += 100; fallthrough;
+                        case mark(4): hits += 1000; fallthrough;
+                        default: hits += 10000;
+                    }
+                    return [trace, hits];
+                }
+                [run(1), run(2), run(3), run(4), run(9)]
+            )");
+            check_eq(std::string("[[12, 11], [12, 10], [1234, 11100], [1234, 11000], [1234, 10000]]"), result.to_string());
+        });
+
+        test("switch_on_a_call_evaluates_the_condition_once", [this]() {
+            auto engine = make_engine();
+            auto result = engine->execute(R"(
+                int calls = 0;
+                int next() { calls += 1; return calls; }
+                int run() {
+                    int out = 0;
+                    for (int i = 0; i < 6; ++i) {
+                        switch (next() % 3) {
+                            case 0: out += 1;
+                            case 1: out += 10;
+                            default: out += 100;
+                        }
+                    }
+                    return out * 100 + calls;
+                }
+                run()
+            )");
+            check_eq((int64_t)22206, result.as_int());
+        });
+
+        test("switch_on_dynamic_values_uses_the_languages_equality", [this]() {
+            auto engine = make_engine();
+            auto result = engine->execute(R"(
+                class Key {
+                    int k;
+                    Key(int v) { k = v; }
+                    bool operator==(const Key& other) { return k % 10 == other.k % 10; }
+                }
+                string number(var v) {
+                    switch (v) {
+                        case 1: return "one";
+                        case 3.5: return "three and a half";
+                        default: return "other";
+                    }
+                }
+                string key(Key v) {
+                    switch (v) {
+                        case Key(1): return "one";
+                        case Key(2): return "two";
+                        default: return "other";
+                    }
+                }
+                number(1.0) + "," + number(3.5) + "," + number(2) + "," + key(Key(12)) + "," + key(Key(21)) + "," + key(Key(5))
+            )");
+            check_eq(std::string("one,three and a half,other,two,one,other"), result.template as<std::string>());
+        });
+
+        test("break_and_continue_inside_a_switch_inside_a_loop", [this]() {
+            auto engine = make_engine();
+            auto result = engine->execute(R"(
+                int run() {
+                    int out = 0;
+                    for (int i = 0; i < 10; ++i) {
+                        switch (i & 3) {
+                            case 0: continue;
+                            case 1:
+                                if (i > 4) { break; }
+                                out += 1;
+                            case 2: {
+                                int local = i * 2;
+                                out += local;
+                            }
+                            default:
+                                switch (i) {
+                                    case 3: out += 1000; break;
+                                    default: out += 100;
+                                }
+                        }
+                        out += 10000;
+                    }
+                    return out;
+                }
+                run()
+            )");
+            check_eq((int64_t)71117, result.as_int());
+        });
+
         test("fallthrough_only_in_switch", [this]() {
             auto engine = make_engine();
             // This should fail to parse - fallthrough outside switch

@@ -121,18 +121,18 @@ inline auto class_instance::make_cell(script_value&& v) -> field_cell {
     if (arena_used_ < arena_cells_) {
         auto* p = arena_ + arena_used_++;
         new (p) script_value(std::move(v));
-        return field_cell(p, cell_deleter{false});
+        return field_cell(p, false);
     }
-    return field_cell(new script_value(std::move(v)), cell_deleter{true});
+    return field_cell(new script_value(std::move(v)), true);
 }
 
 inline auto class_instance::make_trivial_cell(const script_value& v) -> field_cell {
     if (arena_used_ < arena_cells_) {
         auto* p = arena_ + arena_used_++;
         std::memcpy(static_cast<void*>(p), static_cast<const void*>(&v), sizeof(script_value));
-        return field_cell(p, cell_deleter{false});
+        return field_cell(p, false);
     }
-    return field_cell(new script_value(v), cell_deleter{true});
+    return field_cell(new script_value(v), true);
 }
 
 inline auto class_instance::extras() -> instance_extras& {
@@ -3255,12 +3255,9 @@ inline const script_value& class_instance::get_field(uint64_t id, bool throw_if_
         detail::throw_field_missing(class_def_, id);
     }
 
-    if (class_def_) {
-        invalid_value_ = script_value::make_invalid(class_def_->get_engine());
-    } else {
-        invalid_value_ = script_value::make_invalid(nullptr);
-    }
-    return invalid_value_;
+    auto& missing = const_cast<class_instance*>(this)->extras().missing_field;
+    missing = script_value::make_invalid(class_def_ ? class_def_->get_engine() : nullptr);
+    return *missing;
 }
 
 inline script_value& class_instance::get_field(uint64_t id, bool throw_if_missing) {
@@ -3299,12 +3296,9 @@ inline script_value& class_instance::get_field(uint64_t id, bool throw_if_missin
         detail::throw_field_missing(class_def_, id);
     }
 
-    if (class_def_) {
-        invalid_value_ = script_value::make_invalid(class_def_->get_engine());
-    } else {
-        invalid_value_ = script_value::make_invalid(nullptr);
-    }
-    return invalid_value_;
+    auto& missing = const_cast<class_instance*>(this)->extras().missing_field;
+    missing = script_value::make_invalid(class_def_ ? class_def_->get_engine() : nullptr);
+    return *missing;
 }
 
 inline bool class_instance::has_field(uint64_t id) const {
@@ -3326,7 +3320,7 @@ inline script_value class_instance::get_method(uint64_t id, bool throw_if_missin
 }
 
 inline class_instance::class_instance(std::string_view class_name, engine* eng)
-    : engine_(eng), invalid_value_(std::monostate{}, eng) {
+    : engine_(eng) {
     if (eng) { class_name_ = eng->get_symbolizer()->intern_with_view(class_name).second; }
 }
 

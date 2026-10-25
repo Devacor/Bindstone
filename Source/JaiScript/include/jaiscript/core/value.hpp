@@ -2941,13 +2941,80 @@ namespace detail {
         type_info_ptr tag;
     };
 
-    inline script_array::script_array() = default;
-    inline script_array::script_array(kind_t k) : kind_(k) {}
+    inline void script_array::construct_lane() noexcept {
+        switch (lane_of(kind_)) {
+            case lane_t::values: new (&values_) std::vector<script_value>(); break;
+            case lane_t::ints: new (&ints_) std::vector<script_int>(); break;
+            case lane_t::floats: new (&floats_) std::vector<script_float>(); break;
+            case lane_t::bytes: new (&bytes_) std::vector<uint8_t>(); break;
+            case lane_t::strs: new (&strs_) std::vector<strong_ptr<script_string>>(); break;
+            case lane_t::objs: new (&objs_) std::vector<obj_slot>(); break;
+        }
+    }
+    inline void script_array::destroy_lane() noexcept {
+        switch (lane_of(kind_)) {
+            case lane_t::values: values_.~vector(); break;
+            case lane_t::ints: ints_.~vector(); break;
+            case lane_t::floats: floats_.~vector(); break;
+            case lane_t::bytes: bytes_.~vector(); break;
+            case lane_t::strs: strs_.~vector(); break;
+            case lane_t::objs: objs_.~vector(); break;
+        }
+    }
+    // an empty lane of kind k replaces the current one; a kind on the same lane keeps the buffer
+    inline void script_array::switch_lane(kind_t k) noexcept {
+        if (lane_of(k) == lane_of(kind_)) { kind_ = k; return; }
+        destroy_lane();
+        kind_ = k;
+        construct_lane();
+    }
+    inline script_array::script_array() : values_() {}
+    inline script_array::script_array(kind_t k) : kind_(k) { construct_lane(); }
 
-    inline script_array::script_array(const script_array&) = default;
-    inline script_array::script_array(script_array&&) noexcept = default;
-    inline script_array& script_array::operator=(const script_array&) = default;
-    inline script_array& script_array::operator=(script_array&&) noexcept = default;
+    inline script_array::script_array(const script_array& other) : live_elem_refs(other.live_elem_refs), kind_(other.kind_), owner(other.owner) {
+        switch (lane_of(kind_)) {
+            case lane_t::values: new (&values_) std::vector<script_value>(other.values_); break;
+            case lane_t::ints: new (&ints_) std::vector<script_int>(other.ints_); break;
+            case lane_t::floats: new (&floats_) std::vector<script_float>(other.floats_); break;
+            case lane_t::bytes: new (&bytes_) std::vector<uint8_t>(other.bytes_); break;
+            case lane_t::strs: new (&strs_) std::vector<strong_ptr<script_string>>(other.strs_); break;
+            case lane_t::objs: new (&objs_) std::vector<obj_slot>(other.objs_); break;
+        }
+    }
+    inline script_array::script_array(script_array&& other) noexcept : live_elem_refs(other.live_elem_refs), kind_(other.kind_), owner(other.owner) {
+        switch (lane_of(kind_)) {
+            case lane_t::values: new (&values_) std::vector<script_value>(std::move(other.values_)); break;
+            case lane_t::ints: new (&ints_) std::vector<script_int>(std::move(other.ints_)); break;
+            case lane_t::floats: new (&floats_) std::vector<script_float>(std::move(other.floats_)); break;
+            case lane_t::bytes: new (&bytes_) std::vector<uint8_t>(std::move(other.bytes_)); break;
+            case lane_t::strs: new (&strs_) std::vector<strong_ptr<script_string>>(std::move(other.strs_)); break;
+            case lane_t::objs: new (&objs_) std::vector<obj_slot>(std::move(other.objs_)); break;
+        }
+    }
+    inline script_array& script_array::operator=(const script_array& other) {
+        if (this != &other) {
+            script_array copy(other);
+            *this = std::move(copy);
+        }
+        return *this;
+    }
+    inline script_array& script_array::operator=(script_array&& other) noexcept {
+        if (this != &other) {
+            destroy_lane();
+            live_elem_refs = other.live_elem_refs;
+            kind_ = other.kind_;
+            owner = other.owner;
+            switch (lane_of(kind_)) {
+                case lane_t::values: new (&values_) std::vector<script_value>(std::move(other.values_)); break;
+                case lane_t::ints: new (&ints_) std::vector<script_int>(std::move(other.ints_)); break;
+                case lane_t::floats: new (&floats_) std::vector<script_float>(std::move(other.floats_)); break;
+                case lane_t::bytes: new (&bytes_) std::vector<uint8_t>(std::move(other.bytes_)); break;
+                case lane_t::strs: new (&strs_) std::vector<strong_ptr<script_string>>(std::move(other.strs_)); break;
+                case lane_t::objs: new (&objs_) std::vector<obj_slot>(std::move(other.objs_)); break;
+            }
+        }
+        return *this;
+    }
     namespace detail {
         // A container's elements die depth first through nested arrays and maps without native recursion (script_map.hpp)
         inline void release_values_flattened(std::vector<script_value>& values) noexcept;
@@ -2958,6 +3025,7 @@ namespace detail {
                 if (v.release_flattens()) { detail::release_values_flattened(values_); break; }
             }
         }
+        destroy_lane();
     }
 
     inline size_t script_array::size() const noexcept {
@@ -2979,7 +3047,16 @@ namespace detail {
             default: return values_.size();
         }
     }
-    inline void script_array::clear() noexcept { values_.clear(); ints_.clear(); floats_.clear(); bytes_.clear(); strs_.clear(); objs_.clear(); }
+    inline void script_array::clear() noexcept {
+        switch (lane_of(kind_)) {
+            case lane_t::values: values_.clear(); break;
+            case lane_t::ints: ints_.clear(); break;
+            case lane_t::floats: floats_.clear(); break;
+            case lane_t::bytes: bytes_.clear(); break;
+            case lane_t::strs: strs_.clear(); break;
+            case lane_t::objs: objs_.clear(); break;
+        }
+    }
     inline void script_array::reserve(size_t n) {
         switch (kind_) {
             case kind_t::i64: ints_.reserve(n); break;
@@ -3053,6 +3130,7 @@ namespace detail {
 	}
 
     inline void script_array::assign_buffer(const script_array& other) {
+        switch_lane(other.kind_);
         switch (other.kind_) {
             case kind_t::i64: ints_ = other.ints_; break;
             case kind_t::f64: floats_ = other.floats_; break;
@@ -3322,64 +3400,52 @@ namespace detail {
     }
 
     inline void script_array::demote_to_hetero(engine* eng) {
+        if (kind_ == kind_t::hetero) { return; }
+        std::vector<script_value> boxed;
         switch (kind_) {
             case kind_t::i64:
-                values_.reserve(ints_.size());
-                for (script_int n : ints_) { values_.emplace_back(n, eng); }
-                ints_.clear();
-                ints_.shrink_to_fit();
+                boxed.reserve(ints_.size());
+                for (script_int n : ints_) { boxed.emplace_back(n, eng); }
                 break;
             case kind_t::f64:
-                values_.reserve(floats_.size());
-                for (script_float f : floats_) { values_.emplace_back(f, eng); }
-                floats_.clear();
-                floats_.shrink_to_fit();
+                boxed.reserve(floats_.size());
+                for (script_float f : floats_) { boxed.emplace_back(f, eng); }
                 break;
             case kind_t::b8:
-                values_.reserve(bytes_.size());
-                for (uint8_t b : bytes_) { values_.emplace_back(static_cast<script_bool>(b != 0), eng); }
-                bytes_.clear();
-                bytes_.shrink_to_fit();
+                boxed.reserve(bytes_.size());
+                for (uint8_t b : bytes_) { boxed.emplace_back(static_cast<script_bool>(b != 0), eng); }
                 break;
             case kind_t::c8:
-                values_.reserve(bytes_.size());
-                for (uint8_t c : bytes_) { values_.emplace_back(static_cast<script_char>(c), eng); }
-                bytes_.clear();
-                bytes_.shrink_to_fit();
+                boxed.reserve(bytes_.size());
+                for (uint8_t c : bytes_) { boxed.emplace_back(static_cast<script_char>(c), eng); }
                 break;
             case kind_t::u8:
             case kind_t::i8:
-                values_.reserve(bytes_.size());
+                boxed.reserve(bytes_.size());
                 for (uint8_t b : bytes_) {
-                    values_.emplace_back(kind_ == kind_t::u8 ? static_cast<script_int>(b) : static_cast<script_int>(static_cast<int8_t>(b)), eng);
+                    boxed.emplace_back(kind_ == kind_t::u8 ? static_cast<script_int>(b) : static_cast<script_int>(static_cast<int8_t>(b)), eng);
                 }
-                bytes_.clear();
-                bytes_.shrink_to_fit();
                 break;
             case kind_t::str:
-                values_.reserve(strs_.size());
-                for (auto& h : strs_) { values_.emplace_back(std::move(h), eng); }
-                strs_.clear();
-                strs_.shrink_to_fit();
+                boxed.reserve(strs_.size());
+                for (auto& h : strs_) { boxed.emplace_back(std::move(h), eng); }
                 break;
             case kind_t::obj:
-                values_.reserve(objs_.size());
-                for (auto& s : objs_) { values_.emplace_back(std::move(s.handle), s.tag, eng); }
-                objs_.clear();
-                objs_.shrink_to_fit();
+                boxed.reserve(objs_.size());
+                for (auto& s : objs_) { boxed.emplace_back(std::move(s.handle), s.tag, eng); }
                 break;
             case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba: {
                 const size_t n = size();
-                values_.reserve(n);
-                for (size_t i = 0; i < n; ++i) { values_.push_back(get(i, eng)); }
-                bytes_.clear();
-                bytes_.shrink_to_fit();
+                boxed.reserve(n);
+                for (size_t i = 0; i < n; ++i) { boxed.push_back(get(i, eng)); }
                 break;
             }
             default:
                 break;
         }
+        destroy_lane();
         kind_ = kind_t::hetero;
+        new (&values_) std::vector<script_value>(std::move(boxed));
     }
 
     // Map-key order (operator<=>): two keys of the same raw int or string kind order by payload, the answer the type rank and

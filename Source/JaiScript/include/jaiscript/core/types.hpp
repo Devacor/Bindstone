@@ -6,6 +6,7 @@
 #include <jaiscript/jaiscript_fwd.hpp>
 #include <jaiscript/core/checked_result.hpp>
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -60,7 +61,7 @@ namespace jai {
     // Container types. script_array is the ONE array node behind TYPEID_ARRAY (the
     // strong_ptr pointee — its address is the array's identity for ordering, borrows,
     // and COW probes). Typed kinds (internal/typed_array_design.md stage 2) store raw
-    // primitive buffers instead of 32-byte script_values; the airtight array<T> tag
+    // primitive buffers instead of boxed script_values; the airtight array<T> tag
     // and demote-on-stamp keep node kind ⟺ view tag. values() is the HETERO
     // element surface only — every caller either sits behind a kind check or handles
     // typed nodes through get()/set()/typed buffers (kind-dispatch helpers live in
@@ -78,7 +79,7 @@ namespace jai {
         uint32_t live_elem_refs = 0;
         // b8/c8/u8/i8 share one byte buffer (bool, char, uint8 and int8 payloads); the kind says how to box
         // str holds shared string handles (the same handle a boxed element would carry)
-        // obj holds {object handle, class tag} slots (array<UserType>; 16 bytes vs 32 boxed)
+        // obj holds {object handle, class tag} slots (array<UserType>)
         // v2..rgba are the math vector kinds on the byte buffer too: each element is its components' words (binary32, or
         // int32 for ivec) at the kind's stride; kind + 8 is the vector's storage index (TYPEID_VEC2 .. TYPEID_COLOR)
         enum class kind_t : uint8_t { hetero = 0, i64 = 1, f64 = 2, b8 = 3, c8 = 4, str = 5, obj = 6, u8 = 7, i8 = 8,
@@ -134,18 +135,19 @@ namespace jai {
 		inline void retain_selected(const std::vector<uint8_t>& a_selected);
         inline void truncate(size_t n);   // drop elements past n (no default construction)
 
-        std::vector<script_value>& values() noexcept { return values_; }
-        const std::vector<script_value>& values() const noexcept { return values_; }
-        std::vector<script_int>& ints() noexcept { return ints_; }
-        const std::vector<script_int>& ints() const noexcept { return ints_; }
-        std::vector<script_float>& floats() noexcept { return floats_; }
-        const std::vector<script_float>& floats() const noexcept { return floats_; }
-        std::vector<uint8_t>& bytes() noexcept { return bytes_; }
-        const std::vector<uint8_t>& bytes() const noexcept { return bytes_; }
-        std::vector<strong_ptr<script_string>>& strs() noexcept { return strs_; }
-        const std::vector<strong_ptr<script_string>>& strs() const noexcept { return strs_; }
-        std::vector<obj_slot>& objs() noexcept { return objs_; }
-        const std::vector<obj_slot>& objs() const noexcept { return objs_; }
+        // One buffer per node: the kind names the live lane, and only that lane may be touched
+        std::vector<script_value>& values() noexcept { assert(lane_of(kind_) == lane_t::values); return values_; }
+        const std::vector<script_value>& values() const noexcept { assert(lane_of(kind_) == lane_t::values); return values_; }
+        std::vector<script_int>& ints() noexcept { assert(kind_ == kind_t::i64); return ints_; }
+        const std::vector<script_int>& ints() const noexcept { assert(kind_ == kind_t::i64); return ints_; }
+        std::vector<script_float>& floats() noexcept { assert(kind_ == kind_t::f64); return floats_; }
+        const std::vector<script_float>& floats() const noexcept { assert(kind_ == kind_t::f64); return floats_; }
+        std::vector<uint8_t>& bytes() noexcept { assert(lane_of(kind_) == lane_t::bytes); return bytes_; }
+        const std::vector<uint8_t>& bytes() const noexcept { assert(lane_of(kind_) == lane_t::bytes); return bytes_; }
+        std::vector<strong_ptr<script_string>>& strs() noexcept { assert(kind_ == kind_t::str); return strs_; }
+        const std::vector<strong_ptr<script_string>>& strs() const noexcept { assert(kind_ == kind_t::str); return strs_; }
+        std::vector<obj_slot>& objs() noexcept { assert(kind_ == kind_t::obj); return objs_; }
+        const std::vector<obj_slot>& objs() const noexcept { assert(kind_ == kind_t::obj); return objs_; }
         // A vector kind's element i: its component words (count = vec_stride) in and out of the byte buffer
         void vec_words(size_t i, uint32_t* out) const noexcept {
             const size_t n = vec_stride(kind_);
@@ -198,13 +200,29 @@ namespace jai {
         inline void demote_to_hetero(engine* eng);
 
     private:
+        enum class lane_t : uint8_t { values, ints, floats, bytes, strs, objs };
+        static constexpr lane_t lane_of(kind_t k) noexcept {
+            switch (k) {
+                case kind_t::hetero: return lane_t::values;
+                case kind_t::i64: return lane_t::ints;
+                case kind_t::f64: return lane_t::floats;
+                case kind_t::str: return lane_t::strs;
+                case kind_t::obj: return lane_t::objs;
+                default: return lane_t::bytes;
+            }
+        }
+        inline void construct_lane() noexcept;
+        inline void destroy_lane() noexcept;
+        inline void switch_lane(kind_t k) noexcept;
         kind_t kind_ = kind_t::hetero;
-        std::vector<script_value> values_;
-        std::vector<script_int> ints_;
-        std::vector<script_float> floats_;
-        std::vector<uint8_t> bytes_;
-        std::vector<strong_ptr<script_string>> strs_;
-        std::vector<obj_slot> objs_;
+        union {
+            std::vector<script_value> values_;
+            std::vector<script_int> ints_;
+            std::vector<script_float> floats_;
+            std::vector<uint8_t> bytes_;
+            std::vector<strong_ptr<script_string>> strs_;
+            std::vector<obj_slot> objs_;
+        };
     public:
         // the engine that made this node (after the hot fields): its typed reads, copies and memory charges run against it
         engine* owner = nullptr;

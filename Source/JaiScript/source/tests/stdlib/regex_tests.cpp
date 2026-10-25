@@ -290,7 +290,7 @@ public:
             e->disassembly_sink([&listing](const std::string& l, const std::string&) { listing += l; });
             e->execute("int n = 0; for (int i = 0; i < 3; ++i) { if (regex(\"a\" + \"b\", \"i\").matches(\"AB\")) { ++n; } } string p = \"x\"; regex(p);");
             check_true(listing.find("REGEX_CONSTANT site=") != std::string::npos, listing);
-            check_eq(size_t(1), [&] { size_t k = 0, at = 0; while ((at = listing.find("REGEX_CONSTANT", at)) != std::string::npos) { ++k; ++at; } return k; }(), "only the literal call folds");
+            check_eq(size_t(1), [&] { size_t k = 0, at = 0; while ((at = listing.find("REGEX_CONSTANT site=", at)) != std::string::npos) { ++k; ++at; } return k; }(), "only the literal call folds");
         });
 
         test("a_constant_pattern_follows_the_name_it_calls", [expect]() {

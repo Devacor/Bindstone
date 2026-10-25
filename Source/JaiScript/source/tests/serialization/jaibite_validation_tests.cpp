@@ -96,7 +96,8 @@ public:
             auto eng = make_engine();
             auto declarations = parse(*eng, "int n = 3;");
             std::static_pointer_cast<variable_decl>(declarations.front())->slot_index = 0;
-            reject(*eng, declarations);
+            // the writer drops a program's own slots (they are re-derived at load): a body-mode writer still puts the claim on the wire
+            reject_bytes(*eng, detail::ast_writer(*eng->get_symbolizer()).in_body().serialize(declarations, eng->registration_fingerprint()));
         });
 
         test("function_body_must_not_be_null", [this]() {

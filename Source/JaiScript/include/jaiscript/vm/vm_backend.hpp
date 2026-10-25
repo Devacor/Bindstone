@@ -841,6 +841,8 @@ namespace jai::vm {
             stack_.push_back(std::move(v));
             ++caller.ip;
         }
+        // a frame whose code reads its slots: a call frame, or a program frame whose block-scoped declarations have them (its window)
+        static bool has_slots(const frame& f) noexcept { return f.locals && (!f.top_level || f.window_backed); }
         script_value* frame_slot(frame& f, size_t slot) noexcept {
             if (f.window_backed) {
                 return slot < f.window_live ? &stack_[f.window_base + slot] : nullptr;

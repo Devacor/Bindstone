@@ -40,7 +40,7 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 45;   // 45: the math:: random family left the language, so the math intrinsic ids after it (which aggregate lowering writes into its component codes) moved; 44: a conditional whose arms name storage reads its arms as references where a reference binds it (an argument, a T& declaration, default or return, a cast<T&> operand), so a sibling parsed before it re-parses; 43: a by-value structured range-for binding declares its value by value (the entry's copy), not as a reference to a hidden pair's half; 42: a conditional of lvalues as the container of a store target reads its arms as references, and the checker reports override markers and same-run redefinitions, types a class operand's operator by the overload that takes the right operand and a field over a same-named global, so a sibling parsed or checked clean before them re-parses; 41: const declarations and parameters (internal/const.md): variable_decl::is_const and destructuring_decl::is_const, and a const range-for or parameter is no longer ignored; 40: `function` parses as the callable-or-null slot type (type_info::make_callable), so a sibling that kept it untyped re-parses; 39: consistent namespaces, byte-character results, typed transforms and builtin ordering invalidate prior hints/checks; 38: known builtin method arities invalidate prior checked-clean bites; reserved preview 37 is not reused; 36: hot_reload_migrate at a unit's top level is the unit's reload hook, off the program, so a sibling that defined it as a function re-parses; 35: the JavaScript/C# additions: ?? and ??= read as tokens of their own, => arrow functions, do-while, let, structured range-for bindings and optional chains that skip their rest desugar at parse time, so a sibling parsed before them re-parses; 34: a host template name is no longer a token of its own (token_type::user_template_type removed, so every later token value moved) and its arguments spell canonically (Box<array<int>>, double as float); 33: an anonymous function(...) expression parses as a [&] lambda, so a sibling that recorded it capture-free re-parses; 32: exhaustive capture lists (a parse error for an unlisted enclosing local, a named capture's own scope entry) and the strict required-return and reference-admission checks, so a sibling parsed or checked clean before them re-parses; 31: the header carries the identity of the source the bite was parsed from, so a sibling describes exactly one source text; 30: C++ lvalue targets (a conditional of lvalues, `(a = b) = c`, `++x = v`) read their pieces as references (cast_expr::implicit_ref, assignment_expr::yields_reference); 29: the checker holds a shared_ptr<T> namespace variable store to handle admission, so a bite checked clean before it re-checks; 28: variable_decl::is_inline (`inline T x;`); 27: math::vec2/vec3/vec4/ivec2/ivec3/color read as types, so a sibling that parsed a math declaration as an expression re-parses; 26: import(...) is an expression (import_expr: paths, a group, jai::force); 24: array<uint8> / array<int8> read uint8 / int8 as one-byte element types, so a sibling that parsed them as classes re-parses; 23: a lambda capture carries its init-capture expression; 22: variable_decl::default_initialized (a program-scope declaration without an initializer keeps its value on a same-unit re-run); 21: a typed declaration without an initializer default-initializes, so a sibling parsed before it re-parses; 20: a template string joins no empty parts; 19: utf8_string reads as a type, so a sibling that parsed it as a class re-parses; 18: a literal include inside a function body splices at parse time, so a sibling written before it re-parses; 17: a negated numeric literal is a literal; 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
+    inline constexpr uint32_t k_jaibite_version = 46;   // 46: a top-level statement's block-scoped declarations (a loop's variable, its body's locals) carry frame slots (detail::program_slot_pass); 45: the math:: random family left the language, so the math intrinsic ids after it (which aggregate lowering writes into its component codes) moved; 44: a conditional whose arms name storage reads its arms as references where a reference binds it (an argument, a T& declaration, default or return, a cast<T&> operand), so a sibling parsed before it re-parses; 43: a by-value structured range-for binding declares its value by value (the entry's copy), not as a reference to a hidden pair's half; 42: a conditional of lvalues as the container of a store target reads its arms as references, and the checker reports override markers and same-run redefinitions, types a class operand's operator by the overload that takes the right operand and a field over a same-named global, so a sibling parsed or checked clean before them re-parses; 41: const declarations and parameters (internal/const.md): variable_decl::is_const and destructuring_decl::is_const, and a const range-for or parameter is no longer ignored; 40: `function` parses as the callable-or-null slot type (type_info::make_callable), so a sibling that kept it untyped re-parses; 39: consistent namespaces, byte-character results, typed transforms and builtin ordering invalidate prior hints/checks; 38: known builtin method arities invalidate prior checked-clean bites; reserved preview 37 is not reused; 36: hot_reload_migrate at a unit's top level is the unit's reload hook, off the program, so a sibling that defined it as a function re-parses; 35: the JavaScript/C# additions: ?? and ??= read as tokens of their own, => arrow functions, do-while, let, structured range-for bindings and optional chains that skip their rest desugar at parse time, so a sibling parsed before them re-parses; 34: a host template name is no longer a token of its own (token_type::user_template_type removed, so every later token value moved) and its arguments spell canonically (Box<array<int>>, double as float); 33: an anonymous function(...) expression parses as a [&] lambda, so a sibling that recorded it capture-free re-parses; 32: exhaustive capture lists (a parse error for an unlisted enclosing local, a named capture's own scope entry) and the strict required-return and reference-admission checks, so a sibling parsed or checked clean before them re-parses; 31: the header carries the identity of the source the bite was parsed from, so a sibling describes exactly one source text; 30: C++ lvalue targets (a conditional of lvalues, `(a = b) = c`, `++x = v`) read their pieces as references (cast_expr::implicit_ref, assignment_expr::yields_reference); 29: the checker holds a shared_ptr<T> namespace variable store to handle admission, so a bite checked clean before it re-checks; 28: variable_decl::is_inline (`inline T x;`); 27: math::vec2/vec3/vec4/ivec2/ivec3/color read as types, so a sibling that parsed a math declaration as an expression re-parses; 26: import(...) is an expression (import_expr: paths, a group, jai::force); 24: array<uint8> / array<int8> read uint8 / int8 as one-byte element types, so a sibling that parsed them as classes re-parses; 23: a lambda capture carries its init-capture expression; 22: variable_decl::default_initialized (a program-scope declaration without an initializer keeps its value on a same-unit re-run); 21: a typed declaration without an initializer default-initializes, so a sibling parsed before it re-parses; 20: a template string joins no empty parts; 19: utf8_string reads as a type, so a sibling that parsed it as a class re-parses; 18: a literal include inside a function body splices at parse time, so a sibling written before it re-parses; 17: a negated numeric literal is a literal; 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -107,6 +107,8 @@ namespace jai::detail {
         // identity keys, e.g. hot-reload redefinition equality) — never deserialized.
         explicit ast_writer(const string_symbolizer& symbols, bool include_locations = true, std::string own_path = {})
             : symbols_(symbols), include_locations_(include_locations), own_path_(std::move(own_path)) {}
+        // the subtree is a body's (the parallel body copier): its slots are written, as a function's are
+        ast_writer& in_body() { frame_depth_ = 1; return *this; }
 
         // Structural key for one subtree: string table + node encoding, a deterministic
         // pure function of AST structure (symbol ids persist as first-seen table indices,
@@ -185,7 +187,9 @@ namespace jai::detail {
             if (name.empty()) jaibite_fail("cannot serialize unresolvable symbol id");
             varint(1 + table_index(name));
         }
-        void slot(size_t s) { varint(s == SIZE_MAX ? 0 : uint64_t(s) + 1); }
+        // a program's own frame writes none: its block-scoped slots are re-derived at load (detail::program_slot_pass)
+        void slot(size_t s) { varint(s == SIZE_MAX || frame_depth_ == 0 ? 0 : uint64_t(s) + 1); }
+        int frame_depth_ = 0;   // the bodies (functions, lambdas, parallel_for) the writer is inside
 
         void location(const source_location& loc) {
             if (!include_locations_) {
@@ -326,6 +330,7 @@ namespace jai::detail {
                 }
                 case node_type::lambda_expr: {
                     auto* e = static_cast<const lambda_expr*>(n);
+                    ++frame_depth_;
                     type(e->result_type);
                     u8(uint8_t(e->default_capture));
                     varint(e->captures.size());
@@ -345,6 +350,7 @@ namespace jai::detail {
                     for (const auto& [sym, s] : e->chained_outer_slots) { symbol(sym, UINT64_MAX); slot(s); }
                     varint(e->chained_outer_names.size());
                     for (uint64_t sym : e->chained_outer_names) symbol(sym, UINT64_MAX);
+                    --frame_depth_;
                     break;
                 }
                 case node_type::new_expr: {
@@ -450,14 +456,18 @@ namespace jai::detail {
                     auto* s = static_cast<const parallel_for_stmt*>(n);
                     std::vector<parameter> all{ s->loop_param };
                     all.insert(all.end(), s->extra_params.begin(), s->extra_params.end());
+                    ++frame_depth_;
                     parameters(all);
+                    --frame_depth_;
                     varint(s->local_count);
                     varint(s->frame_captures.size());
                     for (const auto& [sym, slot] : s->frame_captures) { symbol(sym, UINT64_MAX); varint(slot); }
                     node(s->container.get());
                     varint(s->extra_containers.size());
                     for (const auto& c : s->extra_containers) node(c.get());
+                    ++frame_depth_;
                     node(s->body.get());
+                    --frame_depth_;
                     break;
                 }
                 case node_type::return_stmt: {
@@ -516,6 +526,7 @@ namespace jai::detail {
                 }
                 case node_type::function_decl: {
                     auto* d = static_cast<const function_decl*>(n);
+                    ++frame_depth_;
                     str(d->name);
                     symbol(d->name_id, UINT64_MAX);
                     parameters(d->parameters);
@@ -532,6 +543,7 @@ namespace jai::detail {
                     flag(d->is_coroutine);
                     varint(d->local_count);
                     outer_slot_plan(d->outer_slot_plan, d->outer_slot_plan_built);
+                    --frame_depth_;
                     break;
                 }
                 case node_type::class_decl: {

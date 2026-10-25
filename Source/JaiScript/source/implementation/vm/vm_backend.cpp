@@ -523,7 +523,7 @@ void vm_backend::debug_stop_at(const ast_node* node) {
 
 std::vector<std::pair<std::string, script_value>> vm_backend::frame_slot_locals(const frame* f) const {
 	std::vector<std::pair<std::string, script_value>> out;
-	if (!f || !f->locals || f->top_level || !f->code) { return out; }   // global scope: env fallback
+	if (!f || !has_slots(*f) || !f->code) { return out; }   // global scope without slots: env fallback
 
 	// slot -> name from the chunk's operands: decls carry their variable_decl node
 	// (exact name + slot); load/store/incdec name any slot the body touches (parameters
@@ -1458,7 +1458,7 @@ std::vector<stack_frame> vm_backend::debug_frame_walk(std::vector<const frame*>*
 		const ast_node* node = frame_statement(*fr);
 		if (fr->top_level) {
 			out.push_back(trace_frame_at("<script>", location_of(node)));
-			if (slot_frames) { slot_frames->push_back(nullptr); }
+			if (slot_frames) { slot_frames->push_back(has_slots(*fr) ? fr : nullptr); }
 			break;
 		}
 		const size_t grafts = graft_frames_at(*fr->code, fr->ip, &node, out);
@@ -2312,7 +2312,7 @@ void vm_backend::exec_map(frame& f, const vm_instruction& ins) {
 }
 
 script_value* vm_backend::resolve_local_or_env(frame& f, uint32_t slot, uint64_t symbol_id) {
-	if (slot != k_invalid_u32 && f.locals && !f.top_level) {
+	if (slot != k_invalid_u32 && has_slots(f)) {
 		if (auto* ptr = frame_slot(f, slot)) {
 			return ptr;
 		}
@@ -2376,7 +2376,7 @@ uint64_t vm_backend::type_ctor_base_symbol(uint64_t sym) {
 }
 
 script_value* vm_backend::resolve_local_or_env_cached(frame& f, uint32_t slot, uint64_t symbol_id) {
-	if (slot != k_invalid_u32 && f.locals && !f.top_level) {
+	if (slot != k_invalid_u32 && has_slots(f)) {
 		if (auto* ptr = frame_slot(f, slot)) {
 			return ptr;
 		}
@@ -2605,7 +2605,7 @@ op_status vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_
 	if (box_cell && !value.is_reference()) {
 		value = script_value::make_cell_reference(std::move(value), engine_);
 	}
-	if (slot_index != SIZE_MAX && f.locals && !f.top_level) {
+	if (slot_index != SIZE_MAX && has_slots(f)) {
 		if (box_cell && !parallel_worker_) [[unlikely]] {
 			// a loop's next iteration drops the cell the last one shared: checked for a cycle once the slot lets go
 			std::vector<script_value> replaced;
@@ -3140,7 +3140,7 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			environment_->undefined_text(sym), sym);
 	}
-	if (ins.a != k_invalid_u32 && f.locals && !f.top_level) {
+	if (ins.a != k_invalid_u32 && has_slots(f)) {
 		if (auto* local = frame_slot(f, ins.a)) {
 			// a live typed element's snapshot straight from its buffer (no scratch view refresh then copy); a removed element and every
 			// other reference mode dereference as before
@@ -3330,11 +3330,11 @@ op_status vm_backend::exec_store(frame& f, const vm_instruction& ins) {
 op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, script_value value) {
 	const size_t vi = value.raw_storage_index();
 	// a store through a reference alias (`var& r`, a var& parameter) to a plain var cell: ref_store_through's variable store, its var row
-	if ((ins.c & store_flag_ref_alias) && ins.b != k_invalid_u32 && f.locals && !f.top_level && vi != script_value::TYPEID_REFERENCE && store_ref_alias_var(f, ins, value)) {
+	if ((ins.c & store_flag_ref_alias) && ins.b != k_invalid_u32 && has_slots(f) && vi != script_value::TYPEID_REFERENCE && store_ref_alias_var(f, ins, value)) {
 		return op_status::ok;
 	}
 	if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
-		if (ins.b != k_invalid_u32 && f.locals && !f.top_level) {
+		if (ins.b != k_invalid_u32 && has_slots(f)) {
 			if (script_value* slot = frame_slot(f, ins.b); slot && slot->raw_storage_index() != script_value::TYPEID_REFERENCE) {
 				if (store_scalar_lane(*slot, value, ins)) return op_status::ok;
 				// an int into a float slot: the full path's table row (int -> float), the converted value stored and pushed
@@ -3536,7 +3536,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 		value = std::move(derefed);
 	}
 
-	if (ins.b != k_invalid_u32 && f.locals && !f.top_level) {
+	if (ins.b != k_invalid_u32 && has_slots(f)) {
 		if (auto* frameLocal = frame_slot(f, ins.b)) {
 			// A cell in the slot IS the variable's storage when the name is the value
 			// decl itself (escape-boxed local): write the cell with the same typed
@@ -4026,7 +4026,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 // path's in-place rows for those kinds, with every other shape (an overflow included, for its text) left to it
 op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 	const uint32_t kind = ins.c & compound_kind_mask;
-	if (kind <= compound_star && !(ins.c & compound_flag_global_only) && ins.b != k_invalid_u32 && f.locals && !f.top_level && !has_custom_numeric_ops_) {
+	if (kind <= compound_star && !(ins.c & compound_flag_global_only) && ins.b != k_invalid_u32 && has_slots(f) && !has_custom_numeric_ops_) {
 		if (script_value* slot = frame_slot(f, ins.b)) {
 			const script_value& right = stack_.back();
 			const size_t ti = slot->raw_storage_index(), ri = right.raw_storage_index();
@@ -4941,7 +4941,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 		(void)raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(sym), sym);
 		return nullptr;
 	}
-	if (operand.slot != k_invalid_u32 && f.locals && !f.top_level) {
+	if (operand.slot != k_invalid_u32 && has_slots(f)) {
 		if (auto* local = frame_slot(f, operand.slot)) {
 			return &binding_value(*local, observed);
 		}
@@ -5788,7 +5788,7 @@ op_status vm_backend::exec_binary_fused_decl(frame& f, const vm_instruction& ins
 		}
 	} lane{this, f, decl,
 	       (decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
-	       !decl->ref_escaping && decl->slot_index != SIZE_MAX && f.locals && !f.top_level};
+	       !decl->ref_escaping && decl->slot_index != SIZE_MAX && has_slots(f)};
 	VM_TRY(binary_fused_compute(f, dp.binary_proto, lane));
 	if (lane.landed) {
 		return {};
@@ -5801,7 +5801,7 @@ op_status vm_backend::exec_binary_fused_decl(frame& f, const vm_instruction& ins
 	// preconditions, KEPT IN SYNC with it. A fused-binary result is never a reference,
 	// so the deref leg is structurally absent here.
 	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
-	    !decl->ref_escaping && decl->slot_index != SIZE_MAX && f.locals && !f.top_level) {
+	    !decl->ref_escaping && decl->slot_index != SIZE_MAX && has_slots(f)) {
 		if (variable_decl::identity_payload(computed->raw_storage_index(), decl->type.get())) {
 			if (decl->type) {
 				computed->set_type_info(decl->type);
@@ -5826,7 +5826,7 @@ op_status vm_backend::exec_binary_fused_decl(frame& f, const vm_instruction& ins
 // A raw int or float result into a slot already holding that kind from this engine: store_popped_value's head over the
 // value the kernel would mint (its canonical stamp; a var slot's own tag), written as payload and tag
 bool vm_backend::store_slot_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv) {
-	if (ins.b == k_invalid_u32 || !f.locals || f.top_level) return false;
+	if (ins.b == k_invalid_u32 || !has_slots(f)) return false;
 	script_value* slot = frame_slot(f, ins.b);
 	if (!slot || slot->raw_storage_index() != kind) return false;
 	const bool is_int = kind == script_value::TYPEID_INT;
@@ -5865,7 +5865,7 @@ static bool plain_concat_text(const script_value& v, char (&digits)[24], std::st
 // another (the caller computes and stores); a refused charge raises the concatenation's error.
 JAI_NOINLINE bool vm_backend::self_concat_store(frame& f, const fused_binary_dst_proto& dp, op_status& st) {
 	const fused_binary_proto& p = f.code->fused_binary_protos[dp.binary_proto];
-	if (!f.locals || f.top_level || has_custom_numeric_ops_ || (operator_table_ && operator_table_->any()) ||
+	if (!has_slots(f) || has_custom_numeric_ops_ || (operator_table_ && operator_table_->any()) ||
 	    p.left.const_index != k_invalid_u32 || p.left.is_subscript() || (p.left.load_flags & (load_flag_type_ctor | load_flag_global_only))) return false;
 	script_value* slot = frame_slot(f, dp.slot);
 	bool retag = false;
@@ -5891,7 +5891,7 @@ JAI_NOINLINE bool vm_backend::self_concat_store(frame& f, const fused_binary_dst
 
 op_status vm_backend::exec_binary_fused_store(frame& f, const vm_instruction& ins) {
 	const fused_binary_dst_proto& dp = f.code->fused_binary_dst_protos[ins.a];
-	if (dp.slot != k_invalid_u32 && f.locals && !f.top_level && f.code->fused_binary_protos[dp.binary_proto].op == static_cast<uint8_t>(token_type::plus) &&
+	if (dp.slot != k_invalid_u32 && has_slots(f) && f.code->fused_binary_protos[dp.binary_proto].op == static_cast<uint8_t>(token_type::plus) &&
 	    f.code->fused_binary_protos[dp.binary_proto].left.slot == dp.slot) {
 		const script_value* target = frame_slot(f, dp.slot);
 		const size_t tk = target ? target->raw_storage_index() : script_value::TYPEID_NULL;
@@ -5932,7 +5932,7 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 	if (operand.load_flags & (load_flag_type_ctor | load_flag_global_only)) {
 		return nullptr;
 	}
-	if (operand.slot != k_invalid_u32 && f.locals && !f.top_level) {
+	if (operand.slot != k_invalid_u32 && has_slots(f)) {
 		if (auto* local = frame_slot(f, operand.slot)) {
 			return &local->deref();
 		}
@@ -6115,7 +6115,7 @@ op_status vm_backend::exec_compound_fused(frame& f, const vm_instruction& ins) {
 
 	if (!has_custom_numeric_ops_) {
 		script_value* varPtr = nullptr;
-		if (cp.slot != k_invalid_u32 && f.locals && !f.top_level) {
+		if (cp.slot != k_invalid_u32 && has_slots(f)) {
 			varPtr = frame_slot(f, cp.slot);
 		}
 		if (!varPtr) {
@@ -7770,8 +7770,7 @@ JAI_FORCEINLINE void vm_backend::env_flush_one(frame& f, const chunk::cell_loop&
 	*p = std::move(nv);
 }
 
-void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step) {
-	JAI_CELL_COST(3)
+void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step) {	JAI_CELL_COST(3)
 	JAI_COARSE(coarse_miss_, coarse_misses_)
 	JAI_CELLS_COUNT(6); JAI_CELLS_COUNT(5);
 	JAI_COVERAGE_MISS(f);
@@ -8569,7 +8568,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 	if (loop.iter_proto != k_invalid_u32) {
 		// a range-for block: the general form's iteration state (ITER_INIT pushed it) is an array iteration, the loop variable a frame slot
 		const iter_proto& ipr = f.code->iter_protos[loop.iter_proto];
-		if (iter_states_.empty() || ipr.slot == SIZE_MAX || !f.locals || f.top_level) { JAI_CELLS_COUNT(1); return false; }
+		if (iter_states_.empty() || ipr.slot == SIZE_MAX || !has_slots(f)) { JAI_CELLS_COUNT(1); return false; }
 		const iter_state& st = iter_states_.back();
 		if (st.is_map || st.is_string || st.coroutine || st.env_pushed || !st.container || !st.container->is_array()) { JAI_CELLS_COUNT(1); return false; }
 		if (st.index >= st.container->unchecked_get_array_storage()->size()) { return false; }   // no element left: the general ITER_NEXT ends the loop, no block runs for nothing
@@ -11405,7 +11404,7 @@ bool vm_backend::typed_index_store(frame& f, const fused_index_proto& p, bool no
 template <bool Lane>
 op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins) {
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
-	if (Lane && p.typed_lane && !has_custom_numeric_ops_ && f.locals && !f.top_level) {
+	if (Lane && p.typed_lane && !has_custom_numeric_ops_ && has_slots(f)) {
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_typed_decl_read_[0];
 #endif
@@ -11416,7 +11415,7 @@ op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins)
 			return {};
 		}
 	}
-	if (p.decl_slot != k_invalid_u32 && f.locals && !f.top_level) [[likely]] {
+	if (p.decl_slot != k_invalid_u32 && has_slots(f)) [[likely]] {
 		// Raw-capable lane sink: typed-array payloads arrive as raw int64/double and
 		// land in the slot with exactly ONE value mint; boxed arrivals keep the
 		// expect-check + general-landing split
@@ -12300,7 +12299,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 #ifndef JAISCRIPT_VM_PROFILE
 	const auto* decl = static_cast<const variable_decl*>(f.code->nodes[ins.a].get());
 	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
-	    ins.b != 0 && !decl->ref_escaping && decl->slot_index != SIZE_MAX && f.locals && !f.top_level) {
+	    ins.b != 0 && !decl->ref_escaping && decl->slot_index != SIZE_MAX && has_slots(f)) {
 		script_value& top = stack_.back();
 		const script_value* seen = top.raw_storage_index() == script_value::TYPEID_REFERENCE ? &top.deref() : &top;
 		const size_t vi = seen->raw_storage_index();
@@ -12353,7 +12352,7 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 	// (KEEP BYTE-PARALLEL with interpreter::visit_variable_decl)
 	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
 	    has_init && !decl->ref_escaping &&
-	    decl->slot_index != SIZE_MAX && f.locals && !f.top_level) {
+	    decl->slot_index != SIZE_MAX && has_slots(f)) {
 		script_value& top = stack_.back();
 		size_t vi = top.raw_storage_index();
 		// Subscript-initialized decls (`float d = ch[ci]`) arrive as rhs-lvalue
@@ -12666,7 +12665,7 @@ std::optional<checked_result<script_value>> vm_backend::bind_bare_cpp_property_r
 }
 
 void vm_backend::declare_stored_reference(frame& f, const variable_decl* decl) {
-	script_value* stored = decl->slot_index != SIZE_MAX && f.locals && !f.top_level ? frame_slot(f, decl->slot_index)
+	script_value* stored = decl->slot_index != SIZE_MAX && has_slots(f) ? frame_slot(f, decl->slot_index)
 	                                                                               : environment_->get_value_ptr(decl->name_id);
 	if (stored) { detail::ref_declare(*stored, decl->type->element_type().get(), engine_); }
 }
@@ -12717,7 +12716,7 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 		if (global_only) {
 			// ::name - GLOBAL env only (resolve_local_or_env's door in the interpreter)
 			targetPtr = engine_->get_global_environment()->get_value_ptr(target_sym);
-		} else if (target_ident->slot_index != SIZE_MAX && f.locals && !f.top_level) {
+		} else if (target_ident->slot_index != SIZE_MAX && has_slots(f)) {
 			targetPtr = frame_slot(f, target_ident->slot_index);
 		}
 	}
@@ -16160,7 +16159,7 @@ op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
 // as the LOAD, INDEX and GET_MEMBER sequence reads it
 const script_value* vm_backend::path_index_value(frame& f, const fused_operand& index) {
 	if (index.const_index != k_invalid_u32) { return &f.code->constants[index.const_index]; }
-	if (!f.locals || f.top_level) { return nullptr; }
+	if (!has_slots(f)) { return nullptr; }
 	const script_value* slot = frame_slot(f, index.slot);
 	return slot ? &slot->deref() : nullptr;
 }
@@ -17645,7 +17644,7 @@ op_status vm_backend::exec_concat_pending(frame& f, const vm_instruction& ins) {
 script_value* vm_backend::text_builder_target(frame& f, const vm_instruction& ins, const script_value& snapshot, type_info*& field_tag) {
 	script_value* target = nullptr;
 	field_tag = nullptr;
-	if (ins.b != k_invalid_u32 && f.locals && !f.top_level) {
+	if (ins.b != k_invalid_u32 && has_slots(f)) {
 		target = frame_slot(f, ins.b);
 	} else if (!(ins.c & store_flag_global_only) && proofs_on()) {
 		bool plain = !f.locals || f.top_level;
@@ -19716,7 +19715,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			                                                 by_throw ? &current_exception_->location() : nullptr, std::move(captured_trace_),
 			                                                 by_throw ? current_exception_->what() : nullptr);
 			captured_trace_.clear();
-			if (handler.catch_slot != k_invalid_u32 && f.locals && !f.top_level) {
+			if (handler.catch_slot != k_invalid_u32 && has_slots(f)) {
 				frame_slot_set(f, handler.catch_slot, std::move(caught));
 			} else {
 				JAI_ENV_CENSUS(0); environment_ = acquire_block_env(environment_);
@@ -19864,7 +19863,7 @@ op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 
 	const iter_proto& proto = f.code->iter_protos[ins.a];
 	iter_state state;
-	state.env_pushed = proto.slot == SIZE_MAX || !f.locals || f.top_level;
+	state.env_pushed = proto.slot == SIZE_MAX || !has_slots(f);
 	if (state.env_pushed) {
 		JAI_ENV_CENSUS(0); environment_ = acquire_block_env(environment_);
 	} else if (proto.is_reference || proto.binds_map_entry) {
@@ -19951,7 +19950,7 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 			if (!bound) { return raise_from(bound); }
 			value = std::move(bound.value());
 		}
-		if (proto.slot != SIZE_MAX && f.locals && !f.top_level) {
+		if (proto.slot != SIZE_MAX && has_slots(f)) {
 			frame_slot_set(f, proto.slot, std::move(value));
 		} else {
 			environment_->define(proto.var_symbol, std::move(value));
@@ -20002,7 +20001,7 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 			// Cursor (frame-slot loops only; top-level loops keep the per-iteration mint so
 			// destructor timing stays byte-parallel with the interpreter twin): the slot's
 			// previous holder, when nothing retained it, moves to this index
-			if (proto.slot != SIZE_MAX && f.locals && !f.top_level) {
+			if (proto.slot != SIZE_MAX && has_slots(f)) {
 				if (script_value* cur = frame_slot(f, proto.slot)) {
 					if (auto* cursor = cur->element_cursor_holder();
 					    cursor && cursor->container.get() == array_storage.get() &&
@@ -20035,7 +20034,7 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 		if (!bound) { return raise_from(bound); }
 		element = std::move(bound.value());
 	}
-	if (proto.slot != SIZE_MAX && f.locals && !f.top_level) {
+	if (proto.slot != SIZE_MAX && has_slots(f)) {
 		frame_slot_set(f, proto.slot, std::move(element));
 	} else {
 		environment_->define(proto.var_symbol, std::move(element));
@@ -20049,7 +20048,7 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 // interpreter's visit_member_expr entry_half arm)
 JAI_NOINLINE op_status vm_backend::exec_iter_entry(frame& f, const vm_instruction& ins) {
 	const iter_proto& proto = f.code->iter_protos[ins.a];
-	const bool slotted = proto.slot != SIZE_MAX && f.locals && !f.top_level;
+	const bool slotted = proto.slot != SIZE_MAX && has_slots(f);
 	const script_value* cell = slotted ? frame_slot(f, proto.slot) : environment_->get_value_ptr(proto.var_symbol);
 	if (cell) {
 		if (auto half = detail::map_entry_half(*cell, static_cast<uint8_t>(ins.c), engine_)) {
@@ -20081,7 +20080,7 @@ JAI_NOINLINE op_status vm_backend::iter_next_map_entry(frame& f, const iter_prot
 	if (execution_limit_exhausted()) [[unlikely]] {
 		return raise_from(execution_limit_failure());
 	}
-	const bool slotted = proto.slot != SIZE_MAX && f.locals && !f.top_level;
+	const bool slotted = proto.slot != SIZE_MAX && has_slots(f);
 	script_value* cell = slotted ? frame_slot(f, proto.slot) : environment_->get_own_value_ptr(proto.var_symbol);
 	const auto& entry = *state.map_it;
 	script_value element = make_null();
@@ -20331,7 +20330,7 @@ std::optional<script_value> vm_backend::binding_arm_storage(frame& f, const expr
 		if (ident->global_qualified) {
 			storage = engine_->get_global_environment()->get_value_ptr(symbol_id);
 		} else {
-			if (ident->slot_index != SIZE_MAX && f.locals && !f.top_level) { storage = frame_slot(f, ident->slot_index); }
+			if (ident->slot_index != SIZE_MAX && has_slots(f)) { storage = frame_slot(f, ident->slot_index); }
 			const bool method_frame = f.locals && f.locals->is_method && f.locals->this_object_ptr;
 			if (!storage && method_frame) { storage = frame_this_member_ptr(f, symbol_id); }
 			if (!storage && environment_) { storage = environment_->get_value_ptr(symbol_id); }
@@ -20433,7 +20432,7 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 			if (global_only) {
 				// ::name - GLOBAL env only (resolve_local_or_env's door in the interpreter)
 				targetPtr = engine_->get_global_environment()->get_value_ptr(target_sym);
-			} else if (target_ident->slot_index != SIZE_MAX && f.locals && !f.top_level) {
+			} else if (target_ident->slot_index != SIZE_MAX && has_slots(f)) {
 				targetPtr = frame_slot(f, target_ident->slot_index);
 			}
 			if (!targetPtr && !global_only) {
@@ -22370,7 +22369,7 @@ script_value vm_backend::execute(const std::vector<declaration_ptr>& declaration
 	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 	compiler_.ir_passes(!engine_ || engine_->ir_passes());
 	arm_listing();
-	auto program = compiler_.compile_program(declarations);
+	auto program = compiler_.compile_program(declarations, true);
 	note_compiled(*program);
 	return run_program(std::move(program));
 }
@@ -22381,7 +22380,7 @@ script_value vm_backend::execute(const std::vector<declaration_ptr>& declaration
 		compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 		compiler_.ir_passes(!engine_ || engine_->ir_passes());
 		arm_listing();
-		program = compiler_.compile_program(declarations);
+		program = compiler_.compile_program(declarations, true);
 		note_compiled(*program);
 		compiled_slot = program;
 	}
@@ -22394,7 +22393,7 @@ script_value vm_backend::execute_textual(const std::vector<declaration_ptr>& dec
 		compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 		compiler_.ir_passes(!engine_ || engine_->ir_passes());
 		arm_listing();
-		program = compiler_.compile_program(declarations);
+		program = compiler_.compile_program(declarations, true);
 		note_compiled(*program);
 		compiled_slot = program;
 	}
@@ -22465,6 +22464,17 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textua
 	f.stack_base = stack_.size();
 	f.top_level = true;
 	f.unit = symbolizer_->current_unit();   // the run's stamp (execute_parsed installed it)
+	cell_state program_cells;
+	if (program->local_count > 0) {
+		// the block-scoped declarations' slots (vm_compiler::compile_program): a window as a call frame has, cells for its loops
+		f.window_backed = true;
+		f.window_base = stack_.size();
+		stack_.fill_null_to(f.window_base + program->local_count, engine_);
+		f.window_live = static_cast<uint32_t>(program->local_count);
+		f.stack_base = f.window_base;
+		if (!program->cell_loops.empty()) { program_cells.reset_call(program->max_cells); }
+		f.cells = &program_cells;
+	}
 
 	frame_guard guard(this, &f);
 	checked_result<void> result = entry_result;
@@ -23694,7 +23704,7 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 		if constexpr (Entry) { return entry_return_finish(f, std::move(v), mode); }
 		else { return return_with_result(fp, std::move(v), mode); }
 	};
-	if (ins.a != k_invalid_u32 && !(ins.c & (load_flag_global_only | load_flag_type_ctor)) && f.locals && !f.top_level) {
+	if (ins.a != k_invalid_u32 && !(ins.c & (load_flag_global_only | load_flag_type_ctor)) && has_slots(f)) {
 		if (script_value* local = frame_slot(f, ins.a)) {   // fused_ident_value's slot rung
 			const script_value& resolved = local->deref();
 			if (detail::return_value_plain(resolved)) { return finish(script_value(resolved)); }

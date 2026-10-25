@@ -7,6 +7,7 @@
 #include "../../include/jaiscript/detail/lexer.hpp"  // a spliced include is lexed here
 #include "../../include/jaiscript/detail/map_entry_binding.hpp"
 #include "../../include/jaiscript/detail/expr_children.hpp"
+#include "../../include/jaiscript/detail/program_slots.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iterator>
@@ -932,6 +933,7 @@ namespace {
 bool detail::run_ast_marking_passes(const std::vector<declaration_ptr>& declarations,
                                     string_symbolizer* symbolizer) {
 	bool names_execute_elapsed = false;
+	detail::program_slot_pass().run(declarations);   // ahead of the escape marking, which reads the slots
 	{
 		ref_escape_marker marker;
 		marker.symbolizer = symbolizer;

@@ -34,6 +34,7 @@ Unchanged: the games (`JaiScript/examples/*`), `JaiScript/bench/kernels/jai/` an
 | `jaidoom/` | the headless Lua JaiDoom port, its transpiler and conformance checker |
 | `gatorquest/` | the Lua, LuaJIT and Luau twins of the Gator Quest smoke session |
 | `kernels/` | the kernel suite's Lua side and `run.py`, the cross-language runner |
+| `apps/` | the benchmark apps (Richards, DeltaBlue, a bytecode VM, a spatial-hash simulation) in JaiScript, Lua, Squirrel and Python, the hash-checked runner and the `apps_lua`/`apps_sq` interpreters (`APPS_PEERS`); see `apps/README.md` |
 | `third_party/` | where the Lua, sol2 and Squirrel checkouts go |
 
 ## Dependencies

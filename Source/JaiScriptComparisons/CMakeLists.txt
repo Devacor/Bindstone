@@ -1,5 +1,5 @@
 # JaiScriptComparisons - JaiScript against Lua, LuaJIT, Squirrel and ChaiScript: the GLOOM, demoreel and JaiDoom
-# ports, the Gator Quest Lua twin, the interpreter benchmark suites and the kernel suite's Lua side. JaiScript builds
+# ports, the Gator Quest Lua twin, the interpreter benchmark suites, the kernel suite's Lua side and the benchmark apps. JaiScript builds
 # as a subproject; nothing in it refers back here.
 cmake_minimum_required(VERSION 3.20)
 
@@ -42,3 +42,4 @@ option(JAIDOOM_PORT_LUA "Build the headless Lua JaiDoom comparison" OFF)
 if(JAIDOOM_PORT_LUA)
     add_subdirectory(jaidoom/ports jaidoom_ports)
 endif()
+add_subdirectory(apps)

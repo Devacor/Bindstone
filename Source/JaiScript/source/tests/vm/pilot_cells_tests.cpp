@@ -5068,6 +5068,18 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined tail_of") != std::string::npos, "tail_of grafts with its string reads: " + l);
 			check_true(l.find("-- inlined logs") != std::string::npos, "logs grafts, its push a call the graft keeps: " + l);
 		});
+		test("a_push_onto_an_array_of_arrays_is_a_boundary_of_a_closed_loop", [this]() {
+			// the bytecode app's NEWARR: `heap.push(zeros(n))` converts each value on the general form, so it is a boundary statement and the
+			// dispatch loop around it closes (a push site the entry refused kept the whole loop on the general form)
+			const std::string src =
+				"array<int> zeros(int n) { array<int> r = []; for (int i = 0; i < n; ++i) { r.push(0); } return r; }\n"
+				"int run() { array<array<int>> heap = []; int total = 0;\n"
+				"  for (int i = 0; i < 40; ++i) { total = total + i * 3; if (i % 8 == 0) { heap.push(zeros(i % 5)); } }\n"
+				"  return total * 100 + heap.size() * 10 + heap[4].size(); }\n";
+			both(src + "to_string(run());", "234052", "a push of arrays inside a closed loop");
+			const std::string l = listing_run(src + "run();");
+			check_true(l.find("-- cell loop") != std::string::npos && l.find("boundaries") != std::string::npos, "the loop closes with the push a boundary: " + l);
+		});
 		test("a_container_taken_ahead_of_a_graft_is_a_guard_the_loop_closes_over", [this]() {
 			// Gator Quest's find_target: mob_at's graft takes the global OCC's value ahead of occ_index's graft and reads its element; the value
 			// lands by the container guard's always form and the read keeps OCC as its container (a block's site resolves it once at entry),

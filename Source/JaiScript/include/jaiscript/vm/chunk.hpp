@@ -109,6 +109,7 @@ namespace jai::vm {
         bool value_is_subscript = false;
         uint32_t value_index_flags = 0;
         bool value_temp = false;          // the value is a compiler temp only this push reads: it dies once the push took its copy
+        bool converting_receiver = false; // the receiver is declared with an element type a push converts to (not a scalar, not var): a block runs the push as a boundary
     };
 
     // Per-call-site argument metadata: symbol id per argument (UINT64_MAX = not an identifier)

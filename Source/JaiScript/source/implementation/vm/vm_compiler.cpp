@@ -4621,6 +4621,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const uint32_t pidx = st.op == opcode::op_push_fused ? st.a : c.typed_sites[ip].orig.a;
 				const push_proto& pp = c.push_protos[pidx];
 				if (!c.builtin_indexed || pp.site >= c.call_sites.size() || c.call_sites[pp.site].bi_array == builtin_method_registries::k_no_builtin) { refuse(chunk::cell_refusal_translation, ip); break; }
+				if (pp.converting_receiver) { refuse(chunk::cell_refusal_representation, ip); break; }   // the general form converts each value: a boundary, never a site the entry refuses
 				const bool env_receiver = env_scalar(pp.receiver);   // an environment array: resolved at entry through its lookup, as a load site's container
 				if (!env_receiver && (!pp.receiver.direct || pp.receiver.slot == k_invalid_u32 || pp.receiver.slot >= k_typed_slot_mask || pp.receiver.const_index != k_invalid_u32 || pp.receiver.member_node != k_invalid_u32 || pp.receiver.is_subscript())) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (pp.value.const_index != k_invalid_u32) {
@@ -7764,6 +7765,14 @@ bool vm_compiler::try_emit_fused_push(const std::shared_ptr<call_expr>& expr) {
 	proto.value = value_landed ? landed : make_fused_operand(arg);
 	proto.value_is_subscript = value_is_subscript;
 	proto.value_temp = value_landed;
+	if (const auto declared = callable_.slot_types.find(site.receiver_slot); site.receiver_slot != k_invalid_u32 && declared != callable_.slot_types.end() && declared->second) {
+		const type_info* element = declared->second->element_type();
+		if (element) {
+			const script_value_type k = element->base_type;
+			proto.converting_receiver = k != script_value_type::jai_any_type && k != script_value_type::jai_int_type && k != script_value_type::jai_float_type &&
+			                            k != script_value_type::jai_bool_type && k != script_value_type::jai_string_type;
+		}
+	}
 	if (value_is_subscript) {
 		proto.value_index_flags = is_lvalue_shaped(static_cast<const binary_expr*>(arg.get())->left.get()) ? index_flag_lvalue_shape : 0;
 	}

@@ -32,6 +32,33 @@ public:
             check_eq((int64_t)(2 * 11029), engine->execute("sum(shapes, 2)").as_int());
         });
 
+        test("bare_sibling_calls_follow_the_receiver_class_through_inheritance", [this]() {
+            // a base method's bare calls of a virtual and of an inherited sibling, run on receivers of several classes
+            auto engine = make_engine();
+            engine->execute(R"(
+                class Base {
+                    int pick() { return 1; }
+                    int helper(int k) { return k * 1000; }
+                    int run(int k) { return pick() + helper(k); }
+                }
+                class A : Base { int pick() override { return 2; } }
+                class B : Base { int pick() override { return 3; } }
+                class C : A { int pick() override { return 4; } }
+                class E : Base {}
+                int sum(array<shared_ptr<Base>>& xs, int rounds) {
+                    int total = 0;
+                    for (int r = 0; r < rounds; ++r) {
+                        for (int i = 0; i < xs.size(); ++i) { total += xs[i].run(1); }
+                    }
+                    return total;
+                }
+                array<shared_ptr<Base>> xs = [new A(), new B(), new C(), new E(), new Base(), new B()];
+            )");
+            check_eq((int64_t)(3 * (6000 + 2 + 3 + 4 + 1 + 1 + 3)), engine->execute("sum(xs, 3)").as_int());
+            engine->execute("class Base { int pick() { return 1; } int helper(int k) { return k * 7; } int run(int k) { return pick() + helper(k); } }");
+            check_eq((int64_t)(2 * (42 + 2 + 3 + 4 + 1 + 1 + 3)), engine->execute("sum(xs, 2)").as_int());
+        });
+
         test("override_promotes_to_virtual", [this]() {
             auto engine = make_engine();
             

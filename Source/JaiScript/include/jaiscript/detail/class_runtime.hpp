@@ -2131,6 +2131,31 @@ inline void keep_handle_slot_type(script_value& value, const type_info_ptr& slot
     }
 }
 
+// The handle rows' common case without the table: a statically typed shared_ptr handle bound into a shared_ptr<T> slot whose
+// pointee it already names takes the slot's static type in place, exactly as handle admission plus keep_handle_slot_type
+// leave it; false = the full table decides
+inline bool shared_handle_binds_in_place(script_value& value, const type_info_ptr& slot_type) {
+    if (value.raw_storage_index() != script_value::TYPEID_OBJECT || !slot_type || slot_type->base_type != script_value_type::jai_shared_ptr_type) {
+        return false;
+    }
+    const type_info* tag = value.get_type_info().get();
+    if (tag == slot_type.get()) {
+        return true;
+    }
+    if (!tag || tag->base_type != script_value_type::jai_shared_ptr_type || tag->dynamic_pointee || slot_type->dynamic_pointee) {
+        return false;
+    }
+    const type_info* expected = slot_type->element_type().get();
+    const type_info* pointee = tag->element_type().get();
+    const bool admitted = !expected || expected->type_name.empty() || expected->base_type == script_value_type::jai_any_type || pointee == expected ||
+        (pointee && !pointee->type_name.empty() && pointee->base_type != script_value_type::jai_any_type && pointee->type_name == expected->type_name);
+    if (!admitted) {
+        return false;
+    }
+    value.set_type_info(slot_type);
+    return true;
+}
+
 // Field-store rows for shared_ptr<T> / weak_ptr<T> declared fields (the handle_target
 // verdict): a same-kind tag stores as-is (its own tag) when a shared handle holds T or a
 // subclass, a live object or handle of T or a subclass stores into a shared_ptr<T> field,

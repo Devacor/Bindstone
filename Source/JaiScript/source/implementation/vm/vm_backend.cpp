@@ -3361,6 +3361,18 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 				}
 			}
 		}
+	} else if (vi == script_value::TYPEID_OBJECT && ins.b != k_invalid_u32 && f.locals && !f.top_level) {
+		// a shared handle into a typed shared_ptr<T> local naming its pointee: the full path's admission and keep_handle_slot_type, in place
+		script_value* slot = frame_slot(f, ins.b);
+		const type_info* vt = value.type_info_raw();
+		if (slot && slot->raw_storage_index() != script_value::TYPEID_REFERENCE && vt && vt->base_type == script_value_type::jai_shared_ptr_type) {
+			const type_info* st = slot->type_info_raw();
+			if (st && st->base_type == script_value_type::jai_shared_ptr_type && !st->dynamic_pointee && detail::shared_handle_binds_in_place(value, slot->get_type_info())) {
+				if (ins.c & store_flag_no_result) { *slot = std::move(value); }
+				else { *slot = value; stack_.push_back(std::move(value)); }
+				return op_status::ok;
+			}
+		}
 	}
 	const op_status st = store_popped_value_full(f, ins, std::move(value));
 	if (st == op_status::ok && (ins.c & store_flag_no_result)) { stack_.pop_back(); }
@@ -13628,7 +13640,7 @@ op_status vm_backend::call_parked_script(frame& f, const vm_instruction& ins, co
 			if (&f == &rec.f && static_cast<chunk*>(fn.backend_body_cache.get()) == f.code &&
 			    rec.env_untouched &&
 			    (conv == return_conv::none ||
-			     (conv >= return_conv::prim_int && conv <= return_conv::prim_string)) &&
+			     (conv >= return_conv::prim_int && conv <= return_conv::prim_weak)) &&
 			    try_records_.size() == rec.try_base &&
 			    pending_callees_.size() == rec.pending_base) {
 				if (execution_limit_exhausted()) [[unlikely]] {
@@ -23465,6 +23477,12 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 			break;
 		case return_conv::prim_string:
 			deref_only = result.raw_storage_index() == script_value::TYPEID_STRING;
+			break;
+		case return_conv::prim_shared:
+			deref_only = result.raw_storage_index() == script_value::TYPEID_SHARED_PTR || detail::shared_handle_binds_in_place(result, rec.return_type);
+			break;
+		case return_conv::prim_weak:
+			deref_only = result.raw_storage_index() == script_value::TYPEID_WEAK_PTR;
 			break;
 		default:   // ref / check: full route
 			break;

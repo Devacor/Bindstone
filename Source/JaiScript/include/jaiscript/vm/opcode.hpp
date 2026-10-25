@@ -82,7 +82,6 @@ namespace jai::vm {
         op_try_pop,         // normal try-block completion
         op_catch_end,       // normal catch-block completion
         op_case_eq,         // pops case value + switch value copy, pushes the language's v == cv (an error raises)
-        op_switch_table,    // b=switch_tables index: an int subject jumps through the table to its case's body; anything else runs the case tests that follow. In a cell copy a=the subject's cell, c=the first of the loop's switch_targets (per case, then no match)
         op_iter_init,       // a=iter proto index; pops container, pushes iteration state + loop-var scope
         op_iter_next,       // a=iter proto index; assigns loop var, pushes bool(has element); budget check
         op_iter_pop,        // pops iteration state + loop-var scope
@@ -330,6 +329,7 @@ namespace jai::vm {
         op_concat_store,    // a = symbols index, b = frame slot (k_invalid_u32 = env), c = store_flag_*: [snapshot, tail] -> the target takes the tail in place when it still holds the snapshot's node, else op_store's tail over snapshot + tail; [null, value] -> op_store's tail
         op_sleep,           // op_call_from_scratch's word for `sleep(x)`: the pending callee is the core sleep, so engine::sleep_builtin runs in place; any other callee is the call
         op_get_member_path, // a=nodes index (the chain's outer member_expr), b=member_path_protos index: `a.b.c`, `grid[y][x].cost` read through, each inner link borrowed where it lives, the final value pushed as op_get_member pushes it
+        op_switch_table,    // b=switch_tables index: an int subject jumps through the table to its case's body; anything else runs the case tests that follow. In a cell copy a=the subject's cell, c=the first of the loop's switch_targets (per case, then no match)
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)

@@ -5210,9 +5210,10 @@ private:
             }
             case node_type::switch_stmt: {
                 auto* sw = static_cast<switch_stmt*>(s);
-                infer(sw->condition.get());
+                const ctype condition = infer(sw->condition.get());
                 for (auto& cs : sw->cases) {
-                    infer(cs->value.get());
+                    const ctype value = infer(cs->value.get());
+                    stamp(cs->static_operand_class, operand_class_of(condition, value), operand_class_unknown);
                     scopes_.emplace_back();
                     for (auto& st : cs->body) { walk_stmt(st.get()); }
                     scopes_.pop_back();

@@ -1763,7 +1763,7 @@ void vm_compiler::emit_region_exits(size_t target_region) {
 		case region_kind::switch_ctx:
 			// Discard the switch's [value, ft] stack pair only for jumps that stay in
 			// the frame; return relies on frame teardown truncating the value stack
-			if (target_region != SIZE_MAX) {
+			if (target_region != SIZE_MAX && loops_[idx].switch_stack_pair) {
 				emit(opcode::op_pop);
 				emit(opcode::op_pop);
 			}
@@ -1793,7 +1793,7 @@ void vm_compiler::compile_break() {
 	if (scope_depth_ > region.scope_depth) {
 		emit(opcode::op_scope_pop_n, static_cast<uint32_t>(scope_depth_ - region.scope_depth));
 	}
-	if (region.kind == region_kind::switch_ctx) {
+	if (region.kind == region_kind::switch_ctx && region.switch_stack_pair) {
 		emit(opcode::op_pop);
 		emit(opcode::op_pop);
 	}
@@ -1928,11 +1928,182 @@ void vm_compiler::compile_try(try_stmt* stmt) {
 	patch_jump(jump_end, chunk_->code.size());
 }
 
+namespace {
+// a fallthrough the statement holds for the switch around it (an inner switch owns its own, a parallel body is a worker's function)
+bool holds_fallthrough(const statement* s) {
+	if (!s) return false;
+	switch (s->get_type()) {
+	case node_type::fallthrough_stmt: return true;
+	case node_type::block_stmt:
+		for (const auto& d : static_cast<const block_stmt*>(s)->declarations) { if (holds_fallthrough(d.get())) return true; }
+		return false;
+	case node_type::statement_decl: return holds_fallthrough(static_cast<const statement_decl*>(s)->statement.get());
+	case node_type::if_stmt: {
+		auto* branch = static_cast<const if_stmt*>(s);
+		return holds_fallthrough(branch->then_statement.get()) || holds_fallthrough(branch->else_statement.get());
+	}
+	case node_type::while_stmt: return holds_fallthrough(static_cast<const while_stmt*>(s)->body.get());
+	case node_type::for_stmt: {
+		auto* loop = static_cast<const for_stmt*>(s);
+		return holds_fallthrough(loop->initializer.get()) || holds_fallthrough(loop->body.get());
+	}
+	case node_type::range_for_stmt: return holds_fallthrough(static_cast<const range_for_stmt*>(s)->body.get());
+	case node_type::try_stmt: {
+		auto* t = static_cast<const try_stmt*>(s);
+		return holds_fallthrough(t->try_block.get()) || holds_fallthrough(t->catch_block.get());
+	}
+	case node_type::namespace_decl: return true;
+	default: return false;
+	}
+}
+
+// a case value whose evaluation runs no code and writes nothing: the tests may read the switch's own name in place of a copy
+bool inert_case_value(const expression* e) {
+	if (!e) return false;
+	switch (e->get_type()) {
+	case node_type::literal_expr: return true;
+	case node_type::identifier_expr: return true;
+	case node_type::unary_expr: {
+		auto* u = static_cast<const unary_expr*>(e);
+		return (u->op.type == token_type::minus || u->op.type == token_type::plus) && u->operand && u->operand->get_type() == node_type::literal_expr;
+	}
+	default: return false;
+	}
+}
+}
+
+// The branch form: the tests run first as `subject == value` conditions in case order (the subject a name the case values cannot write,
+// else the condition's value in a compiler temp), each jumping to its body; the bodies follow in order. A fallthrough only as a body's
+// last statement makes the body run into the next one, through that case's value when its evaluation can be observed. Anything else
+// (a fallthrough a later statement follows, a temp the frame cannot hold, the reference mode) keeps the stack form.
+bool vm_compiler::compile_switch_branches(switch_stmt* stmt) {
+	if (reference_) return false;   // the reference mode keeps the stack form: the VM's oracle for this lowering
+	auto tail_fallthrough_only = [](const std::vector<statement_ptr>& body) {
+		for (size_t k = 0; k < body.size(); ++k) {
+			const bool tail = k + 1 == body.size() && body[k]->get_type() == node_type::fallthrough_stmt;
+			if (!tail && holds_fallthrough(body[k].get())) return false;
+		}
+		return true;
+	};
+	for (const auto& case_node : stmt->cases) {
+		if (!tail_fallthrough_only(case_node->body)) return false;
+	}
+	if (stmt->default_case && !tail_fallthrough_only(stmt->default_case->body)) return false;
+	bool inert = true;
+	for (const auto& case_node : stmt->cases) { inert = inert && inert_case_value(case_node->value.get()); }
+	const bool reread = inert && stmt->condition->get_type() == node_type::identifier_expr;
+	if (!reread && (!callable_.active || callable_.coroutine_body || !temps_active_ || !chunk_->is_function_body)) return false;
+
+	current_stmt_ = stmt;
+	const size_t temp_mark = temp_next_;
+	std::shared_ptr<identifier_expr> subject_temp;
+	if (!reread) {
+		fused_operand landed;
+		if (!(value_temp_operand(stmt->condition.get()) && compile_value_into_temp(stmt->condition, 0xFF, landed))) {
+			compile_expression(stmt->condition);
+			landed = fused_operand{};
+			landed.slot = static_cast<uint32_t>(temp_next_++);
+			if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+			emit(opcode::op_call_temp, landed.slot);
+		}
+		if (inline_symbol_ == 0) { inline_symbol_ = symbolizer_->intern("\x01inl"); }
+		callable_.declared.insert(inline_symbol_);
+		subject_temp = std::make_shared<identifier_expr>(stmt->condition->location, std::string_view("\x01inl"), inline_symbol_);
+		subject_temp->slot_index = landed.slot;
+		subject_temp->names_value_decl = true;
+		callable_.slot_types.erase(landed.slot);
+		chunk_->nodes.push_back(subject_temp);
+	}
+
+	std::vector<std::vector<size_t>> body_jumps(stmt->cases.size());
+	token equal_token;
+	equal_token.type = token_type::equal_equal;
+	equal_token.lexeme = "==";
+	for (size_t i = 0; i < stmt->cases.size(); ++i) {
+		const auto& case_node = stmt->cases[i];
+		current_stmt_ = case_node.get();
+		expression_ptr subject;
+		if (subject_temp) {
+			subject = subject_temp;
+		} else {
+			auto reread_name = std::make_shared<identifier_expr>(*static_cast<const identifier_expr*>(stmt->condition.get()));
+			chunk_->nodes.push_back(reread_name);
+			subject = reread_name;
+		}
+		equal_token.location = case_node->location;
+		auto test = std::make_shared<binary_expr>(case_node->location, subject, equal_token, case_node->value);
+		test->static_operand_class = case_node->static_operand_class;
+		chunk_->nodes.push_back(test);
+		compile_branch_condition_true(test, body_jumps[i]);
+	}
+	current_stmt_ = stmt;
+	const size_t no_match = emit(opcode::op_jump, k_invalid_u32);
+	temp_next_ = temp_mark;
+
+	push_region(region_kind::loop);
+	loops_.back().kind = region_kind::switch_ctx;
+	loops_.back().scope_depth = scope_depth_;
+	const size_t region_index = loops_.size() - 1;
+	std::vector<size_t> end_jumps;
+	bool falls_in = false;
+	for (size_t i = 0; i < stmt->cases.size(); ++i) {
+		const auto& case_node = stmt->cases[i];
+		current_stmt_ = case_node.get();
+		if (falls_in && case_node->value->get_type() != node_type::literal_expr) {
+			compile_expression(case_node->value);
+			emit(opcode::op_pop);
+		}
+		for (size_t at : body_jumps[i]) { patch_jump(at, chunk_->code.size()); }
+		compile_case_body(case_node->body);
+		current_stmt_ = case_node.get();
+		falls_in = !case_node->body.empty() && case_node->body.back()->get_type() == node_type::fallthrough_stmt;
+		if (!falls_in) { end_jumps.push_back(emit(opcode::op_jump, k_invalid_u32)); }
+	}
+	current_stmt_ = stmt;
+	if (stmt->default_case) {
+		patch_jump(no_match, chunk_->code.size());
+		compile_case_body(stmt->default_case->body);
+		current_stmt_ = stmt;
+	} else {
+		end_jumps.push_back(no_match);
+	}
+	const size_t end = chunk_->code.size();
+	for (size_t at : end_jumps) { patch_jump(at, end); }
+	for (size_t at : loops_[region_index].break_patches) { patch_jump(at, end); }
+	loops_.pop_back();
+	return true;
+}
+
+// a case or default body: its own scope when it declares into one, its declarations killed at its end; a trailing fallthrough emits nothing
+void vm_compiler::compile_case_body(const std::vector<statement_ptr>& body) {
+	bool case_scope = false;
+	for (const auto& body_stmt : body) {
+		if (declares_in_current_scope(body_stmt.get(), callable_.active)) { case_scope = true; break; }
+	}
+	if (case_scope) {
+		emit(opcode::op_scope_push);
+		++scope_depth_;
+	}
+	kill_scopes_.emplace_back();
+	for (size_t k = 0; k < body.size(); ++k) {
+		if (k + 1 == body.size() && body[k]->get_type() == node_type::fallthrough_stmt) { break; }
+		compile_statement(body[k]);
+		note_kill_decl(body[k].get());
+	}
+	close_kill_scope();
+	if (case_scope) {
+		--scope_depth_;
+		emit(opcode::op_scope_pop);
+	}
+}
+
 void vm_compiler::compile_switch(switch_stmt* stmt) {
+	if (compile_switch_branches(stmt)) { return; }
 	compile_expression(stmt->condition);
 
 	push_region(region_kind::loop);
 	loops_.back().kind = region_kind::switch_ctx;
+	loops_.back().switch_stack_pair = true;
 	loops_.back().scope_depth = scope_depth_;
 	const size_t region_index = loops_.size() - 1;
 

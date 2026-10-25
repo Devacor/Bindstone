@@ -53,7 +53,7 @@ namespace jai::vm {
         enum class region_kind : uint8_t {
             loop,        // while / C-style for: break + continue target
             range_for,   // break + continue target; iteration state popped at the exit label
-            switch_ctx,  // consumes break; continue passes through (pops the [value, ft] stack pair)
+            switch_ctx,  // consumes break; continue passes through (the stack form pops its [value, ft] pair)
             try_block,   // pass-through: op_try_pop before jumps that exit it
             catch_block, // pass-through: op_catch_end before jumps that exit it
             graft,       // an inlined body: its returns jump to the graft's join (vm_inline.cpp)
@@ -68,6 +68,7 @@ namespace jai::vm {
             size_t scope_depth = 0;
             size_t kill_depth = 0;                     // kill scopes open outside the region: a jump out of it destroys the ones above
             const ast_node* stmt = nullptr;            // a loop's statement: its block verdict decides how a graft inside it lands (open_loops_)
+            bool switch_stack_pair = false;            // a switch on the stack form: its [value, ft] pair sits on the value stack
         };
 
         struct callable_context {
@@ -344,6 +345,8 @@ namespace jai::vm {
         bool compile_entry_half(const expression_ptr& init);
         void compile_try(try_stmt* stmt);
         void compile_switch(switch_stmt* stmt);
+        bool compile_switch_branches(switch_stmt* stmt);
+        void compile_case_body(const std::vector<statement_ptr>& body);
         void compile_break();
         void compile_continue();
         // Emits op_try_pop/op_catch_end/switch stack pops for every region between the

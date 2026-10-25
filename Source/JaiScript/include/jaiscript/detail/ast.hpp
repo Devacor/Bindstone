@@ -805,6 +805,8 @@ namespace jai {
         expression_ptr value;  // The case value to match
         std::vector<statement_ptr> body;
         bool has_fallthrough = false;  // Set if last statement is fallthrough
+        // the checker's operand class of `condition == value` (a proof like binary_expr's, never serialized): the VM's case test
+        mutable uint8_t static_operand_class = operand_class_unknown;
 
         case_stmt(const source_location& loc, expression_ptr val)
             : statement(loc, node_type::case_stmt), value(val) {}    };

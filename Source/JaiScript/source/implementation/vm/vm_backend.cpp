@@ -8653,7 +8653,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 #ifdef JAISCRIPT_VM_PROFILE
 			++profile_cells_refused_slot_[k < 64 ? k : 63];
 			++profile_cells_entry_refusals_[std::string(f.code->function_name) + " slot " + std::to_string(cl.slot) + " want=" + std::to_string(want) + " have=" + (s ? std::to_string(s->raw_storage_index()) : std::string("none"))
-			                                 + (st == canonical ? " stamp=canonical" : st && st->base_type == script_value_type::jai_any_type ? " stamp=any" : st ? " stamp=other:" + std::string(st->canonical_name()) : " stamp=none") + (s && s->get_engine() != engine_ ? " foreign-engine" : "")];
+			                                 + (st == canonical ? " stamp=canonical" : st && st->base_type == script_value_type::jai_any_type ? " stamp=any" : st ? " stamp=other:" + std::string(st->canonical_name()) : " stamp=none") + (s && s->payload_engine() && s->payload_engine() != engine_ ? " foreign-engine" : "")];
 #endif
 			return false;
 		}

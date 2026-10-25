@@ -14944,33 +14944,35 @@ JAI_NOINLINE void vm_backend::raise_no_member(std::string_view kind, std::string
 }
 
 checked_result<script_value> vm_backend::eval_expression(const expression_ptr& expr, const std::shared_ptr<environment>& env) {
-	std::shared_ptr<chunk> compiled;
+	frame f;   // the frame's pin is the one count the evaluation takes on its chunk
 	const node_unit_key key{ expr.get(), current_unit().id };
 	auto it = expr_chunk_cache_.find(key);
 	if (it != expr_chunk_cache_.end()) {
-		compiled = it->second.compiled;
+		f.pin = it->second.compiled;
 	} else if (auto precompiled = parallel_worker_ ? parallel_expr_chunks_.find(expr.get()) : parallel_expr_chunks_.end();
 	           precompiled != parallel_expr_chunks_.end()) {
-		compiled = precompiled->second.compiled;
+		f.pin = precompiled->second.compiled;
 	} else {
 		std::unique_lock<std::mutex> region_compile_guard;   // in-region compiles serialize engine-wide (chunk_for_body)
 		if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
 			region_compile_guard = std::unique_lock<std::mutex>(engine_->parallel_compile_mutex());
 		}
 		arm_listing();
-		compiled = compiler_.compile_standalone_expression(expr);
-		note_compiled(*compiled);
-		expr_chunk_cache_.emplace(key, expr_chunk_cache_entry{compiled, expr});
+		f.pin = compiler_.compile_standalone_expression(expr);
+		note_compiled(*f.pin);
+		expr_chunk_cache_.emplace(key, expr_chunk_cache_entry{f.pin, expr});
 	}
 
-	auto saved_env = environment_;
+	// the caller's environment moves aside and comes back by move: no count pair for the swap
+	std::shared_ptr<environment> saved_env;
 	if (env) {
+		saved_env = std::move(environment_);
 		environment_ = env;
+	} else {
+		saved_env = environment_;
 	}
 
-	frame f;
-	f.code = compiled.get();
-	f.pin = compiled;
+	f.code = f.pin.get();
 	f.ip = 0;
 	f.locals = nullptr;
 	f.entry_env = environment_;
@@ -14984,7 +14986,7 @@ checked_result<script_value> vm_backend::eval_expression(const expression_ptr& e
 		size_t stack_base;
 		~expression_scope_restore() {
 			if (self->stack_.size() > stack_base) { self->stack_.truncate(stack_base); }
-			self->environment_ = previous_env;
+			self->environment_ = std::move(previous_env);
 		}
 	} scope_restore{this, saved_env, f.stack_base};
 
@@ -19148,7 +19150,7 @@ checked_result<void> vm_backend::evaluate_field_initializers(std::shared_ptr<cla
 			const size_t li = lit->value.raw_storage_index();
 			if (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT ||
 			    li == script_value::TYPEID_BOOL || li == script_value::TYPEID_CHAR ||
-			    li == script_value::TYPEID_NULL) {
+			    li == script_value::TYPEID_NULL || li == script_value::TYPEID_STRING) {   // a string shares the constant's node as op_const's push does
 				instance->set_field(field_id, materialize_constant(lit->value));
 				return {};
 			}

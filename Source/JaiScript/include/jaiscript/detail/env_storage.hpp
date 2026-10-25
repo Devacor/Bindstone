@@ -9,6 +9,7 @@
 #include <memory>
 #include <new>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace jai::detail {
@@ -95,6 +96,54 @@ namespace jai::detail {
         }
     };
 
+    // The ids an environment defines: the first N inline, a hash set past them
+    template <size_t N = 4>
+    class env_id_set {
+        uint64_t inline_[N];
+        uint32_t count_ = 0;
+        std::unique_ptr<std::unordered_set<uint64_t>> big_;
+
+    public:
+        env_id_set() = default;
+        env_id_set(const env_id_set&) = delete;
+        env_id_set& operator=(const env_id_set&) = delete;
+
+        bool contains(uint64_t key) const noexcept {
+            if (big_) { return big_->count(key) != 0; }
+            for (uint32_t i = 0; i < count_; ++i) {
+                if (inline_[i] == key) { return true; }
+            }
+            return false;
+        }
+        void insert(uint64_t key) {
+            if (contains(key)) { return; }
+            if (!big_) {
+                if (count_ < N) {
+                    inline_[count_++] = key;
+                    return;
+                }
+                big_ = std::make_unique<std::unordered_set<uint64_t>>();
+                big_->reserve(N * 4);
+                for (uint32_t i = 0; i < count_; ++i) { big_->insert(inline_[i]); }
+                count_ = 0;
+            }
+            big_->insert(key);
+        }
+        void clear() noexcept {
+            count_ = 0;
+            if (big_) { big_->clear(); }
+        }
+        bool empty() const noexcept { return big_ ? big_->empty() : count_ == 0; }
+        size_t size() const noexcept { return big_ ? big_->size() : count_; }
+        template <class F> void for_each(F&& f) const {
+            if (big_) {
+                for (uint64_t key : *big_) { f(key, true); }
+                return;
+            }
+            for (uint32_t i = 0; i < count_; ++i) { f(inline_[i], true); }
+        }
+    };
+
     // An environment's own values in declaration order, each at a fixed address for the env's life (lookups and the vm's
     // caches hold pointers into it): the first few inside the environment, the rest in fixed chunks, none moved on growth
     class env_value_store {
@@ -102,18 +151,19 @@ namespace jai::detail {
         static constexpr size_t k_chunk = 16;
         struct chunk { alignas(script_value) unsigned char bytes[k_chunk * sizeof(script_value)]; };
         alignas(script_value) unsigned char inline_[k_inline * sizeof(script_value)];
-        std::vector<std::unique_ptr<chunk>> chunks_;
+        std::unique_ptr<std::vector<std::unique_ptr<chunk>>> chunks_;   // made when the inline cells fill
         size_t size_ = 0;
 
         script_value* cell(size_t i) noexcept {
             if (i < k_inline) { return reinterpret_cast<script_value*>(inline_) + i; }
             const size_t rest = i - k_inline;
-            return reinterpret_cast<script_value*>(chunks_[rest / k_chunk]->bytes) + rest % k_chunk;
+            return reinterpret_cast<script_value*>((*chunks_)[rest / k_chunk]->bytes) + rest % k_chunk;
         }
         void* next_cell() {
             if (size_ >= k_inline) {
                 const size_t rest = size_ - k_inline;
-                if (rest / k_chunk == chunks_.size()) { chunks_.push_back(std::make_unique<chunk>()); }
+                if (!chunks_) { chunks_ = std::make_unique<std::vector<std::unique_ptr<chunk>>>(); }
+                if (rest / k_chunk == chunks_->size()) { chunks_->push_back(std::make_unique<chunk>()); }
             }
             return cell(size_);
         }

@@ -344,7 +344,7 @@ namespace jai {
         mutable detail::env_id_map<script_value*> flat_lookup_;
 
         // Track which IDs we defined locally (for O(1) "is local" checks)
-        detail::env_id_map<bool> local_ids_;
+        detail::env_id_set<> local_ids_;
         // Root only: the earlier cells of a name redeclared across units, each with the unit that
         // declared it, and the unit of the cell in flat_lookup_ (absent = 0: host, function, class)
         struct binding_version { unit_stamp unit; script_value* cell; };

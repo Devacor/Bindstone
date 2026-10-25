@@ -394,15 +394,19 @@ public:
         auto& dbg = eng->debugger();
         stop_waiter stops(dbg);
         dbg.set_enabled(true);
+        // a fixed delay before the pause let a loaded machine pause before line 1 declared done
+        std::promise<void> declared;
+        eng->add_function("declared", [&declared] { declared.set_value(); });
 
         const std::string src =
-            "int done = 0;\n"                           // line 1
+            "int done = 0; declared();\n"               // line 1
             "sleep(1.5);\n"                             // line 2
             "done = 1;\n";                              // line 3
         std::string script_error;
         std::thread script([&] {
             try { eng->execute(src); } catch (const std::exception& e) { script_error = e.what(); }
         });
+        declared.get_future().wait();
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         dbg.request_pause();
         const auto pause = stops.wait();

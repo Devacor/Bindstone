@@ -138,12 +138,13 @@ namespace jai {
         // insertion order so a map built at once keeps its entries together; an erased entry's storage is reused
         class entry_pool {
             struct free_node { free_node* next; };
+            static constexpr size_t k_first_chunk = 2;   // most maps are small records; chunks double from here
             std::vector<std::unique_ptr<std::byte[]>> chunks_;
             std::byte* cursor_ = nullptr;
             size_t left_ = 0;
-            size_t next_count_ = 8;
+            size_t next_count_ = k_first_chunk;
             free_node* free_ = nullptr;
-            void reset() noexcept { cursor_ = nullptr; left_ = 0; next_count_ = 8; free_ = nullptr; }
+            void reset() noexcept { cursor_ = nullptr; left_ = 0; next_count_ = k_first_chunk; free_ = nullptr; }
         public:
             entry_pool() = default;
             entry_pool(const entry_pool&) = delete;
@@ -158,7 +159,7 @@ namespace jai {
             }
             // the first chunk sized for count entries (a map built at once in one allocation)
             void reserve(size_t count) {
-                if (!chunks_.empty() || count <= next_count_) return;
+                if (!chunks_.empty() || count == 0) return;
                 next_count_ = std::min<size_t>(count, 4096);
             }
             template <typename... A>
@@ -183,7 +184,7 @@ namespace jai {
         struct class_key_index_deleter { void operator()(class_key_index* index) const noexcept; };
         // where a class key is (found) or goes (run, at) among its class's keys
         struct class_probe { entry* found = nullptr; size_t run = 0; size_t at = 0; uint64_t hash = 0; script_int key_hash = 0; };
-        static constexpr size_t min_capacity = 8;
+        static constexpr size_t min_capacity = 4;
 
         entry_pool pool_;
         std::vector<slot> slots_;                   // empty, or a power of two

@@ -827,6 +827,34 @@ public:
             check_eq(std::string("10/3/10/3 11/3/11/3 12/3/12/3 "), r.as<std::string>());
         });
 
+        test("class_reference_to_an_object_array_element_follows_the_slot", [this]() {
+            // `P& e = ps[i]` binds the element: a store into the slot is seen through it, a subclass element binds, a removed one raises
+            auto e = make_stdlib_engine();
+            auto r = e->execute(R"(
+                class P { int x = 0; int y = 0; P(int a, int b) { x = a; y = b; } }
+                class Q : P { Q(int a) : super(a, a) {} }
+                string run() {
+                    array<P> ps = [];
+                    for (int i = 0; i < 6; ++i) { ps.push(P(i, i * 10)); }
+                    ps.push(Q(7));
+                    int total = 0;
+                    for (int i = 0; i < 7; ++i) {
+                        P& el = ps[i];
+                        total += el.x + el.y;
+                        ps[i] = P(100, 200);
+                        total += el.x;
+                    }
+                    string out = to_string(total);
+                    P& last = ps[6];
+                    ps.pop();
+                    try { int v = last.x; out += " read " + to_string(v); } catch (err) { out += " " + err; }
+                    return out;
+                }
+                run()
+            )");
+            check_eq(std::string("879 Reference to a removed array element"), r.as<std::string>());
+        });
+
         test("global_read_in_method_yields_to_a_static_added_on_reload", [this]() {
             auto e = make_stdlib_engine();
             e->execute(R"(

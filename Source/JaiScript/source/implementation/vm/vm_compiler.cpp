@@ -3839,7 +3839,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// the index of a load or store: a value or the fold over values; every operand an int
 		auto index_values = [&](ir_op& op, const fused_index_proto& fp, size_t ip) -> bool {
 			uint32_t sink;
-			if (fp.index_binary == k_invalid_u32) return value(op, fp.index, kint, static_cast<uint32_t>(ip * 3), ip, sink);
+			if (fp.index_binary == k_invalid_u32) return value(op, fp.index, kint, static_cast<uint32_t>(ip * 3 + 1), ip, sink);   // the general read's index role: ip * 3 is its container's
 			if (fp.index_binary >= c.fused_binary_protos.size()) return false;
 			const fused_binary_proto& bp = c.fused_binary_protos[fp.index_binary];
 			bool ok = is_index_chain_arith(static_cast<token_type>(bp.op)) && value(op, bp.left, kint, static_cast<uint32_t>(ip * 3), ip, sink) && value(op, bp.right, kint, static_cast<uint32_t>(ip * 3 + 1), ip, sink);

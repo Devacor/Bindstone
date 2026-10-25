@@ -461,6 +461,22 @@ namespace jai::vm {
         // (detail::declared_ref_kind); a store through the name decides by them, nothing is stamped at the binding
         std::vector<type_info*> slot_declared_refs;
         std::vector<uint8_t> slot_declared_kinds;
+        // a switch's dispatch (op_switch_table): the subject, each case's key (an int constant or a program-scope const name) and body,
+        // the no-match target (the default body or the end); the dense table is built at run time from the keys and rebuilt when a
+        // program-scope const or the names' environment changes
+        struct switch_table {
+            fused_operand subject;
+            std::vector<fused_operand> keys;
+            std::vector<uint32_t> targets;
+            uint32_t no_match = 0;
+            bool constant_keys = false;   // every key an int constant: the table, once built, never goes stale
+            mutable bool built = false, usable = false;
+            mutable const void* env = nullptr;
+            mutable uint64_t env_serial = 0, const_epoch = 0, definition_epoch = 0;
+            mutable int64_t low = 0;
+            mutable std::vector<uint32_t> dense;   // subject - low -> the case index, k_invalid_u32 = no case
+        };
+        std::vector<switch_table> switch_tables;
         std::vector<call_site> call_sites;
         // op_array / op_map with c != 0: the bits from word c - 1 mark the operands copied when evaluated (copy_ahead_of),
         // which the op takes as they are
@@ -517,6 +533,7 @@ namespace jai::vm {
             struct rebind { uint32_t copy_ip = 0, cell = 0, source_site = k_invalid_u32; std::vector<uint32_t> dependents; bool iter = false; uint32_t ref_decl = k_invalid_u32; };   // iter: a range-for's by-reference loop variable (the reference carries the range-for's element constraint); ref_decl: a class reference's declaration (its admission runs at each new binding, its constraint rides the flushed reference)
             std::vector<rebind> rebinds;
             std::vector<uint8_t> site_alias;   // per site: 1 = a site through an alias (its container the rebind's element; skipped by the entry and the hold check)
+            std::vector<uint32_t> switch_targets;   // per C_SWITCH: its cases' copy ips, then its no-match copy ip
             std::vector<uint32_t> land_sites;   // the sites a landing after a call checks again (no alias site, no range head), k_land_member_site marking a member site
             static constexpr uint32_t k_land_member_site = 0x80000000u;
             std::vector<uint32_t> inline_sites;   // the inlined leaves inside the region (chunk::inline_sites indexes): their guards hold at the entry and after every effect point

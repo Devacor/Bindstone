@@ -87,7 +87,7 @@ namespace {
 		case opcode::op_d_add: case opcode::op_d_sub: case opcode::op_d_mul: case opcode::op_d_div: case opcode::op_d_mod: case opcode::op_d_and: case opcode::op_d_or:
 		case opcode::op_d_xor: case opcode::op_d_shl: case opcode::op_d_shr:
 			return fam::arith;
-		case opcode::op_fused_cmp_jump: case opcode::op_jump: case opcode::op_jump_if_false: case opcode::op_jump_if_true:
+		case opcode::op_fused_cmp_jump: case opcode::op_jump: case opcode::op_jump_if_false: case opcode::op_jump_if_true: case opcode::op_switch_table:
 		case opcode::op_d_jlt: case opcode::op_d_jle: case opcode::op_d_jgt: case opcode::op_d_jge: case opcode::op_d_jeq: case opcode::op_d_jne:
 			return fam::compare;
 		case opcode::op_const: case opcode::op_const_folded: case opcode::op_null: case opcode::op_true: case opcode::op_false: case opcode::op_pop: case opcode::op_dup: case opcode::op_load:

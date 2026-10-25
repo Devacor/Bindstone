@@ -5056,7 +5056,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"int logs(int v) { LOG.push(v); return LOG.size(); }\n"
 				"int run() { array<It> worn; for (int i = 0; i < 2; ++i) { It t; t.base = i - 1; t.pmag = 3; worn.push(t); }\n"
 				"  int s = lump_num(\"STBAR\") * 1000 + lump_num(\"NOPE\") * 100;\n"
-				"  for (int i = 0; i < worn.size(); ++i) { switch (i) { case 9: s = s - 1; } s = s + stat(worn[i], 1); }\n"
+				"  for (int i = 0; i < worn.size(); ++i) { switch (i) { case 9: if (s > 0) { fallthrough; } s = s - 1; } s = s + stat(worn[i], 1); }\n"
 				"  return s + tail_of(\"PLAYA\") * 10000 + tail_of(\"STBAR\") * 100000 + logs(4) * 1000000; }\n"
 				"Def dd; DEFS.push(dd);\n";
 			const std::string run = "to_string(run()) + \"|\" + to_string(DEFS[0].vals[0]) + \"|\" + to_string(LOG.size());";
@@ -5410,7 +5410,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"array<int> XS = [0, 1, 2, 1, 0, 2];\n"
 				"int after_of(int t) { int a = DEFS[t].after; return a + t; }\n"
 				// a switch in the body is a statement no block takes (an effect at CASE_EQ), so the loop stays refused
-				"int open_sum() { int s = 0; for (int i = 0; i < XS.size(); ++i) { switch (i) { case 9: s = s - 1; } s = s + after_of(XS[i]); } return s; }\n"
+				"int open_sum() { int s = 0; for (int i = 0; i < XS.size(); ++i) { switch (i) { case 9: if (s > 0) { fallthrough; } s = s - 1; } s = s + after_of(XS[i]); } return s; }\n"
 				"int closed_sum(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + after_of(i % 3); } return s; }\n"
 				"for (int k = 0; k < 3; ++k) { D d; d.after = k * 10; DEFS.push(d); }\n";
 			both(prelude + "to_string(open_sum()) + \"|\" + to_string(closed_sum(6));", "66|66", "a leaf in an open loop and in a closed one");

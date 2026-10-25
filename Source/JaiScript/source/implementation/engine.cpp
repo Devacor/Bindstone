@@ -1854,6 +1854,7 @@ struct engine::implementation {
     uint64_t class_definition_epoch_ = 1;
     uint64_t definition_epoch_ = 1;
     uint64_t fold_epoch_ = 1;
+    uint64_t const_epoch_ = 1;
     std::unordered_set<const script_value*> const_cells_;
     // Shadowing units (environment::define_variable): a file by its lexically normal path, a
     // literal by its content, numbered at first execution; 0 is the host
@@ -4124,6 +4125,7 @@ bool engine::has_variable(const std::string& name) const {
 
 void engine::mark_const_cell(const script_value* cell, bool is_const) {
     if (!cell) { return; }
+    ++impl->const_epoch_;
     if (is_const) { impl->const_cells_.insert(cell); } else { impl->const_cells_.erase(cell); }
 }
 
@@ -4654,6 +4656,14 @@ uint64_t engine::fold_epoch() const {
 
 void engine::bump_fold_epoch() {
     ++impl->fold_epoch_;
+}
+
+const uint64_t* engine::const_epoch_counter() const {
+    return &impl->const_epoch_;
+}
+
+const uint64_t* engine::definition_epoch_counter() const {
+    return &impl->definition_epoch_;
 }
 
 void engine::bump_definition_epoch() {

@@ -23711,6 +23711,11 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
 	if (!resolved) return op_status::failed;
+	if (scratch && resolved == &*scratch) {   // the resolution's own copy: the result takes it
+		script_value value(std::move(*scratch));
+		if (!detail::return_value_plain(value)) { materialize_return(f, value, detail::return_operand_ident, ins.a); }
+		return finish(std::move(value));
+	}
 	if (detail::return_value_plain(*resolved)) { return finish(script_value(*resolved)); }
 	script_value value(*resolved);
 	materialize_return(f, value, detail::return_operand_ident, ins.a);

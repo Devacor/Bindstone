@@ -135,6 +135,10 @@ namespace jai::detail {
     // values decode); a heavy temporary and every plain value stay as they are.
     inline void materialize_return_value(script_value& v, bool lvalue_read) {
         if (return_value_plain(v)) return;
+        if (!v.is_reference()) {
+            const type_info* tag = v.type_info_raw();
+            if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) return;   // a shared handle's copy is itself (clone_for_assignment shares it)
+        }
         if (lvalue_read || v.is_reference() || borrows_host_object(v)) { v = clone_for_assignment(v); }
     }
 

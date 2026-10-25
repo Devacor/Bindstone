@@ -118,7 +118,7 @@ public:
     struct interned_name_t {};
     // a name already in the engine's interned table (a class definition's cached view): no copy, no lookup
     class_instance(interned_name_t, std::string_view interned, engine* eng)
-        : class_name_(interned), engine_(eng), invalid_value_(std::monostate{}, eng) {}
+        : class_name_(interned), engine_(eng) {}
     // The slot table and cells in the instance's own allocation (class_definition::allocate_instance): `slots` table
     // entries, then `slots` cells; a slot the class gains later takes a heap table and heap cells
     struct trailing_cells {
@@ -314,11 +314,36 @@ private:
     // Either way a pointee never moves - reclass/migration move the POINTERS - so field_slot_value(slot) stays valid
     // until the instance dies or a reload/re-class re-seats its slots (the class pointer or the field-shape epoch moves),
     // and the arena outlives every cell (declared before flat_fields_ on purpose).
-    struct cell_deleter {
-        bool heap = true;
-        void operator()(script_value* p) const noexcept { if (heap) { delete p; } else { p->~script_value(); } }
+    // An owning cell pointer in one word: bit 0 marks an arena cell (destroyed in place), clear a heap cell (deleted)
+    class field_cell {
+    public:
+        field_cell() noexcept = default;
+        field_cell(script_value* a_cell, bool a_heap) noexcept : bits(reinterpret_cast<uintptr_t>(a_cell) | (a_heap ? 0 : 1)) {}
+        field_cell(field_cell&& a_other) noexcept : bits(a_other.bits) { a_other.bits = 0; }
+        field_cell& operator=(field_cell&& a_other) noexcept {
+            if (this != &a_other) {
+                const uintptr_t replaced = bits;
+                bits = a_other.bits;
+                a_other.bits = 0;
+                release_cell(replaced);
+            }
+            return *this;
+        }
+        field_cell(const field_cell&) = delete;
+        field_cell& operator=(const field_cell&) = delete;
+        ~field_cell() { release_cell(bits); }
+        script_value* get() const noexcept { return reinterpret_cast<script_value*>(bits & ~uintptr_t{1}); }
+        script_value& operator*() const noexcept { return *get(); }
+        script_value* operator->() const noexcept { return get(); }
+        explicit operator bool() const noexcept { return bits != 0; }
+    private:
+        static void release_cell(uintptr_t a_bits) noexcept {
+            if (!a_bits) { return; }
+            script_value* cell = reinterpret_cast<script_value*>(a_bits & ~uintptr_t{1});
+            if (a_bits & 1) { cell->~script_value(); } else { delete cell; }
+        }
+        uintptr_t bits = 0;
     };
-    using field_cell = std::unique_ptr<script_value, cell_deleter>;
     // The slot table: the trailing table, or a heap table once the class gains slots past it
     class field_table {
     public:
@@ -400,6 +425,7 @@ private:
     struct instance_extras {
         std::optional<script_value> native;
         std::vector<std::pair<uint64_t, field_cell>> retired_cells;
+        std::optional<script_value> missing_field;   // what get_field answers for a field the instance does not have
     };
     std::unique_ptr<instance_extras> extras_;
     inline instance_extras& extras();
@@ -408,7 +434,6 @@ private:
     class_instance* registry_prev_ = nullptr;
     class_instance* registry_next_ = nullptr;
     friend class class_definition;
-    mutable script_value invalid_value_;
 
     inline static std::shared_ptr<void> extract_cpp_object_impl(const script_value& val);
     inline bool fields_cascade() const noexcept;

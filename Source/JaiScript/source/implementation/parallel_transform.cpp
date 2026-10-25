@@ -3658,7 +3658,7 @@ namespace {
 
 	struct reach_filter;
 	element_proof prove_elements(engine& eng, const script_value& array_value, script_array& node,
-	                             std::vector<script_value>& elements, const reach_filter& reach,
+	                             const reach_filter& reach,
 	                             const char* prefix, std::vector<type_info*>* types = nullptr,
 	                             std::vector<std::pair<const void*, size_t>>* handle_objects = nullptr);
 
@@ -3853,7 +3853,7 @@ namespace {
 			if (handle->is_typed()) {
 				if (handle->kind() == script_array::kind_t::str) { detach_shared_typed_strings(*handle, eng); return true; }
 				if (handle->kind() == script_array::kind_t::obj) {
-					return prove_elements(eng, v, *handle, handle->values(), reach_filter{}, "parallel_for", types).failed == SIZE_MAX;
+					return prove_elements(eng, v, *handle, reach_filter{}, "parallel_for", types).failed == SIZE_MAX;
 				}
 				return true;   // scalar buffer: exclusive by construction
 			}
@@ -4053,12 +4053,15 @@ namespace {
 	// elements: the boxed view walked for a non-object kind (the node's own vector, or the
 	// caller's materialized copy of a typed primitive/string buffer)
 	element_proof prove_elements(engine& eng, const script_value& array_value, script_array& node,
-	                             std::vector<script_value>& elements, const reach_filter& reach,
+	                             const reach_filter& reach,
 	                             const char* prefix, std::vector<type_info*>* types,
 	                             std::vector<std::pair<const void*, size_t>>* handle_objects) {
 		element_proof proof;
 		proof.typed_obj = node.is_typed() && node.kind() == script_array::kind_t::obj;
-		auto& slots = node.objs();
+		std::vector<script_value> no_elements;
+		std::vector<obj_slot> no_slots;
+		std::vector<script_value>& elements = node.is_typed() ? no_elements : node.values();
+		std::vector<obj_slot>& slots = proof.typed_obj ? node.objs() : no_slots;
 		const size_t n = proof.typed_obj ? node.size() : elements.size();
 		const class_definition* string_free_class = nullptr;
 		bool declared_exclusive = false;
@@ -4926,7 +4929,6 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 	}
 	script_array& node = boxed_range.is_array() ? *boxed_range.unchecked_get_array_storage() : *const_cast<script_array*>(source_node);
-	auto& source = node.values();
 	const size_t n = node.size();
 
 	// ELEMENT PROOF + NORMALIZATION (prove_elements): every element must end this pass
@@ -4949,7 +4951,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	const bool skip_proof = !plan.inplace && (statically_all_scalar(array_value) || parallel_content_all_scalar(array_value));
 	if (!skip_proof) {
 		state.faults.checkpoint("region.element_proof");
-		proof = prove_elements(eng, array_value, node, source, reach, plan.prefix, plan.inplace ? nullptr : &value_types, &handle_objects);
+		proof = prove_elements(eng, array_value, node, reach, plan.prefix, plan.inplace ? nullptr : &value_types, &handle_objects);
 		if (proof.failed != SIZE_MAX) {
 			if (!proof.what.empty()) {
 				return usage("element " + std::to_string(proof.failed) + ": " + proof.what);
@@ -4959,7 +4961,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 				             " cannot be proven exclusive (only value-semantic shapes are: primitives, strings,"
 				             " value containers, flat value-class instances and distinct handles to them)");
 			}
-			const script_value failed_element = typed_obj ? node.get(proof.failed, &eng) : source[proof.failed];
+			const script_value failed_element = typed_obj ? node.get(proof.failed, &eng) : node.values()[proof.failed];
 			const char* what = non_value_semantic_what(failed_element);
 			return usage("element " + std::to_string(proof.failed) +
 			             ": value is not value-semantic (" + (what ? what : "object") + ")");
@@ -4989,7 +4991,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 		if (znode->is_typed() && znode->kind() != script_array::kind_t::obj) { znode->demote_to_hetero(&eng); }
 		if (!plan.zip_arrays_fresh) {
-			element_proof zproof = prove_elements(eng, zv, *znode, znode->values(), reach_filter{}, plan.prefix, nullptr, &handle_objects);
+			element_proof zproof = prove_elements(eng, zv, *znode, reach_filter{}, plan.prefix, nullptr, &handle_objects);
 			if (zproof.failed != SIZE_MAX) {
 				return usage("zipped array " + std::to_string(j + 1) + " element " + std::to_string(zproof.failed) +
 				             (zproof.what.empty() ? std::string(" cannot be proven exclusive") : ": " + zproof.what));
@@ -5006,7 +5008,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	for (const auto& cap : captures) {
 		if (cap.kind != parallel_capture_kind::written || !cap.shares_slots) { continue; }
 		script_array* wnode = const_cast<script_array*>(cap.source->unchecked_array_node());
-		element_proof wproof = prove_elements(eng, *cap.source, *wnode, wnode->values(), reach_filter{}, plan.prefix, nullptr, &handle_objects);
+		element_proof wproof = prove_elements(eng, *cap.source, *wnode, reach_filter{}, plan.prefix, nullptr, &handle_objects);
 		if (wproof.failed != SIZE_MAX) {
 			return usage("captured name '" + std::string(cap.entry->name) + "' element " + std::to_string(wproof.failed) +
 			             (wproof.what.empty() ? std::string(" cannot be proven exclusive") : ": " + wproof.what));
@@ -5030,7 +5032,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		script_array* inode = const_cast<script_array*>(cap.source->unchecked_array_node());
 		if (inode->is_typed() && inode->kind() != script_array::kind_t::obj) { continue; }
 		std::vector<std::pair<const void*, size_t>> input_objects;
-		element_proof iproof = prove_elements(eng, *cap.source, *inode, inode->values(), reach_filter{}, plan.prefix, &value_types, &input_objects);   // the step copies each element
+		element_proof iproof = prove_elements(eng, *cap.source, *inode, reach_filter{}, plan.prefix, &value_types, &input_objects);   // the step copies each element
 		if (iproof.failed != SIZE_MAX) {
 			return usage("input element " + std::to_string(iproof.failed) +
 			             (iproof.what.empty() ? std::string(" cannot be proven exclusive") : ": " + iproof.what));

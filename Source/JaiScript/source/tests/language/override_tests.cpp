@@ -8,6 +8,30 @@ public:
     override_tests() : suite("Override and Virtual Tests") {}
     
     void forge_tests() override {
+        test("one_call_site_dispatches_many_classes_and_follows_a_redefinition", [this]() {
+            // a method site meeting more classes than one keeps each class's method, and a redefined class answers anew
+            auto engine = make_engine();
+            engine->execute(R"(
+                class Shape { int area(int k) { return 0; } }
+                class Sq : Shape { int area(int k) override { return 1 * k; } }
+                class Tri : Shape { int area(int k) override { return 10 * k; } }
+                class Hex : Shape { int area(int k) override { return 100 * k; } }
+                class Oct : Shape { int area(int k) override { return 1000 * k; } }
+                class Dec : Shape { int area(int k) override { return 10000 * k; } }
+                int sum(array<shared_ptr<Shape>>& shapes, int rounds) {
+                    int total = 0;
+                    for (int r = 0; r < rounds; ++r) {
+                        for (int i = 0; i < shapes.size(); ++i) { total += shapes[i].area(1); }
+                    }
+                    return total;
+                }
+                array<shared_ptr<Shape>> shapes = [new Sq(), new Tri(), new Hex(), new Oct(), new Dec(), new Tri(), new Sq()];
+            )");
+            check_eq((int64_t)(3 * 11122), engine->execute("sum(shapes, 3)").as_int());
+            engine->execute("class Hex : Shape { int area(int k) override { return 7 * k; } }");
+            check_eq((int64_t)(2 * 11029), engine->execute("sum(shapes, 2)").as_int());
+        });
+
         test("override_promotes_to_virtual", [this]() {
             auto engine = make_engine();
             

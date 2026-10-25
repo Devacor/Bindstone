@@ -17984,6 +17984,15 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 						++profile_slice_gate_[2];   // resolution declined in the slice branch
 #endif
+					} else if (cached_global_env_ && site.mic_cd && cd) {
+						for (const call_site::mic_entry& entry : site.mic_poly) {
+							if (entry.cd != cd || cd->method_epoch() != entry.epoch) { continue; }
+							if (!(entry.field_free && !inst->has_user_overflow_fields()) && inst->has_field(member->member_id)) { break; }
+							script_value method_val = entry.method;
+							return enter_script_method_sliced(f, std::move(method_val), *entry.dispatch,
+							                                  entry.resolved, nullptr, args_base - 1,
+							                                  args_base, argc, site);
+						}
 					}
 #ifdef JAISCRIPT_VM_PROFILE
 					else { ++profile_slice_gate_[3]; }   // mic guard failed (unarmed/epoch/class/field)
@@ -18267,29 +18276,33 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 								// native path, which re-resolves and reports the identical error
 								if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
 									// IC fill (call_site in chunk.hpp): single-overload methods on
-									// all-public chains cache this outcome; mic_static marks sites
-									// whose resolution can't depend on arg types (every arg-bound
-									// param untyped — pick_best_overload's has_explicit_type test).
+									// all-public chains cache this outcome; a single declaration binds
+									// by arity alone (resolve_method_overload_core), so the site's
+									// fixed argument count makes the resolution static. A site that
+									// meets another class keeps the earlier one in its polymorphic row.
 									if (cached_global_env_ && target.instance &&
 									    target.instance->get_class_definition() &&
 									    !target.class_def->chain_has_nonpublic() &&
 									    dispatch->cls->single_method_overload(dispatch->name_id)) {
-										site.mic_cd = target.instance->get_class_definition();
+										const class_definition* armed = target.instance->get_class_definition();
+										if (site.mic_cd && site.mic_cd != armed && site.mic_static && site.mic_dispatch) {
+											call_site::mic_entry& slot = site.mic_poly[site.mic_poly_next];
+											site.mic_poly_next = static_cast<uint8_t>((site.mic_poly_next + 1) % call_site::k_mic_poly);
+											slot.cd = site.mic_cd;
+											slot.epoch = site.mic_epoch;
+											slot.field_free = site.mic_field_free;
+											slot.method = site.mic_method;
+											slot.dispatch = site.mic_dispatch;
+											slot.resolved = site.mic_resolved;
+										}
+										site.mic_cd = armed;
 										site.mic_epoch = site.mic_cd->method_epoch();
 										site.mic_field_free = !site.mic_cd->chain_declares_field(member->member_id) &&
 										                      site.mic_cd->field_slot(member->member_id) == class_definition::k_no_field_slot;
 										site.mic_method = method_val;
 										site.mic_dispatch = site.mic_method.as_function().target<script_method_dispatch>();
 										site.mic_resolved = resolved.value();
-										bool arg_independent = true;
-										const auto& params = resolved.value()->parameters;
-										for (size_t i = 0; i < arguments.size() && arg_independent; ++i) {
-											const auto& p = params[i];
-											arg_independent = !(p.type && !p.type->type_name.empty() &&
-											                    p.type->type_name != "any" &&
-											                    p.type->base_type != script_value_type::jai_any_type);
-										}
-										site.mic_static = arg_independent;
+										site.mic_static = true;
 									}
 #ifdef JAISCRIPT_VM_PROFILE
 									profile_call_method_paths_[2]++;
@@ -22245,6 +22258,7 @@ void vm_backend::release_site_pins() noexcept {
 			site.mic_resolved.reset();
 			site.mic_dispatch = nullptr;
 			site.mic_cd = nullptr;
+			for (auto& entry : site.mic_poly) { entry = call_site::mic_entry{}; }
 		}
 		for (auto& site : code->inline_sites) { site.holds_fn = {}; }
 	};

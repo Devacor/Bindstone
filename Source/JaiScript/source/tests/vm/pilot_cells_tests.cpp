@@ -5068,6 +5068,32 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined tail_of") != std::string::npos, "tail_of grafts with its string reads: " + l);
 			check_true(l.find("-- inlined logs") != std::string::npos, "logs grafts, its push a call the graft keeps: " + l);
 		});
+		test("top_level_loops_take_slots_and_close_as_function_bodies_do", [this]() {
+			// a top-level loop's variable and its body's locals are program-frame slots (detail::program_slot_pass): the loop takes the typed
+			// rows and closes as a cell block; globals stay in the environment, where functions read them at call time and a block local
+			// that shadows one leaves it alone
+			const std::string src =
+				"int acc = 0; int x = 100; int readx() { return x; }\n"
+				"for (int i = 0; i < 50; ++i) { int x = i & 3; acc += x; if (i == 10) { acc += readx(); } }\n"
+				"array<int> data = [3, 1, 4, 1, 5]; int total = 0;\n"
+				"for (auto v : data) { int doubled = v * 2; total += doubled; }\n"
+				"{ int a = 7; { int b = a * 3; total += b; } }\n"
+				"int w = 0; while (w < 5) { int sq = w * w; if (sq > 8) { break; } total += sq; ++w; }\n";
+			both(src + "to_string(acc) + \"|\" + to_string(total) + \"|\" + to_string(x);", "173|54|100", "top-level block-scoped slots");
+			const std::string l = listing_run(src + "acc;");
+			check_true(l.find("-- cell loop") != std::string::npos && l.find("T_JLT_II") != std::string::npos, "the top-level loops close: " + l);
+		});
+		test("top_level_statements_that_could_see_a_block_name_keep_the_environment", [this]() {
+			// a lambda, a nested function or a try in the statement keeps its names in the environment: a capture and a call see them there
+			const std::string src =
+				"int out = 0;\n"
+				"for (int i = 0; i < 3; ++i) { auto f = [i]() { return i * 10; }; out += f(); }\n"
+				"for (int j = 0; j < 2; ++j) { try { out += j; } catch (e) { } }\n"
+				"string log = \"\";\n"
+				"class D { string n; D(string s) { n = s; } ~D() { log += n; } }\n"
+				"{ D a = D(\"a\"); { D b = D(\"b\"); } log += \".\"; }\n";
+			both(src + "to_string(out) + \"|\" + log;", "31|b.a", "statements on the environment beside slotted ones");
+		});
 		test("a_global_container_read_at_a_global_index_keeps_its_own_lookup", [this]() {
 			// the index's environment cell resolves through the read's index role (ip * 3 + 1): at the container's role the two names shared one
 			// lookup-cache row, and the block read the container through the index's binding

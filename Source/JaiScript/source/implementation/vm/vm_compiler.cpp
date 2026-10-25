@@ -4,6 +4,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/body_walker.hpp>
+#include <jaiscript/detail/program_slots.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/debug/controller.hpp>
@@ -608,7 +609,7 @@ void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint
 		switch (rhs->get_type()) {
 		case node_type::binary_expr:
 			if (code.back().op == opcode::op_binary_fused) {
-				if (!loops_.empty() && typed_lowering_ && temps_active_ && chunk_->is_function_body && slot != k_invalid_u32 &&
+				if (!loops_.empty() && typed_lowering_ && temps_active_ && chunk_->is_function_body &&
 				    (kind_flags & compound_flag_no_result) && !(kind_flags & (compound_flag_old_result | compound_flag_incdec))) {
 					// inside a loop the operand lands in a temp first (the same kernel, the result into the temp) and the compound reads
 					// the temp: the typed rows and the cell translation take both halves, where a compound over a binary proto stays general
@@ -800,12 +801,12 @@ uint32_t vm_compiler::binary_shape(binary_expr* expr) {
 
 static bool loop_free_body(const ast_node* n);
 
-std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaration_ptr>& declarations) {
+std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaration_ptr>& declarations, bool program_frame) {
 	JAI_CENSUS_F(compile_chunk, 1);
 	auto result = std::make_shared<chunk>();
 	chunk_ = result.get();
 	chunk_->pinned_decls = declarations;
-	chunk_->first_temp_slot = SIZE_MAX;   // a program chunk has no compiler slots (temps_active_ is false)
+	chunk_->first_temp_slot = SIZE_MAX;   // a program chunk without block-scoped slots has no compiler slots (temps_active_ is false)
 	loops_.clear();
 	loop_marks_.clear();
 	callable_ = {};
@@ -813,11 +814,48 @@ std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaratio
 	current_stmt_ = nullptr;
 	temps_active_ = false;
 	temp_symbol_index_ = k_invalid_u32;
+	frame_eligible_ = false;
+	subscript_guards_.clear();
 
+	// the statements whose block-scoped declarations hold frame slots (detail::program_slot_pass, the parser's): each compiles as a
+	// function body does, its names in the program frame's window and its temps above them; every other statement as a program's
+	detail::program_slot_pass pass;
+	const size_t slots = program_frame && !reference_ ? pass.run(declarations) : 0;
+	if (slots > 0) {
+		chunk_->local_count = slots;
+		chunk_->first_temp_slot = slots;
+		chunk_->is_function_body = true;
+		temp_next_ = slots;
+		temp_high_ = slots;
+	}
 	for (const auto& decl : declarations) {
+		const bool slotted = slots > 0 && pass.slotted.count(decl.get()) != 0;
+		if (slotted) {
+			callable_ = {};
+			callable_.active = true;
+			callable_.declared = pass.names;
+			temps_active_ = true;
+			program_region_ = true;
+			temp_next_ = slots;
+			auto region = std::make_shared<block_stmt>(decl->location, std::vector<declaration_ptr>{decl});
+			chunk_->nodes.push_back(region);
+			callable_body_ = region.get();
+			infer_local_kinds({}, region.get(), slots);
+		}
 		compile_declaration(decl, true);
+		if (slotted) {
+			callable_ = {};
+			callable_body_ = nullptr;
+			program_region_ = false;
+			temps_active_ = false;
+		}
 	}
 	emit(opcode::op_halt);
+	if (slots > 0) {
+		if (temp_high_ > result->local_count) { result->local_count = temp_high_; }
+		lower_typed_ops(*result);
+		lower_dynamic_ops(*result);
+	}
 	chunk_ = nullptr;
 	return result;
 }
@@ -1413,6 +1451,7 @@ void vm_compiler::push_region(region_kind kind) {
 bool vm_compiler::slot_kill_wanted(const type_info_ptr& t, size_t slot, uint64_t symbol) const {
 	if (slot == SIZE_MAX || !callable_.active || !engine_ || callable_.declared.find(symbol) == callable_.declared.end()) { return false; }
 	if (t && t->is_reference()) { return false; }
+	if (program_region_) { return !primitive_declared_type(t.get()); }   // compiled before the program's own classes are declared: any class may own one
 	return slot_may_own_destructor(*const_cast<engine*>(engine_), t);
 }
 

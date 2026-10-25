@@ -921,8 +921,10 @@ script_value_type spill_kind(const expression* e) {
 bool vm_compiler::graft_may_destroy(const function_decl* fn) const {
 	if (!engine_) { return false; }
 	engine& eng = *const_cast<engine*>(engine_);
+	// a program statement compiles before the program's own classes are declared: any type but a scalar may own one there
+	auto may_own = [&](const type_info_ptr& t) { return program_region_ ? !scalar_type(t.get()) : slot_may_own_destructor(eng, t); };
 	for (const parameter& p : fn->parameters) {
-		if (!p.is_reference && slot_may_own_destructor(eng, p.type)) { return true; }
+		if (!p.is_reference && may_own(p.type)) { return true; }
 	}
 	std::function<bool(const statement*)> walk = [&](const statement* st) -> bool {
 		if (!st) { return false; }
@@ -934,7 +936,7 @@ bool vm_compiler::graft_may_destroy(const function_decl* fn) const {
 		case node_type::for_stmt: return walk(static_cast<const for_stmt*>(st)->initializer.get()) || walk(static_cast<const for_stmt*>(st)->body.get());
 		case node_type::range_for_stmt: {
 			const auto* rf = static_cast<const range_for_stmt*>(st);
-			return (!rf->is_reference && slot_may_own_destructor(eng, rf->element_type)) || walk(rf->body.get());
+			return (!rf->is_reference && may_own(rf->element_type)) || walk(rf->body.get());
 		}
 		case node_type::try_stmt: return walk(static_cast<const try_stmt*>(st)->try_block.get()) || walk(static_cast<const try_stmt*>(st)->catch_block.get());
 		case node_type::switch_stmt: {
@@ -945,7 +947,7 @@ bool vm_compiler::graft_may_destroy(const function_decl* fn) const {
 		}
 		case node_type::variable_decl: {
 			const auto* v = static_cast<const variable_decl*>(st);
-			return !(v->type && v->type->is_reference()) && slot_may_own_destructor(eng, v->type);
+			return !(v->type && v->type->is_reference()) && may_own(v->type);
 		}
 		default: return false;
 		}

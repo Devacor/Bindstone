@@ -40,7 +40,8 @@ namespace jai::vm {
         // the stdlib math aliases a bare call may lower to (engine::register_math_alias)
         void math_aliases(const engine* e) { engine_ = e; }
 
-        std::shared_ptr<chunk> compile_program(const std::vector<declaration_ptr>& declarations);
+        // program_frame: the chunk runs in a program frame with a window (vm_backend::run_program), so its block-scoped declarations take slots
+        std::shared_ptr<chunk> compile_program(const std::vector<declaration_ptr>& declarations, bool program_frame = false);
         std::shared_ptr<chunk> compile_callable(std::string_view name,
                                                 const std::vector<parameter>& parameters,
                                                 const std::shared_ptr<block_stmt>& body,
@@ -199,6 +200,7 @@ namespace jai::vm {
         size_t temp_next_ = 0;
         size_t temp_high_ = 0;
         bool temps_active_ = false;
+        bool program_region_ = false;   // compiling a program statement whose block-scoped declarations hold slots (compile_program)
         uint32_t temp_symbol_index_ = k_invalid_u32;   // shared "\x01tmp" symbols entry
         uint32_t temp_symbol_index();
         // Tail-position hint for `return f(args)` with clean region exits: consumed by

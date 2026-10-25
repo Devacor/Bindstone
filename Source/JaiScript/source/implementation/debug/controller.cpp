@@ -235,7 +235,9 @@ std::vector<variable_info> controller::list_locals(size_t frame) const {
     if (frame != 0) return {};
     const auto env = backend->get_current_environment();
     const auto program = engine_->get_global_environment();
-    return rendered_variables(block_scope_variables(env.get(), program.get()));
+    auto named = block_scope_variables(env.get(), program.get());
+    for (auto& slot_local : backend->get_frame_locals(frame)) { named.push_back(std::move(slot_local)); }   // the VM's program frame keeps block-scoped locals in slots
+    return rendered_variables(named);
 }
 
 std::vector<variable_info> controller::list_globals() const {

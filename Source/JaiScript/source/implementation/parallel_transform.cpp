@@ -3104,7 +3104,7 @@ namespace {
 	statement_ptr clone_statement(engine& eng, const statement_ptr& stmt, const script_defined_function& fn) {
 		std::vector<declaration_ptr> decls;
 		decls.push_back(std::make_shared<statement_decl>(stmt->location, stmt));
-		const std::vector<uint8_t> bytes = serialize_jaibite(decls, *eng.get_symbolizer(), 0);
+		const std::vector<uint8_t> bytes = ast_writer(*eng.get_symbolizer()).in_body().serialize(decls, 0);
 		uint64_t fingerprint = 0;
 		const ast_frame_context context{fn.local_count, fn.parameters()};
 		auto back = deserialize_jaibite(bytes.data(), bytes.size(), &eng, fingerprint, nullptr, &context);

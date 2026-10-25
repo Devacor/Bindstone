@@ -80,6 +80,62 @@ public:
 			check_eq(std::string("6"), outcome("int make_shared(int v) { return v * 2; } make_shared(3)"));
 			check_eq(std::string("5"), outcome("int make_shared(int v) { return v; } auto a = make_shared<Vec>(5); a.x"));
 		});
+		test("handle_results_and_stores_keep_the_declared_handle_type", [this]() {
+			check_eq(std::string("111110"), outcome(R"(
+				class Base { int v() { return 1; } }
+				class Derived : Base { int v() override { return 2; } }
+				class Holder {
+					shared_ptr<Derived> d = new Derived();
+					shared_ptr<Holder> link = null;
+					shared_ptr<Base> as_base() { return d; }
+					shared_ptr<Holder> me() { return shared_from_this(); }
+				}
+				int run() {
+					shared_ptr<Holder> h = new Holder();
+					h.link = new Holder();
+					int total = 0;
+					shared_ptr<Base> b = null;
+					for (int i = 0; i < 5; ++i) { b = h.as_base(); total += b.v(); }
+					b = new Base();
+					total += b.v() * 100;
+					shared_ptr<Holder> again = null;
+					for (int i = 0; i < 3; ++i) { again = h.me(); }
+					if (again == h) { total += 1000; }
+					shared_ptr<Holder> x = null;
+					for (int i = 0; i < 4; ++i) { x = h.link; }
+					if (x == h.link && x != h) { total += 10000; }
+					var dyn = h.as_base();
+					dyn = new Holder();
+					if (dyn != null) { total += 100000; }
+					return total;
+				}
+				run()
+			)"));
+		});
+		test("handle_result_and_store_of_another_class_raise", [this]() {
+			auto eng = make_engine();
+			eng->static_checking(jai::check_mode::off);
+			auto r = eng->execute(R"(
+				class Base { int v() { return 1; } }
+				class Other { int w = 0; }
+				class Holder {
+					shared_ptr<Base> b = new Base();
+					shared_ptr<Base> get() { return b; }
+					shared_ptr<Other> wrong() { return b; }
+				}
+				string run() {
+					string out = "";
+					shared_ptr<Holder> h = new Holder();
+					shared_ptr<Other> o = null;
+					try { o = h.get(); out += "stored"; } catch (e) { out += e; }
+					out += "|";
+					try { o = h.wrong(); out += "returned"; } catch (e) { out += e; }
+					return out;
+				}
+				run()
+			)");
+			check_eq(std::string("Cannot assign Base to 'o' (declared shared_ptr<Other>)|Cannot return Base from 'wrong' (declared -> shared_ptr<Other>)"), r.as<std::string>());
+		});
 	}
 };
 

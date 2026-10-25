@@ -64,6 +64,43 @@ namespace detail {
         template <class U> bool operator!=(const trailing_allocator<U>&) const noexcept { return false; }
     };
 
+    // The object block (internal/object_layout.md): a head counting the parts that still need the memory, the room for the
+    // instance's holder, then allocate_shared's control block and instance, then the slot table and cells. The instance's
+    // part and the holder's part each give their part back; the last one frees the block.
+    struct object_block_head {
+        std::atomic<uint32_t> parts{1};
+        static constexpr size_t holder_room = (sizeof(control_block<script_value::object_holder>) + 15) & ~size_t{15};
+        static constexpr size_t size = 16 + holder_room;
+        static void release(std::byte* block) noexcept {
+            auto* head = reinterpret_cast<object_block_head*>(block);
+            if (head->parts.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                head->~object_block_head();
+                ::operator delete(block);
+            }
+        }
+        static std::byte* holder_slot(std::byte* block) noexcept { return block + 16; }
+    };
+    template <class T>
+    struct object_block_allocator {
+        using value_type = T;
+        std::byte** out = nullptr;
+        std::byte** holder_out = nullptr;
+        size_t extra = 0;
+        object_block_allocator(std::byte** o, std::byte** h, size_t e) noexcept : out(o), holder_out(h), extra(e) {}
+        template <class U> object_block_allocator(const object_block_allocator<U>& o) noexcept : out(o.out), holder_out(o.holder_out), extra(o.extra) {}
+        T* allocate(size_t n) {
+            const size_t head = (n * sizeof(T) + 15) & ~size_t{15};
+            auto* memory = static_cast<std::byte*>(::operator new(object_block_head::size + head + extra));
+            new (memory) object_block_head();
+            *holder_out = object_block_head::holder_slot(memory);
+            *out = memory + object_block_head::size + head;
+            return reinterpret_cast<T*>(memory + object_block_head::size);
+        }
+        void deallocate(T* p, size_t) noexcept { object_block_head::release(reinterpret_cast<std::byte*>(p) - object_block_head::size); }
+        template <class U> bool operator==(const object_block_allocator<U>&) const noexcept { return true; }
+        template <class U> bool operator!=(const object_block_allocator<U>&) const noexcept { return false; }
+    };
+
     // A destructor class's instance (a shared_ptr with its deleter) keeps its control block in the first `reserve` bytes of
     // its own allocation: the deleter only destroys the instance, the allocation goes when the control block does
     template <class T>
@@ -130,6 +167,10 @@ public:
     // An instance placed in its own raw allocation (a destructor class's, allocate_instance) dies through this; the
     // allocation goes with its control block (detail::block_head_allocator)
     inline static void free_allocation(class_instance* instance) noexcept;
+    // The holder room of the instance's block (detail::object_block_head), for the first wrap to claim; null once claimed or
+    // for an instance made outside one
+    std::byte* take_embedded_holder() noexcept { std::byte* slot = embedded_holder_; embedded_holder_ = nullptr; return slot; }
+    void set_embedded_holder(std::byte* slot) noexcept { embedded_holder_ = slot; }
 
     inline ~class_instance();
 
@@ -433,6 +474,7 @@ private:
     // and unlinking touch the instance and its two neighbours, under the region lock while a region runs
     class_instance* registry_prev_ = nullptr;
     class_instance* registry_next_ = nullptr;
+    std::byte* embedded_holder_ = nullptr;
     friend class class_definition;
 
     inline static std::shared_ptr<void> extract_cpp_object_impl(const script_value& val);

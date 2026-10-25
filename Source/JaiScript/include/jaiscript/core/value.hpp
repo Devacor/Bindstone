@@ -2223,6 +2223,8 @@ namespace detail {
         // run, acquire takes plain make_strong blocks that never touch the pool.
         static strong_ptr<reference_holder> acquire_reference_holder(engine* eng);
         static strong_ptr<object_holder> acquire_object_holder(engine* eng);
+        // the instance's own holder room when its block has an unclaimed one (internal/object_layout.md), else a pooled holder
+        static strong_ptr<object_holder> claim_object_holder(class_instance* instance, engine* eng);
         struct cell_cycle_registry;
         
         

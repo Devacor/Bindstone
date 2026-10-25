@@ -710,9 +710,11 @@ inline std::shared_ptr<class_instance> class_definition::allocate_instance() {
         instance = std::shared_ptr<class_instance>(raw_instance, detail::instance_deleter{shared_from_this()},
                                                    detail::block_head_allocator<class_instance>(memory));
     } else {
-        // control block, instance, slot table and cells: one allocation
-        instance = std::allocate_shared<class_instance>(detail::trailing_allocator<class_instance>(&trailing.memory, extra),
+        // the holder's room, control block, instance, slot table and cells: one allocation
+        std::byte* holder_room = nullptr;
+        instance = std::allocate_shared<class_instance>(detail::object_block_allocator<class_instance>(&trailing.memory, &holder_room, extra),
                                                         class_instance::interned_name_t{}, interned_name(), engine_, trailing);
+        instance->set_embedded_holder(holder_room);
     }
     return instance;
 }

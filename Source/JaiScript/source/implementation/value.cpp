@@ -944,10 +944,35 @@ script_value script_value::make_object(std::string_view type_name, uint64_t type
     return v;
 }
 
+namespace {
+// the embedded holder's last weak reference gives the holder's part of the object block back (detail::object_block_head)
+void release_embedded_holder(jai::detail::control_block_base* base) noexcept {
+#ifndef NDEBUG
+    base->magic = jai::detail::cb_magic_dead;
+#endif
+    auto* block = reinterpret_cast<std::byte*>(base) - 16;
+    static_cast<jai::detail::control_block<script_value::object_holder>*>(base)->~control_block();
+    jai::detail::object_block_head::release(block);
+}
+}
+
+strong_ptr<script_value::object_holder> script_value::claim_object_holder(class_instance* instance, engine* eng) {
+    static_assert(sizeof(jai::detail::control_block<object_holder>) <= jai::detail::object_block_head::holder_room,
+                  "the object block's holder room holds the holder's control block");
+    std::byte* room = instance ? instance->take_embedded_holder() : nullptr;
+    if (!room) { return acquire_object_holder(eng); }
+    reinterpret_cast<jai::detail::object_block_head*>(room - 16)->parts.fetch_add(1, std::memory_order_relaxed);
+    auto* cb = new (room) jai::detail::control_block<object_holder>();
+    cb->dealloc_fn = &release_embedded_holder;
+    auto result = jai::detail::adopt_pooled(new (cb->storage) object_holder());
+    result->owner = eng;
+    return result;
+}
+
 script_value script_value::make_class_object(const class_definition& cd, std::shared_ptr<void> data, engine* eng) {
     script_value v(std::monostate{}, eng);
     v.set_stamp(cd.get_type_info());
-    auto obj = acquire_object_holder(eng);
+    auto obj = claim_object_holder(static_cast<class_instance*>(data.get()), eng);
     obj->type_name = cd.interned_name();
     obj->type_id = cd.get_type_id();
     obj->data = std::move(data);

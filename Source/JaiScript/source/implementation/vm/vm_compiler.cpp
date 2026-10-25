@@ -602,7 +602,7 @@ void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint
 	// ::name targets stay on the plain op (compound_fused's fast path resolves its
 	// target through the frame/env ladder; the global-only door lives in
 	// exec_compound_store and this path is cold by definition)
-	if (!reference_ && !code.empty() && rhs && !(kind_flags & compound_flag_global_only) && !compound_kind_bitwise(kind_flags)) {   // &= |= ^= <<= >>= take the plain op
+	if (!reference_ && !code.empty() && rhs && !(kind_flags & compound_flag_global_only)) {
 		compound_fused_proto cp;
 		bool fuse = false;
 		switch (rhs->get_type()) {
@@ -3369,16 +3369,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (!(cp.kind_flags & compound_flag_no_result)) break;
 			const uint8_t cls = cp.typed_class == operand_class_float_float ? 2 : (cp.typed_class == operand_class_int_int || cp.typed_class == operand_class_unknown) ? 1 : 0;
 			if (cls == 0) break;
-			token_type tok = token_type::plus;
-			bool known = true;
-			switch (cp.kind_flags & compound_kind_mask) {
-			case compound_plus: tok = token_type::plus; break;
-			case compound_minus: tok = token_type::minus; break;
-			case compound_star: tok = token_type::star; break;
-			case compound_slash: tok = token_type::slash; break;
-			default: known = false; break;
-			}
-			const opcode t = known ? arith_op(tok, cls) : opcode::op_halt;
+			const bool known = (cp.kind_flags & compound_kind_mask) != compound_percent;   // %= raises (the pair's unknown operator)
+			const opcode t = known ? arith_op(compound_kind_token(cp.kind_flags), cls) : opcode::op_halt;
 			if (t == opcode::op_halt) break;
 			uint32_t right;
 			if (cp.rhs.const_index != k_invalid_u32) {
@@ -4564,16 +4556,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (cp.slot >= k_typed_slot_mask && cp.slot != k_invalid_u32) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (cp.kind_flags & compound_flag_global_only) { refuse(chunk::cell_refusal_effect, ip); break; }   // `::name`
 				if (!(cp.kind_flags & compound_flag_no_result) || cp.rhs_proto != k_invalid_u32 || (cp.kind_flags & compound_flag_old_result)) { refuse(chunk::cell_refusal_translation, ip); break; }
-				uint8_t tok;
-				switch (cp.kind_flags & compound_kind_mask) {
-				case compound_plus: tok = static_cast<uint8_t>(token_type::plus); break;
-				case compound_minus: tok = static_cast<uint8_t>(token_type::minus); break;
-				case compound_star: tok = static_cast<uint8_t>(token_type::star); break;
-				case compound_slash: tok = static_cast<uint8_t>(token_type::slash); break;
-				case compound_percent: tok = static_cast<uint8_t>(token_type::percent); break;
-				default: tok = 0; break;
-				}
-				if (tok == 0) { refuse(chunk::cell_refusal_translation, ip); break; }
+				const uint8_t tok = static_cast<uint8_t>(compound_kind_token(cp.kind_flags));
 				if (!value(op, cp.rhs, 0, static_cast<uint32_t>(ip * 3), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (cp.slot == k_invalid_u32) {
 					const uint32_t e = k_ir_env_bit | env_written(cp.symbol, k_typed_dst_compound, ip);   // an environment value stepped in place

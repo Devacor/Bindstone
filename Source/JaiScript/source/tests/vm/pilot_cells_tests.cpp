@@ -5068,6 +5068,15 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined tail_of") != std::string::npos, "tail_of grafts with its string reads: " + l);
 			check_true(l.find("-- inlined logs") != std::string::npos, "logs grafts, its push a call the graft keeps: " + l);
 		});
+		test("a_global_container_read_at_a_global_index_keeps_its_own_lookup", [this]() {
+			// the index's environment cell resolves through the read's index role (ip * 3 + 1): at the container's role the two names shared one
+			// lookup-cache row, and the block read the container through the index's binding
+			const std::string src =
+				"array<int> A = [1, 2, 4]; int I = 2; var V = [5, \"x\", 7];\n"
+				"int run() { int s = 0; for (int k = 0; k < 3; ++k) { s = s + A[I]; } return s; }\n"
+				"string runv() { string out = \"\"; for (int k = 0; k < 2; ++k) { out = out + V[I]; } return out; }\n";
+			both(src + "to_string(run()) + \"|\" + runv();", "12|77", "a global container at a global index");
+		});
 		test("bitwise_compound_stores_run_in_the_block", [this]() {
 			// &= |= ^= <<= >>= on int locals take the typed rows and the block's arithmetic as += does (they were a bail per iteration);
 			// on a var local they take the any-kind row, and a float target raises the general form's error

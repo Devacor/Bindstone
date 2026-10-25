@@ -22865,7 +22865,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	}
 	rec.return_conv_class = ast->backend_return_conv;   // typed method returns take the same memoized epilogue as functions
 	if (rec.ast_pin.get() != ast.get()) [[unlikely]] {
-		rec.ast_pin = ast;   // the resolved overload must outlive a mid-call hot reload; slot
+		rec.pin_ast(ast);   // the resolved overload must outlive a mid-call hot reload; slot
 	}                        // reuse with the SAME overload (recursion) skips the atomic pair
 	rec.method_result_anchor = true;
 	rec.callee_pin = std::move(method_val);   // pins the dispatcher and, through it, the class
@@ -23029,7 +23029,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	}
 	rec.return_conv_class = ast->backend_return_conv;   // typed method returns take the same memoized epilogue as functions
 	if (rec.ast_pin.get() != ast.get()) [[unlikely]] {
-		rec.ast_pin = ast;   // the resolved overload must outlive a mid-call hot reload; slot
+		rec.pin_ast(ast);   // the resolved overload must outlive a mid-call hot reload; slot
 	}                        // reuse with the SAME overload (recursion) skips the atomic pair
 	rec.method_result_anchor = true;
 	rec.callee_pin = std::move(method_val);   // pins the dispatcher and, through it, the class
@@ -23201,7 +23201,7 @@ op_status vm_backend::push_static_method_frame(frame& caller, script_value&& met
 	}
 	rec.return_conv_class = ast->backend_return_conv;
 	if (rec.ast_pin.get() != ast.get()) [[unlikely]] {
-		rec.ast_pin = ast;
+		rec.pin_ast(ast);
 	}
 	rec.method_result_anchor = false;   // no receiver to anchor a result to
 	rec.callee_pin = std::move(method_val);

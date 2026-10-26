@@ -1783,6 +1783,18 @@ namespace jai::vm {
             std::vector<std::pair<uint64_t, script_value>> values;
         };
         std::unordered_map<const class_definition*, field_init_plan> field_init_plans_;
+        // A class level's field initializers compiled once into a method body over the level's initializer environment
+        // (vm_compiler::compile_field_initializers); keyed by the class, rebuilt when its initializers or the unit change
+        struct level_initializers {
+            uint64_t unit = UINT64_MAX;
+            std::vector<const expression*> asts;
+            std::unique_ptr<script_defined_function> fn;
+        };
+        std::unordered_map<const class_definition*, level_initializers> level_initializers_;
+        // what a field store inside a level's initializer chunk threw, rethrown where the store would have thrown natively
+        std::exception_ptr field_init_exception_;
+        checked_result<void> run_level_initializers(class_instance& instance, script_class_definition& class_def,
+                                                    const std::shared_ptr<environment>& init_env);
         // A fresh layer's whole starting field state for a class whose initializers are all constants (the same keys)
         struct fresh_layer_plan {
             uint64_t epoch = 0;
@@ -2936,6 +2948,7 @@ namespace jai::vm {
         bool handle_op_error(frame*& fp, size_t records_base);
         bool handle_throw_unwind(frame*& fp, size_t records_base);
         op_status exec_this(frame& f, const vm_instruction& ins);
+        op_status exec_field_init(frame& f, const vm_instruction& ins);
         op_status exec_super(frame& f, const vm_instruction& ins);
         op_status exec_from_this(frame& f, const vm_instruction& ins);
         op_status exec_get_member(frame& f, const vm_instruction& ins);

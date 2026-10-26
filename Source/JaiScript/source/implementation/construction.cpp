@@ -28,6 +28,18 @@ void stamp_literal_field_initializers(class_instance& instance, const script_cla
 	}
 }
 
+checked_result<void> construction_host::initialize_level_fields(class_instance& instance, const std::shared_ptr<script_class_definition>& level,
+                                                                const std::shared_ptr<environment>& level_env) {
+	for (const auto& [field_id, initializer_ast] : level->get_field_initializer_asts()) {
+		if (!initializer_ast) { continue; }
+		auto evaluated = evaluate(initializer_ast, level_env);
+		if (unwinding) { return {}; }
+		if (!evaluated) { return evaluated.error_value(); }
+		instance.set_field(field_id, initializer_store_value(std::move(evaluated.value()), initializer_ast.get()));
+	}
+	return {};
+}
+
 namespace {
 	std::shared_ptr<environment> construction_member_environment(construction_host& host, const std::shared_ptr<environment>& parent,
 	                                                             const script_value& this_value, class_definition* access) {
@@ -224,13 +236,9 @@ namespace {
 			}
 			dispatch_level_scope level_dispatch(instance, it->script_class.get(), class_instance::cdtor_phase::construction);
 			if (delegation == level_initializers.end()) {
-				for (const auto& [field_id, initializer_ast] : it->script_class->get_field_initializer_asts()) {
-					if (!initializer_ast) { continue; }
-					auto evaluated = host.evaluate(initializer_ast, level_env);
-					if (host.unwinding) { return {}; }
-					if (!evaluated) { return evaluated.error_value(); }
-					instance.set_field(field_id, initializer_store_value(std::move(evaluated.value()), initializer_ast.get()));
-				}
+				auto initialized = host.initialize_level_fields(instance, it->script_class, level_env);
+				if (host.unwinding) { return {}; }
+				if (!initialized) { return initialized; }
 			}
 			initializer_depth.reset();
 			auto body = host.run_constructor_body(it->ctor, definition_env, this_value, it->script_class.get(), it->args);

@@ -15429,6 +15429,25 @@ op_status vm_backend::exec_this(frame& f, const vm_instruction& ins) {
 		"'this' can only be used inside methods");
 }
 
+op_status vm_backend::exec_field_init(frame& f, const vm_instruction& ins) {
+	const auto& [field_id, initializer] = f.code->field_inits[ins.a];
+	script_value value = std::move(stack_.back());
+	stack_.pop_back();
+	script_value* tp = current_this(f);
+	const auto* holder = tp ? tp->peek_object_holder() : nullptr;
+	auto* instance = holder && holder->is_class_instance_wrapper ? static_cast<class_instance*>(holder->data.get()) : nullptr;
+	if (!instance) {
+		return raise_(make_error_code(runtime_error_code::this_outside_method), "'this' can only be used inside methods");
+	}
+	try {
+		instance->set_field(field_id, initializer_store_value(std::move(value), initializer));
+	} catch (...) {
+		field_init_exception_ = std::current_exception();   // the store throws natively, as the per-field evaluation's does
+		return raise_(make_error_code(runtime_error_code::constructor_failed), "field initializer store");
+	}
+	return {};
+}
+
 op_status vm_backend::exec_super(frame& f, const vm_instruction& ins) {
 	script_value* tp = current_this(f);
 	if (!tp) {
@@ -19292,6 +19311,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 // extern declares nothing: the name resolves to whatever defines it, and a use while nothing does raises the
 // extern's own text. KEEP BYTE-PARALLEL with interpreter::visit_extern_decl.
 op_status vm_backend::exec_extern_decl(frame& f, const vm_instruction& ins) {
+	if (ins.b == k_field_init_form) { return exec_field_init(f, ins); }
 	auto* decl = static_cast<extern_decl*>(f.code->nodes[ins.a].get());
 	environment_->note_extern(decl->name_id, decl->is_function);
 	return {};
@@ -19638,12 +19658,78 @@ checked_result<void> vm_backend::evaluate_field_initializers(std::shared_ptr<cla
 	if (aggregate) [[unlikely]] {
 		return detail::aggregate_fill_own_fields(*instance, *class_def, *aggregate, engine_, initialize_field);
 	}
+	if (init_env) {
+		return run_level_initializers(*instance, *class_def, init_env);
+	}
 	for (const auto& [field_id, initializer_ast] : class_def->get_field_initializer_asts()) {
 		if (initializer_ast) {
 			auto initialized = initialize_field(field_id, initializer_ast);
 			if (!initialized) { return initialized; }
 		}
 	}
+	return {};
+}
+
+// The level's initializers run as one method body over init_env (its `this`, the constructor's parameters, then the definition
+// environment): the frame resolves names as the per-field evaluation did, and each value lands through op_field_init
+checked_result<void> vm_backend::run_level_initializers(class_instance& instance, script_class_definition& class_def,
+                                                        const std::shared_ptr<environment>& init_env) {
+	const auto& initializers = class_def.get_field_initializer_asts();
+	level_initializers& entry = level_initializers_[&class_def];
+	bool current = entry.fn && entry.unit == current_unit().id;
+	if (current) {
+		size_t at = 0;
+		for (const auto& [field_id, initializer] : initializers) {
+			if (!initializer) { continue; }
+			if (at >= entry.asts.size() || entry.asts[at] != initializer.get()) { current = false; break; }
+			++at;
+		}
+		current = current && at == entry.asts.size();
+	}
+	if (!current) {
+		std::vector<std::pair<uint64_t, expression_ptr>> compiled_initializers;
+		entry.asts.clear();
+		for (const auto& [field_id, initializer] : initializers) {
+			if (!initializer) { continue; }
+			compiled_initializers.emplace_back(field_id, initializer);
+			entry.asts.push_back(initializer.get());
+		}
+		std::unique_lock<std::mutex> region_compile_guard;   // in-region compiles serialize engine-wide (chunk_for_body)
+		if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
+			region_compile_guard = std::unique_lock<std::mutex>(engine_->parallel_compile_mutex());
+		}
+		arm_listing();
+		auto code = compiler_.compile_field_initializers(class_def.interned_name(), compiled_initializers);
+		note_compiled(*code);
+		entry.fn = std::make_unique<script_defined_function>(class_def.interned_name(), std::vector<parameter>{}, nullptr,
+		                                                     std::make_shared<block_stmt>(compiled_initializers.empty() ? source_location{} : compiled_initializers.front().second->location, std::vector<declaration_ptr>{}), nullptr, 0);
+		entry.fn->backend_body_cache = std::move(code);
+		entry.unit = current_unit().id;
+	}
+	entry.fn->unit = current_unit();
+	auto this_result = init_env->get(this_id_);
+	if (!this_result) { return this_result.error_value(); }
+	const script_value this_value = std::move(this_result.value());
+	const method_entry method{&init_env, &this_value, &class_def};
+	const std::vector<script_value> no_arguments;
+	const pending_call_site pending = pending_site_ctx_;   // the constructor body's call still takes the site its arming left
+	pending_site_ctx_ = {};
+	struct uncounted_frame {   // the initializers run at the constructor's depth: their frame is no call of its own
+		int& depth;
+		explicit uncounted_frame(int& d) noexcept : depth(d) { --depth; }
+		~uncounted_frame() { ++depth; }
+	};
+	auto ran = [&] {
+		uncounted_frame depth_kept(current_call_depth_);
+		return call_script_function(*entry.fn, no_arguments, nullptr, nullptr, nullptr, &method);
+	}();
+	pending_site_ctx_ = pending;
+	if (field_init_exception_) [[unlikely]] {
+		std::exception_ptr thrown = std::move(field_init_exception_);
+		field_init_exception_ = nullptr;
+		std::rethrow_exception(thrown);
+	}
+	if (!ran) { return ran.error_value(); }
 	return {};
 }
 
@@ -19768,6 +19854,13 @@ struct vm_backend::construction_lender final : detail::construction_host {
 
 	checked_result<script_value> run_constructor_body(const std::shared_ptr<function_decl>& ctor, const std::shared_ptr<environment>& definition_env,
 	                                                  const script_value& this_value, class_definition* access, const std::vector<script_value>& args) override {
+		if (!ctor->is_coroutine && definition_env) {
+			// the body runs as a method call over the definition env with this on its frame (a pooled method scope when it needs one)
+			script_defined_function body(ctor->name, shared_parameters_for(ctor.get()), ctor->return_type, ctor->body, nullptr, ctor->local_count);
+			body.unit = ctor->unit;
+			const method_entry method{&definition_env, &this_value, access};
+			return self.call_script_function(body, args, nullptr, nullptr, nullptr, &method);
+		}
 		auto method_env = std::make_shared<environment>(definition_env, self.env_symbolizer_, this_value);
 		method_env->set_access_context(access);
 		method_env->define(self.symbolizer_->get_this_id(), this_value);
@@ -19780,6 +19873,11 @@ struct vm_backend::construction_lender final : detail::construction_host {
 		return self.evaluate_field_initializers(instance, cls, init_env, skip_parent_recursion, aggregate);
 	}
 
+	checked_result<void> initialize_level_fields(class_instance& instance, const std::shared_ptr<script_class_definition>& level,
+	                                             const std::shared_ptr<environment>& level_env) override {
+		if (level->get_field_initializer_asts().empty()) { return {}; }
+		return self.run_level_initializers(instance, *level, level_env);   // under the caller's unit, as each evaluation ran
+	}
 	std::optional<error_propagator> pass_depth_gate() override { return self.pass_depth_gate(); }
 	std::shared_ptr<environment> current_environment() override { return self.environment_; }
 	std::shared_ptr<environment> global_environment() override { return self.engine_ ? self.engine_->get_global_environment() : self.environment_; }

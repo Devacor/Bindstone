@@ -33,7 +33,7 @@ namespace jai::vm {
         op_binary,          // a=token_type, b=binary_shape_none; pops rhs,lhs, pushes result
         op_binary_fused,    // a=fused_binary_proto index, b=shape; resolves operands in place, pushes result
         op_index,           // a=flags(index_flag_*); pops index,container, pushes element/reference
-        op_index_assign,    // pops reference,value; assigns through, pushes value
+        op_bind_captures,   // a=first capture slot, b=count: a converted closure's body binds its captured cells into those slots (its first instruction)
         op_index_compound,  // a=compound kind; pops rhs,reference; computes, assigns through, pushes result
         op_unary,           // a=token_type; pops operand, pushes result
         op_array,           // a=element count; pops elements, pushes array
@@ -482,7 +482,6 @@ namespace jai::vm {
             case opcode::op_binary: return "BINARY";
             case opcode::op_binary_fused: return "BINARY_FUSED";
             case opcode::op_index: return "INDEX";
-            case opcode::op_index_assign: return "INDEX_ASSIGN";
             case opcode::op_index_compound: return "INDEX_COMPOUND";
             case opcode::op_index_store: return "INDEX_STORE";
             case opcode::op_index_compound_fused: return "INDEX_COMPOUND_FUSED";
@@ -571,6 +570,7 @@ namespace jai::vm {
             case opcode::op_catch_end: return "CATCH_END";
             case opcode::op_case_eq: return "CASE_EQ";
             case opcode::op_switch_table: return "SWITCH_TABLE";
+            case opcode::op_bind_captures: return "BIND_CAPTURES";
             case opcode::op_iter_init: return "ITER_INIT";
             case opcode::op_iter_next: return "ITER_NEXT";
             case opcode::op_iter_pop: return "ITER_POP";

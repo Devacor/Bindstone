@@ -1472,7 +1472,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 			const script_value* v = env ? env->get_value_ptr(id.symbol_id) : nullptr;
 			if (!v || !v->deref().is_function()) return false;
 			const auto* thunk = v->deref().as_function().target<script_callable_thunk>();
-			if (!thunk || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn || thunk->payload.fn->closure_env || !thunk->payload.fn->body) return false;
+			if (!thunk || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn || thunk->payload.fn->closure_env || thunk->payload.fn->converted() || !thunk->payload.fn->body) return false;
 			out.push_back(detail::ref_write_callee{&thunk->payload.fn->parameters(), thunk->payload.fn->body.get(), thunk->payload.fn->name, false, false});
 			read.emplace_back(id.symbol_id, thunk->payload.fn->body.get());
 			return true;

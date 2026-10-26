@@ -2538,27 +2538,28 @@ namespace {
 					if (payload->kind != script_callable::kind_type::function || !payload->fn) {
 						return fail(callee, "call target '" + callee_name + "' is not a plain function");
 					}
-					if (!admit_function(payload->fn, callee->symbol_id, root_param::none, callee)) { return false; }
-					note_death(payload->fn->return_type);   // the call's result is a temporary
+					const std::shared_ptr<script_defined_function> callee_fn = script_defined_function::environment_form(payload->fn, &eng);
+					if (!admit_function(callee_fn, callee->symbol_id, root_param::none, callee)) { return false; }
+					note_death(callee_fn->return_type);   // the call's result is a temporary
 					// A non-const by-ref parameter receiving captured state is a write channel (the callee may store through it):
 					// refused statically. A const T& one is a captured read, a subscript read when the callee only subscripts it
-					const auto& params = payload->fn->parameters();
+					const auto& params = callee_fn->parameters();
 					for (size_t i = 0; i < call->arguments.size() && i < params.size(); ++i) {
 						if (proof_mode && !params[i].is_reference && conversion_may_run_code(params[i].type, call->arguments[i])) { root_escaped = true; }
 						if (!params[i].is_reference) { continue; }
 						const expression* arg = call->arguments[i].get();
 						const bool const_ref = !proof_mode && params[i].is_const;
-						if (!proof_mode && !params[i].is_const && !ref_parameter_takes_temporary(eng, params, payload->fn->body.get(), i, true)) {
+						if (!proof_mode && !params[i].is_const && !ref_parameter_takes_temporary(eng, params, callee_fn->body.get(), i, true)) {
 							note_loop_variable_reference_argument(call->arguments[i]);
 						}
 						if (identifier_expr* root = enclosing_root(call->arguments[i])) {
 							if (!const_ref) {
-								const bool reads_only = !proof_mode && ref_parameter_takes_temporary(eng, params, payload->fn->body.get(), i, true);
+								const bool reads_only = !proof_mode && ref_parameter_takes_temporary(eng, params, callee_fn->body.get(), i, true);
 								return fail(root, proof_mode ? "argument passes enclosing state '" + std::string(root->name) + "' by reference (captured reads are read-only)"
 								                             : reference_argument_refusal(root, params[i], callee_name, reads_only));
 							}
 							if (arg == root) {
-								const size_t use = const_ref_use_index(payload->fn->body.get(), i);
+								const size_t use = const_ref_use_index(callee_fn->body.get(), i);
 								touch_capture(root, use != SIZE_MAX);
 								note_bare_capture(root);
 								if (use != SIZE_MAX) { const_ref_touches.emplace_back(capture_index[root->symbol_id], use); }
@@ -2567,14 +2568,14 @@ namespace {
 							continue;
 						}
 						if (const_ref && const_ref_local(arg)) {
-							if (const size_t use = const_ref_use_index(payload->fn->body.get(), i); use != SIZE_MAX) {
+							if (const size_t use = const_ref_use_index(callee_fn->body.get(), i); use != SIZE_MAX) {
 								const_ref_forwards.emplace_back(local(static_cast<const identifier_expr*>(arg)->symbol_id)->const_ref_use, use);
 								forwarded_arguments.push_back(arg);
 								continue;
 							}
 						}
 						// A callee that writes through the parameter writes the argument's place
-						if (proof_mode && !ref_parameter_takes_temporary(eng, params, payload->fn->body.get(), i, true)) {
+						if (proof_mode && !ref_parameter_takes_temporary(eng, params, callee_fn->body.get(), i, true)) {
 							const expression* arg = call->arguments[i].get();
 							if (!chain_root_identifier(arg) || global_rooted(arg)) { return fail(arg, "argument passes state the proof does not own to a writing reference parameter"); }
 							if (chain_root_is_element(call->arguments[i])) { adm.element_mutated = true; }
@@ -6009,14 +6010,15 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 		~running_guard() { s.region_running = false; }
 	} guard(state);
 
-	const parallel_admission* adm = admit_cached(eng, state, fn_payload->fn);
+	const std::shared_ptr<script_defined_function> root_fn = script_defined_function::environment_form(fn_payload->fn, &eng);
+	const parallel_admission* adm = admit_cached(eng, state, root_fn);
 	if (!adm->admitted) {
 		return raise(adm->code, adm->message);
 	}
-	const std::shared_ptr<function_decl>& transform_wrapper = build_transform_wrapper(eng, state, fn_payload->fn, *adm);
+	const std::shared_ptr<function_decl>& transform_wrapper = build_transform_wrapper(eng, state, root_fn, *adm);
 	const parallel_admission* weight_adm = nullptr;
 	if (weight_payload) {
-		weight_adm = admit_cached(eng, state, weight_payload->fn);
+		weight_adm = admit_cached(eng, state, script_defined_function::environment_form(weight_payload->fn, &eng));
 		if (!weight_adm->admitted) {
 			return raise(weight_adm->code, weight_adm->message);
 		}
@@ -6074,7 +6076,7 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	containers.push_back(out);
 	plan.prefix = "parallel_transform";
 	plan.containers = &containers;
-	plan.root_fn = fn_payload->fn;
+	plan.root_fn = root_fn;
 	plan.adm = adm;
 	plan.chunk_wrapper = &transform_wrapper;
 	plan.inplace = false;
@@ -6303,7 +6305,7 @@ checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<
 			return usage(std::string("parallel_reduce: ") + roles[k] + " must take two parameters " + shapes[k]);
 		}
 	}
-	const std::shared_ptr<script_defined_function>& step = callbacks[0]->fn;
+	const std::shared_ptr<script_defined_function> step = script_defined_function::environment_form(callbacks[0]->fn, &eng);
 	if (step->parameters()[1].is_reference) {
 		return usage("parallel_reduce: step takes its element by value (the elements are the input's, never written)");
 	}
@@ -6321,7 +6323,7 @@ checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<
 		if (!step_adm->admitted) {
 			return raise(step_adm->code, step_adm->message);
 		}
-		const parallel_admission* combine_adm = admit_cached(eng, state, callbacks[1]->fn, /*inplace_root*/ true, "parallel_reduce");
+		const parallel_admission* combine_adm = admit_cached(eng, state, script_defined_function::environment_form(callbacks[1]->fn, &eng), /*inplace_root*/ true, "parallel_reduce");
 		if (!combine_adm->admitted) {
 			return raise(combine_adm->code, combine_adm->message);
 		}

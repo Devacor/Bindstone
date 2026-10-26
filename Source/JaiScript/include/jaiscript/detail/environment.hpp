@@ -689,8 +689,21 @@ struct call_frame {
         size_t line = 0;   // the declaration's line (an overload's diagnostics name it)
         uint64_t context = 0;   // the host entry that declared it (engine::host_entry_generation)
         std::shared_ptr<const function_decl> decl;   // the vm's mint pins its declaration, so the inliner's stamps on it resolve while the function lives (the interpreter's decl already owns its mint)
+        // A converted closure (internal/closure_conversion_design.md): closure_env is null, backend_body_cache is the chunk compiled
+        // with a slot per captured name, and captures holds each name's cell in capture_ids' order (body stays the lambda's own)
+        struct converted_captures {
+            std::vector<script_value> cells;
+            std::shared_ptr<const std::vector<uint64_t>> ids;
+            std::shared_ptr<script_defined_function> environment_twin;
+        };
+        std::unique_ptr<converted_captures> captures;
 
         const std::vector<parameter>& parameters() const noexcept { return *shared_parameters; }
+        bool converted() const noexcept { return captures != nullptr; }
+        // fn as code that runs its body by name sees it: a converted closure answers its twin over one environment holding its
+        // cells (made once; the parallel builtins and admission run bodies that way), any other function itself
+        static std::shared_ptr<script_defined_function> environment_form(const std::shared_ptr<script_defined_function>& fn, engine* eng);
+        ~script_defined_function();
 
         // slots is the body's frame size (its declaration's local_count): the vm places its temporaries above it
         script_defined_function(std::string_view n, std::vector<parameter> params,

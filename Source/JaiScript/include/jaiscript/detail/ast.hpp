@@ -119,6 +119,8 @@ namespace jai {
         // Parser escape analysis for a `T& p` parameter: its reference reaches another binding (a call argument), so the call
         // marks it with T (detail::ref_declare) for the bindings that cannot see the name
         bool declared_ref_escapes = false;
+        // A converted closure's captured name (never parsed): its slot binds the closure's cell when the frame enters
+        bool binds_capture = false;
         mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID for optimization
         mutable size_t slot_index = SIZE_MAX;     // Slot index for fast local access (SIZE_MAX = not assigned)
         // A reference parameter the body never writes through takes a temporary

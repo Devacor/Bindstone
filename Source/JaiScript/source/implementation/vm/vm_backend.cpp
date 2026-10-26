@@ -40,6 +40,9 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/string_element.hpp>
 #include <jaiscript/detail/import_paths.hpp>
 #include <jaiscript/detail/capture_ladder.hpp>
+#include <jaiscript/detail/ast_serializer.hpp>
+#include <jaiscript/detail/body_walker.hpp>
+#include <jaiscript/detail/expr_children.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (interp parity)
 #include <jaiscript/detail/const_rules.hpp>   // const guards (interp parity)
 #include <jaiscript/detail/aggregate_init.hpp>
@@ -110,6 +113,7 @@ namespace { struct cell_cost_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; 
 #else
 #define JAI_ENV_CENSUS(i) ((void)0)
 #endif
+namespace jai::detail::aggregate_lowering_impl { bool contains_yield(const statement* s); }
 namespace jai::vm {
 
 namespace {
@@ -246,10 +250,10 @@ struct vm_backend::frame_guard {
 	size_t iter_base;
 	size_t cfor_base;
 	size_t top_mark;
-	frame_guard(vm_backend* backend, frame* f)
+	frame_guard(vm_backend* backend, frame* f, const script_defined_function* function = nullptr)
 		: vm(backend), try_base(backend->try_records_.size()), iter_base(backend->iter_states_.size()),
 		  cfor_base(backend->cfor_states_.size()), top_mark(backend->top_frame_mark_) {
-		vm->enter_frame(*f);
+		vm->enter_frame(*f, function);
 		if (f->top_level) { vm->top_frame_mark_ = vm->frames_.size() - 1; }
 	}
 	~frame_guard() {
@@ -631,10 +635,17 @@ std::vector<std::pair<std::string, script_value>> vm_backend::frame_slot_locals(
 	}
 	std::sort(slot_names.begin(), slot_names.end(),
 	          [](const auto& a, const auto& b) { return a.first < b.first; });
+	// a converted closure's capture slots are its captures, not its locals (the environment form lists none)
+	size_t capture_first = SIZE_MAX, capture_end = SIZE_MAX;
+	if (!f->code->code.empty() && f->code->code[0].op == opcode::op_bind_captures) {
+		capture_first = f->code->code[0].a;
+		capture_end = capture_first + f->code->code[0].b;
+	}
 	size_t last = SIZE_MAX;
 	for (const auto& [slot, name] : slot_names) {
 		if (slot == last) { continue; }
 		last = slot;
+		if (slot >= capture_first && slot < capture_end) { continue; }
 		const script_value* v = frame_slot(*f, slot);
 		if (!v) { continue; }                            // reserved capacity only: not live yet
 		out.emplace_back(std::string(name), *v);
@@ -754,6 +765,19 @@ void vm_backend::pop_instance_scope() {
 }
 
 script_value vm_backend::get_variable(const std::string& name) const {
+	// a stop inside a converted closure reads its captured names first, as its environment form's scope would
+	if (!frames_.empty()) {
+		const frame* top = frames_.back();
+		if (top && top->captures && top->code && !top->code->code.empty() && top->code->code[0].op == opcode::op_bind_captures) {
+			const uint64_t id = symbolizer_->intern(name);
+			const auto& ids = *top->captures->ids;
+			for (size_t k = 0; k < ids.size(); ++k) {
+				if (ids[k] != id) { continue; }
+				const script_value* bound = frame_slot(*top, top->code->code[0].a + k);
+				return (bound ? *bound : top->captures->cells[k]).deref();
+			}
+		}
+	}
 	auto result = environment_->get(name);
 	if (!result) {
 		if (!result.message().empty()) {
@@ -9278,7 +9302,7 @@ bool vm_backend::raw_probe(frame& f, const chunk::cell_loop& loop, uint32_t inde
 	if (!(e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() &&
 	      e.fast_ptr->raw_storage_index() == script_value::TYPEID_FUNCTION && &e.fast_ptr->unchecked_as_function() == site.ic_identity)) return false;
 	const script_defined_function& fn = *site.ic_fn;
-	if (fn.closure_env) return false;
+	if (fn.closure_env || fn.converted()) return false;
 	chunk* body = static_cast<chunk*>(fn.backend_body_cache.get());
 	if (!body || body->frame_program == k_invalid_u32) return false;
 	const chunk::cell_loop& program = body->cell_loops[body->frame_program];
@@ -12986,7 +13010,7 @@ bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
 	if (worker_holds && *worker_holds == &fn) return true;
 	note_worker_decline(worker_decline::inline_fn_memo);
 	const auto* thunk = fn.target<script_callable_thunk>();
-	const bool holds = thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn && (!thunk->payload.fn->closure_env || (parallel_worker_ && thunk->payload.fn->closure_env.get() == worker_root_env_)) && thunk->payload.fn->body.get() == site.body;   // a worker's copy of the callee closes over the worker's root
+	const bool holds = thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn && !thunk->payload.fn->converted() && (!thunk->payload.fn->closure_env || (parallel_worker_ && thunk->payload.fn->closure_env.get() == worker_root_env_)) && thunk->payload.fn->body.get() == site.body;   // a worker's copy of the callee closes over the worker's root
 	if (holds && !parallel_worker_) { site.holds_fn = *v->get_storage().get_if<script_value::TYPEID_FUNCTION>(); }
 	if (holds && worker_holds) { *worker_holds = &fn; }
 	return holds;
@@ -13305,7 +13329,7 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 				parked_direct = true;
 				if (parallel_worker_) {
 					if (worker_chunk_env_cache::call_ic* ic = worker_call_ic(f, site)) { *ic = { &calleeVal.unchecked_as_function(), pc.fn, pc.pin, static_cast<uint32_t>(argc), false }; }
-				} else if (cached_global_env_ && !thunk->payload.fn->closure_env) {
+				} else if (cached_global_env_ && !thunk->payload.fn->closure_env && !thunk->payload.fn->converted()) {
 					retire_site_callee(site);
 					site.ic_pin = pc.pin;
 					site.ic_identity = &calleeVal.unchecked_as_function();
@@ -14146,7 +14170,7 @@ bool vm_backend::push_plain_frame(frame& caller, const call_site& site, const sc
 	rec.f.top_level = false;
 	rec.f.unit = function.unit;
 	enter_unit(function.unit);
-	enter_frame(rec.f);
+	enter_frame(rec.f, &function);
 	const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
 	stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
 	switch_to_ = &rec.f;
@@ -14262,7 +14286,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.f.top_level = false;
 	rec.f.unit = function.unit;
 	enter_unit(function.unit);
-	enter_frame(rec.f);
+	enter_frame(rec.f, &function);
 	JAI_CALL_PUSH_SECTION(3);
 
 	const bool bound_in_place = binds_slice_in_place(function, stack_.data() + args_base, argc);
@@ -14647,6 +14671,217 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+namespace {
+// Which captured names a body only reads: a name stored to, incremented, handed to a call or a construction (a T& parameter
+// could bind it), called through as a method receiver, bound by a reference declaration or a by-reference loop counts as
+// written; a statement kind the scan does not know writes every name
+struct capture_write_scan {
+	const std::vector<uint64_t>& ids;
+	std::vector<uint8_t> written;
+	bool names_reference = false;   // a captured name resolves to a reference declaration (its declared type governs a store through it)
+	explicit capture_write_scan(const std::vector<uint64_t>& a_ids) : ids(a_ids), written(a_ids.size(), 0) {}
+	void all() { std::fill(written.begin(), written.end(), uint8_t{1}); }
+	void root(const expression* e) {
+		while (e) {
+			switch (e->get_type()) {
+				case node_type::identifier_expr: {
+					const uint64_t sym = static_cast<const identifier_expr*>(e)->symbol_id;
+					for (size_t k = 0; k < ids.size(); ++k) { if (ids[k] == sym) { written[k] = 1; } }
+					return;
+				}
+				case node_type::member_expr: e = static_cast<const member_expr*>(e)->object.get(); break;
+				case node_type::binary_expr: e = static_cast<const binary_expr*>(e)->left.get(); break;
+				case node_type::cast_expr: e = static_cast<const cast_expr*>(e)->operand.get(); break;
+				case node_type::assignment_expr: e = static_cast<const assignment_expr*>(e)->target.get(); break;
+				case node_type::ternary_expr: {
+					auto* t = static_cast<const ternary_expr*>(e);
+					root(t->then_expression.get());
+					e = t->else_expression.get();
+					break;
+				}
+				default: return;
+			}
+		}
+	}
+	void expr(const expression* e) {
+		if (!e) return;
+		switch (e->get_type()) {
+			case node_type::identifier_expr: {
+				auto* id = static_cast<const identifier_expr*>(e);
+				if ((!id->names_value_decl || id->declared_ref_kind != 0) && std::find(ids.begin(), ids.end(), id->symbol_id) != ids.end()) { names_reference = true; }
+				return;
+			}
+			case node_type::assignment_expr: root(static_cast<const assignment_expr*>(e)->target.get()); break;
+			case node_type::unary_expr: {
+				auto* u = static_cast<const unary_expr*>(e);
+				if (u->op.type == token_type::plus_plus || u->op.type == token_type::minus_minus) { root(u->operand.get()); }
+				break;
+			}
+			case node_type::call_expr: {
+				auto* c = static_cast<const call_expr*>(e);
+				if (c->callee && c->callee->get_type() == node_type::member_expr) { root(c->callee.get()); }
+				for (const auto& a : c->arguments) { root(a.get()); }
+				break;
+			}
+			case node_type::new_expr: for (const auto& a : static_cast<const new_expr*>(e)->arguments) { root(a.get()); } break;
+			case node_type::cast_expr: root(static_cast<const cast_expr*>(e)->operand.get()); break;
+			case node_type::lambda_expr: case node_type::yield_expr: case node_type::import_expr: case node_type::include_expr: all(); break;
+			default: break;
+		}
+		detail::for_each_child_expression(e, [this](const expression* child) { expr(child); });
+	}
+	void stmt(const statement* s) {
+		if (!s) return;
+		switch (s->get_type()) {
+			case node_type::expression_stmt: expr(static_cast<const expression_stmt*>(s)->expression.get()); return;
+			case node_type::expression_decl: expr(static_cast<const expression_decl*>(s)->expression.get()); return;
+			case node_type::statement_decl: stmt(static_cast<const statement_decl*>(s)->statement.get()); return;
+			case node_type::variable_decl: {
+				auto* v = static_cast<const variable_decl*>(s);
+				if (v->type && v->type->is_reference()) { root(v->initializer.get()); }
+				expr(v->initializer.get());
+				return;
+			}
+			case node_type::destructuring_decl: {
+				auto* d = static_cast<const destructuring_decl*>(s);
+				root(d->initializer.get());
+				expr(d->initializer.get());
+				return;
+			}
+			case node_type::block_stmt: for (const auto& d : static_cast<const block_stmt*>(s)->declarations) { stmt(d.get()); } return;
+			case node_type::if_stmt: { auto* i = static_cast<const if_stmt*>(s); expr(i->condition.get()); stmt(i->then_statement.get()); stmt(i->else_statement.get()); return; }
+			case node_type::while_stmt: { auto* w = static_cast<const while_stmt*>(s); expr(w->condition.get()); stmt(w->body.get()); return; }
+			case node_type::for_stmt: { auto* f = static_cast<const for_stmt*>(s); stmt(f->initializer.get()); expr(f->condition.get()); expr(f->update.get()); stmt(f->body.get()); return; }
+			case node_type::range_for_stmt: {
+				auto* r = static_cast<const range_for_stmt*>(s);
+				if (r->is_reference) { root(r->container.get()); }
+				expr(r->container.get());
+				stmt(r->body.get());
+				return;
+			}
+			case node_type::return_stmt: expr(static_cast<const return_stmt*>(s)->value.get()); return;
+			case node_type::break_stmt: case node_type::continue_stmt: case node_type::fallthrough_stmt: return;
+			case node_type::try_stmt: { auto* t = static_cast<const try_stmt*>(s); stmt(t->try_block.get()); stmt(t->catch_block.get()); return; }
+			case node_type::switch_stmt: {
+				auto* sw = static_cast<const switch_stmt*>(s);
+				expr(sw->condition.get());
+				for (const auto& c : sw->cases) { expr(c->value.get()); for (const auto& b : c->body) { stmt(b.get()); } }
+				if (sw->default_case) { for (const auto& b : sw->default_case->body) { stmt(b.get()); } }
+				return;
+			}
+			default: all(); return;
+		}
+	}
+};
+}
+
+const closure_proto::converted_form* vm_backend::converted_form_of(const closure_proto& proto) {
+	if (proto.convert_state != 0) { return proto.convert_state == 1 ? proto.converted.get() : nullptr; }
+	proto.convert_state = 2;
+	const lambda_expr& lambda = *proto.lambda;
+	// vm-reference keeps every closure's environment: the oracle the converted form is held to
+	if (reference_mode_ || proto.captures_this || proto.uses_instance || !lambda.chained_outer_slots.empty() || !lambda.chained_outer_names.empty() ||
+	    (lambda.return_type && lambda.return_type->is_reference()) ||
+	    detail::aggregate_lowering_impl::contains_yield(proto.body.get())) {
+		return nullptr;
+	}
+	for (size_t i = 0; i < lambda.parameters.size(); ++i) {
+		if (lambda.parameters[i].slot_index != i) { return nullptr; }
+	}
+	auto ids = std::make_shared<std::vector<uint64_t>>();
+	std::vector<size_t> outer_slots;
+	auto planned_slot = [&](uint64_t sym) -> size_t {
+		for (const auto& [s, slot] : proto.outer_slot_plan) { if (s == sym) return slot; }
+		return SIZE_MAX;
+	};
+	auto add = [&](uint64_t sym, size_t slot) {
+		if (std::find(ids->begin(), ids->end(), sym) != ids->end()) { return; }
+		ids->push_back(sym);
+		outer_slots.push_back(slot);
+	};
+	const bool has_default = proto.default_capture != static_cast<uint8_t>(lambda_expr::capture_default::none);
+	for (const auto& capture : proto.captures) {
+		if (capture.init || capture.symbol_id == this_id_) { return nullptr; }
+		const size_t slot = capture.outer_slot != SIZE_MAX ? capture.outer_slot : planned_slot(capture.symbol_id);
+		if (slot == SIZE_MAX) { return nullptr; }
+	}
+	if (has_default) {
+		for (uint64_t var_id : proto.used_variables) {
+			if (var_id == this_id_) { continue; }
+			if (std::any_of(proto.captures.begin(), proto.captures.end(), [var_id](const auto& c) { return c.symbol_id == var_id; })) { continue; }
+			if (const size_t slot = planned_slot(var_id); slot != SIZE_MAX) { add(var_id, slot); }
+		}
+	}
+	for (const auto& capture : proto.captures) {
+		add(capture.symbol_id, capture.outer_slot != SIZE_MAX ? capture.outer_slot : planned_slot(capture.symbol_id));
+	}
+	for (const auto& [sym, slot] : proto.outer_slot_plan) { add(sym, slot); }
+	if (ids->empty()) { return nullptr; }
+
+	// a captured name the body declares again (a parameter or a local of the same name) keeps the environment form
+	std::unordered_set<uint64_t> declared;
+	for (const auto& p : lambda.parameters) { declared.insert(p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name)); }
+	{
+		detail::body_walker walker;
+		walker.symbolizer = symbolizer_;
+		walker.on_declared = [&declared](uint64_t id) { declared.insert(id); };
+		walker.stmt(proto.body);
+	}
+	for (uint64_t sym : *ids) { if (declared.count(sym)) { return nullptr; } }
+
+	// the body over capture slots: its own slots past the parameters move up by the capture count, each captured name reads
+	// the slot after the parameters that binds its cell
+	const size_t first = lambda.parameters.size();
+	const size_t count = ids->size();
+	std::vector<parameter> parameters = lambda.parameters;
+	std::unordered_map<uint64_t, size_t> capture_slots;
+	for (size_t k = 0; k < count; ++k) {
+		parameter p(nullptr, std::string(symbolizer_->get_string((*ids)[k])), /*ref*/ true);
+		p.binds_capture = true;
+		p.symbol_id = (*ids)[k];
+		p.slot_index = first + k;
+		parameters.push_back(std::move(p));
+		capture_slots.emplace((*ids)[k], first + k);
+	}
+	std::shared_ptr<block_stmt> body;
+	try {
+		std::vector<declaration_ptr> decls;
+		decls.push_back(std::make_shared<statement_decl>(proto.body->location, proto.body));
+		const std::vector<uint8_t> bytes = detail::ast_writer(*symbolizer_).in_body().serialize(decls, 0);
+		detail::ast_frame_context context{lambda.local_count + count, parameters, first, count, &capture_slots};
+		detail::ast_reader reader(bytes.data(), bytes.size(), engine_, &context);
+		uint64_t fingerprint = 0;
+		auto back = reader.deserialize(fingerprint);
+		if (reader.frame_count() != 2 || back.size() != 1 || back[0]->get_type() != node_type::statement_decl) { return nullptr; }
+		const statement_ptr& copied = static_cast<statement_decl*>(back[0].get())->statement;
+		if (!copied || copied->get_type() != node_type::block_stmt) { return nullptr; }
+		body = std::static_pointer_cast<block_stmt>(copied);
+	} catch (const std::exception&) {
+		return nullptr;
+	}
+	capture_write_scan scan(*ids);
+	scan.stmt(proto.body.get());
+	if (scan.names_reference) { return nullptr; }
+	auto form = std::make_shared<closure_proto::converted_form>();
+	form->read_only.resize(ids->size());
+	for (size_t k = 0; k < ids->size(); ++k) { form->read_only[k] = scan.written[k] ? 0 : 1; }
+	form->ids = std::move(ids);
+	form->outer_slots = std::move(outer_slots);
+	form->body_chunk = chunk_for_body("<lambda>", parameters, body, lambda.local_count + count, current_unit());
+	proto.converted = form;
+	proto.convert_state = 1;
+	return form.get();
+}
+
+op_status vm_backend::exec_bind_captures(frame& f, const vm_instruction& ins) {
+	const std::vector<script_value>* cells = f.captures ? &f.captures->cells : nullptr;
+	if (!cells || cells->size() != ins.b) [[unlikely]] {
+		return raise_(make_error_code(runtime_error_code::invalid_operation), "A converted closure's body entered without its captures");
+	}
+	for (uint32_t k = 0; k < ins.b; ++k) { frame_slot_set(f, ins.a + k, script_value((*cells)[k])); }
+	return {};
+}
+
 op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 	const closure_proto& proto = f.code->closure_protos[ins.a];
 	auto closure_env = environment_;
@@ -14709,6 +14944,61 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 	const environment* program_scope_raw = detail::program_scope_of(closure_env.get());
 	const bool needs_capture_env = has_explicit_captures || !outer_refs.empty() || (has_default_capture && !proto.used_variables.empty()) ||
 		(program_scope_raw && program_scope_raw->parent_raw());
+
+	// The converted form: every captured name is a slot of the creating frame, so the closure keeps one cell per name and no
+	// environment; the cells are made in the order the environment form defines its names (the same copies, the same shares)
+	if (needs_capture_env && !captures_this && init_count == 0 && f.locals && !f.top_level && !parallel_worker_ &&
+	    !(program_scope_raw && program_scope_raw->parent_raw())) {
+		if (const closure_proto::converted_form* form = converted_form_of(proto)) {
+			const std::vector<uint64_t>& ids = *form->ids;
+			const size_t live = frame_slot_count(f);
+			bool fits = true;
+			for (size_t k = 0; fits && k < ids.size(); ++k) { fits = form->outer_slots[k] < live && frame_slot(f, form->outer_slots[k]); }
+			if (fits && has_default_capture) {
+				ensure_frame_member_scope(f, environment_.get());
+				const detail::member_scope_ctx scope = detail::frame_member_scope(*f.locals);
+				for (uint64_t var_id : proto.used_variables) {
+					if (var_id == this_id_ || std::find(ids.begin(), ids.end(), var_id) != ids.end()) { continue; }
+					const auto src = detail::resolve_capture_source(nullptr, environment_.get(), scope, var_id);
+					if (src.what != detail::capture_source::kind::miss && !(src.what == detail::capture_source::kind::chain && src.global)) { fits = false; break; }
+				}
+			}
+			if (fits) {
+				std::vector<script_value> cells;
+				cells.reserve(ids.size());
+				for (size_t k = 0; k < ids.size(); ++k) {
+					script_value& source = *frame_slot(f, form->outer_slots[k]);
+					bool by_reference = capture_by_ref_default;
+					for (const auto& capture : proto.captures) {
+						if (capture.symbol_id == ids[k]) { by_reference = capture.by_reference; break; }
+					}
+					if (by_reference) {
+						cells.push_back(share_env_ref(source));
+						continue;
+					}
+					// a name the body only reads holds its copy itself when the copy is a scalar or a string; a name it may
+					// write keeps its copy in a cell its slot binds, so the write lasts to the next call
+					script_value copy = detail::clone_for_capture(source.deref());
+					const size_t kind = copy.raw_storage_index();
+					const bool plain = form->read_only[k] && (kind == script_value::TYPEID_INT || kind == script_value::TYPEID_FLOAT ||
+						kind == script_value::TYPEID_BOOL || kind == script_value::TYPEID_CHAR || kind == script_value::TYPEID_STRING || kind == script_value::TYPEID_NULL);
+					cells.push_back(plain ? std::move(copy) : script_value::make_cell_reference(std::move(copy), engine_));
+				}
+				auto converted = std::make_shared<script_defined_function>("<lambda>", shared_parameters_for(proto.lambda.get()),
+					proto.lambda->return_type, proto.body, nullptr, proto.lambda->local_count);
+				converted->unit = current_unit();
+				converted->captures = std::make_unique<script_defined_function::converted_captures>();
+				converted->captures->cells = std::move(cells);
+				converted->captures->ids = form->ids;
+				converted->backend_body_cache = form->body_chunk;
+				script_callable payload;
+				payload.kind = script_callable::kind_type::function;
+				payload.fn = std::move(converted);
+				stack_.push_back(script_value::make_function(script_callable_thunk{engine_, std::move(payload)}, engine_));
+				return {};
+			}
+		}
+	}
 
 	std::shared_ptr<environment> final_closure_env;
 
@@ -21920,7 +22210,6 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			case opcode::op_graft_depth: current_call_depth_ += ins.a ? 1 : -1; break;   // a raise unwinding out of the graft restores the depth at its handler or at the run's end
 			case opcode::op_index: VM_TRY_OP(exec_index(f, ins)); break;
-			case opcode::op_index_assign: VM_TRY_OP(exec_index_assign(f, ins)); break;
 			case opcode::op_index_compound: VM_TRY_OP(exec_index_compound(f, ins)); break;
 			case opcode::op_unary: VM_TRY_OP(exec_unary(f, ins)); break;
 			case opcode::op_inline_guard: VM_TRY_OP(exec_inline_guard(f, ins)); continue;   // the executor sets the ip: the next instruction, or the fallback
@@ -21962,6 +22251,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			case opcode::op_func_decl: VM_TRY_OP(exec_func_decl(f, ins)); break;
 			case opcode::op_closure: VM_TRY_OP(exec_closure(f, ins)); break;
+			case opcode::op_bind_captures: VM_TRY_OP(exec_bind_captures(f, ins)); break;
 
 			// The five hottest fused ops (7.6M/200t on GLOOM) skip exec_extended's
 			// second switch: direct dispatch on the shared temp (frame stays flat),
@@ -22821,7 +23111,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	rec.f.top_level = false;
 	rec.f.unit = function.unit;
 	enter_unit(function.unit);
-	enter_frame(rec.f);   // before binding: the ref-param frames_ scan must see this frame
+	enter_frame(rec.f, &function);   // before binding: the ref-param frames_ scan must see this frame
 
 	op_status bound{};
 	try {
@@ -24730,7 +25020,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	const unit_stamp caller_unit = current_unit();   // the native caller's frame, or the ambient
 	f.unit = function.unit;
 	unit_sync_scope unitSync{this};   // destroyed after the guard pops the frame: the caller's unit again
-	frame_guard guard(this, &f);
+	frame_guard guard(this, &f, &function);
 	enter_unit(function.unit);
 
 	const size_t entry_pending = pending_callees_.size();
@@ -24968,7 +25258,7 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 	has_return_value_ = false;
 	const unit_stamp caller_unit = current_unit();
 	unit_sync_scope unit_sync{this};
-	frame_guard guard(this, &f);
+	frame_guard guard(this, &f, &function);
 	enter_unit(function.unit);
 
 	const size_t entry_pending = pending_callees_.size();

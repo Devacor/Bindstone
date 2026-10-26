@@ -164,6 +164,52 @@ public:
     // Named frame locals at a stop inside a function: parameters + reached body locals
     // with their live values. Interpreter reads the frame's function AST; the vm
     // reconstructs slot names lazily from the chunk's decl/load/store operands.
+    // A stop inside a lambda made in a function over its locals (the vm's converted form): its captures are not frame locals,
+    // a read names them through the stop's scope as the environment form does, and a set writes the program scope
+    std::string captured_names_at_a_closure_stop(jai::backend_type type) {
+        auto eng = make_backend_engine(type);
+        eng->execution_budget(0);
+        jai::stdlib::register_all(eng);
+        auto& dbg = eng->debugger();
+        stop_waiter stops(dbg);
+        dbg.set_breakpoints("<script>", {5});
+        dbg.set_enabled(true);
+        const std::string src =
+            "function run() -> string {\n"                              // line 1
+            "    int r = 5; int c = 1; int s = 10;\n"                   // line 2
+            "    var f = [r, c, &s]() -> int {\n"                       // line 3
+            "        c = c + 1;\n"                                      // line 4
+            "        s = s + r;\n"                                      // line 5 (breakpoint)
+            "        return c + s;\n"                                   // line 6
+            "    };\n"
+            "    return to_string(f()) + \",\" + to_string(s);\n"
+            "}\n"
+            "auto out = run();\n";
+        std::string script_error;
+        std::thread script([&] {
+            try { eng->execute(src); } catch (const std::exception& e) { script_error = e.what(); }
+        });
+        std::string seen = "no stop";
+        if (const auto hit = stops.wait()) {
+            seen = parked_read(dbg, [&] {
+                std::string text = "line " + std::to_string(hit->line) + ";";
+                for (const auto& v : dbg.list_locals()) { text += " local " + v.name + "=" + v.value; }
+                for (const char* name : {"r", "c", "s"}) {
+                    try { text += std::string(" ") + name + "=" + dbg.get_variable(name).to_string(); }
+                    catch (const std::exception& e) { text += std::string(" ") + name + ":" + e.what(); }
+                }
+                dbg.set_variable("r", eng->make_value(7));
+                text += " r after set=" + dbg.get_variable("r").to_string();
+                return text;
+            }).value_or("no read");
+            dbg.clear_breakpoints();
+            dbg.resume();
+        }
+        dbg.detach();
+        script.join();
+        return seen + " | " + script_error + " | " + eng->get_variable("out").to_string();
+    }
+
     void frame_locals_at_breakpoint(jai::backend_type type) {
         auto eng = make_backend_engine(type);
         auto& dbg = eng->debugger();
@@ -936,6 +982,12 @@ public:
         });
         test("vm_loop_breakpoint_hits_each_iteration", [this]() {
             loop_breakpoint_hits_each_iteration(jai::backend_type::vm);
+        });
+        test("captured_names_at_a_closure_stop_read_alike_on_both_backends", [this]() {
+            const std::string interp = captured_names_at_a_closure_stop(jai::backend_type::interpreter);
+            const std::string vm = captured_names_at_a_closure_stop(jai::backend_type::vm);
+            check_eq(interp, vm, "the vm's converted closure reads and sets its captured names as the interpreter's environment does");
+            check_true(interp.find("r=5 c=2 s=10") != std::string::npos, interp);
         });
         test("frame_locals_at_breakpoint", [this]() {
             frame_locals_at_breakpoint(jai::backend_type::interpreter);

@@ -147,6 +147,53 @@ std::optional<checked_result<value_store>> slot_value_assign(const script_value&
 
 } // namespace detail
 
+namespace {
+// The converted closure a dying value alone keeps alive (the value, or the cell holding it): its captures die on the caller's
+// work list, so a chain of closures each capturing the last releases without native recursion
+script_defined_function* sole_converted_closure(script_value& a_value) noexcept {
+    script_value* function_value = &a_value;
+    if (a_value.raw_storage_index() == script_value::TYPEID_REFERENCE) {
+        if (!a_value.release_cascades()) { return nullptr; }
+        auto* holder = a_value.get_reference_holder();
+        if (!holder || !holder->plain_cell()) { return nullptr; }
+        function_value = holder->cell();
+    }
+    if (function_value->raw_storage_index() != script_value::TYPEID_FUNCTION || !function_value->release_cascades()) { return nullptr; }
+    auto* thunk = function_value->unchecked_as_function().target<script_callable_thunk>();
+    if (!thunk || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn || thunk->payload.fn.use_count() != 1) {
+        return nullptr;
+    }
+    return thunk->payload.fn->converted() ? thunk->payload.fn.get() : nullptr;
+}
+}
+
+script_defined_function::~script_defined_function() {
+    if (!captures) { return; }
+    std::vector<script_value> work = std::move(captures->cells);
+    captures->cells.clear();
+    while (!work.empty()) {
+        script_value dying = std::move(work.back());
+        work.pop_back();
+        if (script_defined_function* inner = sole_converted_closure(dying)) {
+            for (auto& value : inner->captures->cells) { work.push_back(std::move(value)); }
+            inner->captures->cells.clear();
+        }
+    }
+}
+
+std::shared_ptr<script_defined_function> script_defined_function::environment_form(const std::shared_ptr<script_defined_function>& fn, engine* eng) {
+    if (!fn || !fn->converted() || !eng) { return fn; }
+    converted_captures& state = *fn->captures;
+    if (!state.environment_twin) {
+        auto scope = std::make_shared<environment>(eng->get_global_environment(), eng->get_symbolizer());
+        for (size_t i = 0; i < state.cells.size(); ++i) { scope->define((*state.ids)[i], state.cells[i]); }
+        auto twin = std::make_shared<script_defined_function>(fn->name, fn->shared_parameters, fn->return_type, fn->body, std::move(scope), fn->local_count);
+        twin->unit = fn->unit;
+        state.environment_twin = std::move(twin);
+    }
+    return state.environment_twin;
+}
+
 // The environment a dying function value alone keeps alive: a lambda's captures (and its unique enclosing scopes)
 environment* environment::sole_closure_env(const script_value& a_value) noexcept {
     if (a_value.raw_storage_index() != script_value::TYPEID_FUNCTION || !a_value.release_cascades()) { return nullptr; }

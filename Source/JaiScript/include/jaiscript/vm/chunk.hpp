@@ -249,6 +249,16 @@ namespace jai::vm {
         uint8_t default_capture = 0;                       // lambda_expr::capture_default
         bool captures_this = false;
         bool uses_instance = false;                        // this/super in the body
+        // The converted form (internal/closure_conversion_design.md), made at the node's first creation that can use it: the
+        // captured names in the order the environment form defines them, their slots after the parameters, the chunk over them
+        struct converted_form {
+            std::shared_ptr<const std::vector<uint64_t>> ids;
+            std::vector<size_t> outer_slots;               // each name's slot in the creating frame
+            std::vector<uint8_t> read_only;                // the body only reads the name (no store, no call argument, no method receiver)
+            std::shared_ptr<chunk> body_chunk;
+        };
+        mutable std::shared_ptr<const converted_form> converted;
+        mutable uint8_t convert_state = 0;                 // 0 not judged, 1 converts, 2 never
     };
 
     struct destructure_proto {
@@ -657,7 +667,7 @@ namespace jai::vm {
             if (op >= opcode::op_t_add_ii && op <= opcode::op_t_load) return cell_refusal_translation;   // the typed scalar set (opcode.hpp)
             switch (op) {
             case opcode::op_const: case opcode::op_null: case opcode::op_true: case opcode::op_false: case opcode::op_pop: case opcode::op_dup:            case opcode::op_to_bool: case opcode::op_load: case opcode::op_store: case opcode::op_compound_store: case opcode::op_incdec:
-            case opcode::op_decl_var: case opcode::op_binary: case opcode::op_binary_fused: case opcode::op_index: case opcode::op_index_assign:
+            case opcode::op_decl_var: case opcode::op_binary: case opcode::op_binary_fused: case opcode::op_index:
             case opcode::op_index_compound: case opcode::op_unary: case opcode::op_jump_if_false: case opcode::op_jump_if_true:
             case opcode::op_compound_fused: case opcode::op_math: case opcode::op_index_store: case opcode::op_index_compound_fused:
             case opcode::op_index_fused: case opcode::op_operand_temp: case opcode::op_call_temp: case opcode::op_member_temp: case opcode::op_set_member_fused: case opcode::op_math_temp: case opcode::op_push_fused:

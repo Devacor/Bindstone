@@ -1,5 +1,6 @@
-// A class instance's strong family counts plainly outside a parallel region and atomically while one runs (the region flag in its
-// object block, internal/object_layout.md). Each case runs many regions on 8 workers and holds the result to the serial loop's.
+// Class instances workers reach while a parallel region runs: element objects read, called, built and landed in outputs, and one
+// C++ object (its wrapper, its script layer) every worker wraps through a host call. Each case runs many regions on 8 workers and
+// holds the result to the serial loop's.
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>

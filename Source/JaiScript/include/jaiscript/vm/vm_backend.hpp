@@ -1334,13 +1334,13 @@ namespace jai::vm {
         // receiver_owned: null = receiver in the stack slot at args_base-1 (the slot is
         // the pin); non-null = thunk-payload receiver (moved into the env binding).
         // frame_base = first stack index of this frame's territory (pop truncation).
-        op_status enter_script_method_sliced(frame& caller, script_value&& method_val,
+        op_status enter_script_method_sliced(frame& caller, const script_value& method_val,
                                              const script_method_dispatch& dispatch,
                                              const std::shared_ptr<function_decl>& ast,
                                              script_value* receiver_owned, size_t frame_base,
                                              size_t args_base, size_t argc,
                                              const call_site& site);
-        op_status push_method_frame_sliced(frame& caller, script_value&& method_val,
+        op_status push_method_frame_sliced(frame& caller, const script_value& method_val,
                                            const script_method_dispatch& dispatch,
                                            const std::shared_ptr<function_decl>& ast,
                                            script_value* receiver_owned, size_t frame_base,

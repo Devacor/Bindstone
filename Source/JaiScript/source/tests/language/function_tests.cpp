@@ -676,6 +676,20 @@ public:
             check_eq((int64_t)1, (int64_t)eng->local_alias_binds());   // the kill switch keeps every copy
         });
 
+        test("a_method_redefined_while_it_runs_finishes_its_old_body", [this]() {
+            // the running call holds no pin on the method's dispatcher: its body, overload and environment stay live through the reload,
+            // and the next call takes the new body
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            jai::engine* raw = eng.get();
+            eng->add_function("reload_c", [raw]() { raw->execute("class C { int base = 7; int run(int k) { return 1000 + k; } }"); });
+            eng->execute(R"(
+                class C { int base = 7; int run(int k) { int a = base + k; if (k == 2) { reload_c(); } array<int> pad = [a, a]; return pad[0] + pad[1] + base; } }
+                C c = C();
+            )");
+            check_eq(std::string("[21, 23, 25, 1003]"), eng->execute("[c.run(0), c.run(1), c.run(2), c.run(3)];").to_string(), "old body to its end, then the new one");
+        });
+
         test("readonly_local_alias_skips_nocopy_and_destructors", [this]() {
             auto eng = make_engine();
             jai::stdlib::register_all(eng);

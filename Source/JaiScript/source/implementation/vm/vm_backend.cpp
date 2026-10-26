@@ -22684,6 +22684,17 @@ void vm_backend::release_site_pins() noexcept {
 	for (auto& [key, entry] : decl_chunk_cache_) { release(entry.compiled); }
 }
 
+JAI_FORCEINLINE void vm_backend::pin_method_decl(call_record& rec, const std::shared_ptr<function_decl>& ast) {
+	rec.ast = ast.get();
+	if (ast->vm_retainer == this) [[likely]] { return; }
+	if (!parallel_worker_ && !ast->vm_retainer) {
+		ast->vm_retainer = this;
+		retained_decls_.push_back(ast);
+		return;
+	}
+	if (rec.ast_pin.get() != ast.get()) { rec.pin_ast(ast); }
+}
+
 void vm_backend::retire_unreachable_code() {
 	if (parallel_worker_ || !engine_ || cache_inserts_since_retire_ < std::max<size_t>(64, cache_size_after_retire_ / 2)) { return; }
 	if (is_executing() || !frames_.empty() || call_records_top_ != 0 || *parked_runs_ != 0 || engine_->parallel_region_active()) { return; }
@@ -22698,6 +22709,11 @@ void vm_backend::retire_unreachable_code() {
 	for (auto it = method_functions_.begin(); it != method_functions_.end();) {
 		it = it->second.pin.use_count() == 1 ? method_functions_.erase(it) : std::next(it);
 	}
+	retained_decls_.erase(std::remove_if(retained_decls_.begin(), retained_decls_.end(), [this](std::shared_ptr<function_decl>& decl) {
+		if (decl.use_count() != 1) { return false; }
+		decl->vm_retainer = nullptr;
+		return true;
+	}), retained_decls_.end());
 	// the backend's own holders of a chunk: its cache entry and the fold sites that pin it; of a cached node: its entry and the chunk
 	std::unordered_map<const chunk*, long> fold_pins;
 	for (const fold_site& site : fold_sites_) { if (site.pin) { ++fold_pins[site.pin.get()]; } }
@@ -23352,11 +23368,9 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 		ast->backend_return_conv = static_cast<uint8_t>(classify_return_conv(ast->return_type));
 	}
 	rec.return_conv_class = ast->backend_return_conv;   // typed method returns take the same memoized epilogue as functions
-	if (rec.ast_pin.get() != ast.get()) [[unlikely]] {
-		rec.pin_ast(ast);   // the resolved overload must outlive a mid-call hot reload; slot
-	}                        // reuse with the SAME overload (recursion) skips the atomic pair
+	pin_method_decl(rec, ast);
 	rec.method_result_anchor = true;
-	// no pin: the body chunk lives in chunk_cache_ for the engine's life, the class definition is engine-pinned, the overload rides ast_pin and
+	// no pin: the body chunk lives in chunk_cache_ for the engine's life, the class definition is engine-pinned, the overload is retained (pin_method_decl) and
 	// the lazy env environment_, so a reload that replaces the method mid-call frees only the old dispatcher
 	(void)method_val;
 	rec.try_base = try_records_.size();
@@ -23426,6 +23440,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 		rec.callee_pin = make_null();
 		rec.return_type = nullptr;
 		rec.ast_pin.reset();
+		rec.ast = nullptr;
 		rec.method_result_anchor = false;
 		rec.locals.this_object_ptr.reset();
 		rec.locals.is_method = false;
@@ -23459,10 +23474,10 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 
 	op_status bound{};
 	try {
-		bound = bind_parameters(rec.ast_pin->parameters, stack_, args_base, argc, rec.f, *rec.f.code,
+		bound = bind_parameters(rec.ast->parameters, stack_, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, rec.ast_pin->body, rec.ast_pin->parameters.size(), argc), nullptr, caller_frame_unit(),
-		                        0, false, rec.ast_pin->body.get());
+		                        site_arg_proofs(site, caller.code, rec.ast->body, rec.ast->parameters.size(), argc), nullptr, caller_frame_unit(),
+		                        0, false, rec.ast->body.get());
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -23475,7 +23490,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 	// Conversions during binding push and pop above the args, so the slice is intact; a default argument extends the window
 	assert(stack_.size() == args_base + rec.f.window_live);
 	{
-		const size_t window_slots = std::max(rec.ast_pin->local_count, static_cast<size_t>(body_chunk->local_count));
+		const size_t window_slots = std::max(rec.ast->local_count, static_cast<size_t>(body_chunk->local_count));
 		stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
 	}
 	switch_to_ = &rec.f;
@@ -23526,9 +23541,7 @@ op_status vm_backend::push_method_frame(frame& caller, const script_value& metho
 		ast->backend_return_conv = static_cast<uint8_t>(classify_return_conv(ast->return_type));
 	}
 	rec.return_conv_class = ast->backend_return_conv;   // typed method returns take the same memoized epilogue as functions
-	if (rec.ast_pin.get() != ast.get()) [[unlikely]] {
-		rec.pin_ast(ast);   // the resolved overload must outlive a mid-call hot reload; slot
-	}                        // reuse with the SAME overload (recursion) skips the atomic pair
+	pin_method_decl(rec, ast);
 	rec.method_result_anchor = true;
 	(void)method_val;   // no pin, as in push_method_frame_sliced
 	rec.try_base = try_records_.size();
@@ -23593,6 +23606,7 @@ op_status vm_backend::push_method_frame(frame& caller, const script_value& metho
 		rec.callee_pin = make_null();
 		rec.return_type = nullptr;
 		rec.ast_pin.reset();
+		rec.ast = nullptr;
 		rec.method_result_anchor = false;
 		rec.locals.this_object_ptr.reset();
 		rec.locals.is_method = false;
@@ -23698,9 +23712,7 @@ op_status vm_backend::push_static_method_frame(frame& caller, const script_value
 		ast->backend_return_conv = static_cast<uint8_t>(classify_return_conv(ast->return_type));
 	}
 	rec.return_conv_class = ast->backend_return_conv;
-	if (rec.ast_pin.get() != ast.get()) [[unlikely]] {
-		rec.pin_ast(ast);
-	}
+	pin_method_decl(rec, ast);
 	rec.method_result_anchor = false;   // no receiver to anchor a result to
 	(void)method_val;
 	rec.try_base = try_records_.size();
@@ -23721,6 +23733,7 @@ op_status vm_backend::push_static_method_frame(frame& caller, const script_value
 		rec.callee_pin = make_null();
 		rec.return_type = nullptr;
 		rec.ast_pin.reset();
+		rec.ast = nullptr;
 		if (rec.prev_env) { environment_ = std::move(rec.prev_env); }
 		--call_records_top_;
 		throw;

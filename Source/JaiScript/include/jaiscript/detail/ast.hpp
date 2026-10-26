@@ -1011,6 +1011,8 @@ namespace jai {
         // derives it from return_type alone, engine-independent). 0 = uncomputed. Same
         // benign-idempotent write pattern as script_defined_function::backend_return_conv.
         mutable uint8_t backend_return_conv = 0;
+        // the vm backend that keeps this declaration alive until its retire point (vm_backend::retain_method_decl): its frames name it raw
+        mutable const void* vm_retainer = nullptr;
         // a lambda's graft declaration without a declared return type: the kind its returns certainly yield (1 int, 2 float, 3 bool)
         mutable uint8_t graft_return_kind = 0;
 

@@ -29,13 +29,15 @@ inline script_value region_field_default(const script_value& value, engine* eng)
 }
 }
 
-inline size_t class_instance::trailing_bytes(uint32_t slots) noexcept { return slots * (sizeof(field_cell) + sizeof(script_value)); }
+inline size_t class_instance::trailing_bytes(uint32_t slots) noexcept { return slots * sizeof(script_value); }
 
 inline class_instance::class_instance(interned_name_t, std::string_view interned, engine* eng, const trailing_cells& trailing) : class_instance(interned_name_t{}, interned, eng) {
     if (trailing.memory && trailing.slots) {
-        flat_fields_.adopt_inline(reinterpret_cast<field_cell*>(trailing.memory), trailing.slots);
-        arena_ = reinterpret_cast<script_value*>(trailing.memory + trailing.slots * sizeof(field_cell));
+        arena_ = reinterpret_cast<script_value*>(trailing.memory);
+        for (uint32_t i = 0; i < trailing.slots; ++i) { new (arena_ + i) script_value(script_value::make_invalid(eng)); }
         arena_cells_ = trailing.slots;
+        arena_used_ = trailing.slots;
+        flat_fields_.adopt_implicit(arena_, trailing.slots);
     }
 }
 
@@ -52,7 +54,13 @@ inline void class_instance::note_field_ref_released() noexcept { if (live_field_
 }
 
 inline script_value class_instance::take_field_slot(uint32_t slot) {
-    if (slot < flat_fields_.size() && flat_fields_[slot]) { return std::move(*flat_fields_[slot]); }
+    if (slot < flat_fields_.size()) {
+        if (flat_fields_.implicit()) {
+            if (script_value* c = flat_fields_.present_cell(slot)) { return std::move(*c); }
+        } else if (flat_fields_[slot]) {
+            return std::move(*flat_fields_[slot]);
+        }
+    }
     return script_value(std::monostate{}, engine_);
 }
 
@@ -60,11 +68,15 @@ inline script_value* class_instance::field_slot_value(uint32_t slot) {
     if (slot >= flat_fields_.size()) {
         return nullptr;
     }
-    script_value* v = flat_fields_[slot].get();
-    return (v && v->raw_storage_index() != script_value::TYPEID_INVALID) ? v : nullptr;
+    return flat_fields_.present_cell(slot);
 }
 
 inline void class_instance::field_slot_write(uint32_t slot, script_value&& v) {
+    if (slot < flat_fields_.size() && flat_fields_.implicit()) {
+        script_value* c = flat_fields_.cell(slot);
+        if (c->is_reference()) { c->deref() = std::move(v); } else { *c = std::move(v); }
+        return;
+    }
     if (slot >= flat_fields_.size()) {
         flat_fields_.resize(static_cast<size_t>(slot) + 1);
     }
@@ -141,7 +153,8 @@ inline auto class_instance::extras() -> instance_extras& {
 }
 
 inline bool class_instance::fields_cascade() const noexcept {
-    for (const auto& cell : flat_fields_) {
+    for (size_t slot = 0; slot < flat_fields_.size(); ++slot) {
+        const script_value* cell = flat_fields_.cell(slot);
         if (cell && cell->release_cascades()) { return true; }
     }
     return (overflow_fields_ && !overflow_fields_->empty()) || native();
@@ -1559,6 +1572,11 @@ inline script_value& class_instance::materialize_field(uint64_t id, script_value
     if (class_def_) {
         const uint32_t slot = class_def_->field_slot(id);
         if (slot != class_definition::k_no_field_slot) {
+            if (slot < flat_fields_.size() && flat_fields_.implicit()) {
+                script_value* c = flat_fields_.cell(slot);
+                *c = std::move(v);
+                return *c;
+            }
             if (slot >= flat_fields_.size()) {
                 flat_fields_.resize((std::max)(static_cast<size_t>(class_def_->field_slot_count()),
                                                static_cast<size_t>(slot) + 1));
@@ -1579,8 +1597,15 @@ inline script_value& class_instance::materialize_field(uint64_t id, script_value
 }
 
 inline void class_instance::seed_fields_from_plan(const std::vector<std::pair<uint32_t, script_value>>& plan, uint32_t slot_count, bool detach) {
-    if (flat_fields_.size() < slot_count) { flat_fields_.resize(slot_count); }
     seeded_from_plan_ = true;
+    if (flat_fields_.implicit() && flat_fields_.size() >= slot_count) {
+        for (const auto& [slot, value] : plan) {
+            script_value* c = flat_fields_.cell(slot);
+            if (detach) [[unlikely]] { *c = detail::region_field_default(value, engine_); } else { *c = value; }
+        }
+        return;
+    }
+    if (flat_fields_.size() < slot_count) { flat_fields_.resize(slot_count); }
     for (const auto& [slot, value] : plan) {
         auto& cell = flat_fields_[slot];
         if (detach) [[unlikely]] {
@@ -1681,8 +1706,7 @@ inline void class_instance::for_each_field(F&& fn) {
         // a base answering for the object during its constructor or destructor knows its own slots only
         const size_t n = std::min(flat_fields_.size(), static_cast<size_t>(class_def_->field_slot_count()));
         for (size_t slot = 0; slot < n; ++slot) {
-            script_value* v = flat_fields_[slot].get();
-            if (v && v->raw_storage_index() != script_value::TYPEID_INVALID) {
+            if (script_value* v = flat_fields_.present_cell(slot)) {
                 fn(class_def_->slot_field(static_cast<uint32_t>(slot)), *v);
             }
         }
@@ -1700,8 +1724,7 @@ inline void class_instance::for_each_field(F&& fn) const {
         // a base answering for the object during its constructor or destructor knows its own slots only
         const size_t n = std::min(flat_fields_.size(), static_cast<size_t>(class_def_->field_slot_count()));
         for (size_t slot = 0; slot < n; ++slot) {
-            const script_value* v = flat_fields_[slot].get();
-            if (v && v->raw_storage_index() != script_value::TYPEID_INVALID) {
+            if (const script_value* v = flat_fields_.present_cell(slot)) {
                 fn(class_def_->slot_field(static_cast<uint32_t>(slot)), *v);
             }
         }
@@ -3097,8 +3120,8 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
     if (class_def_) {
         const size_t n = flat_fields_.size();
         for (size_t slot = 0; slot < n; ++slot) {
-            script_value* v = flat_fields_[slot].get();
-            if (!v || v->raw_storage_index() == script_value::TYPEID_INVALID) {
+            script_value* v = flat_fields_.present_cell(slot);
+            if (!v) {
                 continue;
             }
             const uint64_t id = class_def_->slot_field(static_cast<uint32_t>(slot));
@@ -3206,15 +3229,25 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy_level(detail::d
         const size_t slots = dispatch_phase_ == cdtor_phase::none ? flat_fields_.size()
                                                                   : (std::min)(flat_fields_.size(), static_cast<size_t>(class_def_->field_slot_count()));
         new_instance->class_def_ = class_def_;
-        new_instance->reserve_cell_arena(slots);
-        new_instance->flat_fields_.resize(slots);
+        const bool implicit = new_instance->flat_fields_.implicit() && new_instance->flat_fields_.size() >= slots;
+        if (!implicit) {
+            new_instance->reserve_cell_arena(slots);
+            new_instance->flat_fields_.resize(slots);
+        }
         for (size_t slot = 0; slot < slots; ++slot) {
-            const auto& cell = flat_fields_[slot];
+            const script_value* cell = flat_fields_.present_cell(slot);
             if (!cell) { continue; }
             const size_t kind = cell->raw_storage_index();
-            if (kind == script_value::TYPEID_INVALID) { continue; }
-            if (kind == script_value::TYPEID_INT || kind == script_value::TYPEID_FLOAT || kind == script_value::TYPEID_BOOL ||
-                kind == script_value::TYPEID_CHAR || kind == script_value::TYPEID_NULL) {
+            const bool trivial = kind == script_value::TYPEID_INT || kind == script_value::TYPEID_FLOAT || kind == script_value::TYPEID_BOOL ||
+                                 kind == script_value::TYPEID_CHAR || kind == script_value::TYPEID_NULL;
+            if (implicit) {   // the copy's own slot cell, in its block
+                script_value* target = new_instance->flat_fields_.cell(slot);
+                if (trivial || cell->element_copies_shallow()) { *target = *cell; continue; }
+                *target = script_value(std::monostate{}, engine_);
+                cell->clone_element_into(*target, work, depth);
+                continue;
+            }
+            if (trivial) {
                 new_instance->flat_fields_[slot] = new_instance->make_trivial_cell(*cell);
                 continue;
             }

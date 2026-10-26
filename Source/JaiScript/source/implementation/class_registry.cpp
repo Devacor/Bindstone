@@ -326,7 +326,7 @@ void class_instance::release_fields() noexcept {
     const bool driver = !m->deferring;
     const size_t mark = m->stack.size();
     for (size_t slot = flat_fields_.size(); slot-- > 0;) {
-        auto& cell = flat_fields_[slot];
+        script_value* cell = flat_fields_.cell(slot);
         if (cell && cell->release_cascades()) { m->stack.push_back({std::move(*cell), detail::release_machine::k_no_frame}); }
     }
     if (overflow_fields_) {
@@ -347,7 +347,7 @@ void class_instance::release_orphan_fields() noexcept {
     std::vector<script_value> work;
     auto take_cells = [&work](class_instance& from) {
         for (size_t slot = 0; slot < from.flat_fields_.size(); ++slot) {
-            auto& cell = from.flat_fields_[slot];
+            script_value* cell = from.flat_fields_.cell(slot);
             if (cell && cell->release_cascades()) { work.push_back(std::move(*cell)); }
         }
         if (from.overflow_fields_) {

@@ -22,7 +22,8 @@ and its `data` keeps owning the instance through the `shared_ptr`, so every `hol
 lives (a host `shared_ptr` still holds it) leaves its bytes dead in the block until the instance goes; an instance kept only
 by its holder dies with it.
 
-The embedded holder is claimed by the first `make_class_object` over the instance; a second wrap of the same instance takes a
+The embedded holder is claimed by the first wrap over the instance (`make_class_object`, `make_object`, and the deep copy's
+holder for its new instance); a second wrap of the same instance takes a
 pooled holder as before. An instance made outside `allocate_instance` (deep copy's raw path, host-made instances) keeps the
 pooled holder.
 

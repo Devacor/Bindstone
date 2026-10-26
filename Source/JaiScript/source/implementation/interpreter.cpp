@@ -35,7 +35,7 @@
 #include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
 #include <jaiscript/detail/binary_handlers.hpp>
 #include <jaiscript/detail/arg_capture.hpp>   // call arguments take their value when evaluated (vm parity)
-#include <jaiscript/detail/construction.hpp>
+#include <jaiscript/detail/construction_kernel.hpp>
 #include <jaiscript/detail/function_overloads.hpp>
 #include <jaiscript/detail/char_promotion.hpp>   // char operands promote to int64 0..255
 #include <jaiscript/detail/utf8_operands.hpp>

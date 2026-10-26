@@ -58,7 +58,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/range_for_diagnostic.hpp>   // range-for texts (interp parity)
 #include <jaiscript/detail/map_entry_binding.hpp>
 #include <jaiscript/detail/arg_capture.hpp>   // call arguments take their value when evaluated (interp parity)
-#include <jaiscript/detail/construction.hpp>
+#include <jaiscript/detail/construction_kernel.hpp>
 #include <jaiscript/detail/function_overloads.hpp>
 #ifdef JAISCRIPT_VM_PROFILE
 #include <intrin.h>   // __rdtsc (diagnostic builds only; keep out of headers)
@@ -19752,8 +19752,8 @@ template <class F>
 static void for_each_construction_level(const script_class_definition& level, F&& f, const script_class_definition** seen, size_t& seen_count, int depth = 0) {
 	if (depth > 64) { return; }
 	for (const auto& parent : level.get_parent_classes()) {
-		if (const auto* script_parent = dynamic_cast<const script_class_definition*>(parent.get())) {
-			for_each_construction_level(*script_parent, f, seen, seen_count, depth + 1);
+		if (parent && parent->is_script_class()) {
+			for_each_construction_level(static_cast<const script_class_definition&>(*parent), f, seen, seen_count, depth + 1);
 		}
 	}
 	for (size_t i = 0; i < seen_count; ++i) { if (seen[i] == &level) { return; } }
@@ -19931,8 +19931,8 @@ checked_result<void> vm_backend::construction_frame_fields(construction_frame& c
 	unit_override_scope unit_scope(this, &class_unit);
 	if (!skip_parent_recursion) {
 		for (const auto& parent : level.get_parent_classes()) {
-			if (auto* script_parent = dynamic_cast<script_class_definition*>(parent.get())) {
-				auto initialized = construction_frame_fields(cf, instance, *script_parent, false);
+			if (parent && parent->is_script_class()) {
+				auto initialized = construction_frame_fields(cf, instance, static_cast<script_class_definition&>(*parent), false);
 				if (!initialized) { return initialized; }
 			}
 		}

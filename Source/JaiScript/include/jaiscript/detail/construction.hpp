@@ -70,7 +70,8 @@ namespace jai::detail {
 	// A constructor's member initialization on an instance under construction: its initializer list (base constructors and their
 	// bodies, or the whole delegated-to constructor), then the field initializers; the body is the caller's. captured_out (the
 	// outermost constructor only) receives the arguments taken ahead of that code, when it runs any.
-	checked_result<script_value> initialize_members(construction_host& host, const std::shared_ptr<script_class_definition>& cls,
+	template <class Host>
+	checked_result<script_value> initialize_members(Host& host, const std::shared_ptr<script_class_definition>& cls,
 	                                                const std::shared_ptr<environment>& definition_env, const std::shared_ptr<class_instance>& instance,
 	                                                const script_value& this_value, const std::shared_ptr<function_decl>& ctor,
 	                                                const std::vector<script_value>& args, std::optional<call_depth_guard>& initializer_depth,
@@ -79,7 +80,8 @@ namespace jai::detail {
 	// Everything ahead of a constructor's body: the overload, the instance and its member initialization. Success yields the
 	// instance; the picked constructor and the arguments the body binds (when they were taken ahead of it) ride the
 	// out-parameters. Inline, so the hot pick and allocation compile in each backend's own translation unit.
-	inline checked_result<script_value> begin_construction(construction_host& host, const std::shared_ptr<script_class_definition>& cls,
+	template <class Host>
+	inline checked_result<script_value> begin_construction(Host& host, const std::shared_ptr<script_class_definition>& cls,
 	                                                       const std::shared_ptr<environment>& definition_env, const std::vector<script_value>& args,
 	                                                       std::optional<call_depth_guard>& initializer_depth, std::shared_ptr<function_decl>& ctor_out,
 	                                                       std::vector<script_value>& captured_out, bool check_access) {
@@ -119,7 +121,8 @@ namespace jai::detail {
 	}
 
 	// A class without a constructor: a copy, aggregate initialization, or the implicit default constructor
-	checked_result<script_value> construct_default_instance(construction_host& host, const std::shared_ptr<script_class_definition>& cls,
+	template <class Host>
+	checked_result<script_value> construct_default_instance(Host& host, const std::shared_ptr<script_class_definition>& cls,
 	                                                        const std::vector<script_value>& args);
 
 	inline std::shared_ptr<environment> environment_chain_root(std::shared_ptr<environment> result) {

@@ -303,19 +303,34 @@ inline void class_definition::replace_field_declared_types(std::unordered_map<ui
 inline void class_definition::destroy_chain(class_instance* instance, const class_definition* level) const { destroy_levels(instance, level, nullptr); }
 
 inline type_info_ptr class_definition::get_field_declared_type(uint64_t id) const {
+    // a declared field's type by its slot: the chain walk once per field shape (field_shape_epoch_ moves down the chain with any declared type)
+    const uint32_t slot = field_slot(id);
+    if (slot != k_no_field_slot) {
+        if (slot_declared_epoch_ != field_shape_epoch_ || slot_declared_types_.size() != slot_to_field_.size()) [[unlikely]] {
+            slot_declared_types_.clear();
+            slot_declared_types_.reserve(slot_to_field_.size());
+            for (const uint64_t field : slot_to_field_) { slot_declared_types_.push_back(field_declared_type_walk(field)); }
+            slot_declared_epoch_ = field_shape_epoch_;
+        }
+        return slot_declared_types_[slot];
+    }
+    return field_declared_type_walk(id);
+}
+
+inline type_info_ptr class_definition::field_declared_type_walk(uint64_t id) const {
     auto it = field_declared_types_.find(id);
     if (it != field_declared_types_.end()) {
         return it->second;
     }
     for (const auto& parent : parent_classes_) {
         if (parent) {
-            if (type_info_ptr t = parent->get_field_declared_type(id)) {
+            if (type_info_ptr t = parent->field_declared_type_walk(id)) {
                 return t;
             }
         }
     }
     if (cpp_base_class_) {
-        return cpp_base_class_->get_field_declared_type(id);
+        return cpp_base_class_->field_declared_type_walk(id);
     }
     return nullptr;
 }

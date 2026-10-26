@@ -720,6 +720,7 @@ public:
     bool type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
 
     inline type_info_ptr get_field_declared_type(uint64_t id) const;
+    inline type_info_ptr field_declared_type_walk(uint64_t id) const;   // the chain's maps, own first
 
     inline void add_static_field(uint64_t id, const script_value& initial_value);
 
@@ -1337,6 +1338,8 @@ private:
     std::unordered_map<uint64_t, std::vector<size_t>> static_method_arities_;
     std::unordered_map<uint64_t, script_value> field_defaults_;
     std::unordered_map<uint64_t, type_info_ptr> field_declared_types_;
+    mutable std::vector<type_info_ptr> slot_declared_types_;   // per field slot, the chain walk's answer under slot_declared_epoch_
+    mutable uint64_t slot_declared_epoch_ = UINT64_MAX;
     bool declared_types_dirty_ = false;
     std::unordered_map<uint64_t, script_value> static_field_values_;
     std::unordered_set<uint64_t> static_fields_;

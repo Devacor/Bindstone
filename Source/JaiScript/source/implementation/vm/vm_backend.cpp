@@ -13876,7 +13876,7 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 #ifdef JAISCRIPT_VM_PROFILE
 					cfs_probe_.bucket = 1;
 #endif
-					script_value method_val = *bthunk->payload.bound_dispatch();
+					const script_value& method_val = *bthunk->payload.bound_dispatch();
 					script_value receiver = *bthunk->payload.this_obj();
 					return enter_script_method_sliced(f, std::move(method_val), *dispatch,
 					                                  *resolved.value(), &receiver, slice_base,
@@ -18051,7 +18051,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 						const detail::parallel_method_pin* pin = parallel_method_pins_
 							? parallel_method_pins_->find(cd, member->member_id) : nullptr;
 						if (pin && pin->resolved) {
-							script_value method_val = pin->method_value;
+							const script_value& method_val = pin->method_value;
 							const auto* dispatch = method_val.as_function().target<script_method_dispatch>();
 							return enter_script_method_sliced(f, std::move(method_val), *dispatch,
 							                                  pin->resolved, nullptr, args_base - 1,
@@ -18065,7 +18065,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 						++profile_slice_gate_[1];   // mic guard passed
 #endif
 						if (site.mic_static) {
-							script_value method_val = site.mic_method;
+							const script_value& method_val = site.mic_method;
 							return enter_script_method_sliced(f, std::move(method_val), *site.mic_dispatch,
 							                                  site.mic_resolved, nullptr, args_base - 1,
 							                                  args_base, argc, site);
@@ -18073,7 +18073,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 						auto resolved = site.mic_dispatch->cls->resolve_method_overload_ref(
 							site.mic_dispatch->name_id, stack_.data() + args_base, argc);
 						if (resolved && (*resolved.value())->body && !(*resolved.value())->is_coroutine) {
-							script_value method_val = site.mic_method;
+							const script_value& method_val = site.mic_method;
 							return enter_script_method_sliced(f, std::move(method_val), *site.mic_dispatch,
 							                                  *resolved.value(), nullptr, args_base - 1,
 							                                  args_base, argc, site);
@@ -18086,7 +18086,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 						for (const call_site::mic_entry& entry : site.mic_poly) {
 							if (entry.cd != cd || cd->method_epoch() != entry.epoch) { continue; }
 							if (!(entry.field_free && !inst->has_user_overflow_fields()) && inst->has_field(member->member_id)) { break; }
-							script_value method_val = entry.method;
+							const script_value& method_val = entry.method;
 							return enter_script_method_sliced(f, std::move(method_val), *entry.dispatch,
 							                                  entry.resolved, nullptr, args_base - 1,
 							                                  args_base, argc, site);
@@ -22864,14 +22864,14 @@ op_status vm_backend::enter_script_method(frame& caller, script_value&& method_v
 	}
 }
 
-op_status vm_backend::enter_script_method_sliced(frame& caller, script_value&& method_val,
+op_status vm_backend::enter_script_method_sliced(frame& caller, const script_value& method_val,
                                                  const script_method_dispatch& dispatch,
                                                  const std::shared_ptr<function_decl>& ast,
                                                  script_value* receiver_owned, size_t frame_base,
                                                  size_t args_base, size_t argc,
                                                  const call_site& site) {
 	try {
-		return push_method_frame_sliced(caller, std::move(method_val), dispatch, ast,
+		return push_method_frame_sliced(caller, method_val, dispatch, ast,
 		                                receiver_owned, frame_base, args_base, argc, &site);
 	} catch (...) {
 		// The frame's stack territory is still live in slice mode: drop it like the
@@ -22888,7 +22888,7 @@ op_status vm_backend::enter_script_method_sliced(frame& caller, script_value&& m
 // rec.locals this). frame_base = where this frame's stack territory begins (the
 // receiver/callee slot below the window, or args_base when nothing sits below) — pop
 // truncation destroys territory + pin exactly like a function frame's callee slot.
-op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& method_val,
+op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value& method_val,
                                                const script_method_dispatch& dispatch,
                                                const std::shared_ptr<function_decl>& ast,
                                                script_value* receiver_owned, size_t frame_base,
@@ -22946,7 +22946,9 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 		rec.pin_ast(ast);   // the resolved overload must outlive a mid-call hot reload; slot
 	}                        // reuse with the SAME overload (recursion) skips the atomic pair
 	rec.method_result_anchor = true;
-	rec.callee_pin = std::move(method_val);   // pins the dispatcher and, through it, the class
+	// no pin: the body chunk lives in chunk_cache_ for the engine's life, the class definition is engine-pinned, the overload rides ast_pin and
+	// the lazy env environment_, so a reload that replaces the method mid-call frees only the old dispatcher
+	(void)method_val;
 	rec.try_base = try_records_.size();
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
@@ -22966,7 +22968,13 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 		// into the env like the vector path moved.
 		const script_value& receiver_v = receiver_owned ? receiver_owned->deref()
 		                                                : stack_[args_base - 1].deref();
-		rec.locals.set_this(receiver_v);
+		if (!receiver_owned && rec.env_lazy && stack_[args_base - 1].raw_storage_index() != script_value::TYPEID_REFERENCE) {
+			// a lazy frame's receiver slot moves into the frame's this (the slot is read by nothing until the pop truncates it, and the pop
+			// nulls this after that truncation, where the slot's copy used to die): no handle copy, the same destruction point
+			rec.locals.set_this(std::move(stack_[args_base - 1]));
+		} else {
+			rec.locals.set_this(receiver_v);
+		}
 #ifdef JAISCRIPT_VM_PROFILE
 		{ const uint64_t prof_s = __rdtsc(); profile_mpush_sub_[0] += prof_s - prof_p0; prof_p0 = prof_s; }
 #endif

@@ -395,25 +395,50 @@ private:
             clear();
             if (heap_) { ::operator delete(static_cast<void*>(data_)); }
         }
-        void adopt_inline(field_cell* buffer, uint32_t capacity) noexcept { data_ = buffer; cap_ = capacity; }
+        // The implicit table (internal/object_layout.md): slot i's cell is arena[i], constructed (raw-invalid while absent) for
+        // the instance's life; no word per slot until something re-seats a slot, which materializes the table over the same cells
+        void adopt_implicit(script_value* arena, uint32_t slots) noexcept { implicit_ = arena; size_ = slots; implicit_mode_ = true; }
+        bool implicit() const noexcept { return implicit_mode_; }
+        // slot i's cell (null: none); an implicit slot's cell always exists, raw-invalid while the field is absent
+        script_value* cell(size_t i) const noexcept { return implicit_mode_ ? implicit_ + i : data_[i].get(); }
+        // slot i's cell when the field is present in it as the table form reads presence (null pointer or raw-invalid pointee)
+        script_value* present_cell(size_t i) const noexcept {
+            script_value* c = cell(i);
+            return c && c->raw_storage_index() != script_value::TYPEID_INVALID ? c : nullptr;
+        }
+        void materialize() const {
+            if (!implicit_mode_) { return; }
+            script_value* arena = implicit_;
+            auto* fresh = static_cast<field_cell*>(::operator new((size_ ? size_ : 1) * sizeof(field_cell)));
+            for (uint32_t i = 0; i < size_; ++i) { new (&fresh[i]) field_cell(arena + i, false); }
+            data_ = fresh;
+            cap_ = size_;
+            heap_ = true;
+            implicit_mode_ = false;
+        }
         size_t size() const noexcept { return size_; }
         bool empty() const noexcept { return size_ == 0; }
-        field_cell& operator[](size_t i) noexcept { return data_[i]; }
-        const field_cell& operator[](size_t i) const noexcept { return data_[i]; }
-        field_cell* begin() noexcept { return data_; }
-        field_cell* end() noexcept { return data_ + size_; }
-        const field_cell* begin() const noexcept { return data_; }
-        const field_cell* end() const noexcept { return data_ + size_; }
+        field_cell& operator[](size_t i) { materialize(); return data_[i]; }
+        const field_cell& operator[](size_t i) const { materialize(); return data_[i]; }
+        field_cell* begin() { materialize(); return data_; }
+        field_cell* end() { materialize(); return data_ + size_; }
+        const field_cell* begin() const { materialize(); return data_; }
+        const field_cell* end() const { materialize(); return data_ + size_; }
         void resize(size_t n) {
+            materialize();
             if (n > cap_) { grow(n); }
             for (size_t i = size_; i < n; ++i) { new (&data_[i]) field_cell(); }
             while (size_ > n) { data_[--size_].~field_cell(); }
             size_ = static_cast<uint32_t>(n);
         }
-        void pop_back() noexcept { data_[--size_].~field_cell(); }
+        void pop_back() noexcept {
+            if (implicit_mode_) { implicit_[--size_].~script_value(); return; }
+            data_[--size_].~field_cell();
+        }
         void clear() noexcept {
             const uint32_t n = size_;
             size_ = 0;
+            if (implicit_mode_) { for (uint32_t i = 0; i < n; ++i) { implicit_[i].~script_value(); } return; }
             for (uint32_t i = 0; i < n; ++i) { data_[i].~field_cell(); }
         }
     private:
@@ -429,10 +454,14 @@ private:
             cap_ = static_cast<uint32_t>(cap);
             heap_ = true;
         }
-        field_cell* data_ = nullptr;
+        union {
+            mutable field_cell* data_ = nullptr;
+            mutable script_value* implicit_;
+        };
         uint32_t size_ = 0;
-        uint32_t cap_ = 0;
-        bool heap_ = false;
+        mutable uint32_t cap_ = 0;
+        mutable bool heap_ = false;
+        mutable bool implicit_mode_ = false;
     };
     std::unique_ptr<std::byte[]> cell_arena_;
     script_value* arena_ = nullptr;
@@ -1434,8 +1463,7 @@ inline script_value* class_instance::find_field_value(uint64_t id) {
             if (slot >= flat_fields_.size()) {
                 return nullptr;
             }
-            script_value* v = flat_fields_[slot].get();
-            return (v && v->raw_storage_index() != script_value::TYPEID_INVALID) ? v : nullptr;
+            return flat_fields_.present_cell(slot);
         }
     }
     if (overflow_fields_) {

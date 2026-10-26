@@ -935,7 +935,7 @@ script_value script_value::make_object(std::string_view type_name, uint64_t type
     script_value v(std::monostate{}, eng);
     v.set_stamp(class_def->get_type_info());
 
-    auto obj = acquire_object_holder(eng);
+    auto obj = is_cpp_class ? claim_object_holder(static_cast<class_instance*>(data.get()), eng) : acquire_object_holder(eng);
     obj->type_name = interned_type_text(eng, type_name, type_id);
     obj->type_id = type_id;  // Set the cached type_id for fast comparison
     obj->data = data;
@@ -1512,7 +1512,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
         if (obj_holder->is_class_instance_wrapper) {
             auto new_instance = static_cast<const class_instance*>(obj_holder->data.get())->deep_copy_level(work, depth);
 
-            auto new_holder = acquire_object_holder(obj_holder->owner);
+            auto new_holder = claim_object_holder(new_instance.get(), obj_holder->owner);
             new_holder->type_name = obj_holder->type_name;
             new_holder->type_id = obj_holder->type_id;
             new_holder->data = std::move(new_instance);
@@ -1648,7 +1648,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             if (obj_holder->is_class_instance_wrapper) {
                 auto new_instance = static_cast<const class_instance*>(obj_holder->data.get())->deep_copy_level(work, depth);
 
-                auto new_holder = acquire_object_holder(obj_holder->owner);
+                auto new_holder = claim_object_holder(new_instance.get(), obj_holder->owner);
                 new_holder->type_name = obj_holder->type_name;
                 new_holder->type_id = obj_holder->type_id;  // Preserve the cached type_id
                 new_holder->data = std::move(new_instance);

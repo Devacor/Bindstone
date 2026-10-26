@@ -12,6 +12,8 @@
 #include <type_traits>
 #include <utility>
 #include <functional>
+#include <atomic>
+#include <cstring>
 #ifdef JAISCRIPT_DIAG_ATOMIC_RC
 #include <atomic>
 #endif
@@ -162,13 +164,83 @@ inline void control_block_base::diag_check() const noexcept {
 
 struct adopt_tag {};
 
+// How a strong family counts. Plain counts by default; a type whose objects a parallel region's workers can reach together (a
+// script class instance: a C++ object's script layer, reached through a host call) counts atomically while the region runs.
+template<typename T>
+struct strong_counts {
+    static void add_strong(control_block_base* cb) noexcept { cb->add_strong(); }
+    static bool release_strong(control_block_base* cb) noexcept { return cb->release_strong(); }
+    static void add_weak(control_block_base* cb) noexcept { cb->add_weak(); }
+    static bool release_weak(control_block_base* cb) noexcept { return cb->release_weak(); }
+    static bool try_add_strong(control_block_base* cb) noexcept { return cb->try_add_strong(); }
+    static size_t strong_count(const control_block_base* cb) noexcept { return cb->get_strong_count(); }
+};
+
+// A class instance's block keeps, just before its control block, the flag that says its engine runs a parallel region
+// (internal/object_layout.md): while it is set the counts are atomic, so workers reaching one instance count it safely
+template<>
+struct strong_counts<class_instance> {
+    static const bool* region_flag(const control_block_base* cb) noexcept {
+        const bool* flag;
+        std::memcpy(&flag, reinterpret_cast<const unsigned char*>(cb) - sizeof(flag), sizeof(flag));
+        return flag;
+    }
+    static bool shared(const control_block_base* cb) noexcept {
+        const bool* flag = region_flag(cb);
+        return flag && *flag;
+    }
+#ifdef JAISCRIPT_DIAG_ATOMIC_RC
+    static void add_strong(control_block_base* cb) noexcept { cb->add_strong(); }
+    static bool release_strong(control_block_base* cb) noexcept { return cb->release_strong(); }
+    static void add_weak(control_block_base* cb) noexcept { cb->add_weak(); }
+    static bool release_weak(control_block_base* cb) noexcept { return cb->release_weak(); }
+    static bool try_add_strong(control_block_base* cb) noexcept { return cb->try_add_strong(); }
+    static size_t strong_count(const control_block_base* cb) noexcept { return cb->get_strong_count(); }
+#else
+    static void add_strong(control_block_base* cb) noexcept {
+        if (shared(cb)) [[unlikely]] { std::atomic_ref<size_t>(cb->strong_count).fetch_add(1, std::memory_order_relaxed); return; }
+        cb->add_strong();
+    }
+    static bool release_strong(control_block_base* cb) noexcept {
+        if (shared(cb)) [[unlikely]] { return std::atomic_ref<size_t>(cb->strong_count).fetch_sub(1, std::memory_order_acq_rel) == 1; }
+        return cb->release_strong();
+    }
+    static void add_weak(control_block_base* cb) noexcept {
+        if (shared(cb)) [[unlikely]] { std::atomic_ref<size_t>(cb->weak_count).fetch_add(1, std::memory_order_relaxed); return; }
+        cb->add_weak();
+    }
+    static bool release_weak(control_block_base* cb) noexcept {
+        if (shared(cb)) [[unlikely]] {
+            return std::atomic_ref<size_t>(cb->weak_count).fetch_sub(1, std::memory_order_acq_rel) == 1 &&
+                   std::atomic_ref<size_t>(cb->strong_count).load(std::memory_order_acquire) == 0;
+        }
+        return cb->release_weak();
+    }
+    static bool try_add_strong(control_block_base* cb) noexcept {
+        if (shared(cb)) [[unlikely]] {
+            std::atomic_ref<size_t> count(cb->strong_count);
+            size_t seen = count.load(std::memory_order_relaxed);
+            while (seen != 0) {
+                if (count.compare_exchange_weak(seen, seen + 1, std::memory_order_acq_rel, std::memory_order_relaxed)) { return true; }
+            }
+            return false;
+        }
+        return cb->try_add_strong();
+    }
+    static size_t strong_count(const control_block_base* cb) noexcept {
+        if (shared(cb)) [[unlikely]] { return std::atomic_ref<size_t>(const_cast<size_t&>(cb->strong_count)).load(std::memory_order_acquire); }
+        return cb->get_strong_count();
+    }
+#endif
+};
+
 // What the last strong release does: the object dies, then the strong family's collective weak reference goes. A type whose
 // death is more than its destructor (a script class instance: its destructor chain, the release machine) specializes it.
 template<typename T>
 struct strong_last_release {
     static void run(T* object, control_block_base* cb) noexcept {
         object->~T();
-        if (cb->release_weak()) { cb->dealloc_fn(cb); }
+        if (strong_counts<T>::release_weak(cb)) { cb->dealloc_fn(cb); }
     }
 };
 // A script class instance's death runs its destructor chain on the release machine (class_registry.cpp)
@@ -228,7 +300,7 @@ public:
     JAI_FORCEINLINE strong_ptr(const strong_ptr& other) noexcept
         : ptr_(other.ptr_) {
         if (ptr_) {
-            cb()->add_strong();
+            detail::strong_counts<T>::add_strong(cb());
             JAI_SP_CENSUS_ADD();
         }
     }
@@ -250,7 +322,7 @@ public:
 
         // Derive from the local: ~T() never changes the address, and the memory is
         // still allocated because this handle held live strong+weak counts.
-        if (local_ptr && detail::cb_from_object(local_ptr)->release_strong()) {
+        if (local_ptr && detail::strong_counts<T>::release_strong(detail::cb_from_object(local_ptr))) {
             destroy_last(local_ptr);
         }
     }
@@ -304,7 +376,7 @@ public:
     [[nodiscard]] explicit operator bool() const noexcept { return ptr_ != nullptr; }
 
     [[nodiscard]] size_t use_count() const noexcept {
-        return ptr_ ? cb()->get_strong_count() : 0;
+        return ptr_ ? detail::strong_counts<T>::strong_count(cb()) : 0;
     }
 
     [[nodiscard]] bool unique() const noexcept {
@@ -355,7 +427,7 @@ namespace detail {
 // shared_from_this); empty once the object is dying
 template<typename T>
 strong_ptr<T> strong_from_object(T* object) noexcept {
-    if (!object || !cb_from_object(object)->try_add_strong()) { return strong_ptr<T>(); }
+    if (!object || !strong_counts<T>::try_add_strong(cb_from_object(object))) { return strong_ptr<T>(); }
     return adopt_pooled(object);
 }
 }
@@ -383,7 +455,7 @@ public:
     weaker_ptr(const weaker_ptr& other) noexcept
         : ptr_(other.ptr_) {
         if (ptr_) {
-            cb()->add_weak();
+            detail::strong_counts<T>::add_weak(cb());
         }
     }
 
@@ -395,7 +467,7 @@ public:
     weaker_ptr(const strong_ptr<T>& other) noexcept
         : ptr_(other.get()) {
         if (ptr_) {
-            cb()->add_weak();
+            detail::strong_counts<T>::add_weak(cb());
         }
     }
 
@@ -408,7 +480,7 @@ public:
 
         if (local_ptr) {
             auto* local_cb = detail::cb_from_object(local_ptr);
-            if (local_cb->release_weak()) {
+            if (detail::strong_counts<T>::release_weak(local_cb)) {
                 local_cb->dealloc_fn(local_cb);
             }
         }
@@ -447,7 +519,7 @@ public:
     // ===== Observers =====
 
     [[nodiscard]] size_t use_count() const noexcept {
-        return ptr_ ? cb()->get_strong_count() : 0;
+        return ptr_ ? detail::strong_counts<T>::strong_count(cb()) : 0;
     }
 
 	[[nodiscard]] const void* owner_identity() const noexcept { return ptr_; }
@@ -464,7 +536,7 @@ public:
      * @return strong_ptr<T> if object is still alive, empty strong_ptr otherwise
      */
     [[nodiscard]] strong_ptr<T> lock() const noexcept {
-        if (ptr_ && cb()->try_add_strong()) {
+        if (ptr_ && detail::strong_counts<T>::try_add_strong(cb())) {
             return strong_ptr<T>(ptr_, detail::adopt_tag{});
         }
         return strong_ptr<T>();
@@ -485,7 +557,7 @@ template<typename T>
 weaker_ptr<T> weak_from_object(T* object) noexcept {
     weaker_ptr<T> result;
     if (object) {
-        cb_from_object(object)->add_weak();
+        strong_counts<T>::add_weak(cb_from_object(object));
         result.ptr_ = object;
     }
     return result;

@@ -52,6 +52,9 @@ namespace detail {
     struct object_block_head {
         std::atomic<uint32_t> parts{1};
         uint32_t prefix = 0;   // bytes before the holder room: the definition pin of a destructor class's instance
+#if UINTPTR_MAX == 0xFFFFFFFFu
+        uint32_t pad = 0;
+#endif
         const bool* region_flag = nullptr;
         static constexpr size_t holder_room = (sizeof(control_block<script_value::object_holder>) + 15) & ~size_t{15};
         static constexpr size_t size = 16;
@@ -104,7 +107,8 @@ enum class delegation_type {
 
 class class_definition;
 
-class class_instance {
+// aligned to 8 everywhere, so its control block sits one fixed distance before it (detail::k_instance_cb_offset)
+class alignas(8) class_instance {
 public:
     // An instance in its own object block (detail::object_block_head), owned by strong_ptr; a destructor_owner arms the
     // instance's destructor chain and pins the definition until the instance dies

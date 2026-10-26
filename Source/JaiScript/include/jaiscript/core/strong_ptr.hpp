@@ -176,6 +176,25 @@ struct strong_counts {
     static size_t strong_count(const control_block_base* cb) noexcept { return cb->get_strong_count(); }
 };
 
+// Atomic operations on a plain count (libc++ before 19 has no std::atomic_ref)
+struct shared_count_ops {
+#if defined(_MSC_VER) && !defined(__clang__)
+    static size_t fetch_add(size_t& c, size_t v) noexcept { return std::atomic_ref<size_t>(c).fetch_add(v, std::memory_order_relaxed); }
+    static size_t fetch_sub(size_t& c, size_t v) noexcept { return std::atomic_ref<size_t>(c).fetch_sub(v, std::memory_order_acq_rel); }
+    static size_t load(const size_t& c) noexcept { return std::atomic_ref<size_t>(const_cast<size_t&>(c)).load(std::memory_order_acquire); }
+    static bool cas(size_t& c, size_t& seen, size_t want) noexcept {
+        return std::atomic_ref<size_t>(c).compare_exchange_weak(seen, want, std::memory_order_acq_rel, std::memory_order_relaxed);
+    }
+#else
+    static size_t fetch_add(size_t& c, size_t v) noexcept { return __atomic_fetch_add(&c, v, __ATOMIC_RELAXED); }
+    static size_t fetch_sub(size_t& c, size_t v) noexcept { return __atomic_fetch_sub(&c, v, __ATOMIC_ACQ_REL); }
+    static size_t load(const size_t& c) noexcept { return __atomic_load_n(&c, __ATOMIC_ACQUIRE); }
+    static bool cas(size_t& c, size_t& seen, size_t want) noexcept {
+        return __atomic_compare_exchange_n(&c, &seen, want, true, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED);
+    }
+#endif
+};
+
 // A class instance's block keeps, just before its control block, the flag that says its engine runs a parallel region
 // (internal/object_layout.md): while it is set the counts are atomic, so workers reaching one instance count it safely
 template<>
@@ -198,37 +217,35 @@ struct strong_counts<class_instance> {
     static size_t strong_count(const control_block_base* cb) noexcept { return cb->get_strong_count(); }
 #else
     static void add_strong(control_block_base* cb) noexcept {
-        if (shared(cb)) [[unlikely]] { std::atomic_ref<size_t>(cb->strong_count).fetch_add(1, std::memory_order_relaxed); return; }
+        if (shared(cb)) [[unlikely]] { shared_count_ops::fetch_add(cb->strong_count, 1); return; }
         cb->add_strong();
     }
     static bool release_strong(control_block_base* cb) noexcept {
-        if (shared(cb)) [[unlikely]] { return std::atomic_ref<size_t>(cb->strong_count).fetch_sub(1, std::memory_order_acq_rel) == 1; }
+        if (shared(cb)) [[unlikely]] { return shared_count_ops::fetch_sub(cb->strong_count, 1) == 1; }
         return cb->release_strong();
     }
     static void add_weak(control_block_base* cb) noexcept {
-        if (shared(cb)) [[unlikely]] { std::atomic_ref<size_t>(cb->weak_count).fetch_add(1, std::memory_order_relaxed); return; }
+        if (shared(cb)) [[unlikely]] { shared_count_ops::fetch_add(cb->weak_count, 1); return; }
         cb->add_weak();
     }
     static bool release_weak(control_block_base* cb) noexcept {
         if (shared(cb)) [[unlikely]] {
-            return std::atomic_ref<size_t>(cb->weak_count).fetch_sub(1, std::memory_order_acq_rel) == 1 &&
-                   std::atomic_ref<size_t>(cb->strong_count).load(std::memory_order_acquire) == 0;
+            return shared_count_ops::fetch_sub(cb->weak_count, 1) == 1 && shared_count_ops::load(cb->strong_count) == 0;
         }
         return cb->release_weak();
     }
     static bool try_add_strong(control_block_base* cb) noexcept {
         if (shared(cb)) [[unlikely]] {
-            std::atomic_ref<size_t> count(cb->strong_count);
-            size_t seen = count.load(std::memory_order_relaxed);
+            size_t seen = shared_count_ops::load(cb->strong_count);
             while (seen != 0) {
-                if (count.compare_exchange_weak(seen, seen + 1, std::memory_order_acq_rel, std::memory_order_relaxed)) { return true; }
+                if (shared_count_ops::cas(cb->strong_count, seen, seen + 1)) { return true; }
             }
             return false;
         }
         return cb->try_add_strong();
     }
     static size_t strong_count(const control_block_base* cb) noexcept {
-        if (shared(cb)) [[unlikely]] { return std::atomic_ref<size_t>(const_cast<size_t&>(cb->strong_count)).load(std::memory_order_acquire); }
+        if (shared(cb)) [[unlikely]] { return shared_count_ops::load(cb->strong_count); }
         return cb->get_strong_count();
     }
 #endif

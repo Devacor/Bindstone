@@ -8214,7 +8214,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			}
 			cs.site_node2[ip - loop.copy_head] = nullptr;
 			if (p.value_is_subscript) {
-				fused_operand base = p.value; base.subscript_chain.clear();
+				fused_operand base; base.slot = p.value.slot; base.symbol = p.value.symbol; base.const_index = p.value.const_index; base.load_flags = p.value.load_flags; base.ident_node = p.value.ident_node; base.member_node = p.value.member_node; base.direct = p.value.direct;
 				const script_value* sp = base.slot != k_invalid_u32 ? frame_slot(f, base.slot) : fused_cmp_operand(f, base, static_cast<size_t>(ci.c) * 3 + 1);
 				if (sp && sp->raw_storage_index() == script_value::TYPEID_REFERENCE) { sp = lane_deref_silent(*sp) ? &sp->deref() : nullptr; }
 				bool borrowed = false;

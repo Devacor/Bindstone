@@ -15442,7 +15442,7 @@ op_status vm_backend::exec_field_init(frame& f, const vm_instruction& ins) {
 	try {
 		instance->set_field(field_id, initializer_store_value(std::move(value), initializer));
 	} catch (...) {
-		field_init_exception_ = std::current_exception();   // the store throws natively, as the per-field evaluation's does
+		construction().field_init_exception = std::current_exception();   // the store throws natively, as the per-field evaluation's does
 		return raise_(make_error_code(runtime_error_code::constructor_failed), "field initializer store");
 	}
 	return {};
@@ -19675,7 +19675,7 @@ checked_result<void> vm_backend::evaluate_field_initializers(std::shared_ptr<cla
 checked_result<void> vm_backend::run_level_initializers(class_instance& instance, script_class_definition& class_def,
                                                         const std::shared_ptr<environment>& init_env) {
 	const auto& initializers = class_def.get_field_initializer_asts();
-	level_initializers& entry = level_initializers_[&class_def];
+	level_initializers& entry = construction().level_initializers[&class_def];
 	bool current = entry.fn && entry.unit == current_unit().id;
 	if (current) {
 		size_t at = 0;
@@ -19725,9 +19725,9 @@ checked_result<void> vm_backend::run_level_initializers(class_instance& instance
 		return call_script_function(*entry.fn, no_arguments, nullptr, nullptr, nullptr, &method);
 	}();
 	pending_site_ctx_ = pending;
-	if (field_init_exception_) [[unlikely]] {
-		std::exception_ptr thrown = std::move(field_init_exception_);
-		field_init_exception_ = nullptr;
+	if (construction().field_init_exception) [[unlikely]] {
+		std::exception_ptr thrown = std::move(construction().field_init_exception);
+		construction().field_init_exception = nullptr;
 		std::rethrow_exception(thrown);
 	}
 	if (!ran) { return ran.error_value(); }
@@ -19779,7 +19779,14 @@ static void for_each_construction_expression(const script_class_definition& leve
 
 const std::shared_ptr<chunk>* vm_backend::construction_chunk(const std::shared_ptr<environment>& definition_env, script_class_definition& level, const function_decl* ctor, size_t argc) {
 	if (!definition_env || (ctor && ctor->is_coroutine)) { return nullptr; }
-	construction_plan& plan = construction_plans_[construction_key{&level, ctor, argc}];
+	const uint64_t class_epoch = engine_ ? engine_->class_definition_epoch() : 0;
+	const uint64_t unit = current_unit().id;
+	construction_memo& memo = construction().memo[((reinterpret_cast<uintptr_t>(&level) >> 4) ^ (reinterpret_cast<uintptr_t>(ctor) >> 4) ^ argc) & (k_construction_memo_size - 1)];
+	if (memo.level == &level && memo.ctor == ctor && memo.argc == argc && memo.unit == unit && memo.class_epoch == class_epoch) {
+		return memo.plan->code ? &memo.plan->code : nullptr;
+	}
+	construction_plan& plan = construction().plans[construction_key{&level, ctor, argc}];
+	memo = construction_memo{&level, ctor, argc, unit, class_epoch, &plan};
 	if (plan.unit == current_unit().id) {
 		size_t at = 0;
 		bool same = true;
@@ -19846,8 +19853,8 @@ bool vm_backend::open_construction_frame(detail::construction_scope& scope, cons
 	const std::shared_ptr<chunk>* plan_code = construction_chunk(definition_env, *level, ctor, argc);
 	if (!plan_code) { return false; }
 	const chunk* code = plan_code->get();
-	if (construction_frames_top_ == construction_frames_.size()) { construction_frames_.push_back(std::make_unique<construction_frame>()); }
-	construction_frame& cf = *construction_frames_[construction_frames_top_++];
+	if (construction().frames_top == construction().frames.size()) { construction().frames.push_back(std::make_unique<construction_frame>()); }
+	construction_frame& cf = *construction().frames[construction().frames_top++];
 	cf.locals = call_frame{};
 	if (!this_box_pool_.empty()) {
 		cf.locals.this_object_ptr = std::move(this_box_pool_.back());
@@ -19887,7 +19894,7 @@ void vm_backend::close_construction_frame(detail::construction_scope& scope) {
 	}
 	cf->f.pin.reset();
 	cf->definition_env.reset();
-	--construction_frames_top_;
+	--construction().frames_top;
 }
 
 // One segment of the level's code in its frame, run as a top-level evaluation runs (eval_expression): no call of its own, the
@@ -19940,9 +19947,9 @@ checked_result<void> vm_backend::construction_frame_fields(construction_frame& c
 	detail::dispatch_level_scope level_dispatch(instance, &level, class_instance::cdtor_phase::construction);   // KEEP BYTE-PARALLEL with the interpreter
 	bool found = false;
 	auto ran = run_construction_segment(cf, &level, found);
-	if (field_init_exception_) [[unlikely]] {
-		std::exception_ptr thrown = std::move(field_init_exception_);
-		field_init_exception_ = nullptr;
+	if (construction().field_init_exception) [[unlikely]] {
+		std::exception_ptr thrown = std::move(construction().field_init_exception);
+		construction().field_init_exception = nullptr;
 		std::rethrow_exception(thrown);
 	}
 	if (!ran) { return ran.error_value(); }
@@ -20097,9 +20104,9 @@ struct vm_backend::construction_lender final : detail::construction_host {
 		if (scope.frame) {   // under the caller's unit, as each evaluation ran
 			bool found = false;
 			auto ran = self.run_construction_segment(*static_cast<construction_frame*>(scope.frame), level.get(), found);
-			if (self.field_init_exception_) [[unlikely]] {
-				std::exception_ptr thrown = std::move(self.field_init_exception_);
-				self.field_init_exception_ = nullptr;
+			if (self.construction().field_init_exception) [[unlikely]] {
+				std::exception_ptr thrown = std::move(self.construction().field_init_exception);
+				self.construction().field_init_exception = nullptr;
 				std::rethrow_exception(thrown);
 			}
 			if (!ran) { return ran.error_value(); }

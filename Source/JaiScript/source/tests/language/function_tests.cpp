@@ -707,6 +707,29 @@ public:
             check_eq(std::string("[0, 6, 12, 2003]"), eng->execute("[D::twice(0), D::twice(1), D::twice(2), D::twice(3)];").to_string(), "static method: old body to its end, then the new one");
         });
 
+        test("an_indexed_store_of_a_ternary_evaluates_the_value_first_and_stores_each_arm", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            auto r = e->execute(R"(
+                array<string> LOG = [];
+                int pick(int k) { LOG.push("i" + to_string(k)); return k; }
+                bool cond(bool b) { LOG.push("c"); return b; }
+                int run() {
+                    array<int> a = [0, 0, 0, 0];
+                    array<var> v = [null, null];
+                    for (int i = 0; i < 4; i++) {
+                        a[pick(i)] = cond(i % 2 == 0) ? i * 10 : -i;
+                        a[i] = a[i] < 5 ? a[i] + 100 : a[i];
+                    }
+                    v[0] = a[1] < 0 ? "neg" : 1.5;
+                    v[1] = a[0] == 100 ? a : null;
+                    return a[0] + a[1] + a[2] + a[3] + (v[0] == "neg" ? 1000 : 0) + (v[1] == null ? 0 : 10000);
+                }
+                return [run(), LOG];
+            )");
+            check_eq(std::string("[10316, [\"c\", \"i0\", \"c\", \"i1\", \"c\", \"i2\", \"c\", \"i3\"]]"), r.to_string());
+        });
+
         test("readonly_local_alias_skips_nocopy_and_destructors", [this]() {
             auto eng = make_engine();
             jai::stdlib::register_all(eng);

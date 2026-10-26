@@ -1591,7 +1591,7 @@ namespace jai::vm {
         bool probe_callee_resolving_ = false;   // exec_probe_callee -> fused_ident_value: the bare name is being called
 
         struct member_target {
-            std::shared_ptr<class_instance> instance;
+            strong_ptr<class_instance> instance;
             std::shared_ptr<class_definition> engine_def;
             class_definition* class_def = nullptr;
             explicit operator bool() const { return instance != nullptr || class_def != nullptr; }
@@ -1771,12 +1771,12 @@ namespace jai::vm {
         // op_new's class name resolved now: the cell, and the constructor's thunk read once per value at the site
         script_value* new_class_cell(frame& f, const vm_instruction& ins, const type_info& cls);
         const script_callable_thunk* new_constructor_thunk(const call_site& site, const script_value& ctor);
-        checked_result<void> evaluate_field_initializers(std::shared_ptr<class_instance> instance,
+        checked_result<void> evaluate_field_initializers(strong_ptr<class_instance> instance,
                                          std::shared_ptr<script_class_definition> class_def,
                                          std::shared_ptr<environment> init_env,
                                          bool skip_parent_recursion = false,
                                          const detail::aggregate_plan* aggregate = nullptr);
-        void apply_field_initializers(const std::shared_ptr<class_instance>& instance,
+        void apply_field_initializers(const strong_ptr<class_instance>& instance,
                                       const std::shared_ptr<class_definition>& class_def) override;
         // A script class whose field initializers are all constants (literals, and array and map literals of them): the values
         // its first instance stored, written into every later one with no initializer environment or evaluation. Keyed by the
@@ -1865,8 +1865,8 @@ namespace jai::vm {
             std::vector<std::pair<uint32_t, script_value>> values;   // by slot
         };
         std::unordered_map<const class_definition*, fresh_layer_plan> fresh_layer_plans_;
-        bool seed_fresh_layer_fields(const std::shared_ptr<class_instance>& instance, const std::shared_ptr<class_definition>& class_def) override;
-        void note_fresh_layer_fields(const std::shared_ptr<class_instance>& instance, const std::shared_ptr<class_definition>& class_def) override;
+        bool seed_fresh_layer_fields(const strong_ptr<class_instance>& instance, const std::shared_ptr<class_definition>& class_def) override;
+        void note_fresh_layer_fields(const strong_ptr<class_instance>& instance, const std::shared_ptr<class_definition>& class_def) override;
 
         // Mirrors visit_member_expr's non-static path; unwinding cases leave out null
         // Lexical access context for member enforcement: an env-untouched frame

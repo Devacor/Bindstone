@@ -30,7 +30,7 @@ struct release_action {
 struct release_frame {
     class_instance* instance = nullptr;
     std::shared_ptr<class_definition> owner;   // the allocation's class (its deleter's capture)
-    std::weak_ptr<class_instance> allocation;  // keeps the instance's memory (it goes with its control block) until the frame ends
+    weaker_ptr<class_instance> allocation;  // keeps the instance's memory (it goes with its control block) until the frame ends
     const class_definition* root = nullptr;    // the level destroy_levels started from
     const class_definition* kept = nullptr;
     const class_definition* constructed = nullptr;   // a half-built instance's deepest completed level (null: every level)

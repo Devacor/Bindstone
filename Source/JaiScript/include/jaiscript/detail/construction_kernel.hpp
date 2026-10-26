@@ -56,7 +56,7 @@ namespace construction_kernel {
 
 	inline void adopt_host_base_object(class_instance& instance, const script_value& host_object) {
 		if (!host_object.is_object()) { return; }
-		auto host_instance = host_object.as<std::shared_ptr<class_instance>>();
+		auto host_instance = host_object.as<strong_ptr<class_instance>>();
 		if (!host_instance) { return; }
 		if (const script_value* native = host_instance->native()) {
 			instance.set_native(*native);
@@ -135,7 +135,7 @@ namespace construction_kernel {
 			return {};
 		}
 		level_scope<Host> env(host, definition_env, this_value, base.get());
-		return host.evaluate_field_initializers(instance.shared_from_this(), base, env.scope, false, nullptr);
+		return host.evaluate_field_initializers(instance.strong_from_this(), base, env.scope, false, nullptr);
 	}
 
 	// A script base with a constructor: walk the super() chain up to a C++ base (constructed on the way), then run each level's
@@ -309,7 +309,7 @@ namespace construction_kernel {
 
 template <class Host>
 checked_result<script_value> initialize_members(Host& host, const std::shared_ptr<script_class_definition>& cls,
-                                                const std::shared_ptr<environment>& definition_env, const std::shared_ptr<class_instance>& instance,
+                                                const std::shared_ptr<environment>& definition_env, const strong_ptr<class_instance>& instance,
                                                 const script_value& this_value, const std::shared_ptr<function_decl>& ctor,
                                                 const std::vector<script_value>& args, std::optional<call_depth_guard>& initializer_depth,
                                                 size_t delegation_depth, std::vector<script_value>* captured_out) {

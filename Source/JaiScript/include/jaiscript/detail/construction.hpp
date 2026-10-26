@@ -44,7 +44,7 @@ namespace jai::detail {
 		virtual checked_result<script_value> evaluate(const expression_ptr& expr, const std::shared_ptr<environment>& env) = 0;
 		virtual checked_result<script_value> run_constructor_body(const std::shared_ptr<function_decl>& ctor, const std::shared_ptr<environment>& definition_env,
 		                                                          const script_value& this_value, class_definition* access, const std::vector<script_value>& args) = 0;
-		virtual checked_result<void> evaluate_field_initializers(const std::shared_ptr<class_instance>& instance, const std::shared_ptr<script_class_definition>& cls,
+		virtual checked_result<void> evaluate_field_initializers(const strong_ptr<class_instance>& instance, const std::shared_ptr<script_class_definition>& cls,
 		                                                         construction_scope& scope, bool skip_parent_recursion, const aggregate_plan* aggregate) = 0;
 		// A constructor level's own field initializers in its scope, in declaration order (each evaluated, then stored)
 		virtual checked_result<void> initialize_level_fields(class_instance& instance, const std::shared_ptr<script_class_definition>& level,
@@ -72,7 +72,7 @@ namespace jai::detail {
 	// outermost constructor only) receives the arguments taken ahead of that code, when it runs any.
 	template <class Host>
 	checked_result<script_value> initialize_members(Host& host, const std::shared_ptr<script_class_definition>& cls,
-	                                                const std::shared_ptr<environment>& definition_env, const std::shared_ptr<class_instance>& instance,
+	                                                const std::shared_ptr<environment>& definition_env, const strong_ptr<class_instance>& instance,
 	                                                const script_value& this_value, const std::shared_ptr<function_decl>& ctor,
 	                                                const std::vector<script_value>& args, std::optional<call_depth_guard>& initializer_depth,
 	                                                size_t delegation_depth, std::vector<script_value>* captured_out);

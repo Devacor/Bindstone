@@ -2149,7 +2149,7 @@ public:
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute("class C { int v = 0; var w = 0; }  auto c = C();");
                 auto obj = e->execute("c");
-                auto instance = obj.as<std::shared_ptr<jai::class_instance>>();
+                auto instance = obj.as<jai::strong_ptr<jai::class_instance>>();
                 check_not_null(instance.get());
                 uint64_t v_id = e->symbolize("v");
                 uint64_t w_id = e->symbolize("w");
@@ -3752,7 +3752,7 @@ public:
                 auto e = jai::engine::make();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute("class C { int a = 0; C() {} C(int v) { a = v; } } class H { C c; string s = \"\"; } auto h = H();");
-                auto instance = e->execute("h").as<std::shared_ptr<jai::class_instance>>();
+                auto instance = e->execute("h").as<jai::strong_ptr<jai::class_instance>>();
                 check_not_null(instance.get());
                 bool threw = false;
                 try { instance->set_field(e->symbolize("c"), jai::script_value((int64_t)5, e.get())); }

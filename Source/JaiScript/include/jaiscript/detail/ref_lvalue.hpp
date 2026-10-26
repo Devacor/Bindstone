@@ -187,7 +187,7 @@ namespace jai::detail {
 	// would silently swallow writes (they take the CPP-MEMBER / PROPERTY mint instead).
 	// Instance-local fields with no class declarer have no accessor to bypass and stay
 	// bindable.
-	inline bool ref_field_is_script_backed(const std::shared_ptr<class_instance>& instance, uint64_t member_id) {
+	inline bool ref_field_is_script_backed(const strong_ptr<class_instance>& instance, uint64_t member_id) {
 		const class_definition* class_def = instance->get_class_definition();
 		if (!class_def) {
 			return true;
@@ -199,7 +199,7 @@ namespace jai::detail {
 	// A field with a user _get_/_set_ anywhere in its chain is a computed property from the
 	// outside: an alias to the backing cell would bypass the accessor. A frozen symbolizer is
 	// a parallel region, whose workers never reach accessors (worker walls read the cell).
-	inline bool ref_field_has_user_accessor(const std::shared_ptr<class_instance>& instance, const member_expr* m,
+	inline bool ref_field_has_user_accessor(const strong_ptr<class_instance>& instance, const member_expr* m,
 	                                        uint64_t member_id, string_symbolizer* symbolizer) {
 		const class_definition* class_def = instance->get_class_definition();
 		if (!class_def || !class_def->has_property_getters() || symbolizer->frozen()) {

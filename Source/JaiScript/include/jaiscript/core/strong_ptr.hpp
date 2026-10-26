@@ -162,6 +162,21 @@ inline void control_block_base::diag_check() const noexcept {
 
 struct adopt_tag {};
 
+// What the last strong release does: the object dies, then the strong family's collective weak reference goes. A type whose
+// death is more than its destructor (a script class instance: its destructor chain, the release machine) specializes it.
+template<typename T>
+struct strong_last_release {
+    static void run(T* object, control_block_base* cb) noexcept {
+        object->~T();
+        if (cb->release_weak()) { cb->dealloc_fn(cb); }
+    }
+};
+// A script class instance's death runs its destructor chain on the release machine (class_registry.cpp)
+template<>
+struct strong_last_release<class_instance> {
+    static void run(class_instance* object, control_block_base* cb) noexcept;
+};
+
 // Reserved for engine-owned block pools (script_value's reference_holder pool,
 // value.cpp): adopt a strong count already established on a reused control_block<T>.
 // The single-pointer derivation invariant holds because pooled blocks ARE
@@ -169,6 +184,8 @@ struct adopt_tag {};
 // the placement-new result at control_block<T>::storage's head.
 template<typename T>
 strong_ptr<T> adopt_pooled(T* ptr) noexcept;
+template<typename T>
+weaker_ptr<T> weak_from_object(T* object) noexcept;
 
 } // namespace detail
 
@@ -271,6 +288,13 @@ public:
         std::swap(ptr_, other.ptr_);
     }
 
+    // Gives up the handle without dropping its count: the caller now owns that count (detail::object_ref adopts it)
+    [[nodiscard]] T* release() noexcept {
+        T* held = ptr_;
+        ptr_ = nullptr;
+        return held;
+    }
+
     // ===== Observers =====
 
     [[nodiscard]] T* get() const noexcept { return ptr_; }
@@ -309,10 +333,7 @@ private:
     JAI_NOINLINE static void destroy_last(T* local_ptr) noexcept {
         auto* local_cb = detail::cb_from_object(local_ptr);
         JAI_SP_CENSUS_FREED(local_ptr);
-        local_ptr->~T();
-        if (local_cb->release_weak()) {
-            local_cb->dealloc_fn(local_cb);
-        }
+        detail::strong_last_release<T>::run(local_ptr, local_cb);
     }
 
     // Adopts a count already established by the caller (make_strong's initial 1,
@@ -327,6 +348,16 @@ private:
 template<typename T>
 strong_ptr<T> detail::adopt_pooled(T* ptr) noexcept {
     return strong_ptr<T>(ptr, detail::adopt_tag{});
+}
+
+namespace detail {
+// A new strong handle to an object some strong_ptr already owns (an object naming itself: the strong_ptr form of
+// shared_from_this); empty once the object is dying
+template<typename T>
+strong_ptr<T> strong_from_object(T* object) noexcept {
+    if (!object || !cb_from_object(object)->try_add_strong()) { return strong_ptr<T>(); }
+    return adopt_pooled(object);
+}
 }
 
 /**
@@ -443,7 +474,23 @@ private:
     T* ptr_ = nullptr;
 
     detail::control_block_base* cb() const noexcept { return detail::cb_from_object(ptr_); }
+
+    template<typename U> friend weaker_ptr<U> detail::weak_from_object(U*) noexcept;
 };
+
+namespace detail {
+// A weak handle to an object a strong_ptr owns or owned (its control block is still allocated: the object is alive, or its
+// strong family still holds the collective weak reference)
+template<typename T>
+weaker_ptr<T> weak_from_object(T* object) noexcept {
+    weaker_ptr<T> result;
+    if (object) {
+        cb_from_object(object)->add_weak();
+        result.ptr_ = object;
+    }
+    return result;
+}
+}
 
 /**
  * @brief Create a strong_ptr managing a new object (combined allocation)

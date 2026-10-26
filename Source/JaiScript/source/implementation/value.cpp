@@ -919,16 +919,16 @@ std::string_view interned_type_text(engine* eng, std::string_view name, uint64_t
 }
 }
 
-script_value script_value::make_object(std::string_view type_name, std::shared_ptr<void> data, engine* eng) {
+script_value script_value::make_object(std::string_view type_name, detail::object_ref data, engine* eng) {
     if (!eng) {
         throw runtime_error("Cannot create object with null engine pointer");
     }
 
     uint64_t type_id = eng->get_symbolizer()->intern(type_name);
-    return make_object(type_name, type_id, data, eng);
+    return make_object(type_name, type_id, std::move(data), eng);
 }
 
-script_value script_value::make_object(std::string_view type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng, bool is_cpp_class) {
+script_value script_value::make_object(std::string_view type_name, uint64_t type_id, detail::object_ref data, engine* eng, bool is_cpp_class) {
     if (!eng) {
         throw runtime_error("Cannot create object with null engine pointer");
     }
@@ -944,13 +944,19 @@ script_value script_value::make_object(std::string_view type_name, uint64_t type
     script_value v(std::monostate{}, eng);
     v.set_stamp(class_def->get_type_info());
 
-    auto obj = is_cpp_class ? claim_object_holder(static_cast<class_instance*>(data.get()), eng) : acquire_object_holder(eng);
+    auto obj = is_cpp_class ? claim_object_holder(data.instance_pointer(), eng) : acquire_object_holder(eng);
     obj->type_name = interned_type_text(eng, type_name, type_id);
     obj->type_id = type_id;  // Set the cached type_id for fast comparison
-    obj->data = data;
+    obj->data = std::move(data);
     obj->is_class_instance_wrapper = is_cpp_class;  // True when data is a class_instance object (both C++ and script classes), false for raw data
     v.storage_ = obj;
     return v;
+}
+
+namespace detail {
+void retain_instance(class_instance* instance) noexcept { cb_from_object(instance)->add_strong(); }
+void release_instance(class_instance* instance) noexcept { strong_ptr<class_instance> last = adopt_pooled(instance); }
+size_t instance_use_count(const class_instance* instance) noexcept { return cb_from_object(const_cast<class_instance*>(instance))->get_strong_count(); }
 }
 
 namespace {
@@ -978,10 +984,10 @@ strong_ptr<script_value::object_holder> script_value::claim_object_holder(class_
     return result;
 }
 
-script_value script_value::make_class_object(const class_definition& cd, std::shared_ptr<void> data, engine* eng) {
+script_value script_value::make_class_object(const class_definition& cd, strong_ptr<class_instance> data, engine* eng) {
     script_value v(std::monostate{}, eng);
     v.set_stamp(cd.get_type_info());
-    auto obj = claim_object_holder(static_cast<class_instance*>(data.get()), eng);
+    auto obj = claim_object_holder(data.get(), eng);
     obj->type_name = cd.interned_name();
     obj->type_id = cd.get_type_id();
     obj->data = std::move(data);
@@ -1157,7 +1163,7 @@ script_value script_value::make_removed_element_reference(const strong_ptr<scrip
     return v;
 }
 
-script_value script_value::make_field_reference(std::shared_ptr<class_instance> owner, uint64_t field_id,
+script_value script_value::make_field_reference(strong_ptr<class_instance> owner, uint64_t field_id,
                                                 engine* eng, type_info_ptr field_type) {
     if (!owner) {
         throw runtime_error("Cannot create reference to null");
@@ -1189,7 +1195,7 @@ strong_ptr<script_value::reference_holder> script_value::mint_field_holder(class
     return ref;
 }
 
-script_value script_value::make_field_reference(std::shared_ptr<class_instance> owner, uint64_t field_id,
+script_value script_value::make_field_reference(strong_ptr<class_instance> owner, uint64_t field_id,
                                                 engine* eng, type_info_ptr field_type, const script_value& field_value,
                                                 uint32_t field_slot) {
     script_value v(std::monostate{}, eng);
@@ -1269,7 +1275,7 @@ void script_value::reference_holder::store_referent(const script_value& value, e
     }
 }
 
-script_value script_value::make_cpp_member_reference(const script_value& receiver, std::shared_ptr<void> object_pin,
+script_value script_value::make_cpp_member_reference(const script_value& receiver, detail::object_ref object_pin,
                                                      void* address, uint8_t size_and_sign, uint8_t semantic_index,
                                                      uint64_t field_id, engine* eng) {
     if (!eng) {
@@ -1792,7 +1798,7 @@ script_value script_value::parallel_host_view() const {
     if (!cd || !native_holder || !native_holder->data) { throw runtime_error("parallel_host_view: the instance owns no C++ object"); }
     auto view = cd->allocate_instance();
     view->set_class_definition(cd);
-    view->set_native(make_cpp_object(native_holder->type_name, native_holder->type_id, native_holder->data, holder->owner));
+    view->set_native(make_cpp_object(native_holder->type_name, native_holder->type_id, native_holder->data.shared(), holder->owner));
     cd->register_live_instance(view.get());
     auto view_holder = acquire_object_holder(holder->owner);
     view_holder->type_name = holder->type_name;

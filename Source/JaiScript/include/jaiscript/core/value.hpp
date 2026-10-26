@@ -51,7 +51,8 @@ namespace jai {
 
     // shared_ptr extraction (engine.cpp): locks an extended object's weakly held owner
     // (null once the object died); an owning native object is returned as is.
-    std::shared_ptr<void> engine_lock_instance_cpp_object(engine* eng, const std::shared_ptr<void>& instance_data);
+    namespace detail { class object_ref; }
+    std::shared_ptr<void> engine_lock_instance_cpp_object(engine* eng, const detail::object_ref& instance_data);
     
 	namespace detail {
 		checked_result<void*> checked_native_reference(const script_value& value, const std::type_info& target, uint64_t target_id = UINT64_MAX);
@@ -104,9 +105,120 @@ namespace detail {
     struct argument_capture_storage;
     // Out of line (schema_binding.cpp) so a binding TU does not instantiate the class and instance machinery
     std::shared_ptr<class_definition> make_class_definition(std::string_view name, uint64_t type_id, engine* eng);
-    std::shared_ptr<class_instance> make_native_instance(class_definition& def, std::string_view name, std::shared_ptr<void> object, engine* eng);
+    strong_ptr<class_instance> make_native_instance(class_definition& def, std::string_view name, std::shared_ptr<void> object, engine* eng);
     // A C++ object the call just made (a constructor's, a copy's): on a parallel chunk the chunk owns it (class_instance::region_tag)
     void note_region_made(const script_value& value, engine* eng);
+
+    // The counts of a strong_ptr<class_instance> where class_instance is incomplete (value.cpp)
+    void retain_instance(class_instance* instance) noexcept;
+    void release_instance(class_instance* instance) noexcept;
+    size_t instance_use_count(const class_instance* instance) noexcept;
+
+    // A std::shared_ptr owning a class instance through its strong_ptr, for a host that holds the instance as a C++ object's owner
+    // (a hybrid's load, an aliasing handle): the last host handle drops the strong count, so it drops on the script's thread
+    template <class I = class_instance>
+    std::shared_ptr<void> shared_owner_of(strong_ptr<I> instance) {
+        I* raw = instance.get();
+        if (!raw) { return nullptr; }
+        return std::shared_ptr<void>(raw, [keep = std::move(instance)](void*) mutable { keep.reset(); });
+    }
+
+    // What an object holder owns: a bound C++ object (a std::shared_ptr) or a class instance (a strong_ptr, internal/object_layout.md),
+    // in the two words of a shared_ptr. An instance is its pointer then a marker word no shared_ptr's control-block word can hold.
+    class object_ref {
+    public:
+        object_ref() noexcept { new (bytes_) std::shared_ptr<void>(); }
+        object_ref(std::nullptr_t) noexcept : object_ref() {}
+        object_ref(std::shared_ptr<void> object) noexcept { new (bytes_) std::shared_ptr<void>(std::move(object)); }
+        template <class T> requires (!std::is_same_v<T, class_instance> && !std::is_same_v<T, void>)
+        object_ref(std::shared_ptr<T> object) noexcept { new (bytes_) std::shared_ptr<void>(std::move(object)); }
+        object_ref(strong_ptr<class_instance> instance) noexcept {
+            class_instance* held = instance.release();
+            if (held) { set_instance_words(held); } else { new (bytes_) std::shared_ptr<void>(); }
+        }
+        object_ref(const object_ref& other) noexcept {
+            if (other.is_instance()) {
+                retain_instance(other.instance_pointer());
+                std::memcpy(bytes_, other.bytes_, sizeof(bytes_));
+            } else {
+                new (bytes_) std::shared_ptr<void>(other.shared_ref());
+            }
+        }
+        object_ref(object_ref&& other) noexcept {
+            std::memcpy(bytes_, other.bytes_, sizeof(bytes_));
+            new (other.bytes_) std::shared_ptr<void>();
+        }
+        object_ref& operator=(const object_ref& other) noexcept {
+            if (this != &other) {
+                object_ref copy(other);
+                swap(copy);
+            }
+            return *this;
+        }
+        object_ref& operator=(object_ref&& other) noexcept {
+            if (this != &other) {
+                object_ref taken(std::move(other));
+                swap(taken);
+            }
+            return *this;
+        }
+        ~object_ref() { drop(); }
+
+        void swap(object_ref& other) noexcept {
+            unsigned char held[sizeof(bytes_)];
+            std::memcpy(held, bytes_, sizeof(bytes_));
+            std::memcpy(bytes_, other.bytes_, sizeof(bytes_));
+            std::memcpy(other.bytes_, held, sizeof(bytes_));
+        }
+        void reset() noexcept { object_ref().swap(*this); }
+
+        bool is_instance() const noexcept { return word(1) == k_instance_mark; }
+        void* get() const noexcept { return is_instance() ? static_cast<void*>(instance_pointer()) : shared_ref().get(); }
+        explicit operator bool() const noexcept { return get() != nullptr; }
+        bool operator==(std::nullptr_t) const noexcept { return get() == nullptr; }
+        bool operator!=(std::nullptr_t) const noexcept { return get() != nullptr; }
+        long use_count() const noexcept {
+            return is_instance() ? static_cast<long>(instance_use_count(instance_pointer())) : shared_ref().use_count();
+        }
+        // The class instance this owns (null for a C++ object)
+        class_instance* instance_pointer() const noexcept {
+            return is_instance() ? reinterpret_cast<class_instance*>(word(0)) : nullptr;
+        }
+        // A new strong handle to the class instance this owns (empty for a C++ object); a template so it instantiates where
+        // class_instance is complete
+        template <class I = class_instance>
+        strong_ptr<I> instance() const noexcept { return strong_from_object<I>(static_cast<I*>(instance_pointer())); }
+        // The bound C++ object's handle; empty for a class instance
+        const std::shared_ptr<void>& shared() const noexcept {
+            static const std::shared_ptr<void> none;
+            return is_instance() ? none : shared_ref();
+        }
+
+    private:
+        static_assert(sizeof(std::shared_ptr<void>) == 2 * sizeof(uintptr_t), "object_ref packs into a shared_ptr's two words");
+        static constexpr uintptr_t k_instance_mark = 1;
+        uintptr_t word(size_t i) const noexcept {
+            uintptr_t w;
+            std::memcpy(&w, bytes_ + i * sizeof(uintptr_t), sizeof(w));
+            return w;
+        }
+        void set_instance_words(class_instance* instance) noexcept {
+            const uintptr_t words[2] = { reinterpret_cast<uintptr_t>(instance), k_instance_mark };
+            std::memcpy(bytes_, words, sizeof(words));
+        }
+        const std::shared_ptr<void>& shared_ref() const noexcept { return *std::launder(reinterpret_cast<const std::shared_ptr<void>*>(bytes_)); }
+        void drop() noexcept {
+            if (is_instance()) {
+                class_instance* held = instance_pointer();
+                new (bytes_) std::shared_ptr<void>();
+                release_instance(held);
+            } else {
+                std::launder(reinterpret_cast<std::shared_ptr<void>*>(bytes_))->~shared_ptr();
+                new (bytes_) std::shared_ptr<void>();
+            }
+        }
+        alignas(std::shared_ptr<void>) unsigned char bytes_[sizeof(std::shared_ptr<void>)];
+    };
 }
 
     namespace detail {
@@ -313,10 +425,10 @@ namespace detail {
         // Engine-aware factory methods (preferred - ALWAYS use these)
         static script_value make_array(type_info_ptr element_type, engine* eng);
         static script_value make_map(type_info_ptr keyType, type_info_ptr valueType, engine* eng);
-        static script_value make_object(std::string_view type_name, std::shared_ptr<void> data, engine* eng);
+        static script_value make_object(std::string_view type_name, detail::object_ref data, engine* eng);
         // Optimized version with cached type_id
-        static script_value make_object(std::string_view type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng, bool is_cpp_class = true);
-        static script_value make_class_object(const class_definition& cd, std::shared_ptr<void> data, engine* eng);   // an instance of the class in hand (no registry lookup)
+        static script_value make_object(std::string_view type_name, uint64_t type_id, detail::object_ref data, engine* eng, bool is_cpp_class = true);
+        static script_value make_class_object(const class_definition& cd, strong_ptr<class_instance> data, engine* eng);   // an instance of the class in hand (no registry lookup)
         // Internal factory method for raw C++ objects - always requires type_id to avoid re-interning
         static script_value make_cpp_object(std::string_view type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng);
         // Non-owning C++ object holder that still knows its owner weakly (an extended object's
@@ -335,11 +447,11 @@ namespace detail {
                                                            engine* eng, type_info_ptr element_type);
         // Instance-pinned reference to a class field: deref/assign-through re-resolve the
         // field node by id (never a cached address), so hot reload cannot dangle it.
-        static script_value make_field_reference(std::shared_ptr<class_instance> owner, uint64_t field_id,
+        static script_value make_field_reference(strong_ptr<class_instance> owner, uint64_t field_id,
                                                  engine* eng, type_info_ptr field_type);
         // the same over the field's current cell the caller found (present: a removed field never reaches it), at the slot the
         // owner's class assigned the field (UINT32_MAX: none known), which the reference remembers
-        static script_value make_field_reference(std::shared_ptr<class_instance> owner, uint64_t field_id,
+        static script_value make_field_reference(strong_ptr<class_instance> owner, uint64_t field_id,
                                                  engine* eng, type_info_ptr field_type, const script_value& field_value,
                                                  uint32_t field_slot = UINT32_MAX);
         // the same pinned by the holder that owns the instance (holder->data is the instance)
@@ -377,7 +489,7 @@ namespace detail {
         // A reference to the bound object a non-owning handle reaches (a host method's T& result): reads see the object, an
         // assignment copy-assigns into it, and the handle's anchor keeps its owner alive
         static script_value make_referent_reference(const script_value& handle, engine* eng);
-        static script_value make_cpp_member_reference(const script_value& receiver, std::shared_ptr<void> object_pin,
+        static script_value make_cpp_member_reference(const script_value& receiver, detail::object_ref object_pin,
                                                       void* address, uint8_t size_and_sign, uint8_t semantic_index,
                                                       uint64_t field_id, engine* eng);
         // PROPERTY reference (every other binder property): deref reads through the getter
@@ -1699,7 +1811,7 @@ namespace detail {
                 return checked_result<T>(std::move(result));
             }
             // Support for shared_ptr<class_instance> extraction from objects
-            else if constexpr (std::is_same_v<T, std::shared_ptr<jai::class_instance>>) {
+            else if constexpr (std::is_same_v<T, jai::strong_ptr<jai::class_instance>>) {
                 auto t = type();
                 if (t != script_value_type::jai_object_type && t != script_value_type::jai_shared_ptr_type) {
                     return checked_result<T>(
@@ -1726,7 +1838,7 @@ namespace detail {
                         type_id()
                     );
                 }
-                return checked_result<T>(std::static_pointer_cast<class_instance>((*objHolder)->data));
+                return checked_result<T>((*objHolder)->data.instance());
             }
             // Support for shared_ptr<void> extraction
             else if constexpr (std::is_same_v<T, std::shared_ptr<void>>) {
@@ -1797,7 +1909,7 @@ namespace detail {
                     }
 
                     // Otherwise use static cast
-                    return checked_result<T>(std::static_pointer_cast<typename T::element_type>(objHolder->data));
+                    return checked_result<T>(std::static_pointer_cast<typename T::element_type>(objHolder->data.shared()));
                 }
 
                 return checked_result<T>(
@@ -2010,7 +2122,7 @@ namespace detail {
         struct object_holder {
             std::string_view type_name;      // the type's name: the engine's interned text or a literal (never an owned string)
             uint64_t type_id = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
-            std::shared_ptr<void> data;     // The actual object
+            detail::object_ref data;        // The actual object: a bound C++ object, or a class instance
             bool is_class_instance_wrapper = false;  // True if data is a class_instance object (both C++ and script classes), false for raw data
             // A coroutine handle IS a reference to a running computation: clone() shares
             // it (reference semantics, like shared_ptr) instead of deep-copying.
@@ -2026,13 +2138,13 @@ namespace detail {
             // into it, `return *this`), pinned without taking part in extraction (bound_ptr stays the target).
             struct host_links {
                 std::weak_ptr<void> weak_data;
-                std::shared_ptr<void> keep_alive;
+                detail::object_ref keep_alive;
             };
             std::unique_ptr<host_links> links;
-            std::shared_ptr<void> keep_alive() const { return links ? links->keep_alive : nullptr; }
+            detail::object_ref keep_alive() const { return links ? links->keep_alive : detail::object_ref(); }
             bool has_keep_alive() const noexcept { return links && links->keep_alive; }
             std::shared_ptr<void> lock_weak_data() const { return links ? links->weak_data.lock() : nullptr; }
-            void set_keep_alive(std::shared_ptr<void> pin) {
+            void set_keep_alive(detail::object_ref pin) {
                 if (pin || links) { host().keep_alive = std::move(pin); }
             }
             void set_weak_data(std::weak_ptr<void> object) { host().weak_data = std::move(object); }
@@ -2086,7 +2198,7 @@ namespace detail {
         struct property_binding {
             strong_ptr<object_holder> receiver;
             type_info_ptr receiver_tag = nullptr;
-            std::shared_ptr<void> object_pin;
+            detail::object_ref object_pin;
             uint64_t field_id = 0;
             bool live_member = false;   // CPP-MEMBER: inline storage holds the bound box
             bool has_scratch = false;   // PROPERTY: inline storage holds the last getter result
@@ -2148,7 +2260,7 @@ namespace detail {
             // owns (a script layer reached through a C++ object), by its shared ownership
             class_instance* owner_instance = nullptr;
             strong_ptr<object_holder> owner_pin;
-            std::shared_ptr<class_instance> owner_shared;
+            strong_ptr<class_instance> owner_shared;
             uint64_t field_id = UINT64_MAX;
             // the field's slot as the owner's class assigned it (a slot never moves within a class; a re-class changes the class, a
             // reload bumps its field-shape epoch): field_cell() reads the slot while both match, else finds the field by id and
@@ -2796,11 +2908,11 @@ namespace detail {
         }
 
         // Safe class_instance extraction from object_holder
-        std::shared_ptr<class_instance> get_class_instance() {
+        strong_ptr<class_instance> get_class_instance() {
             JAI_CENSUS(holder_inspect);
             auto holder = get_object_holder();
             if (holder && holder->is_class_instance_wrapper) {
-                return std::static_pointer_cast<class_instance>(holder->data);
+                return holder->data.instance();
             }
             return nullptr;
         }
@@ -2843,7 +2955,7 @@ namespace detail {
         // Friends only for essential access patterns
         friend class interpreter;  // For coroutine handle creation (object_holder access)
         template<typename T> friend class dynamic_binder;  // For make_cpp_object
-        friend std::shared_ptr<class_instance> detail::make_native_instance(class_definition&, std::string_view, std::shared_ptr<void>, engine*);
+        friend strong_ptr<class_instance> detail::make_native_instance(class_definition&, std::string_view, std::shared_ptr<void>, engine*);
         friend class serialization::binary_archive_writer;  // For storage_ access
         friend class serialization::binary_archive_reader;  // For storage_ access
         friend class serialization::json_archive_writer;    // For storage_ access

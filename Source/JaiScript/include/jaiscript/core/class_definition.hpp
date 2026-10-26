@@ -45,82 +45,31 @@ namespace detail {
         std::shared_ptr<class_definition> def;
         void operator()(class_instance* ptr) const noexcept;
     };
-    // allocate_shared's allocator for an instance: the control block's allocation carries the instance's slot table and
-    // cells after it (`extra` bytes, their address written to *out before the instance is constructed)
-    template <class T>
-    struct trailing_allocator {
-        using value_type = T;
-        std::byte** out = nullptr;
-        size_t extra = 0;
-        trailing_allocator(std::byte** o, size_t e) noexcept : out(o), extra(e) {}
-        template <class U> trailing_allocator(const trailing_allocator<U>& o) noexcept : out(o.out), extra(o.extra) {}
-        T* allocate(size_t n) {
-            const size_t head = (n * sizeof(T) + 15) & ~size_t{15};
-            auto* memory = static_cast<std::byte*>(::operator new(head + extra));
-            *out = memory + head;
-            return reinterpret_cast<T*>(memory);
-        }
-        void deallocate(T* p, size_t) noexcept { ::operator delete(p); }
-        template <class U> bool operator==(const trailing_allocator<U>&) const noexcept { return true; }
-        template <class U> bool operator!=(const trailing_allocator<U>&) const noexcept { return false; }
-    };
-
-    // The object block (internal/object_layout.md): a head counting the parts that still need the memory, the room for the
-    // instance's holder, then allocate_shared's control block and instance, then the slot table and cells. The instance's
-    // part and the holder's part each give their part back; the last one frees the block.
+    // The object block (internal/object_layout.md): a destructor class's pin on its definition, the head counting the parts
+    // that still need the memory, the room for the instance's holder, the instance's strong_ptr control block and instance, then
+    // the cells. The instance's part and the holder's part each give their part back; the last one frees the block.
     struct object_block_head {
         std::atomic<uint32_t> parts{1};
+        uint32_t prefix = 0;   // bytes before the head: the definition pin of a destructor class's instance
         static constexpr size_t holder_room = (sizeof(control_block<script_value::object_holder>) + 15) & ~size_t{15};
         static constexpr size_t size = 16 + holder_room;
+        static constexpr size_t pin_bytes = (sizeof(std::shared_ptr<class_definition>) + 15) & ~size_t{15};
         static void release(std::byte* block) noexcept {
             auto* head = reinterpret_cast<object_block_head*>(block);
             if (head->parts.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                std::byte* memory = block - head->prefix;
+                if (head->prefix) { reinterpret_cast<std::shared_ptr<class_definition>*>(memory)->~shared_ptr(); }
                 head->~object_block_head();
-                ::operator delete(block);
+                ::operator delete(memory);
             }
         }
         static std::byte* holder_slot(std::byte* block) noexcept { return block + 16; }
-    };
-    template <class T>
-    struct object_block_allocator {
-        using value_type = T;
-        std::byte** out = nullptr;
-        std::byte** holder_out = nullptr;
-        size_t extra = 0;
-        object_block_allocator(std::byte** o, std::byte** h, size_t e) noexcept : out(o), holder_out(h), extra(e) {}
-        template <class U> object_block_allocator(const object_block_allocator<U>& o) noexcept : out(o.out), holder_out(o.holder_out), extra(o.extra) {}
-        T* allocate(size_t n) {
-            const size_t head = (n * sizeof(T) + 15) & ~size_t{15};
-            auto* memory = static_cast<std::byte*>(::operator new(object_block_head::size + head + extra));
-            new (memory) object_block_head();
-            *holder_out = object_block_head::holder_slot(memory);
-            *out = memory + object_block_head::size + head;
-            return reinterpret_cast<T*>(memory + object_block_head::size);
+        static object_block_head* of_control_block(control_block_base* cb) noexcept {
+            return reinterpret_cast<object_block_head*>(reinterpret_cast<std::byte*>(cb) - size);
         }
-        void deallocate(T* p, size_t) noexcept { object_block_head::release(reinterpret_cast<std::byte*>(p) - object_block_head::size); }
-        template <class U> bool operator==(const object_block_allocator<U>&) const noexcept { return true; }
-        template <class U> bool operator!=(const object_block_allocator<U>&) const noexcept { return false; }
-    };
-
-    // A destructor class's instance (a shared_ptr with its deleter) keeps its control block in the first `reserve` bytes of
-    // its own allocation: the deleter only destroys the instance, the allocation goes when the control block does
-    template <class T>
-    struct block_head_allocator {
-        using value_type = T;
-        static constexpr size_t reserve = 64;
-        std::byte* block = nullptr;
-        explicit block_head_allocator(std::byte* b) noexcept : block(b) {}
-        template <class U> block_head_allocator(const block_head_allocator<U>& o) noexcept : block(o.block) {}
-        T* allocate(size_t n) {
-            if (n * sizeof(T) <= reserve && alignof(T) <= 16) { return reinterpret_cast<T*>(block); }
-            return static_cast<T*>(::operator new(n * sizeof(T)));
+        std::shared_ptr<class_definition>* definition_pin() noexcept {
+            return prefix ? reinterpret_cast<std::shared_ptr<class_definition>*>(reinterpret_cast<std::byte*>(this) - prefix) : nullptr;
         }
-        void deallocate(T* p, size_t) noexcept {
-            if (reinterpret_cast<std::byte*>(p) != block) { ::operator delete(p); }
-            ::operator delete(block);
-        }
-        template <class U> bool operator==(const block_head_allocator<U>& o) const noexcept { return block == o.block; }
-        template <class U> bool operator!=(const block_head_allocator<U>& o) const noexcept { return block != o.block; }
     };
 }
 
@@ -150,8 +99,17 @@ enum class delegation_type {
 
 class class_definition;
 
-class class_instance : public std::enable_shared_from_this<class_instance> {
+class class_instance {
 public:
+    // An instance in its own object block (detail::object_block_head), owned by strong_ptr; a destructor_owner arms the
+    // instance's destructor chain and pins the definition until the instance dies
+    inline static strong_ptr<class_instance> make(std::string_view interned, engine* eng, uint32_t slots = 0,
+                                                  class_definition* destructor_owner = nullptr);
+    // This instance's own handle (std::enable_shared_from_this's shared_from_this): empty while it dies
+    strong_ptr<class_instance> strong_from_this() noexcept { return detail::strong_from_object(this); }
+    weaker_ptr<class_instance> weak_from_this() noexcept { return detail::weak_from_object(this); }
+    strong_ptr<class_instance> strong_from_this() const noexcept { return const_cast<class_instance*>(this)->strong_from_this(); }
+    weaker_ptr<class_instance> weak_from_this() const noexcept { return const_cast<class_instance*>(this)->weak_from_this(); }
     inline class_instance(std::string_view class_name, engine* eng = nullptr);
     struct interned_name_t {};
     // a name already in the engine's interned table (a class definition's cached view): no copy, no lookup
@@ -335,10 +293,10 @@ public:
     // The C++ object's address (owning or not); null without one. A raw read - no handle copies - for member resolution.
     inline void* cpp_object_pointer() const;
 
-    inline std::shared_ptr<class_instance> deep_copy() const;
+    inline strong_ptr<class_instance> deep_copy() const;
     // One level of a deep copy (script_value::clone_level); past detail::k_inline_copy_depth its fields and then its end
     // (finish_deep_copy_level) are steps on the work list
-    inline std::shared_ptr<class_instance> deep_copy_level(detail::deep_copy_work& work, unsigned depth) const;
+    inline strong_ptr<class_instance> deep_copy_level(detail::deep_copy_work& work, unsigned depth) const;
     // The end of an instance's copy, after its fields: its C++ object, then the copy joins its class's live instances
     inline void finish_deep_copy_level(class_instance& copy, bool overflow) const;
 
@@ -856,12 +814,12 @@ public:
     inline const std::vector<std::pair<uint32_t, script_value>>& instance_plan() const;
     // An instance of this class, armed with the chain's script destructor when it declares one: every instance runs it,
     // a minted one and every copy alike (C++)
-    inline std::shared_ptr<class_instance> allocate_instance();
+    inline strong_ptr<class_instance> allocate_instance();
     // Every memo a construction, copy or death of an instance fills, filled ahead of a parallel region whose chunks make or
     // destroy instances (they only read them)
     inline void prime_region_memos();
 
-    inline std::shared_ptr<class_instance> create_instance();
+    inline strong_ptr<class_instance> create_instance();
 
     inline const std::unordered_map<uint64_t, script_value>& get_all_field_defaults() const;
 
@@ -950,10 +908,10 @@ public:
     // Slot access for a bound C++ type deriving script_extensible, installed by its
     // dynamic_binder; the void* is the native object's pointer, a T* by the holder contract.
     struct script_slot_hooks {
-        void (*attach)(void* object, const std::weak_ptr<class_instance>& layer) = nullptr;
-        void (*own)(void* object, const std::shared_ptr<class_instance>& layer) = nullptr;
+        void (*attach)(void* object, const weaker_ptr<class_instance>& layer) = nullptr;
+        void (*own)(void* object, const strong_ptr<class_instance>& layer) = nullptr;
         void (*detach)(void* object) = nullptr;
-        std::shared_ptr<class_instance> (*read)(const void* object) = nullptr;
+        strong_ptr<class_instance> (*read)(const void* object) = nullptr;
         const script_extensible* (*slot)(const void* object) = nullptr;
     };
     void set_script_slot_hooks(const script_slot_hooks& hooks) { script_slot_hooks_ = hooks; }
@@ -1056,7 +1014,7 @@ public:
     void rename(const std::string& name, uint64_t type_id);
     bool has_live_instances() const;
     // The registered instances in creation order, weakly (a walk that can run script takes this snapshot first)
-    inline std::vector<std::weak_ptr<class_instance>> registered_instances() const;
+    inline std::vector<weaker_ptr<class_instance>> registered_instances() const;
 
     // Reflection surface (docs/site/guide/12-reflection.html): dynamic_binder marks host-backed classes;
     // the generation counter bumps on every redefinition so tools poll one integer and
@@ -1139,7 +1097,7 @@ public:
     const std::vector<uint64_t>& field_order() const { return field_order_; }
 
     // Creation order (the registry is a list in creation order; reflect::instances answers in it)
-    inline std::vector<std::shared_ptr<class_instance>> live_instances() const;
+    inline std::vector<strong_ptr<class_instance>> live_instances() const;
 
     engine* get_engine() const { return engine_; }
 
@@ -1291,10 +1249,10 @@ public:
     inline void register_live_instance(class_instance* live);
     inline JAI_NOINLINE void register_live_instance_in_region(class_instance* live);
 
-    inline void register_instance(std::weak_ptr<class_instance> instance, class_instance* live = nullptr);
+    inline void register_instance(weaker_ptr<class_instance> instance, class_instance* live = nullptr);
 
     // The join (main thread, region over: the plain unlocked path): a worker's surviving instance
-    inline void register_instance_after_region(std::weak_ptr<class_instance> instance,
+    inline void register_instance_after_region(weaker_ptr<class_instance> instance,
                                         const detail::fault_injection* faults = nullptr, class_instance* live_hint = nullptr);
 
     // O(1) unlink, called from ~class_instance (and a re-class). An instance never registered, or parked by a worker, skips

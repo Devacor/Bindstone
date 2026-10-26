@@ -207,9 +207,8 @@ bool run_destructor_body_in_region(engine& eng, class_instance* instance, const 
     dispatch.cls = shared->cls;
     dispatch.name_id = shared->name_id;
     dispatch.definition_env = *chunk->definition_env;
-    std::shared_ptr<class_instance> self = instance->weak_from_this().lock();
-    if (!self) { self = std::shared_ptr<class_instance>(instance, [](class_instance*) {}); }
-    const std::vector<script_value> arguments{ script_value::make_class_object(*level, self, &eng) };
+    detail::dying_instance_pin self(instance);
+    const std::vector<script_value> arguments{ script_value::make_class_object(*level, self.handle(), &eng) };
     try {
         auto ran = chunk->backend->execute_method_from(dispatch, ast, arguments[0], arguments, 1);
         if (!ran && chunk->deferred_reports) { chunk->deferred_reports->push_back(detail::deferred_report{ chunk->element(), ran.error(), format_error(ran, *eng.get_symbolizer()) }); }
@@ -230,10 +229,9 @@ void class_definition::run_destructor_body(class_instance* instance, const class
         arguments = std::move(m->spare_arguments.back());
         m->spare_arguments.pop_back();
     }
+    detail::dying_instance_pin self(instance);   // outlives the arguments, cleared on every path below
     try {
-        std::shared_ptr<class_instance> self = instance->weak_from_this().lock();   // a living instance (a re-class) keeps its owner
-        if (!self) { self = std::shared_ptr<class_instance>(instance, [](class_instance*) {}); }
-        arguments.push_back(script_value::make_class_object(*level, self, engine_));
+        arguments.push_back(script_value::make_class_object(*level, self.handle(), engine_));
         auto ran = body.as_function()(arguments);
         arguments.clear();
         if (!ran) { engine_->report_script_error(format_error(ran, *engine_->get_symbolizer()), ran.error()); }   // reported, never propagated
@@ -377,6 +375,14 @@ void class_instance::release_orphan_fields() noexcept {
 
 namespace detail {
 
+void strong_last_release<class_instance>::run(class_instance* object, control_block_base* cb) noexcept {
+    if (std::shared_ptr<class_definition>* pin = object_block_head::of_control_block(cb)->definition_pin(); pin && *pin) {
+        instance_deleter{std::move(*pin)}(object);
+        return;
+    }
+    class_instance::free_allocation(object);
+}
+
 void instance_deleter::operator()(class_instance* ptr) const noexcept {
     if (!ptr) { return; }
     engine* eng = def->get_engine();
@@ -455,7 +461,7 @@ void release_drive(engine& eng, release_machine& m, size_t mark) {
             m.stack.pop_back();
             const bool del = frame.delete_at_end;
             std::shared_ptr<class_definition> owner = std::move(frame.owner);
-            std::weak_ptr<class_instance> allocation = std::move(frame.allocation);
+            weaker_ptr<class_instance> allocation = std::move(frame.allocation);
             frame.instance = nullptr;
             m.free_frames.push_back(index);
             if (del) { release_step(m, [&] { class_instance::free_allocation(instance); }); }
@@ -663,7 +669,7 @@ namespace detail {
 namespace {
     // What each live object of a reloaded class (or of a class derived from it) held in the fields whose initializer needs the object
     struct reloaded_object {
-        std::weak_ptr<class_instance> instance;
+        weaker_ptr<class_instance> instance;
         std::vector<uint8_t> held;   // per field: 0 absent, 1 null, 2 a value
     };
 
@@ -723,7 +729,7 @@ namespace {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
                     "Property getter requires 'this' object");
             }
-            auto instance = args[0].as<std::shared_ptr<class_instance>>();
+            auto instance = args[0].as<strong_ptr<class_instance>>();
             return instance->get_field(field_id);
         };
     }
@@ -734,7 +740,7 @@ namespace {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
                     "Property setter requires 'this' and value");
             }
-            auto instance = args[0].as<std::shared_ptr<class_instance>>();
+            auto instance = args[0].as<strong_ptr<class_instance>>();
             // Typed fields enforce like locals (declared type; auto infers from the initialized value)
             auto enforced = instance->field_store(field_id, args[1], [&] { return args[1]; });
             if (!enforced) {
@@ -766,7 +772,7 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
         if (!existing.is_null() && existing.is_object()) {
             auto objHolder = existing.get_object_holder();
             if (objHolder && objHolder->type_id == host.class_definition_type_id) {
-                class_def = std::static_pointer_cast<script_class_definition>(objHolder->data);
+                class_def = std::static_pointer_cast<script_class_definition>(objHolder->data.shared());
                 is_redefinition = true;
             }
         }
@@ -815,7 +821,7 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
             if (!base_class_var.is_null() && base_class_var.is_object()) {
                 auto objHolder = base_class_var.get_object_holder();
                 if (objHolder && objHolder->type_id == host.class_definition_type_id) {
-                    base_class_def = std::static_pointer_cast<class_definition>(objHolder->data);
+                    base_class_def = std::static_pointer_cast<class_definition>(objHolder->data.shared());
                 } else {
                     return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
                 }

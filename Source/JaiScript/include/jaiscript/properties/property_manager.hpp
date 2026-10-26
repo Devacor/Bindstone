@@ -168,7 +168,7 @@ namespace jai {
 				return static_cast<const script_extensible&>(*this);
 			}
 		}
-		std::shared_ptr<class_instance> script_layer() const { return jai_script_slot().script_layer(); }
+		strong_ptr<class_instance> script_layer() const { return jai_script_slot().script_layer(); }
 		bool has_script_layer() const { return jai_script_slot().has_script_layer(); }
 
 		property_manager property_mgr;

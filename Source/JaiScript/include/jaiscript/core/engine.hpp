@@ -1110,41 +1110,41 @@ namespace jai {
         std::string script_layer_detach(const std::shared_ptr<T>& object);
         // The live layer owned by this engine, if any.
         template<typename T>
-        std::shared_ptr<class_instance> script_layer(const T& object) const;
+        strong_ptr<class_instance> script_layer(const T& object) const;
 
         // Map path for types without the slot, keyed by the native object's pointer.
         // note_script_layer is called from class_instance::set_native.
-        void note_script_layer(const void* cpp_object, const std::weak_ptr<class_instance>& owner);
-        std::shared_ptr<class_instance> script_layer_of(const void* cpp_object) const;
+        void note_script_layer(const void* cpp_object, const weaker_ptr<class_instance>& owner);
+        strong_ptr<class_instance> script_layer_of(const void* cpp_object) const;
         // The instance script already holds for a native object: its layer, or the plain wrapper make_object handed out
         // (one identity per object, so extend re-classes the object every holder sees)
-        std::shared_ptr<class_instance> object_instance_of(const void* cpp_object) const;
+        strong_ptr<class_instance> object_instance_of(const void* cpp_object) const;
         // Archive: $type (script class) + $script (fields as JSON) for a layer this engine owns;
         // the C++ base a script class extends ("" when it is not such a class); re-attachment
         // around a freshly loaded object (initializers, then hydration, then post_load) - the
         // caller aliases the returned layer only when the object cannot own it.
-        bool script_layer_save(const std::shared_ptr<class_instance>& layer, std::string& script_class_name, std::string& fields_json);
+        bool script_layer_save(const strong_ptr<class_instance>& layer, std::string& script_class_name, std::string& fields_json);
         std::string script_layer_base_name(const std::string& script_class_name);
-        std::shared_ptr<class_instance> extend_loaded(const std::string& script_class_name,
+        strong_ptr<class_instance> extend_loaded(const std::string& script_class_name,
             const std::shared_ptr<void>& cpp_object, const std::string& fields_json);
-        bool script_layer_object_owned(const std::shared_ptr<class_instance>& layer) const;
+        bool script_layer_object_owned(const strong_ptr<class_instance>& layer) const;
         // A load constructs a class that has a zero-argument constructor (any access, its initializer list included, so
         // a script class over a C++ base builds that base), then loads the saved values over it, then runs post_load
         bool script_class_default_constructible(const class_definition& cls) const;
         // The archive's hybrid load when the script class has a zero-argument constructor: the constructed instance and
         // the C++ object its constructor built (null when the class has none); then the saved $script fields hydrate over
         // it and post_load runs
-        std::shared_ptr<class_instance> construct_script_layer_for_load(const std::string& script_class_name, std::shared_ptr<void>& cpp_object);
-        checked_result<void> hydrate_script_layer(const std::shared_ptr<class_instance>& layer, const std::string& fields_json);
-        std::string detach_object(const std::shared_ptr<class_instance>& layer);
+        strong_ptr<class_instance> construct_script_layer_for_load(const std::string& script_class_name, std::shared_ptr<void>& cpp_object);
+        checked_result<void> hydrate_script_layer(const strong_ptr<class_instance>& layer, const std::string& fields_json);
+        std::string detach_object(const strong_ptr<class_instance>& layer);
         // Cores (error codes; the public extend throws at the host boundary): extend itself,
         // the script class behind a constructor value / name, and a layer of script_def over an
         // object typed as base_def (state from carry_from's fields or fields_json).
         checked_result<script_value> extend_checked(const script_value& object, const script_value& script_class, const std::string& fields_json);
         checked_result<std::shared_ptr<class_definition>> resolve_script_class(const script_value& script_class);
-        checked_result<std::shared_ptr<class_instance>> build_script_layer(const std::shared_ptr<class_definition>& script_def,
+        checked_result<strong_ptr<class_instance>> build_script_layer(const std::shared_ptr<class_definition>& script_def,
             const std::shared_ptr<class_definition>& base_def, const std::shared_ptr<void>& object, bool engine_owned,
-            const std::shared_ptr<class_instance>& carry_from, const std::string& fields_json);
+            const strong_ptr<class_instance>& carry_from, const std::string& fields_json);
 
         // Monotonic counter bumped on every script-class (re)definition. Class-shape
         // caches (class_definition::flat_value_semantics) validate against it: a nested
@@ -1278,7 +1278,7 @@ namespace jai {
         std::unique_lock<std::mutex> parallel_instance_registry_lock();
         // While a region runs, a chunk's thread parks an instance it constructed or copied with the element it is running (false
         // outside a region's chunk): class_definition::register_instance parks there, the join registers the survivors.
-        bool park_parallel_registration(std::weak_ptr<class_instance>& instance);
+        bool park_parallel_registration(weaker_ptr<class_instance>& instance);
         // Cold class-reload boundary: recover surviving worker copies after a failed join.
         void recover_parallel_registrations();
 

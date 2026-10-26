@@ -335,7 +335,7 @@ std::shared_ptr<class_definition> make_class_definition(std::string_view name, u
 	return std::make_shared<class_definition>(name, type_id, eng);
 }
 
-std::shared_ptr<class_instance> make_native_instance(class_definition& def, std::string_view name, std::shared_ptr<void> object, engine* eng) {
+strong_ptr<class_instance> make_native_instance(class_definition& def, std::string_view name, std::shared_ptr<void> object, engine* eng) {
 	auto instance = def.create_instance();
 	instance->set_native(script_value::make_cpp_object(name, def.get_type_id(), std::move(object), eng));
 	return instance;

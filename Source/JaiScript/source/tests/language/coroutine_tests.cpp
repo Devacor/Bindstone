@@ -1878,7 +1878,7 @@ public:
                 auto eng = engine::make();
                 eng->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
                 eng->execute("coroutine int forever() { while (true) { yield 1; } return 0; } var h = forever();");
-                auto handle = std::static_pointer_cast<coroutine_handle>(eng->execute("h").get_object_holder()->data);
+                auto handle = std::static_pointer_cast<coroutine_handle>(eng->execute("h").get_object_holder()->data.shared());
                 eng->execution_budget(0.05);
                 const auto start = std::chrono::steady_clock::now();
                 auto steps = handle->next(eng.get(), static_cast<script_int>(4000000000LL));
@@ -1888,15 +1888,15 @@ public:
                 check_true(seconds < 5.0, "it stops at the budget" + be);
                 eng->execution_budget(5.0);
                 eng->execute("var h2 = forever();");
-                auto fresh = std::static_pointer_cast<coroutine_handle>(eng->execute("h2").get_object_holder()->data);
+                auto fresh = std::static_pointer_cast<coroutine_handle>(eng->execute("h2").get_object_holder()->data.shared());
                 auto again = fresh->next(eng.get(), 3);
                 check_true(again.has_value() && again.value().as_int() == 1, "the next host call arms its own deadline" + be);
 
                 eng->execute("coroutine int k() { yield 1; throw \"late\"; yield 2; } var t = k();");
-                auto thrower = std::static_pointer_cast<coroutine_handle>(eng->execute("t").get_object_holder()->data);
+                auto thrower = std::static_pointer_cast<coroutine_handle>(eng->execute("t").get_object_holder()->data.shared());
                 auto thrown = thrower->next(eng.get(), 3);
                 eng->execute("var t1 = k();");
-                auto single = std::static_pointer_cast<coroutine_handle>(eng->execute("t1").get_object_holder()->data);
+                auto single = std::static_pointer_cast<coroutine_handle>(eng->execute("t1").get_object_holder()->data.shared());
                 (void)single->next(eng.get());
                 auto alone = single->next(eng.get());
                 check_true(!thrown.has_value() && !alone.has_value(), "a later step's uncaught throw is the host call's error" + be);

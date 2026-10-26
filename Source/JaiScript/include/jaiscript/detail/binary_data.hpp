@@ -578,9 +578,9 @@ namespace jai::binary {
 		}();
 		if (!made) { raise("read could not construct the class: " + eng->format_error(made)); }
 		script_value obj = std::move(made.value());
-		std::shared_ptr<class_instance> instance;
+		strong_ptr<class_instance> instance;
 		if (obj.is_object()) {
-			try { instance = obj.as<std::shared_ptr<class_instance>>(); } catch (...) {}
+			try { instance = obj.as<strong_ptr<class_instance>>(); } catch (...) {}
 		}
 		class_definition* def = instance ? instance->get_class_definition() : nullptr;
 		if (!def || def->is_cpp_class()) { raise("read expects a script class, got " + (def ? def->get_name() : value_kind_name(obj))); }

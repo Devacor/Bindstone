@@ -395,7 +395,7 @@ public:
 			auto eng = make_engine();
 			bind_native(*eng);
 			auto value = eng->make_object(std::make_shared<native_child>());
-			value.as<std::shared_ptr<class_instance>>()->retire_script_layer();
+			value.as<strong_ptr<class_instance>>()->retire_script_layer();
 			const std::string expected = "Script layer 'NativeChild' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object";
 			auto reference = detail::checked_native_reference(value, typeid(second_base));
 			check_false(reference.has_value());

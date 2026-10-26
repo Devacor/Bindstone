@@ -2455,7 +2455,7 @@ public:
             POMultiDerived multi;
             check(!multi.has_script_layer(), "fresh object: no layer");
             auto probe = eng->execute("Slotkin()");
-            auto layer = probe.as<std::shared_ptr<class_instance>>();
+            auto layer = probe.as<strong_ptr<class_instance>>();
             multi.jai_script_slot().attach_script_layer(layer);
             check(multi.script_layer() == layer, "the multi-base slot resolves through the first extensible base");
             check(eng->script_layer(multi) == layer, "engine::script_layer reads the same slot");

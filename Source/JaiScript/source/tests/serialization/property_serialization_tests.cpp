@@ -1518,7 +1518,7 @@ public:
 
             // Get the rectangle and check that hook was called
             auto rect_val = eng->get_variable("rect");
-            auto rect_instance = rect_val.as<std::shared_ptr<class_instance>>();
+            auto rect_instance = rect_val.as<strong_ptr<class_instance>>();
             check(rect_instance != nullptr);
 
             auto cpp_obj = rect_instance->get_cpp_object_as<Rectangle>();
@@ -1597,7 +1597,7 @@ public:
             if (loaded_val.type() == script_value_type::jai_object_type || loaded_val.type() == script_value_type::jai_shared_ptr_type) {
                 auto obj_holder = loaded_val.get_object_holder();
                 if (obj_holder && obj_holder->data) {
-                    auto inst = std::static_pointer_cast<class_instance>(obj_holder->data);
+                    auto inst = obj_holder->data.instance();
                     std::cerr << "[TEST] loaded is class instance: " << inst->get_class_name() << std::endl;
                     std::cerr << "[TEST] Instance fields: ";
                     inst->for_each_field([&](uint64_t fid, const script_value&) {

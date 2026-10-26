@@ -300,6 +300,10 @@ namespace {
 				// value forms never touch the env; the reference arms resolve storage through it
 				if (ins.b != 0) { JAI_ENV_TRIP(ins.op); return true; }
 				break;
+			case opcode::op_extern_decl:
+				// a field initializer's store reaches this, never the env; a real extern records into it
+				if (ins.b != k_field_init_form) { JAI_ENV_TRIP(ins.op); return true; }
+				break;
 			case opcode::op_binary_fused_store:
 			case opcode::op_index_fused:
 			case opcode::op_index_store_fused:
@@ -1135,6 +1139,47 @@ std::shared_ptr<chunk> vm_compiler::compile_standalone_expression(const expressi
 	scope_depth_ = saved_depth;
 	kill_scopes_ = std::move(saved_kills);
 	try_kills_ = std::move(saved_try_kills);
+	return result;
+}
+
+std::shared_ptr<chunk> vm_compiler::compile_field_initializers(std::string_view name, const std::vector<std::pair<uint64_t, expression_ptr>>& initializers) {
+	JAI_CENSUS_F(compile_chunk, 2);
+	open_loops_.clear();
+	loop_marks_.clear();
+	auto result = std::make_shared<chunk>();
+	chunk_ = result.get();
+	chunk_->function_name = std::string(name);
+	chunk_->local_count = 0;
+	chunk_->first_temp_slot = 0;
+	chunk_->is_function_body = true;
+	loops_.clear();
+	scope_depth_ = 0;
+	current_stmt_ = nullptr;
+	temps_active_ = true;
+	temp_next_ = 0;
+	temp_high_ = 0;
+	temp_symbol_index_ = k_invalid_u32;
+	subscript_guards_.clear();
+	callable_ = {};
+	callable_.active = true;
+	callable_body_ = nullptr;
+	frame_param_kinds_.clear();
+	frame_eligible_ = false;
+	nested_land_memo_.clear();
+	for (const auto& [field_id, initializer] : initializers) {
+		current_stmt_ = initializer.get();
+		chunk_->nodes.push_back(initializer);
+		compile_expression(initializer);
+		chunk_->field_inits.emplace_back(field_id, initializer.get());
+		emit(opcode::op_extern_decl, static_cast<uint32_t>(chunk_->field_inits.size() - 1), k_field_init_form);
+	}
+	emit(opcode::op_halt);
+	result->needs_frame_env = reference_ || body_needs_frame_env(*result);
+	result->method_env_reusable = !reference_ && (!result->needs_frame_env || method_body_env_reusable(*result));
+	if (temp_high_ > result->local_count) { result->local_count = temp_high_; }
+	temps_active_ = false;
+	current_stmt_ = nullptr;
+	chunk_ = nullptr;
 	return result;
 }
 

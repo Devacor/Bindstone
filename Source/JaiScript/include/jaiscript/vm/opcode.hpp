@@ -73,7 +73,9 @@ namespace jai::vm {
         op_class_decl,      // a=node index (class_decl); defines/redefines the class
         op_namespace_decl,  // a=node index (namespace_decl)
         op_enum_decl,       // a=node index (enum_decl)
-        op_extern_decl,     // a=node index (extern_decl): records the name (environment::note_extern), declares nothing
+        op_extern_decl,     // a=node index (extern_decl): records the name (environment::note_extern), declares nothing.
+                            // b=k_field_init_form: a=chunk::field_inits index, pops a level's field initializer value into this's field
+                            // (vm_compiler::compile_field_initializers; the 256 one-byte opcodes are all taken)
         op_decl_keep,       // a=node index (a program-scope variable_decl written without an initializer, or an inline one); pushes bool: a same-unit re-run keeps the variable (detail::redeclaration_keeps_value), an inline one finds its variable
         op_decl_share,      // a=node index (an inline variable_decl just declared): its cell is shared (environment::share)
 
@@ -454,6 +456,8 @@ namespace jai::vm {
     inline constexpr uint32_t index_flag_transient_read = 4; // read consumed transiently: elide the reference mint (transient_read.hpp)
     inline constexpr uint32_t index_flag_string_target = 8;  // a store target: a string base mints a STRING-ELEMENT reference, c = chunk::string_target_sites index
     inline constexpr uint32_t index_flag_no_result = 16;     // an op_index_store a fused statement store runs: its caller pops the result, nothing reads it back
+
+    inline constexpr uint32_t k_field_init_form = 1;   // op_extern_decl's b for a field initializer's store
 
     struct vm_instruction {
         opcode op;

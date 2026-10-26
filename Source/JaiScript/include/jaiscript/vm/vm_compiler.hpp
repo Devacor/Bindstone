@@ -49,6 +49,8 @@ namespace jai::vm {
         // Env-only lookups; safe to invoke mid-run (class decls, field initializers)
         std::shared_ptr<chunk> compile_standalone_expression(const expression_ptr& expr);
         std::shared_ptr<chunk> compile_standalone_declaration(const declaration_ptr& decl);
+        // One class level's field initializers as a method body: each value lands in this's field (op_field_init) in declaration order
+        std::shared_ptr<chunk> compile_field_initializers(std::string_view name, const std::vector<std::pair<uint64_t, expression_ptr>>& initializers);
 
     private:
         enum class region_kind : uint8_t {

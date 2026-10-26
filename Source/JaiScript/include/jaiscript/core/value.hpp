@@ -2042,19 +2042,28 @@ namespace detail {
 
             // Registered-class T& binding: the live C++ object (data stays null). Non-owning!
             void* bound_ptr = nullptr;
-            // An extended object's native object (internal/script_extensible.md): non-owning like bound_ptr,
-            // but the object's shared_ptr is reachable weakly so shared_ptr extraction can
-            // still hand out ownership while the object lives.
-            std::weak_ptr<void> weak_data;
 
-            // Lifetime anchor for NON-OWNING references (data == nullptr, bound_ptr set).
-            // When a C++ method returns a reference into its receiver (e.g. `return *this`
-            // for chaining), the resulting non-owning value must keep the receiver's
-            // underlying object alive even if the receiver was a temporary. This pins
-            // that owner WITHOUT participating in extraction (bound_ptr remains the
-            // authoritative target). Empty for owning objects.
-            std::shared_ptr<void> keep_alive;
             engine* owner = nullptr;   // the engine that made this object (after the hot fields): copies and class lookups run against it
+            // The non-owning forms' anchors, boxed so an owning object pays one pointer. weak_data: an extended object's
+            // native object (internal/script_extensible.md), reachable weakly so shared_ptr extraction can still hand out
+            // ownership while it lives. keep_alive: a non-owning reference's receiver (a C++ method returning a reference
+            // into it, `return *this`), pinned without taking part in extraction (bound_ptr stays the target).
+            struct host_links {
+                std::weak_ptr<void> weak_data;
+                std::shared_ptr<void> keep_alive;
+            };
+            std::unique_ptr<host_links> links;
+            std::shared_ptr<void> keep_alive() const { return links ? links->keep_alive : nullptr; }
+            bool has_keep_alive() const noexcept { return links && links->keep_alive; }
+            std::shared_ptr<void> lock_weak_data() const { return links ? links->weak_data.lock() : nullptr; }
+            void set_keep_alive(std::shared_ptr<void> pin) {
+                if (pin || links) { host().keep_alive = std::move(pin); }
+            }
+            void set_weak_data(std::weak_ptr<void> object) { host().weak_data = std::move(object); }
+            host_links& host() {
+                if (!links) { links = std::make_unique<host_links>(); }
+                return *links;
+            }
         };
 
 	private:
@@ -3485,7 +3494,7 @@ namespace detail {
             }
             case TYPEID_OBJECT: {
                 const auto& h = storage_.get<TYPEID_OBJECT>();
-                return h.unique() && (h->data ? h->data.use_count() == 1 : h->keep_alive != nullptr);
+                return h.unique() && (h->data ? h->data.use_count() == 1 : h->has_keep_alive());
             }
             case TYPEID_MAP: return storage_.get<TYPEID_MAP>().unique();
             case TYPEID_FUNCTION: return storage_.get<TYPEID_FUNCTION>().unique();

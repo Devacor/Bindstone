@@ -1033,7 +1033,7 @@ script_value script_value::make_cpp_reference(std::string_view type_name, uint64
     obj->type_name = interned_type_text(eng, type_name, type_id);
     obj->type_id = type_id;
     obj->bound_ptr = object;
-    obj->weak_data = std::move(owner);
+    obj->set_weak_data(std::move(owner));
     obj->is_class_instance_wrapper = false;
     v.storage_ = obj;
     return v;
@@ -1236,7 +1236,7 @@ script_value script_value::make_referent_reference(const script_value& handle, e
     ref->property = std::make_unique<property_binding>();
     ref->property->receiver = holder;
     ref->property->receiver_tag = handle.get_type_info();
-    ref->property->object_pin = holder->keep_alive;
+    ref->property->object_pin = holder->keep_alive();
     ref->property->live_member = true;
     ref->property->referent = holder->bound_ptr;
     ref->property->referent_class = holder->type_id != UINT64_MAX ? eng->get_class_definition(holder->type_id).get() : nullptr;

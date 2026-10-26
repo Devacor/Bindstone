@@ -8385,8 +8385,8 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         auto rv_holder = rv.get_object_holder();
                         auto recv_holder = objectValue.get_object_holder();
                         if (rv_holder && recv_holder) {
-                            rv_holder->keep_alive = recv_holder->data ? recv_holder->data
-                                                                      : recv_holder->keep_alive;
+                            rv_holder->set_keep_alive(recv_holder->data ? recv_holder->data
+                                                                      : recv_holder->keep_alive());
                         }
                     }
                     push_value(std::move(result_checked.value()));

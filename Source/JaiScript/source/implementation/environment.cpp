@@ -1244,8 +1244,8 @@ void detail::anchor_bound_method_result(const script_value& this_obj, checked_re
             if (rv_holder && recv_holder) {
                 // Prefer the receiver's owning data; if the receiver is itself a
                 // non-owning link in the chain, propagate its existing anchor.
-                rv_holder->keep_alive = recv_holder->data ? recv_holder->data
-                                                          : recv_holder->keep_alive;
+                rv_holder->set_keep_alive(recv_holder->data ? recv_holder->data
+                                                          : recv_holder->keep_alive());
             }
         }
     }

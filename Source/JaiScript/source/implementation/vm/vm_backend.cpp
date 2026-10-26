@@ -23350,8 +23350,8 @@ void vm_backend::anchor_method_result(script_value& result, script_value& receiv
 	auto rv_holder = result.get_object_holder();
 	auto recv_holder = receiver.get_object_holder();
 	if (rv_holder && recv_holder) {
-		rv_holder->keep_alive = recv_holder->data ? recv_holder->data
-		                                          : recv_holder->keep_alive;
+		rv_holder->set_keep_alive(recv_holder->data ? recv_holder->data
+		                                          : recv_holder->keep_alive());
 	}
 }
 

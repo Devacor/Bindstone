@@ -138,8 +138,8 @@ checked_result<script_value> script_callable_thunk::call(const std::vector<scrip
                 auto rv_holder = rv.get_object_holder();
                 auto recv_holder = this_obj.get_object_holder();
                 if (rv_holder && recv_holder) {
-                    rv_holder->keep_alive = recv_holder->data ? recv_holder->data
-                                                              : recv_holder->keep_alive;
+                    rv_holder->set_keep_alive(recv_holder->data ? recv_holder->data
+                                                              : recv_holder->keep_alive());
                 }
             }
         }
@@ -6600,7 +6600,7 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
     }
     script_value cpp_value = instance->native_or_throw();
     auto cpp_holder = cpp_value.get_object_holder();
-    std::shared_ptr<void> cpp_object = cpp_holder->data ? cpp_holder->data : cpp_holder->weak_data.lock();
+    std::shared_ptr<void> cpp_object = cpp_holder->data ? cpp_holder->data : cpp_holder->lock_weak_data();
     if (!cpp_object) {
         return result(make_error_code(runtime_error_code::extend_rejected),
             "extend: the C++ object behind '{0}' no longer exists", instance_def->get_type_id());
@@ -6760,7 +6760,7 @@ std::shared_ptr<void> engine_lock_instance_cpp_object(engine* eng, const std::sh
     if (cppObjValue.is_null() || cppObjValue.type() != script_value_type::jai_object_type) { return nullptr; }
     auto objHolder = cppObjValue.get_object_holder();
     if (!objHolder) { return nullptr; }
-    return objHolder->data ? objHolder->data : objHolder->weak_data.lock();
+    return objHolder->data ? objHolder->data : objHolder->lock_weak_data();
 }
 
 std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng) {

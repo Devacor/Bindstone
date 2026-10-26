@@ -291,8 +291,6 @@ namespace jai::vm {
         // A method frame names its overload raw: the main backend keeps every declaration it entered alive until a retire point finds
         // only itself holding it (no frame can name it then); a worker, or a declaration another backend retains, pins it on the record
         std::vector<std::shared_ptr<function_decl>> retained_decls_;
-        struct call_record;
-        void pin_method_decl(call_record& rec, const std::shared_ptr<function_decl>& ast);
         void release_retained_decls() noexcept {
             for (auto& decl : retained_decls_) { if (decl->vm_retainer == this) { decl->vm_retainer = nullptr; } }
             retained_decls_.clear();
@@ -1376,6 +1374,7 @@ namespace jai::vm {
         op_status push_static_method_frame(frame& caller, const script_value& method_val, const script_static_method_dispatch& dispatch,
                                            const std::shared_ptr<function_decl>& ast, const std::vector<script_value>& arguments, const call_site* site);
         void anchor_method_result(script_value& result, script_value& receiver);
+        void pin_method_decl(call_record& rec, const std::shared_ptr<function_decl>& ast);
         void pop_script_frame_core(call_record& rec);
         // A sharing frame's cells (chunk::shares_cells), gathered before its locals die and checked after
         void gather_frame_shared_cells(const frame& f);

@@ -256,7 +256,7 @@ script_value* environment::vm_storage_lookup(uint64_t id, bool& cacheable) {
     cacheable = false;
     // Byte-parallel with the get_ref/get_value_ptr prefix: 'this' special-case first
     if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
-        return &this_object_;
+        return &method_->this_object;
     }
     if (symbolizer_->shadow_count() != 0) [[unlikely]] {
         if (script_value* cell = shadowed_cell(id)) { cacheable = true; return cell; }
@@ -317,7 +317,7 @@ checked_result<script_value> environment::get(uint64_t id) const {
     JAI_CENSUS(env_get_id);
     // For method environments, handle 'this' specially
     if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
-        return this_object_;
+        return method_->this_object;
     }
     if (symbolizer_->shadow_count() != 0) [[unlikely]] {
         if (script_value* cell = shadowed_cell(id)) { return *cell; }
@@ -351,11 +351,11 @@ checked_result<script_value> environment::get(uint64_t id) const {
 
     // Kind-specific fallback: check 'this' object fields for method environments
     if (kind_ == env_kind::method) {
-        auto this_type = this_object_.type();
+        auto this_type = method_->this_object.type();
         if (id != symbolizer_->get_this_id() &&
             (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
-            !this_object_.is_null()) {
-            auto obj_holder = this_object_.get_object_holder();
+            !method_->this_object.is_null()) {
+            auto obj_holder = method_->this_object.get_object_holder();
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 
@@ -380,12 +380,12 @@ checked_result<script_value> environment::get(uint64_t id) const {
                     // thunk's operator() (engine.cpp), keep-alive anchor included.
                     script_callable payload;
                     payload.kind = script_callable::kind_type::bound_method;
-                    payload.more().this_obj = this_object_;
+                    payload.more().this_obj = method_->this_object;
                     payload.more().bound_dispatch = std::move(method);
-                    bound_method_storage_ = script_value::make_function(
-                        script_callable_thunk{this_object_.payload_engine(), std::move(payload)},
-                        this_object_.payload_engine());
-                    return bound_method_storage_;
+                    method_->bound_method = script_value::make_function(
+                        script_callable_thunk{method_->this_object.payload_engine(), std::move(payload)},
+                        method_->this_object.payload_engine());
+                    return method_->bound_method;
                 }
 
                 // Try to get static field from class definition
@@ -397,14 +397,14 @@ checked_result<script_value> environment::get(uint64_t id) const {
     }
 
     // Kind-specific fallback: check static fields for static_method environments
-    if (kind_ == env_kind::static_method && class_def_) {
+    if (kind_ == env_kind::static_method && method_ && method_->class_def) {
         // Check static fields
-        if (script_value* static_ptr = class_def_->find_static_field_in_chain(id)) {
+        if (script_value* static_ptr = method_->class_def->find_static_field_in_chain(id)) {
             return *static_ptr;
         }
 
         // Check static methods (for calling other static methods)
-        if (const script_value* method = class_def_->find_static_method_in_chain(id)) {
+        if (const script_value* method = method_->class_def->find_static_method_in_chain(id)) {
             return *method;
         }
     }
@@ -615,7 +615,7 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
     JAI_CENSUS(env_get_ref_id);
     // For method environments, handle 'this' specially
     if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
-        return std::cref(this_object_);
+        return std::cref(method_->this_object);
     }
     if (symbolizer_->shadow_count() != 0) [[unlikely]] {
         if (script_value* cell = shadowed_cell(id)) { return std::cref(*cell); }
@@ -647,11 +647,11 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
 
     // Kind-specific fallback: check 'this' object fields for method environments
     if (kind_ == env_kind::method) {
-        auto this_type = this_object_.type();
+        auto this_type = method_->this_object.type();
         if (id != symbolizer_->get_this_id() &&
             (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
-            !this_object_.is_null()) {
-            auto obj_holder = this_object_.get_object_holder();
+            !method_->this_object.is_null()) {
+            auto obj_holder = method_->this_object.get_object_holder();
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 
@@ -673,8 +673,8 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
     }
 
     // Kind-specific fallback: check static fields for static_method environments
-    if (kind_ == env_kind::static_method && class_def_) {
-        const script_value* field_ptr = class_def_->find_static_field_in_chain(id);
+    if (kind_ == env_kind::static_method && method_ && method_->class_def) {
+        const script_value* field_ptr = method_->class_def->find_static_field_in_chain(id);
         if (field_ptr) {
             return std::cref(*field_ptr);
         }
@@ -696,7 +696,7 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
     JAI_CENSUS(env_get_ref_id);
     // For method environments, handle 'this' specially (note: this is non-const so we return mutable ref)
     if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
-        return std::ref(this_object_);
+        return std::ref(method_->this_object);
     }
 
     // Check cache first (O(1))
@@ -725,11 +725,11 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
 
     // Kind-specific fallback: check 'this' object fields for method environments
     if (kind_ == env_kind::method) {
-        auto this_type = this_object_.type();
+        auto this_type = method_->this_object.type();
         if (id != symbolizer_->get_this_id() &&
             (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
-            !this_object_.is_null()) {
-            auto obj_holder = this_object_.get_object_holder();
+            !method_->this_object.is_null()) {
+            auto obj_holder = method_->this_object.get_object_holder();
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 
@@ -751,8 +751,8 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
     }
 
     // Kind-specific fallback: check static fields for static_method environments
-    if (kind_ == env_kind::static_method && class_def_) {
-        script_value* field_ptr = class_def_->find_static_field_in_chain(id);
+    if (kind_ == env_kind::static_method && method_ && method_->class_def) {
+        script_value* field_ptr = method_->class_def->find_static_field_in_chain(id);
         if (field_ptr) {
             return std::ref(*field_ptr);
         }
@@ -804,17 +804,17 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
 
     // Kind-specific fallback: assign to 'this' object fields for method environments
     if (kind_ == env_kind::method) {
-        auto this_type = this_object_.type();
+        auto this_type = method_->this_object.type();
         if (id != symbolizer_->get_this_id() &&
             (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
-            auto obj_holder = this_object_.get_object_holder();
+            auto obj_holder = method_->this_object.get_object_holder();
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
                 if (instance && instance->has_field(id)) {
                     // A hybrid's C++ property stores through its setter (a same-named
                     // script field shadows it)
                     if (uint64_t setter_id = detail::cpp_property_setter_id(instance.get(), id)) {
-                        return detail::write_cpp_property(this_object_, instance->get_class_definition(), setter_id, value);
+                        return detail::write_cpp_property(method_->this_object, instance->get_class_definition(), setter_id, value);
                     }
                     // Typed fields enforce like locals (declared type; auto infers)
                     auto enforced = instance->field_store(id, value, [&] { return clone_for_assignment(value); });
@@ -829,8 +829,8 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
     }
 
     // Kind-specific fallback: assign to static fields for static_method environments
-    if (kind_ == env_kind::static_method && class_def_) {
-        if (class_definition* owner = detail::bare_static_owner(class_def_.get(), nullptr, id)) {
+    if (kind_ == env_kind::static_method && method_ && method_->class_def) {
+        if (class_definition* owner = detail::bare_static_owner(method_->class_def.get(), nullptr, id)) {
             auto enforced = owner->static_store(id, value, [&] { return clone_for_assignment(value); });
             if (!enforced) {
                 return enforced.error_value();
@@ -880,15 +880,15 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
 
     // Kind-specific fallback: assign to 'this' object fields for method environments
     if (kind_ == env_kind::method) {
-        auto this_type = this_object_.type();
+        auto this_type = method_->this_object.type();
         if (id != symbolizer_->get_this_id() &&
             (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
-            auto obj_holder = this_object_.get_object_holder();
+            auto obj_holder = method_->this_object.get_object_holder();
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
                 if (instance && instance->has_field(id)) {
                     if (uint64_t setter_id = detail::cpp_property_setter_id(instance.get(), id)) {
-                        return detail::write_cpp_property(this_object_, instance->get_class_definition(), setter_id, value);
+                        return detail::write_cpp_property(method_->this_object, instance->get_class_definition(), setter_id, value);
                     }
                     // Typed fields enforce like locals (declared type; auto infers)
                     auto enforced = instance->field_store(id, value, [&] { return std::move(value); });
@@ -903,8 +903,8 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
     }
 
     // Kind-specific fallback: assign to static fields for static_method environments
-    if (kind_ == env_kind::static_method && class_def_) {
-        if (class_definition* owner = detail::bare_static_owner(class_def_.get(), nullptr, id)) {
+    if (kind_ == env_kind::static_method && method_ && method_->class_def) {
+        if (class_definition* owner = detail::bare_static_owner(method_->class_def.get(), nullptr, id)) {
             auto enforced = owner->static_store(id, value, [&] { return std::move(value); });
             if (!enforced) {
                 return enforced.error_value();
@@ -1003,13 +1003,15 @@ void environment::reset(std::shared_ptr<environment> new_parent) {
 
     // Reset to standard kind and clear kind-specific fields
     kind_ = env_kind::standard;
-    this_object_ = script_value::make_null(nullptr);
-    class_def_.reset();
+    if (method_) {
+        method_->this_object = script_value::make_null(nullptr);
+        method_->class_def.reset();
+    }
     access_context_ = nullptr;
     vm_pinned_scope_ = false;
     block_scope_ = false;
     call_scope_ = false;
-    bound_method_storage_ = script_value::make_null(nullptr);
+    if (method_) { method_->bound_method = script_value::make_null(nullptr); }
 }
 
 void environment::reset_as_method(std::shared_ptr<environment> parent, script_value this_obj) {
@@ -1028,13 +1030,13 @@ void environment::reset_as_method(std::shared_ptr<environment> parent, script_va
 
     // Set to method kind with this object (caller stamps set_access_context after)
     kind_ = env_kind::method;
-    this_object_ = std::move(this_obj);
-    class_def_.reset();
+    method_box().this_object = std::move(this_obj);
+    method_->class_def.reset();
     access_context_ = nullptr;
     vm_pinned_scope_ = false;
     block_scope_ = false;
     call_scope_ = false;
-    bound_method_storage_ = script_value::make_null(nullptr);
+    method_->bound_method = script_value::make_null(nullptr);
 }
 
 void environment::reset_as_static_method(std::shared_ptr<environment> parent, std::shared_ptr<class_definition> class_def) {
@@ -1053,13 +1055,13 @@ void environment::reset_as_static_method(std::shared_ptr<environment> parent, st
 
     // Set to static_method kind with class definition
     kind_ = env_kind::static_method;
-    this_object_ = script_value::make_null(nullptr);
-    class_def_ = class_def;
-    access_context_ = class_def_.get();
+    method_box().this_object = script_value::make_null(nullptr);
+    method_->class_def = class_def;
+    access_context_ = method_->class_def.get();
     vm_pinned_scope_ = false;
     block_scope_ = false;
     call_scope_ = false;
-    bound_method_storage_ = script_value::make_null(nullptr);
+    method_->bound_method = script_value::make_null(nullptr);
 }
 
 std::unordered_map<std::string_view, script_value> environment::get_all_variables() const {
@@ -1082,7 +1084,7 @@ script_value* environment::get_value_ptr(uint64_t id) {
     JAI_CENSUS(env_value_ptr);
     // For method environments, handle 'this' specially
     if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
-        return &this_object_;
+        return &method_->this_object;
     }
     if (symbolizer_->shadow_count() != 0) [[unlikely]] {
         if (script_value* cell = shadowed_cell(id)) { return cell; }
@@ -1131,7 +1133,7 @@ script_value* environment::uncached_value_ptr(uint64_t id) {
     };
     std::vector<environment*> with_fallback;
     for (environment* q = this; q != nullptr; q = chain_step(q->parent_.get())) {
-        if (q->kind_ == env_kind::method && id == this_id) { return memoize_below(q, &q->this_object_); }
+        if (q->kind_ == env_kind::method && id == this_id) { return memoize_below(q, &q->method_->this_object); }
         if (shadows) [[unlikely]] {
             if (script_value* cell = q->shadowed_cell(id)) { return memoize_below(q, cell); }
         }
@@ -1147,11 +1149,11 @@ script_value* environment::uncached_value_ptr(uint64_t id) {
 script_value* environment::kind_fallback_ptr(uint64_t id) {
     // Kind-specific fallback: check 'this' object fields for method environments
     if (kind_ == env_kind::method) {
-        auto this_type = this_object_.type();
+        auto this_type = method_->this_object.type();
         if (id != symbolizer_->get_this_id() &&
             (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
-            !this_object_.is_null()) {
-            auto obj_holder = this_object_.get_object_holder();
+            !method_->this_object.is_null()) {
+            auto obj_holder = method_->this_object.get_object_holder();
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 
@@ -1175,8 +1177,8 @@ script_value* environment::kind_fallback_ptr(uint64_t id) {
     }
 
     // Kind-specific fallback: check static fields for static_method environments
-    if (kind_ == env_kind::static_method && class_def_) {
-        script_value* field_ptr = class_def_->find_static_field_in_chain(id);
+    if (kind_ == env_kind::static_method && method_ && method_->class_def) {
+        script_value* field_ptr = method_->class_def->find_static_field_in_chain(id);
         if (field_ptr) {
             return field_ptr;
         }

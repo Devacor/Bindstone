@@ -41,35 +41,30 @@ namespace jai {
     public:
         // Standard environment constructor
         environment(string_symbolizer* symbolizer)
-            : symbolizer_(symbolizer), kind_(env_kind::standard),
-              this_object_(std::monostate{}, static_cast<engine*>(nullptr)),
-              bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
+            : symbolizer_(symbolizer), kind_(env_kind::standard) {
             bump_env_epoch();
         }
 
         // Standard environment with parent
         environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer)
-            : parent_(parent), symbolizer_(symbolizer), engine_(parent ? parent->engine_ : nullptr), kind_(env_kind::standard),
-              this_object_(std::monostate{}, static_cast<engine*>(nullptr)),
-              bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
+            : parent_(parent), symbolizer_(symbolizer), engine_(parent ? parent->engine_ : nullptr), kind_(env_kind::standard) {
             bump_env_epoch();
         }
 
         // Method environment constructor (with 'this' object)
         environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer, script_value this_obj)
             : parent_(parent), symbolizer_(symbolizer), engine_(parent ? parent->engine_ : nullptr), kind_(env_kind::method),
-              this_object_(std::move(this_obj)),
-              bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
+              method_(std::make_unique<method_fields>()) {
+            method_->this_object = std::move(this_obj);
             bump_env_epoch();
         }
 
         // Static method environment constructor (with class definition)
         environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer, std::shared_ptr<class_definition> class_def)
             : parent_(parent), symbolizer_(symbolizer), engine_(parent ? parent->engine_ : nullptr), kind_(env_kind::static_method),
-              class_def_(class_def),
-              this_object_(std::monostate{}, static_cast<engine*>(nullptr)),
-              bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)),
+              method_(std::make_unique<method_fields>()),
               access_context_(class_def.get()) {
+            method_->class_def = class_def;
             bump_env_epoch();
         }
 
@@ -171,20 +166,21 @@ namespace jai {
         bool is_static_method_env() const { return kind_ == env_kind::static_method; }
 
         // Method environment accessors (only valid when kind == method)
-        const script_value& get_this_object() const { return this_object_; }
+        const script_value& get_this_object() const { return method_ ? method_->this_object : null_this(); }
 
         // Clear just the this_object without clearing local values
         // Called when a method/constructor returns to ensure timely destruction
         void clear_this_reference() {
-            this_object_ = script_value::make_null(static_cast<engine*>(nullptr));
-            bound_method_storage_ = script_value::make_null(static_cast<engine*>(nullptr));
+            if (!method_) { return; }
+            method_->this_object = script_value::make_null(static_cast<engine*>(nullptr));
+            method_->bound_method = script_value::make_null(static_cast<engine*>(nullptr));
         }
 
         // Sticky method-scope rebind (vm fast path): swap the receiver on a persistent
         // per-dispatch method env between calls. Deliberately NO epoch bump - 'this' is
         // never memoized by the vm lookup caches (vm_storage_lookup marks it uncacheable)
         // and nothing name-resolvable changed.
-        void rebind_method_this(script_value this_obj) { this_object_ = std::move(this_obj); }
+        void rebind_method_this(script_value this_obj) { method_box().this_object = std::move(this_obj); }
 
         // vm ip-cache pin: identity+epoch of this env are stable across calls (persistent
         // method scope parented on the global env), so env_lookup_cached may memoize
@@ -234,12 +230,12 @@ namespace jai {
         }
 
         // Static method environment accessors (only valid when kind == static_method)
-        std::shared_ptr<class_definition> get_class_definition() const { return class_def_; }
+        std::shared_ptr<class_definition> get_class_definition() const { return method_ ? method_->class_def : nullptr; }
 
         // Member-shadowing ladder (detail/member_scope.hpp): stable storage of a method
         // env's receiver, so closure frames can probe the creation-site 'this' without
         // copying it per identifier. Null for non-method envs.
-        script_value* method_this_storage() { return kind_ == env_kind::method ? &this_object_ : nullptr; }
+        script_value* method_this_storage() { return kind_ == env_kind::method ? &method_box().this_object : nullptr; }
 
         // OWN-storage probe for the member-shadowing ladder's function-scope phase:
         // names DEFINED in this env only (local_ids_-gated) - never ancestor cache
@@ -370,11 +366,23 @@ namespace jai {
         env_kind kind_;
         bool namespace_scope_ = false;
 
-        // For method environments: the 'this' object for field access
-        script_value this_object_;
+        // What only method and static-method scopes hold ('this', the class, the bound-method slot), boxed so other scopes pay
+        // one pointer; a pooled env keeps its box across resets
+        struct method_fields {
+            script_value this_object{std::monostate{}, static_cast<engine*>(nullptr)};
+            std::shared_ptr<class_definition> class_def;
+            script_value bound_method{std::monostate{}, static_cast<engine*>(nullptr)};
+        };
+        std::unique_ptr<method_fields> method_;
+        method_fields& method_box() {
+            if (!method_) { method_ = std::make_unique<method_fields>(); }
+            return *method_;
+        }
+        static const script_value& null_this() {
+            static const script_value none{std::monostate{}, static_cast<engine*>(nullptr)};
+            return none;
+        }
 
-        // For static method environments: the class definition for static field access
-        std::shared_ptr<class_definition> class_def_;
 
         // Access-enforcement context (see set_access_context above). NOT owning: the
         // pooled-env reset paths null it so a recycled env never leaks a stale context.
@@ -384,11 +392,9 @@ namespace jai {
         bool block_scope_ = false;       // see block_scope(); reset paths clear it
         bool call_scope_ = false;        // see set_call_scope(); reset paths clear it
 
-        // Storage for bound methods (used by method and static_method kinds)
-        mutable script_value bound_method_storage_;
 
         // Internal helpers for kind-specific lookups
-        // These check this_object_ fields (for method kind) or class_def_ static fields (for static_method kind)
+        // These check the receiver's fields (method kind) or the class's static fields (static_method kind)
         script_value* get_static_field_ptr(uint64_t id);
     };
 

@@ -1277,6 +1277,21 @@ void class_definition::add_method(const std::string& name, script_function func,
     add_method(name, std::move(func), arity, {});
 }
 
+void class_definition::rebuild_field_slots_once() const {
+    while (field_slots_building_.test_and_set(std::memory_order_acquire)) { field_slots_building_.wait(true, std::memory_order_relaxed); }
+    if (!field_slots_current_.load(std::memory_order_acquire)) { rebuild_field_slots(); }
+    field_slots_building_.clear(std::memory_order_release);
+    field_slots_building_.notify_all();
+}
+
+void class_definition::rebuild_declared_slot_types() const {
+    std::vector<type_info_ptr> types;
+    types.reserve(slot_to_field_.size());
+    for (const uint64_t field : slot_to_field_) { types.push_back(field_declared_type_walk(field)); }
+    slot_declared_types_ = std::move(types);
+    slot_declared_epoch_ = field_shape_epoch_;
+}
+
 void class_definition::rebuild_field_slots() const {
     cpp_property_slots_.assign(slot_to_field_.size(), 0);
     std::function<void(const class_definition&)> walk = [&](const class_definition& cd) {
@@ -1298,7 +1313,8 @@ void class_definition::rebuild_field_slots() const {
     };
     walk(*this);
     has_cpp_property_slots_ = std::find(cpp_property_slots_.begin(), cpp_property_slots_.end(), 1) != cpp_property_slots_.end();
-    field_slots_current_ = true;
+    rebuild_declared_slot_types();
+    field_slots_current_.store(true, std::memory_order_release);
 }
 
 [[nodiscard]] bool class_definition::add_parent(std::shared_ptr<class_definition> parent) {

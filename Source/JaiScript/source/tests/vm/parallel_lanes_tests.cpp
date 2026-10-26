@@ -55,6 +55,24 @@ function par(int n) -> string { array<int> xs = []; for (int i = 0; i < n; ++i) 
 				"0|true|true|0|true|", "callee rows");
 		});
 
+		test("field_layouts_and_declared_types_follow_redefinitions_under_many_workers", [this]() {
+			// each round redefines the class (a field added or retyped, so the layout and its declared-type table move) and runs a region
+			// that stores into typed fields from every worker: the workers read the tables the definition built, never build them
+			std::vector<std::string> steps{ R"JAI(
+class P { int a = 0; float b = 0.0; }
+function par(int n) -> float { array<P> ps = []; for (int i = 0; i < n; ++i) { ps.push(P()); } parallel_for (auto& p : ps) { for (int k = 0; k < 8; ++k) { p.a = p.a + k; p.b = p.b + 0.5; } } float s = 0.0; for (auto& p : ps) { s = s + p.a + p.b; } return s; }
+0;)JAI" };
+			std::string expected = "0|";
+			for (int round = 0; round < 24; ++round) {
+				steps.push_back(round % 2 == 0 ? "class P { int a = 0; float b = 0.0; int c" + std::to_string(round) + " = 1; } 0;" : "class P { int a = 0; float b = 0.0; } 0;");
+				steps.push_back("par(512);");
+				expected += "0|16384.0|";
+			}
+			for (int repeat = 0; repeat < 4; ++repeat) {
+				for (bool vm : { false, true }) { check_eq(expected, run(vm, 8, steps), std::string("typed field stores across redefinitions (") + (vm ? "vm" : "interpreter") + ")"); }
+			}
+		});
+
 		test("a_workers_method_graft_follows_a_class_reload_between_regions", [this]() {
 			same_everywhere({ R"JAI(
 class V { float x = 0.0; float y = 0.0; function len2() -> float { return x * x + y * y; } }

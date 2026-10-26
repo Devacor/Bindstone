@@ -14015,7 +14015,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // Parse-time argument proofs belong to the ONE callee the site resolved to: body
     // identity is the callee check (internal/type_proofs_design.md I-C1)
     const uint8_t* arg_proofs = nullptr;
-    if (call_ctx && call_ctx->site && call_ctx->site->proven_callee_body == function.body.get() && !call_ctx->site->proven_callee_body_owner.expired() &&
+    if (call_ctx && call_ctx->site && call_ctx->site->proven_callee_body == function.body.get() && !call_ctx->site->proven_callee_body_owner.owner_before(function.body) && !function.body.owner_before(call_ctx->site->proven_callee_body_owner) &&
         call_ctx->site->static_arg_proofs.size() == function.parameters().size() &&
         args.size() == function.parameters().size()) {
         arg_proofs = call_ctx->site->static_arg_proofs.data();

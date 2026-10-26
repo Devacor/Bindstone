@@ -719,7 +719,13 @@ namespace jai::vm {
             std::vector<proof_global> proof_globals;
             // the program-scope functions the parameter forwarding read (symbol id, body): a by-value parameter renamed to the caller's
             // variable because each callee it is passed to takes it by value; re-checked with the proof globals
-            std::vector<std::pair<uint64_t, const statement*>> forward_callees;
+            struct forward_callee {
+                uint64_t symbol = 0;
+                const statement* body = nullptr;
+                std::weak_ptr<const block_stmt> owner;   // body names that function's body only while this holds
+                bool operator==(const forward_callee& o) const noexcept { return symbol == o.symbol && body == o.body; }
+            };
+            std::vector<forward_callee> forward_callees;
             bool epoch_checked = false;   // proof_globals or forward_callees non-empty: the guard asks inline_globals_hold
             mutable uint64_t globals_epoch = 0;
             bool calls = false;           // the body makes calls: op_graft_depth counts the grafted frame while they run
@@ -765,6 +771,9 @@ namespace jai::vm {
         // Default-argument expressions compiled per parameter (function-body chunks only)
         std::vector<std::shared_ptr<chunk>> param_default_chunks;
 
+        // a function body's chunk keeps its body alive: a holder's body-keyed check (script_method_dispatch::body_cache_key) never meets a
+        // recycled address
+        std::shared_ptr<const block_stmt> owner_body;
         std::string function_name;                         // empty = top level
         size_t local_count = 0;
         size_t first_temp_slot = 0;   // the parser's locals end here; every slot from it on is the compiler's (temps, a graft's slots)

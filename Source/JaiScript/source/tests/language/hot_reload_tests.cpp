@@ -2,13 +2,33 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/core/execution_backend.hpp>
+#include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/ast.hpp>
 #include <iostream>
 #include <iomanip>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 
 using namespace jai::foundry;
 
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#include <psapi.h>
+#endif
+
 namespace jai::foundry::tests {
+
+// the process's committed private memory (0 where the platform gives no cheap answer)
+inline size_t process_private_bytes() {
+#ifdef _WIN32
+	PROCESS_MEMORY_COUNTERS_EX counters{};
+	if (GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters), sizeof(counters))) { return counters.PrivateUsage; }
+#endif
+	return 0;
+}
 
 class hot_reload_tests : public suite {
 public:
@@ -21,6 +41,54 @@ public:
     }
 
     void forge_tests() override {
+		test("reloaded_code_is_freed_once_nothing_runs_it", [this]() {
+			// a file reloaded 200 times: each version's functions, methods and lambdas die once nothing runs them (recursion and mutual
+			// calls included), memory stays flat, and a coroutine suspended in the first version keeps running its own body
+			for (auto backend : {jai::backend_type::interpreter, jai::backend_type::vm}) {
+				const std::string label = backend == jai::backend_type::vm ? "vm" : "interpreter";
+				auto engine = jai::foundry::make_engine();
+				engine->set_backend(backend);
+				auto body_of = [&](const char* name) {
+					const jai::script_value f = engine->execute(name);
+					const auto* thunk = f.as_function().target<jai::script_callable_thunk>();
+					return std::weak_ptr<const jai::block_stmt>(thunk->payload.fn->body);
+				};
+				auto source = [](int round) {
+					const std::string k = std::to_string(round);
+					return "int ROUND = " + k + ";\n"
+					       "class Node { int depth = 0; Node(int d) { depth = d; } int sum(int n) { if (n <= 0) { return depth; } return sum(n - 1) + 1; } int other(int n) { return n > 0 ? twice(n - 1) : " + k + "; } int twice(int n) { return other(n) * 2; } }\n"
+					       "int fact(int n) { return n <= 1 ? 1 : n * fact(n - 1); }\n"
+					       "int ping(int n) { return n <= 0 ? " + k + " : pong(n - 1); }\n"
+					       "int pong(int n) { return ping(n); }\n"
+					       "auto adder = [](int a) { return a + " + k + "; };\n"
+					       "coroutine int counter() { int i = " + k + " * 1000; while (true) { yield i; i += 1; } return 0; }\n"
+					       "int drive() { Node t = Node(" + k + "); int s = 0; for (int i = 0; i < 20; i++) { s += t.sum(3) + t.other(2) + fact(5) + ping(4) + adder(i); } return s; }\n"
+					       + std::string(round == 0 ? "var KEPT = counter(); KEPT.next();\n" : "")
+					       + "drive();\n";
+				};
+				const std::filesystem::path file = std::filesystem::temp_directory_path() / ("jai_reload_frees_" + label + "_" + std::to_string(reinterpret_cast<uintptr_t>(engine.get())) + ".jai");
+				auto reload = [&](int round) {
+					{ std::ofstream out(file, std::ios::binary | std::ios::trunc); out << source(round); }
+					engine->execute_file(file.string());
+				};
+				reload(0);
+				const auto fact0 = body_of("fact"), ping0 = body_of("ping"), adder0 = body_of("adder"), drive0 = body_of("drive");
+				size_t at_100 = 0;
+				for (int round = 1; round <= 200; ++round) {
+					reload(round);
+					if (round == 100) { at_100 = jai::foundry::tests::process_private_bytes(); }
+				}
+				const size_t at_200 = jai::foundry::tests::process_private_bytes();
+				check(fact0.expired() && ping0.expired() && adder0.expired() && drive0.expired(), label + ": the first version's code is freed");
+				check_eq((int64_t)1, engine->execute("KEPT.next()").as_int(), label + ": the suspended coroutine runs its own body");
+				check_eq((int64_t)200000, engine->execute("counter().next()").as_int(), label + ": a new coroutine runs the last version");
+				check_eq(engine->execute("drive()").as_int(), engine->execute("drive()").as_int(), label + ": the last version still runs");
+				check(at_200 <= at_100 + 4 * 1024 * 1024, label + ": 100 more reloads keep memory flat (" + std::to_string(at_100) + " -> " + std::to_string(at_200) + ")");
+				std::error_code ignored;
+				std::filesystem::remove(file, ignored);
+			}
+		});
+
 		test("migration_reports_aggregate_actual_field_operations", [this]() {
 			for (auto backend : {jai::backend_type::interpreter, jai::backend_type::vm}) {
 				auto engine = jai::foundry::make_engine();

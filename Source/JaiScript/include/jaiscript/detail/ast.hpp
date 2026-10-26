@@ -350,6 +350,7 @@ namespace jai {
         // runs ahead of the receiver's read
         mutable proof_global receiver_global;
         mutable const block_stmt* proven_callee_body = nullptr;
+        mutable std::weak_ptr<const block_stmt> proven_callee_body_owner;   // proven_callee_body names that body only while this holds
         // weak: the resolved declaration may belong to a program that dies before this site compiles (a dropped jaibite, an evicted parse-cache entry, a redefinition)
         mutable std::weak_ptr<const class function_decl> proven_callee_decl;
         mutable std::weak_ptr<const class function_decl> proven_method_decl;   // `recv.m(...)` on an object receiver in a frame slot: the one overload of the receiver's class the checker resolved (the inliner's method graft)

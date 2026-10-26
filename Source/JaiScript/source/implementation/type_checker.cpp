@@ -2235,6 +2235,7 @@ private:
             c->static_arg_proofs.clear();
             c->proof_globals.clear();
             c->proven_callee_body = nullptr;
+            c->proven_callee_body_owner.reset();
             return;
         }
         c->static_arg_proofs.assign(n, proof_none);
@@ -2253,6 +2254,7 @@ private:
             }
         }
         c->proven_callee_body = by_value && certain_program ? fn->body.get() : nullptr;
+        c->proven_callee_body_owner = by_value && certain_program ? std::weak_ptr<const block_stmt>(fn->body) : std::weak_ptr<const block_stmt>();
         if (by_value && certain_program) { ++counts_.calls; }
     }
 

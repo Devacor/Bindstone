@@ -646,7 +646,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto callee = clone_expr(ce->callee, c);
 		if (!c.ok) return nullptr;
 		auto n = c.make<call_expr>(ce->location, callee, std::move(args));
-		n->static_arg_proofs = ce->static_arg_proofs; n->proof_globals = ce->proof_globals; n->proven_callee_body = ce->proven_callee_body; n->proven_callee_decl = ce->proven_callee_decl;
+		n->static_arg_proofs = ce->static_arg_proofs; n->proof_globals = ce->proof_globals; n->proven_callee_body = ce->proven_callee_body; n->proven_callee_body_owner = ce->proven_callee_body_owner; n->proven_callee_decl = ce->proven_callee_decl;
 		n->builtin_receiver = ce->builtin_receiver; n->builtin_receiver_open = ce->builtin_receiver_open;
 		c.origins[n.get()] = ce;
 		for (auto* pins : { c.alias_pins, c.callee_probes }) {
@@ -1447,7 +1447,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	};
 	// a scalar value parameter the body never writes, its argument a private local of the parameter's declared type that no other argument
 	// writes or binds by reference: the copy is unobservable, so the parameter is a renaming too (no move into the callee's slot)
-	std::vector<std::pair<uint64_t, const statement*>> forward_callees;
+	std::vector<chunk::inline_site::forward_callee> forward_callees;
 	auto forwards = [&](size_t i) -> bool {
 		const parameter& p = fn->parameters[i];
 		const expression_ptr& a = call->arguments[i];
@@ -1465,7 +1465,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		as_reference[i].is_reference = true;
 		// a program-scope script function the body calls answers through its own parameters (a by-value one copies); the guard re-checks
 		// each one read when a definition changes (forward_callees), any other callee is unseen and an argument use counts as a write
-		std::vector<std::pair<uint64_t, const statement*>> read;
+		std::vector<chunk::inline_site::forward_callee> read;
 		detail::ref_write_analysis writes([&](const identifier_expr& id, std::vector<detail::ref_write_callee>& out) -> bool {
 			if (!engine_ || id.global_qualified || id.slot_index != SIZE_MAX || id.symbol_id == UINT64_MAX) return false;
 			const auto env = engine_->get_global_environment();
@@ -1474,7 +1474,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 			const auto* thunk = v->deref().as_function().target<script_callable_thunk>();
 			if (!thunk || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn || thunk->payload.fn->closure_env || thunk->payload.fn->converted() || !thunk->payload.fn->body) return false;
 			out.push_back(detail::ref_write_callee{&thunk->payload.fn->parameters(), thunk->payload.fn->body.get(), thunk->payload.fn->name, false, false});
-			read.emplace_back(id.symbol_id, thunk->payload.fn->body.get());
+			read.push_back(chunk::inline_site::forward_callee{id.symbol_id, thunk->payload.fn->body.get(), thunk->payload.fn->body});
 			return true;
 		});
 		if (writes.analyze(detail::ref_write_callee{&as_reference, fn->body.get(), {}, false, false}, i).writes) return false;

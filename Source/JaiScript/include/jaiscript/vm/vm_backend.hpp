@@ -1346,7 +1346,7 @@ namespace jai::vm {
                                            script_value* receiver_owned, size_t frame_base,
                                            size_t args_base, size_t argc,
                                            const call_site* site);
-        op_status push_method_frame(frame& caller, script_value&& method_val,
+        op_status push_method_frame(frame& caller, const script_value& method_val,
                                                const script_method_dispatch& dispatch,
                                                const std::shared_ptr<function_decl>& ast,
                                                script_value&& receiver,
@@ -1355,7 +1355,7 @@ namespace jai::vm {
         // a script class's static method entered in-loop (the native path's static scope env, no receiver): true when callee is one
         // this engine's loop may enter (st holds the push's outcome), false for the opaque call
         bool enter_static_method(frame& caller, script_value& callee, const std::vector<script_value>& arguments, const call_site& site, op_status& st);
-        op_status push_static_method_frame(frame& caller, script_value&& method_val, const script_static_method_dispatch& dispatch,
+        op_status push_static_method_frame(frame& caller, const script_value& method_val, const script_static_method_dispatch& dispatch,
                                            const std::shared_ptr<function_decl>& ast, const std::vector<script_value>& arguments, const call_site* site);
         void anchor_method_result(script_value& result, script_value& receiver);
         void pop_script_frame_core(call_record& rec);

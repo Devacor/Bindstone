@@ -49,8 +49,18 @@ namespace jai::vm {
         // Env-only lookups; safe to invoke mid-run (class decls, field initializers)
         std::shared_ptr<chunk> compile_standalone_expression(const expression_ptr& expr);
         std::shared_ptr<chunk> compile_standalone_declaration(const declaration_ptr& decl);
-        // One class level's field initializers as a method body: each value lands in this's field (op_field_init) in declaration order
-        std::shared_ptr<chunk> compile_field_initializers(std::string_view name, const std::vector<std::pair<uint64_t, expression_ptr>>& initializers);
+    private:
+        const std::unordered_map<uint64_t, uint32_t>* name_slots_ = nullptr;   // compile_construction's parameter names
+    public:
+        // A constructor level's construction chunk: one segment per initializer-list argument, then one for the level's field
+        // initializers (each value stored into this's field), run in one frame whose slots hold the constructor's parameters by
+        // name (name_slots: an identifier naming one reads its slot, as the level environment's binding shadowed it)
+        struct construction_fields {
+            const class_definition* level;
+            std::vector<std::pair<uint64_t, expression_ptr>> initializers;
+        };
+        std::shared_ptr<chunk> compile_construction(std::string_view name, const std::unordered_map<uint64_t, uint32_t>& name_slots, size_t slot_count,
+                                                    const std::vector<expression_ptr>& arguments, const std::vector<construction_fields>& fields);
 
     private:
         enum class region_kind : uint8_t {

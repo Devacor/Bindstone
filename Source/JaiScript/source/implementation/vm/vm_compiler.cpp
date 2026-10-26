@@ -713,6 +713,10 @@ void vm_compiler::emit_unsupported(const char* construct) {
 }
 
 uint32_t vm_compiler::identifier_slot_operand(identifier_expr* ident) const {
+	if (name_slots_) {   // a construction chunk: the constructor's parameters by name, everything else through the frame's chain
+		auto it = name_slots_->find(ident->symbol_id);
+		return it != name_slots_->end() ? it->second : k_invalid_u32;
+	}
 	if (ident->slot_index == SIZE_MAX) return k_invalid_u32;
 	if (callable_.active && callable_.declared.find(ident->symbol_id) == callable_.declared.end()) {
 		// Slot belongs to an enclosing function's frame (or interpreter-patched state):
@@ -1142,38 +1146,52 @@ std::shared_ptr<chunk> vm_compiler::compile_standalone_expression(const expressi
 	return result;
 }
 
-std::shared_ptr<chunk> vm_compiler::compile_field_initializers(std::string_view name, const std::vector<std::pair<uint64_t, expression_ptr>>& initializers) {
+std::shared_ptr<chunk> vm_compiler::compile_construction(std::string_view name, const std::unordered_map<uint64_t, uint32_t>& name_slots, size_t slot_count,
+                                                       const std::vector<expression_ptr>& arguments, const std::vector<construction_fields>& fields) {
 	JAI_CENSUS_F(compile_chunk, 2);
 	open_loops_.clear();
 	loop_marks_.clear();
 	auto result = std::make_shared<chunk>();
 	chunk_ = result.get();
 	chunk_->function_name = std::string(name);
-	chunk_->local_count = 0;
-	chunk_->first_temp_slot = 0;
+	chunk_->local_count = slot_count;
+	chunk_->first_temp_slot = slot_count;
 	chunk_->is_function_body = true;
 	loops_.clear();
 	scope_depth_ = 0;
 	current_stmt_ = nullptr;
 	temps_active_ = true;
-	temp_next_ = 0;
-	temp_high_ = 0;
+	temp_next_ = slot_count;
+	temp_high_ = slot_count;
 	temp_symbol_index_ = k_invalid_u32;
 	subscript_guards_.clear();
 	callable_ = {};
 	callable_.active = true;
+	for (const auto& [id, slot] : name_slots) { callable_.declared.insert(id); }
 	callable_body_ = nullptr;
 	frame_param_kinds_.clear();
 	frame_eligible_ = false;
 	nested_land_memo_.clear();
-	for (const auto& [field_id, initializer] : initializers) {
-		current_stmt_ = initializer.get();
-		chunk_->nodes.push_back(initializer);
-		compile_expression(initializer);
-		chunk_->field_inits.emplace_back(field_id, initializer.get());
-		emit(opcode::op_extern_decl, static_cast<uint32_t>(chunk_->field_inits.size() - 1), k_field_init_form);
+	name_slots_ = &name_slots;
+	for (const auto& argument : arguments) {
+		chunk_->construction_segments.emplace_back(argument.get(), static_cast<uint32_t>(chunk_->code.size()));
+		current_stmt_ = argument.get();
+		chunk_->nodes.push_back(argument);
+		compile_expression(argument);
+		emit(opcode::op_halt);
 	}
-	emit(opcode::op_halt);
+	for (const auto& level : fields) {
+		chunk_->construction_segments.emplace_back(level.level, static_cast<uint32_t>(chunk_->code.size()));
+		for (const auto& [field_id, initializer] : level.initializers) {
+			current_stmt_ = initializer.get();
+			chunk_->nodes.push_back(initializer);
+			compile_expression(initializer);
+			chunk_->field_inits.emplace_back(field_id, initializer.get());
+			emit(opcode::op_extern_decl, static_cast<uint32_t>(chunk_->field_inits.size() - 1), k_field_init_form);
+		}
+		emit(opcode::op_halt);
+	}
+	name_slots_ = nullptr;
 	result->needs_frame_env = reference_ || body_needs_frame_env(*result);
 	result->method_env_reusable = !reference_ && (!result->needs_frame_env || method_body_env_reusable(*result));
 	if (temp_high_ > result->local_count) { result->local_count = temp_high_; }

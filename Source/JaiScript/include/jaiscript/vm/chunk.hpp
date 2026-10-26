@@ -806,6 +806,10 @@ namespace jai::vm {
             detail::host_member_hit host;       // slot UINT32_MAX on a bound C++ class: the member's in-place lane, when it has one
         };
         mutable std::vector<member_ic_entry> member_ic;
+        // the field IC's second class per env cache slot (a base method running on several subclasses), main engine only; sized on the
+        // first receiver of another class
+        struct this_field_row { const class_definition* cd = nullptr; uint32_t slot = 0; };
+        mutable std::vector<this_field_row> this_field_alt;
         // A bare name in a method that reads a C++ member of the receiver, by env cache slot (ip * 3 + operand): the receiver
         // class, its method epoch and the member's lane. Sized on the first such read.
         struct bare_host_entry {

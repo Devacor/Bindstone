@@ -1926,6 +1926,9 @@ namespace jai::vm {
         // and only value/callee sites mint.
         script_value* member_scope_env_lookup(frame& f, uint64_t symbol_id, size_t cache_slot,
                                               const identifier_expr* idn = nullptr) {
+            if (lazy_method_frame(f)) {
+                if (script_value* ic_field = this_field_ic_probe(f, cache_slot, symbol_id)) { return ic_field; }
+            }
             if (script_value* own = detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, symbol_id)) {
                 return own;
             }
@@ -1979,6 +1982,11 @@ namespace jai::vm {
         // the whole proof. Eager frames keep the serial (their scope env sits below the
         // floor and may define). Loop scopes churning the serial (top-level loop bodies,
         // constructions) no longer starve lazy methods' field caches.
+        // a method frame that runs over its definition environment (no frame env: entry_env null) has no scopes of its own, so a member
+        // outranks every environment name whatever the env serial says (lazy_frame_no_own_scopes' answer, read off the frame)
+        static bool lazy_method_frame(const frame& f) noexcept {
+            return f.locals && f.locals->is_method && !f.entry_env && !f.top_level;
+        }
         bool lazy_frame_no_own_scopes(frame& f) {
             ensure_frame_member_scope(f, environment_.get());
             return f.locals && frame_scope_state(f) == detail::member_scope_state::instance &&
@@ -2002,7 +2010,7 @@ namespace jai::vm {
             if (cache.size() <= cache_slot) { return nullptr; }
             const auto& entry = cache[cache_slot];
             if (entry.this_field_serial == 0 || entry.this_field_sym != sym) { return nullptr; }
-            if (entry.this_field_serial != env_symbolizer_->env_epoch() && !lazy_frame_no_own_scopes(f)) { return nullptr; }
+            if (!lazy_method_frame(f) && entry.this_field_serial != env_symbolizer_->env_epoch() && !lazy_frame_no_own_scopes(f)) { return nullptr; }
             script_value& this_val = f.locals->get_this();
             if (!this_val.is_object() || this_val.is_null()) { return nullptr; }
             // Raw extraction (get_class_instance's exact ladder minus its handle
@@ -2020,8 +2028,17 @@ namespace jai::vm {
             }
             // another class at the site: a C++ property's placeholder is no cell (the object answers, through the member probe)
             if (const class_definition* cd = instance->get_class_definition()) {
+                if (!parallel_worker_ && cache_slot < f.code->this_field_alt.size() && f.code->this_field_alt[cache_slot].cd == cd) {
+                    return instance->field_slot_value(f.code->this_field_alt[cache_slot].slot);
+                }
                 const uint32_t slot = cd->field_slot(sym);
                 if (slot != class_definition::k_no_field_slot && cd->slot_is_cpp_property(slot)) { return nullptr; }
+                if (slot != class_definition::k_no_field_slot && !parallel_worker_) {
+                    // the id->slot mapping is append-only for a class object's lifetime: the pair stays true
+                    if (f.code->this_field_alt.size() <= cache_slot) { f.code->this_field_alt.resize(f.code->code.size() * 3); }
+                    if (cache_slot < f.code->this_field_alt.size()) { f.code->this_field_alt[cache_slot] = chunk::this_field_row{cd, slot}; }
+                    return instance->field_slot_value(slot);
+                }
             }
             return instance->find_field_value(sym);
         }
@@ -2104,7 +2121,7 @@ namespace jai::vm {
             if (cache.size() <= cache_slot) { return nullptr; }
             const auto& entry = cache[cache_slot];
             if (entry.this_store_state != 1 || entry.this_field_sym != sym) { return nullptr; }
-            if (entry.this_field_serial != env_symbolizer_->env_epoch() && !lazy_frame_no_own_scopes(f) && !stamped_this_field_store(f, sym)) { return nullptr; }
+            if (!lazy_method_frame(f) && entry.this_field_serial != env_symbolizer_->env_epoch() && !lazy_frame_no_own_scopes(f) && !stamped_this_field_store(f, sym)) { return nullptr; }
             script_value& this_val = f.locals->get_this();
             if (!this_val.is_object() || this_val.is_null()) { return nullptr; }
             auto* oh = this_val.unchecked_get_object_storage().get();

@@ -122,7 +122,7 @@ public:
             script_value loaded_val = reader.read_value();
 
             // Verify object was constructed with context values
-            auto loaded_instance = loaded_val.as<std::shared_ptr<class_instance>>();
+            auto loaded_instance = loaded_val.as<strong_ptr<class_instance>>();
             auto loaded_obj = loaded_instance->get_cpp_object_as<context_required_object>();
 
             check_eq(loaded_obj->is_initialized(), true);
@@ -181,7 +181,7 @@ public:
             script_value loaded_val = reader.read_value();
 
             // Verify object was constructed with pre-read values
-            auto loaded_instance = loaded_val.as<std::shared_ptr<class_instance>>();
+            auto loaded_instance = loaded_val.as<strong_ptr<class_instance>>();
             auto loaded_obj = loaded_instance->get_cpp_object_as<property_preread_object>();
 
             check_eq(loaded_obj->get_id(), std::string("obj_123"));
@@ -238,7 +238,7 @@ public:
             script_value loaded_val = reader.read_value();
 
             // Verify object was constructed with both context and pre-read values
-            auto loaded_instance = loaded_val.as<std::shared_ptr<class_instance>>();
+            auto loaded_instance = loaded_val.as<strong_ptr<class_instance>>();
             auto loaded_obj = loaded_instance->get_cpp_object_as<complex_object>();
 
             check_eq(loaded_obj->get_service_name(), std::string("NewService"));  // From context

@@ -564,13 +564,13 @@ namespace jai {
         // Evaluate field initializers for a script class instance at construction time
         // This should be called BEFORE the constructor body executes
         // If skip_parent_recursion is true, only evaluate THIS class's field initializers (parents already handled)
-        checked_result<void> evaluate_field_initializers(std::shared_ptr<class_instance> instance,
+        checked_result<void> evaluate_field_initializers(strong_ptr<class_instance> instance,
                                         std::shared_ptr<script_class_definition> class_def,
                                         std::shared_ptr<environment> init_env,
                                         bool skip_parent_recursion = false,
                                         const detail::aggregate_plan* aggregate = nullptr);
         // execution_backend::apply_field_initializers
-        void apply_field_initializers(const std::shared_ptr<class_instance>& instance,
+        void apply_field_initializers(const strong_ptr<class_instance>& instance,
                                       const std::shared_ptr<class_definition>& class_def) override;
 
         // Helper to create a bound method - binds 'this' as the first argument
@@ -1167,7 +1167,7 @@ namespace jai {
         // references (T& returns), and raw C++ holders (unregistered make_object fallback).
         // Every member/method/operator path resolves through this so the shapes can't drift.
         struct member_target {
-            std::shared_ptr<class_instance> instance;      // fields; null for cpp_bound/raw holders
+            strong_ptr<class_instance> instance;      // fields; null for cpp_bound/raw holders
             std::shared_ptr<class_definition> engine_def;  // anchors engine-resolved definitions
             class_definition* class_def = nullptr;         // methods/getters/setters/unwrap, both shapes
 

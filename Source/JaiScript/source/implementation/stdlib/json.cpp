@@ -56,7 +56,7 @@ namespace stdlib {
                 throw runtime_error(eng->format_error(made));
             }
             auto holder = made.value().get_object_holder();
-            object = holder ? holder->data : nullptr;
+            object = holder ? holder->data.shared() : nullptr;
         } else {
             throw runtime_error("Cannot load hybrid script class '" + class_def->get_name() + "': its C++ base '" + base_name +
                                 "' is not default constructible and has no load_and_construct");
@@ -124,7 +124,7 @@ namespace stdlib {
 
     void load_saved_fields(engine* eng, const script_value& instance, const script_map& saved,
                            const std::function<script_value(const script_value&)>& transform) {
-        std::shared_ptr<class_instance> inst = instance.is_object() ? const_cast<script_value&>(instance).get_class_instance() : nullptr;
+        strong_ptr<class_instance> inst = instance.is_object() ? const_cast<script_value&>(instance).get_class_instance() : nullptr;
         class_definition* def = inst ? inst->get_class_definition() : nullptr;
         if (!def) { return; }
         // a load in progress for the whole walk: the field order stays cached while nested objects load
@@ -404,7 +404,7 @@ namespace stdlib {
 				instance = script_value::make_class_object(*class_def, created, eng_);
 				eng_->get_execution_backend()->apply_field_initializers(created, class_def);
 			}
-			std::shared_ptr<class_instance> created_instance = instance.is_object() ? instance.get_class_instance() : nullptr;
+			strong_ptr<class_instance> created_instance = instance.is_object() ? instance.get_class_instance() : nullptr;
 			class_definition* def = created_instance ? created_instance->get_class_definition() : nullptr;
 			if (!def) { return false; }
 			if (handle_id != 0) { handles_.loaded.try_emplace(handle_id, script_handle_of(eng_, instance)); }
@@ -504,7 +504,7 @@ namespace stdlib {
 		// constructed value, recorded either way
 		void store_member(frame& f, script_value&& value) {
 			if (f.finished) { return; }
-			std::shared_ptr<class_instance> inst = f.built.get_class_instance();
+			strong_ptr<class_instance> inst = f.built.get_class_instance();
 			class_definition* def = inst->get_class_definition();
 			if (!store_saved_member(eng_, f.built, *inst, *def, *f.field, std::move(value))) { f.finished = true; }
 		}

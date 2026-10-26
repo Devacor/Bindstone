@@ -47,7 +47,7 @@ namespace jai::detail {
 			return result(make_error_code(runtime_error_code::type_mismatch),
 				"'{0}' is not a valid class", class_name_id);
 		}
-		auto class_def = std::static_pointer_cast<class_definition>(holder->data);
+		auto class_def = std::static_pointer_cast<class_definition>(holder->data.shared());
 		if (class_def->chain_has_nonpublic()) [[unlikely]] {
 			auto access = enforce_member_access(class_def.get(), member->member_id, access_context);
 			if (!access) {

@@ -279,7 +279,7 @@ namespace stdlib {
     // tagged with a base class still answers the class it actually holds.
     std::string object_type_name(const script_value& d) {
         try {
-            auto instance = d.as<std::shared_ptr<class_instance>>();
+            auto instance = d.as<strong_ptr<class_instance>>();
             if (instance) {
                 if (auto def = instance->get_class_definition()) {
                     return def->get_name();

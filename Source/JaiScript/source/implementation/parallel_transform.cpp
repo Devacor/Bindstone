@@ -104,7 +104,7 @@ namespace jai::detail {
 		std::vector<pending_registration> pending_instances;
 		// What destructors that failed on this chunk report, replayed by the join
 		std::vector<deferred_report> deferred_reports;
-		std::vector<std::pair<const void*, std::weak_ptr<class_instance>>> pending_script_layers;   // recorded by the join
+		std::vector<std::pair<const void*, weaker_ptr<class_instance>>> pending_script_layers;   // recorded by the join
 		std::vector<deferred_release> deferred_releases;   // released by the join
 		cell_counters cells_folded{};   // this worker's block counters already folded into the engine's
 		parallel_schedule_cursor sched;   // this worker's place in the region's shared blocks (schedule null: the static partition)

@@ -82,7 +82,7 @@ private:
         uint8_t phase = 0;              // a tagged map's pair: 0 its key next, 1 its value next, 2 its close
         script_map::const_iterator next{};
         class_definition* class_def = nullptr;
-        std::shared_ptr<class_instance> instance;   // an instance frame's object: its script fields save as stored
+        strong_ptr<class_instance> instance;   // an instance frame's object: its script fields save as stored
         std::vector<std::string> names;
         std::vector<std::pair<std::string, script_value>> fields;
     };
@@ -97,13 +97,13 @@ private:
 
     void end_frame(write_frame& f);
 
-    static std::shared_ptr<class_instance> written_instance(const script_value& value);
+    static strong_ptr<class_instance> written_instance(const script_value& value);
 
     // {"$id": N} or {"$ref": N}; the archive's first reference to the object carries its "$type" and "$val" beside the id
     void begin_handle(std::string_view id_key, const strong_ptr<script_value::object_holder>& holder, std::vector<write_frame>& frames);
 
     // An instance's "$type" and its fields under "$val", inside an object already open: the frame closes both
-    void begin_instance_members(const script_value& value, std::shared_ptr<class_instance> instance, bool comma,
+    void begin_instance_members(const script_value& value, strong_ptr<class_instance> instance, bool comma,
                                 std::vector<write_frame>& frames);
 
     // Local helper functions to avoid circular includes

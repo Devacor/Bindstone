@@ -404,7 +404,7 @@ checked_result<script_value> environment::get(uint64_t id) const {
             !method_->this_object.is_null()) {
             auto obj_holder = method_->this_object.get_object_holder();
             if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                auto instance = obj_holder->data.instance();
 
                 if (auto access = receiver_member_access(*this, *instance, id); !access) [[unlikely]] {
                     return access.error_value();
@@ -700,7 +700,7 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
             !method_->this_object.is_null()) {
             auto obj_holder = method_->this_object.get_object_holder();
             if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                auto instance = obj_holder->data.instance();
 
                 if (auto access = receiver_member_access(*this, *instance, id); !access) [[unlikely]] {
                     return access.error_value();
@@ -778,7 +778,7 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
             !method_->this_object.is_null()) {
             auto obj_holder = method_->this_object.get_object_holder();
             if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                auto instance = obj_holder->data.instance();
 
                 if (auto access = receiver_member_access(*this, *instance, id); !access) [[unlikely]] {
                     return access.error_value();
@@ -856,7 +856,7 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
             (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
             auto obj_holder = method_->this_object.get_object_holder();
             if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                auto instance = obj_holder->data.instance();
                 if (instance && instance->has_field(id)) {
                     // A hybrid's C++ property stores through its setter (a same-named
                     // script field shadows it)
@@ -932,7 +932,7 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
             (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
             auto obj_holder = method_->this_object.get_object_holder();
             if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                auto instance = obj_holder->data.instance();
                 if (instance && instance->has_field(id)) {
                     if (uint64_t setter_id = detail::cpp_property_setter_id(instance.get(), id)) {
                         return detail::write_cpp_property(method_->this_object, instance->get_class_definition(), setter_id, value);
@@ -1202,7 +1202,7 @@ script_value* environment::kind_fallback_ptr(uint64_t id) {
             !method_->this_object.is_null()) {
             auto obj_holder = method_->this_object.get_object_holder();
             if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                auto instance = obj_holder->data.instance();
 
                 if (!receiver_member_access(*this, *instance, id)) [[unlikely]] {
                     return nullptr;   // out of reach: the value site raises the access text

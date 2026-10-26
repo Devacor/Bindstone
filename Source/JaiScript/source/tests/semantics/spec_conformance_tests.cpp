@@ -3551,7 +3551,7 @@ private:
 					}
 					out += call(name, key) + "|";
 				}
-				auto handle = std::static_pointer_cast<coroutine_handle>(e.get_variable("h").get_object_holder()->data);
+				auto handle = std::static_pointer_cast<coroutine_handle>(e.get_variable("h").get_object_holder()->data.shared());
 				for (int i = 0; i < 2; ++i) {
 					try {
 						auto r = handle->next(&e);

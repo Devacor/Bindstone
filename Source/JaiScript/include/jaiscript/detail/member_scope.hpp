@@ -239,7 +239,7 @@ inline checked_result<script_value> read_cpp_property_site(const script_value& r
 // The C++ object behind a receiver, pinned: the instance's native object (an extended
 // object's weak handle locked), a raw holder's data, else the anchor a non-owning handle
 // carries. Null = the reference is exactly as safe as the handle it was bound on.
-inline std::shared_ptr<void> pin_cpp_object(const script_value& receiver, const class_instance* instance) {
+inline object_ref pin_cpp_object(const script_value& receiver, const class_instance* instance) {
     auto holder = receiver.get_object_holder();
     if (instance) {
         const script_value* held = instance->native();
@@ -247,7 +247,7 @@ inline std::shared_ptr<void> pin_cpp_object(const script_value& receiver, const 
     }
     if (!holder) return nullptr;
     if (holder->data) return holder->data;
-    if (auto locked = holder->lock_weak_data()) return locked;
+    if (auto locked = holder->lock_weak_data()) return object_ref(std::move(locked));
     return holder->keep_alive();
 }
 

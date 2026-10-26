@@ -66,7 +66,7 @@ namespace jai::detail {
     // them in element order (the serial loop's), whichever worker ran the element
     struct pending_registration {
         size_t element = SIZE_MAX;
-        std::weak_ptr<class_instance> instance;
+        weaker_ptr<class_instance> instance;
     };
     struct deferred_report {
         size_t element = SIZE_MAX;
@@ -90,7 +90,7 @@ namespace jai::detail {
             const std::shared_ptr<environment>* definition_env = nullptr;
             std::vector<deferred_report>* deferred_reports = nullptr;
             // The script layers this chunk's hybrids adopt their host objects into, recorded by the join (the engine's map is shared)
-            std::vector<std::pair<const void*, std::weak_ptr<class_instance>>>* pending_script_layers = nullptr;
+            std::vector<std::pair<const void*, weaker_ptr<class_instance>>>* pending_script_layers = nullptr;
             // The C++ objects of serial-only classes that die on this chunk, released by the join; cursors name the element running
             std::vector<deferred_release>* deferred_releases = nullptr;
             const std::vector<script_value>* cursors = nullptr;

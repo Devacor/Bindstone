@@ -2627,7 +2627,7 @@ interpreter::member_target interpreter::resolve_member_target(const script_value
         return target;
     }
     if (holder->is_class_instance_wrapper) {
-        target.instance = std::static_pointer_cast<class_instance>(holder->data);
+        target.instance = holder->data.instance();
         if (target.instance) {
             target.class_def = target.instance->get_class_definition();
             // A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
@@ -3677,7 +3677,7 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
             script_value& this_val = *this_ptr;
             if (this_val.is_object()) {
                 // Try to access as a member of 'this'
-                std::shared_ptr<class_instance> instance = this_val.get_class_instance();
+                strong_ptr<class_instance> instance = this_val.get_class_instance();
 
                 if (instance) {
                     // Intern the name to ID
@@ -4067,7 +4067,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     return {};
                 }
                 // First, try to find operator[] as a method on the object (for class instances)
-                auto instance_result = left.checked_as<std::shared_ptr<class_instance>>();
+                auto instance_result = left.checked_as<strong_ptr<class_instance>>();
                 if (instance_result) {
                     auto instance = instance_result.value();
                     // Use cached subscript operator ID
@@ -4317,7 +4317,7 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
                     script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
                     if (this_ptr && this_ptr->is_object()) {
                         script_value& this_val = *this_ptr;
-                        std::shared_ptr<class_instance> instance = this_val.get_class_instance();
+                        strong_ptr<class_instance> instance = this_val.get_class_instance();
 
                         if (instance && instance->has_field(identifier->symbol_id)) {
                             if (class_definition* field_class = instance->get_class_definition(); field_class && field_class->chain_has_nonpublic()) [[unlikely]] {
@@ -5084,7 +5084,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 }
 
                 script_value& this_val = *this_ptr;
-                std::shared_ptr<class_instance> instance = this_val.get_class_instance();
+                strong_ptr<class_instance> instance = this_val.get_class_instance();
 
                 if (!instance || !instance->has_field(identifier->symbol_id)) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
@@ -5860,7 +5860,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     if (this_val.is_object()) {
                         auto obj_holder = this_val.get_object_holder();
                         if (obj_holder->is_class_instance_wrapper) {
-                            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                            auto instance = obj_holder->data.instance();
 
                             // First try instance fields
                             if (instance->has_field(identifier->symbol_id)) {
@@ -7999,7 +7999,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                     if (class_var.is_object()) {
                         auto objHolder = class_var.get_object_holder();
                         if (objHolder && objHolder->type_name == "class_definition") {
-                            fallback_class = std::static_pointer_cast<class_definition>(objHolder->data);
+                            fallback_class = std::static_pointer_cast<class_definition>(objHolder->data.shared());
                         }
                     }
                 }
@@ -8142,7 +8142,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
 
-        auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
+        auto class_def = std::static_pointer_cast<class_definition>(objHolder->data.shared());
 
         if (class_def->chain_has_nonpublic()) [[unlikely]] {
             JAISCRIPT_TRY(detail::enforce_member_access(class_def.get(), expr->member_id,
@@ -8394,7 +8394,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         }
 
         // Both script and C++ classes store class_instance in data
-        auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
+        auto instance = objHolder->data.instance();
         if (!instance) {
             // super:: used on non-class object
             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
@@ -8465,7 +8465,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     if (objectValue.is_object()) {
         auto objHolder = objectValue.get_object_holder();
         if (objHolder && objHolder->type_id == coroutine_handle_type_id_) {
-            auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->data);
+            auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->data.shared());
             if (expr->member_id == next_id_) {
 	            if (!as_callee) { return method_value_error(expr, objectValue, false); }
                 auto captured_handle = handle;
@@ -10988,7 +10988,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
         // Check for coroutine/generator iteration
         auto objHolder = container.get_object_holder();
         if (objHolder && objHolder->type_id == coroutine_handle_type_id_) {
-            auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->data);
+            auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->data.shared());
 
             script_value* loop_var_ptr = nullptr;
             if (use_slot) {
@@ -11868,7 +11868,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                     {
                         auto obj_holder = class_var.get_object_holder();
                         if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
-                            auto class_def = std::static_pointer_cast<class_definition>(obj_holder->data);
+                            auto class_def = std::static_pointer_cast<class_definition>(obj_holder->data.shared());
 
                             // Arity-aware collision check
                             if (class_def->has_static_method_with_arity(func_decl->name_id, func_decl->parameters.size())) {
@@ -11924,7 +11924,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                     auto obj_holder = class_def_var->get_object_holder();
                     if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
                         detail::register_namespace_class(*engine_, *ns_data, decl->name, class_decl_ptr->name_id,
-                                                         std::static_pointer_cast<class_definition>(obj_holder->data));
+                                                         std::static_pointer_cast<class_definition>(obj_holder->data.shared()));
                     }
                 }
             }
@@ -12156,7 +12156,7 @@ checked_result<script_value> interpreter::execute_method_ast(std::shared_ptr<fun
 
 // Evaluate field initializers for a script class instance at construction time
 // If skip_parent_recursion is true, only evaluate THIS class's field initializers (parents already handled)
-checked_result<void> interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> instance,
+checked_result<void> interpreter::evaluate_field_initializers(strong_ptr<class_instance> instance,
                                              std::shared_ptr<script_class_definition> class_def,
                                              std::shared_ptr<environment> init_env,
                                              bool skip_parent_recursion,
@@ -12224,7 +12224,7 @@ checked_result<void> interpreter::evaluate_field_initializers(std::shared_ptr<cl
     return {};
 }
 
-void interpreter::apply_field_initializers(const std::shared_ptr<class_instance>& instance,
+void interpreter::apply_field_initializers(const strong_ptr<class_instance>& instance,
                                            const std::shared_ptr<class_definition>& class_def) {
     auto script_def = std::dynamic_pointer_cast<script_class_definition>(class_def);
     if (!script_def || !instance) { return; }
@@ -12267,7 +12267,7 @@ struct interpreter::construction_lender final : detail::construction_host {
         return self.execute_method_ast(ctor, method_env.get(), args);
     }
 
-    checked_result<void> evaluate_field_initializers(const std::shared_ptr<class_instance>& instance, const std::shared_ptr<script_class_definition>& cls,
+    checked_result<void> evaluate_field_initializers(const strong_ptr<class_instance>& instance, const std::shared_ptr<script_class_definition>& cls,
                                                      detail::construction_scope& scope, bool skip_parent_recursion,
                                                      const detail::aggregate_plan* aggregate) override {
         return self.evaluate_field_initializers(instance, cls, scope.env, skip_parent_recursion, aggregate);

@@ -96,12 +96,12 @@ script_value engine::make_value_object(std::shared_ptr<T> data) {
                 return script_value::make_object(layer->get_class_definition()->get_name(), layer, this);
             }
         }
-        if (std::shared_ptr<detail::first_type_t<class_instance, T>> known = object_instance_of(key)) {
+        if (strong_ptr<detail::first_type_t<class_instance, T>> known = object_instance_of(key)) {
             const class_definition* def = known->get_class_definition();
             const script_value* held = known->native();
             const auto* holder = held ? held->peek_object_holder() : nullptr;   // a read: workers reach one object's holder together
             const bool layer = def && def->is_script_class() && !std::is_base_of_v<script_extensible, T>;
-            const bool same_object = holder && holder->data && !holder->data.owner_before(data) && !data.owner_before(holder->data);
+            const bool same_object = holder && holder->data && !holder->data.shared().owner_before(data) && !data.owner_before(holder->data.shared());
             // A member at offset 0 shares its enclosing object's address (and, through an aliasing handle, its owner)
             std::type_index handed_type = std::type_index(typeid(T));
             if constexpr (std::is_polymorphic_v<T>) { handed_type = std::type_index(typeid(*data)); }
@@ -153,7 +153,7 @@ script_value engine::extend(const std::shared_ptr<T>& object, std::string_view s
 }
 
 template<typename T>
-std::shared_ptr<class_instance> engine::script_layer(const T& object) const {
+strong_ptr<class_instance> engine::script_layer(const T& object) const {
     if constexpr (std::is_base_of_v<script_extensible, T>) {
         auto layer = object.jai_script_slot().script_layer();
         return (layer && layer->get_engine() == this) ? layer : nullptr;

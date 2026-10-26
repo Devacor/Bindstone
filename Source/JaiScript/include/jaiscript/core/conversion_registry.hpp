@@ -13,6 +13,8 @@
 #include <typeinfo>
 #include <typeindex>
 #include <type_traits>
+
+namespace jai::detail { class object_ref; }
 #include <algorithm>
 
 namespace jai {
@@ -95,7 +97,7 @@ public:
     // === Custom Object Extractor (replaces static extractor in script_value) ===
     
     // Type for custom extractor function
-    using extractor_func = std::function<std::shared_ptr<void>(std::string_view, std::shared_ptr<void>)>;
+    using extractor_func = std::function<std::shared_ptr<void>(std::string_view, const detail::object_ref&)>;
     
     // Set custom extractor for unwrapping objects (e.g., extracting C++ objects from class_instance)
     void set_custom_extractor(extractor_func extractor) {
@@ -108,7 +110,7 @@ public:
     }
     
     // Extract custom object
-    std::shared_ptr<void> extract_custom_object(std::string_view type_name, std::shared_ptr<void> data) const {
+    std::shared_ptr<void> extract_custom_object(std::string_view type_name, const detail::object_ref& data) const {
         if (custom_extractor_) {
             return custom_extractor_(type_name, data);
         }

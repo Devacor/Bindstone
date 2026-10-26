@@ -338,7 +338,7 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
                 out_.append("null");
                 return;
             }
-            if (std::shared_ptr<class_instance> instance = written_instance(value)) {
+            if (strong_ptr<class_instance> instance = written_instance(value)) {
                 open_value('{');
                 begin_instance_members(value, std::move(instance), false, frames);
                 return;
@@ -353,9 +353,9 @@ void json_archive_writer::begin_value(const script_value& given, std::vector<wri
     }
 }
 
-std::shared_ptr<class_instance> json_archive_writer::written_instance(const script_value& value) {
+strong_ptr<class_instance> json_archive_writer::written_instance(const script_value& value) {
     try {
-        return value.as<std::shared_ptr<class_instance>>();
+        return value.as<strong_ptr<class_instance>>();
     } catch (...) {
         return nullptr;
     }
@@ -368,7 +368,7 @@ void json_archive_writer::begin_handle(std::string_view id_key, const strong_ptr
     append_json_integer(out_, id);
     if (is_new) {
         script_value object = weak_target_value(holder);
-        if (std::shared_ptr<class_instance> instance = engine_ref_ ? written_instance(object) : nullptr) {
+        if (strong_ptr<class_instance> instance = engine_ref_ ? written_instance(object) : nullptr) {
             begin_instance_members(object, std::move(instance), true, frames);
             return;
         }
@@ -378,7 +378,7 @@ void json_archive_writer::begin_handle(std::string_view id_key, const strong_ptr
     close_value('}', false);
 }
 
-void json_archive_writer::begin_instance_members(const script_value& value, std::shared_ptr<class_instance> instance, bool comma,
+void json_archive_writer::begin_instance_members(const script_value& value, strong_ptr<class_instance> instance, bool comma,
                                                  std::vector<write_frame>& frames) {
     class_definition* class_def = instance->get_class_definition();
     std::string type_name;

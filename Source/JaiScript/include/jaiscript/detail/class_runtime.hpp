@@ -42,7 +42,68 @@ inline class_instance::class_instance(interned_name_t, std::string_view interned
     }
 }
 
-inline void class_instance::free_allocation(class_instance* instance) noexcept { instance->~class_instance(); }
+inline void class_instance::free_allocation(class_instance* instance) noexcept {
+    detail::control_block_base* cb = detail::cb_from_object(instance);
+    instance->~class_instance();
+    if (cb->release_weak()) { cb->dealloc_fn(cb); }
+}
+
+namespace detail {
+// An instance handed to its own destructor body as `this`: a dying one (its last strong reference gone, its chain running) holds
+// a count for the span that goes back without a second death; a living one (a re-class) is pinned as usual
+class dying_instance_pin {
+public:
+    explicit dying_instance_pin(class_instance* instance) noexcept : instance_(instance) {
+        control_block_base* cb = cb_from_object(instance);
+        revived_ = cb->get_strong_count() == 0;
+        cb->add_strong();
+    }
+    dying_instance_pin(const dying_instance_pin&) = delete;
+    dying_instance_pin& operator=(const dying_instance_pin&) = delete;
+    ~dying_instance_pin() {
+        if (revived_) {
+            (void)cb_from_object(instance_)->release_strong();
+        } else {
+            strong_ptr<class_instance> pinned = adopt_pooled(instance_);
+        }
+    }
+    strong_ptr<class_instance> handle() const noexcept {
+        cb_from_object(instance_)->add_strong();
+        return adopt_pooled(instance_);
+    }
+private:
+    class_instance* instance_;
+    bool revived_ = false;
+};
+
+// The instance's part of its object block, given back when its strong family's last weak reference goes
+inline void release_instance_block(control_block_base* cb) noexcept {
+#ifndef NDEBUG
+    cb->magic = cb_magic_dead;
+#endif
+    auto* head = object_block_head::of_control_block(cb);
+    static_cast<control_block<class_instance>*>(cb)->~control_block();
+    object_block_head::release(reinterpret_cast<std::byte*>(head));
+}
+}
+
+inline strong_ptr<class_instance> class_instance::make(std::string_view interned, engine* eng, uint32_t slots, class_definition* destructor_owner) {
+    using block_cb = detail::control_block<class_instance>;
+    constexpr size_t cb_bytes = (sizeof(block_cb) + 15) & ~size_t{15};
+    const size_t prefix = destructor_owner ? detail::object_block_head::pin_bytes : 0;
+    auto* memory = static_cast<std::byte*>(::operator new(prefix + detail::object_block_head::size + cb_bytes + trailing_bytes(slots)));
+    std::byte* block = memory + prefix;
+    auto* head = new (block) detail::object_block_head();
+    head->prefix = static_cast<uint32_t>(prefix);
+    if (destructor_owner) { new (memory) std::shared_ptr<class_definition>(destructor_owner->shared_from_this()); }
+    auto* cb = new (block + detail::object_block_head::size) block_cb();
+    cb->dealloc_fn = &detail::release_instance_block;
+    const trailing_cells trailing{block + detail::object_block_head::size + cb_bytes, slots};
+    auto* instance = new (cb->storage) class_instance(interned_name_t{}, interned, eng, trailing);
+    instance->set_embedded_holder(detail::object_block_head::holder_slot(block));
+    if (destructor_owner) { instance->note_destructor_armed(); }
+    return detail::adopt_pooled(instance);
+}
 
 inline bool class_instance::has_field_value(uint64_t id) const { return find_field_value(id) != nullptr; }
 
@@ -720,8 +781,7 @@ inline void class_definition::prime_region_memos() {
     (void)script_assign_operator_id();
 }
 
-inline std::shared_ptr<class_instance> class_definition::allocate_instance() {
-    std::shared_ptr<class_instance> instance;
+inline strong_ptr<class_instance> class_definition::allocate_instance() {
     // Destructor probe memo: "~"+name_ alloc + symbolizer intern + has_method are
     // class-static facts, recomputed per MINT before this (measured in
     // the construct_instance section profile). method_epoch_ already cascades to
@@ -733,31 +793,12 @@ inline std::shared_ptr<class_instance> class_definition::allocate_instance() {
         }
         dtor_memo_epoch_ = method_epoch_;
     }
-
-    class_instance::trailing_cells trailing{nullptr, field_slot_count()};
-    const size_t extra = class_instance::trailing_bytes(trailing.slots);
-    if (has_script_dtor_) {
-        constexpr size_t control = detail::block_head_allocator<class_instance>::reserve;
-        constexpr size_t head = (sizeof(class_instance) + 15) & ~size_t{15};
-        auto* memory = static_cast<std::byte*>(::operator new(control + head + extra));
-        trailing.memory = memory + control + head;
-        auto* raw_instance = new (memory + control) class_instance(class_instance::interned_name_t{}, interned_name(), engine_, trailing);
-        raw_instance->note_destructor_armed();
-        if (engine_ && !engine_->destructors_armed()) { engine_->note_destructors_armed(); }
-        instance = std::shared_ptr<class_instance>(raw_instance, detail::instance_deleter{shared_from_this()},
-                                                   detail::block_head_allocator<class_instance>(memory));
-    } else {
-        // the holder's room, control block, instance, slot table and cells: one allocation
-        std::byte* holder_room = nullptr;
-        instance = std::allocate_shared<class_instance>(detail::object_block_allocator<class_instance>(&trailing.memory, &holder_room, extra),
-                                                        class_instance::interned_name_t{}, interned_name(), engine_, trailing);
-        instance->set_embedded_holder(holder_room);
-    }
-    return instance;
+    if (has_script_dtor_ && engine_ && !engine_->destructors_armed()) { engine_->note_destructors_armed(); }
+    return class_instance::make(interned_name(), engine_, field_slot_count(), has_script_dtor_ ? this : nullptr);
 }
 
-inline std::shared_ptr<class_instance> class_definition::create_instance() {
-    std::shared_ptr<class_instance> instance = allocate_instance();
+inline strong_ptr<class_instance> class_definition::create_instance() {
+    strong_ptr<class_instance> instance = allocate_instance();
 
     instance->set_class_definition(this);
 
@@ -1043,8 +1084,8 @@ inline void class_definition::set_unwrap_function(std::function<script_value(scr
     unwrap_function_ = std::move(fn);
 }
 
-inline std::vector<std::weak_ptr<class_instance>> class_definition::registered_instances() const {
-    std::vector<std::weak_ptr<class_instance>> out;
+inline std::vector<weaker_ptr<class_instance>> class_definition::registered_instances() const {
+    std::vector<weaker_ptr<class_instance>> out;
     for (class_instance* i = registry_head_; i; i = i->registry_next_) { out.push_back(i->weak_from_this()); }
     return out;
 }
@@ -1078,8 +1119,8 @@ inline void* class_definition::adjust_cpp_pointer(void* pointer, const std::type
 
 inline void class_definition::set_field_order(std::vector<uint64_t> order) { field_order_ = std::move(order); }
 
-inline std::vector<std::shared_ptr<class_instance>> class_definition::live_instances() const {
-    std::vector<std::shared_ptr<class_instance>> live;
+inline std::vector<strong_ptr<class_instance>> class_definition::live_instances() const {
+    std::vector<strong_ptr<class_instance>> live;
     for (class_instance* i = registry_head_; i; i = i->registry_next_) {
         if (auto locked = i->weak_from_this().lock()) { live.push_back(std::move(locked)); }
     }
@@ -1356,7 +1397,7 @@ inline void class_definition::redefine_class(const std::unordered_map<uint64_t, 
     // iterating the live vector would migrate those too (re-invoking the hook) and loop
     // unboundedly. Snapshotted instances built against the new definition need no
     // migration, so skipping them is also correct.
-    std::vector<std::weak_ptr<class_instance>> to_migrate = registered_instances();
+    std::vector<weaker_ptr<class_instance>> to_migrate = registered_instances();
     for (auto& weak_instance : to_migrate) {
         auto instance = weak_instance.lock();
         if (!instance) {
@@ -1445,12 +1486,12 @@ inline void class_definition::register_live_instance(class_instance* live) {
         register_live_instance_in_region(live);
         return;
     }
-    register_instance_after_region(std::weak_ptr<class_instance>(), nullptr, live);
+    register_instance_after_region(weaker_ptr<class_instance>(), nullptr, live);
 }
 
 inline JAI_NOINLINE void class_definition::register_live_instance_in_region(class_instance* live) { register_instance(live->weak_from_this(), live); }
 
-inline void class_definition::register_instance(std::weak_ptr<class_instance> instance, class_instance* live) {
+inline void class_definition::register_instance(weaker_ptr<class_instance> instance, class_instance* live) {
     if (engine_ && engine_->parallel_region_active()) {
         // A chunk parks the registration (no lock; the join registers survivors in element order)
         if (engine_->park_parallel_registration(instance)) { return; }
@@ -1459,7 +1500,7 @@ inline void class_definition::register_instance(std::weak_ptr<class_instance> in
     register_instance_after_region(std::move(instance), nullptr, live);
 }
 
-inline void class_definition::register_instance_after_region(std::weak_ptr<class_instance> instance, const detail::fault_injection* faults, class_instance* live_hint) {
+inline void class_definition::register_instance_after_region(weaker_ptr<class_instance> instance, const detail::fault_injection* faults, class_instance* live_hint) {
     if (faults) { faults->checkpoint("registry.instance_append", registry_count_); }
     class_instance* live = live_hint;
     if (!live) {
@@ -1867,7 +1908,7 @@ struct slot_conversion {
 // instance (a plain wrapper of an extended object re-points to its script layer, exactly
 // like the backends' resolve_member_target), raw holders through the engine registry.
 struct slot_class_view {
-    std::shared_ptr<class_instance> instance;
+    strong_ptr<class_instance> instance;
     std::shared_ptr<class_definition> engine_def;
     class_definition* def = nullptr;
 };
@@ -1879,7 +1920,7 @@ inline slot_class_view resolve_slot_class(const script_value& v, engine* eng) {
         return view;
     }
     if (holder->is_class_instance_wrapper) {
-        view.instance = std::static_pointer_cast<class_instance>(holder->data);
+        view.instance = holder->data.instance();
         if (view.instance) {
             view.def = view.instance->get_class_definition();
             if (view.def && view.def->wrapped_object_has_layer(*view.instance)) {
@@ -2692,8 +2733,8 @@ inline checked_result<void> reclass_assign(script_value& current, auto& holder, 
         return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
             "an assignment that changes an object's class is not admitted in a parallel body");
     }
-    std::shared_ptr<class_instance> self = std::static_pointer_cast<class_instance>(holder.data);   // a destructor body may drop the slot or the source
-    std::shared_ptr<class_instance> source_pin = source->weak_from_this().lock();
+    strong_ptr<class_instance> self = holder.data.instance();   // a destructor body may drop the slot or the source
+    strong_ptr<class_instance> source_pin = source->weak_from_this().lock();
     class_instance* instance = self.get();
     const class_definition* def = instance->get_class_definition();
     def->destroy_levels(instance, def, source_def);
@@ -3180,7 +3221,7 @@ inline std::shared_ptr<void> class_instance::extract_cpp_object_impl(const scrip
         if (!obj_holder) {
             throw runtime_error("script_value is not an object type");
         }
-        if (obj_holder->data) { return obj_holder->data; }
+        if (obj_holder->data) { return obj_holder->data.shared(); }
         // an extended object's non-owning holder: hand the pointer out as an unowned alias
         if (obj_holder->bound_ptr) { return std::shared_ptr<void>(std::shared_ptr<void>(), obj_holder->bound_ptr); }
         return nullptr;
@@ -3201,7 +3242,7 @@ inline const script_value& class_instance::native_or_throw() const {
     return *held;
 }
 
-inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
+inline strong_ptr<class_instance> class_instance::deep_copy() const {
     detail::deep_copy_work work;
     return deep_copy_level(work, 0);
 }
@@ -3236,11 +3277,11 @@ inline void class_instance::finish_deep_copy_level(class_instance& copy, bool ov
     }
 }
 
-inline std::shared_ptr<class_instance> class_instance::deep_copy_level(detail::deep_copy_work& work, unsigned depth) const {
+inline strong_ptr<class_instance> class_instance::deep_copy_level(detail::deep_copy_work& work, unsigned depth) const {
     if (class_def_ && class_def_->nocopy()) {
         throw runtime_error("Cannot copy an instance of nocopy class '" + std::string(get_class_name()) + "': hold it by reference (auto&/var&) or share it (shared_ptr)");
     }
-    auto new_instance = class_def_ ? class_def_->allocate_instance() : std::make_shared<class_instance>(interned_name_t{}, class_name_, engine_);
+    auto new_instance = class_def_ ? class_def_->allocate_instance() : class_instance::make(class_name_, engine_);
 #ifdef JAISCRIPT_VM_COVERAGE
     census::add_weight(flat_fields_.size());
 #endif

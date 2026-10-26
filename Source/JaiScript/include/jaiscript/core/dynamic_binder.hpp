@@ -1650,12 +1650,12 @@ public:
             // Get the typed pointer - check if it's a class_instance wrapper
             T* cpp_ptr = nullptr;
             if (holder->is_class_instance_wrapper) {
-                auto instance = std::static_pointer_cast<class_instance>(holder->data);
+                auto instance = holder->data.instance();
                 if (instance) {
                     cpp_ptr = instance->get_cpp_object_as<T>().get();
                 }
             } else {
-                auto typed_ptr = std::static_pointer_cast<T>(holder->data);
+                auto typed_ptr = std::static_pointer_cast<T>(holder->data.shared());
                 cpp_ptr = typed_ptr.get();
             }
 
@@ -1803,10 +1803,10 @@ public:
 
         if constexpr (std::is_base_of_v<script_extensible, T>) {
             class_definition::script_slot_hooks hooks;
-            hooks.attach = [](void* object, const std::weak_ptr<class_instance>& layer) {
+            hooks.attach = [](void* object, const weaker_ptr<class_instance>& layer) {
                 static_cast<T*>(object)->jai_script_slot().attach_script_layer(layer);
             };
-            hooks.own = [](void* object, const std::shared_ptr<class_instance>& layer) {
+            hooks.own = [](void* object, const strong_ptr<class_instance>& layer) {
                 static_cast<T*>(object)->jai_script_slot().own_script_layer(layer);
             };
             hooks.detach = [](void* object) { static_cast<T*>(object)->jai_script_slot().detach_script_layer(); };

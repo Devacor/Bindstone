@@ -9,9 +9,9 @@ class class_instance;
 
 namespace detail {
     // Out of line (engine.cpp): marks a surviving layer retired when its object dies.
-    void retire_script_layer(const std::weak_ptr<class_instance>& layer);
-    std::string script_layer_to_json(const std::shared_ptr<class_instance>& layer);
-    bool script_layer_from_json(const std::shared_ptr<class_instance>& layer, const std::string& json);
+    void retire_script_layer(const weaker_ptr<class_instance>& layer);
+    std::string script_layer_to_json(const strong_ptr<class_instance>& layer);
+    bool script_layer_from_json(const strong_ptr<class_instance>& layer, const std::string& json);
 }
 
 // Lets a C++ object carry the script class instance extending it (docs/site/embedding/13-script-extensible.html).
@@ -24,7 +24,7 @@ namespace detail {
 // a new identity and starts without a layer.
 class script_extensible {
 public:
-    std::shared_ptr<class_instance> script_layer() const { return layer_.lock(); }
+    strong_ptr<class_instance> script_layer() const { return layer_.lock(); }
     bool has_script_layer() const { return !layer_.expired(); }
 
     // The layer's script state as {"$type": class, "$script": fields} - what extend's
@@ -40,9 +40,9 @@ public:
     const script_extensible& jai_script_slot() const { return *this; }
 
     // constructed hybrid: the layer owns the object, the slot points back
-    void attach_script_layer(const std::weak_ptr<class_instance>& layer) { layer_ = layer; }
+    void attach_script_layer(const weaker_ptr<class_instance>& layer) { layer_ = layer; }
     // extended object: the object owns its layer
-    void own_script_layer(const std::shared_ptr<class_instance>& layer) { owned_ = layer; layer_ = layer; }
+    void own_script_layer(const strong_ptr<class_instance>& layer) { owned_ = layer; layer_ = layer; }
     void detach_script_layer() { owned_.reset(); layer_.reset(); }
 
 protected:
@@ -54,8 +54,8 @@ protected:
     script_extensible& operator=(script_extensible&&) noexcept { return *this; }
 
 private:
-    std::shared_ptr<class_instance> owned_;
-    std::weak_ptr<class_instance> layer_;
+    strong_ptr<class_instance> owned_;
+    weaker_ptr<class_instance> layer_;
 };
 
 namespace detail {

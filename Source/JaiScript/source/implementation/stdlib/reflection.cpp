@@ -64,7 +64,7 @@ inline class_definition* resolve_class(engine* eng, const script_value& v,
     }
     if (d.is_object()) {
         try {
-            auto instance = d.as<std::shared_ptr<class_instance>>();
+            auto instance = d.as<strong_ptr<class_instance>>();
             if (instance) {
                 if (auto* def = instance->get_class_definition()) { return def; }
             }
@@ -111,7 +111,7 @@ inline std::optional<uint64_t> known_symbol(engine* eng, std::string_view name) 
 // object-shape resolution direct member syntax uses (class_instance wrappers, cpp_bound
 // holders, raw holders resolved by engine registration).
 struct member_door {
-    std::shared_ptr<class_instance> instance;       // fields door; null for host holders
+    strong_ptr<class_instance> instance;       // fields door; null for host holders
     std::shared_ptr<class_definition> engine_def;   // anchors engine-resolved definitions
     class_definition* def = nullptr;                // methods/accessors, both shapes
 };
@@ -122,7 +122,7 @@ inline member_door resolve_member_door(engine* eng, const script_value& value) {
     auto holder = const_cast<script_value&>(v).get_object_holder();
     if (!holder) { return door; }
     if (holder->is_class_instance_wrapper) {
-        door.instance = std::static_pointer_cast<class_instance>(holder->data);
+        door.instance = holder->data.instance();
         if (door.instance) { door.def = door.instance->get_class_definition(); }
     } else {
         door.engine_def = holder->type_id != UINT64_MAX

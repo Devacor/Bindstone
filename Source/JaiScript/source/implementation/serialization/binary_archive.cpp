@@ -320,9 +320,9 @@ bool binary_archive_writer::begin_value(const script_value& given, std::vector<v
             std::string type_name = type_info ? type_info->type_name : "unknown";
 
             // For script classes, type_info->type_name may be "any" - use the actual class name
-            std::shared_ptr<class_instance> instance;
+            strong_ptr<class_instance> instance;
             try {
-                instance = value.as<std::shared_ptr<class_instance>>();
+                instance = value.as<strong_ptr<class_instance>>();
             } catch (...) {
                 // not a class_instance: an empty object under its type's name
             }
@@ -995,7 +995,7 @@ script_value binary_archive_reader::finish_frame(engine* eng, value_frame& f) {
         any_archive_reader any_ar(*this);
         script_value constructed_obj = metadata->custom_construct(any_ar, f.version);
 
-        auto instance = constructed_obj.as<std::shared_ptr<class_instance>>();
+        auto instance = constructed_obj.as<strong_ptr<class_instance>>();
         if (instance) {
             auto class_def = instance->get_class_definition();
             if (class_def) {

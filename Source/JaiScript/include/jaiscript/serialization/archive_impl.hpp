@@ -193,7 +193,7 @@ protected:
     // stays out. False when a getter threw into the backend: the in-flight exception leaves the archive.
     template <class ClassDef, class Emit>
     bool for_each_serialized_property(const script_value& value, const ClassDef& class_def, engine* eng, Emit&& emit) {
-        const std::shared_ptr<class_instance> instance = serialized_instance_of(value);
+        const strong_ptr<class_instance> instance = serialized_instance_of(value);
         const std::vector<std::string> names = class_def->get_property_names();
         size_t index = 0;
         bool aborted = false;
@@ -205,10 +205,10 @@ protected:
         return !aborted;
     }
 
-    static std::shared_ptr<class_instance> serialized_instance_of(const script_value& value) {
-        std::shared_ptr<class_instance> instance;
+    static strong_ptr<class_instance> serialized_instance_of(const script_value& value) {
+        strong_ptr<class_instance> instance;
         if (value.is_object()) {
-            try { instance = value.as<std::shared_ptr<class_instance>>(); } catch (...) {}
+            try { instance = value.as<strong_ptr<class_instance>>(); } catch (...) {}
         }
         return instance;
     }
@@ -678,7 +678,7 @@ private:
             // recovers the most-derived address (correct under multiple inheritance).
             const void* complete = dynamic_cast<const void*>(value.get());
             std::string hybrid_type, hybrid_fields;
-            std::shared_ptr<class_instance> layer;
+            strong_ptr<class_instance> layer;
             if (engine_ref_) {
                 if constexpr (std::is_base_of_v<script_extensible, elem_type>) {
                     layer = value->jai_script_slot().script_layer();
@@ -1308,7 +1308,7 @@ private:
                             throw serialization_error("Expected '$val' for polymorphic shared_ptr");
                         }
                         void* adjusted = polymorphic_registry::instance().adjust_to_base(entry->type, std::type_index(typeid(elem_type)), constructed_object.get());
-                        result = std::shared_ptr<elem_type>(constructed, static_cast<elem_type*>(adjusted));
+                        result = std::shared_ptr<elem_type>(detail::shared_owner_of(constructed), static_cast<elem_type*>(adjusted));
                         self()->register_deserialized_shared(id, result);
                         self()->begin_object();
                         any_archive_reader wrapper(*self());
@@ -1349,7 +1349,7 @@ private:
                             throw serialization_error("Failed to reconstruct hybrid script class '" + hybrid_class + "'");
                         }
                         if (!engine_ref_->script_layer_object_owned(instance)) {
-                            result = std::shared_ptr<elem_type>(instance, static_cast<elem_type*>(adjusted));
+                            result = std::shared_ptr<elem_type>(detail::shared_owner_of(instance), static_cast<elem_type*>(adjusted));
                         }
                     }
                     self()->register_deserialized_shared(id, result);

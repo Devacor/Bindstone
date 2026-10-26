@@ -4675,7 +4675,7 @@ public:
 
 			// This models a worker-created instance awaiting registration. Setting
 			// its class definition does not put it in the live-instance registry.
-			auto failed = std::make_shared<class_instance>("RegistryFaultCell", eng.get());
+			auto failed = class_instance::make("RegistryFaultCell", eng.get());
 			failed->set_class_definition(def);
 			parallel_region_fault_tests::fault_trace trace;
 			trace.fail_point = "registry.instance_append";

@@ -119,7 +119,7 @@ checked_result<std::shared_ptr<void>> checked_native_object(engine* eng, const s
 		}
 		return checked_native_object(eng, *native_holder, target, target_id);
 	}
-	auto owner = holder.data;
+	std::shared_ptr<void> owner = holder.data.shared();
 	if (!owner && holder.bound_ptr) {
 		owner = holder.lock_weak_data();
 		if (!owner) {

@@ -286,6 +286,7 @@ public:
 			// interpreter, the oracle, copies the `s = s + x` spellings)
 			auto e = jai::engine::make();
 			e->set_backend(jai::backend_type::vm);
+			e->execution_budget(120);   // a loaded Debug run outlasts the 5 s default; a copy per append still runs for minutes
 			jai::stdlib::register_all(e);
 			auto r = e->execute(R"(
 				class Holder { string s; }

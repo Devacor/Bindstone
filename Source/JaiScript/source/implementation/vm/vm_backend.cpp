@@ -14013,6 +14013,32 @@ static JAI_FORCEINLINE bool lean_slot_takes(const parameter& p, const script_val
 	}
 }
 
+// a method's in-place arguments that are already its parameters, as bind_parameters' first rows take them: the function rows
+// (lean_slot_takes), and a handle or null already tagged with a shared_ptr parameter's exact type
+static JAI_FORCEINLINE bool method_binds_in_place(const function_decl& ast, const script_value* args, size_t argc) {
+	if (ast.vm_lean_bind == 0) {
+		uint8_t lean = 1;
+		for (size_t i = 0; i < ast.parameters.size(); ++i) {
+			const parameter& p = ast.parameters[i];
+			const script_value_type bt = p.type ? p.type->base_type : script_value_type::jai_any_type;
+			if (p.is_reference || p.ref_escaping || p.default_value || p.slot_index != i ||
+			    !(lean_parameter_type(bt) || bt == script_value_type::jai_shared_ptr_type)) { lean = 2; break; }
+		}
+		ast.vm_lean_bind = lean;
+	}
+	if (ast.vm_lean_bind != 1 || argc != ast.parameters.size()) { return false; }
+	for (size_t i = 0; i < argc; ++i) {
+		const parameter& p = ast.parameters[i];
+		if (p.type && p.type->base_type == script_value_type::jai_shared_ptr_type) {
+			const size_t ri = args[i].raw_storage_index();
+			if ((ri != script_value::TYPEID_OBJECT && ri != script_value::TYPEID_NULL) || args[i].type_info_raw() != p.type.get()) { return false; }
+			continue;
+		}
+		if (!lean_slot_takes(p, args[i])) { return false; }
+	}
+	return true;
+}
+
 // a T& parameter after `from` whose argument names a place evaluation decides, its reference not yet bound
 template <class At>
 static bool later_place_argument(const std::vector<parameter>& parameters, const call_site* site, const chunk* caller_code, size_t from, size_t argc, At&& at) {
@@ -23472,19 +23498,21 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 	enter_frame(rec.f);   // before binding: the ref-param frames_ scan must see this frame
 	JAI_MPUSH_SECTION(3);
 
-	op_status bound{};
-	try {
-		bound = bind_parameters(rec.ast->parameters, stack_, args_base, argc, rec.f, *rec.f.code,
-		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, rec.ast->body, rec.ast->parameters.size(), argc), nullptr, caller_frame_unit(),
-		                        0, false, rec.ast->body.get());
-	} catch (...) {
-		pop_script_frame_core(rec);
-		throw;
-	}
-	if (bound == op_status::failed) {
-		pop_script_frame_core(rec);
-		return bound;
+	if (!method_binds_in_place(*rec.ast, stack_.data() + args_base, argc)) {
+		op_status bound{};
+		try {
+			bound = bind_parameters(rec.ast->parameters, stack_, args_base, argc, rec.f, *rec.f.code,
+			                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
+			                        site_arg_proofs(site, caller.code, rec.ast->body, rec.ast->parameters.size(), argc), nullptr, caller_frame_unit(),
+			                        0, false, rec.ast->body.get());
+		} catch (...) {
+			pop_script_frame_core(rec);
+			throw;
+		}
+		if (bound == op_status::failed) {
+			pop_script_frame_core(rec);
+			return bound;
+		}
 	}
 	JAI_MPUSH_SECTION(4);
 	// Conversions during binding push and pop above the args, so the slice is intact; a default argument extends the window

@@ -2679,7 +2679,11 @@ namespace jai::vm {
         op_status exec_index_store_fused(frame& f, const vm_instruction& ins);
         op_status exec_call_builtin(frame& f, const vm_instruction& ins);
         op_status exec_concat_append(frame& f, const vm_instruction& ins);
-        op_status concat_step(const script_value& right, uint32_t hint);
+        op_status concat_step(const script_value& right, uint32_t hint, const void* site = nullptr);
+        // An append site's largest length seen when its string had to grow: the next string built there reserves it at
+        // its first growth, so a string rebuilt every pass grows once instead of once per capacity step
+        std::unordered_map<const void*, size_t> text_growth_memo_;
+        JAI_NOINLINE void grow_text_for_site(std::string& out, size_t add, const void* site);
         op_status exec_concat_operands(frame& f, const vm_instruction& ins);
         op_status exec_concat_pending(frame& f, const vm_instruction& ins);
         op_status exec_concat_store(frame& f, const vm_instruction& ins);

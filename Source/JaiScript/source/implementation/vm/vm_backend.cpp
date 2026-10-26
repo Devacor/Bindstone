@@ -10363,7 +10363,9 @@ op_status vm_backend::exec_c_append(frame& f, size_t& ip, const vm_instruction& 
 	if (reinterpret_cast<int64_t>(h.get()) != cr.cells[lk].bits || !h.unique()) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }   // rebound, or shared: the general form unshares
 	const script_string* src = rconst ? cr.consts[ins.c & ~k_typed_const_bit].unchecked_string_handle().get() : reinterpret_cast<const script_string*>(cr.cells[ins.c].bits);
 	if (!src || !limits_->memory_charge(src->size())) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }   // the cap: the general form raises its own text
-	s->unchecked_as_string_ref(engine_) += *src;   // in place (unique, so no unshare): the slot owns the node, the cell's borrow stays valid
+	script_string& out = s->unchecked_as_string_ref(engine_);
+	if (src != &out && out.capacity() - out.size() < src->size()) { grow_text_for_site(out, src->size(), &ins); }
+	out += *src;   // in place (unique, so no unshare): the slot owns the node, the cell's borrow stays valid
 	++ip;
 	return {};
 }
@@ -17866,7 +17868,15 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 // One step of a string chain: the stack's top (the accumulator) + right, appending in place when the accumulator is a string and right
 // a string or scalar (the general `+` otherwise). `hint` > 0 on a chain's first step sizes the accumulator for the chain's text: the copy
 // the write gate makes (and charges) of a shared head, or the unique head's own buffer.
-op_status vm_backend::concat_step(const script_value& right, uint32_t hint) {
+JAI_NOINLINE void vm_backend::grow_text_for_site(std::string& out, size_t add, const void* site) {
+	constexpr size_t k_memo_cap = size_t{1} << 20;
+	size_t& memo = text_growth_memo_[site];
+	const size_t need = out.size() + add;
+	out.reserve((std::max)(need, memo));
+	if (need > memo) { memo = (std::min)(need, k_memo_cap); }
+}
+
+op_status vm_backend::concat_step(const script_value& right, uint32_t hint, const void* site) {
 	script_value& acc = stack_.back();
 	const size_t rk = right.raw_storage_index();
 	if (acc.raw_storage_index() == script_value::TYPEID_STRING && !(operator_table_ && operator_table_->any()) &&
@@ -17896,7 +17906,9 @@ op_status vm_backend::concat_step(const script_value& right, uint32_t hint) {
 				node->reserve(want);
 			}
 		}
-		acc.unchecked_as_string_ref(engine_).append(text);
+		std::string& out = acc.unchecked_as_string_ref(engine_);
+		if (site && out.capacity() - out.size() < text.size() && text.data() != out.data()) { grow_text_for_site(out, text.size(), site); }
+		out.append(text);
 		acc.set_type_info(nullptr);
 		return {};
 	}
@@ -17912,7 +17924,7 @@ op_status vm_backend::exec_concat_append(frame& f, const vm_instruction& ins) {
 	(void)f;
 	script_value right_raw = std::move(stack_.back());
 	stack_.pop_back();
-	return concat_step(right_raw.deref(), ins.a);
+	return concat_step(right_raw.deref(), ins.a, &ins);
 }
 
 // A chain's run of plain operands (constants, identifiers) joined onto the accumulator: each read at its own step, where the stack form
@@ -17937,11 +17949,11 @@ op_status vm_backend::exec_concat_operands(frame& f, const vm_instruction& ins) 
 		const size_t vk = v->raw_storage_index();
 		if (vk == script_value::TYPEID_STRING || vk == script_value::TYPEID_INT || vk == script_value::TYPEID_CHAR ||
 		    vk == script_value::TYPEID_FLOAT || vk == script_value::TYPEID_BOOL) {
-			VM_TRY(concat_step(*v, hint));
+			VM_TRY(concat_step(*v, hint, &piece));
 		} else {
 			// the general `+` may run user code: it reads its own handle on the operand (a constant materialized with the engine)
 			script_value held = piece.const_index != k_invalid_u32 ? materialize_constant(*f.code, piece.const_index) : v->deref();
-			VM_TRY(concat_step(held, hint));
+			VM_TRY(concat_step(held, hint, &piece));
 		}
 		if (is_unwinding_) { return {}; }
 		hint = 0;

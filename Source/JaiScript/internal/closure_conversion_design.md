@@ -1,58 +1,56 @@
 # Closure conversion
 
-A capturing lambda keeps its captured values in a flat array on its function object and runs without a capture
-environment. Behavior is unchanged on both backends; the interpreter keeps its environments (it is the oracle).
+A lambda the VM makes inside a function, over that function's frame-slot locals, keeps its captures on its function object
+and runs without a capture environment. Behavior is unchanged on both backends; the interpreter and vm-reference keep the
+environment form (they are the oracles the converted form is held to).
 
-## Today
+## The environment form
 
-`vm_backend::exec_closure` builds a capture `environment` (328 bytes, a `make_shared`) whose parent is the lambda's program
-scope, defines each captured name in it (`clone_for_capture` for a copy, `share_env_ref` for `[&]`), and stores it as
-`script_defined_function::closure_env`. A call installs that env as the frame's parent (`environment_ = function.closure_env`
-on every entry path), and the body reaches a captured name through the environment-addressed forms of `op_load`, `op_store`,
-the compound, inc/dec, concat-store and ref-return ops (`a = k_invalid_u32`, symbol in `b`) and their lookup caches. A
-300k-closure array costs about 615 bytes per closure: the env 344, the function 176, the value node about 88.
+`vm_backend::exec_closure` builds a capture `environment` whose parent is the lambda's program scope, defines each captured
+name in it (`clone_for_capture` for a copy, `share_env_ref` for `[&]`) and stores it as `script_defined_function::closure_env`.
+A call installs that env as the frame's parent, and the body reaches a captured name through the environment-addressed forms
+of the name ops and their lookup caches.
 
-## Shape
+## The converted form
 
-- `closure_proto` gains the capture layout, fixed at compile time: one entry per name the body may capture (explicit captures,
-  then the `[=]`/`[&]` body names in `used_variables`), each with its mode (copy, cell, init) and its source (outer slot, or
-  resolve through the capture ladder).
-- `script_defined_function` gains `captures`: a `std::unique_ptr<script_value[]>` sized to the layout (16 bytes a name). An
-  entry the runtime ladder declines (a global: it resolves when the lambda runs, `src.global`) holds the absent marker
-  (raw-invalid, as a field cell does) and its reads fall back to the environment form.
-- The body compiles captured names to capture-addressed operands: a new operand mode beside frame slots and the env
-  (`k_capture_bit | index`) on every op that addresses a name today. A copy entry reads and writes its own value; a `[&]`
-  entry holds the shared cell's reference value and goes through it (`deref`), exactly as the env value does now.
-- A converted lambda's `closure_env` is null, so it enters through the capture-free call path (program-scope parent), and the
-  running function's captures are reached from the frame: `call_frame` gains a pointer to the running function's capture
-  array, set where the entry paths set `closure_env` today. That store is the one touch on the call protocol.
+- **When.** `vm_backend::converted_form_of` judges a closure node once, at its first creation: no `this`, no init-capture, no
+  yield, no nested function frame (a nested lambda, function or parallel body), no chained outer names, no reference return,
+  parameters in slots `0..p-1`, every captured name a slot of the creating frame (an explicit capture's `outer_slot` or the
+  node's `outer_slot_plan`), no captured name the body declares again or reaches as a reference declaration. A creation then
+  converts when it is a function frame (not the program frame), not a parallel worker, under the global program scope, with
+  every captured slot live, and every `[=]`/`[&]` body name outside the layout resolving to a global or to nothing.
+- **Layout.** The captured names in the order the environment form defines them: the default-capture names, then the
+  explicit captures, then the remaining outer slots. Destruction runs in reverse of that order, as the environment's does.
+- **Values.** `script_defined_function::captures` (one boxed `converted_captures`: the values, the ids, the environment twin)
+  holds per name: the shared cell for `[&]`; the copy itself for a name the body only reads (no store, increment, call or
+  construction argument, method receiver, reference declaration or by-reference loop over it) when the copy is a scalar or a
+  string; else a cell holding the copy, so a write lasts to the next call.
+- **Body.** A copy of the lambda's body, made through the AST serializer (`ast_frame_context` remaps the copy's own slots past
+  the parameters up by the capture count and gives each captured identifier its capture slot), compiled with one synthetic
+  `T&` parameter per capture (`parameter::binds_capture`, slots `p..p+n-1`). Its first instruction, `op_bind_captures`
+  (op_index_assign's slot, which nothing emitted), copies the closure's values into those slots; loads dereference a cell,
+  stores write through it. The function's `body` stays the lambda's own; `backend_body_cache` is the copy's chunk.
+- **Entry.** `closure_env` is null, so the closure enters through the capture-free paths; `vm_backend::enter_frame(frame&,
+  function)` points `frame::captures` at the function's values (`bind_frame_captures`), read by `op_bind_captures` once the
+  window stands.
 
 ## Contracts kept
 
-- **Copies and cells.** A copy capture is `clone_for_capture` of the source at creation; `[&]` shares the source's cell
-  (`share_env_ref`), so writes on either side are seen by both. An init-capture takes `clone_for_assignment` of its value.
-- **Globals at call time.** A global is never captured (`src.global`): its entry stays absent and the read resolves through
-  the program scope when the lambda runs, so a reassigned global is seen.
-- **`this`.** `[this]` and `[=]`/`[&]` with an instance keep the method environment (members resolve through it); only
-  lambdas whose captures are all plain names convert. A lambda that captures `this` keeps today's path.
-- **Nested lambdas.** A lambda created inside a converted body finds an enclosing captured name through the capture ladder:
-  `detail::resolve_capture_source` gains the running function's capture array as the step after the outer frame's slots.
-- **Debugger.** The locals walk lists the running function's captures after its slots, under the captured names (the layout
-  keeps the symbol ids); a set-variable writes the entry.
-- **Hot reload.** A reloaded body compiles against its own proto's layout; a closure made before the reload keeps its
-  function object, whose chunk pin and layout stay matched. A layout never changes under a live function.
-- **Parallel workers.** `provision_worker`'s function copy clones the capture array the way it clones `closure_env` today
-  (copies detach, cells stay shared under the region's admission rules).
-- **Coroutines.** A coroutine function decl keeps its capture env (its handle owns an env chain across suspensions).
-- **jaibite.** The layout derives from the AST at compile time and the serializer writes no chunk state, so `.jaibite` is
-  unchanged (no `k_jaibite_version` bump) unless the layout is persisted.
+- **Copies and shares.** A copy is `clone_for_capture` of the source at creation and `[&]` shares the source's cell, exactly
+  as the environment form defines them.
+- **Globals at call time.** A global is never captured: the body reads it by name through the program scope when it runs.
+- **Code that runs a body by name.** The parallel builtins (`parallel_transform`, `parallel_reduce`) and region admission of a
+  global function value take `script_defined_function::environment_form`: a twin over one environment holding the closure's
+  values. The compile-time inliner, the call-site cache, inline holds and frame programs treat a converted closure as
+  capturing (they never run its body without its captures, and never pin it past its frame).
+- **Release.** `~script_defined_function` releases a chain of closures each holding the last on a work list; the cell-cycle
+  collector follows a definition to its captured cells and twin.
+- **Debugger.** The locals walk leaves out the capture slots (the environment form lists no captures among a frame's locals).
+- **Hot reload.** The converted form lives on the closure node of a chunk: a reloaded unit compiles new nodes; a closure made
+  before keeps its function, whose chunk it pins.
+- **jaibite.** Nothing persisted changes.
 
-## Cost and order
+## Cost
 
-Every name-addressing op family gains one operand mode (both env safe-lists in `vm_compiler.cpp`, the disassembler, the
-manifest, the debugger's locals walk, the typed-env operand table). That is the bulk of the work and touches the compiler and
-the op handlers, not the call protocol; it lands after the call-protocol rework so the frame's access to its function is the
-reworked one.
-
-Expected: about 350 of 615 bytes and two allocations (the env and its control block) per capturing closure; a captured read
-becomes an indexed load instead of an env lookup cache probe.
+A capturing closure drops its environment (288 bytes and its control block) for one box and its values; a captured read is a
+slot load instead of an environment lookup.

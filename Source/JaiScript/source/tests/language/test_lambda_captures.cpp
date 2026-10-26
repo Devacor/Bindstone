@@ -385,6 +385,32 @@ public:
                    "1|99", "[g] of an unshadowed global inside a method snapshots it");
         });
 
+        // A lambda made in a function over that function's locals keeps its captures as cells on the closure (the vm's converted
+        // form, internal/closure_conversion_design.md): every capture mode keeps the environment form's results
+        test("converted_closures_keep_every_capture_mode", [expect]() {
+            expect("function f() -> string { int n = 1; var inc = [&n]() { n = n + 1; return n; }; var peek = [n]() { return n; }; inc(); inc();"
+                   " var all = [inc, peek, n]() { return to_string(inc()) + \"/\" + to_string(peek()) + \"/\" + to_string(n); };"
+                   " return all() + \" \" + all() + \" \" + to_string(n); } f()", "4/1/3 5/1/3 5", "copies, shares and a captured closure");
+            expect("function f() -> string { array<int> a = [1, 2, 3]; var p = [a]() { a.push(4); return a.size(); };"
+                   " var q = [=]() { return a.size(); }; var r = [&]() { a.push(9); return a.size(); };"
+                   " return to_string(p()) + to_string(p()) + to_string(q()) + to_string(r()) + to_string(a.size()); } f()",
+                   "45344", "a copied array is the closure's own and lasts between calls");
+            expect("function f() -> string { string s = \"ab\"; var w = [s]() { s += \"!\"; return s; }; var rd = [s]() { return s + \"?\"; };"
+                   " w(); return w() + \" \" + rd() + \" \" + s; } f()", "ab!! ab? ab", "a written copy and a read-only copy");
+            expect("int G = 5; function f() -> int { int k = 1; var g = [=]() { return k + G; }; G = 7; return g(); } to_string(f())", "8",
+                   "a global resolves when the lambda runs");
+            expect("function f() -> int { int t = 0; for (int i = 0; i < 4; ++i) { int k = i * 10; var g = [k](int x) { return x + k; }; t += g(1); } return t; } to_string(f())",
+                   "64", "a loop's closures each copy their iteration's local");
+        });
+
+        test("converted_closures_release_in_order_and_without_recursion", [expect]() {
+            expect("var log = \"\"; class T { string n; T(string s) { n = s; } ~T() { log += n + \";\"; } }"
+                   " function f() { T a = T(\"a\"); T b = T(\"b\"); var c = [a, b]() { return a.n + b.n; }; c(); } f(); log",
+                   "b;a;b;a;", "the captured copies die with the closure, last capture first");
+            expect("function f(int n) -> int { var g = []() { return 0; }; for (int i = 0; i < n; ++i) { var prev = g; g = [prev]() { return 1; }; } return g(); }"
+                   " to_string(f(200000))", "1", "a long chain of closures each holding the last releases without native recursion");
+        });
+
         test("explicit_capture_of_undefined_name_text_parity", [this, run_both]() {
             // Static checking off: the runtime text is the one under test
             auto [i_out, v_out] = run_both("auto l = [&nosuch]() { return 1; }; l()", true);

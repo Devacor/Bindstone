@@ -621,6 +621,7 @@ namespace jai::vm {
             // lookup; any other chunk (a reused record, a frame that never looked one up) reads through worker_env_cache_slot
             const chunk* env_table_code = nullptr;
             env_lookup_cache_entry* env_table = nullptr;
+            const script_defined_function::converted_captures* captures = nullptr;   // the running converted closure's (op_bind_captures)
         };
         // a byte per cell: a cell store marks its cell with one byte write, so consecutive stores carry no read-modify-write chain
         struct cell_dirty {
@@ -844,13 +845,15 @@ namespace jai::vm {
         // Every frame enters through here (record, raw and session entries, method and tail-call pushes, fibers and native entries through
         // frame_guard): it joins frames_, and its function's captures bind into its slots (a raw-entered frame's slots are its cells until
         // build_raw_window builds its window).
-        void enter_frame(frame& f) {
+        void enter_frame(frame& f, const script_defined_function* function = nullptr) {
             frames_.push_back(&f);
-            bind_frame_captures(f);
+            bind_frame_captures(f, function);
         }
-        // The one place a function's captures bind into its frame (a converted closure's flat capture array, closure_env null); no
-        // function carries one yet, so it binds nothing
-        void bind_frame_captures(frame&) noexcept {}
+        // The one place a function's captures bind into its frame: a converted closure's cells, which its body's first
+        // instruction (op_bind_captures) lands in its capture slots once the window stands
+        static void bind_frame_captures(frame& f, const script_defined_function* function) noexcept {
+            f.captures = function && function->converted() ? function->captures.get() : nullptr;
+        }
         // a frame whose code reads its slots: a call frame, or a program frame whose block-scoped declarations have them (its window)
         static bool has_slots(const frame& f) noexcept { return f.locals && (!f.top_level || f.window_backed); }
         script_value* frame_slot(frame& f, size_t slot) noexcept {
@@ -2789,6 +2792,9 @@ namespace jai::vm {
                                                const call_site* site);
         op_status exec_func_decl(frame& f, const vm_instruction& ins);
         op_status exec_closure(frame& f, const vm_instruction& ins);
+        op_status exec_bind_captures(frame& f, const vm_instruction& ins);
+        // the converted form of a closure node, made at its first creation that can use it (null: the node keeps its environment)
+        const closure_proto::converted_form* converted_form_of(const closure_proto& proto);
         op_status exec_destructure(frame& f, const vm_instruction& ins);
         op_status exec_extended(frame& f, const vm_instruction& ins);
         op_status exec_throw(frame& f, const vm_instruction& ins);

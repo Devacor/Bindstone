@@ -658,6 +658,11 @@ namespace jai::detail {
     struct ast_frame_context {
         size_t local_count;
         const std::vector<parameter>& parameters;
+        // A converted closure's body copy: its slots from remap_from up move by remap_shift, and an identifier naming a
+        // captured symbol takes that capture's slot
+        size_t remap_from = SIZE_MAX;
+        size_t remap_shift = 0;
+        const std::unordered_map<uint64_t, size_t>* capture_slots = nullptr;
     };
 
     class ast_reader {
@@ -665,6 +670,9 @@ namespace jai::detail {
         ast_reader(const uint8_t* data, size_t size, engine* eng, const ast_frame_context* context = nullptr, std::string own_path = {})
             : data_(data), size_(size), eng_(eng), symbols_(eng->get_symbolizer()), own_path_(std::move(own_path)) {
             if (context) {
+                remap_from_ = context->remap_from;
+                remap_shift_ = context->remap_shift;
+                capture_slots_ = context->capture_slots;
                 // The copied body's own frame is known; its captured parent is
                 // not part of this trusted subtree. Never used for file loading.
                 frames_[0].local_count = SIZE_MAX;
@@ -672,6 +680,9 @@ namespace jai::detail {
                 frames_[current_frame_].local_count = context->local_count;
             }
         }
+
+        // the function frames the read entered (the context's own frame included): a copied body holding a nested function has more
+        size_t frame_count() const noexcept { return frames_.size(); }
 
         std::vector<declaration_ptr> deserialize(uint64_t& fingerprint_out, uint32_t* flags_out = nullptr) {
             if (size_ < 20) jaibite_fail("truncated header");
@@ -836,7 +847,9 @@ namespace jai::detail {
         }
         size_t slot_val() {
             uint64_t v = varint();
-            return v == 0 ? SIZE_MAX : size_t(v - 1);
+            if (v == 0) { return SIZE_MAX; }
+            const size_t slot = size_t(v - 1);
+            return slot >= remap_from_ ? slot + remap_shift_ : slot;
         }
 
         source_location location() {
@@ -1023,6 +1036,9 @@ namespace jai::detail {
                     e->result_type = rt;
                     e->slot_index = slot_val();
                     e->global_qualified = flag();
+                    if (capture_slots_ && !e->global_qualified) {
+                        if (auto it = capture_slots_->find(sym); it != capture_slots_->end()) { e->slot_index = it->second; }
+                    }
                     track_slot(e->slot_index, sym, true);
                     result = e;
                     break;
@@ -1566,6 +1582,9 @@ namespace jai::detail {
         size_t current_frame_ = 0;
         int depth_ = 0;
         std::string own_path_;
+        size_t remap_from_ = SIZE_MAX;
+        size_t remap_shift_ = 0;
+        const std::unordered_map<uint64_t, size_t>* capture_slots_ = nullptr;
     };
 
     // own_path: the unit's source path as its nodes are stamped; pass the same spelling to

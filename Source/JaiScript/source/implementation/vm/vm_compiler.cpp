@@ -161,7 +161,6 @@ namespace {
 			case opcode::op_math_guard:
 			case opcode::op_unary_temp:
 			case opcode::op_index:
-			case opcode::op_index_assign:
 			case opcode::op_index_compound:
 			case opcode::op_index_store:
 			case opcode::op_index_compound_fused:
@@ -251,6 +250,7 @@ namespace {
 			case opcode::op_throw:
 			case opcode::op_case_eq:
 			case opcode::op_switch_table:
+			case opcode::op_bind_captures:
 			case opcode::op_cfor_prep:
 			case opcode::op_cfor_back:
 			case opcode::op_cfor_pop:
@@ -387,7 +387,6 @@ namespace {
 			case opcode::op_math_guard:
 			case opcode::op_unary_temp:
 			case opcode::op_index:
-			case opcode::op_index_assign:
 			case opcode::op_index_compound:
 			case opcode::op_index_store:
 			case opcode::op_index_compound_fused:
@@ -477,6 +476,7 @@ namespace {
 			case opcode::op_throw:
 			case opcode::op_case_eq:
 			case opcode::op_switch_table:
+			case opcode::op_bind_captures:
 			case opcode::op_cfor_prep:
 			case opcode::op_cfor_back:
 			case opcode::op_cfor_pop:
@@ -983,6 +983,16 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 			chunk_->param_default_chunks[i] = std::move(default_chunk);
 		}
 	}
+
+	// a converted closure's captured names: their slots follow the parameters, bound from the closure before the body runs
+	size_t capture_first = SIZE_MAX;
+	size_t capture_count = 0;
+	for (const auto& p : parameters) {
+		if (!p.binds_capture) { continue; }
+		if (capture_first == SIZE_MAX) { capture_first = p.slot_index; }
+		++capture_count;
+	}
+	if (capture_count > 0) { emit(opcode::op_bind_captures, static_cast<uint32_t>(capture_first), static_cast<uint32_t>(capture_count)); }
 
 	for (const auto& decl : body->declarations) {
 		compile_declaration(decl, false);

@@ -728,8 +728,12 @@ void script_value::release_cell_cycles(std::vector<script_value>& cells, engine*
                 break;
             }
             case node_definition: {
-                const auto& env = static_cast<const script_defined_function*>(key)->closure_env;
-                if (env) link(env.get(), env.use_count(), node_environment);
+                const auto* definition = static_cast<const script_defined_function*>(key);
+                if (const auto& env = definition->closure_env) link(env.get(), env.use_count(), node_environment);
+                if (definition->captures) {
+                    for (const script_value& cell : definition->captures->cells) { link_value(cell); }
+                    if (const auto& twin = definition->captures->environment_twin) link(twin.get(), twin.use_count(), node_definition);
+                }
                 break;
             }
             case node_environment: {

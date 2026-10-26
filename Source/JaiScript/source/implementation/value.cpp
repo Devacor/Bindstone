@@ -954,9 +954,10 @@ script_value script_value::make_object(std::string_view type_name, uint64_t type
 }
 
 namespace detail {
-void retain_instance(class_instance* instance) noexcept { strong_counts<class_instance>::add_strong(cb_from_object(instance)); }
-void release_instance(class_instance* instance) noexcept { strong_ptr<class_instance> last = adopt_pooled(instance); }
-size_t instance_use_count(const class_instance* instance) noexcept { return strong_counts<class_instance>::strong_count(cb_from_object(const_cast<class_instance*>(instance))); }
+void release_last_instance(class_instance* instance) noexcept {
+    JAI_SP_CENSUS_FREED(instance);
+    strong_last_release<class_instance>::run(instance, cb_from_object(instance));
+}
 }
 
 namespace {

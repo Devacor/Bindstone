@@ -2369,6 +2369,7 @@ checked_result<void> host_reference_store(engine* eng, const host_slot& slot, sc
 }
 
 engine::engine() : impl(std::make_unique<implementation>()) {
+    assert(detail::object_ref::layout_holds() && "object_ref reads a shared_ptr as (stored pointer, control block)");
     impl->global_environment_->bind_engine(this);
 }
 

@@ -109,10 +109,18 @@ namespace detail {
     // A C++ object the call just made (a constructor's, a copy's): on a parallel chunk the chunk owns it (class_instance::region_tag)
     void note_region_made(const script_value& value, engine* eng);
 
-    // The counts of a strong_ptr<class_instance> where class_instance is incomplete (value.cpp)
-    void retain_instance(class_instance* instance) noexcept;
-    void release_instance(class_instance* instance) noexcept;
-    size_t instance_use_count(const class_instance* instance) noexcept;
+    // The counts of a strong_ptr<class_instance> where class_instance is incomplete: its control block sits a fixed distance
+    // before it (class_runtime.hpp checks the distance against cb_storage_offset); the last release dies out of line (value.cpp)
+    inline constexpr size_t k_instance_cb_offset = (sizeof(control_block_base) + 7) & ~size_t{7};
+    inline control_block_base* instance_control_block(const class_instance* instance) noexcept {
+        return reinterpret_cast<control_block_base*>(reinterpret_cast<unsigned char*>(const_cast<class_instance*>(instance)) - k_instance_cb_offset);
+    }
+    void release_last_instance(class_instance* instance) noexcept;
+    inline void retain_instance(class_instance* instance) noexcept { strong_counts<class_instance>::add_strong(instance_control_block(instance)); }
+    inline void release_instance(class_instance* instance) noexcept {
+        if (strong_counts<class_instance>::release_strong(instance_control_block(instance))) { release_last_instance(instance); }
+    }
+    inline size_t instance_use_count(const class_instance* instance) noexcept { return strong_counts<class_instance>::strong_count(instance_control_block(instance)); }
 
     // A std::shared_ptr owning a class instance through its strong_ptr, for a host that holds the instance as a C++ object's owner
     // (a hybrid's load, an aliasing handle): the last host handle drops the strong count, so it drops on the script's thread
@@ -173,7 +181,8 @@ namespace detail {
         void reset() noexcept { object_ref().swap(*this); }
 
         bool is_instance() const noexcept { return word(1) == k_instance_mark; }
-        void* get() const noexcept { return is_instance() ? static_cast<void*>(instance_pointer()) : shared_ref().get(); }
+        // the first word in both forms: an instance's pointer, the shared_ptr's stored pointer (checked once, value.cpp)
+        void* get() const noexcept { return reinterpret_cast<void*>(word(0)); }
         explicit operator bool() const noexcept { return get() != nullptr; }
         bool operator==(std::nullptr_t) const noexcept { return get() == nullptr; }
         bool operator!=(std::nullptr_t) const noexcept { return get() != nullptr; }
@@ -194,6 +203,12 @@ namespace detail {
             return is_instance() ? none : shared_ref();
         }
 
+        // the layout get() and is_instance() read, checked against the standard library in hand (value.cpp)
+        static bool layout_holds() noexcept {
+            int probe = 0;
+            object_ref ref(std::shared_ptr<void>(std::shared_ptr<void>(), &probe));
+            return ref.word(0) == reinterpret_cast<uintptr_t>(&probe) && ref.word(1) != k_instance_mark;
+        }
     private:
         static_assert(sizeof(std::shared_ptr<void>) == 2 * sizeof(uintptr_t), "object_ref packs into a shared_ptr's two words");
         static constexpr uintptr_t k_instance_mark = 1;

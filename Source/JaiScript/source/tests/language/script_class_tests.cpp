@@ -315,6 +315,26 @@ public:
             check_eq((int64_t)3501, r.as_int());
         });
 
+        test("per_class_guard_facts_follow_every_receiver_class_and_redefinition", [this]() {
+            // a base method's bare names on alternating subclasses (the member-miss memo's second class) and a grafted call on several
+            // receiver classes (the graft guard's per-class rows); a subclass redefined to declare a method of the bare name takes it
+            // from then on
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            e->execute(R"(
+                int helper(int k) { return k * 10; }
+                class Shape { int side = 1; int area() { return side * side; } int report(int k) { return helper(k) + area(); } }
+                class Square : Shape { int extra = 0; }
+                class Tile : Shape { int pad0 = 0; int pad1 = 0; }
+                class Cube : Shape { int depth = 2; }
+                array<Shape> all = [Shape(), Square(), Tile(), Cube(), Square()];
+                int run_all(int rounds) { int s = 0; for (int r = 0; r < rounds; r++) { for (int i = 0; i < all.size(); i++) { all[i].side = i + 1; s += all[i].report(r); } } return s; }
+            )");
+            check_eq((int64_t)775, e->execute("run_all(5)").as_int(), "every class at the sites");
+            e->execute("class Tile : Shape { int pad0 = 0; int pad1 = 0; int helper(int k) { return 1000; } }");
+            check_eq((int64_t)5675, e->execute("run_all(5)").as_int(), "the redefined class's own helper wins over the global");
+        });
+
         test("class_destructor_basic", [this]() {
             auto js_engine = make_engine();
             stdlib::register_all(*js_engine);

@@ -123,13 +123,13 @@ checked_result<script_value> script_callable_thunk::call(const std::vector<scrip
     // host-boundary wrapping, matching the anonymous-lambda mint this replaces. Hot
     // vm call paths never get here (they recover the payload and enter in-loop).
     if (payload.kind == script_callable::kind_type::bound_method) {
-        const script_value& this_obj = *payload.this_obj;
+        const script_value& this_obj = *payload.this_obj();
         std::vector<script_value> method_args;
         method_args.reserve(args.size() + 1);
         method_args.push_back(this_obj);
         method_args.insert(method_args.end(), args.begin(), args.end());
 
-        const auto& method_func = payload.bound_dispatch->as_function();
+        const auto& method_func = payload.bound_dispatch()->as_function();
         auto result = host_call ? method_func(method_args) : detail::call_function_value(method_func, method_args);
 
         if (result && this_obj.is_object()) {
@@ -6455,12 +6455,12 @@ checked_result<std::shared_ptr<class_definition>> engine::resolve_script_class(c
         name = script_class.as_string();
     } else if (script_class.is_function()) {
         auto* thunk = script_class.as_function().target<script_callable_thunk>();
-        if (!thunk || thunk->payload.kind != script_callable::kind_type::constructor || !thunk->payload.cls) {
+        if (!thunk || thunk->payload.kind != script_callable::kind_type::constructor || !thunk->payload.cls()) {
             return result(make_error_code(runtime_error_code::extend_rejected),
                 "extend: the second argument must name a script class (a class name or a string), not a function");
         }
-        if (thunk->payload.cls->is_script_class()) { return result(thunk->payload.cls); }
-        name = thunk->payload.cls->get_name();
+        if (thunk->payload.cls()->is_script_class()) { return result(thunk->payload.cls()); }
+        name = thunk->payload.cls()->get_name();
     } else {
         return result(make_error_code(runtime_error_code::extend_rejected),
             "extend: the second argument must name a script class (a class name or a string)");

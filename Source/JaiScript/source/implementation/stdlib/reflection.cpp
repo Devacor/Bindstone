@@ -860,9 +860,9 @@ void register_reflection_functions(engine& eng_ref) {
                     if (thunk->payload.fn && thunk->payload.fn->shared_parameters) {
                         arr.as_array().push_back(reflect_detail::params_array_for(
                             eng, *thunk->payload.fn->shared_parameters));
-                    } else if (thunk->payload.ast) {
+                    } else if (thunk->payload.ast()) {
                         arr.as_array().push_back(reflect_detail::params_array_for(
-                            eng, thunk->payload.ast->parameters));
+                            eng, thunk->payload.ast()->parameters));
                     }
                 }
                 return arr;

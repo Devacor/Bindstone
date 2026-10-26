@@ -193,9 +193,9 @@ namespace {
             if (declared_return) { *declared_return = p.fn->return_type; }
             return &p.fn->parameters();
         }
-        if ((p.kind == script_callable::kind_type::method || p.kind == script_callable::kind_type::static_method) && p.ast) {
-            if (declared_return) { *declared_return = p.ast->return_type; }
-            return &p.ast->parameters;
+        if ((p.kind == script_callable::kind_type::method || p.kind == script_callable::kind_type::static_method) && p.ast()) {
+            if (declared_return) { *declared_return = p.ast()->return_type; }
+            return &p.ast()->parameters;
         }
         return nullptr;
     }
@@ -8338,10 +8338,10 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         // seam the dispatcher uses (args already evaluated once)
                         script_callable payload;
                         payload.kind = script_callable::kind_type::method;
-                        payload.ast = resolved_pin;
-                        payload.cls = cls_pin;
-                        payload.definition_env = def_env;
-                        payload.this_obj = objectValue;
+                        payload.more().ast = resolved_pin;
+                        payload.more().cls = cls_pin;
+                        payload.more().definition_env = def_env;
+                        payload.more().this_obj = objectValue;
                         auto coro_result = execute_callable(payload, arguments);
                         if (!coro_result) {
                             return coro_result.error_value();
@@ -8485,9 +8485,9 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
     const script_function* callee_func = &callee.as_function();
     const auto* callee_thunk = callee_func->target<script_callable_thunk>();
     if (callee_thunk && callee_thunk->eng == engine_ && callee_thunk->payload.kind == script_callable::kind_type::overload_set &&
-        callee_thunk->payload.overloads) {
+        callee_thunk->payload.overloads()) {
         // the member these arguments select (KEEP BYTE-PARALLEL with vm_backend::invoke_callee)
-        auto picked = detail::select_overload_member(*callee_thunk->payload.overloads, arguments.data(), arguments.size(), engine_);
+        auto picked = detail::select_overload_member(*callee_thunk->payload.overloads(), arguments.data(), arguments.size(), engine_);
         if (!picked) { return picked.error_value(); }
         callee_func = &picked.value()->as_function();
         callee_thunk = callee_func->target<script_callable_thunk>();
@@ -13453,27 +13453,27 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
         case script_callable::kind_type::function:
             return call_function(*payload.fn, args);
         case script_callable::kind_type::overload_set: {
-            if (!payload.overloads) {
+            if (!payload.overloads()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Overload set payload without members");
             }
-            auto picked = detail::select_overload_member(*payload.overloads, args.data(), args.size(), engine_);
+            auto picked = detail::select_overload_member(*payload.overloads(), args.data(), args.size(), engine_);
             if (!picked) { return picked.error_value(); }
             const script_callable* member = detail::script_callable_of(*picked.value(), engine_);
             return member && member->fn ? call_function(*member->fn, args) : call_value(picked.value()->as_function(), args);
         }
         case script_callable::kind_type::method: {
-            auto method_env = get_pooled_method_environment(payload.definition_env, *payload.this_obj, payload.cls.get());
-            method_env->define("this", *payload.this_obj);
-            auto result = execute_method_ast(payload.ast, method_env, args);
+            auto method_env = get_pooled_method_environment(payload.definition_env(), *payload.this_obj(), payload.cls().get());
+            method_env->define("this", *payload.this_obj());
+            auto result = execute_method_ast(payload.ast(), method_env, args);
             release_environment(method_env, true);   // the receiver dies with the call, as the vm's method frame drops it
             return result;
         }
         case script_callable::kind_type::static_method: {
-            auto static_env = std::make_shared<environment>(payload.definition_env, string_symbolizer_, payload.cls);
-            return execute_method_ast(payload.ast, static_env, args);
+            auto static_env = std::make_shared<environment>(payload.definition_env(), string_symbolizer_, payload.cls());
+            return execute_method_ast(payload.ast(), static_env, args);
         }
         case script_callable::kind_type::constructor: {
-            auto script_cls = std::dynamic_pointer_cast<script_class_definition>(payload.cls);
+            auto script_cls = std::dynamic_pointer_cast<script_class_definition>(payload.cls());
             if (!script_cls) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Constructor payload without script class definition");
             }
@@ -13485,7 +13485,7 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
                 construction_lender host(*this);
                 return detail::construct_default_instance(host, script_cls, args);
             }
-            return construct_instance(script_cls, payload.definition_env, args, !waived);
+            return construct_instance(script_cls, payload.definition_env(), args, !waived);
         }
     }
     return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Unknown callable kind");

@@ -380,8 +380,8 @@ checked_result<script_value> environment::get(uint64_t id) const {
                     // thunk's operator() (engine.cpp), keep-alive anchor included.
                     script_callable payload;
                     payload.kind = script_callable::kind_type::bound_method;
-                    payload.this_obj = this_object_;
-                    payload.bound_dispatch = std::move(method);
+                    payload.more().this_obj = this_object_;
+                    payload.more().bound_dispatch = std::move(method);
                     bound_method_storage_ = script_value::make_function(
                         script_callable_thunk{this_object_.payload_engine(), std::move(payload)},
                         this_object_.payload_engine());

@@ -1008,9 +1008,9 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
         // construction and the body without a native re-entry; every other caller goes through operator()
         script_callable ctor_payload;
         ctor_payload.kind = script_callable::kind_type::constructor;
-        ctor_payload.cls = class_def;
+        ctor_payload.more().cls = class_def;
         if (found_constructor) {
-            ctor_payload.definition_env = global_env;
+            ctor_payload.more().definition_env = global_env;
         }
         global_env->define(decl->name_id, script_value::make_function(script_callable_thunk{eng, std::move(ctor_payload)}, eng));
     }

@@ -7481,6 +7481,9 @@ bool vm_compiler::try_emit_fused_index_store_shape(binary_expr* sub, const expre
 	} else if (no_result && (unary_temp_operand(value.get()) || math_temp_operand(value.get()) != detail::math_fn::none)) {
 		compile_value_into_temp(value, 0xFF, p.store_value);
 		value_operand = true;   // `a[i] = -e` or `a[i] = math::f(e)`: the value lands in a temp
+	} else if (no_result && ternary_temp_operand(value.get())) {
+		compile_ternary_into_temp(value, p.store_value);
+		value_operand = true;   // `a[i] = c ? x : y`: each arm lands in the temp, so no value crosses the join on the stack
 	} else if (no_result && value->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(value.get()))) {
 		// `a[i] = e op f`: the value binary lands in a compiler temp (its fused binary rewritten to land there, as an operand's
 		// does) and the store takes the temp as an operand; a shape the fuse declined stays on the stack

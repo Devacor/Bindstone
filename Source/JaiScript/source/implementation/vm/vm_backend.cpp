@@ -1902,9 +1902,50 @@ bool vm_backend::object_defines_custom_equality(const script_value& v) const {
 	return cd && (cd->defines_method(eq_method_id_) || cd->defines_method(op_spaceship_id_));
 }
 
+// a script class instance whose class, at its method epoch, answers none of ==, != and <=> and wraps nothing: every equality lane asks
+// operator_value for those names and finds nothing, so the answer is known (main engine; a few classes remembered)
+// detail::shared_handle_admits remembered for a class instance: the verdict is a function of the object's class, its tag and the declared
+// type while no class definition moves (engine::class_definition_epoch), so a few (class, tag, declared) rows answer the steady state
+// without the by-name class lookup and the subtype walk (main engine)
+bool vm_backend::handle_admits(const script_value& v, const type_info_ptr& declared) {
+	class_instance* inst = parallel_worker_ ? nullptr : v.peek_class_instance();
+	if (!inst || !engine_) { return detail::shared_handle_admits(v, declared, engine_); }
+	const class_definition* cd = inst->get_class_definition();
+	const type_info* tag = v.type_info_raw();
+	const uint64_t epoch = engine_->class_definition_epoch();
+	for (const handle_admits_row& row : handle_admits_rows_) {
+		if (row.cd == cd && row.tag == tag && row.declared == declared.get() && row.epoch == epoch) { return row.admits; }
+	}
+	const bool admits = detail::shared_handle_admits(v, declared, engine_);
+	handle_admits_rows_[handle_admits_next_] = handle_admits_row{cd, tag, declared.get(), epoch, admits};
+	handle_admits_next_ = (handle_admits_next_ + 1) % k_handle_admits_rows;
+	return admits;
+}
+
+bool vm_backend::comparison_free(const script_value& v) {
+	if (parallel_worker_) { return false; }
+	class_instance* inst = v.peek_class_instance();
+	if (!inst || inst->has_user_overflow_fields()) { return false; }
+	const class_definition* cd = inst->get_class_definition();
+	if (!cd || !cd->is_script_class()) { return false; }
+	const uint64_t epoch = cd->method_epoch();
+	for (const comparison_free_row& row : comparison_free_rows_) {
+		if (row.cd == cd && row.epoch == epoch) { return row.free; }
+	}
+	bool free = false;
+	if (auto target = resolve_member_target(v)) {
+		free = !(target.class_def && target.class_def->is_transparent_wrapper()) && !operator_value(target, eq_method_id_).is_function() &&
+		       !operator_value(target, op_bang_equal_id_).is_function() && !operator_value(target, op_spaceship_id_).is_function();
+	}
+	comparison_free_rows_[comparison_free_next_] = comparison_free_row{cd, epoch, free};
+	comparison_free_next_ = (comparison_free_next_ + 1) % k_comparison_free_rows;
+	return free;
+}
+
 std::optional<checked_result<bool>> vm_backend::object_equality_via_method(const script_value& left, const script_value& right) {
 	// a worker whose region did not pin the class's == leaves it to handle_equal, which raises the verdict
 	if (parallel_worker_ && !worker_operators_pinned(left, { eq_method_id_, op_spaceship_id_ })) [[unlikely]] { return std::nullopt; }
+	if (comparison_free(left)) { return std::nullopt; }
 	auto target = resolve_member_target(left);
 	if (!target) {
 		return std::nullopt;
@@ -1939,7 +1980,7 @@ std::optional<checked_result<bool>> vm_backend::object_inequality_via_method(con
 		}
 		return std::nullopt;
 	}
-	if (!left.is_object() || right.is_null()) { return std::nullopt; }
+	if (!left.is_object() || right.is_null() || comparison_free(left)) { return std::nullopt; }
 	auto target = resolve_member_target(left);
 	if (!target) { return std::nullopt; }
 	script_value method_val = operator_value(target, op_bang_equal_id_);
@@ -2011,7 +2052,7 @@ std::optional<checked_result<bool>> vm_backend::object_spaceship_equality_via_me
 		return std::nullopt;
 	};
 	const auto side = [&](const script_value& self, const script_value& other) -> std::optional<checked_result<bool>> {
-		if (!self.is_object()) { return std::nullopt; }
+		if (!self.is_object() || comparison_free(self)) { return std::nullopt; }
 		auto target = resolve_member_target(self);
 		if (!target) { return std::nullopt; }
 		if (parallel_worker_ && !worker_operators_pinned(self, { op_spaceship_id_, eq_method_id_ })) [[unlikely]] {
@@ -3044,7 +3085,7 @@ checked_result<script_value> vm_backend::enforce_type_compatibility_named(script
 			// shared_ptr<T> / weak_ptr<T> `=`: a same-kind tag stores as-is when a shared handle's judged class is T or a
 			// subclass; a shared handle downgrades into a weak_ptr<T> slot exactly as the declaration form does (outside the table)
 			if (value.type() == target_type->base_type &&
-			    (target_type->base_type != script_value_type::jai_shared_ptr_type || detail::shared_handle_admits(value, target_type, engine_))) {
+			    (target_type->base_type != script_value_type::jai_shared_ptr_type || handle_admits(value, target_type))) {
 				return std::move(value);
 			}
 			if (detail::weak_slot_takes_shared(value, target_type, engine_)) {
@@ -3139,7 +3180,7 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 			auto source_type_info = derefed_arg.get_type_info();
 			if (source_type_info && source_type_info->base_type == script_value_type::jai_shared_ptr_type &&
 			    target_base_type == script_value_type::jai_shared_ptr_type &&
-			    detail::shared_handle_admits(derefed_arg, target_type, engine_)) {
+			    handle_admits(derefed_arg, target_type)) {
 				// handle admission: the parameter or return value has the declared static type (KEEP BYTE-PARALLEL with the interpreter)
 				if (arg.is_reference() || source_type_info.get() == target_type.get()) { return arg; }
 				script_value bound = arg;
@@ -13795,7 +13836,7 @@ JAI_NOINLINE bool vm_backend::call_host_site(const call_site& site, size_t argc,
 	struct running { uint32_t& n; explicit running(uint32_t& c) : n(c) { ++n; } ~running() { --n; } } run{host_site_calls_};
 	std::optional<checked_result<script_value>> called;
 	try {
-		called.emplace(site.ic_host_invoke(site.ic_host_target, args, argc));
+		JAI_CENSUS(call_native_lane); called.emplace(site.ic_host_invoke(site.ic_host_target, args, argc));
 	} catch (...) {
 		st = call_threw(base);   // a throwing entry unwinds as the general call's guarded_native_call does
 		return true;
@@ -13906,7 +13947,7 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 				script_value result = make_null();
 				bool taken = false;
 				try {
-					taken = (*static_cast<const class_definition::native_entry*>(pc.native_entry))(self, receiver, stack_.data() + slice_base, argc, result);
+					JAI_CENSUS(call_native_lane); taken = (*static_cast<const class_definition::native_entry*>(pc.native_entry))(self, receiver, stack_.data() + slice_base, argc, result);
 				} catch (...) {
 					return call_threw(slice_base);
 				}
@@ -17167,7 +17208,7 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 								return op_status{};
 							}
 						}
-						auto enforced = inst->field_store(member->member_id, value, [&] { return clone_for_assignment(value); });
+						auto enforced = inst->field_store_at(entry.slot, member->member_id, value, [&] { return clone_for_assignment(value); });
 						if (!enforced) {
 							return raise_from(enforced);
 						}
@@ -18401,7 +18442,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 							script_value out = make_null();
 							bool taken = false;
 							try {
-								taken = (*static_cast<const class_definition::native_entry*>(nat_entry))(self, objd, stack_.data() + args_base, argc, out);
+								JAI_CENSUS(call_native_lane); taken = (*static_cast<const class_definition::native_entry*>(nat_entry))(self, objd, stack_.data() + args_base, argc, out);
 							} catch (...) {
 								return call_threw(args_base - 1);
 							}
@@ -18468,7 +18509,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 							script_value out = make_null();
 							bool taken = false;
 							try {
-								taken = (*static_cast<const class_definition::native_entry*>(nat_entry))(self, objd, stack_.data() + args_base, argc, out);
+								JAI_CENSUS(call_native_lane); taken = (*static_cast<const class_definition::native_entry*>(nat_entry))(self, objd, stack_.data() + args_base, argc, out);
 							} catch (...) {
 								return call_threw(args_base - 1);
 							}

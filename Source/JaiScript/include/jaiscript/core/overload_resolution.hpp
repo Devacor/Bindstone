@@ -518,6 +518,7 @@ inline checked_result<std::shared_ptr<function_decl>> select_declaration(const s
 // Span core; the vector overload forwards (call-arg windows resolve on the stack slice).
 inline const std::shared_ptr<function_decl>* class_definition::resolve_method_overload_core(
     uint64_t name_id, const script_value* args, size_t argc, std::error_code& ec, bool may_cache) const {
+    JAI_CENSUS(overload_resolve);
     auto it = method_overloads_.find(name_id);
     if (it == method_overloads_.end() || it->second.empty()) {
         ec = make_error_code(runtime_error_code::member_not_found);

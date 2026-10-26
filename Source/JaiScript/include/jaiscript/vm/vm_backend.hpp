@@ -2420,6 +2420,16 @@ namespace jai::vm {
         bool inline_globals_hold(const frame& f, const chunk::inline_site& site);
         bool inline_forward_callees_hold(const chunk::inline_site& site);
         bool inline_method_verdict(const chunk::inline_site& site, const class_definition* cd);
+        bool comparison_free(const script_value& v);
+        bool handle_admits(const script_value& v, const type_info_ptr& declared);
+        struct handle_admits_row { const class_definition* cd = nullptr; const type_info* tag = nullptr; const type_info* declared = nullptr; uint64_t epoch = 0; bool admits = false; };
+        static constexpr size_t k_handle_admits_rows = 8;
+        handle_admits_row handle_admits_rows_[k_handle_admits_rows];
+        size_t handle_admits_next_ = 0;
+        struct comparison_free_row { const class_definition* cd = nullptr; uint64_t epoch = 0; bool free = false; };
+        static constexpr size_t k_comparison_free_rows = 8;
+        comparison_free_row comparison_free_rows_[k_comparison_free_rows];
+        size_t comparison_free_next_ = 0;
         bool math_alias_holds(frame& f, const chunk::cell_loop::math_alias_site& site);
         bool call_typed_land(frame& caller, const script_value& v);   // op_call_typed's landing (the caller's ip on the call)
         bool inline_method_holds(frame& f, const chunk::inline_site& site);
@@ -2805,6 +2815,7 @@ namespace jai::vm {
         op_status exec_sleep(frame& f, const vm_instruction& ins);
         // A function value running script calls: while a run is active a script callable enters without pinning it
         checked_result<script_value> call_value(const script_function& f, const std::vector<script_value>& args) {
+            JAI_CENSUS(call_function_object);
             return engine_->active_run_pins() ? detail::call_function_value(f, args) : f(args);
         }
         op_status exec_call_from_scratch_general(frame& f, const vm_instruction& ins);

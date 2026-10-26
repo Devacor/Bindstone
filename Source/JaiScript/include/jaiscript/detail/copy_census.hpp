@@ -47,6 +47,14 @@
     X(field_slot_scan, "lookup", "class_definition::field_slot, small-class scan") \
     X(field_slot_hash, "lookup", "class_definition::field_slot, hashed") \
     X(get_method, "lookup", "class_definition::get_method(id) (flags: 1 found on a base)") \
+    X(method_ptr, "lookup", "class_definition::method_ptr(id)") \
+    X(user_accessor, "lookup", "class_definition::user_accessor(id) (a chain walk of hashed tables)") \
+    X(single_overload, "lookup", "class_definition::single_method_overload(name)") \
+    X(overload_resolve, "lookup", "class_definition::resolve_method_overload_core (hashed table, maybe a scoring pass)") \
+    X(static_chain, "lookup", "class_definition::find_static_field_in_chain / find_static_method_in_chain") \
+    X(chain_field, "lookup", "class_definition::chain_declares_field (a chain walk)") \
+    X(call_function_object, "indirect", "a script_function (std::function) invoked through call_value") \
+    X(call_native_lane, "indirect", "a host method's direct lane or a host direct entry, called through a function pointer") \
     X(map_key_hash, "lookup", "script_value::map_key_hash (flags: raw index of the key)") \
     X(typed_slot_convert, "lookup", "convert_for_typed_slot_core (flags: 1 identity, 2 converted, 3 rejected)") \
     X(container_validate, "lookup", "validate_container_homogeneous (a whole-container walk)") \

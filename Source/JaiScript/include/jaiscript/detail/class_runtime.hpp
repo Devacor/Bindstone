@@ -235,6 +235,7 @@ inline void class_definition::add_method_by_id(uint64_t name_id, script_function
 }
 
 inline const script_value* class_definition::user_accessor(uint64_t id) const {
+    JAI_CENSUS(user_accessor);
     bool script_field_seen = false;
     return user_accessor_walk(id, script_field_seen);
 }
@@ -270,6 +271,7 @@ inline checked_result<script_value> class_definition::host_exception_result(engi
 }
 
 inline function_decl* class_definition::single_method_overload(uint64_t name_id) const {
+    JAI_CENSUS(single_overload);
     auto it = method_overloads_.find(name_id);
     return (it != method_overloads_.end() && it->second.size() == 1) ? it->second[0].get() : nullptr;
 }
@@ -302,6 +304,11 @@ inline void class_definition::replace_field_declared_types(std::unordered_map<ui
 }
 
 inline void class_definition::destroy_chain(class_instance* instance, const class_definition* level) const { destroy_levels(instance, level, nullptr); }
+
+inline type_info_ptr class_definition::field_declared_type_at(uint32_t slot, uint64_t id) const {
+    if (slot_declared_epoch_ == field_shape_epoch_ && slot < slot_declared_types_.size()) { return slot_declared_types_[slot]; }
+    return field_declared_type_walk(id);
+}
 
 inline type_info_ptr class_definition::get_field_declared_type(uint64_t id) const {
     // a declared field's type by its slot, from the table the layout build and every field-shape change fill (never built here, so a
@@ -469,6 +476,7 @@ inline script_value class_definition::get_method(uint64_t id, bool throw_if_miss
 }
 
 inline const script_value* class_definition::method_ptr(uint64_t id) const {
+    JAI_CENSUS(method_ptr);
     if (auto it = methods_.find(id); it != methods_.end()) { return &it->second; }
     for (const auto& parent : parent_classes_) {
         if (parent) {
@@ -564,6 +572,7 @@ inline bool class_definition::declares_instance_member(uint64_t id) const {
 }
 
 inline script_value* class_definition::find_static_field_in_chain(uint64_t id, class_definition** owner) {
+    JAI_CENSUS(static_chain);
     if (auto it = static_field_values_.find(id); it != static_field_values_.end()) {
         if (owner) { *owner = this; }
         return &it->second;
@@ -579,6 +588,7 @@ inline script_value* class_definition::find_static_field_in_chain(uint64_t id, c
 }
 
 inline const script_value* class_definition::find_static_method_in_chain(uint64_t id, class_definition** owner) {
+    JAI_CENSUS(static_chain);
     if (auto it = static_methods_.find(id); it != static_methods_.end()) {
         if (owner) { *owner = this; }
         return &it->second;
@@ -812,6 +822,7 @@ inline uint32_t class_definition::field_slot_count() const {
 }
 
 inline bool class_definition::chain_declares_field(uint64_t id) const {
+    JAI_CENSUS(chain_field);
     const auto& all_fields = get_all_field_defaults();
     if (all_fields.find(id) != all_fields.end()) {
         return true;
@@ -2952,6 +2963,29 @@ inline checked_result<script_value> class_instance::field_store(uint64_t id, con
         return kept ? script_value(kept->deref()) : script_value(std::monostate{}, engine_);
     }
     return enforce_field_write(id, copy());
+}
+
+template <class Copy>
+inline checked_result<script_value> class_instance::field_store_at(uint32_t slot, uint64_t id, const script_value& source, Copy&& copy) const {
+    if (!class_def_) { return field_store(id, source, copy); }
+    const type_info_ptr declared = class_def_->field_declared_type_at(slot, id);
+    script_value* current = const_cast<class_instance*>(this)->field_slot_value(slot);
+    if (!declared || declared->base_type == script_value_type::jai_any_type) {
+        if (current) {
+            if (auto in_place = detail::var_slot_assign_in_place(*current, source, engine_)) {
+                if (!*in_place) { return in_place->error_value(); }
+                const script_value* kept = const_cast<class_instance*>(this)->field_slot_value(slot);
+                return kept ? script_value(kept->deref()) : script_value(std::monostate{}, engine_);
+            }
+        }
+    } else if (declared->base_type == script_value_type::jai_object_type && !declared->type_name.empty() && current) {
+        if (auto in_place = detail::user_assign_operator(*current, source, engine_, declared.get())) {
+            if (!*in_place) { return in_place->error_value(); }
+            const script_value* kept = const_cast<class_instance*>(this)->field_slot_value(slot);   // the operator may have run code that moved the fields
+            return kept ? script_value(kept->deref()) : script_value(std::monostate{}, engine_);
+        }
+    }
+    return detail::declared_slot_write(declared, [&] { return const_cast<class_instance*>(this)->field_slot_value(slot); }, copy(), engine_, id, class_def_, false);
 }
 
 template <class Copy>

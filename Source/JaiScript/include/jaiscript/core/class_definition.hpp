@@ -168,8 +168,19 @@ public:
     // allocation goes with its control block (detail::block_head_allocator)
     inline static void free_allocation(class_instance* instance) noexcept;
     // The holder room of the instance's block (detail::object_block_head), for the first wrap to claim; null once claimed or
-    // for an instance made outside one
-    std::byte* take_embedded_holder() noexcept { std::byte* slot = embedded_holder_; embedded_holder_ = nullptr; return slot; }
+    // for an instance made outside one. Workers of a region can wrap one instance together (a C++ object's wrapper or script layer)
+    std::byte* take_embedded_holder() noexcept {
+        if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
+#if defined(_MSC_VER) && !defined(__clang__)
+            return std::atomic_ref<std::byte*>(embedded_holder_).exchange(nullptr, std::memory_order_acq_rel);
+#else
+            return __atomic_exchange_n(&embedded_holder_, nullptr, __ATOMIC_ACQ_REL);
+#endif
+        }
+        std::byte* slot = embedded_holder_;
+        embedded_holder_ = nullptr;
+        return slot;
+    }
     void set_embedded_holder(std::byte* slot) noexcept { embedded_holder_ = slot; }
 
     inline ~class_instance();

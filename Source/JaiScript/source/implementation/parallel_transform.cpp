@@ -1669,7 +1669,7 @@ namespace {
 			auto global = eng.get_global_environment()->get(name_id);
 			if (!global || !global.value().is_function()) { return nullptr; }
 			if (const script_callable* payload = payload_from_function_value(global.value())) {
-				return payload->kind == script_callable::kind_type::constructor ? payload->cls : nullptr;
+				return payload->kind == script_callable::kind_type::constructor ? payload->cls() : nullptr;
 			}
 			const auto& host_classes = eng.get_class_registry().cpp_classes_;
 			const auto found = host_classes.find(std::string(sym.get_string(name_id)));
@@ -5651,8 +5651,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 				}
 				script_callable payload;
 				payload.kind = script_callable::kind_type::constructor;
-				payload.cls = made.cls;
-				if (!std::static_pointer_cast<script_class_definition>(made.cls)->get_constructor_asts().empty()) { payload.definition_env = slot->method_env; }
+				payload.more().cls = made.cls;
+				if (!std::static_pointer_cast<script_class_definition>(made.cls)->get_constructor_asts().empty()) { payload.more().definition_env = slot->method_env; }
 				script_value ctor = script_value::make_function(script_callable_thunk{ &eng, std::move(payload) }, &eng);
 				slot->pinned_name_ids.push_back(made.name_id);
 				slot->root_env->define(made.name_id, ctor);

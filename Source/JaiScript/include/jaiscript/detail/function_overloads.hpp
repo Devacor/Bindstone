@@ -50,8 +50,8 @@ namespace jai::detail {
         };
         if (held->kind == script_callable::kind_type::function && held->fn && held->fn->declared) {
             keep(held->fn, *existing);
-        } else if (held->kind == script_callable::kind_type::overload_set && held->overloads) {
-            for (size_t i = 0; i < held->overloads->members.size(); ++i) { keep(held->overloads->members[i], held->overloads->values[i]); }
+        } else if (held->kind == script_callable::kind_type::overload_set && held->overloads()) {
+            for (size_t i = 0; i < held->overloads()->members.size(); ++i) { keep(held->overloads()->members[i], held->overloads()->values[i]); }
         }
         if (duplicate) [[unlikely]] { return duplicate_definition_error(*fn, duplicate->line, eng); }
         // one that differs only by reference: within one execute context the second definition's error, else a redefinition that
@@ -72,7 +72,7 @@ namespace jai::detail {
         set->values.push_back(std::move(value));
         script_callable payload;
         payload.kind = script_callable::kind_type::overload_set;
-        payload.overloads = std::move(set);
+        payload.more().overloads = std::move(set);
         return script_value::make_function(script_function(script_callable_thunk{eng, std::move(payload)}), eng);
     }
 

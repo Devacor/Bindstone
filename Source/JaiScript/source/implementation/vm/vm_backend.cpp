@@ -1589,8 +1589,8 @@ vm_backend::member_target vm_backend::resolve_member_target(const script_value& 
 script_value vm_backend::make_bound_method_thunk(const script_value& this_val, script_value method) {
 	script_callable payload;
 	payload.kind = script_callable::kind_type::bound_method;
-	payload.this_obj = this_val;
-	payload.bound_dispatch = std::move(method);
+	payload.more().this_obj = this_val;
+	payload.more().bound_dispatch = std::move(method);
 	return script_value::make_function(script_callable_thunk{engine_, std::move(payload)}, engine_);
 }
 
@@ -13221,18 +13221,18 @@ void vm_backend::arm_sibling_method(frame& f, const call_site& site, const scrip
 	if (site.callee.symbol == k_invalid_u32 || site.callee.slot != k_invalid_u32 || (site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) return;
 	if (resolved.raw_storage_index() != script_value::TYPEID_FUNCTION) return;
 	const auto* thunk = resolved.unchecked_as_function().target<script_callable_thunk>();
-	if (!thunk || thunk->eng != engine_ || thunk->payload.kind != script_callable::kind_type::bound_method || !thunk->payload.this_obj || !thunk->payload.bound_dispatch) return;
+	if (!thunk || thunk->eng != engine_ || thunk->payload.kind != script_callable::kind_type::bound_method || !thunk->payload.this_obj() || !thunk->payload.bound_dispatch()) return;
 	const script_value& this_val = *f.locals->scope_this;
 	const auto& holder = const_cast<script_value&>(this_val).get_object_holder();
-	const auto& bound_holder = const_cast<script_value&>(*thunk->payload.this_obj).get_object_holder();
+	const auto& bound_holder = const_cast<script_value&>(*thunk->payload.this_obj()).get_object_holder();
 	if (!holder || !holder->is_class_instance_wrapper || !holder->data || !bound_holder || bound_holder->data != holder->data) return;
 	class_instance& inst = *static_cast<class_instance*>(holder->data.get());
 	class_definition* cd = inst.get_class_definition();
 	const uint64_t sym = f.code->symbols[site.callee.symbol];
 	if (!cd || cd->chain_has_nonpublic()) return;
 	const script_value method = inst.get_method(sym, false);
-	if (method.raw_storage_index() != script_value::TYPEID_FUNCTION || thunk->payload.bound_dispatch->raw_storage_index() != script_value::TYPEID_FUNCTION ||
-	    &method.unchecked_as_function() != &thunk->payload.bound_dispatch->unchecked_as_function()) return;
+	if (method.raw_storage_index() != script_value::TYPEID_FUNCTION || thunk->payload.bound_dispatch()->raw_storage_index() != script_value::TYPEID_FUNCTION ||
+	    &method.unchecked_as_function() != &thunk->payload.bound_dispatch()->unchecked_as_function()) return;
 	const auto* dispatch = method.unchecked_as_function().target<script_method_dispatch>();
 	if (!dispatch) {
 		// the receiver's C++ base method: parked on its direct lane when the base has one for this receiver's object
@@ -13865,9 +13865,9 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 		const auto* bthunk = pc.value.unchecked_as_function().target<script_callable_thunk>();
 		if (bthunk && bthunk->eng == engine_ &&
 		    bthunk->payload.kind == script_callable::kind_type::bound_method &&
-		    bthunk->payload.this_obj && bthunk->payload.bound_dispatch &&
+		    bthunk->payload.this_obj() && bthunk->payload.bound_dispatch() &&
 		    !parallel_worker_) {
-			const auto* dispatch = bthunk->payload.bound_dispatch->as_function().target<script_method_dispatch>();
+			const auto* dispatch = bthunk->payload.bound_dispatch()->as_function().target<script_method_dispatch>();
 			if (dispatch && dispatch->eng == engine_) {
 				const size_t slice_base = stack_.size() - argc;
 				auto resolved = dispatch->cls->resolve_method_overload_ref(dispatch->name_id,
@@ -13876,8 +13876,8 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 #ifdef JAISCRIPT_VM_PROFILE
 					cfs_probe_.bucket = 1;
 #endif
-					script_value method_val = *bthunk->payload.bound_dispatch;
-					script_value receiver = *bthunk->payload.this_obj;
+					script_value method_val = *bthunk->payload.bound_dispatch();
+					script_value receiver = *bthunk->payload.this_obj();
 					return enter_script_method_sliced(f, std::move(method_val), *dispatch,
 					                                  *resolved.value(), &receiver, slice_base,
 					                                  slice_base, argc, site);
@@ -14424,9 +14424,9 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	const size_t argc = arguments.size();
 
 	if (const script_callable* held = detail::script_callable_of(callee, engine_);
-	    held && held->kind == script_callable::kind_type::overload_set && held->overloads) {
+	    held && held->kind == script_callable::kind_type::overload_set && held->overloads()) {
 		// the member these arguments select (KEEP BYTE-PARALLEL with the interpreter's call)
-		auto picked = detail::select_overload_member(*held->overloads, arguments.data(), argc, engine_);
+		auto picked = detail::select_overload_member(*held->overloads(), arguments.data(), argc, engine_);
 		if (!picked) { return raise_from(picked); }
 		script_value member = *picked.value();
 		callee = std::move(member);
@@ -14449,17 +14449,17 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	if (parallel_worker_ && thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::bound_method) { note_worker_decline(worker_decline::bound_in_loop); }
 	if (thunk && thunk->eng == engine_ &&
 	    thunk->payload.kind == script_callable::kind_type::bound_method &&
-	    thunk->payload.this_obj && thunk->payload.bound_dispatch &&
+	    thunk->payload.this_obj() && thunk->payload.bound_dispatch() &&
 	    !parallel_worker_) {
-		const auto* dispatch = thunk->payload.bound_dispatch->as_function().target<script_method_dispatch>();
+		const auto* dispatch = thunk->payload.bound_dispatch()->as_function().target<script_method_dispatch>();
 		if (dispatch && dispatch->eng == engine_) {
 			auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id, arguments);
 			if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
 #ifdef JAISCRIPT_VM_PROFILE
 				profile_bound_method_paths_[1]++;
 #endif
-				script_value method_val = *thunk->payload.bound_dispatch;
-				script_value receiver = *thunk->payload.this_obj;
+				script_value method_val = *thunk->payload.bound_dispatch();
+				script_value receiver = *thunk->payload.this_obj();
 				return enter_script_method(f, std::move(method_val), *dispatch,
 				                           resolved.value(), std::move(receiver), arguments, site);
 			}
@@ -14482,8 +14482,8 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	    thunk->payload.kind == script_callable::kind_type::constructor) {
 		const std::shared_ptr<script_class_definition> no_class;
 		const std::shared_ptr<script_class_definition>* cached = cached_global_env_ ? site_script_class(&site, thunk) : nullptr;
-		const std::shared_ptr<script_class_definition> cast = cached || !thunk->payload.cls || !thunk->payload.cls->is_script_class()
-			? no_class : std::static_pointer_cast<script_class_definition>(thunk->payload.cls);
+		const std::shared_ptr<script_class_definition> cast = cached || !thunk->payload.cls() || !thunk->payload.cls()->is_script_class()
+			? no_class : std::static_pointer_cast<script_class_definition>(thunk->payload.cls());
 		const std::shared_ptr<script_class_definition>& script_cls = cached ? *cached : cast;
 		if (script_cls) {
 			if (script_cls->get_constructor_asts().empty()) {
@@ -14494,8 +14494,8 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 				stack_.push_back(std::move(result.value()));
 				return {};
 			}
-			if (thunk->payload.definition_env) {
-				return enter_constructor_in_loop(f, script_cls, thunk->payload.definition_env,
+			if (thunk->payload.definition_env()) {
+				return enter_constructor_in_loop(f, script_cls, thunk->payload.definition_env(),
 				                                 arguments, nullptr, &site);
 			}
 		}
@@ -18719,8 +18719,8 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 						stack_.push_back(std::move(value));
 						return {};
 					}
-					if (thunk->payload.definition_env) {
-						return enter_constructor_in_loop(f, *cls, thunk->payload.definition_env, args, expr->type.get(), &site);
+					if (thunk->payload.definition_env()) {
+						return enter_constructor_in_loop(f, *cls, thunk->payload.definition_env(), args, expr->type.get(), &site);
 					}
 				}
 			}
@@ -18733,8 +18733,8 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		if (ctor_thunk && ctor_thunk->eng == engine_ &&
 		    ctor_thunk->payload.kind == script_callable::kind_type::constructor &&
 		    !parallel_worker_) {
-			auto script_cls = ctor_thunk->payload.cls && ctor_thunk->payload.cls->is_script_class()
-				? std::static_pointer_cast<script_class_definition>(ctor_thunk->payload.cls)
+			auto script_cls = ctor_thunk->payload.cls() && ctor_thunk->payload.cls()->is_script_class()
+				? std::static_pointer_cast<script_class_definition>(ctor_thunk->payload.cls())
 				: std::shared_ptr<script_class_definition>();
 			if (script_cls) {
 				if (script_cls->get_constructor_asts().empty()) {
@@ -18749,9 +18749,9 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 					stack_.push_back(std::move(value));
 					return {};
 				}
-				if (ctor_thunk->payload.definition_env) {
+				if (ctor_thunk->payload.definition_env()) {
 					return enter_constructor_in_loop(f, script_cls,
-						ctor_thunk->payload.definition_env, args, expr->type.get(), ins.c ? &f.code->call_sites[ins.c - 1] : nullptr);
+						ctor_thunk->payload.definition_env(), args, expr->type.get(), ins.c ? &f.code->call_sites[ins.c - 1] : nullptr);
 				}
 			}
 		}
@@ -18787,8 +18787,8 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 			script_value* ctor_cell = new_class_cell(f, ins, *expr->type);
 			const script_callable_thunk* thunk = ctor_cell && ctor_cell->deref().raw_storage_index() == script_value::TYPEID_FUNCTION
 				? ctor_cell->deref().unchecked_as_function().target<script_callable_thunk>() : nullptr;
-			if (thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::constructor && thunk->payload.cls && thunk->payload.cls->is_script_class()) {
-				const auto script_cls = std::static_pointer_cast<script_class_definition>(thunk->payload.cls);
+			if (thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::constructor && thunk->payload.cls() && thunk->payload.cls()->is_script_class()) {
+				const auto script_cls = std::static_pointer_cast<script_class_definition>(thunk->payload.cls());
 				if (script_cls->get_constructor_asts().empty()) {
 					auto result = construct_default_instance(script_cls, args);
 					if (!result) {
@@ -18797,8 +18797,8 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 					stack_.push_back(std::move(result.value()));
 					return {};
 				}
-				if (thunk->payload.definition_env) {
-					return enter_constructor_in_loop(f, script_cls, thunk->payload.definition_env, args, nullptr, &f.code->call_sites[ins.c - 1]);
+				if (thunk->payload.definition_env()) {
+					return enter_constructor_in_loop(f, script_cls, thunk->payload.definition_env(), args, nullptr, &f.code->call_sites[ins.c - 1]);
 				}
 			}
 		}
@@ -18819,8 +18819,8 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 						stack_.push_back(std::move(result.value()));
 						return {};
 					}
-					if (thunk->payload.definition_env) {
-						return enter_constructor_in_loop(f, *cls, thunk->payload.definition_env, args, nullptr, &site);
+					if (thunk->payload.definition_env()) {
+						return enter_constructor_in_loop(f, *cls, thunk->payload.definition_env(), args, nullptr, &site);
 					}
 				}
 			}
@@ -18838,8 +18838,8 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		if (ctor_thunk && ctor_thunk->eng == engine_ &&
 		    ctor_thunk->payload.kind == script_callable::kind_type::constructor &&
 		    !parallel_worker_) {
-			auto script_cls = ctor_thunk->payload.cls && ctor_thunk->payload.cls->is_script_class()
-				? std::static_pointer_cast<script_class_definition>(ctor_thunk->payload.cls)
+			auto script_cls = ctor_thunk->payload.cls() && ctor_thunk->payload.cls()->is_script_class()
+				? std::static_pointer_cast<script_class_definition>(ctor_thunk->payload.cls())
 				: std::shared_ptr<script_class_definition>();
 			if (script_cls) {
 				if (script_cls->get_constructor_asts().empty()) {
@@ -18850,9 +18850,9 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 					stack_.push_back(std::move(result.value()));
 					return {};
 				}
-				if (ctor_thunk->payload.definition_env) {
+				if (ctor_thunk->payload.definition_env()) {
 					return enter_constructor_in_loop(f, script_cls,
-						ctor_thunk->payload.definition_env, args, nullptr, ins.c ? &f.code->call_sites[ins.c - 1] : nullptr);
+						ctor_thunk->payload.definition_env(), args, nullptr, ins.c ? &f.code->call_sites[ins.c - 1] : nullptr);
 				}
 			}
 		}
@@ -19500,10 +19500,10 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 }
 
 const std::shared_ptr<script_class_definition>* vm_backend::site_script_class(const call_site* site, const script_callable_thunk* thunk) {
-	const class_definition* cls = thunk->payload.cls.get();
+	const class_definition* cls = thunk->payload.cls().get();
 	if (!cls || !cls->is_script_class()) { return nullptr; }
 	if (site->ctor_cls_key != cls) {
-		site->ctor_cls = std::static_pointer_cast<script_class_definition>(thunk->payload.cls);
+		site->ctor_cls = std::static_pointer_cast<script_class_definition>(thunk->payload.cls());
 		site->ctor_cls_key = cls;
 	}
 	return &site->ctor_cls;
@@ -22634,7 +22634,7 @@ struct vm_backend::unwind_park {
 };
 
 checked_result<script_value> vm_backend::execute_callable_from(const script_callable& payload, const std::vector<script_value>& args, size_t first) {
-	if (first != 0 && (payload.kind != script_callable::kind_type::method || !payload.this_obj || payload.ast->is_coroutine)) {
+	if (first != 0 && (payload.kind != script_callable::kind_type::method || !payload.this_obj() || payload.ast()->is_coroutine)) {
 		return execution_backend::execute_callable_from(payload, args, first);
 	}
 	detail::release_sync release_first(engine_);
@@ -22644,35 +22644,35 @@ checked_result<script_value> vm_backend::execute_callable_from(const script_call
 		case script_callable::kind_type::function:
 			return call_script_function(*payload.fn, args);
 		case script_callable::kind_type::overload_set: {
-			if (!payload.overloads) {
+			if (!payload.overloads()) {
 				return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Overload set payload without members");
 			}
-			auto picked = detail::select_overload_member(*payload.overloads, args.data(), args.size(), engine_);
+			auto picked = detail::select_overload_member(*payload.overloads(), args.data(), args.size(), engine_);
 			if (!picked) { return picked.error_value(); }
 			const script_callable* member = detail::script_callable_of(*picked.value(), engine_);
 			return member && member->fn ? call_script_function(*member->fn, args) : call_value(picked.value()->as_function(), args);
 		}
 		case script_callable::kind_type::method: {
-			if (!payload.this_obj) {
+			if (!payload.this_obj()) {
 				return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Method payload without 'this' receiver");
 			}
-			if (!payload.ast->is_coroutine) {
-				const method_entry entry{&payload.definition_env, &*payload.this_obj, payload.cls.get()};
-				return call_script_function(method_function_for(payload.ast), args, nullptr, nullptr, nullptr, &entry, first);
+			if (!payload.ast()->is_coroutine) {
+				const method_entry entry{&payload.definition_env(), &*payload.this_obj(), payload.cls().get()};
+				return call_script_function(method_function_for(payload.ast()), args, nullptr, nullptr, nullptr, &entry, first);
 			}
-			auto method_env = acquire_method_scope_env(payload.definition_env, *payload.this_obj, payload.cls.get());   // a method env answers `this` itself
-			auto result = execute_method_ast(payload.ast, method_env, args);
+			auto method_env = acquire_method_scope_env(payload.definition_env(), *payload.this_obj(), payload.cls().get());   // a method env answers `this` itself
+			auto result = execute_method_ast(payload.ast(), method_env, args);
 			release_scope_env(std::move(method_env));
 			return result;
 		}
 		case script_callable::kind_type::static_method: {
-			auto static_env = acquire_static_scope_env(payload.definition_env, payload.cls);
-			auto result = execute_method_ast(payload.ast, static_env, args);
+			auto static_env = acquire_static_scope_env(payload.definition_env(), payload.cls());
+			auto result = execute_method_ast(payload.ast(), static_env, args);
 			release_scope_env(std::move(static_env));
 			return result;
 		}
 		case script_callable::kind_type::constructor: {
-			auto script_cls = std::dynamic_pointer_cast<script_class_definition>(payload.cls);
+			auto script_cls = std::dynamic_pointer_cast<script_class_definition>(payload.cls());
 			if (!script_cls) {
 				return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Constructor payload without script class definition");
 			}
@@ -22680,7 +22680,7 @@ checked_result<script_value> vm_backend::execute_callable_from(const script_call
 			if (script_cls->get_constructor_asts().empty()) {
 				return construct_default_instance(script_cls, args);
 			}
-			return construct_instance(script_cls, payload.definition_env, args, !waived);
+			return construct_instance(script_cls, payload.definition_env(), args, !waived);
 		}
 	}
 	return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Unknown callable kind");

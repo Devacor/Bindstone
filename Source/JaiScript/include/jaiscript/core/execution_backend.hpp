@@ -47,12 +47,47 @@ struct script_callable {
     kind_type kind = kind_type::function;
 
     std::shared_ptr<script_defined_function> fn;   // function (free functions, lambdas)
-    std::shared_ptr<function_decl> ast;            // method / static_method (resolved overload)
-    std::shared_ptr<class_definition> cls;         // method / static_method / constructor
-    std::shared_ptr<environment> definition_env;   // method / static_method / constructor
-    std::optional<script_value> this_obj;          // method / bound_method ('this'; args exclude it)
-    std::optional<script_value> bound_dispatch;    // bound_method: the method value to invoke
-    std::shared_ptr<const function_overload_set> overloads;   // overload_set
+
+    // Every kind but function keeps the rest boxed, so a lambda's thunk fits std::function's inline storage
+    struct extras {
+        std::shared_ptr<function_decl> ast;            // method / static_method (resolved overload)
+        std::shared_ptr<class_definition> cls;         // method / static_method / constructor
+        std::shared_ptr<environment> definition_env;   // method / static_method / constructor
+        std::optional<script_value> this_obj;          // method / bound_method ('this'; args exclude it)
+        std::optional<script_value> bound_dispatch;    // bound_method: the method value to invoke
+        std::shared_ptr<const function_overload_set> overloads;   // overload_set
+    };
+
+    script_callable() = default;
+    script_callable(const script_callable& a_other) : kind(a_other.kind), fn(a_other.fn), extras_(a_other.extras_ ? std::make_unique<extras>(*a_other.extras_) : nullptr) {}
+    script_callable(script_callable&&) noexcept = default;
+    script_callable& operator=(const script_callable& a_other) {
+        if (this != &a_other) {
+            script_callable copy(a_other);
+            *this = std::move(copy);
+        }
+        return *this;
+    }
+    script_callable& operator=(script_callable&&) noexcept = default;
+
+    // the boxed fields to write (made on first use)
+    extras& more() {
+        if (!extras_) { extras_ = std::make_unique<extras>(); }
+        return *extras_;
+    }
+    const std::shared_ptr<function_decl>& ast() const { return extras_ ? extras_->ast : empty_extras().ast; }
+    const std::shared_ptr<class_definition>& cls() const { return extras_ ? extras_->cls : empty_extras().cls; }
+    const std::shared_ptr<environment>& definition_env() const { return extras_ ? extras_->definition_env : empty_extras().definition_env; }
+    const std::optional<script_value>& this_obj() const { return extras_ ? extras_->this_obj : empty_extras().this_obj; }
+    const std::optional<script_value>& bound_dispatch() const { return extras_ ? extras_->bound_dispatch : empty_extras().bound_dispatch; }
+    const std::shared_ptr<const function_overload_set>& overloads() const { return extras_ ? extras_->overloads : empty_extras().overloads; }
+
+private:
+    static const extras& empty_extras() {
+        static const extras none;
+        return none;
+    }
+    std::unique_ptr<extras> extras_;
 };
 
 // Named trampoline for script-defined callables. Backends mint function values through
@@ -224,7 +259,7 @@ public:
     virtual void prepare_for_execution() = 0;
 
     // Execute a script-defined callable (see script_callable). For kind::method the
-    // receiver rides in payload.this_obj and args exclude it.
+    // receiver rides in payload.this_obj() and args exclude it.
     virtual checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args) = 0;
     // execute_callable over args[first..]: the arguments after a receiver the caller's list carries ahead of them
     virtual checked_result<script_value> execute_callable_from(const script_callable& payload, const std::vector<script_value>& args, size_t first) {
@@ -237,10 +272,10 @@ public:
                                                              const script_value& this_obj, const std::vector<script_value>& args, size_t first) {
         script_callable payload;
         payload.kind = script_callable::kind_type::method;
-        payload.ast = ast;
-        payload.cls = dispatch.cls;
-        payload.definition_env = dispatch.definition_env;
-        payload.this_obj = this_obj;
+        payload.more().ast = ast;
+        payload.more().cls = dispatch.cls;
+        payload.more().definition_env = dispatch.definition_env;
+        payload.more().this_obj = this_obj;
         return execute_callable_from(payload, args, first);
     }
 

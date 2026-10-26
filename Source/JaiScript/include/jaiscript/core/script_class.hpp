@@ -390,15 +390,15 @@ inline checked_result<script_value> script_static_method_dispatch::call(const st
     }
     script_callable payload;
     payload.kind = script_callable::kind_type::static_method;
-    payload.ast = fallback;
-    payload.cls = cls;
-    payload.definition_env = definition_env;
+    payload.more().ast = fallback;
+    payload.more().cls = cls;
+    payload.more().definition_env = definition_env;
     const auto& table = cls->script_static_method_overloads();
     const auto it = table.find(name_id);
     if (it != table.end() && it->second.size() > 1) {
         const auto verdict = score_declarations(it->second, args.data(), args.size(), eng);
         if (verdict.rival) [[unlikely]] { return detail::ambiguous_call(name_id, (*verdict.best)->parameters, (*verdict.rival)->parameters, args.data(), args.size(), eng); }
-        if (verdict.best) { payload.ast = *verdict.best; }
+        if (verdict.best) { payload.more().ast = *verdict.best; }
     }
     if (backend->is_executing() || backend->is_unwinding()) {
         engine::run_pin pin(host_call ? eng : nullptr);

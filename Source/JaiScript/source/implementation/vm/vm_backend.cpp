@@ -842,9 +842,18 @@ struct vm_backend::vm_coroutine_state : coroutine_backend_state {
 	std::optional<script_value> parked_exception_value;
 	uint64_t parked_catch_marker = 0;
 	bool started = false;
+	std::shared_ptr<size_t> parked_counter;   // vm_backend::parked_fibers_, counted while pending_storage holds a parked callee
+	bool parked_counted = false;
+	void note_parked() noexcept {
+		const bool parked = !pending_storage.empty();
+		if (parked == parked_counted || !parked_counter) { return; }
+		parked_counted = parked;
+		if (parked) { ++*parked_counter; } else { --*parked_counter; }
+	}
 
 	// A fiber dropped while suspended: its window dies here, then the cells it shared are checked for cycles
 	~vm_coroutine_state() override {
+		if (parked_counted && parked_counter) { --*parked_counter; }
 		if (!body_chunk || !body_chunk->shares_cells || !f.window_backed) { return; }
 		std::vector<script_value> shared;
 		const size_t end = std::min(stack_storage.size(), f.window_base + f.window_live);
@@ -858,6 +867,17 @@ struct vm_backend::vm_coroutine_state : coroutine_backend_state {
 // A suspendable run's execution state: the run swaps it whole with the live members at every switch, so a run that suspends
 // keeps its frames, stacks, records and per-depth pools while another entry runs, and either resumes in any order
 struct vm_backend::vm_run_state : backend_run_state {
+	std::shared_ptr<size_t> parked_counter;   // vm_backend::parked_runs_, counted while this side holds frames
+	bool parked_counted = false;
+	void note_parked() noexcept {
+		const bool parked = !frames.empty() || call_records_top != 0;
+		if (parked == parked_counted || !parked_counter) { return; }
+		parked_counted = parked;
+		if (parked) { ++*parked_counter; } else { --*parked_counter; }
+	}
+	~vm_run_state() override {
+		if (parked_counted && parked_counter) { --*parked_counter; }
+	}
 	value_stack stack;
 	frame_stack frames;
 	size_t top_frame_mark = SIZE_MAX;
@@ -916,6 +936,7 @@ struct vm_backend::vm_run_state : backend_run_state {
 
 std::unique_ptr<backend_run_state> vm_backend::make_run_state() {
 	auto state = std::make_unique<vm_run_state>();
+	state->parked_counter = parked_runs_;
 	if (engine_) { state->env = engine_->get_global_environment(); }
 	return state;
 }
@@ -979,6 +1000,7 @@ void vm_backend::swap_run_state(backend_run_state& a_state) noexcept {
 	swap(debug_last_depth_, s.debug_last_depth);
 	raw_epoch_advance();   // the other side's code ran in between: no raw call plan outlives a switch
 	sync_unit();
+	s.note_parked();
 }
 
 void vm_backend::reset_run_state(backend_run_state& a_state) {
@@ -1031,6 +1053,7 @@ void vm_backend::reset_run_state(backend_run_state& a_state) {
 	s.debug_last_frame = nullptr;
 	s.debug_last_code = nullptr;
 	s.debug_last_depth = SIZE_MAX;
+	s.note_parked();
 }
 
 void vm_backend::adopt_run_trace(backend_run_state& a_state) {
@@ -1045,6 +1068,7 @@ vm_backend::vm_coroutine_state& vm_backend::coroutine_fiber_state(coroutine_hand
 	if (!state) {
 		auto owned = std::make_unique<vm_coroutine_state>();
 		owned->eng = engine_;
+		owned->parked_counter = parked_fibers_;
 		state = owned.get();
 		handle.set_backend_state(std::move(owned));
 	}
@@ -1151,7 +1175,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 		vm_backend* vm;
 		vm_coroutine_state* st;
 		fiber_stacks_swap(vm_backend* v, vm_coroutine_state* c) : vm(v), st(c) { flip(); }
-		~fiber_stacks_swap() { flip(); }
+		~fiber_stacks_swap() { flip(); st->note_parked(); }
 		void flip() {
 			vm->stack_.swap_payload(st->stack_storage);
 			std::swap(vm->try_records_, st->try_storage);
@@ -12980,7 +13004,10 @@ bool vm_backend::inline_globals_hold(const frame& f, const chunk::inline_site& s
 }
 // a forwarded parameter's callees: each name still binds the program-scope function whose parameters the forwarding read
 JAI_NOINLINE bool vm_backend::inline_forward_callees_hold(const chunk::inline_site& site) {
-	for (const auto& [sym, body] : site.forward_callees) {
+	for (const auto& callee : site.forward_callees) {
+		if (callee.owner.expired()) return false;
+		const uint64_t sym = callee.symbol;
+		const statement* body = callee.body;
 		const script_value* v = environment_ ? environment_->get_value_ptr(sym) : nullptr;
 		if (!v) return false;
 		if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*v)) return false; v = &v->deref(); }
@@ -15224,6 +15251,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 	auto cache_it = chunk_cache_.find(body_key);
 	if (cache_it == chunk_cache_.end()) {
 		chunk_cache_.emplace(body_key, chunk_cache_entry{proto.body_chunk, proto.body});
+		note_cache_insert();
 	}
 
 	script_callable payload;
@@ -15268,6 +15296,7 @@ checked_result<script_value> vm_backend::eval_expression(const expression_ptr& e
 		f.pin = compiler_.compile_standalone_expression(expr);
 		note_compiled(*f.pin);
 		expr_chunk_cache_.emplace(key, expr_chunk_cache_entry{f.pin, expr});
+		note_cache_insert();
 	}
 
 	// the caller's environment moves aside and comes back by move: no count pair for the swap
@@ -16703,9 +16732,8 @@ void vm_backend::prefold_parallel_reads(uint64_t fold_epoch) {
 			if (defaults && prefolded_chunks_.insert(defaults.get()).second) { changed = prefold_chunk(defaults) || changed; }
 		}
 	};
-	const size_t cached = chunk_cache_.size() + expr_chunk_cache_.size() + parallel_expr_chunks_.size();
-	if (cached != prefold_cached_) {   // the caches only grow: a scan covers every chunk compiled since the last one
-		prefold_cached_ = cached;
+	if (cache_inserts_total_ != prefold_cached_) {   // a scan covers every chunk added since the last one (prefolded_chunks_ skips the rest)
+		prefold_cached_ = cache_inserts_total_;
 		for (auto& [key, entry] : chunk_cache_) { visit(entry.compiled); }
 		for (auto& [key, entry] : expr_chunk_cache_) { visit(entry.compiled); }
 		for (auto& [key, entry] : parallel_expr_chunks_) { visit(entry.compiled); }
@@ -19284,6 +19312,7 @@ op_status vm_backend::exec_namespace_variable(const declaration_ptr& member_decl
 		compiled = compiler_.compile_program(std::vector<declaration_ptr>{member_decl});
 		note_compiled(*compiled);
 		decl_chunk_cache_.emplace(key, decl_chunk_cache_entry{compiled, member_decl});
+		note_cache_insert();
 	}
 	auto saved_env = environment_;
 	environment_ = detail::namespace_scope(*engine_, ns_data);
@@ -19765,10 +19794,11 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 	// The body runs through the method door (the lazy environment when the chain is public, `this` in the record); the dispatcher
 	// is one per constructor declaration, kept by the backend and checked against the class and the definition environment
 	ctor_dispatch_entry& entry = ctor_dispatch_[matching_ctor.get()];
-	if (entry.cls != class_def.get() || entry.env != definition_env.get() || !entry.method) {
+	if (entry.cls != class_def.get() || entry.env != definition_env.get() || !entry.method || entry.decl.expired()) {
 		entry.method = script_value::make_function(script_method_dispatch{engine_, class_def, matching_ctor->name_id, definition_env}, engine_);
 		entry.cls = class_def.get();
 		entry.env = definition_env.get();
+		entry.decl = matching_ctor;
 	}
 	const auto* dispatch = entry.method->as_function().target<script_method_dispatch>();
 	op_status pushed;
@@ -22654,13 +22684,97 @@ void vm_backend::release_site_pins() noexcept {
 	for (auto& [key, entry] : decl_chunk_cache_) { release(entry.compiled); }
 }
 
+void vm_backend::retire_unreachable_code() {
+	if (parallel_worker_ || !engine_ || cache_inserts_since_retire_ < std::max<size_t>(64, cache_size_after_retire_ / 2)) { return; }
+	if (is_executing() || !frames_.empty() || call_records_top_ != 0 || *parked_runs_ != 0 || engine_->parallel_region_active()) { return; }
+	cache_inserts_since_retire_ = 0;
+	if (*parked_fibers_ == 0) {
+		release_site_pins();   // the sites refill on their next call; a cycle through them (recursion, mutual calls) is broken here
+		raw_epoch_advance();
+	}
+	for (auto it = ctor_dispatch_.begin(); it != ctor_dispatch_.end();) {
+		it = it->second.decl.expired() ? ctor_dispatch_.erase(it) : std::next(it);
+	}
+	for (auto it = method_functions_.begin(); it != method_functions_.end();) {
+		it = it->second.pin.use_count() == 1 ? method_functions_.erase(it) : std::next(it);
+	}
+	// the backend's own holders of a chunk: its cache entry and the fold sites that pin it; of a cached node: its entry and the chunk
+	std::unordered_map<const chunk*, long> fold_pins;
+	for (const fold_site& site : fold_sites_) { if (site.pin) { ++fold_pins[site.pin.get()]; } }
+	auto node_refs = [](const chunk& code, const void* node) {
+		long result = code.owner_body.get() == node ? 1 : 0;
+		for (const auto& n : code.nodes) { if (n.get() == node) { ++result; } }
+		return result;
+	};
+	auto unreachable = [&](const std::shared_ptr<chunk>& code, const void* node, long node_uses) {
+		if (!code) { return node_uses == 1; }
+		const auto pins = fold_pins.find(code.get());
+		if (code.use_count() != 1 + (pins == fold_pins.end() ? 0 : pins->second)) { return false; }
+		return node_uses == 1 + node_refs(*code, node);
+	};
+	std::unordered_set<const chunk*> retired;
+	auto retire = [&](const std::shared_ptr<chunk>& code) {
+		if (!code) { return; }
+		retired.insert(code.get());
+		for (const auto& defaults : code->param_default_chunks) { if (defaults) { retired.insert(defaults.get()); } }
+	};
+	std::vector<std::shared_ptr<chunk>> dying;   // freed after every raw-pointer table forgot them
+	for (bool progress = true; progress;) {
+		progress = false;
+		for (auto it = chunk_cache_.begin(); it != chunk_cache_.end();) {
+			if (unreachable(it->second.compiled, it->second.pin.get(), it->second.pin.use_count())) {
+				retire(it->second.compiled);
+				dying.push_back(std::move(it->second.compiled));
+				it = chunk_cache_.erase(it);
+				progress = true;
+			} else { ++it; }
+		}
+		for (auto it = expr_chunk_cache_.begin(); it != expr_chunk_cache_.end();) {
+			if (unreachable(it->second.compiled, it->second.pin.get(), it->second.pin.use_count())) {
+				retire(it->second.compiled);
+				dying.push_back(std::move(it->second.compiled));
+				it = expr_chunk_cache_.erase(it);
+				progress = true;
+			} else { ++it; }
+		}
+		for (auto it = decl_chunk_cache_.begin(); it != decl_chunk_cache_.end();) {
+			if (unreachable(it->second.compiled, it->second.pin.get(), it->second.pin.use_count())) {
+				retire(it->second.compiled);
+				dying.push_back(std::move(it->second.compiled));
+				it = decl_chunk_cache_.erase(it);
+				progress = true;
+			} else { ++it; }
+		}
+		if (!dying.empty()) {
+			// a dying chunk's own references (its lambdas' chunks, the nodes it pins) may be the last on another entry: free them and look again
+			fold_sites_.erase(std::remove_if(fold_sites_.begin(), fold_sites_.end(), [&](const fold_site& site) { return retired.count(site.code) != 0; }), fold_sites_.end());
+			for (const chunk* code : retired) {
+				body_chunks_.erase(code);
+				prefolded_chunks_.erase(code);
+#ifdef JAISCRIPT_VM_PROFILE
+				profile_chunks_.erase(code);
+#endif
+			}
+			for (auto& rec : call_records_) { rec->raw_prepared = nullptr; }
+			debug_last_code_ = nullptr;
+			retired.clear();
+			fold_pins.clear();
+			for (const fold_site& site : fold_sites_) { if (site.pin) { ++fold_pins[site.pin.get()]; } }
+			dying.clear();
+		}
+	}
+	cache_size_after_retire_ = chunk_cache_.size() + expr_chunk_cache_.size() + decl_chunk_cache_.size();
+}
+
 script_value vm_backend::execute(const std::vector<declaration_ptr>& declarations) {
 	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 	compiler_.ir_passes(!engine_ || engine_->ir_passes());
 	arm_listing();
 	auto program = compiler_.compile_program(declarations, true);
 	note_compiled(*program);
-	return run_program(std::move(program));
+	script_value result = run_program(std::move(program));
+	retire_unreachable_code();
+	return result;
 }
 
 script_value vm_backend::execute(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) {
@@ -22673,7 +22787,9 @@ script_value vm_backend::execute(const std::vector<declaration_ptr>& declaration
 		note_compiled(*program);
 		compiled_slot = program;
 	}
-	return run_program(std::move(program));
+	script_value result = run_program(std::move(program));
+	retire_unreachable_code();
+	return result;
 }
 
 script_value vm_backend::execute_textual(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) {
@@ -22686,7 +22802,9 @@ script_value vm_backend::execute_textual(const std::vector<declaration_ptr>& dec
 		note_compiled(*program);
 		compiled_slot = program;
 	}
-	return run_program(std::move(program), true);
+	script_value result = run_program(std::move(program), true);
+	retire_unreachable_code();
+	return result;
 }
 
 script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textual) {
@@ -22862,6 +22980,7 @@ void vm_backend::precompile_parallel_expression(const expression_ptr& expr) {
 	auto compiled = compiler_.compile_standalone_expression(expr);
 	note_compiled(*compiled);
 	parallel_expr_chunks_.emplace(expr.get(), expr_chunk_cache_entry{compiled, expr});
+	note_cache_insert();
 }
 
 std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
@@ -22887,6 +23006,7 @@ std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
 	note_compiled(*compiled);
 	chunk_cache_.emplace(key, chunk_cache_entry{compiled, body});
 	body_chunks_.insert(compiled.get());
+	note_cache_insert();
 	return compiled;
 }
 
@@ -22986,9 +23106,10 @@ checked_result<script_value> vm_backend::execute_method_from(const script_method
 		function = static_cast<const script_defined_function*>(dispatch.backend_function);
 	} else {
 		function = &method_function_for(ast);
-		if (!parallel_worker_) {   // method_functions_ never drops an entry: the pointer lives as long as this backend
+		if (!parallel_worker_) {   // the pinned declaration keeps its method_functions_ entry (retire_unreachable_code drops only unpinned ones)
 			dispatch.backend_function_key = ast.get();
 			dispatch.backend_function = function;
+			dispatch.backend_function_pin = ast;
 		}
 	}
 	const method_entry entry{&dispatch.definition_env, &this_obj, dispatch.cls.get()};

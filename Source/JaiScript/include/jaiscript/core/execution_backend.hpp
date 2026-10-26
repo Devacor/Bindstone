@@ -131,6 +131,7 @@ struct script_method_dispatch {
     // the main backend's compiled function for the overload last entered, keyed by its declaration (the interpreter ignores it)
     mutable const void* backend_function_key = nullptr;
     mutable const void* backend_function = nullptr;
+    mutable std::shared_ptr<const void> backend_function_pin;   // that declaration: the key never names a recycled address
     checked_result<script_value> operator()(const std::vector<script_value>& args) const;
     // The overload the arguments args[first..] call
     checked_result<const std::shared_ptr<function_decl>*> resolve(const std::vector<script_value>& args, size_t first) const;

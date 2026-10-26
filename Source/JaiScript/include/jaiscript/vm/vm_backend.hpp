@@ -283,6 +283,11 @@ namespace jai::vm {
         // A call site pins the callee it cached (ABA): a recursive function's own body pins the function, function -> body
         // chunk -> site -> function; the backend drops every pin as it dies so the engine's functions die with the engine
         void release_site_pins() noexcept;
+        // Hot reload's reclamation, at the end of an outermost execute: the cached chunks nothing outside the backend's own caches
+        // holds any more (their bodies' declarations gone, no frame, fiber or run on them) are dropped. The site pins go first when no
+        // suspended fiber parks a callee, so code that only its own call sites kept alive (recursion, mutual calls) goes too.
+        void retire_unreachable_code();
+        void note_cache_insert() noexcept { ++cache_inserts_total_; ++cache_inserts_since_retire_; }
         void retire_site_callee(const call_site& site);
 
         script_value execute(const std::vector<declaration_ptr>& declarations) override;
@@ -528,7 +533,7 @@ namespace jai::vm {
         // builders read the same palette cells thousands of times per region, and each read
         // allocated a string. Bounded; cleared when it grows past the cap.
         std::unordered_map<uint64_t, script_value> worker_borrowed_strings_;
-        struct ctor_dispatch_entry { std::optional<script_value> method; const class_definition* cls = nullptr; const environment* env = nullptr; };
+        struct ctor_dispatch_entry { std::optional<script_value> method; const class_definition* cls = nullptr; const environment* env = nullptr; std::weak_ptr<const function_decl> decl; };
         std::unordered_map<const function_decl*, ctor_dispatch_entry> ctor_dispatch_;   // a constructor's method-door dispatcher (its body chunk cached on it)
         script_value worker_borrowed_string(const script_value& borrow, const script_value& index, const script_string& source);
         script_value worker_owned_string(const script_array* node, uint64_t index, const script_string& source);   // the cache by node and index
@@ -1460,7 +1465,7 @@ namespace jai::vm {
                                        const block_stmt* body, size_t nparams, size_t argc) const {
             if (!site || !caller_code || site->call_node == k_invalid_u32 || argc != nparams) { return nullptr; }
             const auto* ce = static_cast<const call_expr*>(caller_code->nodes[site->call_node].get());
-            if (ce->proven_callee_body != body || ce->static_arg_proofs.size() != nparams) { return nullptr; }
+            if (ce->proven_callee_body != body || ce->static_arg_proofs.size() != nparams || ce->proven_callee_body_owner.expired()) { return nullptr; }
             return ce->static_arg_proofs.data();
         }
         // Ref-param bind against the caller's variable storage: shares an existing
@@ -2846,6 +2851,13 @@ namespace jai::vm {
         std::vector<fold_site> fold_sites_;
         std::unordered_set<const chunk*> body_chunks_;   // chunk_for_body's chunks: pinned by the cache for the backend's lifetime
         std::unordered_set<const chunk*> prefolded_chunks_;
+        size_t cache_inserts_total_ = 0;   // every entry ever added (the prefold scan's trigger: entries also leave)
+        size_t cache_inserts_since_retire_ = 0;   // chunk, expression and declaration cache entries added since retire_unreachable_code last ran
+        size_t cache_size_after_retire_ = 0;
+        // suspended fibers that parked a callee (a site pin may be its only owner) and suspended runs that hold frames; shared with
+        // the states, which may outlive the backend
+        std::shared_ptr<size_t> parked_fibers_ = std::make_shared<size_t>(0);
+        std::shared_ptr<size_t> parked_runs_ = std::make_shared<size_t>(0);
         uint64_t prefold_epoch_ = 0;
         size_t prefold_cached_ = 0;
         std::optional<script_value> folded_static_value(const member_expr* expr, bool prefold = false);

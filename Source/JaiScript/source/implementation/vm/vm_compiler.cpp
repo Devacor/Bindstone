@@ -923,6 +923,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 	chunk_->local_count = local_count;
 	chunk_->first_temp_slot = local_count;
 	chunk_->is_function_body = true;
+	chunk_->owner_body = body;
 	loops_.clear();
 	scope_depth_ = 0;
 	current_stmt_ = nullptr;

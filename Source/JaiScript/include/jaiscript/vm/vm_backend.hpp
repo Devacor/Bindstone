@@ -1893,7 +1893,12 @@ namespace jai::vm {
             if (state == detail::member_scope_state::statics) { return e.miss_dynamic == nullptr; }
             if (state != detail::member_scope_state::instance || !f.locals->scope_this) { return false; }
             const class_definition* dyn = member_miss_dynamic_class(f);
-            return dyn && dyn == e.miss_dynamic && dyn->method_epoch() == e.miss_dynamic_epoch;
+            if (!dyn) { return false; }
+            if (dyn == e.miss_dynamic) { return dyn->method_epoch() == e.miss_dynamic_epoch; }
+            // a base method running on another receiver class: the site's second class row (main engine)
+            if (parallel_worker_ || cache_slot >= f.code->member_miss_alt.size()) { return false; }
+            const chunk::member_miss_row& alt = f.code->member_miss_alt[cache_slot];
+            return alt.dyn == dyn && dyn->method_epoch() == alt.epoch;
         }
         // after a full probe missed (no field, method or static of the name)
         void member_miss_arm(frame& f, size_t cache_slot, uint64_t sym) {
@@ -1912,6 +1917,12 @@ namespace jai::vm {
             }
             if (!member_miss_subject(st) || !member_miss_subject(dyn)) { return; }
             env_lookup_cache_entry& e = (*rows)[cache_slot];
+            if (!parallel_worker_ && dyn && e.miss_sym == sym && e.miss_static == st && e.miss_dynamic && e.miss_dynamic != dyn) {
+                if (f.code->member_miss_alt.size() <= cache_slot) { f.code->member_miss_alt.resize(f.code->code.size() * 3); }
+                if (cache_slot < f.code->member_miss_alt.size()) {
+                    f.code->member_miss_alt[cache_slot] = chunk::member_miss_row{static_cast<const class_definition*>(e.miss_dynamic), e.miss_dynamic_epoch};
+                }
+            }
             e.miss_sym = sym;
             e.miss_static = st;
             e.miss_static_epoch = st ? st->method_epoch() : 0;
@@ -2408,6 +2419,7 @@ namespace jai::vm {
         }
         bool inline_globals_hold(const frame& f, const chunk::inline_site& site);
         bool inline_forward_callees_hold(const chunk::inline_site& site);
+        bool inline_method_verdict(const chunk::inline_site& site, const class_definition* cd);
         bool math_alias_holds(frame& f, const chunk::cell_loop::math_alias_site& site);
         bool call_typed_land(frame& caller, const script_value& v);   // op_call_typed's landing (the caller's ip on the call)
         bool inline_method_holds(frame& f, const chunk::inline_site& site);

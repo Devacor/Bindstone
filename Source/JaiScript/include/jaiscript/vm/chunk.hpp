@@ -711,8 +711,11 @@ namespace jai::vm {
             std::vector<uint64_t> field_ids;
             bool env_reads = false;                // a free function's body reads an environment name: the guard holds only where the caller has no member scope (a field would shadow it)
             bool plain_numeric = false;            // a renamed reference parameter's stores were proven by the kinds of plain arithmetic: the guard holds only while no numeric operator is registered
-            mutable const class_definition* holds_cd = nullptr;   // the last class the guard validated, at its method epoch
-            mutable uint64_t holds_epoch = 0;
+            // the guard's verdict for the receiver classes it met, each at its method epoch (every fact the verdict reads moves that epoch)
+            struct holds_row { const class_definition* cd = nullptr; uint64_t epoch = 0; bool holds = false; };
+            static constexpr uint8_t k_holds_rows = 4;
+            mutable holds_row holds_rows[k_holds_rows];
+            mutable uint8_t holds_next = 0;
             mutable strong_ptr<script_function_node> holds_fn;   // the free function the guard last validated: the same object holds again
             // the program-scope names the call's argument proofs read (call_expr::proof_globals: symbol id, kind): the guard holds only
             // while each still holds its kind, re-checked when a run moved engine::definition_epoch past globals_epoch
@@ -810,6 +813,10 @@ namespace jai::vm {
         // first receiver of another class
         struct this_field_row { const class_definition* cd = nullptr; uint32_t slot = 0; };
         mutable std::vector<this_field_row> this_field_alt;
+        // the member-miss proof's second receiver class per env cache slot (the name is no member of that class either, at its method
+        // epoch), main engine only; sized when a site first meets a second class
+        struct member_miss_row { const class_definition* dyn = nullptr; uint64_t epoch = 0; };
+        mutable std::vector<member_miss_row> member_miss_alt;
         // A bare name in a method that reads a C++ member of the receiver, by env cache slot (ip * 3 + operand): the receiver
         // class, its method epoch and the member's lane. Sized on the first such read.
         struct bare_host_entry {

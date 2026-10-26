@@ -13063,13 +13063,25 @@ bool vm_backend::inline_method_holds(frame& f, const chunk::inline_site& site) {
 	const script_value& v = r->deref();
 	const size_t k = v.raw_storage_index();
 	if (k != script_value::TYPEID_OBJECT && k != script_value::TYPEID_SHARED_PTR) return false;
-	const auto holder = v.get_object_holder();
+	const auto& holder = v.unchecked_object_handle();
 	if (!holder || !holder->is_class_instance_wrapper || !holder->data || holder->type_id == coroutine_handle_type_id_) return false;
 	auto* inst = static_cast<class_instance*>(holder->data.get());
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) return false;
 	if (inst->has_user_overflow_fields() && inst->has_field(site.member_id)) return false;
-	if (cd == site.holds_cd && cd->method_epoch() == site.holds_epoch) return true;
+	const uint64_t epoch = cd->method_epoch();
+	for (const chunk::inline_site::holds_row& row : site.holds_rows) {
+		if (row.cd == cd && row.epoch == epoch) { return row.holds; }
+	}
+	const bool holds = inline_method_verdict(site, cd);
+	chunk::inline_site::holds_row& row = site.holds_rows[site.holds_next];
+	site.holds_next = static_cast<uint8_t>((site.holds_next + 1) % chunk::inline_site::k_holds_rows);
+	row = chunk::inline_site::holds_row{cd, epoch, holds};
+	return holds;
+}
+// the method graft's facts for a receiver class: the class resolves the name to the graft's one-overload body, no field or getter of the
+// name, no user accessor over a bare field the body names, and each such field is the declaration the method's class sees
+bool vm_backend::inline_method_verdict(const chunk::inline_site& site, const class_definition* cd) {
 	if (site.field_class && cd != site.field_class) return false;
 	if (cd->chain_has_nonpublic() || cd->chain_declares_field(site.member_id) || cd->field_slot(site.member_id) != class_definition::k_no_field_slot) return false;
 	const uint64_t getter_id = symbolizer_->get_getter_id_with_view(site.member_id).first;
@@ -13088,8 +13100,6 @@ bool vm_backend::inline_method_holds(frame& f, const chunk::inline_site& site) {
 		const class_definition* at = cd->find_field_declaring_class(id);
 		if (!at || at != dispatch->cls->find_field_declaring_class(id)) return false;
 	}
-	site.holds_cd = cd;
-	site.holds_epoch = cd->method_epoch();
 	return true;
 }
 // a worker's method graft: the receiver's class holds the region's pin of the method, whose body is the graft's, and the bare fields the

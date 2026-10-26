@@ -19481,10 +19481,9 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 		entry.env = definition_env.get();
 	}
 	const auto* dispatch = entry.method->as_function().target<script_method_dispatch>();
-	script_value method = *entry.method;
 	op_status pushed;
 	try {
-		pushed = push_method_frame(f, std::move(method), *dispatch, matching_ctor, std::move(this_value), args, site);
+		pushed = push_method_frame(f, *entry.method, *dispatch, matching_ctor, std::move(this_value), args, site);
 	} catch (...) {
 		return call_threw(SIZE_MAX);
 	}
@@ -22857,7 +22856,7 @@ op_status vm_backend::enter_script_method(frame& caller, script_value&& method_v
                                                      const call_site& site) {
 	// Stateless ref binding: the call site travels as an argument
 	try {
-		return push_method_frame(caller, std::move(method_val), dispatch, ast, std::move(receiver),
+		return push_method_frame(caller, method_val, dispatch, ast, std::move(receiver),
 		                         arguments, &site);
 	} catch (...) {
 		return call_threw(SIZE_MAX);
@@ -22972,6 +22971,8 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 			// a lazy frame's receiver slot moves into the frame's this (the slot is read by nothing until the pop truncates it, and the pop
 			// nulls this after that truncation, where the slot's copy used to die): no handle copy, the same destruction point
 			rec.locals.set_this(std::move(stack_[args_base - 1]));
+		} else if (receiver_owned && rec.env_lazy && receiver_owned->raw_storage_index() != script_value::TYPEID_REFERENCE) {
+			rec.locals.set_this(std::move(*receiver_owned));   // the owner's copy dies with the frame instead of after the push
 		} else {
 			rec.locals.set_this(receiver_v);
 		}
@@ -23072,7 +23073,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 	return {};
 }
 
-op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val,
+op_status vm_backend::push_method_frame(frame& caller, const script_value& method_val,
                                                    const script_method_dispatch& dispatch,
                                                    const std::shared_ptr<function_decl>& ast,
                                                    script_value&& receiver,
@@ -23118,7 +23119,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 		rec.pin_ast(ast);   // the resolved overload must outlive a mid-call hot reload; slot
 	}                        // reuse with the SAME overload (recursion) skips the atomic pair
 	rec.method_result_anchor = true;
-	rec.callee_pin = std::move(method_val);   // pins the dispatcher and, through it, the class
+	(void)method_val;   // no pin, as in push_method_frame_sliced
 	rec.try_base = try_records_.size();
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
@@ -23244,7 +23245,7 @@ bool vm_backend::enter_static_method(frame& caller, script_value& callee, const 
 	}
 	if (!ast->body || ast->is_coroutine) return false;   // a coroutine mints a handle: the opaque call's execute_method_ast
 	try {
-		st = push_static_method_frame(caller, std::move(callee), *dispatch, ast, arguments, &site);
+		st = push_static_method_frame(caller, callee, *dispatch, ast, arguments, &site);
 	} catch (...) {
 		st = call_threw(SIZE_MAX);
 	}
@@ -23253,7 +23254,7 @@ bool vm_backend::enter_static_method(frame& caller, script_value& callee, const 
 
 // push_method_frame without a receiver: the body runs in the static scope env the opaque call's execute_method_ast gives it
 // (parented on the definition env, the class for bare statics and access), parameters in the window
-op_status vm_backend::push_static_method_frame(frame& caller, script_value&& method_val, const script_static_method_dispatch& dispatch,
+op_status vm_backend::push_static_method_frame(frame& caller, const script_value& method_val, const script_static_method_dispatch& dispatch,
                                                const std::shared_ptr<function_decl>& ast, const std::vector<script_value>& arguments, const call_site* site) {
 	if (current_call_depth_ >= limits_->vm_depth_gate) {
 		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
@@ -23290,7 +23291,7 @@ op_status vm_backend::push_static_method_frame(frame& caller, script_value&& met
 		rec.pin_ast(ast);
 	}
 	rec.method_result_anchor = false;   // no receiver to anchor a result to
-	rec.callee_pin = std::move(method_val);
+	(void)method_val;
 	rec.try_base = try_records_.size();
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();

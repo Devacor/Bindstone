@@ -690,6 +690,23 @@ public:
             check_eq(std::string("[21, 23, 25, 1003]"), eng->execute("[c.run(0), c.run(1), c.run(2), c.run(3)];").to_string(), "old body to its end, then the new one");
         });
 
+        test("a_constructor_or_static_method_redefined_while_it_runs_finishes_its_old_body", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            jai::engine* raw = eng.get();
+            eng->add_function("reload_d", [raw]() { raw->execute("class D { int v = 0; D(int k) { v = 1000 + k; } static int twice(int k) { return 2000 + k; } }"); });
+            eng->execute(R"(
+                class D { int v = 0; D(int k) { int a = k * 2; if (k == 2) { reload_d(); } array<int> pad = [a, a]; v = pad[0] + pad[1]; }
+                          static int twice(int k) { int a = k * 3; if (k == 2) { reload_d(); } array<int> pad = [a, a]; return pad[0] + pad[1]; } }
+            )");
+            check_eq(std::string("[0, 4, 8, 1003]"), eng->execute("[D(0).v, D(1).v, D(2).v, D(3).v];").to_string(), "constructor: old body to its end, then the new one");
+            eng->execute(R"(
+                class D { int v = 0; D(int k) { v = k; }
+                          static int twice(int k) { int a = k * 3; if (k == 2) { reload_d(); } array<int> pad = [a, a]; return pad[0] + pad[1]; } }
+            )");
+            check_eq(std::string("[0, 6, 12, 2003]"), eng->execute("[D::twice(0), D::twice(1), D::twice(2), D::twice(3)];").to_string(), "static method: old body to its end, then the new one");
+        });
+
         test("readonly_local_alias_skips_nocopy_and_destructors", [this]() {
             auto eng = make_engine();
             jai::stdlib::register_all(eng);

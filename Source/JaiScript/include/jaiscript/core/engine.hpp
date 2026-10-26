@@ -1270,6 +1270,8 @@ namespace jai {
         // True while a parallel region's workers run (main thread parked). Worker-side
         // mints must not touch the single-threaded pool.
         bool parallel_region_active() const noexcept { return parallel_region_active_; }
+        // what an instance's block reads to count atomically while a region runs (detail::strong_counts<class_instance>)
+        const bool* parallel_region_flag() const noexcept { return &parallel_region_active_; }
         // the region guard's record of its region (on while workers run, back to the enclosing region's state after)
         void note_parallel_region(bool active) noexcept { parallel_region_active_ = active; }
         // Workers copy and construct class instances (by-value bindings, whole reads): the

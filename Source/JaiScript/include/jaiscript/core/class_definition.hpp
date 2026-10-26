@@ -45,32 +45,37 @@ namespace detail {
         std::shared_ptr<class_definition> def;
         void operator()(class_instance* ptr) const noexcept;
     };
-    // The object block (internal/object_layout.md): a destructor class's pin on its definition, the head counting the parts
-    // that still need the memory, the room for the instance's holder, the instance's strong_ptr control block and instance, then
-    // the cells. The instance's part and the holder's part each give their part back; the last one frees the block.
+    // The object block (internal/object_layout.md): a destructor class's pin on its definition, the room for the instance's
+    // holder, the head (the parts that still need the memory, then the engine's parallel-region flag, the word right before the
+    // control block: detail::strong_counts<class_instance>), the instance's strong_ptr control block and instance, then the
+    // cells. The instance's part and the holder's part each give their part back; the last one frees the block.
     struct object_block_head {
         std::atomic<uint32_t> parts{1};
-        uint32_t prefix = 0;   // bytes before the head: the definition pin of a destructor class's instance
+        uint32_t prefix = 0;   // bytes before the holder room: the definition pin of a destructor class's instance
+        const bool* region_flag = nullptr;
         static constexpr size_t holder_room = (sizeof(control_block<script_value::object_holder>) + 15) & ~size_t{15};
-        static constexpr size_t size = 16 + holder_room;
+        static constexpr size_t size = 16;
         static constexpr size_t pin_bytes = (sizeof(std::shared_ptr<class_definition>) + 15) & ~size_t{15};
-        static void release(std::byte* block) noexcept {
-            auto* head = reinterpret_cast<object_block_head*>(block);
+        std::byte* memory() noexcept { return reinterpret_cast<std::byte*>(this) - holder_room - prefix; }
+        static void release(object_block_head* head) noexcept {
             if (head->parts.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                std::byte* memory = block - head->prefix;
+                std::byte* memory = head->memory();
                 if (head->prefix) { reinterpret_cast<std::shared_ptr<class_definition>*>(memory)->~shared_ptr(); }
                 head->~object_block_head();
                 ::operator delete(memory);
             }
         }
-        static std::byte* holder_slot(std::byte* block) noexcept { return block + 16; }
+        std::byte* holder_slot() noexcept { return reinterpret_cast<std::byte*>(this) - holder_room; }
+        static object_block_head* of_holder_slot(std::byte* slot) noexcept { return reinterpret_cast<object_block_head*>(slot + holder_room); }
         static object_block_head* of_control_block(control_block_base* cb) noexcept {
             return reinterpret_cast<object_block_head*>(reinterpret_cast<std::byte*>(cb) - size);
         }
         std::shared_ptr<class_definition>* definition_pin() noexcept {
-            return prefix ? reinterpret_cast<std::shared_ptr<class_definition>*>(reinterpret_cast<std::byte*>(this) - prefix) : nullptr;
+            return prefix ? reinterpret_cast<std::shared_ptr<class_definition>*>(memory()) : nullptr;
         }
     };
+    static_assert(sizeof(object_block_head) == object_block_head::size && offsetof(object_block_head, region_flag) == object_block_head::size - sizeof(void*),
+                  "the region flag is the word right before the control block");
 }
 
 namespace detail {

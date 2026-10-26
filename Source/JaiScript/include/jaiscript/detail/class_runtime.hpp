@@ -45,7 +45,7 @@ inline class_instance::class_instance(interned_name_t, std::string_view interned
 inline void class_instance::free_allocation(class_instance* instance) noexcept {
     detail::control_block_base* cb = detail::cb_from_object(instance);
     instance->~class_instance();
-    if (cb->release_weak()) { cb->dealloc_fn(cb); }
+    if (detail::strong_counts<class_instance>::release_weak(cb)) { cb->dealloc_fn(cb); }
 }
 
 namespace detail {
@@ -55,20 +55,20 @@ class dying_instance_pin {
 public:
     explicit dying_instance_pin(class_instance* instance) noexcept : instance_(instance) {
         control_block_base* cb = cb_from_object(instance);
-        revived_ = cb->get_strong_count() == 0;
-        cb->add_strong();
+        revived_ = strong_counts<class_instance>::strong_count(cb) == 0;
+        strong_counts<class_instance>::add_strong(cb);
     }
     dying_instance_pin(const dying_instance_pin&) = delete;
     dying_instance_pin& operator=(const dying_instance_pin&) = delete;
     ~dying_instance_pin() {
         if (revived_) {
-            (void)cb_from_object(instance_)->release_strong();
+            (void)strong_counts<class_instance>::release_strong(cb_from_object(instance_));
         } else {
             strong_ptr<class_instance> pinned = adopt_pooled(instance_);
         }
     }
     strong_ptr<class_instance> handle() const noexcept {
-        cb_from_object(instance_)->add_strong();
+        strong_counts<class_instance>::add_strong(cb_from_object(instance_));
         return adopt_pooled(instance_);
     }
 private:
@@ -83,7 +83,7 @@ inline void release_instance_block(control_block_base* cb) noexcept {
 #endif
     auto* head = object_block_head::of_control_block(cb);
     static_cast<control_block<class_instance>*>(cb)->~control_block();
-    object_block_head::release(reinterpret_cast<std::byte*>(head));
+    object_block_head::release(head);
 }
 }
 
@@ -91,16 +91,18 @@ inline strong_ptr<class_instance> class_instance::make(std::string_view interned
     using block_cb = detail::control_block<class_instance>;
     constexpr size_t cb_bytes = (sizeof(block_cb) + 15) & ~size_t{15};
     const size_t prefix = destructor_owner ? detail::object_block_head::pin_bytes : 0;
-    auto* memory = static_cast<std::byte*>(::operator new(prefix + detail::object_block_head::size + cb_bytes + trailing_bytes(slots)));
-    std::byte* block = memory + prefix;
+    constexpr size_t room = detail::object_block_head::holder_room;
+    auto* memory = static_cast<std::byte*>(::operator new(prefix + room + detail::object_block_head::size + cb_bytes + trailing_bytes(slots)));
+    std::byte* block = memory + prefix + room;
     auto* head = new (block) detail::object_block_head();
     head->prefix = static_cast<uint32_t>(prefix);
+    head->region_flag = eng ? eng->parallel_region_flag() : nullptr;
     if (destructor_owner) { new (memory) std::shared_ptr<class_definition>(destructor_owner->shared_from_this()); }
     auto* cb = new (block + detail::object_block_head::size) block_cb();
     cb->dealloc_fn = &detail::release_instance_block;
     const trailing_cells trailing{block + detail::object_block_head::size + cb_bytes, slots};
     auto* instance = new (cb->storage) class_instance(interned_name_t{}, interned, eng, trailing);
-    instance->set_embedded_holder(detail::object_block_head::holder_slot(block));
+    instance->set_embedded_holder(head->holder_slot());
     if (destructor_owner) { instance->note_destructor_armed(); }
     return detail::adopt_pooled(instance);
 }

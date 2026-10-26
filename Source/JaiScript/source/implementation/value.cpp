@@ -954,9 +954,9 @@ script_value script_value::make_object(std::string_view type_name, uint64_t type
 }
 
 namespace detail {
-void retain_instance(class_instance* instance) noexcept { cb_from_object(instance)->add_strong(); }
+void retain_instance(class_instance* instance) noexcept { strong_counts<class_instance>::add_strong(cb_from_object(instance)); }
 void release_instance(class_instance* instance) noexcept { strong_ptr<class_instance> last = adopt_pooled(instance); }
-size_t instance_use_count(const class_instance* instance) noexcept { return cb_from_object(const_cast<class_instance*>(instance))->get_strong_count(); }
+size_t instance_use_count(const class_instance* instance) noexcept { return strong_counts<class_instance>::strong_count(cb_from_object(const_cast<class_instance*>(instance))); }
 }
 
 namespace {
@@ -965,9 +965,9 @@ void release_embedded_holder(jai::detail::control_block_base* base) noexcept {
 #ifndef NDEBUG
     base->magic = jai::detail::cb_magic_dead;
 #endif
-    auto* block = reinterpret_cast<std::byte*>(base) - 16;
+    auto* head = jai::detail::object_block_head::of_holder_slot(reinterpret_cast<std::byte*>(base));
     static_cast<jai::detail::control_block<script_value::object_holder>*>(base)->~control_block();
-    jai::detail::object_block_head::release(block);
+    jai::detail::object_block_head::release(head);
 }
 }
 
@@ -976,7 +976,7 @@ strong_ptr<script_value::object_holder> script_value::claim_object_holder(class_
                   "the object block's holder room holds the holder's control block");
     std::byte* room = instance ? instance->take_embedded_holder() : nullptr;
     if (!room) { return acquire_object_holder(eng); }
-    reinterpret_cast<jai::detail::object_block_head*>(room - 16)->parts.fetch_add(1, std::memory_order_relaxed);
+    jai::detail::object_block_head::of_holder_slot(room)->parts.fetch_add(1, std::memory_order_relaxed);
     auto* cb = new (room) jai::detail::control_block<object_holder>();
     cb->dealloc_fn = &release_embedded_holder;
     auto result = jai::detail::adopt_pooled(new (cb->storage) object_holder());

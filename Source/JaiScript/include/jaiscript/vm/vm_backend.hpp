@@ -1462,10 +1462,11 @@ namespace jai::vm {
         // V-C1: the call site's per-argument same_type proofs, valid only when the site's
         // call_expr was proven against THIS callee body with THIS arity (null otherwise)
         const uint8_t* site_arg_proofs(const call_site* site, const chunk* caller_code,
-                                       const block_stmt* body, size_t nparams, size_t argc) const {
+                                       const std::shared_ptr<block_stmt>& body, size_t nparams, size_t argc) const {
             if (!site || !caller_code || site->call_node == k_invalid_u32 || argc != nparams) { return nullptr; }
             const auto* ce = static_cast<const call_expr*>(caller_code->nodes[site->call_node].get());
-            if (ce->proven_callee_body != body || ce->static_arg_proofs.size() != nparams || ce->proven_callee_body_owner.expired()) { return nullptr; }
+            if (ce->proven_callee_body != body.get() || ce->static_arg_proofs.size() != nparams) { return nullptr; }
+            if (ce->proven_callee_body_owner.owner_before(body) || body.owner_before(ce->proven_callee_body_owner)) { return nullptr; }   // a recycled address: another body's proofs
             return ce->static_arg_proofs.data();
         }
         // Ref-param bind against the caller's variable storage: shares an existing

@@ -14322,7 +14322,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 		try {
 			bound = bind_parameters(function.parameters(), stack_, args_base, argc, rec.f, *rec.f.code,
 			                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-			                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc), &function, caller_frame_unit());
+			                        site_arg_proofs(site, caller.code, function.body, function.parameters().size(), argc), &function, caller_frame_unit());
 		} catch (...) {
 			pop_script_frame_core(rec);
 			throw;
@@ -14370,7 +14370,7 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 	try {
 		bound = bind_parameters(function.parameters(), stack_, args_base, argc, tf, *body_chunk,
 		                        environment_, site, &rec.f, rec.f.code,
-		                        site_arg_proofs(site, rec.f.code, function.body.get(), function.parameters().size(), argc), &function, tail_caller_unit);
+		                        site_arg_proofs(site, rec.f.code, function.body, function.parameters().size(), argc), &function, tail_caller_unit);
 	} catch (...) {
 		frames_.pop_back();
 		throw;
@@ -19794,7 +19794,7 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 	// The body runs through the method door (the lazy environment when the chain is public, `this` in the record); the dispatcher
 	// is one per constructor declaration, kept by the backend and checked against the class and the definition environment
 	ctor_dispatch_entry& entry = ctor_dispatch_[matching_ctor.get()];
-	if (entry.cls != class_def.get() || entry.env != definition_env.get() || !entry.method || entry.decl.expired()) {
+	if (entry.cls != class_def.get() || entry.env != definition_env.get() || !entry.method || entry.decl.owner_before(matching_ctor) || matching_ctor.owner_before(entry.decl)) {
 		entry.method = script_value::make_function(script_method_dispatch{engine_, class_def, matching_ctor->name_id, definition_env}, engine_);
 		entry.cls = class_def.get();
 		entry.env = definition_env.get();
@@ -23238,7 +23238,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	try {
 		bound = bind_parameters(function.parameters(), args, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, function.body.get(), function.parameters().size(), argc), &function, caller_frame_unit());
+		                        site_arg_proofs(site, caller.code, function.body, function.parameters().size(), argc), &function, caller_frame_unit());
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -23461,7 +23461,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 	try {
 		bound = bind_parameters(rec.ast_pin->parameters, stack_, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, rec.ast_pin->body.get(), rec.ast_pin->parameters.size(), argc), nullptr, caller_frame_unit(),
+		                        site_arg_proofs(site, caller.code, rec.ast_pin->body, rec.ast_pin->parameters.size(), argc), nullptr, caller_frame_unit(),
 		                        0, false, rec.ast_pin->body.get());
 	} catch (...) {
 		pop_script_frame_core(rec);
@@ -23622,7 +23622,7 @@ op_status vm_backend::push_method_frame(frame& caller, const script_value& metho
 	try {
 		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, ast->body.get(), ast->parameters.size(), arguments.size()), nullptr, caller_frame_unit(),
+		                        site_arg_proofs(site, caller.code, ast->body, ast->parameters.size(), arguments.size()), nullptr, caller_frame_unit(),
 		                        0, false, ast->body.get());
 	} catch (...) {
 		pop_script_frame_core(rec);
@@ -23741,7 +23741,7 @@ op_status vm_backend::push_static_method_frame(frame& caller, const script_value
 	op_status bound{};
 	try {
 		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code, rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, ast->body.get(), ast->parameters.size(), arguments.size()), nullptr, caller_frame_unit(),
+		                        site_arg_proofs(site, caller.code, ast->body, ast->parameters.size(), arguments.size()), nullptr, caller_frame_unit(),
 		                        0, false, ast->body.get());
 	} catch (...) {
 		pop_script_frame_core(rec);
@@ -25165,7 +25165,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	{
 		auto bind_result = bind_parameters(function.parameters(), args, first, argc, f, *f.code,
 	                                   env_untouched ? environment_ : previousEnv, site, caller_frame, caller_code,
-	                                   site_arg_proofs(site, caller_code, function.body.get(), function.parameters().size(), argc), &function, caller_unit);
+	                                   site_arg_proofs(site, caller_code, function.body, function.parameters().size(), argc), &function, caller_unit);
 		if (bind_result == op_status::failed) {
 			cleanup();
 			return pending_error_;

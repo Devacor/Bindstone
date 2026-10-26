@@ -79,7 +79,7 @@ namespace jai::vm {
 #endif
         cell_counters cells_counters() const override { return cells_counters_; }
 #ifdef JAISCRIPT_VM_PROFILE
-        ~vm_backend() override { dump_opcode_profile(); release_site_pins(); }
+        ~vm_backend() override { dump_opcode_profile(); release_site_pins(); release_retained_decls(); }
         void dump_opcode_profile() const;
         void profile_reset() override;
         uint64_t profile_cycles_[256] = {};
@@ -276,9 +276,9 @@ namespace jai::vm {
         uint64_t profile_index_read_paths_[8] = {};
         std::map<std::string, uint64_t> profile_builtin_direct_names_;   // builtin-direct calls by name
 #elif defined(JAISCRIPT_VM_COARSE_PROFILE)
-        ~vm_backend() override { dump_coarse_profile(); release_site_pins(); }
+        ~vm_backend() override { dump_coarse_profile(); release_site_pins(); release_retained_decls(); }
 #else
-        ~vm_backend() override { release_site_pins(); }
+        ~vm_backend() override { release_site_pins(); release_retained_decls(); }
 #endif
         // A call site pins the callee it cached (ABA): a recursive function's own body pins the function, function -> body
         // chunk -> site -> function; the backend drops every pin as it dies so the engine's functions die with the engine
@@ -288,6 +288,15 @@ namespace jai::vm {
         // suspended fiber parks a callee, so code that only its own call sites kept alive (recursion, mutual calls) goes too.
         void retire_unreachable_code();
         void note_cache_insert() noexcept { ++cache_inserts_total_; ++cache_inserts_since_retire_; }
+        // A method frame names its overload raw: the main backend keeps every declaration it entered alive until a retire point finds
+        // only itself holding it (no frame can name it then); a worker, or a declaration another backend retains, pins it on the record
+        std::vector<std::shared_ptr<function_decl>> retained_decls_;
+        struct call_record;
+        void pin_method_decl(call_record& rec, const std::shared_ptr<function_decl>& ast);
+        void release_retained_decls() noexcept {
+            for (auto& decl : retained_decls_) { if (decl->vm_retainer == this) { decl->vm_retainer = nullptr; } }
+            retained_decls_.clear();
+        }
         void retire_site_callee(const call_site& site);
 
         script_value execute(const std::vector<declaration_ptr>& declarations) override;
@@ -925,7 +934,8 @@ namespace jai::vm {
             type_info_ptr return_type;                 // pop drivers convert the result against this
             uint8_t return_conv_class = 0;             // return_conv stamped at push (0 = legacy decision)
             // the caller's unit is the frame below's (vm_backend::caller_frame_unit); no stamp is saved per call
-            std::shared_ptr<function_decl> ast_pin;    // method frames: resolved overload outlives a mid-call hot reload
+            std::shared_ptr<function_decl> ast_pin;    // a worker's method frame: its resolved overload outlives a mid-call hot reload
+            const function_decl* ast = nullptr;        // the method frame's overload, kept alive by ast_pin or by the backend's retained declarations
             // the overloads this pooled record pinned before: a depth that alternates among a few methods swaps pins without counting them
             std::shared_ptr<function_decl> ast_pin_ring[3];
             uint8_t ast_pin_next = 0;

@@ -99,7 +99,7 @@ script_value engine::make_value_object(std::shared_ptr<T> data) {
         if (std::shared_ptr<detail::first_type_t<class_instance, T>> known = object_instance_of(key)) {
             const class_definition* def = known->get_class_definition();
             const script_value* held = known->native();
-            auto holder = held ? held->get_object_holder() : nullptr;
+            const auto* holder = held ? held->peek_object_holder() : nullptr;   // a read: workers reach one object's holder together
             const bool layer = def && def->is_script_class() && !std::is_base_of_v<script_extensible, T>;
             const bool same_object = holder && holder->data && !holder->data.owner_before(data) && !data.owner_before(holder->data);
             // A member at offset 0 shares its enclosing object's address (and, through an aliasing handle, its owner)

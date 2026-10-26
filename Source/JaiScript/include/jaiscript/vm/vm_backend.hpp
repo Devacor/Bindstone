@@ -841,6 +841,16 @@ namespace jai::vm {
             stack_.push_back(std::move(v));
             ++caller.ip;
         }
+        // Every frame enters through here (record, raw and session entries, method and tail-call pushes, fibers and native entries through
+        // frame_guard): it joins frames_, and its function's captures bind into its slots (a raw-entered frame's slots are its cells until
+        // build_raw_window builds its window).
+        void enter_frame(frame& f) {
+            frames_.push_back(&f);
+            bind_frame_captures(f);
+        }
+        // The one place a function's captures bind into its frame (a converted closure's flat capture array, closure_env null); no
+        // function carries one yet, so it binds nothing
+        void bind_frame_captures(frame&) noexcept {}
         // a frame whose code reads its slots: a call frame, or a program frame whose block-scoped declarations have them (its window)
         static bool has_slots(const frame& f) noexcept { return f.locals && (!f.top_level || f.window_backed); }
         script_value* frame_slot(frame& f, size_t slot) noexcept {

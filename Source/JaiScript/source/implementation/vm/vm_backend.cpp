@@ -249,7 +249,7 @@ struct vm_backend::frame_guard {
 	frame_guard(vm_backend* backend, frame* f)
 		: vm(backend), try_base(backend->try_records_.size()), iter_base(backend->iter_states_.size()),
 		  cfor_base(backend->cfor_states_.size()), top_mark(backend->top_frame_mark_) {
-		vm->frames_.push_back(f);
+		vm->enter_frame(*f);
 		if (f->top_level) { vm->top_frame_mark_ = vm->frames_.size() - 1; }
 	}
 	~frame_guard() {
@@ -1274,7 +1274,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	}
 
 	state.f.unit = handle.get_function()->unit;
-	frames_.push_back(&state.f);
+	enter_frame(state.f);
 	enter_unit(state.f.unit);
 
 	const bool prev_yielding = yielding_;
@@ -9408,7 +9408,7 @@ JAI_FORCEINLINE vm_backend::frame& vm_backend::raw_push(frame& f, const chunk::c
 	rec.f.window_base = std::max(stack_.size(), f.window_base + f.code->local_count);   // above the caller's window, built or not
 	rec.f.stack_base = rec.f.window_base;
 	enter_unit(plan.fn->unit);
-	frames_.push_back(&rec.f);
+	enter_frame(rec.f);
 	// the window is reserved here and built the first time the general form needs it (materialize_raw_window: a flush, a door call); the values
 	// are the cells, and the parameters' cells are dirty so a flush writes them
 	rec.f.window_live = 0;
@@ -14146,7 +14146,7 @@ bool vm_backend::push_plain_frame(frame& caller, const call_site& site, const sc
 	rec.f.top_level = false;
 	rec.f.unit = function.unit;
 	enter_unit(function.unit);
-	frames_.push_back(&rec.f);
+	enter_frame(rec.f);
 	const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
 	stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
 	switch_to_ = &rec.f;
@@ -14262,7 +14262,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.f.top_level = false;
 	rec.f.unit = function.unit;
 	enter_unit(function.unit);
-	frames_.push_back(&rec.f);
+	enter_frame(rec.f);
 	JAI_CALL_PUSH_SECTION(3);
 
 	const bool bound_in_place = binds_slice_in_place(function, stack_.data() + args_base, argc);
@@ -14312,7 +14312,7 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 	tf.window_live = static_cast<uint32_t>(argc);
 	tf.top_level = false;
 	tf.unit = rec.f.unit;   // the frame the tail call replaces is its caller
-	frames_.push_back(&tf);   // ref-param frames_ scan parity with the real push
+	enter_frame(tf);   // ref-param frames_ scan parity with the real push
 	const unit_stamp tail_caller_unit = tf.unit;
 	enter_unit(function.unit);
 	op_status bound{};
@@ -22822,7 +22822,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	rec.f.top_level = false;
 	rec.f.unit = function.unit;
 	enter_unit(function.unit);
-	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
+	enter_frame(rec.f);   // before binding: the ref-param frames_ scan must see this frame
 
 	op_status bound{};
 	try {
@@ -23034,7 +23034,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	rec.f.top_level = false;
 	rec.f.unit = ast->unit;
 	enter_unit(ast->unit);
-	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
+	enter_frame(rec.f);   // before binding: the ref-param frames_ scan must see this frame
 	JAI_MPUSH_SECTION(3);
 
 	op_status bound{};
@@ -23196,7 +23196,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	rec.f.top_level = false;
 	rec.f.unit = ast->unit;
 	enter_unit(ast->unit);
-	frames_.push_back(&rec.f);   // before binding: the ref-param frames_ scan must see this frame
+	enter_frame(rec.f);   // before binding: the ref-param frames_ scan must see this frame
 
 	op_status bound{};
 	try {
@@ -23317,7 +23317,7 @@ op_status vm_backend::push_static_method_frame(frame& caller, script_value&& met
 	rec.f.top_level = false;
 	rec.f.unit = ast->unit;
 	enter_unit(ast->unit);
-	frames_.push_back(&rec.f);
+	enter_frame(rec.f);
 	op_status bound{};
 	try {
 		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code, rec.prev_env, site, &caller, caller.code,

@@ -211,6 +211,110 @@ public:
             check_eq(result.as_int(), 60); // firepower(50) + 10
         });
         
+        test("a_bare_name_in_a_method_resolves_locals_then_members_then_globals", [this]() {
+            // the order holds through every lane the field caches take: a member beats a global defined after the method ran, a
+            // local beats the member and ::name reaches the global
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            e->execute(R"(
+                int x = 100;
+                class A {
+                    int x = 1;
+                    int y = 2;
+                    int read() { return x; }
+                    int read_global() { return ::x; }
+                    int read_local() { int x = 7; return x; }
+                    int read_y() { return y; }
+                    void bump() { x += 1; y = y * 3; }
+                }
+                A a = A();
+                int warm = 0;
+                for (int i = 0; i < 50; i++) { warm += a.read() + a.read_y(); }
+            )");
+            e->execute("int y = 99;");
+            check_eq(std::string("[1, 100, 7, 2]"), e->execute("[a.read(), a.read_global(), a.read_local(), a.read_y()]").to_string());
+            e->execute("for (int i = 0; i < 3; i++) { a.bump(); }");
+            check_eq(std::string("[4, 54, 100, 99]"), e->execute("[a.read(), a.read_y(), x, y]").to_string(), "stores land on the fields");
+        });
+
+        test("a_base_method_reads_and_writes_its_fields_on_every_subclass_layout", [this]() {
+            // single and multiple inheritance put the base's fields at other slots in the derived class; the field caches follow
+            // the receiver's class, alternating classes at one site included
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                class P { int p = 10; }
+                class Q {
+                    int q = 2;
+                    int getq() { return q; }
+                    void setq(int v) { q = v; }
+                    int twice() { return q + q; }
+                }
+                class R : P, Q { int r = 3; }
+                class S : Q { int s0 = 0; int s1 = 0; }
+                array<Q> all = [Q(), R(), S(), R(), Q()];
+                int sum = 0;
+                for (int round = 0; round < 40; round++) {
+                    for (int i = 0; i < all.size(); i++) {
+                        all[i].setq(i + round);
+                        sum += all[i].getq() + all[i].twice();
+                    }
+                }
+                return [sum, all[1].getq(), all[2].getq()];
+            )");
+            check_eq(std::string("[12900, 40, 41]"), r.to_string());
+        });
+
+        test("a_hybrid_methods_bare_names_reach_script_fields_and_cpp_properties", [this]() {
+            struct Body { int hp = 5; std::string tag = "c"; };
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            dynamic_binder<Body>(*e, "Body")
+                .property("hp", &Body::hp)
+                .property("tag", &Body::tag)
+                .build();
+            auto r = e->execute(R"(
+                class Hero : Body {
+                    int power = 3;
+                    int score() { return hp * 10 + power; }
+                    void hit() { hp = hp - 1; power += 2; }
+                    string label() { return tag + to_string(power); }
+                }
+                Hero h = Hero();
+                int total = 0;
+                for (int i = 0; i < 3; i++) { h.hit(); total += h.score(); }
+                return [total, h.hp, h.label()];
+            )");
+            check_eq(std::string("[111, 2, \"c9\"]"), r.to_string());
+        });
+
+        test("a_class_reshaped_while_its_method_runs_reads_the_new_fields", [this]() {
+            // the host redefines the class mid-method (a hot reload adds a field in front and drops one): the running body's
+            // next bare reads follow the migrated instance, and a name whose field went away resolves to the global
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            jai::engine* raw = e.get();
+            e->add_function("reshape", [raw]() { raw->execute("class M { int added = 40; int a = 1; int run() { return a; } }"); });
+            auto r = e->execute(R"(
+                int b = 500;
+                class M {
+                    int a = 1;
+                    int b = 2;
+                    int run() {
+                        int before = a + b;
+                        reshape();
+                        int after = a + b;
+                        return before * 1000 + after;
+                    }
+                }
+                M m = M();
+                int warm = 0;
+                for (int i = 0; i < 20; i++) { warm += m.a + m.b; }
+                return m.run();
+            )");
+            check_eq((int64_t)3501, r.as_int());
+        });
+
         test("class_destructor_basic", [this]() {
             auto js_engine = make_engine();
             stdlib::register_all(*js_engine);

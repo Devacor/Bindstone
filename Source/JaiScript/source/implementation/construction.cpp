@@ -29,10 +29,10 @@ void stamp_literal_field_initializers(class_instance& instance, const script_cla
 }
 
 checked_result<void> construction_host::initialize_level_fields(class_instance& instance, const std::shared_ptr<script_class_definition>& level,
-                                                                const std::shared_ptr<environment>& level_env) {
+                                                                construction_scope& scope) {
 	for (const auto& [field_id, initializer_ast] : level->get_field_initializer_asts()) {
 		if (!initializer_ast) { continue; }
-		auto evaluated = evaluate(initializer_ast, level_env);
+		auto evaluated = evaluate_in(scope, initializer_ast);
 		if (unwinding) { return {}; }
 		if (!evaluated) { return evaluated.error_value(); }
 		instance.set_field(field_id, initializer_store_value(std::move(evaluated.value()), initializer_ast.get()));
@@ -40,33 +40,40 @@ checked_result<void> construction_host::initialize_level_fields(class_instance& 
 	return {};
 }
 
-namespace {
-	std::shared_ptr<environment> construction_member_environment(construction_host& host, const std::shared_ptr<environment>& parent,
-	                                                             const script_value& this_value, class_definition* access) {
-		auto result = std::make_shared<environment>(parent, host.env_symbols);
-		result->define(host.symbols->get_this_id(), this_value);
-		result->set_access_context(access);
-		return result;
+void construction_host::open_scope(construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
+                                   script_class_definition* level, const function_decl* ctor, const std::vector<script_value>* args, bool bind_for_parameters) {
+	scope.env = std::make_shared<environment>(definition_env, env_symbols);
+	scope.env->define(symbols->get_this_id(), this_value);
+	scope.env->set_access_context(level);
+	if (!ctor || !args) { return; }
+	for (size_t i = 0; i < ctor->parameters.size() && i < args->size(); ++i) {
+		const parameter& param = ctor->parameters[i];
+		if (param.symbol_id == UINT64_MAX) { param.symbol_id = symbols->intern(param.name); }
+		scope.env->define(param.symbol_id, bind_for_parameters ? argument_for_binding((*args)[i], parameter_binding(param)) : (*args)[i]);
 	}
+}
 
-	std::shared_ptr<environment> construction_level_environment(construction_host& host, const std::shared_ptr<environment>& definition_env,
-	                                                            const script_value& this_value, script_class_definition* level,
-	                                                            const function_decl& ctor, const std::vector<script_value>& args) {
-		auto result = construction_member_environment(host, definition_env, this_value, level);
-		for (size_t i = 0; i < ctor.parameters.size() && i < args.size(); ++i) {
-			const parameter& param = ctor.parameters[i];
-			if (param.symbol_id == UINT64_MAX) { param.symbol_id = host.symbols->intern(param.name); }
-			result->define(param.symbol_id, args[i]);
+namespace {
+	// a level's scope, opened where its code starts and closed when the construction leaves the level
+	struct level_scope {
+		construction_host& host;
+		construction_scope scope;
+		level_scope(construction_host& h, const std::shared_ptr<environment>& definition_env, const script_value& this_value, script_class_definition* level,
+		            const function_decl* ctor = nullptr, const std::vector<script_value>* args = nullptr, bool bind_for_parameters = false) : host(h) {
+			host.open_scope(scope, definition_env, this_value, level, ctor, args, bind_for_parameters);
 		}
-		return result;
-	}
+		explicit level_scope(construction_host& h) : host(h) {}
+		level_scope(const level_scope&) = delete;
+		level_scope& operator=(const level_scope&) = delete;
+		~level_scope() { if (scope) { host.close_scope(scope); } }
+	};
 
 	// an initializer list's arguments, each taken as it evaluates; a failure propagates as raised
-	checked_result<void> evaluate_initializer_arguments(construction_host& host, const constructor_initializer& initializer, const std::shared_ptr<environment>& env,
+	checked_result<void> evaluate_initializer_arguments(construction_host& host, const constructor_initializer& initializer, construction_scope& scope,
 	                                                    bool fields_run_code, const class_definition* binding_class, std::vector<script_value>& result) {
 		result.reserve(initializer.arguments.size());
 		for (const auto& arg_expr : initializer.arguments) {
-			auto evaluated = host.evaluate(arg_expr, env);
+			auto evaluated = host.evaluate_in(scope, arg_expr);
 			if (!evaluated) { return evaluated.error_value(); }
 			result.push_back(std::move(evaluated.value()));
 			capture_initializer_argument(host.eng, initializer, result.size() - 1, fields_run_code, result.back(),
@@ -148,7 +155,7 @@ namespace {
 	}
 
 	checked_result<void> construct_further_bases(construction_host& host, const std::shared_ptr<script_class_definition>& cls,
-	                                             const script_class_definition& level, const function_decl* ctor, const std::shared_ptr<environment>& level_env,
+	                                             const script_class_definition& level, const function_decl* ctor, construction_scope& level_env,
 	                                             const std::shared_ptr<environment>& definition_env, class_instance& instance, const script_value& this_value,
 	                                             std::optional<call_depth_guard>& initializer_depth);
 
@@ -159,8 +166,8 @@ namespace {
 			stamp_literal_field_initializers(instance, *base, false, host.eng);
 			return {};
 		}
-		auto env = construction_member_environment(host, definition_env, this_value, base.get());
-		return host.evaluate_field_initializers(instance.shared_from_this(), base, env, false, nullptr);
+		level_scope env(host, definition_env, this_value, base.get());
+		return host.evaluate_field_initializers(instance.shared_from_this(), base, env.scope, false, nullptr);
 	}
 
 	// A script base with a constructor: walk the super() chain up to a C++ base (constructed on the way), then run each level's
@@ -184,8 +191,8 @@ namespace {
 				if (ancestor) {
 					std::vector<script_value> ancestor_args;
 					if (init) {
-						auto level_env = construction_level_environment(host, definition_env, this_value, entry.script_class.get(), *entry.ctor, entry.args);
-						auto evaluated = evaluate_initializer_arguments(host, *init, level_env, fields_run_code, ancestor.get(), ancestor_args);
+						level_scope level_env(host, definition_env, this_value, entry.script_class.get(), entry.ctor.get(), &entry.args);
+						auto evaluated = evaluate_initializer_arguments(host, *init, level_env.scope, fields_run_code, ancestor.get(), ancestor_args);
 						if (!evaluated || host.unwinding) { return evaluated; }
 					}
 					if (auto ancestor_script = std::dynamic_pointer_cast<script_class_definition>(ancestor)) {
@@ -207,13 +214,13 @@ namespace {
 		}
 		for (size_t below = chain.size(); below > 0; --below) {
 			auto* it = &chain[below - 1];
-			auto level_env = construction_level_environment(host, definition_env, this_value, it->script_class.get(), *it->ctor, it->args);
+			level_scope level_env(host, definition_env, this_value, it->script_class.get(), it->ctor.get(), &it->args);
 			const auto& level_initializers = it->script_class->effective_initializers(*it->ctor);
 			const auto delegation = std::find_if(level_initializers.begin(), level_initializers.end(), [](const constructor_initializer& init) { return init.target == "this"; });
 			if (delegation != level_initializers.end()) {
 				// C++ delegation: the target constructor constructs the level (its bases, its members and its body) ahead of this body
 				std::vector<script_value> target_args;
-				auto evaluated = evaluate_initializer_arguments(host, *delegation, level_env, fields_run_code, it->script_class.get(), target_args);
+				auto evaluated = evaluate_initializer_arguments(host, *delegation, level_env.scope, fields_run_code, it->script_class.get(), target_args);
 				if (!evaluated || host.unwinding) { return evaluated; }
 				std::vector<std::shared_ptr<function_decl>> other_ctors;
 				for (const auto& candidate : it->script_class->get_constructor_asts()) { if (candidate != it->ctor) { other_ctors.push_back(candidate); } }
@@ -230,13 +237,13 @@ namespace {
 				it = &chain[below - 1];
 			}
 			if (delegation == level_initializers.end()) {
-				auto further = construct_further_bases(host, cls, *it->script_class, it->ctor.get(), level_env, definition_env, instance, this_value, initializer_depth);
+				auto further = construct_further_bases(host, cls, *it->script_class, it->ctor.get(), level_env.scope, definition_env, instance, this_value, initializer_depth);
 				if (!further || host.unwinding) { return further; }
 				it = &chain[below - 1];
 			}
 			dispatch_level_scope level_dispatch(instance, it->script_class.get(), class_instance::cdtor_phase::construction);
 			if (delegation == level_initializers.end()) {
-				auto initialized = host.initialize_level_fields(instance, it->script_class, level_env);
+				auto initialized = host.initialize_level_fields(instance, it->script_class, level_env.scope);
 				if (host.unwinding) { return {}; }
 				if (!initialized) { return initialized; }
 			}
@@ -253,7 +260,7 @@ namespace {
 	// The bases after the first, in declaration order, once the first is constructed and before the level's own members (C++): each
 	// with the arguments the level's initializer list names it with, else default-constructed
 	checked_result<void> construct_further_bases(construction_host& host, const std::shared_ptr<script_class_definition>& cls,
-	                                             const script_class_definition& level, const function_decl* ctor, const std::shared_ptr<environment>& level_env,
+	                                             const script_class_definition& level, const function_decl* ctor, construction_scope& level_env,
 	                                             const std::shared_ptr<environment>& definition_env, class_instance& instance, const script_value& this_value,
 	                                             std::optional<call_depth_guard>& initializer_depth) {
 		const auto& parents = level.get_parent_classes();
@@ -287,7 +294,7 @@ namespace {
 	}
 
 	checked_result<void> construct_base(construction_host& host, const std::shared_ptr<script_class_definition>& cls, const constructor_initializer& initializer,
-	                                    const std::shared_ptr<environment>& definition_env, const std::shared_ptr<environment>& init_env,
+	                                    const std::shared_ptr<environment>& definition_env, construction_scope& init_env,
 	                                    class_instance& instance, const script_value& this_value,
 	                                    std::optional<call_depth_guard>& initializer_depth, bool& handled_parent_init) {
 		auto parent = cls->get_parent();
@@ -349,9 +356,9 @@ checked_result<script_value> initialize_members(construction_host& host, const s
 	}
 	const auto& initializers = cls->effective_initializers(*ctor);
 	const bool all_literal = cls->chain_initializers_all_literal();
-	std::shared_ptr<environment> init_env;
+	level_scope init_scope(host);
+	construction_scope& init_env = init_scope.scope;
 	if (!initializers.empty() || !all_literal) {
-		init_env = construction_member_environment(host, definition_env, this_value, cls.get());
 		// the construction runs code ahead of the body: the call's arguments are taken first, as the body's parameters; a
 		// delegated-to constructor's arguments were taken as they evaluated
 		const std::vector<script_value>* argv = &args;
@@ -362,10 +369,7 @@ checked_result<script_value> initialize_members(construction_host& host, const s
 			}
 			argv = captured_out;
 		}
-		for (size_t i = 0; i < ctor->parameters.size() && i < argv->size(); ++i) {
-			const auto& param = ctor->parameters[i];
-			init_env->define(param.symbol_id, argument_for_binding((*argv)[i], parameter_binding(param)));
-		}
+		host.open_scope(init_env, definition_env, this_value, cls.get(), ctor.get(), argv, true);
 	}
 
 	bool handled_parent_init = false;
@@ -474,8 +478,14 @@ checked_result<script_value> construct_default_instance(construction_host& host,
 		return this_value;
 	}
 	auto sandbox = host.parallel_sandbox();
-	auto init_env = construction_member_environment(host, sandbox ? sandbox : environment_chain_root(host.current_environment()), this_value, cls.get());
-	auto initialized = host.evaluate_field_initializers(instance, cls, init_env, false, aggregate.fills() ? &aggregate : nullptr);
+	const auto scope_parent = sandbox ? sandbox : environment_chain_root(host.current_environment());
+	level_scope init_env(host);
+	if (aggregate.fills()) {
+		host.construction_host::open_scope(init_env.scope, scope_parent, this_value, cls.get(), nullptr, nullptr, false);   // aggregate filling reads the environment
+	} else {
+		host.open_scope(init_env.scope, scope_parent, this_value, cls.get(), nullptr, nullptr, false);
+	}
+	auto initialized = host.evaluate_field_initializers(instance, cls, init_env.scope, false, aggregate.fills() ? &aggregate : nullptr);
 	if (!initialized) { return initialized.error_value(); }
 	return this_value;
 }

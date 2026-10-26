@@ -13392,9 +13392,9 @@ struct interpreter::construction_lender final : detail::construction_host {
     }
 
     checked_result<void> evaluate_field_initializers(const std::shared_ptr<class_instance>& instance, const std::shared_ptr<script_class_definition>& cls,
-                                                     const std::shared_ptr<environment>& init_env, bool skip_parent_recursion,
+                                                     detail::construction_scope& scope, bool skip_parent_recursion,
                                                      const detail::aggregate_plan* aggregate) override {
-        return self.evaluate_field_initializers(instance, cls, init_env, skip_parent_recursion, aggregate);
+        return self.evaluate_field_initializers(instance, cls, scope.env, skip_parent_recursion, aggregate);
     }
 
     std::optional<error_propagator> pass_depth_gate() override { return detail::raise_call_depth(); }

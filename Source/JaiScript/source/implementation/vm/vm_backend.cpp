@@ -19699,7 +19699,8 @@ checked_result<void> vm_backend::run_level_initializers(class_instance& instance
 			region_compile_guard = std::unique_lock<std::mutex>(engine_->parallel_compile_mutex());
 		}
 		arm_listing();
-		auto code = compiler_.compile_field_initializers(class_def.interned_name(), compiled_initializers);
+		static const std::unordered_map<uint64_t, uint32_t> no_slots;
+		auto code = compiler_.compile_construction(class_def.interned_name(), no_slots, 0, {}, {vm_compiler::construction_fields{&class_def, compiled_initializers}});
 		note_compiled(*code);
 		entry.fn = std::make_unique<script_defined_function>(class_def.interned_name(), std::vector<parameter>{}, nullptr,
 		                                                     std::make_shared<block_stmt>(compiled_initializers.empty() ? source_location{} : compiled_initializers.front().second->location, std::vector<declaration_ptr>{}), nullptr, 0);
@@ -19724,6 +19725,221 @@ checked_result<void> vm_backend::run_level_initializers(class_instance& instance
 		return call_script_function(*entry.fn, no_arguments, nullptr, nullptr, nullptr, &method);
 	}();
 	pending_site_ctx_ = pending;
+	if (field_init_exception_) [[unlikely]] {
+		std::exception_ptr thrown = std::move(field_init_exception_);
+		field_init_exception_ = nullptr;
+		std::rethrow_exception(thrown);
+	}
+	if (!ran) { return ran.error_value(); }
+	return {};
+}
+
+// A construction chunk compiles what its frame can run alone: no closure (its captures resolve by name in the environment), no
+// yield, include or import
+static bool construction_frame_expression(const expression* e) {
+	if (!e) { return true; }
+	switch (e->get_type()) {
+		case node_type::lambda_expr: case node_type::yield_expr: case node_type::include_expr: case node_type::import_expr: return false;
+		default: break;
+	}
+	bool ok = true;
+	detail::for_each_child_expression(e, [&](const expression* child) { if (ok && !construction_frame_expression(child)) { ok = false; } });
+	return ok;
+}
+
+// The levels whose field initializers a level's construction runs, bases first, each once (evaluate_field_initializers' order)
+template <class F>
+static void for_each_construction_level(const script_class_definition& level, F&& f, const script_class_definition** seen, size_t& seen_count, int depth = 0) {
+	if (depth > 64) { return; }
+	for (const auto& parent : level.get_parent_classes()) {
+		if (const auto* script_parent = dynamic_cast<const script_class_definition*>(parent.get())) {
+			for_each_construction_level(*script_parent, f, seen, seen_count, depth + 1);
+		}
+	}
+	for (size_t i = 0; i < seen_count; ++i) { if (seen[i] == &level) { return; } }
+	if (seen_count < 64) { seen[seen_count++] = &level; }
+	f(level);
+}
+
+// every expression the plan compiled, in its order (a level's fields after a null marker): the plan is current while they match
+template <class F>
+static void for_each_construction_expression(const script_class_definition& level, const function_decl* ctor, F&& f) {
+	if (ctor) {
+		for (const auto& initializer : const_cast<script_class_definition&>(level).effective_initializers(*ctor)) {
+			for (const auto& argument : initializer.arguments) { f(argument.get()); }
+		}
+	}
+	const script_class_definition* seen[64];
+	size_t seen_count = 0;
+	for_each_construction_level(level, [&](const script_class_definition& fields_level) {
+		f(nullptr);
+		for (const auto& [field_id, initializer] : fields_level.get_field_initializer_asts()) { if (initializer) { f(initializer.get()); } }
+	}, seen, seen_count);
+}
+
+const std::shared_ptr<chunk>* vm_backend::construction_chunk(const std::shared_ptr<environment>& definition_env, script_class_definition& level, const function_decl* ctor, size_t argc) {
+	if (!definition_env || (ctor && ctor->is_coroutine)) { return nullptr; }
+	construction_plan& plan = construction_plans_[construction_key{&level, ctor, argc}];
+	if (plan.unit == current_unit().id) {
+		size_t at = 0;
+		bool same = true;
+		for_each_construction_expression(level, ctor, [&](const expression* e) {
+			if (!same) { return; }
+			if (at >= plan.asts.size() || plan.asts[at] != e) { same = false; return; }
+			++at;
+		});
+		if (same && at == plan.asts.size()) { return plan.code ? &plan.code : nullptr; }
+	}
+	plan.unit = current_unit().id;
+	plan.asts.clear();
+	plan.code.reset();
+	for_each_construction_expression(level, ctor, [&](const expression* e) { plan.asts.push_back(e); });
+	std::vector<expression_ptr> arguments;
+	if (ctor) {
+		for (const auto& initializer : level.effective_initializers(*ctor)) {
+			for (const auto& argument : initializer.arguments) { arguments.push_back(argument); }
+		}
+	}
+	std::vector<vm_compiler::construction_fields> fields;
+	{
+		const script_class_definition* seen[64];
+		size_t seen_count = 0;
+		for_each_construction_level(level, [&](const script_class_definition& fields_level) {
+			vm_compiler::construction_fields entry{&fields_level, {}};
+			for (const auto& [field_id, initializer] : fields_level.get_field_initializer_asts()) {
+				if (initializer) { entry.initializers.emplace_back(field_id, initializer); }
+			}
+			fields.push_back(std::move(entry));
+		}, seen, seen_count);
+	}
+	bool eligible = true;
+	std::unordered_map<uint64_t, uint32_t> name_slots;
+	if (ctor) {
+		for (size_t i = 0; i < ctor->parameters.size() && i < argc; ++i) {
+			const parameter& param = ctor->parameters[i];
+			if (param.is_reference || param.binds_capture || param.slot_index != i) { eligible = false; break; }
+			if (param.symbol_id == UINT64_MAX) { param.symbol_id = symbolizer_->intern(param.name); }
+			name_slots.emplace(param.symbol_id, static_cast<uint32_t>(i));
+		}
+	}
+	for (const auto& argument : arguments) { if (eligible && !construction_frame_expression(argument.get())) { eligible = false; } }
+	for (const auto& entry : fields) {
+		for (const auto& [field_id, initializer] : entry.initializers) { if (eligible && !construction_frame_expression(initializer.get())) { eligible = false; } }
+	}
+	if (!eligible) { return nullptr; }
+	std::unique_lock<std::mutex> region_compile_guard;   // in-region compiles serialize engine-wide (chunk_for_body)
+	if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
+		region_compile_guard = std::unique_lock<std::mutex>(engine_->parallel_compile_mutex());
+	}
+	arm_listing();
+	auto code = compiler_.compile_construction(level.interned_name(), name_slots, std::min(argc, ctor ? ctor->parameters.size() : size_t{0}), arguments, fields);
+	note_compiled(*code);
+	if (code->needs_frame_env) { return nullptr; }
+	plan.code = std::move(code);
+	return &plan.code;
+}
+
+bool vm_backend::open_construction_frame(detail::construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
+                                         script_class_definition* level, const function_decl* ctor, const std::vector<script_value>* args, bool bind_for_parameters) {
+	if (!level) { return false; }
+	const size_t argc = ctor && args ? std::min(args->size(), ctor->parameters.size()) : 0;
+	const std::shared_ptr<chunk>* plan_code = construction_chunk(definition_env, *level, ctor, argc);
+	if (!plan_code) { return false; }
+	const chunk* code = plan_code->get();
+	if (construction_frames_top_ == construction_frames_.size()) { construction_frames_.push_back(std::make_unique<construction_frame>()); }
+	construction_frame& cf = *construction_frames_[construction_frames_top_++];
+	cf.locals = call_frame{};
+	if (!this_box_pool_.empty()) {
+		cf.locals.this_object_ptr = std::move(this_box_pool_.back());
+		this_box_pool_.pop_back();
+	}
+	cf.locals.set_this(this_value);
+	cf.locals.scope_static = level;
+	cf.locals.function_name = level->interned_name();
+	cf.definition_env = definition_env;
+	cf.f = frame{};
+	cf.f.code = const_cast<chunk*>(code);
+	cf.f.pin = *plan_code;
+	cf.f.locals = &cf.locals;
+	cf.f.window_backed = true;
+	cf.window_base = stack_.size();
+	cf.f.window_base = cf.window_base;
+	cf.f.top_level = false;
+	stack_.fill_null_to(cf.window_base + code->local_count, engine_);
+	for (size_t i = 0; i < argc; ++i) {
+		stack_[cf.window_base + i] = bind_for_parameters ? detail::argument_for_binding((*args)[i], detail::parameter_binding(ctor->parameters[i])) : (*args)[i];
+	}
+	cf.f.window_live = static_cast<uint32_t>(argc);
+	if (engine_) { engine_->execution_limits().memory_charge_deferred((1 + argc) * (sizeof(script_value) + 64)); }   // the allowance the level environment's defines charged (environment::define)
+	scope.frame = &cf;
+	return true;
+}
+
+void vm_backend::close_construction_frame(detail::construction_scope& scope) {
+	auto* cf = static_cast<construction_frame*>(scope.frame);
+	scope.frame = nullptr;
+	if (!cf) { return; }
+	if (stack_.size() > cf->window_base) { stack_.truncate(cf->window_base); }   // the parameters die with the level, as its environment did
+	cf->f.window_live = 0;
+	if (cf->locals.this_object_ptr) {
+		{ script_value dying = std::move(*cf->locals.this_object_ptr); }
+		if (this_box_pool_.size() < 32) { this_box_pool_.push_back(std::move(cf->locals.this_object_ptr)); }
+	}
+	cf->f.pin.reset();
+	cf->definition_env.reset();
+	--construction_frames_top_;
+}
+
+// One segment of the level's code in its frame, run as a top-level evaluation runs (eval_expression): no call of its own, the
+// caller's unit, the error or the unwinding as the evaluation leaves them
+checked_result<script_value> vm_backend::run_construction_segment(construction_frame& cf, const void* key, bool& found) {
+	found = false;
+	uint32_t ip = 0;
+	for (const auto& [segment, at] : cf.f.code->construction_segments) {
+		if (segment == key) { ip = at; found = true; break; }
+	}
+	if (!found) { return make_null(); }
+	std::shared_ptr<environment> saved_env = std::move(environment_);
+	environment_ = cf.definition_env;
+	bool previous_has_return = has_return_value_;
+	std::optional<script_value> previous_return = std::move(return_value_);
+	has_return_value_ = false;
+	frame& f = cf.f;
+	f.ip = ip;
+	f.stack_base = stack_.size();
+	f.unit = current_unit();
+	struct segment_restore {
+		vm_backend* self; std::shared_ptr<environment>& env; size_t stack_base; size_t pending; bool& had_return; std::optional<script_value>& previous;
+		~segment_restore() {
+			truncate_detached(self->pending_callees_, pending);
+			if (self->stack_.size() > stack_base) { self->stack_.truncate(stack_base); }
+			self->environment_ = std::move(env);
+			self->has_return_value_ = had_return;
+			self->return_value_ = std::move(previous);
+		}
+	} restore{this, saved_env, f.stack_base, pending_callees_.size(), previous_has_return, previous_return};
+	frame_guard guard(this, &f);
+	auto r = run(f);
+	if (!r) { return r.error_value(); }
+	if (stack_.size() > f.stack_base) { return std::move(stack_.back()); }
+	return make_null();
+}
+
+// the field initializers of a level and its script bases in the level's frame, bases first, as evaluate_field_initializers runs them
+checked_result<void> vm_backend::construction_frame_fields(construction_frame& cf, class_instance& instance, script_class_definition& level, bool skip_parent_recursion) {
+	const unit_stamp class_unit = level.unit();
+	unit_override_scope unit_scope(this, &class_unit);
+	if (!skip_parent_recursion) {
+		for (const auto& parent : level.get_parent_classes()) {
+			if (auto* script_parent = dynamic_cast<script_class_definition*>(parent.get())) {
+				auto initialized = construction_frame_fields(cf, instance, *script_parent, false);
+				if (!initialized) { return initialized; }
+			}
+		}
+	}
+	detail::dispatch_level_scope level_dispatch(instance, &level, class_instance::cdtor_phase::construction);   // KEEP BYTE-PARALLEL with the interpreter
+	bool found = false;
+	auto ran = run_construction_segment(cf, &level, found);
 	if (field_init_exception_) [[unlikely]] {
 		std::exception_ptr thrown = std::move(field_init_exception_);
 		field_init_exception_ = nullptr;
@@ -19868,15 +20084,44 @@ struct vm_backend::construction_lender final : detail::construction_host {
 	}
 
 	checked_result<void> evaluate_field_initializers(const std::shared_ptr<class_instance>& instance, const std::shared_ptr<script_class_definition>& cls,
-	                                                 const std::shared_ptr<environment>& init_env, bool skip_parent_recursion,
+	                                                 detail::construction_scope& scope, bool skip_parent_recursion,
 	                                                 const detail::aggregate_plan* aggregate) override {
-		return self.evaluate_field_initializers(instance, cls, init_env, skip_parent_recursion, aggregate);
+		if (scope.frame && !aggregate) {
+			return self.construction_frame_fields(*static_cast<construction_frame*>(scope.frame), *instance, *cls, skip_parent_recursion);
+		}
+		return self.evaluate_field_initializers(instance, cls, scope.env, skip_parent_recursion, aggregate);
 	}
-
 	checked_result<void> initialize_level_fields(class_instance& instance, const std::shared_ptr<script_class_definition>& level,
-	                                             const std::shared_ptr<environment>& level_env) override {
+	                                             detail::construction_scope& scope) override {
 		if (level->get_field_initializer_asts().empty()) { return {}; }
-		return self.run_level_initializers(instance, *level, level_env);   // under the caller's unit, as each evaluation ran
+		if (scope.frame) {   // under the caller's unit, as each evaluation ran
+			bool found = false;
+			auto ran = self.run_construction_segment(*static_cast<construction_frame*>(scope.frame), level.get(), found);
+			if (self.field_init_exception_) [[unlikely]] {
+				std::exception_ptr thrown = std::move(self.field_init_exception_);
+				self.field_init_exception_ = nullptr;
+				std::rethrow_exception(thrown);
+			}
+			if (!ran) { return ran.error_value(); }
+			return {};
+		}
+		return self.run_level_initializers(instance, *level, scope.env);
+	}
+	void open_scope(detail::construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
+	                script_class_definition* level, const function_decl* ctor, const std::vector<script_value>* args, bool bind_for_parameters) override {
+		if (self.open_construction_frame(scope, definition_env, this_value, level, ctor, args, bind_for_parameters)) { return; }
+		detail::construction_host::open_scope(scope, definition_env, this_value, level, ctor, args, bind_for_parameters);
+	}
+	void close_scope(detail::construction_scope& scope) override {
+		if (scope.frame) { self.close_construction_frame(scope); }
+	}
+	checked_result<script_value> evaluate_in(detail::construction_scope& scope, const expression_ptr& expr) override {
+		if (scope.frame) {
+			bool found = false;
+			auto ran = self.run_construction_segment(*static_cast<construction_frame*>(scope.frame), expr.get(), found);
+			if (found) { return ran; }
+		}
+		return evaluate(expr, scope.env);
 	}
 	std::optional<error_propagator> pass_depth_gate() override { return self.pass_depth_gate(); }
 	std::shared_ptr<environment> current_environment() override { return self.environment_; }

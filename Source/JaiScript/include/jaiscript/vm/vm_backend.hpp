@@ -31,7 +31,7 @@
 
 namespace jai {
     class script_class_definition;
-    namespace detail { struct caller_frame_view; struct namespace_store_target; struct aggregate_plan; }
+    namespace detail { struct caller_frame_view; struct namespace_store_target; struct aggregate_plan; struct construction_scope; }
     struct script_namespace_data;
 }
 
@@ -1783,14 +1783,50 @@ namespace jai::vm {
             std::vector<std::pair<uint64_t, script_value>> values;
         };
         std::unordered_map<const class_definition*, field_init_plan> field_init_plans_;
-        // A class level's field initializers compiled once into a method body over the level's initializer environment
-        // (vm_compiler::compile_field_initializers); keyed by the class, rebuilt when its initializers or the unit change
+        // A class level's field initializers as one method body over its initializer environment: the form a level runs when its
+        // construction chunk cannot (keyed by the class, rebuilt when its initializers or the unit change)
         struct level_initializers {
             uint64_t unit = UINT64_MAX;
             std::vector<const expression*> asts;
             std::unique_ptr<script_defined_function> fn;
         };
         std::unordered_map<const class_definition*, level_initializers> level_initializers_;
+        // A constructor level's construction chunk (vm_compiler::compile_construction): its initializer-list arguments and the field
+        // initializers of the class and its script bases, with the constructor's first argc parameters in slots; keyed by the level,
+        // the constructor and argc, checked against the expressions it compiled. null code: the level runs in its environment
+        struct construction_key {
+            const class_definition* level;
+            const function_decl* ctor;
+            size_t argc;
+            bool operator==(const construction_key&) const = default;
+        };
+        struct construction_key_hash {
+            size_t operator()(const construction_key& k) const noexcept {
+                return std::hash<const void*>{}(k.level) ^ (std::hash<const void*>{}(k.ctor) * 31) ^ (k.argc * 0x9E3779B97F4A7C15ull);
+            }
+        };
+        struct construction_plan {
+            uint64_t unit = UINT64_MAX;
+            std::vector<const expression*> asts;
+            std::shared_ptr<chunk> code;
+        };
+        std::unordered_map<construction_key, construction_plan, construction_key_hash> construction_plans_;
+        // A level's construction frame, open from where its code starts to where the construction leaves it: the chunk, `this`
+        // and the parameters in a window on the value stack; frames nest as the levels do (a pool, reused)
+        struct construction_frame {
+            call_frame locals;
+            frame f;
+            std::shared_ptr<environment> definition_env;
+            size_t window_base = 0;
+        };
+        std::vector<std::unique_ptr<construction_frame>> construction_frames_;
+        size_t construction_frames_top_ = 0;
+        const std::shared_ptr<chunk>* construction_chunk(const std::shared_ptr<environment>& definition_env, script_class_definition& level, const function_decl* ctor, size_t argc);
+        bool open_construction_frame(detail::construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
+                                     script_class_definition* level, const function_decl* ctor, const std::vector<script_value>* args, bool bind_for_parameters);
+        void close_construction_frame(detail::construction_scope& scope);
+        checked_result<script_value> run_construction_segment(construction_frame& cf, const void* key, bool& found);
+        checked_result<void> construction_frame_fields(construction_frame& cf, class_instance& instance, script_class_definition& level, bool skip_parent_recursion);
         // what a field store inside a level's initializer chunk threw, rethrown where the store would have thrown natively
         std::exception_ptr field_init_exception_;
         checked_result<void> run_level_initializers(class_instance& instance, script_class_definition& class_def,

@@ -11,6 +11,16 @@
 namespace jai::detail {
 	struct aggregate_plan;
 
+	// What a constructor level's initializer-list arguments and field initializers run in: `this`, the constructor's parameters
+	// by name, then the definition environment. The host opens it where the level's code starts (construction_host::open_scope):
+	// an environment (the interpreter, and a level the vm cannot run in a frame) or the host's own frame (the vm's construction
+	// frame, the parameters in its slots)
+	struct construction_scope {
+		std::shared_ptr<environment> env;
+		void* frame = nullptr;
+		explicit operator bool() const noexcept { return env || frame; }
+	};
+
 	// What a backend lends the one construction kernel both backends run: its evaluator, its constructor-body call, its field
 	// initializers and its depth and unwinding state. The kernel's common paths call none of the hooks.
 	class construction_host {
@@ -35,11 +45,16 @@ namespace jai::detail {
 		virtual checked_result<script_value> run_constructor_body(const std::shared_ptr<function_decl>& ctor, const std::shared_ptr<environment>& definition_env,
 		                                                          const script_value& this_value, class_definition* access, const std::vector<script_value>& args) = 0;
 		virtual checked_result<void> evaluate_field_initializers(const std::shared_ptr<class_instance>& instance, const std::shared_ptr<script_class_definition>& cls,
-		                                                         const std::shared_ptr<environment>& init_env, bool skip_parent_recursion, const aggregate_plan* aggregate) = 0;
-		// A constructor level's own field initializers over its level environment, in declaration order (each evaluated, then
-		// stored): the interpreter evaluates each, the vm runs the level's compiled initializer chunk (construction.cpp)
+		                                                         construction_scope& scope, bool skip_parent_recursion, const aggregate_plan* aggregate) = 0;
+		// A constructor level's own field initializers in its scope, in declaration order (each evaluated, then stored)
 		virtual checked_result<void> initialize_level_fields(class_instance& instance, const std::shared_ptr<script_class_definition>& level,
-		                                                     const std::shared_ptr<environment>& level_env);
+		                                                     construction_scope& scope);
+		// The level's scope: its access context `level`, and the constructor's first args (as the parameters' bindings take them
+		// when bind_for_parameters, else as they are); a null ctor binds none. The default is the level environment
+		virtual void open_scope(construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
+		                        script_class_definition* level, const function_decl* ctor, const std::vector<script_value>* args, bool bind_for_parameters);
+		virtual void close_scope(construction_scope&) {}
+		virtual checked_result<script_value> evaluate_in(construction_scope& scope, const expression_ptr& expr) { return evaluate(expr, scope.env); }
 		virtual std::optional<error_propagator> pass_depth_gate() = 0;
 		virtual std::shared_ptr<environment> current_environment() = 0;
 		virtual std::shared_ptr<environment> global_environment() = 0;

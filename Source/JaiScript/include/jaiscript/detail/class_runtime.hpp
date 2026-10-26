@@ -208,6 +208,7 @@ inline void class_definition::bump_method_epoch() {
 
 inline void class_definition::bump_field_shape_epoch() {
     ++field_shape_epoch_;
+    if (field_slots_current_.load(std::memory_order_acquire)) { rebuild_declared_slot_types(); }   // a definition's thread, between regions
     for (auto& weak_derived : derived_classes_) {
         if (auto derived = weak_derived.lock()) {
             derived->bump_field_shape_epoch();
@@ -303,15 +304,10 @@ inline void class_definition::replace_field_declared_types(std::unordered_map<ui
 inline void class_definition::destroy_chain(class_instance* instance, const class_definition* level) const { destroy_levels(instance, level, nullptr); }
 
 inline type_info_ptr class_definition::get_field_declared_type(uint64_t id) const {
-    // a declared field's type by its slot: the chain walk once per field shape (field_shape_epoch_ moves down the chain with any declared type)
+    // a declared field's type by its slot, from the table the layout build and every field-shape change fill (never built here, so a
+    // parallel reader only reads); a table behind the current shape answers by the chain walk
     const uint32_t slot = field_slot(id);
-    if (slot != k_no_field_slot) {
-        if (slot_declared_epoch_ != field_shape_epoch_ || slot_declared_types_.size() != slot_to_field_.size()) [[unlikely]] {
-            slot_declared_types_.clear();
-            slot_declared_types_.reserve(slot_to_field_.size());
-            for (const uint64_t field : slot_to_field_) { slot_declared_types_.push_back(field_declared_type_walk(field)); }
-            slot_declared_epoch_ = field_shape_epoch_;
-        }
+    if (slot != k_no_field_slot && slot_declared_epoch_ == field_shape_epoch_ && slot < slot_declared_types_.size()) {
         return slot_declared_types_[slot];
     }
     return field_declared_type_walk(id);

@@ -854,9 +854,13 @@ public:
     // in the chain (runtime-added fields live in the instance overflow map).
     static constexpr uint32_t k_no_field_slot = UINT32_MAX;
     void ensure_field_slots() const {
-        if (!field_slots_current_) { rebuild_field_slots(); }
+        if (!field_slots_current_.load(std::memory_order_acquire)) [[unlikely]] { rebuild_field_slots_once(); }
     }
+    // the layout's build under the class's build flag: parallel workers reading a class whose layout is stale build it once, never
+    // concurrently (a definition invalidates it only on the main thread, between regions)
+    void rebuild_field_slots_once() const;
     void rebuild_field_slots() const;
+    void rebuild_declared_slot_types() const;   // slot_declared_types_ from the chain walk, under the current field shape
     uint32_t field_slot(uint64_t id) const {
         ensure_field_slots();
         const size_t n = slot_to_field_.size();
@@ -1366,7 +1370,8 @@ private:
     mutable std::vector<uint64_t> slot_to_field_;
     mutable std::vector<uint8_t> cpp_property_slots_;   // see slot_is_cpp_property
     mutable bool has_cpp_property_slots_ = false;
-    mutable bool field_slots_current_ = false;   // re-walk the chain on next query
+    mutable std::atomic<bool> field_slots_current_{false};   // re-walk the chain on next query
+    mutable std::atomic_flag field_slots_building_;
     mutable bool destructor_tree_cached_ = false;
     mutable uint64_t destructor_tree_epoch_ = UINT64_MAX;
     mutable script_value null_field_value_;

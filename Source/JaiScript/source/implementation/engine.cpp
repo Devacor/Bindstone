@@ -474,6 +474,7 @@ struct engine::implementation {
         }
     } ref_holder_pool_;
     ref_holder_pool_slot_holder object_holder_pool_;
+    ref_holder_pool_slot_holder array_node_pool_;
     // Outlives every value-owning member below: their releases at teardown can still run on it
     detail::release_machine release_;
 
@@ -2197,6 +2198,14 @@ void*& engine::object_holder_pool_slot() {
 
 void engine::set_object_holder_pool_teardown(void (*teardown)(void*)) {
     impl->object_holder_pool_.teardown = teardown;
+}
+
+void*& engine::array_node_pool_slot() {
+    return impl->array_node_pool_.pool;
+}
+
+void engine::set_array_node_pool_teardown(void (*teardown)(void*)) {
+    impl->array_node_pool_.teardown = teardown;
 }
 
 void*& engine::vec_node_pool_slot() {

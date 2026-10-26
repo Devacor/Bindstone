@@ -14,19 +14,110 @@
 
 namespace jai::detail {
 
+    // The spilled form of env_id_map / env_id_set: one open-addressed allocation (keys, then values), linear probing,
+    // grown at half full; a spill is one allocation instead of a bucket array and a node per entry
+    template <class V>
+    class env_flat_table {
+        static constexpr uint64_t k_empty = UINT64_MAX;
+        static constexpr uint64_t k_gone = UINT64_MAX - 1;
+        uint64_t* keys_ = nullptr;
+        V* values_ = nullptr;
+        uint32_t mask_ = 0;
+        uint32_t used_ = 0;    // live + gone
+        uint32_t live_ = 0;
+
+        static size_t index_of(uint64_t key, uint32_t mask) noexcept { return static_cast<size_t>((key * 0x9E3779B97F4A7C15ull) >> 32) & mask; }
+        void release() noexcept {
+            if (!keys_) { return; }
+            for (uint32_t i = 0; i <= mask_; ++i) { if (keys_[i] < k_gone) { values_[i].~V(); } }
+            ::operator delete(static_cast<void*>(keys_));
+            keys_ = nullptr;
+        }
+        void rebuild(uint32_t capacity) {
+            uint64_t* old_keys = keys_;
+            V* old_values = values_;
+            const uint32_t old_mask = mask_;
+            void* memory = ::operator new(capacity * (sizeof(uint64_t) + sizeof(V)));
+            keys_ = static_cast<uint64_t*>(memory);
+            values_ = reinterpret_cast<V*>(keys_ + capacity);
+            mask_ = capacity - 1;
+            used_ = live_ = 0;
+            for (uint32_t i = 0; i < capacity; ++i) { keys_[i] = k_empty; }
+            if (old_keys) {
+                for (uint32_t i = 0; i <= old_mask; ++i) {
+                    if (old_keys[i] < k_gone) {
+                        insert_new(old_keys[i]) = std::move(old_values[i]);
+                        old_values[i].~V();
+                    }
+                }
+                ::operator delete(static_cast<void*>(old_keys));
+            }
+        }
+        V& insert_new(uint64_t key) {
+            size_t i = index_of(key, mask_);
+            while (keys_[i] < k_gone) { i = (i + 1) & mask_; }
+            if (keys_[i] == k_empty) { ++used_; }
+            keys_[i] = key;
+            ++live_;
+            return *new (values_ + i) V{};
+        }
+
+    public:
+        explicit env_flat_table(uint32_t capacity) { rebuild(capacity); }
+        env_flat_table(const env_flat_table&) = delete;
+        env_flat_table& operator=(const env_flat_table&) = delete;
+        ~env_flat_table() { release(); }
+
+        V* find(uint64_t key) noexcept {
+            for (size_t i = index_of(key, mask_);; i = (i + 1) & mask_) {
+                if (keys_[i] == key) { return values_ + i; }
+                if (keys_[i] == k_empty) { return nullptr; }
+            }
+        }
+        V& operator[](uint64_t key) {
+            if (V* found = find(key)) { return *found; }
+            if ((used_ + 1) * 2 > mask_ + 1) { rebuild(live_ * 4 > mask_ + 1 ? (mask_ + 1) * 2 : mask_ + 1); }
+            return insert_new(key);
+        }
+        bool erase(uint64_t key) noexcept {
+            V* found = find(key);
+            if (!found) { return false; }
+            const size_t i = static_cast<size_t>(found - values_);
+            found->~V();
+            keys_[i] = k_gone;
+            --live_;
+            return true;
+        }
+        void clear() noexcept {
+            for (uint32_t i = 0; i <= mask_; ++i) {
+                if (keys_[i] < k_gone) { values_[i].~V(); }
+                keys_[i] = k_empty;
+            }
+            used_ = live_ = 0;
+        }
+        size_t size() const noexcept { return live_; }
+        template <class F> void for_each(F&& f) const {
+            for (uint32_t i = 0; i <= mask_; ++i) { if (keys_[i] < k_gone) { f(keys_[i], values_[i]); } }
+        }
+        template <class P> void erase_if(P&& drop) {
+            for (uint32_t i = 0; i <= mask_; ++i) {
+                if (keys_[i] < k_gone && drop(keys_[i], values_[i])) { values_[i].~V(); keys_[i] = k_gone; --live_; }
+            }
+        }
+    };
+
     // An environment's id -> value table: the first entries live in the environment itself (a scope or a closure
-    // defines a handful of names), a hash table takes over once they outgrow it and stays for the env's life
+    // defines a handful of names), a flat table takes over once they outgrow it and stays for the env's life
     template <class V, size_t N = 4>
     class env_id_map {
         struct slot { uint64_t key; V value; };
         slot inline_[N];
         uint32_t count_ = 0;
-        std::unique_ptr<std::unordered_map<uint64_t, V>> big_;
+        std::unique_ptr<env_flat_table<V>> big_;
 
         void spill() {
-            big_ = std::make_unique<std::unordered_map<uint64_t, V>>();
-            big_->reserve(N * 4);
-            for (uint32_t i = 0; i < count_; ++i) { big_->emplace(inline_[i].key, inline_[i].value); }
+            big_ = std::make_unique<env_flat_table<V>>(static_cast<uint32_t>(N * 4));
+            for (uint32_t i = 0; i < count_; ++i) { (*big_)[inline_[i].key] = inline_[i].value; }
             count_ = 0;
         }
 
@@ -36,10 +127,7 @@ namespace jai::detail {
         env_id_map& operator=(const env_id_map&) = delete;
 
         V* find(uint64_t key) noexcept {
-            if (big_) {
-                auto it = big_->find(key);
-                return it == big_->end() ? nullptr : &it->second;
-            }
+            if (big_) { return big_->find(key); }
             for (uint32_t i = 0; i < count_; ++i) {
                 if (inline_[i].key == key) { return &inline_[i].value; }
             }
@@ -61,7 +149,7 @@ namespace jai::detail {
         }
 
         bool erase(uint64_t key) {
-            if (big_) { return big_->erase(key) != 0; }
+            if (big_) { return big_->erase(key); }
             for (uint32_t i = 0; i < count_; ++i) {
                 if (inline_[i].key == key) {
                     inline_[i] = inline_[--count_];
@@ -75,19 +163,19 @@ namespace jai::detail {
             count_ = 0;
             if (big_) { big_->clear(); }
         }
-        bool empty() const noexcept { return big_ ? big_->empty() : count_ == 0; }
+        bool empty() const noexcept { return big_ ? big_->size() == 0 : count_ == 0; }
         size_t size() const noexcept { return big_ ? big_->size() : count_; }
 
         template <class F> void for_each(F&& f) const {
             if (big_) {
-                for (const auto& [key, value] : *big_) { f(key, value); }
+                big_->for_each(f);
                 return;
             }
             for (uint32_t i = 0; i < count_; ++i) { f(inline_[i].key, inline_[i].value); }
         }
         template <class P> void erase_if(P&& drop) {
             if (big_) {
-                for (auto it = big_->begin(); it != big_->end();) { it = drop(it->first, it->second) ? big_->erase(it) : std::next(it); }
+                big_->erase_if(drop);
                 return;
             }
             for (uint32_t i = 0; i < count_;) {
@@ -96,12 +184,13 @@ namespace jai::detail {
         }
     };
 
-    // The ids an environment defines: the first N inline, a hash set past them
+    // The ids an environment defines: the first N inline, a flat table past them
     template <size_t N = 4>
     class env_id_set {
+        struct present {};
         uint64_t inline_[N];
         uint32_t count_ = 0;
-        std::unique_ptr<std::unordered_set<uint64_t>> big_;
+        std::unique_ptr<env_flat_table<present>> big_;
 
     public:
         env_id_set() = default;
@@ -109,7 +198,7 @@ namespace jai::detail {
         env_id_set& operator=(const env_id_set&) = delete;
 
         bool contains(uint64_t key) const noexcept {
-            if (big_) { return big_->count(key) != 0; }
+            if (big_) { return big_->find(key) != nullptr; }
             for (uint32_t i = 0; i < count_; ++i) {
                 if (inline_[i] == key) { return true; }
             }
@@ -122,22 +211,21 @@ namespace jai::detail {
                     inline_[count_++] = key;
                     return;
                 }
-                big_ = std::make_unique<std::unordered_set<uint64_t>>();
-                big_->reserve(N * 4);
-                for (uint32_t i = 0; i < count_; ++i) { big_->insert(inline_[i]); }
+                big_ = std::make_unique<env_flat_table<present>>(static_cast<uint32_t>(N * 4));
+                for (uint32_t i = 0; i < count_; ++i) { (*big_)[inline_[i]]; }
                 count_ = 0;
             }
-            big_->insert(key);
+            (*big_)[key];
         }
         void clear() noexcept {
             count_ = 0;
             if (big_) { big_->clear(); }
         }
-        bool empty() const noexcept { return big_ ? big_->empty() : count_ == 0; }
+        bool empty() const noexcept { return big_ ? big_->size() == 0 : count_ == 0; }
         size_t size() const noexcept { return big_ ? big_->size() : count_; }
         template <class F> void for_each(F&& f) const {
             if (big_) {
-                for (uint64_t key : *big_) { f(key, true); }
+                big_->for_each([&](uint64_t key, const present&) { f(key, true); });
                 return;
             }
             for (uint32_t i = 0; i < count_; ++i) { f(inline_[i], true); }

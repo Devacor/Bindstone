@@ -463,8 +463,9 @@ struct holder_block_pool {
         }
     }
 
-    strong_ptr<T> acquire() {
-        if (free_blocks.empty()) [[unlikely]] { return acquire_fresh(); }
+    template <class... A>
+    strong_ptr<T> acquire(A&&... args) {
+        if (free_blocks.empty()) [[unlikely]] { return acquire_fresh(std::forward<A>(args)...); }
         block* b = free_blocks.back();
         free_blocks.pop_back();
         b->strong_count = 1;
@@ -473,18 +474,20 @@ struct holder_block_pool {
         b->magic = cb_magic_live;
 #endif
         ++owned;
-        return adopt_pooled(new (b->storage) T());
+        return adopt_pooled(new (b->storage) T(std::forward<A>(args)...));
     }
 
-    JAI_NOINLINE strong_ptr<T> acquire_fresh() {
+    template <class... A>
+    JAI_NOINLINE strong_ptr<T> acquire_fresh(A&&... args) {
         block* b = new block();
         b->home = this;
         b->dealloc_fn = &return_block;
         ++owned;
-        return adopt_pooled(new (b->storage) T());
+        return adopt_pooled(new (b->storage) T(std::forward<A>(args)...));
     }
 
-    JAI_NOINLINE static strong_ptr<T> acquire_plain() { return make_strong<T>(); }
+    template <class... A>
+    JAI_NOINLINE static strong_ptr<T> acquire_plain(A&&... args) { return make_strong<T>(std::forward<A>(args)...); }
 
     static void teardown(void* p) {
         auto* pool = static_cast<holder_block_pool*>(p);
@@ -501,9 +504,10 @@ struct holder_block_pool {
         (eng->*set_teardown)(&teardown);
     }
 
-    static strong_ptr<T> acquire_from(engine* eng, void*& slot, void (engine::*set_teardown)(void (*)(void*))) {
+    template <class... A>
+    static strong_ptr<T> acquire_from(engine* eng, void*& slot, void (engine::*set_teardown)(void (*)(void*)), A&&... args) {
         if (!slot) [[unlikely]] { install(eng, slot, set_teardown); }
-        return static_cast<holder_block_pool*>(slot)->acquire();
+        return static_cast<holder_block_pool*>(slot)->acquire(std::forward<A>(args)...);
     }
 };
 
@@ -884,7 +888,8 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
     }
 
     // Create node with small default capacity to avoid first few reallocations
-    auto node = make_strong<script_array>(node_kind);
+    auto node = eng->parallel_region_active() ? jai::detail::holder_block_pool<script_array, 1024>::acquire_plain(node_kind)
+        : jai::detail::holder_block_pool<script_array, 1024>::acquire_from(eng, eng->array_node_pool_slot(), &engine::set_array_node_pool_teardown, node_kind);
     node->owner = eng;
     node->reserve(8);
     v.storage_ = node;

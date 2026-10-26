@@ -1258,6 +1258,8 @@ namespace jai {
         void set_vec_node_pool_teardown(void (*teardown)(void*));
         void*& object_holder_pool_slot();
         void set_object_holder_pool_teardown(void (*teardown)(void*));
+        void*& array_node_pool_slot();
+        void set_array_node_pool_teardown(void (*teardown)(void*));
         // The weak list of cells an escaped closure kept past a frame-exit cycle check (script_value::release_cell_cycles)
         void*& cell_cycle_registry_slot();
         void set_cell_cycle_registry_teardown(void (*teardown)(void*));

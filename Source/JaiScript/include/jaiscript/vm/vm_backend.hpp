@@ -1790,7 +1790,6 @@ namespace jai::vm {
             std::vector<const expression*> asts;
             std::unique_ptr<script_defined_function> fn;
         };
-        std::unordered_map<const class_definition*, level_initializers> level_initializers_;
         // A constructor level's construction chunk (vm_compiler::compile_construction): its initializer-list arguments and the field
         // initializers of the class and its script bases, with the constructor's first argc parameters in slots; keyed by the level,
         // the constructor and argc, checked against the expressions it compiled. null code: the level runs in its environment
@@ -1810,7 +1809,17 @@ namespace jai::vm {
             std::vector<const expression*> asts;
             std::shared_ptr<chunk> code;
         };
-        std::unordered_map<construction_key, construction_plan, construction_key_hash> construction_plans_;
+        // The plans a construction opens, direct-mapped by (level, constructor, argc): a hit while no class was (re)defined and the
+        // unit holds is the plan without a map probe or a walk of its expressions (map nodes never move)
+        struct construction_memo {
+            const class_definition* level = nullptr;
+            const function_decl* ctor = nullptr;
+            size_t argc = 0;
+            uint64_t unit = UINT64_MAX;
+            uint64_t class_epoch = UINT64_MAX;
+            construction_plan* plan = nullptr;
+        };
+        static constexpr size_t k_construction_memo_size = 64;
         // A level's construction frame, open from where its code starts to where the construction leaves it: the chunk, `this`
         // and the parameters in a window on the value stack; frames nest as the levels do (a pool, reused)
         struct construction_frame {
@@ -1819,16 +1828,26 @@ namespace jai::vm {
             std::shared_ptr<environment> definition_env;
             size_t window_base = 0;
         };
-        std::vector<std::unique_ptr<construction_frame>> construction_frames_;
-        size_t construction_frames_top_ = 0;
+        // The construction machinery's state, boxed: the backend's own layout stays as it was for code that never constructs
+        struct construction_state {
+            std::unordered_map<const class_definition*, level_initializers> level_initializers;
+            std::unordered_map<construction_key, construction_plan, construction_key_hash> plans;
+            construction_memo memo[k_construction_memo_size];
+            std::vector<std::unique_ptr<construction_frame>> frames;
+            size_t frames_top = 0;
+            std::exception_ptr field_init_exception;   // what a field store in a construction chunk threw, rethrown natively
+        };
+        std::unique_ptr<construction_state> construction_;
+        construction_state& construction() {
+            if (!construction_) [[unlikely]] { construction_ = std::make_unique<construction_state>(); }
+            return *construction_;
+        }
         const std::shared_ptr<chunk>* construction_chunk(const std::shared_ptr<environment>& definition_env, script_class_definition& level, const function_decl* ctor, size_t argc);
         bool open_construction_frame(detail::construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
                                      script_class_definition* level, const function_decl* ctor, const std::vector<script_value>* args, bool bind_for_parameters);
         void close_construction_frame(detail::construction_scope& scope);
         checked_result<script_value> run_construction_segment(construction_frame& cf, const void* key, bool& found);
         checked_result<void> construction_frame_fields(construction_frame& cf, class_instance& instance, script_class_definition& level, bool skip_parent_recursion);
-        // what a field store inside a level's initializer chunk threw, rethrown where the store would have thrown natively
-        std::exception_ptr field_init_exception_;
         checked_result<void> run_level_initializers(class_instance& instance, script_class_definition& class_def,
                                                     const std::shared_ptr<environment>& init_env);
         // A fresh layer's whole starting field state for a class whose initializers are all constants (the same keys)

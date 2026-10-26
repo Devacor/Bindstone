@@ -49,6 +49,8 @@ inline void class_instance::free_allocation(class_instance* instance) noexcept {
 }
 
 namespace detail {
+static_assert(cb_storage_offset<class_instance> == k_instance_cb_offset, "object_ref finds an instance's control block a fixed distance before it");
+
 // An instance handed to its own destructor body as `this`: a dying one (its last strong reference gone, its chain running) holds
 // a count for the span that goes back without a second death; a living one (a re-class) is pinned as usual
 class dying_instance_pin {

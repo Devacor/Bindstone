@@ -36,6 +36,10 @@ public:
 	}
 
 	void forge_tests() override {
+		test("an_object_holders_two_words_read_as_the_standard_library_lays_them_out", [this]() {
+			check(detail::object_ref::layout_holds(), "a shared_ptr is (stored pointer, control block) here");
+		});
+
 		test("element_objects_read_call_build_and_return_through_many_regions", [this]() {
 			// a zipped region reads each element's fields, runs its methods, builds and drops temporaries and lands a new object
 			// in its output element; 150 regions of 512 elements, the serial loop's checksum on 1 and 8 workers

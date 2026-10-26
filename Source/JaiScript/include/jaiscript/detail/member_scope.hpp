@@ -116,8 +116,8 @@ inline checked_result<script_value> read_cpp_property(const script_value& receiv
         auto result_holder = value.get_object_holder();
         auto receiver_holder = receiver.get_object_holder();
         if (result_holder && receiver_holder) {
-            result_holder->keep_alive = receiver_holder->data ? receiver_holder->data
-                                                              : receiver_holder->keep_alive;
+            result_holder->set_keep_alive(receiver_holder->data ? receiver_holder->data
+                                                              : receiver_holder->keep_alive());
         }
     }
     return result;
@@ -247,8 +247,8 @@ inline std::shared_ptr<void> pin_cpp_object(const script_value& receiver, const 
     }
     if (!holder) return nullptr;
     if (holder->data) return holder->data;
-    if (auto locked = holder->weak_data.lock()) return locked;
-    return holder->keep_alive;
+    if (auto locked = holder->lock_weak_data()) return locked;
+    return holder->keep_alive();
 }
 
 // The class-scope boundary in a lexical chain: the first method/static env.

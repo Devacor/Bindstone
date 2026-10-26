@@ -93,7 +93,7 @@ void anchor_to_receiver(script_value& result, const script_value& receiver) {
 	auto result_holder = result.get_object_holder();
 	auto receiver_holder = receiver.get_object_holder();
 	if (result_holder && receiver_holder) {
-		result_holder->keep_alive = receiver_holder->data ? receiver_holder->data : receiver_holder->keep_alive;
+		result_holder->set_keep_alive(receiver_holder->data ? receiver_holder->data : receiver_holder->keep_alive());
 	}
 }
 
@@ -121,7 +121,7 @@ checked_result<std::shared_ptr<void>> checked_native_object(engine* eng, const s
 	}
 	auto owner = holder.data;
 	if (!owner && holder.bound_ptr) {
-		owner = holder.weak_data.lock();
+		owner = holder.lock_weak_data();
 		if (!owner) {
 			return checked_result<std::shared_ptr<void>>(make_error_code(runtime_error_code::type_mismatch),
 				"Cannot extract shared_ptr from non-owning C++ reference");

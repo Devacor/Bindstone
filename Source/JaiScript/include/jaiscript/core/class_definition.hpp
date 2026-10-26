@@ -215,6 +215,9 @@ public:
     // source runs no extra destructor
     inline std::optional<checked_result<void>> assign_field_in_place(uint64_t id, const script_value& source) const;
     template <class Copy> checked_result<script_value> field_store(uint64_t id, const script_value& source, Copy&& copy) const;
+    // field_store for a field whose slot the caller holds (a site cache under the class's epoch): the same steps by the slot, no lookup
+    // of the id; id names the field only in a conversion's error text
+    template <class Copy> checked_result<script_value> field_store_at(uint32_t slot, uint64_t id, const script_value& source, Copy&& copy) const;
 
     inline const script_value& get_field(uint64_t id, bool throw_if_missing = true) const;
     inline script_value& get_field(uint64_t id, bool throw_if_missing = true);
@@ -731,6 +734,7 @@ public:
     bool type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
 
     inline type_info_ptr get_field_declared_type(uint64_t id) const;
+    inline type_info_ptr field_declared_type_at(uint32_t slot, uint64_t id) const;   // the slot's declared type (the id answers a stale table)
     inline type_info_ptr field_declared_type_walk(uint64_t id) const;   // the chain's maps, own first
 
     inline void add_static_field(uint64_t id, const script_value& initial_value);

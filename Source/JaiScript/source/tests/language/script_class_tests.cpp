@@ -335,6 +335,31 @@ public:
             check_eq((int64_t)5675, e->execute("run_all(5)").as_int(), "the redefined class's own helper wins over the global");
         });
 
+        test("remembered_comparison_and_handle_facts_follow_redefinition", [this]() {
+            // object == / != without operators, then a redefinition that declares them; a subclass handle into a base parameter, then a
+            // redefinition that drops the base from the chain
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            e->execute(R"(
+                class Base { int v = 1; }
+                class Leaf : Base { int w = 2; }
+                class Other { int v = 3; }
+                int take(shared_ptr<Base> b) { return b.v; }
+                shared_ptr<Leaf> L = make_shared<Leaf>();
+                shared_ptr<Base> B = make_shared<Base>();
+                int count_ne(int rounds) { int s = 0; for (int i = 0; i < rounds; i++) { if (L != B) { s += 1; } if (L == L) { s += 10; } } return s; }
+                int count_take(int rounds) { int s = 0; for (int i = 0; i < rounds; i++) { s += take(L); } return s; }
+            )");
+            check_eq((int64_t)110, e->execute("count_ne(10)").as_int(), "identity comparisons");
+            check_eq((int64_t)10, e->execute("count_take(10)").as_int(), "a subclass handle into a base parameter");
+            e->execute("class Leaf : Base { int w = 2; bool operator!=(const shared_ptr<Base>& o) { return false; } bool operator==(const shared_ptr<Leaf>& o) { return false; } }");
+            check_eq((int64_t)100, e->execute("count_ne(10)").as_int(), "the redefined class's operator!= answers");
+            std::string message;
+            e->execute("class Leaf : Other { int w = 2; }");
+            try { e->execute("count_take(1)"); } catch (const std::exception& ex) { message = ex.what(); }
+            check(!message.empty(), "a class no longer derived from Base is refused: " + message);
+        });
+
         test("class_destructor_basic", [this]() {
             auto js_engine = make_engine();
             stdlib::register_all(*js_engine);

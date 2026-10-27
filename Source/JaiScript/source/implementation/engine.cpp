@@ -1027,6 +1027,7 @@ struct engine::implementation {
         mutable detail::aggregate_lowering_state lowering;
     };
     uint64_t script_cache_epoch = 0;
+    uint64_t layout_generation_ = 0;
     uint64_t script_cache_clock = 0;
     static constexpr size_t script_cache_max = 64;
 
@@ -4636,6 +4637,13 @@ class_registry& engine::get_class_registry() {
 
 uint64_t engine::class_definition_epoch() const {
     return impl->class_definition_epoch_;
+}
+
+const uint64_t* engine::layout_generation() const noexcept { return &impl->layout_generation_; }
+void engine::bump_layout_generation() noexcept { ++impl->layout_generation_; }
+
+void detail::note_class_layout_change(engine* eng) noexcept {
+    if (eng) { eng->bump_layout_generation(); }
 }
 
 void engine::bump_class_definition_epoch() {

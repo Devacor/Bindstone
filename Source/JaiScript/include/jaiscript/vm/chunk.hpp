@@ -43,6 +43,8 @@ namespace jai::vm {
         // Env-resolved plain identifier: chunk::nodes index of its identifier_expr, read live
         // for field proofs (internal/type_proofs_design.md); invalid = slotted / literal / subscript
         uint32_t ident_node = k_invalid_u32;
+        // a bare name the body's class resolves to a plain field (chunk::member_class): its slot + 1 there, 0 for none
+        uint32_t this_slot = 0;
 
         // Subscript-read operand `base[i][j]...[k]` (every level transient-marked, so the
         // elision rule applies): slot/symbol above name the BASE container; the chain
@@ -493,6 +495,17 @@ namespace jai::vm {
         // identifier_expr behind an op_load / op_store / op_binary_fused_store /
         // op_return_ident, read live for field proofs; k_invalid_u32 = none
         std::vector<uint32_t> ident_nodes;
+        // A method body compiled against its declaring class: the bare names that class resolves to plain fields (no local, no
+        // method, getter or user accessor of the name, not a C++ property) carry the field's slot + 1 per instruction (loads and
+        // stores) and per operand (fused_operand::this_slot). A frame whose receiver's class lays those fields out at the same
+        // slots (member_class itself, or a class whose verdict row says so) reads them straight from its receiver
+        const class_definition* member_class = nullptr;
+        std::vector<uint32_t> this_field_slots;                  // per instruction: slot + 1, 0 = none
+        std::vector<std::pair<uint64_t, uint32_t>> this_field_uses;   // (field id, slot) the body addresses
+        struct member_layout_row { const class_definition* cd = nullptr; uint64_t shape = 0; uint64_t methods = 0; bool same = false; };
+        static constexpr uint8_t k_member_layout_rows = 4;
+        mutable member_layout_row member_layout_rows[k_member_layout_rows];
+        mutable uint8_t member_layout_next = 0;
         // per frame slot of a slot-resident `T& name = e;` declaration with a concrete T: T and its kind byte
         // (detail::declared_ref_kind); a store through the name decides by them, nothing is stamped at the binding
         std::vector<type_info*> slot_declared_refs;

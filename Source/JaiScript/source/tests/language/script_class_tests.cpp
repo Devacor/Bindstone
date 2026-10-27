@@ -360,6 +360,33 @@ public:
             check(!message.empty(), "a class no longer derived from Base is refused: " + message);
         });
 
+        test("a_method_body_reads_its_receivers_fields_by_slot_across_reshapes_and_reclassing", [this]() {
+            // a method body's bare fields read and written by slot: a receiver re-classed mid-call (extend), a class that gains a method
+            // named like a field mid-call, and the same method on subclasses with fields of their own
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            jai::engine* raw = e.get();
+            auto r = e->execute(R"(
+                class K {
+                    int a = 1;
+                    int b = 2;
+                    int sum() { return a + b; }
+                    void bump() { a = a + 10; b += 1; }
+                    int reclass_mid() { int before = a + b; extend(this, Mix); return before * 1000 + a + b; }
+                }
+                class K2 : K { int c = 5; int sum2() { return sum() + c; } }
+                class Mix : K { int extra = 7; int sum() override { return extra; } }
+                K k = K();
+                K2 k2 = K2();
+                int s = 0;
+                for (int i = 0; i < 30; i++) { k.bump(); k2.bump(); s += k.sum() + k2.sum2(); }
+                K m = K();
+                int mid = m.reclass_mid();
+                return [s, k.a, k2.b, mid];
+            )");
+            check_eq(std::string("[10560, 301, 32, 3003]"), r.to_string(), "slot reads across subclasses and a mid-call re-class");
+        });
+
         test("class_destructor_basic", [this]() {
             auto js_engine = make_engine();
             stdlib::register_all(*js_engine);

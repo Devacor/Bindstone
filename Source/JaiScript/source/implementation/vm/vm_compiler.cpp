@@ -932,6 +932,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 	chunk_->first_temp_slot = local_count;
 	chunk_->is_function_body = true;
 	chunk_->owner_body = body;
+	chunk_->member_class = member_class_;
 	loops_.clear();
 	scope_depth_ = 0;
 	current_stmt_ = nullptr;
@@ -2424,7 +2425,7 @@ void vm_compiler::compile_store_arm(identifier_expr* ident, assignment_expr* ass
 		return;
 	}
 	if (try_lower_store_move(ident, value, flags)) return;
-	const size_t store_ip = emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
+	const size_t store_ip = emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags); note_this_field(store_ip, ident);
 	note_ident_node(store_ip, assign->target);
 }
 
@@ -2630,7 +2631,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 					return true;
 				}
 				if (try_lower_store_move(ident, assign->value, flags)) return true;
-				const size_t store_ip = emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
+				const size_t store_ip = emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags); note_this_field(store_ip, ident);
 				note_ident_node(store_ip, assign->target);
 			} else {
 				emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident),
@@ -2927,6 +2928,26 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 	}
 }
 
+// slot + 1 of the plain field a bare name of a method body names in the body's declaring class, 0 when the name is a local, a global
+// spelling (::name), a type constructor, or anything but a public script field there (a method, a getter or a user accessor of the
+// name, a static, a C++ property); the frame takes the slot only when its receiver lays the field out at it
+uint32_t vm_compiler::this_field_slot_of(const identifier_expr* ident) {
+	const class_definition* cls = member_class_;
+	if (!cls || reference_ || !chunk_ || chunk_->member_class != cls || !ident || ident->global_qualified || identifier_slot_operand(const_cast<identifier_expr*>(ident)) != k_invalid_u32) return 0;
+	const uint64_t id = ident->symbol_id;
+	if (id == UINT64_MAX || id == 0 || !symbolizer_ || cls->chain_has_nonpublic() || !cls->is_script_class()) return 0;
+	if (!cls->find_field_declaring_class(id)) return 0;
+	const uint32_t slot = cls->field_slot(id);
+	if (slot == class_definition::k_no_field_slot || cls->slot_is_cpp_property(slot)) return 0;
+	if (!cls->get_method(id, false).is_invalid()) return 0;
+	if (cls->user_accessor(symbolizer_->get_getter_id_with_view(id).first) || cls->user_accessor(symbolizer_->get_setter_id_with_view(id).first)) return 0;
+	if (const_cast<class_definition*>(cls)->find_static_field_in_chain(id) || const_cast<class_definition*>(cls)->find_static_method_in_chain(id)) return 0;
+	bool listed = false;
+	for (const auto& use : chunk_->this_field_uses) { if (use.first == id) { listed = true; break; } }
+	if (!listed) { chunk_->this_field_uses.emplace_back(id, slot); }
+	return slot + 1;
+}
+
 void vm_compiler::compile_identifier_load(const expression_ptr& expr) {
 	auto* ident = static_cast<identifier_expr*>(expr.get());
 	uint32_t flags = 0;
@@ -2939,6 +2960,15 @@ void vm_compiler::compile_identifier_load(const expression_ptr& expr) {
 	}
 	const size_t ip = emit(opcode::op_load, identifier_slot_operand(ident), add_symbol(ident->symbol_id), flags);
 	note_ident_node(ip, expr);
+	note_this_field(ip, ident);
+}
+
+void vm_compiler::note_this_field(size_t ip, const identifier_expr* ident) {
+	const uint32_t slot = this_field_slot_of(ident);
+	if (!slot) return;
+	auto& table = chunk_->this_field_slots;
+	if (table.size() <= ip) { table.resize(ip + 1, 0); }
+	table[ip] = slot;
 }
 
 void vm_compiler::note_ident_node(size_t ip, const expression_ptr& ident) {
@@ -7402,6 +7432,7 @@ fused_operand vm_compiler::make_fused_operand(const expression* e) {
 			out.load_flags |= load_flag_type_ctor;
 		}
 		out.direct = out.slot != k_invalid_u32 && out.load_flags == 0;
+		out.this_slot = this_field_slot_of(ident);
 	} else if (e->get_type() == node_type::binary_expr) {
 		// fusable_subscript_operand-vetted chain: walk to the base identifier collecting
 		// indexes innermost-first (application order), base rides the ident fields
@@ -7645,7 +7676,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 				return;
 			}
 			if (try_lower_store_move(ident, expr->value, flags)) return;
-			const size_t store_ip = emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
+			const size_t store_ip = emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags); note_this_field(store_ip, ident);
 			note_ident_node(store_ip, expr->target);
 		} else {
 			uint32_t kind = compound_kind_for_token(expr->op.type);

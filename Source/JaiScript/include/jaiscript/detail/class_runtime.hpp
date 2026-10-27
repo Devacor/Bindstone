@@ -12,6 +12,7 @@
 #include <jaiscript/detail/arity_diagnostic.hpp>
 #include <jaiscript/detail/host_member.hpp>
 #include <jaiscript/detail/uniquely_held.hpp>
+#include <jaiscript/detail/truthiness.hpp>
 
 namespace jai {
 
@@ -2049,29 +2050,12 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
             if (object_src) return slot_conversion::of(verdict::needs_to_x);
             return slot_conversion::converted_to(script_value::make_utf8(v.to_string(), eng));
         case script_value_type::jai_bool_type: {
-            // is_truthy minus its object tail (KEEP BYTE-PARALLEL with the backends' is_truthy)
+            // is_truthy minus its object tail
             if (src == script_value_type::jai_bool_type && primitive_src) return slot_conversion::of(verdict::identity);
             if (object_src) return slot_conversion::of(verdict::needs_to_bool);
-            bool truthy = true;
-            switch (ri) {
-                case script_value::TYPEID_NULL: truthy = false; break;
-                case script_value::TYPEID_INT: truthy = v.unchecked_as_int() != 0; break;
-                case script_value::TYPEID_FLOAT: truthy = v.unchecked_as_float() != 0.0; break;
-                case script_value::TYPEID_STRING: truthy = !v.unchecked_as_string().empty(); break;
-                case script_value::TYPEID_UTF8_STRING: truthy = !v.unchecked_as_utf8().bytes.empty(); break;
-                case script_value::TYPEID_VEC2: case script_value::TYPEID_IVEC2: case script_value::TYPEID_VEC3: case script_value::TYPEID_IVEC3: case script_value::TYPEID_VEC4: case script_value::TYPEID_COLOR: truthy = v.math_truthy(); break;
-                case script_value::TYPEID_CHAR: truthy = true; break;
-                case script_value::TYPEID_ARRAY: { auto& arr = const_cast<script_value&>(v).get_array_storage(); truthy = arr && !arr->empty(); break; }
-                case script_value::TYPEID_MAP: { auto& map = const_cast<script_value&>(v).get_map_storage(); truthy = map && !map->empty(); break; }
-                case script_value::TYPEID_CPP_BOUND:
-                    if (v.is_bool()) truthy = v.unchecked_as_bool();
-                    else if (v.is_int()) truthy = v.unchecked_as_int() != 0;
-                    else if (v.is_float()) truthy = v.unchecked_as_float() != 0.0;
-                    else if (v.is_string()) truthy = !v.unchecked_as_string().empty();
-                    else truthy = v.is_char() || v.get_cpp_bound_ptr() != nullptr;
-                    break;
-                default: break;
-            }
+            // a bool storage that is not a primitive bool source, and a reference left after one deref, stay truthy
+            const bool truthy = ri == script_value::TYPEID_BOOL || ri == script_value::TYPEID_REFERENCE ||
+                                truthy_of(v, [](const script_value&) {return true;});
             return slot_conversion::converted_to(script_value(truthy, eng));
         }
         case script_value_type::jai_array_type:

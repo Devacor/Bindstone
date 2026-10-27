@@ -21,6 +21,7 @@
 #include "operator_table.hpp"
 #include "host_member.hpp"
 #include "value_text.hpp"
+#include "truthiness.hpp"
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/core/execution_backend.hpp>
@@ -1205,45 +1206,7 @@ namespace jai {
         bool is_lvalue_expression(expression* e) const;
 
         inline bool is_truthy(const script_value& value) {
-            // ULTRA-FAST: Use raw_storage_index() - single integer read, no pointer chasing
-            // Avoids type_info_ null check and double-switch overhead
-            // Bool case first since loop conditions almost always evaluate to bool
-            switch (value.raw_storage_index()) {
-                case script_value::TYPEID_BOOL: return value.unchecked_as_bool();    // bool - MOST COMMON for conditions
-                case script_value::TYPEID_NULL: return false;                         // null (monostate)
-                case script_value::TYPEID_INT: return value.unchecked_as_int() != 0; // int
-                case script_value::TYPEID_FLOAT: return value.unchecked_as_float() != 0.0; // float
-                case script_value::TYPEID_STRING: return !value.unchecked_as_string().empty(); // string
-                case script_value::TYPEID_UTF8_STRING: return !value.unchecked_as_utf8().bytes.empty();
-                case script_value::TYPEID_VEC2: case script_value::TYPEID_IVEC2: case script_value::TYPEID_VEC3: case script_value::TYPEID_IVEC3: case script_value::TYPEID_VEC4: case script_value::TYPEID_COLOR: return value.math_truthy();   // not all zero
-                case script_value::TYPEID_CHAR: return true;                          // char - any char is truthy
-                case script_value::TYPEID_ARRAY: {
-                    // array - empty is falsy (const_cast required, get_array_storage is non-const)
-                    auto& arr = const_cast<script_value&>(value).get_array_storage();
-                    return arr && !arr->empty();
-                }
-                case script_value::TYPEID_MAP: {
-                    // map - empty is falsy (const_cast required, get_map_storage is non-const)
-                    auto& map = const_cast<script_value&>(value).get_map_storage();
-                    return map && !map->empty();
-                }
-                case script_value::TYPEID_OBJECT: return object_to_bool_via_method(value); // object - check for to_bool() method
-                case script_value::TYPEID_CPP_BOUND:
-                    // KEEP BYTE-PARALLEL with vm_backend::is_truthy (vm_backend.cpp) - the VM has its own copy
-                    if (value.is_bool()) return value.unchecked_as_bool();
-                    if (value.is_int()) return value.unchecked_as_int() != 0;
-                    if (value.is_float()) return value.unchecked_as_float() != 0.0;
-                    if (value.is_string()) return !value.unchecked_as_string().empty();
-                    if (value.is_char()) return true;
-                    // Opaque bound: truthy while the host pointer is live
-                    return value.get_cpp_bound_ptr() != nullptr;
-                case script_value::TYPEID_REFERENCE:
-                    // References are transparent to truthiness like every other consumer
-                    // (element reads reach conditions as reference wrappers; `if (a[0])`
-                    // on a false element was always-truthy before this case existed)
-                    return is_truthy(value.deref());
-                default: return true;                         // functions, other complex types
-            }
+            return detail::truthy_of(value, [this](const script_value& v) {return object_to_bool_via_method(v);});
         }
         
         

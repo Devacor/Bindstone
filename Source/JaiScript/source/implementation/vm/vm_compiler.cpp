@@ -683,6 +683,11 @@ void vm_compiler::patch_jump(size_t at, size_t target) {
 }
 
 uint32_t vm_compiler::add_constant(const script_value& v) {
+	// a compile inside a parallel region (serialized engine-wide) mints its own string: the AST literal's node stays the main thread's
+	if (engine_ && engine_->parallel_region_active() && v.raw_storage_index() == script_value::TYPEID_STRING) [[unlikely]] {
+		chunk_->constants.push_back(v.parallel_detached_copy(const_cast<engine*>(engine_)));
+		return static_cast<uint32_t>(chunk_->constants.size() - 1);
+	}
 	chunk_->constants.push_back(v);
 	return static_cast<uint32_t>(chunk_->constants.size() - 1);
 }

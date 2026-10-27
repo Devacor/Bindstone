@@ -1613,13 +1613,12 @@ vm_backend::member_target vm_backend::resolve_member_target(const script_value& 
 		if (target.instance) {
 			target.class_def = target.instance->get_class_definition();
 			// A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
-			// S1): re-point the handle itself, so every copy of it - and every receiver site,
-			// getters, setters, bound methods, the caches - sees the layer from now on.
+			// S1): the access reads the layer through the object's slot (a handle is the wrapper itself, so it
+			// cannot be re-pointed); getters, setters, bound methods and the caches see the layer the same way.
 			if (target.class_def && target.class_def->wrapped_object_has_layer(*target.instance)) {
 				if (auto hooks = target.class_def->slot_hooks()) {
 					auto layer = hooks->read(target.instance->cpp_object_pointer());
 					if (layer && layer != target.instance && layer->get_engine() == engine_) {
-						holder->hold(layer);
 						target.instance = std::move(layer);
 						target.class_def = target.instance->get_class_definition();
 					}
@@ -17142,7 +17141,7 @@ op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, ui
 		if (want_result) { stack_.push_back(make_null()); }
 		return {};
 	}
-	if (detail::class_temporary_member_store(member, objectValue)) [[unlikely]] { return raise_from(detail::class_temporary_member_error()); }
+	if (detail::class_temporary_member_store(member, objectValue, 2)) [[unlikely]] { return raise_from(detail::class_temporary_member_error()); }   // objectValue and its dereferenced copy
 
 	if (auto landed = member_field_write_fast(f, ins_index, proof, member, dereferenced, value)) {
 		if (*landed == op_status::failed) { return op_status::failed; }

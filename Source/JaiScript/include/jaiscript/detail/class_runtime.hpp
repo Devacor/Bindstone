@@ -93,9 +93,8 @@ inline strong_ptr<class_instance> class_instance::make(std::string_view interned
     using block_cb = detail::control_block<class_instance>;
     constexpr size_t cb_bytes = (sizeof(block_cb) + 15) & ~size_t{15};
     const size_t prefix = destructor_owner ? detail::object_block_head::pin_bytes : 0;
-    constexpr size_t room = detail::object_block_head::holder_room;
-    auto* memory = static_cast<std::byte*>(::operator new(prefix + room + detail::object_block_head::size + cb_bytes + trailing_bytes(slots)));
-    std::byte* block = memory + prefix + room;
+    auto* memory = static_cast<std::byte*>(::operator new(prefix + detail::object_block_head::size + cb_bytes + trailing_bytes(slots)));
+    std::byte* block = memory + prefix;
     auto* head = new (block) detail::object_block_head();
     head->prefix = static_cast<uint32_t>(prefix);
     if (destructor_owner) { new (memory) std::shared_ptr<class_definition>(destructor_owner->shared_from_this()); }
@@ -103,7 +102,6 @@ inline strong_ptr<class_instance> class_instance::make(std::string_view interned
     cb->dealloc_fn = &detail::release_instance_block;
     const trailing_cells trailing{block + detail::object_block_head::size + cb_bytes, slots};
     auto* instance = new (cb->storage) class_instance(interned_name_t{}, interned, eng, trailing);
-    instance->set_embedded_holder(head->holder_slot());
     if (destructor_owner) { instance->note_destructor_armed(); }
     return detail::adopt_pooled(instance);
 }
@@ -126,7 +124,7 @@ inline script_value class_instance::take_field_slot(uint32_t slot) {
             return std::move(*flat_fields_[slot]);
         }
     }
-    return script_value(std::monostate{}, engine_);
+    return script_value(std::monostate{}, owner_);
 }
 
 inline script_value* class_instance::field_slot_value(uint32_t slot) {
@@ -1670,7 +1668,7 @@ inline void class_instance::seed_fields_from_plan(const std::vector<std::pair<ui
     if (flat_fields_.implicit() && flat_fields_.size() >= slot_count) {
         for (const auto& [slot, value] : plan) {
             script_value* c = flat_fields_.cell(slot);
-            if (detach) [[unlikely]] { *c = detail::region_field_default(value, engine_); } else { *c = value; }
+            if (detach) [[unlikely]] { *c = detail::region_field_default(value, owner_); } else { *c = value; }
         }
         return;
     }
@@ -1678,7 +1676,7 @@ inline void class_instance::seed_fields_from_plan(const std::vector<std::pair<ui
     for (const auto& [slot, value] : plan) {
         auto& cell = flat_fields_[slot];
         if (detach) [[unlikely]] {
-            if (!cell) { cell = make_cell(detail::region_field_default(value, engine_)); } else { *cell = detail::region_field_default(value, engine_); }
+            if (!cell) { cell = make_cell(detail::region_field_default(value, owner_)); } else { *cell = detail::region_field_default(value, owner_); }
             continue;
         }
         if (!cell) { cell = make_cell(script_value(value)); } else { *cell = value; }
@@ -1714,15 +1712,18 @@ inline void class_instance::rehome_overflow_fields() {
 
 inline void class_instance::set_class_definition(class_definition* class_def) {
     class_def_ = class_def;
-    if (class_def_) { reserve_cell_arena(class_def_->field_slot_count()); }
+    if (class_def_) {
+        set_type(class_def_->interned_name(), class_def_->get_type_id());
+        reserve_cell_arena(class_def_->field_slot_count());
+    }
     rehome_overflow_fields();
 }
 
 inline void class_instance::reclass(const std::shared_ptr<class_definition>& class_def, bool drop_undeclared) {
     if (!class_def || class_def.get() == class_def_) { return; }
-    if (!destructor_armed_ && engine_ && class_def->is_script_class() && class_def->chain_declares_destructor(*engine_)) {
+    if (!destructor_armed_ && owner_ && class_def->is_script_class() && class_def->chain_declares_destructor(*owner_)) {
         destructor_armed_ = late_destructor_ = true;
-        if (!engine_->destructors_armed()) { engine_->note_destructors_armed(); }
+        if (!owner_->destructors_armed()) { owner_->note_destructors_armed(); }
     }
     std::vector<std::pair<uint64_t, field_cell>> cells;
     if (class_def_) {
@@ -1736,7 +1737,7 @@ inline void class_instance::reclass(const std::shared_ptr<class_definition>& cla
     }
     flat_fields_.clear();
     class_def_ = class_def.get();
-    class_name_ = class_def->interned_name();
+    set_type(class_def->interned_name(), class_def->get_type_id());
     flat_fields_.resize(class_def_->field_slot_count());
     for (auto& [id, cell] : cells) {
         const uint32_t slot = class_def_->field_slot(id);
@@ -1744,7 +1745,7 @@ inline void class_instance::reclass(const std::shared_ptr<class_definition>& cla
             if (slot >= flat_fields_.size()) { flat_fields_.resize(static_cast<size_t>(slot) + 1); }
             flat_fields_[slot] = std::move(cell);
         } else if (drop_undeclared) {
-            *cell = script_value::make_invalid(engine_);
+            *cell = script_value::make_invalid(owner_);
             extras().retired_cells.emplace_back(id, std::move(cell));
         } else if (cell->raw_storage_index() != script_value::TYPEID_INVALID) {
             if (!overflow_fields_) {
@@ -1930,7 +1931,6 @@ inline slot_class_view resolve_slot_class(const script_value& v, engine* eng) {
                 if (auto hooks = view.def->slot_hooks()) {
                     auto layer = hooks->read(view.instance->cpp_object_pointer());
                     if (layer && layer != view.instance && layer->get_engine() == eng) {
-                        holder->hold(layer);
                         view.instance = std::move(layer);
                         view.def = view.instance->get_class_definition();
                     }
@@ -2963,7 +2963,7 @@ inline checked_result<script_value> class_instance::enforce_field_write(uint64_t
     if (!class_def_) {
         return std::move(value);
     }
-    return detail::declared_slot_write(class_def_->get_field_declared_type(id), [&] { return find_field_value(id); }, std::move(value), engine_, id, class_def_, false);
+    return detail::declared_slot_write(class_def_->get_field_declared_type(id), [&] { return find_field_value(id); }, std::move(value), owner_, id, class_def_, false);
 }
 
 inline std::optional<checked_result<void>> class_instance::assign_field_in_place(uint64_t id, const script_value& source) const {
@@ -2971,12 +2971,12 @@ inline std::optional<checked_result<void>> class_instance::assign_field_in_place
     const type_info_ptr declared = class_def_->get_field_declared_type(id);
     if (!declared || declared->base_type == script_value_type::jai_any_type) {
         const script_value* current = find_field_value(id);
-        return current ? detail::var_slot_assign_in_place(*current, source, engine_) : std::nullopt;
+        return current ? detail::var_slot_assign_in_place(*current, source, owner_) : std::nullopt;
     }
     if (declared->base_type != script_value_type::jai_object_type || declared->type_name.empty()) { return std::nullopt; }
     const script_value* current = find_field_value(id);
     if (!current) { return std::nullopt; }
-    return detail::user_assign_operator(*current, source, engine_, declared.get());
+    return detail::user_assign_operator(*current, source, owner_, declared.get());
 }
 
 inline bool detail::field_slot_holds_object(class_instance* inst, uint32_t slot) {
@@ -2989,7 +2989,7 @@ inline checked_result<script_value> class_instance::field_store(uint64_t id, con
     if (auto in_place = assign_field_in_place(id, source)) {
         if (!*in_place) { return in_place->error_value(); }
         const script_value* kept = find_field_value(id);
-        return kept ? script_value(kept->deref()) : script_value(std::monostate{}, engine_);
+        return kept ? script_value(kept->deref()) : script_value(std::monostate{}, owner_);
     }
     return enforce_field_write(id, copy());
 }
@@ -3001,20 +3001,20 @@ inline checked_result<script_value> class_instance::field_store_at(uint32_t slot
     script_value* current = const_cast<class_instance*>(this)->field_slot_value(slot);
     if (!declared || declared->base_type == script_value_type::jai_any_type) {
         if (current) {
-            if (auto in_place = detail::var_slot_assign_in_place(*current, source, engine_)) {
+            if (auto in_place = detail::var_slot_assign_in_place(*current, source, owner_)) {
                 if (!*in_place) { return in_place->error_value(); }
                 const script_value* kept = const_cast<class_instance*>(this)->field_slot_value(slot);
-                return kept ? script_value(kept->deref()) : script_value(std::monostate{}, engine_);
+                return kept ? script_value(kept->deref()) : script_value(std::monostate{}, owner_);
             }
         }
     } else if (declared->base_type == script_value_type::jai_object_type && !declared->type_name.empty() && current) {
-        if (auto in_place = detail::user_assign_operator(*current, source, engine_, declared.get())) {
+        if (auto in_place = detail::user_assign_operator(*current, source, owner_, declared.get())) {
             if (!*in_place) { return in_place->error_value(); }
             const script_value* kept = const_cast<class_instance*>(this)->field_slot_value(slot);   // the operator may have run code that moved the fields
-            return kept ? script_value(kept->deref()) : script_value(std::monostate{}, engine_);
+            return kept ? script_value(kept->deref()) : script_value(std::monostate{}, owner_);
         }
     }
-    return detail::declared_slot_write(declared, [&] { return const_cast<class_instance*>(this)->field_slot_value(slot); }, copy(), engine_, id, class_def_, false);
+    return detail::declared_slot_write(declared, [&] { return const_cast<class_instance*>(this)->field_slot_value(slot); }, copy(), owner_, id, class_def_, false);
 }
 
 template <class Copy>
@@ -3097,7 +3097,7 @@ inline bool class_definition::wrapped_object_has_layer(const class_instance& ins
 }
 
 inline void class_instance::note_script_layer_owner(const script_value& value) {
-    if (!engine_ || !class_def_) { return; }
+    if (!owner_ || !class_def_) { return; }
     auto cpp_base = class_def_->find_cpp_base_class();
     if (!cpp_base) { return; }
     auto holder = value.get_object_holder();
@@ -3110,7 +3110,7 @@ inline void class_instance::note_script_layer_owner(const script_value& value) {
         hooks->attach(object, weak_self);
         return;
     }
-    engine_->note_script_layer(object, weak_self);
+    owner_->note_script_layer(object, weak_self);
 }
 
 inline void class_instance::set_field(uint64_t id, const script_value& value) {
@@ -3119,9 +3119,9 @@ inline void class_instance::set_field(uint64_t id, const script_value& value) {
     if (class_def_ && !value.is_null()) {
         if (type_info_ptr declared = class_def_->get_field_declared_type(id);
             declared && declared->base_type != script_value_type::jai_any_type) {
-            auto converted = detail::field_store_convert_no_script(value, declared, engine_);
+            auto converted = detail::field_store_convert_no_script(value, declared, owner_);
             if (!converted) [[unlikely]] {
-                detail::throw_field_store_rejection(value, *declared, id, *class_def_, engine_);
+                detail::throw_field_store_rejection(value, *declared, id, *class_def_, owner_);
             }
             set_field_unchecked(id, *converted);
             return;
@@ -3133,7 +3133,7 @@ inline void class_instance::set_field(uint64_t id, const script_value& value) {
 inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_ids,
                                            const std::unordered_map<uint64_t, script_value>& new_field_defaults,
                                            bool preseeded) {
-    const bool reporting = engine_ && engine_->hot_reload_reporting();
+    const bool reporting = owner_ && owner_->hot_reload_reporting();
     auto record = [&](uint64_t field_id, field_migration_outcome outcome, const script_value* before, const script_value* after) {
         if (!reporting) { return; }
         // a field the reload seeded before this pass is new to the instance whatever path finds it
@@ -3141,7 +3141,7 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
             outcome = field_migration_outcome::added;
             before = nullptr;
         }
-        engine_->record_field_migration(class_name_, field_id, outcome, before, after);
+        owner_->record_field_migration(type_name_, field_id, outcome, before, after);
     };
     // IN-PLACE per-id migration: kept fields keep their storage CELL, so script_value
     // addresses stay stable — suspended coroutines' env chains and this-capturing
@@ -3160,7 +3160,7 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
             // ctor, to_X()) falls back to the new initializer default. Reloads stay permissive,
             // never run script and never brick an instance. Same-type fields pass the
             // kernel's same-type fast path and keep their value.
-            if (auto converted = detail::field_store_convert_no_script(*existing, declared, engine_)) {
+            if (auto converted = detail::field_store_convert_no_script(*existing, declared, owner_)) {
                 record(id, field_migration_outcome::converted, existing, &*converted);
                 *existing = std::move(*converted);
             } else {
@@ -3201,7 +3201,7 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
             const uint64_t id = class_def_->slot_field(static_cast<uint32_t>(slot));
             if (new_field_defaults.find(id) == new_field_defaults.end()) {
                 record(id, field_migration_outcome::removed, v, nullptr);
-                *v = script_value::make_invalid(engine_);
+                *v = script_value::make_invalid(owner_);
             }
         }
     }
@@ -3269,9 +3269,9 @@ inline void class_instance::finish_deep_copy_level(class_instance& copy, bool ov
                     throw runtime_error("Failed to copy C++ object of type '" + std::string(get_class_name()) +
                         "'. The registered copy function returned null.");
                 }
-                copy.set_native(script_value::make_cpp_object(get_class_name(), class_def_->get_type_id(), new_cpp_obj, engine_));
+                copy.set_native(script_value::make_cpp_object(get_class_name(), class_def_->get_type_id(), new_cpp_obj, owner_));
                 copied = true;
-                if (engine_ && engine_->parallel_region_active()) [[unlikely]] { copy.region_tag(engine_->parallel_region_serial()); }
+                if (owner_ && owner_->parallel_region_active()) [[unlikely]] { copy.region_tag(owner_->parallel_region_serial()); }
             }
         }
         if (!copied) { copy.set_native(value.clone_element()); }
@@ -3285,7 +3285,7 @@ inline strong_ptr<class_instance> class_instance::deep_copy_level(detail::deep_c
     if (class_def_ && class_def_->nocopy()) {
         throw runtime_error("Cannot copy an instance of nocopy class '" + std::string(get_class_name()) + "': hold it by reference (auto&/var&) or share it (shared_ptr)");
     }
-    auto new_instance = class_def_ ? class_def_->allocate_instance() : class_instance::make(class_name_, engine_);
+    auto new_instance = class_def_ ? class_def_->allocate_instance() : class_instance::make(type_name_, owner_);
 #ifdef JAISCRIPT_VM_COVERAGE
     census::add_weight(flat_fields_.size());
 #endif
@@ -3319,7 +3319,7 @@ inline strong_ptr<class_instance> class_instance::deep_copy_level(detail::deep_c
             if (implicit) {   // the copy's own slot cell, in its block
                 script_value* target = new_instance->flat_fields_.cell(slot);
                 if (trivial || cell->element_copies_shallow()) { *target = *cell; continue; }
-                *target = script_value(std::monostate{}, engine_);
+                *target = script_value(std::monostate{}, owner_);
                 cell->clone_element_into(*target, work, depth);
                 continue;
             }
@@ -3331,12 +3331,12 @@ inline strong_ptr<class_instance> class_instance::deep_copy_level(detail::deep_c
                 new_instance->flat_fields_[slot] = new_instance->make_cell(script_value(*cell));
                 continue;
             }
-            new_instance->flat_fields_[slot] = new_instance->make_cell(script_value(std::monostate{}, engine_));
+            new_instance->flat_fields_[slot] = new_instance->make_cell(script_value(std::monostate{}, owner_));
             cell->clone_element_into(*new_instance->flat_fields_[slot], work, depth);
         }
     } else {
         for_each_field([&](uint64_t id, const script_value& value) {
-            value.clone_element_into(new_instance->materialize_field(id, script_value(std::monostate{}, engine_)), work, depth);
+            value.clone_element_into(new_instance->materialize_field(id, script_value(std::monostate{}, owner_)), work, depth);
         });
     }
     if (stepped) {
@@ -3439,8 +3439,8 @@ inline script_value class_instance::get_method(uint64_t id, bool throw_if_missin
 }
 
 inline class_instance::class_instance(std::string_view class_name, engine* eng)
-    : engine_(eng) {
-    if (eng) { class_name_ = eng->get_symbolizer()->intern_with_view(class_name).second; }
+    : object_holder(k_instance, std::string_view(), eng) {
+    if (eng) { type_name_ = eng->get_symbolizer()->intern_with_view(class_name).second; }
 }
 
 inline class_instance::~class_instance() {
@@ -3452,7 +3452,7 @@ inline class_instance::~class_instance() {
         }
     }
     // an instance the engine's teardown orphaned (class_def_ cleared) outlives its engine: no region can be running
-    if (extras_ && extras_->native && class_def_ && engine_ && engine_->parallel_region_active()) [[unlikely]] { defer_serial_native(); }
+    if (extras_ && extras_->native && class_def_ && owner_ && owner_->parallel_region_active()) [[unlikely]] { defer_serial_native(); }
     if (class_def_) {
         class_def_->unregister_instance(this);
         if (fields_cascade()) { release_fields(); }

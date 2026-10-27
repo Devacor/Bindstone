@@ -557,11 +557,29 @@ strong_ptr<script_value::reference_holder> script_value::acquire_reference_holde
     return result;
 }
 
+static_assert(jai::detail::cb_storage_offset<script_value::object_holder> == jai::detail::cb_storage_offset<script_value::host_holder> &&
+              jai::detail::cb_storage_offset<script_value::object_holder> == jai::detail::cb_storage_offset<class_instance>,
+              "an object value's handle finds its holder's control block where the holder's own family put it");
+
 strong_ptr<script_value::object_holder> script_value::acquire_object_holder(engine* eng) {
-    auto result = !eng || eng->parallel_region_active() ? jai::detail::holder_block_pool<object_holder, 1024>::acquire_plain()
-        : jai::detail::holder_block_pool<object_holder, 1024>::acquire_from(eng, eng->object_holder_pool_slot(), &engine::set_object_holder_pool_teardown);
+    auto result = !eng || eng->parallel_region_active() ? jai::detail::holder_block_pool<host_holder, 1024>::acquire_plain()
+        : jai::detail::holder_block_pool<host_holder, 1024>::acquire_from(eng, eng->object_holder_pool_slot(), &engine::set_object_holder_pool_teardown);
     result->set_owner(eng);
-    return result;
+    return jai::detail::adopt_pooled<object_holder>(static_cast<object_holder*>(result.release()));
+}
+
+strong_ptr<script_value::object_holder> script_value::instance_storage(strong_ptr<class_instance> instance) noexcept {
+    class_instance* raw = instance.release();
+    return raw ? jai::detail::adopt_pooled<object_holder>(static_cast<object_holder*>(raw)) : strong_ptr<object_holder>();
+}
+
+void script_value::object_holder::last_release(object_holder* holder, jai::detail::control_block_base* cb) noexcept {
+    if (holder->is_instance()) {
+        detail::release_last_instance(holder->unchecked_instance());
+        return;
+    }
+    static_cast<host_holder*>(holder)->~host_holder();
+    if (cb->release_weak()) { cb->dealloc_fn(cb); }
 }
 
 strong_ptr<script_vec_node> script_value::acquire_vec_node(engine* eng) {
@@ -949,7 +967,13 @@ script_value script_value::make_object(std::string_view type_name, uint64_t type
     script_value v(std::monostate{}, eng);
     v.set_stamp(class_def->get_type_info());
 
-    auto obj = claim_object_holder(data.instance_pointer(), eng);
+    if (data.is_instance()) {
+        strong_ptr<class_instance> instance = data.instance();
+        if (instance->type_id() == UINT64_MAX) { instance->set_type(interned_type_text(eng, type_name, type_id), type_id); }
+        v.storage_ = instance_storage(std::move(instance));
+        return v;
+    }
+    auto obj = acquire_object_holder(eng);
     obj->set_type(interned_type_text(eng, type_name, type_id), type_id);
     obj->hold(std::move(data));
     v.storage_ = obj;
@@ -963,38 +987,11 @@ void release_last_instance(class_instance* instance) noexcept {
 }
 }
 
-namespace {
-// the embedded holder's last weak reference gives the holder's part of the object block back (detail::object_block_head)
-void release_embedded_holder(jai::detail::control_block_base* base) noexcept {
-#ifndef NDEBUG
-    base->magic = jai::detail::cb_magic_dead;
-#endif
-    auto* head = jai::detail::object_block_head::of_holder_slot(reinterpret_cast<std::byte*>(base));
-    static_cast<jai::detail::control_block<script_value::object_holder>*>(base)->~control_block();
-    jai::detail::object_block_head::release(head);
-}
-}
-
-strong_ptr<script_value::object_holder> script_value::claim_object_holder(class_instance* instance, engine* eng) {
-    static_assert(sizeof(jai::detail::control_block<object_holder>) <= jai::detail::object_block_head::holder_room,
-                  "the object block's holder room holds the holder's control block");
-    std::byte* room = instance ? instance->take_embedded_holder() : nullptr;
-    if (!room) { return acquire_object_holder(eng); }
-    jai::detail::object_block_head::of_holder_slot(room)->parts.fetch_add(1, std::memory_order_relaxed);
-    auto* cb = new (room) jai::detail::control_block<object_holder>();
-    cb->dealloc_fn = &release_embedded_holder;
-    auto result = jai::detail::adopt_pooled(new (cb->storage) object_holder());
-    result->set_owner(eng);
-    return result;
-}
-
 script_value script_value::make_class_object(const class_definition& cd, strong_ptr<class_instance> data, engine* eng) {
     script_value v(std::monostate{}, eng);
     v.set_stamp(cd.get_type_info());
-    auto obj = claim_object_holder(data.get(), eng);
-    obj->set_type(cd.interned_name(), cd.get_type_id());
-    obj->hold(std::move(data));
-    v.storage_ = obj;
+    if (data && data->type_id() == UINT64_MAX) { data->set_type(cd.interned_name(), cd.get_type_id()); }
+    v.storage_ = instance_storage(std::move(data));
     return v;
 }
 
@@ -1524,12 +1521,9 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
         if (obj_holder->is_instance()) {
             auto new_instance = obj_holder->unchecked_instance()->deep_copy_level(work, depth);
 
-            auto new_holder = claim_object_holder(new_instance.get(), obj_holder->owner());
-            new_holder->set_type(obj_holder->type_name(), obj_holder->type_id());
-            new_holder->hold(std::move(new_instance));
-
+            if (new_instance->type_id() == UINT64_MAX) { new_instance->set_type(obj_holder->type_name(), obj_holder->type_id()); }
             script_value result = tagged_null();
-            result.storage_ = new_holder;
+            result.storage_ = instance_storage(std::move(new_instance));
             return result;
         }
 
@@ -1656,10 +1650,8 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             if (obj_holder->is_instance()) {
                 auto new_instance = obj_holder->unchecked_instance()->deep_copy_level(work, depth);
 
-                auto new_holder = claim_object_holder(new_instance.get(), obj_holder->owner());
-                new_holder->set_type(obj_holder->type_name(), obj_holder->type_id());
-                new_holder->hold(std::move(new_instance));
-                result.storage_ = std::move(new_holder);
+                if (new_instance->type_id() == UINT64_MAX) { new_instance->set_type(obj_holder->type_name(), obj_holder->type_id()); }
+                result.storage_ = instance_storage(std::move(new_instance));
             } else {
                 bool copied = false;
                 if (engine* owner = obj_holder->owner()) {
@@ -1789,11 +1781,9 @@ script_value script_value::parallel_host_view() const {
     view->set_class_definition(cd);
     view->set_native(make_cpp_object(native_holder->type_name(), native_holder->type_id(), native_holder->host_object(), holder->owner()));
     cd->register_live_instance(view.get());
-    auto view_holder = acquire_object_holder(holder->owner());
-    view_holder->set_type(holder->type_name(), holder->type_id());
-    view_holder->hold(std::move(view));
+    if (view->type_id() == UINT64_MAX) { view->set_type(holder->type_name(), holder->type_id()); }
     script_value result = tagged_null();
-    result.storage_ = view_holder;
+    result.storage_ = instance_storage(std::move(view));
     return result;
 }
 

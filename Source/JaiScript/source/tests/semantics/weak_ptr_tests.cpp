@@ -97,9 +97,8 @@ public:
     }
     
     void forge_tests() override {
-        // use_count() reports the OUTER
-        // holder count — the layer script alias copies bump and script weak_ptr expiry
-        // follows. cpp_ref_count() reports the inner number (C++-side shares).
+        // use_count() reports the object's count: script alias copies bump it and script weak_ptr
+        // expiry follows it. A script instance has one count, so cpp_ref_count() reports the same one.
         // The alias-ladder must be byte-identical on BOTH backends (the builtin
         // subtracts a per-backend transient offset — these pins hold it stable).
         test("use_count_reports_script_alias_ladder", [this]() {
@@ -186,8 +185,7 @@ public:
         });
 
         test("cpp_ref_count_sees_cpp_extraction", [this]() {
-            // cpp_ref_count() reports the inner number: script aliases leave it
-            // at 1; a C++-side share (holder->data copy) bumps it
+            // a script instance's one count is every owner's: script aliases and a C++-side share each count
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
@@ -197,14 +195,14 @@ public:
                     shared_ptr<T> a = T();
                     var b = a;
                 )");
-                check_eq((int64_t)1, e->execute("a.cpp_ref_count()").as_int(),
-                         use_vm ? "vm inner count ignores aliases" : "interp inner count ignores aliases");
+                check_eq((int64_t)2, e->execute("a.cpp_ref_count()").as_int(),
+                         use_vm ? "vm count sees both aliases" : "interp count sees both aliases");
                 auto held = e->execute("a");
                 auto holder = held.get_object_holder();
                 check_not_null(holder.get(), "holder");
-                auto cpp_share = holder->held();   // the C++-side share the old number counted
-                check_eq((int64_t)2, e->execute("a.cpp_ref_count()").as_int(),
-                         use_vm ? "vm inner count sees C++ share" : "interp inner count sees C++ share");
+                auto cpp_share = holder->held();   // the host's value, its holder handle and this share each own the object
+                check_eq((int64_t)5, e->execute("a.cpp_ref_count()").as_int(),
+                         use_vm ? "vm count sees the C++ share" : "interp count sees the C++ share");
             }
         });
 

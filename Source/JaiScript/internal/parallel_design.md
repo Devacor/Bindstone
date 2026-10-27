@@ -792,13 +792,11 @@ made for `note_script_layer`) hands out an object borrow instead of a handle: st
 - Copying or dropping a borrow touches no count; the serial copy and release paths already switch on the storage index, so the
   borrow costs them nothing. No worker touches a shared instance's count.
 - A member read takes a script field as the worker's own copy (`parallel_shared_value`: scalars as they are, strings and
-  containers detached by the refcount-silent walk, an object a field holds as its own borrow, one per holder so its identity is
-  the serial one) and runs a C++ member on the worker's view of the instance: a worker-owned instance with holders of its own over
+  containers detached by the refcount-silent walk, an object a field holds as its own borrow) and runs a C++ member on the worker's view of the instance: a worker-owned instance with holders of its own over
   the same C++ object, never noted as its script layer.
 - A store into a borrow, a script method on it and a C++ method the barrier did not pin refuse. The borrow branches sit inside the
   worker's existing `parallel_worker_` gates and the stores' non-object branches.
-- Each host wrap is its own record (a serial wrap is its own holder, so `probe() == probe()` is false on both paths); a field's
-  object is one record per holder.
+- A worker has one record per shared instance: every wrap of one object is the object (`probe() == probe()` holds on both paths).
 - An instance an iteration owns (`region_tag` is the region's: a host-backed element, an object a chunk made) refuses to be
   borrowed, so no instance is both counted by its owner and read through a borrow.
 - The join (single-threaded) walks the range, the zipped arrays and the index-write targets when any worker minted a borrow and

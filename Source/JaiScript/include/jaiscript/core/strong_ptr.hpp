@@ -163,12 +163,17 @@ inline void control_block_base::diag_check() const noexcept {
 struct adopt_tag {};
 
 // What the last strong release does: the object dies, then the strong family's collective weak reference goes. A type whose
-// death is more than its destructor (a script class instance: its destructor chain, the release machine) specializes it.
+// death is more than its destructor (a script class instance: its destructor chain, the release machine) specializes it, or
+// names its own as T::last_release (an object value's holder: the instance it is, or a host holder)
 template<typename T>
 struct strong_last_release {
     static void run(T* object, control_block_base* cb) noexcept {
-        object->~T();
-        if (cb->release_weak()) { cb->dealloc_fn(cb); }
+        if constexpr (requires { T::last_release(object, cb); }) {
+            T::last_release(object, cb);
+        } else {
+            object->~T();
+            if (cb->release_weak()) { cb->dealloc_fn(cb); }
+        }
     }
 };
 // A script class instance's death runs its destructor chain on the release machine (class_registry.cpp)

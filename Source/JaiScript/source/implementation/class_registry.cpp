@@ -298,7 +298,7 @@ void class_definition::destroy_levels(class_instance* instance, const class_defi
 
 void class_instance::defer_serial_native() noexcept {
     if (!class_def_ || !class_def_->serial_only_chain()) { return; }
-    const detail::parallel_region_table* region = engine_->parallel_state().active_region;
+    const detail::parallel_region_table* region = owner_->parallel_state().active_region;
     const detail::parallel_region_table::entry* chunk = region ? region->find_entry(std::this_thread::get_id()) : nullptr;
     if (!chunk || !chunk->deferred_releases) { return; }
     const size_t element = chunk->cursors && !chunk->cursors->empty() ? chunk->cursors->front().element_cursor_index() : SIZE_MAX;

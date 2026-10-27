@@ -482,6 +482,83 @@ public:
             check_eq(std::string("[4, 50, 6, 2, 1]"), r.to_string(), "the reloaded layout's stores and reads");
         });
 
+        test("a_method_bodys_returns_and_scalar_stores_follow_its_receivers_layout", [this]() {
+            // bare int, float and var fields stored from arithmetic in a loop (a var field holding an int taking a float, one holding a float
+            // taking an int), an int field taking a float's conversion, bare fields and a program-scope name returned, on the class and on a subclass that takes the name as a field;
+            // then a reload that moves the fields and makes the name a field of the class itself
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                int G = 7;
+                class Acc { int n = 0; float f = 0.5; var v = 1; var u = 1.5;
+                    void step(int k) { for (int i = 0; i < k; ++i) { n = n + 2; f = f + 1.5; v = v + 1; } }
+                    void blend() { for (int i = 0; i < 2; ++i) { v = v + 0.25; n = f * 2.0; u = i + 3; } }
+                    int get() { return n; } float getf() { return f; } var getv() { return v; } int glob() { return G; } }
+                class Sub : Acc { int G = 70; }
+                Acc a = Acc(); Sub b = Sub();
+                a.step(3); b.step(2);
+                string before = "" + a.get() + " " + a.getf() + " " + a.getv() + " " + b.get() + " " + b.glob() + " " + a.glob();
+                a.blend();
+                return before + " | " + a.get() + " " + a.getv() + " " + a.u;
+            )");
+            check_eq(std::string("6 5.0 4 4 70 7 | 10 4.5 4"), r.to_string(), "returns and stores through the fields");
+            e->execute(R"(
+                class Acc { var v = 1; int G = 30; float f = 0.5; int n = 0;
+                    void step(int k) { for (int i = 0; i < k; ++i) { n = n + 3; f = f + 1.0; v = v + 2; } }
+                    int get() { return n; } float getf() { return f; } var getv() { return v; } int glob() { return G; } }
+            )");
+            auto r2 = e->execute(R"(Acc c = Acc(); c.step(2); return "" + c.get() + " " + c.getf() + " " + c.getv() + " " + c.glob() + " " + b.glob();)");
+            check_eq(std::string("6 2.5 5 30 70"), r2.to_string(), "the reloaded layout's returns and stores");
+        });
+
+        test("a_bare_sibling_call_follows_its_receivers_class", [this]() {
+            // a bare call of a method of the body's class, in a loop and in an expression: a subclass's override answers on its instances,
+            // a program-scope function of the name never does, and a reload of the method is the next call's
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                int sib() { return 1000; }
+                class A { int k = 1; int sib() { return k; }
+                    int run(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + sib(); k = k + 1; } return s; }
+                    int twice() { return sib() * 10 + sib(); } }
+                class B : A { int sib() override { return 5; } }
+                A a = A(); B b = B();
+                return [a.run(3), b.run(3), a.twice(), b.twice(), sib()];
+            )");
+            check_eq(std::string("[6, 15, 44, 55, 1000]"), r.to_string(), "the receiver's class answers the bare call");
+            e->execute("class A { int k = 1; int sib() { return k * 100; } int run(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + sib(); k = k + 1; } return s; } int twice() { return sib() * 10 + sib(); } }");
+            auto r2 = e->execute("A c = A(); return [c.run(2), c.twice()];");
+            check_eq(std::string("[300, 3300]"), r2.to_string(), "the reloaded method answers");
+        });
+
+        test("a_method_calls_result_lands_in_its_consumers_operand", [this]() {
+            // method results as arithmetic operands: int and float returns into typed locals, a var return of another kind through a
+            // subclass, a mutating method between two reads of the same receiver (left to right), builtin calls on both sides of one binary,
+            // and a method that throws from inside the binary
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                class P { int v = 3; float w = 0.25; int get() { return v; } float getw() { return w; } var any() { return v; }
+                    int bump() { v = v + 1; return v; } int fail() { throw "bad " + v; return 0; } }
+                class Q : P { var any() override { return 1.5; } }
+                string run() {
+                    P p = P(); shared_ptr<P> q = new Q();
+                    int s = 0; float t = 0.0;
+                    for (int i = 0; i < 4; ++i) { s = s + p.get(); t = t + p.getw(); s = s * 1 + p.bump(); }
+                    var x = 1 + p.any();
+                    var y = 1 + q.any();
+                    int z = p.get() + p.bump() + p.get();
+                    array<int> arr = [1, 2, 3];
+                    int sz = arr.size() + arr.pop();
+                    string err = "";
+                    try { int u = s + p.fail(); } catch (e) { err = e; }
+                    return "" + s + " " + t + " " + x + " " + y + " " + z + " " + sz + " " + arr.size() + " " + err;
+                }
+                return run();
+            )");
+            check_eq(std::string("40 1.0 8 2.5 23 6 2 bad 8"), r.to_string(), "the results the consumers read");
+        });
+
         test("class_destructor_basic", [this]() {
             auto js_engine = make_engine();
             stdlib::register_all(*js_engine);

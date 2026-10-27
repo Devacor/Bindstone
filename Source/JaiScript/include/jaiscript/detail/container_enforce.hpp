@@ -272,7 +272,10 @@ namespace jai::detail {
 	JAI_NOINLINE inline error_propagator index_out_of_bounds_error(string_symbolizer* sym, std::string_view text, std::string_view text_slotless,
 	                                                               script_int index, size_t size) {
 		const auto code = make_error_code(runtime_error_code::index_out_of_bounds);
-		if (sym->frozen()) {
+		if (sym->frozen()) {   // a parallel region: the barrier interned the out-of-range indices its index writes can name
+			const auto index_id = sym->find(std::to_string(index));
+			const auto size_id = sym->find(std::to_string(size));
+			if (index_id && size_id) { return error_propagator{code, text, *index_id, *size_id}; }
 			return error_propagator{code, text_slotless, 0, 0};
 		}
 		const uint64_t index_id = sym->intern(std::to_string(index));

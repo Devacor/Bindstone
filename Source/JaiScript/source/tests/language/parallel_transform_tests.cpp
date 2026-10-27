@@ -2488,6 +2488,11 @@ public:
 				 "parallel_for: captured name 'order' is the container being mutated"},
 				{"try { parallel_for (int k : order) { int j = k; out[j] = 1; } } catch (err) { return err; } return \"ran\";",
 				 "parallel_for: body writes enclosing state 'out'"},
+				// an index past the array raises the serial loop's text, and the slots before the failing element land
+				{"array<int> past = [0, 1, 300, 2]; array<int> small = [0, 0, 0]; try { parallel_for (int k : past) { small[k] = 7; } } catch (err) { return err + \"|\" + (small[0] * 100 + small[1] * 10 + small[2]); } return \"ran\";",
+				 "Array index 300 out of bounds for array of size 3|770"},
+				{"array<int> small = [0, 0, 0]; try { parallel_for (int k = 0; k < 4; k++) { small[k] = 7; } } catch (err) { return err + \"|\" + (small[0] * 100 + small[1] * 10 + small[2]); } return \"ran\";",
+				 "Array index 3 out of bounds for array of size 3|777"},
 			};
 			for (const auto& [body, expected] : cases) {
 				for (bool vm : {false, true}) {

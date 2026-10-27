@@ -19970,13 +19970,15 @@ static bool construction_frame_expression(const expression* e) {
 	return ok;
 }
 
-// The levels whose field initializers a level's construction runs, bases first, each once (evaluate_field_initializers' order)
+// The levels whose field initializers a level's frame runs: a constructor's level its own, a default-constructed base its own and
+// its bases', bases first, each once (evaluate_field_initializers' order)
 template <class F>
-static void for_each_construction_level(const script_class_definition& level, F&& f, const script_class_definition** seen, size_t& seen_count, int depth = 0) {
+static void for_each_construction_level(const script_class_definition& level, const function_decl* ctor, F&& f, const script_class_definition** seen, size_t& seen_count, int depth = 0) {
+	if (ctor) { f(level); return; }
 	if (depth > 64) { return; }
 	for (const auto& parent : level.get_parent_classes()) {
 		if (parent && parent->is_script_class()) {
-			for_each_construction_level(static_cast<const script_class_definition&>(*parent), f, seen, seen_count, depth + 1);
+			for_each_construction_level(static_cast<const script_class_definition&>(*parent), nullptr, f, seen, seen_count, depth + 1);
 		}
 	}
 	for (size_t i = 0; i < seen_count; ++i) { if (seen[i] == &level) { return; } }
@@ -19994,7 +19996,7 @@ static void for_each_construction_expression(const script_class_definition& leve
 	}
 	const script_class_definition* seen[64];
 	size_t seen_count = 0;
-	for_each_construction_level(level, [&](const script_class_definition& fields_level) {
+	for_each_construction_level(level, ctor, [&](const script_class_definition& fields_level) {
 		f(nullptr);
 		for (const auto& [field_id, initializer] : fields_level.get_field_initializer_asts()) { if (initializer) { f(initializer.get()); } }
 	}, seen, seen_count);
@@ -20034,7 +20036,7 @@ const std::shared_ptr<chunk>* vm_backend::construction_chunk(const std::shared_p
 	{
 		const script_class_definition* seen[64];
 		size_t seen_count = 0;
-		for_each_construction_level(level, [&](const script_class_definition& fields_level) {
+		for_each_construction_level(level, ctor, [&](const script_class_definition& fields_level) {
 			vm_compiler::construction_fields entry{&fields_level, {}};
 			for (const auto& [field_id, initializer] : fields_level.get_field_initializer_asts()) {
 				if (initializer) { entry.initializers.emplace_back(field_id, initializer); }
@@ -20320,22 +20322,6 @@ struct vm_backend::construction_lender final : detail::construction_host {
 			return self.construction_frame_fields(*static_cast<construction_frame*>(scope.frame), *instance, *cls, skip_parent_recursion);
 		}
 		return self.evaluate_field_initializers(instance, cls, scope.env, skip_parent_recursion, aggregate);
-	}
-	checked_result<void> initialize_level_fields(class_instance& instance, const std::shared_ptr<script_class_definition>& level,
-	                                             detail::construction_scope& scope) override {
-		if (level->get_field_initializer_asts().empty()) { return {}; }
-		if (scope.frame) {   // under the caller's unit, as each evaluation ran
-			bool found = false;
-			auto ran = self.run_construction_segment(*static_cast<construction_frame*>(scope.frame), level.get(), found);
-			if (self.construction().field_init_exception) [[unlikely]] {
-				std::exception_ptr thrown = std::move(self.construction().field_init_exception);
-				self.construction().field_init_exception = nullptr;
-				std::rethrow_exception(thrown);
-			}
-			if (!ran) { return ran.error_value(); }
-			return {};
-		}
-		return self.run_level_initializers(instance, *level, scope.env);
 	}
 	void open_scope(detail::construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
 	                script_class_definition* level, const function_decl* ctor, const std::vector<script_value>* args, bool bind_for_parameters) override {

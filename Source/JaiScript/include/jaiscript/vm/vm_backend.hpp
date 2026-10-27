@@ -962,6 +962,7 @@ namespace jai::vm {
             frame* caller = nullptr;                   // resume target: native entry frame or another record's f
             std::shared_ptr<environment> prev_env;
             bool env_lazy = false;
+            bool lean = false;   // pushed by push_lean_method_frame: its exit is the lean pop's
             // Lazy no-closure frames never touch environment_ (nothing saved,
             // nothing restored) — the biggest per-call env cost on the fib path gone
             bool env_untouched = false;
@@ -2499,6 +2500,8 @@ namespace jai::vm {
         bool member_layout_same(const chunk& body, const class_definition* cd);
         bool member_layout_verdict(const chunk& body, const class_definition* cd);
         bool park_frame_sibling(frame& f, const call_site& site);
+        uint8_t push_lean_method_frame(frame& caller, const script_method_dispatch& dispatch, const std::shared_ptr<function_decl>& ast,
+                                       script_value* receiver_owned, size_t frame_base, size_t args_base, size_t argc);
         // a member-class body's bare field at slot + 1 `s`: the receiver's cell, while the frame's layout holds (no class anywhere
         // changed methods or field shape, the receiver still has its class); null sends the read to the general ladder
         JAI_FORCEINLINE script_value* frame_this_field(const frame& f, uint32_t s) const noexcept {
@@ -3042,6 +3045,7 @@ namespace jai::vm {
         op_status exec_set_static(frame& f, const vm_instruction& ins);
         op_status exec_member_compound(frame& f, const vm_instruction& ins, size_t ins_index);   // ins_index: the member_ic row (ins may be a temporary)
         op_status exec_call_method(frame& f, const vm_instruction& ins);
+        op_status exec_call_method_general(frame& f, const vm_instruction& ins);
         op_status exec_new(frame& f, const vm_instruction& ins);
         op_status exec_class_decl(frame& f, const vm_instruction& ins);
         op_status exec_namespace_decl(frame& f, const vm_instruction& ins);

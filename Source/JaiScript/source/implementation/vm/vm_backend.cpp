@@ -13885,6 +13885,20 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 			top.pin = hs.ic_pin;   // declined: the general path holds the callee itself
 		}   // else refilled since the probe: the probed callee is retired until the outermost entry returns
 	}
+#ifndef JAISCRIPT_VM_PROFILE
+	if (top.method && !parallel_worker_) {
+		// the general path's sibling method under its dispatcher's memo (the resolution it would reuse), entered as it enters it
+		const script_method_dispatch& md = *top.method;
+		const size_t argc = ins.a;
+		if (md.resolved_memo && md.resolved_memo_epoch == md.cls->method_epoch() && md.resolved_memo_argc == argc && (*md.resolved_memo)->body && !(*md.resolved_memo)->is_coroutine) {
+			pending_callee pc = std::move(top);
+			pending_callees_.pop_back();
+			const size_t slice_base = stack_.size() - argc;
+			script_value receiver = *f.locals->scope_this;
+			return enter_script_method_sliced(f, pc.value, md, *md.resolved_memo, &receiver, slice_base, slice_base, argc, f.code->call_sites[ins.b]);
+		}
+	}
+#endif
 	return exec_call_from_scratch_general(f, ins);
 }
 
@@ -18569,7 +18583,36 @@ JAI_NOINLINE void vm_backend::commit_string_scratch(script_value& recv, uint16_t
 	const bool mutator = bi_string != 0xFFFF ? builtins_.string_mutates_by_index[bi_string] != 0 : builtins_.string_mutator_ids.count(member_id) != 0;
 	if (mutator || !scratch_ref->typed_element()) { scratch_ref->commit_scratch(); }
 }
+// exec_call_method_general's method-cache hit, ahead of its frame: no string builtin of the name, no super receiver, a script instance held
+// in place whose class the site cached at its method epoch with the overload resolved for good, no host lane and no field of the instance
+// taking the name; any other call is the general one's
 op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
+#ifndef JAISCRIPT_VM_PROFILE
+	const call_site& site = f.code->call_sites[ins.b];
+	if (site.mic_static && site.mic_dispatch && cached_global_env_ && !parallel_worker_ &&
+	    (site.receiver_symbol == UINT64_MAX || (f.code->builtin_indexed && site.bi_string == builtin_method_registries::k_no_builtin))) {
+		const auto* member = static_cast<const member_expr*>(f.code->nodes[site.member_node].get());
+		const size_t argc = ins.a;
+		const size_t args_base = stack_.size() - argc;
+		const script_value& objd = stack_[args_base - 1].deref();
+		if (member->member_id != same_as_id_ && !(member->object && member->object->get_type() == node_type::super_expr) &&
+		    objd.raw_storage_index() == script_value::TYPEID_OBJECT) {
+			const strong_ptr<script_value::object_holder>& holder = objd.unchecked_object_handle();
+			if (holder && holder->is_instance() && holder->type_id() != coroutine_handle_type_id_) {
+				auto* inst = holder->unchecked_instance();
+				class_definition* cd = inst->get_class_definition();
+				if (cd && cd == site.mic_cd && !cd->has_native_methods() && !(cd->is_cpp_class() && !cd->get_parent_classes().empty()) &&
+				    cd->method_epoch() == site.mic_epoch && !mic_field_shadowed(site, *inst, member->member_id)) {
+					return enter_script_method_sliced(f, site.mic_method, *site.mic_dispatch, site.mic_resolved, nullptr, args_base - 1, args_base, argc, site);
+				}
+			}
+		}
+	}
+#endif
+	return exec_call_method_general(f, ins);
+}
+
+JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_instruction& ins) {
 	JAI_COARSE(coarse_method_, coarse_methods_)
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t cm_entry = __rdtsc();
@@ -23916,6 +23959,68 @@ op_status vm_backend::enter_script_method(frame& caller, script_value&& method_v
 	}
 }
 
+// push_method_frame_sliced's frame for a compiled lazy body on its definition's environment (nothing saved or restored), its receiver a
+// value and its arguments bound where they stand: the same record, written in one line (the lean pop's frame). lean_declined: nothing
+// changed, the general push runs; lean_failed: the execution limit ran out, as the general push reports it
+enum : uint8_t { lean_pushed, lean_declined, lean_failed };
+JAI_FORCEINLINE uint8_t vm_backend::push_lean_method_frame(frame& caller, const script_method_dispatch& dispatch, const std::shared_ptr<function_decl>& ast,
+                                                           script_value* receiver_owned, size_t frame_base, size_t args_base, size_t argc) {
+	const function_decl& decl = *ast;
+	if (dispatch.body_cache_key != decl.body.get() || !dispatch.cls || !dispatch.definition_env || environment_.get() != dispatch.definition_env.get() ||
+	    decl.backend_return_conv == 0 || current_call_depth_ >= limits_->vm_depth_gate || call_records_top_ == call_records_.size()) {
+		return lean_declined;
+	}
+	chunk* body_chunk = static_cast<chunk*>(dispatch.body_cache.get());
+	script_value& receiver = receiver_owned ? *receiver_owned : stack_[args_base - 1];
+	if (body_chunk->needs_frame_env || receiver.raw_storage_index() == script_value::TYPEID_REFERENCE || !method_binds_in_place(decl, stack_.data() + args_base, argc)) {
+		return lean_declined;
+	}
+	if (execution_limit_exhausted()) [[unlikely]] { return lean_failed; }
+	assert(!has_return_value_);
+	call_record& rec = *call_records_[call_records_top_];
+	++call_records_top_;
+	rec.raw_prepared = nullptr;
+#ifdef JAISCRIPT_VM_PROFILE
+	rec.profile_entry_tsc = __rdtsc();
+#endif
+	rec.caller = &caller;
+	rec.return_type = decl.return_type;
+	rec.return_conv_class = decl.backend_return_conv;
+	pin_method_decl(rec, ast);
+	rec.method_result_anchor = true;
+	rec.try_base = try_records_.size();
+	rec.iter_base = iter_states_.size();
+	rec.cfor_base = cfor_states_.size();
+	rec.pending_base = pending_callees_.size();
+	rec.locals.function_name = decl.name;
+	rec.locals.reset_member_scope();
+	rec.locals.scope_static = dispatch.cls.get();
+	rec.cells.reset_call(body_chunk->max_cells);
+	rec.f.cells = &rec.cells;
+	rec.env_lazy = true;
+	rec.env_untouched = true;
+	rec.lean = true;
+	if (rec.locals.this_object_ptr) { *rec.locals.this_object_ptr = std::move(receiver); } else { rec.locals.this_object_ptr = std::make_unique<script_value>(std::move(receiver)); }
+	rec.locals.is_method = true;
+	++current_call_depth_;
+	rec.f.code = body_chunk;
+	rec.f.ip = 0;
+	rec.f.locals = &rec.locals;
+	if (rec.f.entry_env) { rec.f.entry_env = nullptr; }
+	rec.f.window_backed = true;
+	rec.f.window_base = args_base;
+	rec.f.window_live = static_cast<uint32_t>(argc);
+	rec.f.stack_base = frame_base;
+	rec.f.top_level = false;
+	rec.f.unit = decl.unit;
+	enter_unit(decl.unit);
+	enter_frame(rec.f);
+	if (body_chunk->member_class) { bind_member_layout(rec.f, *body_chunk); } else { rec.f.this_inst = nullptr; }
+	stack_.fill_null_to(args_base + std::max(decl.local_count, static_cast<size_t>(body_chunk->local_count)), engine_);
+	switch_to_ = &rec.f;
+	return lean_pushed;
+}
+
 op_status vm_backend::enter_script_method_sliced(frame& caller, const script_value& method_val,
                                                  const script_method_dispatch& dispatch,
                                                  const std::shared_ptr<function_decl>& ast,
@@ -23923,6 +24028,9 @@ op_status vm_backend::enter_script_method_sliced(frame& caller, const script_val
                                                  size_t args_base, size_t argc,
                                                  const call_site& site) {
 	try {
+		if (const uint8_t lean = push_lean_method_frame(caller, dispatch, ast, receiver_owned, frame_base, args_base, argc); lean != lean_declined) {
+			return lean == lean_pushed ? op_status{} : raise_from(execution_limit_failure());
+		}
 		return push_method_frame_sliced(caller, method_val, dispatch, ast,
 		                                receiver_owned, frame_base, args_base, argc, &site);
 	} catch (...) {
@@ -24430,6 +24538,30 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		pop_script_frame_boxed_cells(rec);
 		return;
 	}
+#ifndef JAISCRIPT_VM_PROFILE
+	if (rec.lean) {
+		// push_lean_method_frame's frame: lazy on an untouched environment, no entry environment, no static class, callee pin, direct pin
+		// or constructor stamp (every pop clears them and the lean push sets none), so of the general exit only these run
+		rec.lean = false;
+		if (stack_.size() > rec.f.stack_base) { stack_.truncate(rec.f.stack_base); }
+		truncate_detached(try_records_, rec.try_base);
+		truncate_detached(iter_states_, rec.iter_base);
+		if (cfor_states_.size() > rec.cfor_base) { cfor_states_.erase(cfor_states_.begin() + rec.cfor_base, cfor_states_.end()); }
+		truncate_detached(pending_callees_, rec.pending_base);
+		*rec.locals.this_object_ptr = make_null();
+		rec.locals.is_method = false;
+		rec.return_type = nullptr;
+		rec.method_result_anchor = false;
+		rec.f.code = nullptr;
+		rec.f.this_inst = nullptr;
+		--current_call_depth_;
+		frames_.pop_back();
+		sync_unit();
+		--call_records_top_;
+		return;
+	}
+#endif
+	rec.lean = false;
 	JAI_COARSE(coarse_pop_, coarse_pops_)
 #ifdef JAISCRIPT_VM_PROFILE
 	uint64_t prof_pc0 = __rdtsc();

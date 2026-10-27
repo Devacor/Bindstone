@@ -1853,7 +1853,7 @@ namespace detail {
                         type_id()
                     );
                 }
-                return checked_result<T>((*objHolder)->data.instance());
+                return checked_result<T>((*objHolder)->instance_handle());
             }
             // Support for shared_ptr<void> extraction
             else if constexpr (std::is_same_v<T, std::shared_ptr<void>>) {
@@ -2139,6 +2139,10 @@ namespace detail {
             uint64_t type_id = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
             detail::object_ref data;        // The actual object: a bound C++ object, or a class instance
             bool is_instance() const noexcept { return data.is_instance(); }
+            class_instance* instance() const noexcept { return data.instance_pointer(); }   // null for a C++ object
+            class_instance* unchecked_instance() const noexcept { return static_cast<class_instance*>(data.get()); }   // is_instance() holds
+            template <class I = class_instance>
+            strong_ptr<I> instance_handle() const noexcept { return data.template instance<I>(); }
             // A coroutine handle IS a reference to a running computation: clone() shares
             // it (reference semantics, like shared_ptr) instead of deep-copying.
             bool is_coroutine_handle = false;
@@ -2919,7 +2923,7 @@ namespace detail {
         class_instance* peek_class_instance() const noexcept {
             const auto* holder = storage_.get_if<strong_ptr<object_holder>>();   // an object's storage alone holds one
             if (!holder || !*holder || !(*holder)->is_instance()) { return nullptr; }
-            return static_cast<class_instance*>((*holder)->data.get());
+            return (*holder)->unchecked_instance();
         }
 
         // Safe class_instance extraction from object_holder
@@ -2927,7 +2931,7 @@ namespace detail {
             JAI_CENSUS(holder_inspect);
             auto holder = get_object_holder();
             if (holder && holder->is_instance()) {
-                return holder->data.instance();
+                return holder->instance_handle();
             }
             return nullptr;
         }

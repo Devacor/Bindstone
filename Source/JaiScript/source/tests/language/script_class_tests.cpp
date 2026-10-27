@@ -1931,7 +1931,7 @@ public:
                 auto sv = e->execute("s");
                 auto holder = sv.get_object_holder();
                 check_not_null(holder.get(), "instance holder");
-                auto instance = holder->data.instance();
+                auto instance = holder->instance_handle();
                 instance->set_field(e->symbolize("f"), jai::script_value((int64_t)42, e.get()));
                 auto after = e->execute("hot()");
                 outcomes[use_vm ? 1 : 0] = after.is_string() ? after.as<std::string>()
@@ -2116,7 +2116,7 @@ public:
                 auto rv = e->execute("r");
                 auto holder = rv.get_object_holder();
                 check_not_null(holder.get(), "instance holder");
-                auto instance = holder->data.instance();
+                auto instance = holder->instance_handle();
                 uint64_t v_id = e->symbolize("v");
                 check_eq((int64_t)4, instance->get_field(v_id).as_int(), "host get_field bypasses enforcement");
             }

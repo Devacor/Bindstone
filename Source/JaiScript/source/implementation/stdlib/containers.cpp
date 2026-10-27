@@ -110,7 +110,7 @@ bool reuse_map_entry_pair(script_value* cell, const class_definition* pair_class
     if (!cell || cell->raw_storage_index() != script_value::TYPEID_OBJECT) { return false; }
     const auto& holder = cell->unchecked_object_handle();
     if (!holder || !holder.unique() || !holder->is_instance() || holder->data.use_count() != 1) { return false; }
-    auto* instance = static_cast<class_instance*>(holder->data.get());
+    auto* instance = holder->unchecked_instance();
     if (instance->get_class_definition() != pair_class || instance->live_field_refs() != 0) { return false; }
     const script_value* native = instance->native();
     if (!native || native->raw_storage_index() != script_value::TYPEID_OBJECT) { return false; }

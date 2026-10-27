@@ -1609,7 +1609,7 @@ vm_backend::member_target vm_backend::resolve_member_target(const script_value& 
 		return target;
 	}
 	if (holder->is_instance()) {
-		target.instance = holder->data.instance();
+		target.instance = holder->instance_handle();
 		if (target.instance) {
 			target.class_def = target.instance->get_class_definition();
 			// A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
@@ -1651,8 +1651,8 @@ bool vm_backend::object_to_bool_via_method(const script_value& value) {
 	if (const auto* h = value.get_storage().get_if<script_value::TYPEID_OBJECT>(); h && *h) {
 		auto* oh = h->get();
 		if (oh->is_instance()) {
-			if (auto* cd = static_cast<class_instance*>(oh->data.get())->get_class_definition();
-			    cd && !cd->may_define_to_bool() && !cd->wrapped_object_has_layer(*static_cast<class_instance*>(oh->data.get()))) {
+			if (auto* cd = oh->unchecked_instance()->get_class_definition();
+			    cd && !cd->may_define_to_bool() && !cd->wrapped_object_has_layer(*oh->unchecked_instance())) {
 				return true;
 			}
 		}
@@ -4080,7 +4080,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 		if (this_val.is_object()) {
 			auto obj_holder = this_val.get_object_holder();
 			if (obj_holder && obj_holder->is_instance()) {
-				auto instance = obj_holder->data.instance();
+				auto instance = obj_holder->instance_handle();
 				if (instance->has_field(sym)) {
 					// A hybrid's C++ property stores through its setter, exactly like
 					// this.name = v (a same-named script field shadows it)
@@ -8150,7 +8150,7 @@ const script_value* vm_backend::cells_member_container(frame& f, const fused_ope
 	auto& holder = const_cast<script_value&>(*base).unchecked_get_object_storage();
 	if (!holder || !holder->is_instance()) return nullptr;
 	auto* expr = static_cast<member_expr*>(f.code->nodes[container.member_node].get());
-	auto* inst = cells_member_prefix(f, static_cast<class_instance*>(holder->data.get()), expr, off);
+	auto* inst = cells_member_prefix(f, holder->unchecked_instance(), expr, off);
 	if (!inst) return nullptr;
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) return nullptr;
@@ -8189,7 +8189,7 @@ class_instance* vm_backend::cells_member_prefix(frame& f, class_instance* inst, 
 	if (!value || value->raw_storage_index() != script_value::TYPEID_OBJECT) return nullptr;
 	const auto& holder = value->unchecked_object_handle();
 	if (!holder || !holder->is_instance()) return nullptr;
-	return static_cast<class_instance*>(holder->data.get());
+	return holder->unchecked_instance();
 }
 
 // a member site's field of an instance (an alias's element at each rebind): the read-side probe answers the class's slot once per
@@ -8442,11 +8442,11 @@ bool vm_backend::cells_rebind_apply(frame& f, const chunk::cell_loop& loop, cons
 			if (n && !(n->kind() == script_array::kind_t::hetero && ti && ti->element_type().get())) { node = n; }
 		} else if (el.raw_storage_index() == script_value::TYPEID_OBJECT) {
 			auto& holder = const_cast<script_value&>(el).unchecked_get_object_storage();
-			if (holder && holder->is_instance()) { inst = static_cast<class_instance*>(holder->data.get()); }
+			if (holder && holder->is_instance()) { inst = holder->unchecked_instance(); }
 		}
 	} else if (table->kind() == script_array::kind_t::obj) {
 		const obj_slot& s = table->objs()[static_cast<size_t>(index)];
-		if (s.handle && s.handle->is_instance()) { inst = static_cast<class_instance*>(s.handle->data.get()); }
+		if (s.handle && s.handle->is_instance()) { inst = s.handle->unchecked_instance(); }
 	}
 	if (!node && !inst) return false;
 	if (!reprobe && rb.ref_decl != k_invalid_u32) {
@@ -8470,7 +8470,7 @@ bool vm_backend::cells_rebind_apply(frame& f, const chunk::cell_loop& loop, cons
 			class_instance* h = nullptr;
 			if (pv && pv->raw_storage_index() == script_value::TYPEID_OBJECT) {
 				const auto& holder = pv->unchecked_object_handle();
-				if (holder && holder->is_instance()) { h = static_cast<class_instance*>(holder->data.get()); }
+				if (holder && holder->is_instance()) { h = holder->unchecked_instance(); }
 			}
 			const class_definition* hcd = h ? h->get_class_definition() : nullptr;
 			same = hcd && hcd == memo.prefix_cd[p] && hcd->method_epoch() == memo.prefix_epoch[p];
@@ -12899,7 +12899,7 @@ static bool element_of_declared_class(const variable_decl& decl, const script_va
 	if (referent->base_type != script_value_type::jai_object_type || referent->type_name.empty()) { return false; }
 	const script_value::object_holder* holder = element_object_in_place(value);
 	if (!holder || !holder->is_instance()) { return false; }
-	const auto* inst = static_cast<const class_instance*>(holder->data.get());
+	const auto* inst = holder->unchecked_instance();
 	const class_definition* def = inst->get_class_definition();
 	return def && def->get_type_id() == referent->id && !def->wrapped_object_has_layer(*inst);
 }
@@ -13230,7 +13230,7 @@ bool vm_backend::inline_method_holds(frame& f, const chunk::inline_site& site) {
 	if (k != script_value::TYPEID_OBJECT && k != script_value::TYPEID_SHARED_PTR) return false;
 	const auto& holder = v.unchecked_object_handle();
 	if (!holder || !holder->is_instance() || holder->type_id == coroutine_handle_type_id_) return false;
-	auto* inst = static_cast<class_instance*>(holder->data.get());
+	auto* inst = holder->unchecked_instance();
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) return false;
 	if (inst->has_user_overflow_fields() && inst->has_field(site.member_id)) return false;
@@ -13277,7 +13277,7 @@ bool vm_backend::worker_inline_method_holds(frame& f, const chunk::inline_site& 
 	if (k != script_value::TYPEID_OBJECT && k != script_value::TYPEID_SHARED_PTR) return false;
 	const auto& holder = v.unchecked_object_handle();
 	if (!holder || !holder->is_instance() || holder->type_id == coroutine_handle_type_id_) return false;
-	auto* inst = static_cast<class_instance*>(holder->data.get());
+	auto* inst = holder->unchecked_instance();
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) return false;
 	if (inst->has_user_overflow_fields() && inst->has_field(site.member_id)) return false;
@@ -13394,7 +13394,7 @@ bool vm_backend::park_sibling_method(frame& f, const call_site& site) {
 	if (ti != script_value::TYPEID_OBJECT) { held = const_cast<script_value&>(this_val).get_object_holder(); }
 	const strong_ptr<script_value::object_holder>& holder = ti == script_value::TYPEID_OBJECT ? this_val.unchecked_object_handle() : held;
 	if (!holder || !holder->is_instance()) return false;
-	const class_instance& inst = *static_cast<class_instance*>(holder->data.get());
+	const class_instance& inst = *holder->unchecked_instance();
 	const class_definition* cd = inst.get_class_definition();
 	const uint64_t sym = f.code->symbols[site.callee.symbol];
 	if (cd != site.mic_cd || cd->method_epoch() != site.mic_epoch) {
@@ -13446,7 +13446,7 @@ int vm_backend::worker_park_sibling(frame& f, const call_site& site) {
 	const uint64_t sym = f.code->symbols[site.callee.symbol];
 	if (!cd || detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) return 0;
 	const auto& holder = const_cast<script_value&>(self).get_object_holder();
-	if (!holder || !holder->data || static_cast<class_instance*>(holder->data.get())->has_field(sym)) return 0;
+	if (!holder || !holder->data || holder->unchecked_instance()->has_field(sym)) return 0;
 	const script_value* bound = cd->method_ptr(sym);
 	if (!bound || !bound->is_function() || !bound->as_function().target<script_method_dispatch>()) return 0;
 	const detail::parallel_method_pin* pin = parallel_method_pins_ ? parallel_method_pins_->find(cd, sym) : nullptr;
@@ -13470,7 +13470,7 @@ void vm_backend::arm_sibling_method(frame& f, const call_site& site, const scrip
 	const auto& holder = const_cast<script_value&>(this_val).get_object_holder();
 	const auto& bound_holder = const_cast<script_value&>(*thunk->payload.this_obj()).get_object_holder();
 	if (!holder || !holder->is_instance() || !bound_holder || bound_holder->data.get() != holder->data.get()) return;
-	class_instance& inst = *static_cast<class_instance*>(holder->data.get());
+	class_instance& inst = *holder->unchecked_instance();
 	class_definition* cd = inst.get_class_definition();
 	const uint64_t sym = f.code->symbols[site.callee.symbol];
 	if (!cd || cd->chain_has_nonpublic()) return;
@@ -13670,7 +13670,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 		std::shared_ptr<class_definition> parent_def;
 		if (objectValue.is_object()) {
 			if (auto objHolder = objectValue.get_object_holder(); objHolder && objHolder->data) {
-				if (auto* class_def = objHolder->data.instance()->get_class_definition()) {
+				if (auto* class_def = objHolder->instance_handle()->get_class_definition()) {
 					parent_def = class_def->get_parent();
 				}
 			}
@@ -13702,7 +13702,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 				"coroutine_handle has no member '{0}'", member_id);
 		}
 		if (holder && holder->is_instance() && member_id != same_as_id_) {
-			auto* inst = static_cast<class_instance*>(holder->data.get());
+			auto* inst = holder->unchecked_instance();
 			class_definition* cd = inst->get_class_definition();
 			if (parallel_worker_) [[unlikely]] {
 				// Worker verdict (parallel-method-admission rule): the call op's text; a pin
@@ -15575,7 +15575,7 @@ op_status vm_backend::exec_field_init(frame& f, const vm_instruction& ins) {
 	stack_.pop_back();
 	script_value* tp = current_this(f);
 	const auto* holder = tp ? tp->peek_object_holder() : nullptr;
-	auto* instance = holder && holder->is_instance() ? static_cast<class_instance*>(holder->data.get()) : nullptr;
+	auto* instance = holder && holder->is_instance() ? holder->unchecked_instance() : nullptr;
 	if (!instance) {
 		return raise_(make_error_code(runtime_error_code::this_outside_method), "'this' can only be used inside methods");
 	}
@@ -15691,7 +15691,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 	if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
 		auto& holder = objectValue.unchecked_get_object_storage();
 		if (holder && holder->is_instance()) {
-			auto* inst = static_cast<class_instance*>(holder->data.get());
+			auto* inst = holder->unchecked_instance();
 			if (script_value* field = detail::parallel_script_field(*inst, expr->member_id)) {
 				out = field->is_reference() ? field->deref() : *field;
 				return {};
@@ -15722,7 +15722,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		if (!objHolder || !objHolder->data) {
 			return raise_(make_error_code(runtime_error_code::type_mismatch));
 		}
-		auto instance = objHolder->data.instance();
+		auto instance = objHolder->instance_handle();
 		if (!instance) {
 			return raise_(make_error_code(runtime_error_code::type_mismatch));
 		}
@@ -16358,7 +16358,7 @@ class_instance* vm_backend::ordinary_site_instance(const call_site& site, const 
 	if (objv.raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
 	const auto& holder = objv.unchecked_object_handle();
 	if (!holder || !holder->is_instance()) { return nullptr; }
-	auto* inst = static_cast<class_instance*>(holder->data.get());
+	auto* inst = holder->unchecked_instance();
 	const class_definition* cd = inst->get_class_definition();
 	if (cd != site.ord_cd || cd->method_epoch() != site.ord_epoch || inst->has_user_overflow_fields() || cd->wrapped_object_has_layer(*inst)) {
 		return nullptr;
@@ -16373,7 +16373,7 @@ JAI_NOINLINE void vm_backend::ordinary_site_arm(const call_site& site, const scr
 	if (objv.raw_storage_index() != script_value::TYPEID_OBJECT) { return; }
 	const auto& holder = objv.unchecked_object_handle();
 	if (!holder || !holder->is_instance()) { return; }
-	auto* inst = static_cast<class_instance*>(holder->data.get());
+	auto* inst = holder->unchecked_instance();
 	class_definition* cd = inst->get_class_definition();
 	if (!cd || cd->chain_has_nonpublic() || inst->has_user_overflow_fields() || cd->wrapped_object_has_layer(*inst)) { return; }
 	if (cd->chain_declares_field(member_id) || cd->field_slot(member_id) != class_definition::k_no_field_slot) { return; }
@@ -16484,7 +16484,7 @@ static script_value::object_holder* element_object_in_place(const script_value& 
 // site_field's read over a class instance's holder: the proven cell, else the site's member IC; null leaves the read to the caller
 JAI_FORCEINLINE const script_value* vm_backend::site_field_of_holder(const chunk& code, script_value::object_holder* holder, member_expr* expr, size_t site) {
 	if (!holder || !holder->is_instance()) { return nullptr; }
-	auto* inst = static_cast<class_instance*>(holder->data.get());
+	auto* inst = holder->unchecked_instance();
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) { return nullptr; }
 	if (expr->proven_class && proofs_on() && cd == expr->proven_class && cd->field_shape_epoch() == expr->proven_epoch) {
@@ -16505,7 +16505,7 @@ JAI_FORCEINLINE const script_value* vm_backend::site_field(const chunk& code, co
 	if (!rows || objd.raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
 	const auto& holder = objd.unchecked_object_handle();
 	if (!holder || !holder->is_instance()) { return nullptr; }
-	auto* inst = static_cast<class_instance*>(holder->data.get());
+	auto* inst = holder->unchecked_instance();
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) { return nullptr; }
 	if (rows->size() <= site) { rows->resize(std::max(site + 1, code.code.size())); }
@@ -17006,7 +17006,7 @@ op_status vm_backend::assign_member(frame& f, const script_value& object_value, 
 	if (parallel_worker_ && object_value.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
 		auto& holder = const_cast<script_value&>(object_value).unchecked_get_object_storage();
 		if (holder && holder->is_instance()) {
-			auto* inst = static_cast<class_instance*>(holder->data.get());
+			auto* inst = holder->unchecked_instance();
 			if (member->member_id != UINT64_MAX && detail::parallel_script_field(*inst, member->member_id)) {
 				auto enforced = inst->field_store(member->member_id, value, [&] { return clone_for_assignment(value); });
 				if (!enforced) {
@@ -17140,7 +17140,7 @@ op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins)
 			if (objd.raw_storage_index() == script_value::TYPEID_OBJECT) {
 				const auto& holder = objd.unchecked_object_handle();
 				if (holder && holder->is_instance()) {
-					auto* inst = static_cast<class_instance*>(holder->data.get());
+					auto* inst = holder->unchecked_instance();
 					const auto& entry = (*store_rows)[static_cast<size_t>(&ins - f.code->code.data())];
 					class_definition* cd = inst->get_class_definition();
 					if (cd && entry.cd == cd && entry.epoch == cd->method_epoch() && entry.slot != UINT32_MAX) {
@@ -17353,7 +17353,7 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 	if (set_rows) {
 		auto& holder = const_cast<script_value&>(dereferenced).unchecked_get_object_storage();
 		if (holder && holder->is_instance()) {
-			auto* inst = static_cast<class_instance*>(holder->data.get());
+			auto* inst = holder->unchecked_instance();
 			if (class_definition* cd = inst->get_class_definition()) {
 				if (set_rows->size() < f.code->code.size()) { set_rows->resize(f.code->code.size()); }
 				auto& entry = (*set_rows)[ins_index];
@@ -17519,7 +17519,7 @@ class_instance* vm_backend::plain_member_store_slot(frame& f, size_t ins_index, 
 	const std::vector<chunk::member_ic_entry>* rows = member_ic_rows(*f.code);
 	auto& holder = const_cast<script_value&>(object).unchecked_get_object_storage();
 	if (!rows || ins_index >= rows->size() || !holder || !holder->is_instance()) return nullptr;
-	class_instance* candidate = static_cast<class_instance*>(holder->data.get());
+	class_instance* candidate = holder->unchecked_instance();
 	const chunk::member_ic_entry& entry = (*rows)[ins_index];
 	const class_definition* cd = candidate->get_class_definition();
 	if (!cd || entry.cd != cd || entry.epoch != cd->method_epoch() || entry.slot == UINT32_MAX || entry.scalar_type) return nullptr;
@@ -17551,7 +17551,7 @@ JAI_NOINLINE std::optional<op_status> vm_backend::host_member_text_append(frame&
 	const std::vector<chunk::member_ic_entry>* rows = member_ic_rows(*f.code);
 	auto& holder = const_cast<script_value&>(object).unchecked_get_object_storage();
 	if (!rows || ins_index >= rows->size() || !holder || !holder->is_instance()) return std::nullopt;
-	const class_instance* inst = static_cast<class_instance*>(holder->data.get());
+	const class_instance* inst = holder->unchecked_instance();
 	const chunk::member_ic_entry& entry = (*rows)[ins_index];
 	const class_definition* cd = inst->get_class_definition();
 	// a lane with `serves` reads a script_value member (dynamic_binder's make_host_member_lane)
@@ -18608,7 +18608,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 					++profile_slice_gate_[0];   // reached instance receiver
 #endif
-					auto* inst = static_cast<class_instance*>(holder->data.get());
+					auto* inst = holder->unchecked_instance();
 					class_definition* cd = inst->get_class_definition();
 					// A host class's direct lane (class_definition::native_method): the bound method's body on the
 					// C++ object, the receiver and arguments read in place; a declined shape takes the ordinary call
@@ -18864,7 +18864,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 			// Worker method wall (parallel-method-admission rule): an admitted method entered in the slice section above;
 			// anything unpinned keeps the wall error. Trusted scripts still opt out entirely.
 			if (parallel_worker_ && holder && holder->is_instance()) [[unlikely]] {
-				auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
+				auto* cd = holder->unchecked_instance()->get_class_definition();
 				if (const detail::parallel_method_pin* host = parallel_method_pins_ && cd ? parallel_method_pins_->find(cd, member->member_id) : nullptr;
 				    host && !host->resolved) {
 					note_worker_decline(worker_decline::host_method_pin);
@@ -18916,7 +18916,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 			// the sp-builtin only applies when the class does NOT define it.
 			bool sp_class_defines = false;
 			if (holder && holder->is_instance()) {
-				auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
+				auto* cd = holder->unchecked_instance()->get_class_definition();
 				sp_class_defines = cd && cd->defines_method(member->member_id);
 			}
 			const bool shared_ptr_builtin = objv.get_type_info() &&

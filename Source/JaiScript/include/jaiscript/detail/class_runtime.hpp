@@ -1924,7 +1924,7 @@ inline slot_class_view resolve_slot_class(const script_value& v, engine* eng) {
         return view;
     }
     if (holder->is_instance()) {
-        view.instance = holder->data.instance();
+        view.instance = holder->instance_handle();
         if (view.instance) {
             view.def = view.instance->get_class_definition();
             if (view.def && view.def->wrapped_object_has_layer(*view.instance)) {
@@ -2737,7 +2737,7 @@ inline checked_result<void> reclass_assign(script_value& current, auto& holder, 
         return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
             "an assignment that changes an object's class is not admitted in a parallel body");
     }
-    strong_ptr<class_instance> self = holder.data.instance();   // a destructor body may drop the slot or the source
+    strong_ptr<class_instance> self = holder.instance_handle();   // a destructor body may drop the slot or the source
     strong_ptr<class_instance> source_pin = source->weak_from_this().lock();
     class_instance* instance = self.get();
     const class_definition* def = instance->get_class_definition();
@@ -2765,7 +2765,7 @@ inline std::optional<checked_result<void>> class_copy_assign(const script_value&
     if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return std::nullopt; }   // a handle rebinds
     auto holder = const_cast<script_value&>(current).get_object_holder();
     if (!holder || !holder->is_instance()) { return std::nullopt; }
-    auto* instance = static_cast<class_instance*>(holder->data.get());
+    auto* instance = holder->unchecked_instance();
     const class_definition* def = instance->get_class_definition();
     if (!def) { return std::nullopt; }
     const script_value& value = value_in.is_reference() ? value_in.deref() : value_in;
@@ -2773,7 +2773,7 @@ inline std::optional<checked_result<void>> class_copy_assign(const script_value&
     if (vi != script_value::TYPEID_OBJECT && vi != script_value::TYPEID_SHARED_PTR) { return std::nullopt; }
     auto source_holder = const_cast<script_value&>(value).get_object_holder();
     if (!source_holder || !source_holder->is_instance()) { return std::nullopt; }
-    auto* source = static_cast<class_instance*>(source_holder->data.get());
+    auto* source = source_holder->unchecked_instance();
     const class_definition* source_def = source->get_class_definition();
     if (!source_def) { return std::nullopt; }
     // the slot's class: its declared type names the held instance's class or one of its bases
@@ -2833,7 +2833,7 @@ inline std::optional<checked_result<void>> script_assign_operator(const script_v
     if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return std::nullopt; }   // a handle rebinds
     auto holder = const_cast<script_value&>(current).get_object_holder();
     if (!holder || !holder->is_instance()) { return std::nullopt; }
-    const class_definition* def = static_cast<class_instance*>(holder->data.get())->get_class_definition();
+    const class_definition* def = holder->unchecked_instance()->get_class_definition();
     const uint64_t assign_id = def ? def->script_assign_operator_id() : 0;
     if (assign_id == 0) { return std::nullopt; }
     return run_script_assign_operator(current, def, assign_id, value_in.is_reference() ? value_in.deref() : value_in, eng);
@@ -2850,7 +2850,7 @@ inline std::optional<checked_result<void>> user_assign_operator(const script_val
     if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return std::nullopt; }   // a handle rebinds
     auto holder = const_cast<script_value&>(current).get_object_holder();
     if (!holder || !holder->is_instance()) { return std::nullopt; }
-    auto* instance = static_cast<class_instance*>(holder->data.get());
+    auto* instance = holder->unchecked_instance();
     const class_definition* def = instance->get_class_definition();
     if (!def) { return std::nullopt; }
     const script_value& value = value_in.is_reference() ? value_in.deref() : value_in;
@@ -2859,7 +2859,7 @@ inline std::optional<checked_result<void>> user_assign_operator(const script_val
     if (value.raw_storage_index() == script_value::TYPEID_OBJECT || value.raw_storage_index() == script_value::TYPEID_SHARED_PTR) {
         auto source_holder = const_cast<script_value&>(value).get_object_holder();
         if (source_holder && source_holder->is_instance()) {
-            const class_definition* source_def = static_cast<class_instance*>(source_holder->data.get())->get_class_definition();
+            const class_definition* source_def = source_holder->unchecked_instance()->get_class_definition();
             // a bound class's own copy runs the operator= its binding binds ("="), as C++ assigns into the held object; without one
             // the store replaces the object with a copy-constructed one (script owns the slot's storage)
             if (source_def && (source_def == def || source_def->derives_from(def)) && !(def->is_cpp_class() && def->has_method(assign_id))) {
@@ -2890,7 +2890,7 @@ JAI_NOINLINE inline void object_declaration_copies(script_value& value, const ty
     const type_info* tag = value.type_info_raw();
     if (!tag || tag->base_type != script_value_type::jai_shared_ptr_type) { return; }
     const auto& holder = value.unchecked_object_handle();
-    const bool sole_script_object = uniquely_held(value) && !static_cast<const class_instance*>(holder->data.get())->has_cpp_object();
+    const bool sole_script_object = uniquely_held(value) && !holder->unchecked_instance()->has_cpp_object();
     if (!sole_script_object) {
         value = value.clone();
     }
@@ -3069,7 +3069,7 @@ inline std::optional<checked_result<void>> element_copy_assign(const script_valu
     if (!eng || held.raw_storage_index() != script_value::TYPEID_OBJECT) { return std::nullopt; }
     auto holder = const_cast<script_value&>(held).get_object_holder();
     if (!holder || !holder->is_instance()) { return std::nullopt; }
-    const class_definition* def = static_cast<class_instance*>(holder->data.get())->get_class_definition();
+    const class_definition* def = holder->unchecked_instance()->get_class_definition();
     if (!def || !def->is_cpp_class() || !def->has_method(eng->get_symbolizer()->intern("="))) { return std::nullopt; }
     return user_assign_operator(current, source, eng, element_type.get());
 }

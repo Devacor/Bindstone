@@ -48,7 +48,7 @@ namespace jai::detail {
 		if (!holder || !holder->is_instance()) {
 			return nullptr;
 		}
-		auto* instance = static_cast<class_instance*>(holder->data.get());
+		auto* instance = holder->unchecked_instance();
 		return instance ? instance->get_class_definition() : nullptr;
 	}
 
@@ -136,7 +136,7 @@ namespace jai::detail {
 					// an instance of exactly the declared class, read in place (no handle copies)
 					const auto& holder = value.unchecked_object_handle();
 					if (holder && holder->is_instance()) {
-						const auto* inst = static_cast<const class_instance*>(holder->data.get());
+						const auto* inst = holder->unchecked_instance();
 						const class_definition* def = inst->get_class_definition();
 						if (def && def->get_type_id() == declared->id && !def->wrapped_object_has_layer(*inst)) { return true; }
 					}
@@ -221,7 +221,7 @@ namespace jai::detail {
 		if (receiver.raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
 		const auto* holder = receiver.peek_object_holder();
 		if (!holder || !holder->is_instance()) { return nullptr; }
-		auto* instance = static_cast<class_instance*>(holder->data.get());
+		auto* instance = holder->unchecked_instance();
 		const class_definition* def = instance->get_class_definition();
 		if (!def || def != m->ref_field_class || def->field_shape_epoch() != m->ref_field_shape ||
 		    def->method_epoch() != m->ref_field_methods || symbolizer->frozen()) {

@@ -1949,7 +1949,7 @@ namespace jai::vm {
             if (this_val.raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
             auto* oh = const_cast<script_value&>(this_val).unchecked_get_object_storage().get();
             if (!oh || !oh->is_instance()) { return nullptr; }
-            const auto* instance = static_cast<const class_instance*>(oh->data.get());
+            const auto* instance = oh->unchecked_instance();
             if (instance->has_user_overflow_fields()) { return nullptr; }
             return instance->get_class_definition();
         }
@@ -2102,7 +2102,7 @@ namespace jai::vm {
             // so a raw pointer over the op is sound.
             auto* oh = this_val.unchecked_get_object_storage().get();
             if (!oh || !oh->is_instance()) { return nullptr; }
-            auto* instance = static_cast<class_instance*>(oh->data.get());
+            auto* instance = oh->unchecked_instance();
             if (!instance) { return nullptr; }
             if (entry.this_field_class &&
                 entry.this_field_class == static_cast<const void*>(instance->get_class_definition())) {
@@ -2210,7 +2210,7 @@ namespace jai::vm {
             if (!this_val.is_object() || this_val.is_null()) { return nullptr; }
             auto* oh = this_val.unchecked_get_object_storage().get();
             if (!oh || !oh->is_instance()) { return nullptr; }
-            auto* instance = static_cast<class_instance*>(oh->data.get());
+            auto* instance = oh->unchecked_instance();
             if (!instance) { return nullptr; }
             class_definition* cd = instance->get_class_definition();
             if (!cd || entry.this_field_class != static_cast<const void*>(cd) ||

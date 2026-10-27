@@ -1597,7 +1597,7 @@ public:
             if (loaded_val.type() == script_value_type::jai_object_type || loaded_val.type() == script_value_type::jai_shared_ptr_type) {
                 auto obj_holder = loaded_val.get_object_holder();
                 if (obj_holder && obj_holder->data) {
-                    auto inst = obj_holder->data.instance();
+                    auto inst = obj_holder->instance_handle();
                     std::cerr << "[TEST] loaded is class instance: " << inst->get_class_name() << std::endl;
                     std::cerr << "[TEST] Instance fields: ";
                     inst->for_each_field([&](uint64_t fid, const script_value&) {

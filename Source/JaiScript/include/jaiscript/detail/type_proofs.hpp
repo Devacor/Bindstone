@@ -61,7 +61,7 @@ namespace jai::detail {
         if (r.raw_storage_index() != script_value::TYPEID_OBJECT) return nullptr;
         auto& holder = const_cast<script_value&>(r).unchecked_get_object_storage();
         if (!holder || !holder->is_instance()) return nullptr;
-        auto* inst = static_cast<class_instance*>(holder->data.get());
+        auto* inst = holder->unchecked_instance();
         class_definition* cd = inst->get_class_definition();
         if (cd != cls || cd->field_shape_epoch() != epoch) return nullptr;
         return inst;

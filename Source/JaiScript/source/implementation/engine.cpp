@@ -2819,7 +2819,7 @@ void engine::initialize_engine_reference() {
         const script_value& object = args[0].deref();
         auto holder = object.raw_storage_index() == script_value::TYPEID_OBJECT && !object.is_shared_ptr_type() ? object.get_object_holder() : nullptr;
         if (!holder || !holder->is_instance() ||
-            static_cast<class_instance*>(holder->data.get())->has_cpp_object()) {
+            holder->unchecked_instance()->has_cpp_object()) {
             return extended;
         }
         if (auto* backend = engine_weak->get_execution_backend()) {
@@ -4434,7 +4434,7 @@ script_value engine::marked_shared_handle(script_value object) {
     const auto* holder = object.unchecked_object_handle().get();
     class_definition* def = nullptr;
     if (holder->is_instance()) {
-        def = static_cast<const class_instance*>(holder->data.get())->get_class_definition();
+        def = holder->unchecked_instance()->get_class_definition();
     }
     type_info* handle_type = def ? def->handle_type() : nullptr;
     if (!handle_type) {
@@ -6574,7 +6574,7 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
     if (!holder || !holder->is_instance()) {
         return result(make_error_code(runtime_error_code::extend_rejected), "extend: '{0}' needs an object to extend", class_id);
     }
-    auto instance = holder->data.instance();
+    auto instance = holder->instance_handle();
     auto instance_def = instance->get_class_definition();
     if (!instance_def) {
         return result(make_error_code(runtime_error_code::extend_rejected), "extend: the object has no class", class_id);

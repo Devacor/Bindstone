@@ -27,7 +27,7 @@ namespace jai::detail {
         if (!d.is_object()) { return nullptr; }
         auto holder = const_cast<script_value&>(d).get_object_holder();
         if (!holder || !holder->is_instance()) { return nullptr; }
-        return static_cast<class_instance*>(holder->data.get())->get_class_definition();
+        return holder->unchecked_instance()->get_class_definition();
     }
 
     inline bool instance_declares_operator(const script_value& v, uint64_t id) {
@@ -157,8 +157,8 @@ namespace jai::detail {
         const auto& lh = l.unchecked_object_handle();
         const auto& rh = r.unchecked_object_handle();
         if (!lh || !rh || !lh->is_instance() || !rh->is_instance()) { return std::nullopt; }
-        const auto* a = static_cast<const class_instance*>(lh->data.get());
-        const auto* b = static_cast<const class_instance*>(rh->data.get());
+        const auto* a = lh->unchecked_instance();
+        const auto* b = rh->unchecked_instance();
         const class_definition* ca = a->get_class_definition();
         const class_definition* cb = b->get_class_definition();
         if (!ca || !cb || !ca->is_script_class() || !cb->is_script_class()) { return std::nullopt; }
@@ -222,8 +222,8 @@ namespace jai::detail {
             return member_step::pair;
         }
         case equality_frame::shape::fields: {
-            const auto* a = static_cast<const class_instance*>(frame.left_holder->data.get());
-            const auto* b = static_cast<const class_instance*>(frame.right_holder->data.get());
+            const auto* a = frame.left_holder->unchecked_instance();
+            const auto* b = frame.right_holder->unchecked_instance();
             if (frame.index < frame.fields.size()) {
                 const auto& [id, field] = frame.fields[frame.index++];
                 const script_value* other = b->find_field_value(id);

@@ -159,6 +159,6 @@ namespace jai::detail {
 	// A constructor that completed arms its instance's destructor
 	inline void construction_completed(const script_value& instance_value) {
 		const auto holder = instance_value.get_object_holder();
-		if (holder && holder->is_instance()) { static_cast<class_instance*>(holder->data.get())->construction_pending(false); }
+		if (holder && holder->is_instance()) { holder->unchecked_instance()->construction_pending(false); }
 	}
 }

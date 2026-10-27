@@ -4821,6 +4821,9 @@ void recover_pending_registrations(parallel_engine_state& state) {
 // the equivalent zip statement costs plus the output array it hands back.
 namespace {
 
+// The out-of-range indices an index write's barrier interns for the serial loop's text (past them a worker raises the text without them)
+constexpr size_t k_index_write_texts = 256;
+
 struct region_plan {
 	const char* prefix = "parallel_for";
 	std::string_view counted_variable;   // the counted form's variable: a method writing it through a reference is refused
@@ -5274,10 +5277,19 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		if (repeated || !index_node || !target) { continue; }
 		const size_t slot_count = target->source->unchecked_array_node()->size();
 		std::vector<size_t> writer(slot_count, SIZE_MAX);
+		size_t out_of_range = 0;
 		for (size_t p = 0; p < n && p < index_node->size(); ++p) {
 			const script_value at = index_node->get(p, &eng);
 			const script_value& index = at.deref();
-			if (!index.is_int() || index.unchecked_as_int() < 0 || static_cast<size_t>(index.unchecked_as_int()) >= slot_count) { continue; }
+			if (index.is_int() && (index.unchecked_as_int() < 0 || static_cast<size_t>(index.unchecked_as_int()) >= slot_count)) {
+				// the serial loop's out-of-bounds text names the index and the size: a worker raises it with these
+				if (out_of_range++ < k_index_write_texts) {
+					(void)eng.get_symbolizer()->intern(std::to_string(index.unchecked_as_int()));
+					(void)eng.get_symbolizer()->intern(std::to_string(slot_count));
+				}
+				continue;
+			}
+			if (!index.is_int()) { continue; }
 			const size_t slot = static_cast<size_t>(index.unchecked_as_int());
 			if (writer[slot] != SIZE_MAX) {
 				return usage("elements " + std::to_string(writer[slot]) + " and " + std::to_string(p) + " write '" + std::string(iw.name) +

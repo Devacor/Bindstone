@@ -28,7 +28,7 @@ of the name ops and their lookup caches.
 - **Body.** A copy of the lambda's body, made through the AST serializer (`ast_frame_context` remaps the copy's own slots past
   the parameters up by the capture count and gives each captured identifier its capture slot), compiled with one synthetic
   `T&` parameter per capture (`parameter::binds_capture`, slots `p..p+n-1`). Its first instruction, `op_bind_captures`
-  (op_index_assign's slot, which nothing emitted), copies the closure's values into those slots; loads dereference a cell,
+  copies the closure's values into those slots; loads dereference a cell,
   stores write through it. The function's `body` stays the lambda's own; `backend_body_cache` is the copy's chunk.
 - **Entry.** `closure_env` is null, so the closure enters through the capture-free paths; `vm_backend::enter_frame(frame&,
   function)` points `frame::captures` at the function's values (`bind_frame_captures`), read by `op_bind_captures` once the

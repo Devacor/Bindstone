@@ -78,7 +78,7 @@ namespace jai::census {
     // one event attributed to a name as well (the callee of a parameter bind, the declared name of a local)
     void hit_named(site s, const char* name, size_t name_size, uint32_t flags) noexcept;
     // the vm's position: the instruction about to run and its chunk row (coverage_general, coverage_cell)
-    void set_position(uint8_t op, const void* row, uint32_t ip, const char* name, const char* file, uint32_t line) noexcept;
+    void set_position(uint16_t op, const void* row, uint32_t ip, const char* name, const char* file, uint32_t line) noexcept;
 
     // A deep copy in flight: the outermost scope is the event, nested scopes and add_weight add to its weight (the values
     // the copy produced). finish names the copy's node so its death can be timed; src is the source's node (null: none).

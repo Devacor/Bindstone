@@ -328,18 +328,6 @@ namespace jai {
             }
             return parallel_worker_ ? script_value(*node, engine_) : script_value(node, engine_);
         }
-        script_value hydrate_literal(const script_value& lit) const {
-            const auto& storage = lit.get_storage();
-            switch (storage.index()) {
-                case 1: return make_value(storage.get<script_int>());
-                case 2: return make_value(storage.get<script_float>());
-                case 3: return literal_string_value(storage.get<strong_ptr<script_string>>());
-                case 4: return make_value(storage.get<script_char>());
-                case 5: return make_value(storage.get<script_bool>());
-                case 0: return make_value();
-                default: return lit;
-            }
-        }
 
         // Execute a list of declarations and return the last value
         script_value execute(const std::vector<declaration_ptr>& declarations) override { return execute(declarations, false); }
@@ -645,33 +633,6 @@ namespace jai {
         bool has_custom_binary_ops_ = false;
         const detail::engine_operator_table* operator_table_ = nullptr;   // engine-owned flat dispatch
         
-        // Helper to check if we should use fast path
-        bool can_use_fast_path(token_type op) const {
-            return !has_custom_numeric_ops_ && is_numeric_op(op);
-        }
-        // An operand-shape fast lane: numbers (and, with concat, two strings under +) push their result; true = handled,
-        // false = the general handlers take it
-        checked_result<bool> scalar_lane(token_type op, const script_value& left, const script_value& right, bool concat);
-        
-        bool is_numeric_op(token_type op) const {
-            switch (op) {
-                case token_type::plus:
-                case token_type::minus:
-                case token_type::star:
-                case token_type::slash:
-                case token_type::percent:
-                case token_type::less:
-                case token_type::less_equal:
-                case token_type::greater:
-                case token_type::greater_equal:
-                case token_type::equal_equal:
-                case token_type::bang_equal:
-                case token_type::spaceship:
-                    return true;
-                default:
-                    return false;
-            }
-        }
         // Script-defined function storage (hoisted to namespace scope in environment.hpp)
         using script_defined_function = jai::script_defined_function;
 

@@ -32,7 +32,7 @@
 #include <jaiscript/detail/aggregate_init.hpp>
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (vm parity)
 #include <jaiscript/detail/namespace_scope.hpp>  // a namespace's variable cells and the ns::x store target (shared with the vm)
-#include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
+#include <jaiscript/detail/transient_read.hpp>
 #include <jaiscript/detail/binary_handlers.hpp>
 #include <jaiscript/detail/arg_capture.hpp>   // call arguments take their value when evaluated (vm parity)
 #include <jaiscript/detail/construction_kernel.hpp>
@@ -3859,149 +3859,14 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
     return checked_result<void>();
 }
 
-// Gate on STORAGE, not declared type: a typed-but-uninitialized variable (`int x;`) holds monostate
-checked_result<bool> interpreter::scalar_lane(token_type op, const script_value& left, const script_value& right, bool concat) {
-	if (op == token_type::spaceship) {
-		const size_t leftKind = left.raw_storage_index(), rightKind = right.raw_storage_index();
-		if (leftKind == script_value::TYPEID_INT && rightKind == script_value::TYPEID_INT) {
-			push_value(make_int_fast(detail::order_sign(left.unchecked_as_int() <=> right.unchecked_as_int()))); return true;
-		}
-		if (detail::numeric_storage(leftKind) && detail::numeric_storage(rightKind)) {
-			push_value(make_int_fast(detail::float_order(detail::as_script_float(left,leftKind), detail::as_script_float(right,rightKind)))); return true;
-		}
-		return false;
-	}
-    if (!detail::scalar_arith_op(op) && !detail::scalar_compare_op(op)) { return false; }
-    const size_t li = left.raw_storage_index();
-    const size_t ri = right.raw_storage_index();
-    if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-        const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
-        if (detail::scalar_compare_op(op)) {
-            push_value(make_bool_fast(detail::scalar_compare(op, a, b)));
-            return true;
-        }
-        script_int out;
-        if (const auto fault = detail::int_arith(op, a, b, out); fault != detail::scalar_fault::none) [[unlikely]] {
-            return detail::scalar_fault_error<checked_result<bool>>(op, fault);
-        }
-        push_value(make_int_fast(out));
-        return true;
-    }
-    if (detail::numeric_storage(li) && detail::numeric_storage(ri)) {
-        const script_float a = detail::as_script_float(left, li), b = detail::as_script_float(right, ri);
-        if (detail::scalar_compare_op(op)) {
-            push_value(make_bool_fast(detail::scalar_compare(op, a, b)));
-            return true;
-        }
-        script_float out;
-        if (const auto fault = detail::float_arith(op, a, b, out); fault != detail::scalar_fault::none) [[unlikely]] {
-            return detail::scalar_fault_error<checked_result<bool>>(op, fault);
-        }
-        push_value(make_float_fast(out));
-        return true;
-    }
-    if (concat && op == token_type::plus && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-        const script_string& left_text = left.unchecked_as_string();
-        const script_string& right_text = right.unchecked_as_string();
-        // engine::memory_cap chokepoint: deny the concat result before it exists
-        if (!limits_->memory_charge(sizeof(script_value) + left_text.size() + right_text.size())) [[unlikely]] {
-            return detail::raise_memory_cap(*limits_);
-        }
-        push_value(make_value(left_text + right_text));
-        return true;
-    }
-    // a cpp-bound operand (index 14) skips the gates above: its zero divisor keeps this lane's error text
-    if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
-        if (auto zero = detail::bound_fastpath_zero_divisor(op, left, right, true, true)) {
-            return checked_result<bool>(make_error_code(zero->code), zero->text);
-        }
-    }
-    return false;
-}
-
 template<bool Replaying>
 checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const replay_point* rs) {
     script_value* const chain_root = std::exchange(chain_root_hold_, nullptr);
-    // Track if we've pre-fetched values to avoid duplicate lookups
-    bool already_have_values = false;
-    std::optional<script_value> pre_fetched_left, pre_fetched_right;
-    // Replay: an operand evaluated before the yield is parked (left as partial[0]); the
-    // identifier/identifier fast head cannot hold a yield, so replay skips it
+    std::optional<script_value> pre_fetched_left;
+    // Replay: an operand evaluated before the yield is parked (left as partial[0])
     if constexpr (Replaying) {
         if (rs && rs->index == 1) { pre_fetched_left = rs->partial[0]; }
     }
-
-	// FAST PATH: identifier + identifier (e.g., "a + b", "sum + i") - eliminates 2 virtual calls
-	// Skip logical operators - they need short-circuit evaluation
-	if (!Replaying && expr->op.type != token_type::ampersand_ampersand && expr->op.type != token_type::pipe_pipe &&
-	    expr->op.type != token_type::question_question) {
-		if (expr->left->get_type() == node_type::identifier_expr) {
-			auto* leftId = static_cast<identifier_expr*>(expr->left.get());
-			if (expr->right->get_type() == node_type::identifier_expr) {
-				auto* rightId = static_cast<identifier_expr*>(expr->right.get());
-				// Both operands are simple identifiers - direct variable lookup without AST
-				// traversal (a null resolution - undefined name, member-method or C++-property
-				// shadow - takes the generic path below, which raises the same texts)
-				script_value* leftPtr = resolve_local_or_env(leftId->slot_index, leftId->symbol_id, leftId->global_qualified);
-				script_value* rightPtr = leftPtr ? resolve_local_or_env(rightId->slot_index, rightId->symbol_id, rightId->global_qualified) : nullptr;
-				if (leftPtr && rightPtr) {
-					const script_value& leftVal = leftPtr->deref();
-					const script_value& rightVal = rightPtr->deref();
-
-					// Fast path for integer arithmetic (most common in loops)
-					if (can_use_fast_path(expr->op.type)) {
-						auto lane = scalar_lane(expr->op.type, leftVal, rightVal, true);
-						if (!lane) { return lane.error_value(); }
-						if (lane.value()) { return {}; }
-					}
-
-					// Fast path didn't handle it - copy values for fallback dispatch
-					pre_fetched_left = leftVal;
-					pre_fetched_right = rightVal;
-					already_have_values = true;
-				}
-			}
-			// FAST PATH 2: identifier + literal (e.g., "i < 100", "x + 5") - most common loop condition!
-			else if (expr->right->get_type() == node_type::literal_expr) {
-				auto* rightLit = static_cast<literal_expr*>(expr->right.get());
-				if (script_value* leftPtr = resolve_local_or_env(leftId->slot_index, leftId->symbol_id, leftId->global_qualified)) {
-					const script_value& leftVal = leftPtr->deref();
-					const script_value& rightVal = rightLit->value;  // Direct access - no lookup!
-
-					if (can_use_fast_path(expr->op.type)) {
-						auto lane = scalar_lane(expr->op.type, leftVal, rightVal, false);
-						if (!lane) { return lane.error_value(); }
-						if (lane.value()) { return {}; }
-					}
-					// Fast path didn't fully handle - copy for slow path (literal needs hydration)
-					pre_fetched_left = leftVal;
-					pre_fetched_right = rightVal.type_info_raw() ? rightVal : hydrate_literal(rightVal);
-					already_have_values = true;
-				}
-			}
-		}
-		// FAST PATH 3: literal + identifier (e.g., "100 > i", "5 + x")
-		else if (expr->left->get_type() == node_type::literal_expr) {
-			auto* leftLit = static_cast<literal_expr*>(expr->left.get());
-			if (expr->right->get_type() == node_type::identifier_expr) {
-				auto* rightId = static_cast<identifier_expr*>(expr->right.get());
-				const script_value& leftVal = leftLit->value;  // Direct access!
-				if (script_value* rightPtr = resolve_local_or_env(rightId->slot_index, rightId->symbol_id, rightId->global_qualified)) {
-					script_value rightVal = rightPtr->deref();
-
-					if (can_use_fast_path(expr->op.type)) {
-						auto lane = scalar_lane(expr->op.type, leftVal, rightVal, false);
-						if (!lane) { return lane.error_value(); }
-						if (lane.value()) { return {}; }
-					}
-					// Fast path didn't fully handle - save for slow path (literal needs hydration)
-					pre_fetched_left = leftVal.type_info_raw() ? leftVal : hydrate_literal(leftVal);
-					pre_fetched_right = std::move(rightVal);
-					already_have_values = true;
-				}
-			}
-		}
-	}
 
     // Handle logical operators specially for short-circuit evaluation
     // Return proper boolean values (not JavaScript-style operand values)
@@ -4067,34 +3932,26 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
     const bool subscript = expr->op.type == token_type::left_bracket;
     const bool left_links = subscript && detail::read_chain_link(expr->left.get());
 
-    if (already_have_values) {
-        // Use pre-fetched values from fast path (already dereferenced)
-        left_opt = std::move(*pre_fetched_left);
-        left_raw_opt = *left_opt;  // Already dereferenced
-        right_opt = std::move(*pre_fetched_right);
+    if (parked<Replaying>(rs, 0)) {
+        left_raw_opt = *pre_fetched_left;   // evaluated before the yield, never re-run
     } else {
-        // Normal path: evaluate via AST traversal
-        if (parked<Replaying>(rs, 0)) {
-            left_raw_opt = *pre_fetched_left;   // evaluated before the yield, never re-run
-        } else {
-            {
-                detail::chain_root_handoff handoff{chain_root_hold_, left_links ? chain_root : nullptr};
-                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->left.get(), rs, 0), expr, rp_operand, 0, {});
-            }
-            if (is_unwinding_) { return {}; }   // the left operand raised: the right one never runs (the vm's order)
-            left_raw_opt = pop_value();  // Keep raw value for subscript handling
+        {
+            detail::chain_root_handoff handoff{chain_root_hold_, left_links ? chain_root : nullptr};
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->left.get(), rs, 0), expr, rp_operand, 0, {});
         }
-        if (chain_root && subscript && !left_links) { *chain_root = *left_raw_opt; }
-        left_opt = left_raw_opt->deref();  // Dereferenced version for most operations
-
-        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->right.get(), rs, 1), expr, rp_operand, 1, (std::vector<script_value>{*left_raw_opt}));
-        // Check if we're unwinding due to an exception in the right expression
-        if (is_unwinding_) {
-            // Don't try to pop a value that wasn't pushed due to the exception
-            return {};
-        }
-        right_opt = pop_value().deref();  // Handle references safely
+        if (is_unwinding_) { return {}; }   // the left operand raised: the right one never runs (the vm's order)
+        left_raw_opt = pop_value();  // Keep raw value for subscript handling
     }
+    if (chain_root && subscript && !left_links) { *chain_root = *left_raw_opt; }
+    left_opt = left_raw_opt->deref();  // Dereferenced version for most operations
+
+    JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->right.get(), rs, 1), expr, rp_operand, 1, (std::vector<script_value>{*left_raw_opt}));
+    // Check if we're unwinding due to an exception in the right expression
+    if (is_unwinding_) {
+        // Don't try to pop a value that wasn't pushed due to the exception
+        return {};
+    }
+    right_opt = pop_value().deref();  // Handle references safely
 
     // Extract values from optional (guaranteed to have values at this point)
     script_value& left_raw = *left_raw_opt;
@@ -4405,41 +4262,6 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 template<bool Replaying>
 checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const replay_point* rs) {
     if (expr->const_check) [[unlikely]] { JAISCRIPT_TRY(const_guard_at(expr, expr->const_check)); }
-    // Fast path for literal unary operations
-    if (expr->operand->get_type() == node_type::literal_expr) {
-        auto* literal = static_cast<literal_expr*>(expr->operand.get());
-        const script_value& val = literal->value;
-
-        switch (expr->op.type) {
-            case token_type::minus:
-                if (val.is_int()) {
-                    // -INT64_MIN is UB; apply the overflow policy exactly like the generic
-                    // path below (a parse-folded literal INT64_MIN reaches here; vm parity)
-                    script_int neg;
-                    if (!ints::try_neg(val.unchecked_as_int(), neg)) {
-                        return int_overflow_v("Integer overflow in unary '-'");
-                    }
-                    push_value(make_value(neg));
-                    return {};
-                } else if (val.is_float()) {
-                    push_value(make_value(-val.unchecked_as_float()));
-                    return {};
-                }
-                break;
-            case token_type::bang:
-                push_value(make_value(!is_truthy(val)));
-                return {};
-            case token_type::tilde:
-                if (val.is_int()) {
-                    push_value(make_value(~val.unchecked_as_int()));
-                    return {};
-                }
-                break;
-            default:
-                break; // Fall through to generic path for increment/decrement
-        }
-    }
-
     // Generic path - evaluate operand and use existing logic
     JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->operand.get(), rs, 0), expr, rp_operand, 0, {});
     // Operand raised a script exception (e.g. ++obj.missing member read): propagate it
@@ -4913,142 +4735,13 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         return {};
                     }
                 }
-                // an element, map-entry or property reference is dereferenced only after the right-hand side has run: the
-                // language's order reads the target after the right side (a reference to a removed element raises when the
-                // store resolves, not before the right side's calls; KEEP BYTE-PARALLEL with the VM's compound store, whose
-                // right value is already on the stack); a plain cell or a value slot cannot raise on a dereference, so the
-                // fast paths keep reading it first
+                // an element, map-entry or property reference is dereferenced only after the right-hand side has run (a
+                // reference to a removed element raises when the store resolves, not before the right side's calls; KEEP
+                // BYTE-PARALLEL with the VM's compound store, whose right value is already on the stack)
                 const auto* target_holder = varPtr->is_reference() ? varPtr->get_reference_holder() : nullptr;
                 const uint8_t declared_kind = !target_holder ? uint8_t{0} : identifier->declared_ref_kind ? identifier->declared_ref_kind : detail::ref_declared_kind(*varPtr);
                 const bool deferred_target = target_holder != nullptr && (!target_holder->plain_cell() ||
-                                             (declared_kind && declared_kind != target_holder->cell()->raw_storage_index()));   // the in-place paths keep T's kind only over T's kind
-                if (!deferred_target) {
-                // Fast path: direct in-place mutation for local variables
-                script_value& target = varPtr->deref();
-                auto leftType = target.type();
-
-                // === ULTRA FAST PATH: int += int literal (e.g., sum += 1) ===
-                // Skip dispatch_expr entirely for int literal RHS.
-                // Gated on STORAGE (a typed-null target must not reach unchecked_*); ops
-                // route through jai::ints so the overflow policy covers compound assigns.
-                if (target.raw_storage_index() == script_value::TYPEID_INT && !has_custom_numeric_ops_) [[likely]] {
-                    if (expr->value->get_type() == node_type::literal_expr) {
-                        auto* rhs_lit = static_cast<literal_expr*>(expr->value.get());
-                        if (rhs_lit->value.raw_storage_index() == script_value::TYPEID_INT) {  // int literal
-                            script_int rhs_val = rhs_lit->value.unchecked_as_int();
-                            script_int& tref = target.unchecked_as_int_ref();
-                            script_int rr;
-                            switch (expr->op.type) {
-                                case token_type::plus_equal:
-                                    if (!ints::try_add(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '+='");
-                                    tref = rr;
-                                    push_value(expression_result_needed_ ? target.clone() : target);
-                                    return {};
-                                case token_type::minus_equal:
-                                    if (!ints::try_sub(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '-='");
-                                    tref = rr;
-                                    push_value(expression_result_needed_ ? target.clone() : target);
-                                    return {};
-                                case token_type::star_equal:
-                                    if (!ints::try_mul(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '*='");
-                                    tref = rr;
-                                    push_value(expression_result_needed_ ? target.clone() : target);
-                                    return {};
-                                case token_type::slash_equal:
-                                    if (rhs_val == 0) {
-                                        return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
-                                    }
-                                    if (!ints::try_div(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '/='");
-                                    tref = rr;
-                                    push_value(expression_result_needed_ ? target.clone() : target);
-                                    return {};
-                                default:
-                                    break;  // Fall through to general path
-                            }
-                        }
-                    }
-                    // === ULTRA FAST PATH: int += int variable (e.g., sum += i) ===
-                    // Skip dispatch_expr for simple identifier RHS
-                    else if (expr->value->get_type() == node_type::identifier_expr) {
-                        auto* rhs_id = static_cast<identifier_expr*>(expr->value.get());
-                        if (rhs_id->symbol_id == UINT64_MAX) {
-                            rhs_id->symbol_id = string_symbolizer_->intern(rhs_id->name);
-                        }
-                        script_value* rhs_ptr = resolve_local_or_env(rhs_id->slot_index, rhs_id->symbol_id, rhs_id->global_qualified);
-                        if (rhs_ptr && rhs_ptr->raw_storage_index() == script_value::TYPEID_INT) {  // int value
-                            script_int rhs_val = rhs_ptr->unchecked_as_int();
-                            script_int& tref = target.unchecked_as_int_ref();
-                            script_int rr;
-                            switch (expr->op.type) {
-                                case token_type::plus_equal:
-                                    if (!ints::try_add(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '+='");
-                                    tref = rr;
-                                    push_value(expression_result_needed_ ? target.clone() : target);
-                                    return {};
-                                case token_type::minus_equal:
-                                    if (!ints::try_sub(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '-='");
-                                    tref = rr;
-                                    push_value(expression_result_needed_ ? target.clone() : target);
-                                    return {};
-                                case token_type::star_equal:
-                                    if (!ints::try_mul(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '*='");
-                                    tref = rr;
-                                    push_value(expression_result_needed_ ? target.clone() : target);
-                                    return {};
-                                case token_type::slash_equal:
-                                    if (rhs_val == 0) {
-                                        return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
-                                    }
-                                    if (!ints::try_div(tref, rhs_val, rr)) return int_overflow_v("Integer overflow in '/='");
-                                    tref = rr;
-                                    push_value(expression_result_needed_ ? target.clone() : target);
-                                    return {};
-                                default:
-                                    break;  // Fall through to general path
-                            }
-                        }
-                    }
-                    // === FAST PATH: int += simple binary expr (e.g., sum += i * 2) ===
-                    else if (expr->value->get_type() == node_type::binary_expr) {
-                        auto* rhs_binary = static_cast<binary_expr*>(expr->value.get());
-                        // Handle identifier * literal pattern (most common in loops)
-                        if (rhs_binary->left->get_type() == node_type::identifier_expr) {
-                            auto* left_id = static_cast<identifier_expr*>(rhs_binary->left.get());
-                            if (rhs_binary->right->get_type() == node_type::literal_expr) {
-                                auto* right_lit = static_cast<literal_expr*>(rhs_binary->right.get());
-                                if (right_lit->value.raw_storage_index() == script_value::TYPEID_INT) {  // int literal
-                                    if (left_id->symbol_id == UINT64_MAX) {
-                                        left_id->symbol_id = string_symbolizer_->intern(left_id->name);
-                                    }
-                                    script_value* left_ptr = resolve_local_or_env(left_id->slot_index, left_id->symbol_id, left_id->global_qualified);
-                                    if (left_ptr && left_ptr->raw_storage_index() == script_value::TYPEID_INT) {
-                                        script_int left_val = left_ptr->unchecked_as_int();
-                                        script_int right_val = right_lit->value.unchecked_as_int();
-                                        script_int binary_result = 0;
-                                        bool handled = true;
-                                        switch (rhs_binary->op.type) {
-                                            case token_type::star: if (!ints::try_mul(left_val, right_val, binary_result)) return int_overflow_v("Integer overflow in '*'"); break;
-                                            case token_type::plus: if (!ints::try_add(left_val, right_val, binary_result)) return int_overflow_v("Integer overflow in '+'"); break;
-                                            case token_type::minus: if (!ints::try_sub(left_val, right_val, binary_result)) return int_overflow_v("Integer overflow in '-'"); break;
-                                            default: handled = false; break;
-                                        }
-                                        if (handled && expr->op.type == token_type::plus_equal) {
-                                            script_int& tref = target.unchecked_as_int_ref();
-                                            script_int rr;
-                                            if (!ints::try_add(tref, binary_result, rr)) return int_overflow_v("Integer overflow in '+='");
-                                            tref = rr;
-                                            push_value(expression_result_needed_ ? target.clone() : target);
-                                            return {};
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                }   // !deferred_target: the fast paths over a target that cannot raise on its dereference
-
-                // Evaluate the right-hand side (general path)
+                                             (declared_kind && declared_kind != target_holder->cell()->raw_storage_index()));
                 JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
                 if (is_unwinding_) {
                     // The RHS raised: surface the ORIGINAL exception instead of running the
@@ -5809,103 +5502,6 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             }
             push_value(expr->postfix_old_result ? std::move(postfix_old) : std::move(resultValue));
         } else {
-            // Numeric subscript-compound fast path (a[i] op= v, the GLOOM store shape):
-            // compute + write in place - no reference mint, no synthetic assignment
-            // replay. Bails to the general path below for ANY shape it can't prove
-            // identical (semantics + error text stay the general path's). Sound to bail
-            // AFTER probing because every probed expression is side-effect-free: base
-            // ident, index ident/int-literal, and a callout_free RHS re-evaluate safely.
-            if (expr->target->get_type() == node_type::binary_expr && !has_custom_numeric_ops_ && !expr->postfix_old_result) {
-                auto* sub = static_cast<binary_expr*>(expr->target.get());
-                detail::op_slot cslot = detail::op_slot::none;
-                switch (expr->op.type) {
-                    case token_type::plus_equal: cslot = detail::op_slot::plus; break;
-                    case token_type::minus_equal: cslot = detail::op_slot::minus; break;
-                    case token_type::star_equal: cslot = detail::op_slot::star; break;
-                    case token_type::slash_equal: cslot = detail::op_slot::slash; break;
-                    case token_type::percent_equal: cslot = detail::op_slot::percent; break;
-                    default: break;
-                }
-                const bool op_overridden = operator_table_ && operator_table_->entry(cslot) != nullptr;
-                if (sub->op.type == token_type::left_bracket && cslot != detail::op_slot::none && !op_overridden &&
-                    sub->left->get_type() == node_type::identifier_expr &&
-                    detail::transient_read_marker::callout_free(expr->value.get())) {
-                    auto* base_ident = static_cast<identifier_expr*>(sub->left.get());
-                    if (base_ident->symbol_id == UINT64_MAX) {
-                        base_ident->symbol_id = string_symbolizer_->intern(base_ident->name);
-                    }
-                    script_value* base_ptr = resolve_local_or_env(base_ident->slot_index, base_ident->symbol_id, base_ident->global_qualified);
-                    script_value* array_val = base_ptr ? &base_ptr->deref() : nullptr;
-                    if (array_val && array_val->raw_storage_index() == script_value::TYPEID_ARRAY) {
-                        // Index: ident or int literal only (re-evaluation-safe)
-                        std::optional<script_int> index;
-                        if (sub->right->get_type() == node_type::literal_expr) {
-                            const auto& lit = static_cast<literal_expr*>(sub->right.get())->value;
-                            if (lit.raw_storage_index() == script_value::TYPEID_INT) {
-                                index = lit.unchecked_as_int();
-                            }
-                        } else if (sub->right->get_type() == node_type::identifier_expr) {
-                            auto* idx_ident = static_cast<identifier_expr*>(sub->right.get());
-                            if (idx_ident->symbol_id == UINT64_MAX) {
-                                idx_ident->symbol_id = string_symbolizer_->intern(idx_ident->name);
-                            }
-                            if (script_value* idx_ptr = resolve_local_or_env(idx_ident->slot_index, idx_ident->symbol_id, idx_ident->global_qualified)) {
-                                const script_value& idx_v = idx_ptr->deref();
-                                if (idx_v.raw_storage_index() == script_value::TYPEID_INT) {
-                                    index = idx_v.unchecked_as_int();
-                                }
-                            }
-                        }
-                        auto storage = array_val->get_array_storage();
-                        // typed nodes take the general path (holder scratch + buffer
-                        // commit); 2b gives them a raw load-op-store fast path
-                        if (index && storage && !storage->is_typed() && *index >= 0 && *index < static_cast<script_int>(storage->size())) {
-                            // RHS after the probes: they read no user code and cannot raise, so this observes the value-first order
-                            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
-                            if (is_unwinding_) {
-                                push_value(make_value());
-                                return {};
-                            }
-                            const script_value rhs_holder = pop_value();
-                            const script_value& rhs = rhs_holder.deref();
-                            script_value* target_ptr = &storage->values()[static_cast<size_t>(*index)];
-                            const size_t ei = target_ptr->raw_storage_index();
-                            const size_t ri = rhs.raw_storage_index();
-                            const bool numeric = (ei == script_value::TYPEID_INT || ei == script_value::TYPEID_FLOAT) &&
-                                                 (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT);
-                            // Zero divisors bail: the general path owns their error text
-                            const bool zero_div =
-                                (expr->op.type == token_type::slash_equal &&
-                                 ((ri == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) ||
-                                  (ri == script_value::TYPEID_FLOAT && rhs.unchecked_as_float() == 0.0))) ||
-                                (expr->op.type == token_type::percent_equal &&
-                                 ri == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0);
-                            if (numeric && !zero_div) {
-                                token_type op;
-                                switch (expr->op.type) {
-                                    case token_type::minus_equal: op = token_type::minus; break;
-                                    case token_type::star_equal: op = token_type::star; break;
-                                    case token_type::slash_equal: op = token_type::slash; break;
-                                    case token_type::percent_equal: op = token_type::percent; break;
-                                    default: op = token_type::plus; break;
-                                }
-                                script_value resultValue = make_value();
-                                JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(*target_ptr, op, rhs, detail::compound_index(op)));
-                                // Typed elements: only the identity case (same raw type) is
-                                // provably conversion-free; anything else bails
-                                auto array_type_info = array_val->get_type_info();
-                                type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
-                                if (!element_type || resultValue.raw_storage_index() == ei) {
-                                    *target_ptr = resultValue;
-                                    push_value(std::move(resultValue));
-                                    return {};
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             // General compound assignment for any expression
             // This handles subscripts, function calls that return references, etc.
 
@@ -6096,21 +5692,6 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     if (store_through) {
                         JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, string_symbolizer_, identifier->declared_ref_kind ? identifier->declared_ref : nullptr, identifier->declared_ref_kind, identifier->name));
                     } else {
-                        // Parse-proven typed store: an IDENTICAL interned type tag (raw
-                        // pointer compare - int/float tags are engine-canonical) makes
-                        // enforcement a provable no-op, and a plain int/float payload makes
-                        // the assignment kernel a plain copy. Guarded at runtime, so a
-                        // mis-stamp just falls through. (KEEP BYTE-PARALLEL with
-                        // vm_backend::exec_store.)
-                        if (expr->typed_store_provable) {
-                            const size_t vi = value.raw_storage_index();
-                            if ((vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT) &&
-                                storage->get_type_info().get() == value.get_type_info().get()) {
-                                *storage = value;
-                                push_value(std::move(value));
-                                return {};
-                            }
-                        }
                         // Slot locals enforce their locked type like the environment path does
                         // (same-type fast guard keeps the hot store path call-free)
                         type_info_ptr slot_type = storage->get_type_info();
@@ -7278,44 +6859,6 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             JAISCRIPT_TRY_ROOT(decl, decl->initializer.get());
             value = pop_value();
             if (is_unwinding_) { return {}; }   // a raising initializer (missing member) wins over the declared-type check; the vm's run loop sees the flag before exec_decl_var
-
-            // Decl fast path (construction-stamped flags): a scalar or string payload
-            // whose storage index already matches the declared type stores straight into
-            // the slot - enforce/clone/homogeneity are provably identity there (a scalar
-            // clones as a copy, a string as its shared node, so is_lvalue_expression is
-            // irrelevant). Anything else - references, mismatched payloads, env-resident
-            // decls, escape-boxed decls - falls through to the untouched full path below.
-            // (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
-            if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
-                !decl->ref_escaping && decl->slot_index != SIZE_MAX && !call_stack_.empty()) {
-                size_t vi = value.raw_storage_index();
-                // Subscript-initialized decls arrive as rhs-lvalue reference wrappers
-                // (the dominant profiled shape): the decl consumes the VALUE, so a
-                // matching pointee takes the same identity store - copy out BEFORE
-                // overwriting `value` (its holder OWNS the deref target).
-                const script_value* seen = &value;
-                if (vi == script_value::TYPEID_REFERENCE) {
-                    seen = &value.deref();
-                    vi = seen->raw_storage_index();
-                }
-                if (variable_decl::identity_payload(vi, decl->type.get())) {
-                    if (seen != &value) {
-                        script_value pointee(*seen);
-                        value = std::move(pointee);
-                    }
-                    if (decl->type) {
-                        value.set_type_info(decl->type);
-                    }
-                    call_stack_.back().set_local(decl->slot_index, std::move(value));
-                    return {};
-                }
-                if (variable_decl::widening_payload(vi, decl->type.get())) {
-                    script_value widened(static_cast<script_float>(seen->unchecked_as_int()), engine_);
-                    widened.set_type_info(decl->type);
-                    call_stack_.back().set_local(decl->slot_index, std::move(widened));
-                    return {};
-                }
-            }
 
             // Element/subscript reads arrive as reference wrappers (rhs-lvalue read
             // shape) - and so do ternaries over them, which is_lvalue_expression can't
@@ -10428,16 +9971,8 @@ checked_result<void> interpreter::visit_ternary_expr_t(ternary_expr* expr, const
         return {};
     }
 
-    // OPTIMIZATION: If condition is guaranteed to return bool, skip type dispatch
-    bool conditionIsTruthy;
-    if (expression_returns_bool(expr->condition.get())) {
-        conditionIsTruthy = conditionValue.unchecked_as_bool();
-    } else {
-        conditionIsTruthy = is_truthy(conditionValue);
-    }
-
     // Evaluate only the selected branch (short-circuit evaluation)
-    if (conditionIsTruthy) {
+    if (is_truthy(conditionValue)) {
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->then_expression.get(), rs, 1), expr, rp_operand, 1, (std::vector<script_value>{conditionValue}));
     } else {
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->else_expression.get(), rs, 1), expr, rp_operand, 1, (std::vector<script_value>{conditionValue}));
@@ -10850,12 +10385,7 @@ checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
             return {};
         }
 
-        // OPTIMIZATION: If condition is guaranteed to return bool, skip type dispatch
-        if (expression_returns_bool(stmt->condition.get())) {
-            is_true = conditionValue.unchecked_as_bool();
-        } else {
-            is_true = is_truthy(conditionValue);
-        }
+        is_true = is_truthy(conditionValue);
     }
 
     // Execute appropriate branch based on truthiness. On yield the branch owns the frames;
@@ -10874,9 +10404,6 @@ checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
 }
 
 checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
-    // OPTIMIZATION: Pre-check if condition is guaranteed to return bool
-    const bool condition_returns_bool = expression_returns_bool(stmt->condition.get());
-
     // Check if we're resuming into this while loop from a coroutine yield
     bool skip_first_condition = false;
     bool replay_condition = false;
@@ -10917,16 +10444,7 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
                 break;
             }
 
-            const auto& val = valueStack_.top();
-            bool is_true;
-
-            // FAST PATH: If we KNOW the condition returns bool, skip type dispatch
-            if (condition_returns_bool) {
-                is_true = val.unchecked_as_bool();
-            } else {
-                is_true = is_truthy(val);
-            }
-
+            const bool is_true = is_truthy(valueStack_.top());
             valueStack_.discard();
 
             if (!is_true) {
@@ -11007,422 +10525,6 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 }
 
 checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
-    // FAST PATH: Detect and optimize integer counting loops
-    // Pattern: for (int/auto/var i = START; i < END; ++i) { body }
-    //
-    // Unified fast path for all declaration types (auto/int/var):
-    // - Native C++ loop with cached pointers for counter, end, and step
-    // - Per-iteration type validation (~0.1ns) handles edge cases
-    // - Falls back to slow path if type changes mid-loop
-    //
-    // IMPORTANT: Skip fast path when inside a coroutine - the fast path doesn't
-    // support yield/resume since it uses native C++ loop counters that can't be saved.
-    // The slow path handles yield correctly via continuation points.
-    //
-    if (stmt->initializer && stmt->condition && stmt->update && !active_coroutine_ &&
-        !detail::const_site_of(stmt->update.get()) && !detail::const_site_of(stmt->initializer.get())) {
-        auto* init_var = stmt->initializer->get_type() == node_type::variable_decl
-            ? static_cast<variable_decl*>(stmt->initializer.get()) : nullptr;
-        auto* cond_binary = stmt->condition->get_type() == node_type::binary_expr
-            ? static_cast<binary_expr*>(stmt->condition.get()) : nullptr;
-
-        // Try to match update patterns: ++i, i++, i += step, i = i + step
-        auto* update_unary = stmt->update->get_type() == node_type::unary_expr
-            ? static_cast<unary_expr*>(stmt->update.get()) : nullptr;
-        auto* update_assign = stmt->update->get_type() == node_type::assignment_expr
-            ? static_cast<assignment_expr*>(stmt->update.get()) : nullptr;
-
-        // Extract update info: which variable, what step
-        uint64_t update_var_id = UINT64_MAX;
-        script_int step_value = 1;  // Default for ++i
-        uint64_t step_var_id = UINT64_MAX;  // For dynamic step (i += j)
-        size_t step_var_slot = SIZE_MAX;
-        bool valid_update = false;
-        // Overflow attribution: the update error names the SOURCE operator (vm cfor parity)
-        const char* update_overflow_msg = "Integer overflow in '+='";
-
-        if (update_unary && update_unary->op.type == token_type::plus_plus) {
-            // Pattern: ++i or i++
-            if (update_unary->operand->get_type() == node_type::identifier_expr) {
-                auto* update_id = static_cast<identifier_expr*>(update_unary->operand.get());
-                update_var_id = update_id->symbol_id;
-                step_value = 1;
-                valid_update = true;
-                update_overflow_msg = "Integer overflow in '++'";
-            }
-        } else if (update_unary && update_unary->op.type == token_type::minus_minus) {
-            // Pattern: --i or i-- (step = -1, but this is unusual for counting up)
-            if (update_unary->operand->get_type() == node_type::identifier_expr) {
-                auto* update_id = static_cast<identifier_expr*>(update_unary->operand.get());
-                update_var_id = update_id->symbol_id;
-                step_value = -1;
-                valid_update = true;
-                update_overflow_msg = "Integer overflow in '--'";
-            }
-        } else if (update_assign && update_assign->op.type == token_type::plus_equal) {
-            // Pattern: i += step (literal or variable)
-            if (update_assign->target->get_type() == node_type::identifier_expr) {
-                auto* update_id = static_cast<identifier_expr*>(update_assign->target.get());
-                update_var_id = update_id->symbol_id;
-                // Check if step is an int literal
-                if (update_assign->value->get_type() == node_type::literal_expr) {
-                    auto* step_lit = static_cast<literal_expr*>(update_assign->value.get());
-                    if (step_lit->value.raw_storage_index() == script_value::TYPEID_INT) {  // int literal
-                        step_value = step_lit->value.unchecked_as_int();
-                        valid_update = true;
-                    }
-                }
-                // Check if step is an identifier (i += j where j is int)
-                else if (update_assign->value->get_type() == node_type::identifier_expr &&
-                         !static_cast<identifier_expr*>(update_assign->value.get())->global_qualified) {
-                    auto* step_id = static_cast<identifier_expr*>(update_assign->value.get());
-                    script_value* step_ptr = resolve_local_or_env(step_id->slot_index, step_id->symbol_id);
-                    if (step_ptr && step_ptr->raw_storage_index() == script_value::TYPEID_INT) {  // int value
-                        step_var_id = step_id->symbol_id;
-                        step_var_slot = step_id->slot_index;
-                        step_value = step_ptr->unchecked_as_int();  // Initial value
-                        valid_update = true;
-                    }
-                }
-            }
-        } else if (update_assign && update_assign->op.type == token_type::minus_equal) {
-            // Pattern: i -= step (literal or variable)
-            update_overflow_msg = "Integer overflow in '-='";
-            if (update_assign->target->get_type() == node_type::identifier_expr) {
-                auto* update_id = static_cast<identifier_expr*>(update_assign->target.get());
-                update_var_id = update_id->symbol_id;
-                if (update_assign->value->get_type() == node_type::literal_expr) {
-                    auto* step_lit = static_cast<literal_expr*>(update_assign->value.get());
-                    if (step_lit->value.raw_storage_index() == script_value::TYPEID_INT) {
-                        // Direction comes from step_subtract below; negating here too made
-                        // `i -= <literal>` ASCEND (i -= -step), an infinite counting loop
-                        step_value = step_lit->value.unchecked_as_int();
-                        valid_update = true;
-                    }
-                }
-                // Check if step is an identifier (i -= j where j is int)
-                else if (update_assign->value->get_type() == node_type::identifier_expr &&
-                         !static_cast<identifier_expr*>(update_assign->value.get())->global_qualified) {
-                    auto* step_id = static_cast<identifier_expr*>(update_assign->value.get());
-                    script_value* step_ptr = resolve_local_or_env(step_id->slot_index, step_id->symbol_id);
-                    if (step_ptr && step_ptr->raw_storage_index() == script_value::TYPEID_INT) {  // int value
-                        step_var_id = step_id->symbol_id;
-                        step_var_slot = step_id->slot_index;
-                        step_value = step_ptr->unchecked_as_int();  // Initial value
-                        valid_update = true;
-                    }
-                }
-            }
-        }
-
-        if (init_var && cond_binary && valid_update) {
-            // Select comparison function based on operator type
-            // Supports: <, <=, >, >=, ==, !=
-            using compare_fn = bool(*)(script_int, script_int);
-            compare_fn cmp = nullptr;
-            switch (cond_binary->op.type) {
-                case token_type::less:          cmp = [](script_int a, script_int b) { return a < b; }; break;
-                case token_type::less_equal:    cmp = [](script_int a, script_int b) { return a <= b; }; break;
-                case token_type::greater:       cmp = [](script_int a, script_int b) { return a > b; }; break;
-                case token_type::greater_equal: cmp = [](script_int a, script_int b) { return a >= b; }; break;
-                case token_type::equal_equal:   cmp = [](script_int a, script_int b) { return a == b; }; break;
-                case token_type::bang_equal:    cmp = [](script_int a, script_int b) { return a != b; }; break;
-                default: break;
-            }
-
-            if (cmp) {
-                auto* cond_id = cond_binary->left->get_type() == node_type::identifier_expr
-                    ? static_cast<identifier_expr*>(cond_binary->left.get()) : nullptr;
-
-                // End value can be literal OR variable
-                script_int end_literal = 0;
-                uint64_t end_var_id = UINT64_MAX;
-                size_t end_var_slot = SIZE_MAX;
-                bool has_end = false;
-
-                if (cond_binary->right->get_type() == node_type::literal_expr) {
-                    auto* cond_lit = static_cast<literal_expr*>(cond_binary->right.get());
-                    if (cond_lit->value.raw_storage_index() == script_value::TYPEID_INT) {  // int literal
-                        end_literal = cond_lit->value.unchecked_as_int();
-                        has_end = true;
-                    }
-                } else if (cond_binary->right->get_type() == node_type::identifier_expr &&
-                           !static_cast<identifier_expr*>(cond_binary->right.get())->global_qualified) {
-                    auto* cond_end_id = static_cast<identifier_expr*>(cond_binary->right.get());
-                    // End is a variable - we'll bind to its pointer (::name bounds stay
-                    // on the generic loop: the cached slot/id pair can't carry the flag)
-                    end_var_id = cond_end_id->symbol_id;
-                    end_var_slot = cond_end_id->slot_index;
-                    has_end = true;
-                }
-
-                if (cond_id && has_end) {
-                    // Check: update variable matches condition variable
-                    if (update_var_id == cond_id->symbol_id) {
-                        // Check: init is variable i = literal (same identifier, int literal)
-                        auto* init_lit = init_var->initializer && init_var->initializer->get_type() == node_type::literal_expr
-                            ? static_cast<literal_expr*>(init_var->initializer.get()) : nullptr;
-
-                        if (init_lit && init_lit->value.raw_storage_index() == script_value::TYPEID_INT &&
-                            init_var->name_id == cond_id->symbol_id) {
-
-                            // === PATTERN MATCHED! Run optimized native loop ===
-                            // Unified fast path for all integer counting loops (auto/int/var)
-                            // Type validation per-iteration is negligible (~0.1ns) vs body dispatch
-                            script_int i = init_lit->value.unchecked_as_int();
-                            uint64_t var_id = init_var->name_id;
-
-                            // Setup environment once (from pool)
-                            auto previous = environment_;
-                            auto loop_env = get_block_environment(previous);
-                            environment_ = loop_env;
-
-                            // Create value preserving declared type (var = any_type, auto = nullptr, int = int_type)
-                            script_value init_val = make_value(i);
-                            if (init_var->type) {
-                                init_val.set_type_info(init_var->type);
-                            }
-                            // Slotted counters (function scope) live in the frame local, not
-                            // the loop env — body identifiers resolve slot-first to the same
-                            // storage. Env define stays for top-level counters.
-                            script_value* var_ptr = nullptr;
-                            if (init_var->slot_index != SIZE_MAX && !call_stack_.empty()) {
-                                call_stack_.back().set_local(init_var->slot_index, std::move(init_val));
-                                var_ptr = call_stack_.back().get_local(init_var->slot_index);
-                            } else {
-                                environment_->define(var_id, std::move(init_val));
-                                var_ptr = environment_->get_value_ptr(var_id);
-                            }
-
-                            // Bind end value pointer (if variable) AFTER environment setup.
-                            // Resolve through references at prep (escape-boxed vars: the
-                            // cell inner is heap-stable) and keep the script_value* so the
-                            // per-iteration guard can re-check the storage kind - a mid-loop
-                            // box-on-demand of the variable demotes gracefully.
-                            script_value* end_target = nullptr;
-                            script_int end_val = end_literal;
-                            if (end_var_id != UINT64_MAX) {
-                                script_value* end_sv = resolve_local_or_env(end_var_slot, end_var_id);
-                                if (end_sv) { end_target = &end_sv->deref(); }
-                                if (!end_target || end_target->raw_storage_index() != script_value::TYPEID_INT ||
-                                    end_target->is_cpp_bound()) {
-                                    // End variable not int - fall back to slow path
-                                    release_environment(loop_env);
-                                    environment_ = previous;
-                                    goto slow_path;
-                                }
-                            }
-
-                            // Bind step value pointer (if variable)
-                            script_value* step_target = nullptr;
-                            if (step_var_id != UINT64_MAX) {
-                                script_value* step_sv = resolve_local_or_env(step_var_slot, step_var_id);
-                                if (step_sv) { step_target = &step_sv->deref(); }
-                                if (!step_target || step_target->raw_storage_index() != script_value::TYPEID_INT ||
-                                    step_target->is_cpp_bound()) {
-                                    // Step variable not int - fall back to slow path
-                                    release_environment(loop_env);
-                                    environment_ = previous;
-                                    goto slow_path;
-                                }
-                            }
-
-                            // Determine step operation: += or -=
-                            const bool step_subtract = update_assign &&
-                                update_assign->op.type == token_type::minus_equal;
-
-                            // === UNIFIED FAST PATH ===
-                            // Native C++ loop with cached pointers for end and step
-                            // Per-iteration type check is cheap (~0.1ns) and handles edge cases
-                            bool fell_through = false;
-
-                            // Optimization: If body is a block, pre-allocate its environment
-                            // and reuse across iterations (define() overwrites existing vars in place)
-                            auto* body_block = stmt->body->get_type() == node_type::block_stmt
-                                ? static_cast<block_stmt*>(stmt->body.get()) : nullptr;
-                            std::shared_ptr<environment> body_env = nullptr;
-                            if (body_block) {
-                                body_env = get_block_environment(loop_env);
-                            }
-
-                            while (true) {
-                                if (execution_limit_exhausted()) [[unlikely]] {
-                                    if (body_env) { release_environment(body_env); }
-                                    release_environment(loop_env);
-                                    environment_ = previous;
-                                    return execution_limit_failure();
-                                }
-
-                                // Storage-kind guard on cached targets (box-on-demand safety)
-                                if ((end_target && end_target->raw_storage_index() != 1) ||
-                                    (step_target && step_target->raw_storage_index() != 1)) [[unlikely]] {
-                                    fell_through = true;
-                                    break;
-                                }
-                                script_int current_end = end_target ? end_target->unchecked_as_int() : end_val;
-                                if (!cmp(i, current_end)) break;
-
-                                // Type validation - if type changed, fall back to slow path
-                                if (var_ptr->raw_storage_index() != 1) [[unlikely]] {
-                                    fell_through = true;
-                                    break;
-                                }
-                                var_ptr->unchecked_as_int_ref() = i;
-
-                                // Execute body - use pre-allocated environment for blocks
-                                if (body_block) {
-                                    // Reuse body_env - it's already a child of loop_env
-                                    environment_ = body_env;
-                                    for (const auto& decl : body_block->declarations) {
-                                        auto result = dispatch_decl(decl.get());
-                                        if (valueStack_.size() > 0) {
-                                            valueStack_.clear();
-                                        }
-                                        if (!result) {
-                                            kill_scope_slots(body_block->declarations);
-                                            release_environment(body_env);
-                                            release_environment(loop_env);
-                                            environment_ = previous;
-                                            return result;
-                                        }
-                                        if (is_unwinding_ || hasBreakRequest_ || hasContinueRequest_ || hasReturnValue_ || hasYieldRequest_) {
-                                            break;
-                                        }
-                                    }
-                                    valueStack_.clear();
-                                    kill_scope_slots(body_block->declarations);   // the body block's locals die each iteration (visit_block_stmt parity)
-                                    // Fresh body scope per iteration (vm/while parity: body shadow decls must
-                                    // not persist); clear_values early-outs when the body defined nothing
-                                    body_env->clear_values();
-                                    environment_ = loop_env;
-                                } else {
-                                    auto result = dispatch_stmt(stmt->body.get());
-                                    if (!result) {
-                                        release_environment(loop_env);
-                                        environment_ = previous;
-                                        return result;
-                                    }
-                                }
-
-                                if (is_unwinding_) break;  // script throw unwinding: stop the loop
-                                if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
-                                if (hasReturnValue_ || hasYieldRequest_) break;
-                                if (hasContinueRequest_) hasContinueRequest_ = false;
-
-                                // The body can move the frame's locals (a declaration at a new slot grows the vector, a
-                                // callee's frame reallocates the call stack): the cached counter, bound and step pointers
-                                // are re-resolved before they are read again (a use-after-free otherwise; Debug's fill
-                                // tripped the kind guard into the general path, Release read the stale bytes)
-                                if (init_var->slot_index != SIZE_MAX && !call_stack_.empty()) { var_ptr = call_stack_.back().get_local(init_var->slot_index); }
-                                else { var_ptr = environment_->get_value_ptr(var_id); }
-                                if (!var_ptr) [[unlikely]] { fell_through = true; break; }
-                                if (end_var_id != UINT64_MAX) {
-                                    script_value* end_sv = resolve_local_or_env(end_var_slot, end_var_id);
-                                    end_target = end_sv ? &end_sv->deref() : nullptr;
-                                    if (!end_target) [[unlikely]] { fell_through = true; break; }
-                                }
-                                if (step_var_id != UINT64_MAX) {
-                                    script_value* step_sv = resolve_local_or_env(step_var_slot, step_var_id);
-                                    step_target = step_sv ? &step_sv->deref() : nullptr;
-                                    if (!step_target) [[unlikely]] { fell_through = true; break; }
-                                }
-
-                                // General-path parity: honor body writes to the loop variable —
-                                // adopt int writes into the native counter; on a type change run
-                                // the real update once, then continue via the fallthrough loop
-                                if (var_ptr->raw_storage_index() != 1) [[unlikely]] {
-                                    if (stmt->update) {
-                                        auto update_result = dispatch_expr(stmt->update.get());
-                                        if (!update_result) {
-                                            if (body_env) { release_environment(body_env); }
-                                            release_environment(loop_env);
-                                            environment_ = previous;
-                                            return update_result;
-                                        }
-                                        pop_value();
-                                    }
-                                    fell_through = true;
-                                    break;
-                                }
-                                i = var_ptr->unchecked_as_int();
-
-                                script_int step = step_target ? step_target->unchecked_as_int() : step_value;
-                                script_int next;
-                                const bool step_overflow = step_subtract
-                                    ? !ints::try_sub(i, step, next)
-                                    : !ints::try_add(i, step, next);
-                                if (step_overflow) [[unlikely]] {
-                                    // vm cfor parity: the update applies the overflow policy and
-                                    // names the source operator
-                                    if (body_env) { release_environment(body_env); }
-                                    release_environment(loop_env);
-                                    environment_ = previous;
-                                    return int_overflow_v(update_overflow_msg);
-                                }
-                                i = next;
-                            }
-
-                            // Release body environment if we allocated it
-                            if (body_env) {
-                                release_environment(body_env);
-                            }
-
-                            // If type changed mid-loop, continue with slow path dispatch
-                            if (fell_through) [[unlikely]] {
-                                while (true) {
-                                    // Same back-edge limit check as every other loop path: a counter
-                                    // boxed mid-loop (bound by reference once) used to land here
-                                    // unbudgeted and spin forever (fuzz seed 33294)
-                                    if (execution_limit_exhausted()) [[unlikely]] {
-                                        release_environment(loop_env);
-                                        environment_ = previous;
-                                        return execution_limit_failure();
-                                    }
-                                    auto cond_result = dispatch_expr(stmt->condition.get());
-                                    if (!cond_result) {
-                                        release_environment(loop_env);
-                                        environment_ = previous;
-                                        return cond_result;
-                                    }
-                                    if (!is_truthy(pop_value())) break;
-
-                                    auto body_result = dispatch_stmt(stmt->body.get());
-                                    if (!body_result) {
-                                        release_environment(loop_env);
-                                        environment_ = previous;
-                                        return body_result;
-                                    }
-
-                                    if (is_unwinding_) break;
-                                    if (hasBreakRequest_) { hasBreakRequest_ = false; break; }
-                                    if (hasReturnValue_ || hasYieldRequest_) break;
-                                    if (hasContinueRequest_) hasContinueRequest_ = false;
-
-                                    if (stmt->update) {
-                                        auto update_result = dispatch_expr(stmt->update.get());
-                                        if (!update_result) {
-                                            release_environment(loop_env);
-                                            environment_ = previous;
-                                            return update_result;
-                                        }
-                                        pop_value();
-                                    }
-                                }
-                            }
-
-                            release_environment(loop_env);
-                            environment_ = previous;
-                            return {};
-                        }
-                    }
-                }
-            }
-        }
-    slow_path: ;  // Empty statement for goto target
-    }
-
-    // === GENERAL PATH: Standard for-loop handling ===
-
     // Check if we're resuming into this for-loop from a coroutine yield
     bool resuming_loop = false;
     uint32_t resume_phase = rp_none;
@@ -11493,7 +10595,6 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
 
     // OPTIMIZATION: Pre-check if condition is guaranteed to return bool
     // This allows us to skip is_truthy() type dispatch entirely
-    const bool condition_returns_bool = stmt->condition && expression_returns_bool(stmt->condition.get());
 
     // Lambda helpers (ChaiScript-style) for cleaner, more optimizable code
     bool replay_condition = resume_phase == rp_cond;
@@ -11523,18 +10624,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
             return false;
         }
 
-        const auto& val = valueStack_.top();
-        bool is_true;
-
-        // FAST PATH: If we KNOW the condition returns bool (comparisons, logical ops),
-        // use unchecked direct access - no type dispatch needed!
-        if (condition_returns_bool) {
-            is_true = val.unchecked_as_bool();
-        } else {
-            // SLOW PATH: General case - need to check type and convert to bool
-            is_true = is_truthy(val);
-        }
-
+        const bool is_true = is_truthy(valueStack_.top());
         valueStack_.discard();
         return is_true;
     };

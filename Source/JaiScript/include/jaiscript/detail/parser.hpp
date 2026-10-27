@@ -109,6 +109,8 @@ namespace jai {
         checked_result<expression_ptr> initializer_from_arguments(const type_info_ptr& type, std::vector<expression_ptr> arguments, const source_location& loc);
         bool paren_group_ends_statement(size_t lparen) const;   // `name(...)` followed by ';': an object declaration, never a function
         checked_result<declaration_ptr> include_declaration();
+        checked_result<std::string> include_literal_path();
+        checked_result<std::vector<expression_ptr>> construction_arguments(bool a_brace, const char* a_closeError = nullptr);
         checked_result<declaration_ptr> import_declaration();
         checked_result<expression_ptr> import_call(const source_location& at);
         checked_result<declaration_ptr> extern_declaration();

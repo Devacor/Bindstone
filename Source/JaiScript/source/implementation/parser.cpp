@@ -128,46 +128,55 @@ namespace {
             }
         }
 
-        // True when the innermost scope that declares `symbol` declares it as a
-        // reference (ref param / auto& decl / auto& loop var). Unresolved symbols
-        // answer false (value-decl semantics is the safe default for stores).
-        bool names_reference_decl(uint64_t symbol) const {
+        // The innermost scope that declares `symbol`: whether a declaration there is a reference (ref param / auto& decl /
+        // auto& loop var; destructured names are always value decls) and whether that scope is the program's
+        struct declaration_hit {
+            bool found = false;
+            bool is_ref = false;
+            bool program_scope = false;
+        };
+        declaration_hit innermost_declaration(uint64_t symbol) const {
+            declaration_hit result;
             if (symbol == UINT64_MAX) {
-                return false;
+                return result;
             }
             for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
-                bool found = false;
-                bool is_ref = false;
                 auto vr = it->vars.equal_range(symbol);
                 for (auto v = vr.first; v != vr.second; ++v) {
-                    found = true;
+                    result.found = true;
                     if (v->second->type && v->second->type->base_type == script_value_type::jai_reference_type) {
-                        is_ref = true;
+                        result.is_ref = true;
                     }
                 }
                 auto pr = it->params.equal_range(symbol);
-                for (auto p = pr.first; p != pr.second; ++p) {
-                    found = true;
-                    if (p->second->is_reference) {
-                        is_ref = true;
+                for (auto q = pr.first; q != pr.second; ++q) {
+                    result.found = true;
+                    if (q->second->is_reference) {
+                        result.is_ref = true;
                     }
                 }
                 auto rr = it->range_vars.equal_range(symbol);
                 for (auto r = rr.first; r != rr.second; ++r) {
-                    found = true;
+                    result.found = true;
                     if (r->second->is_reference) {
-                        is_ref = true;
+                        result.is_ref = true;
                     }
                 }
-                auto dr = it->destructures.equal_range(symbol);
-                if (dr.first != dr.second) {
-                    found = true;   // destructured names are always value decls
+                if (it->destructures.count(symbol)) {
+                    result.found = true;
                 }
-                if (found) {
-                    return is_ref;
+                if (result.found) {
+                    result.program_scope = std::next(it) == scopes.rend();
+                    return result;
                 }
             }
-            return false;
+            return result;
+        }
+
+        // True when the innermost scope that declares `symbol` declares it as a reference (unresolved symbols answer
+        // false: value-decl semantics is the safe default for stores)
+        bool names_reference_decl(uint64_t symbol) const {
+            return innermost_declaration(symbol).is_ref;
         }
 
         // True when the innermost scope that declares `symbol` declares it a by-value var (a var local, a var or untyped
@@ -287,47 +296,12 @@ namespace {
             }
         }
 
-        // The same walk, answering whether the name resolves to a VALUE declaration at all (false for a
-        // reference declaration and for a name the unit does not declare: another unit's global, a host name)
+        // Whether the name resolves to a VALUE declaration at all (false for a reference declaration and for a name the
+        // unit does not declare: another unit's global, a host name); a program-scope hit inside a class body may be
+        // shadowed by a member at runtime
         bool names_known_value_decl(uint64_t symbol) const {
-            if (symbol == UINT64_MAX) {
-                return false;
-            }
-            for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
-                bool found = false;
-                bool is_ref = false;
-                auto vr = it->vars.equal_range(symbol);
-                for (auto v = vr.first; v != vr.second; ++v) {
-                    found = true;
-                    if (v->second->type && v->second->type->base_type == script_value_type::jai_reference_type) {
-                        is_ref = true;
-                    }
-                }
-                auto pr = it->params.equal_range(symbol);
-                for (auto q = pr.first; q != pr.second; ++q) {
-                    found = true;
-                    if (q->second->is_reference) {
-                        is_ref = true;
-                    }
-                }
-                auto rr = it->range_vars.equal_range(symbol);
-                for (auto r = rr.first; r != rr.second; ++r) {
-                    found = true;
-                    if (r->second->is_reference) {
-                        is_ref = true;
-                    }
-                }
-                auto dr = it->destructures.equal_range(symbol);
-                if (dr.first != dr.second) {
-                    found = true;
-                }
-                if (found) {
-                    // a program-scope hit inside a class body may be shadowed by a member at runtime
-                    const bool program_scope = std::next(it) == scopes.rend();
-                    return !is_ref && !(program_scope && class_depth > 0);
-                }
-            }
-            return false;
+            const declaration_hit hit = innermost_declaration(symbol);
+            return hit.found && !hit.is_ref && !(hit.program_scope && class_depth > 0);
         }
 
         // Declared classification of an identifier, looked up ONLY in the innermost
@@ -1496,21 +1470,7 @@ checked_result<expression_ptr> parser::primary() {
             JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after include expression"));
             return std::make_shared<include_expr>(includeToken.location, path_expr);
         }
-        std::string path;
-        if (match(token_type::string_literal)) {
-            path = previous().string_value;
-        } else if (match(token_type::less)) {
-            std::string path_buffer;
-            while (!check(token_type::greater) && !is_at_end()) {
-                path_buffer += peek().lexeme;
-                advance();
-            }
-            JAISCRIPT_TRY(consume(token_type::greater, "Expected '>' after include path"));
-            path = path_buffer;
-        } else {
-            report_error("Expected string literal, '<', or '(' after include", peek());
-            return make_error_code(parse_error_code::unexpected_token);
-        }
+        JAISCRIPT_TRY_ASSIGN(std::string path, include_literal_path());
         return std::make_shared<include_expr>(includeToken.location, path);
     }
 
@@ -1557,23 +1517,9 @@ checked_result<expression_ptr> parser::primary() {
             report_foreign(check(token_type::left_bracket) ? detail::foreign_word::new_array : detail::foreign_word::new_without_arguments, newToken);
             return make_error_code(parse_error_code::unexpected_token);
         }
-        bool is_brace = check(token_type::left_brace);
+        const bool is_brace = check(token_type::left_brace);
         advance(); // consume '(' or '{'
-
-        std::vector<expression_ptr> arguments;
-        if (!check(is_brace ? token_type::right_brace : token_type::right_paren)) {
-            arguments.reserve(4);
-            do {
-                JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                arguments.push_back(bound_conditional(std::move(arg)));
-            } while (match(token_type::comma));
-        }
-
-        if (is_brace) {
-            JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after constructor arguments"));
-        } else {
-            JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after constructor arguments"));
-        }
+        JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(is_brace));
         return std::make_shared<new_expr>(newToken.location, type, std::move(arguments));
     }
 
@@ -1657,31 +1603,12 @@ checked_result<expression_ptr> parser::primary() {
                 if (type && check(token_type::left_brace)) {
                     // This is a brace-initialized constructor like array<int>{}
                     advance(); // consume '{'
-
-                    std::vector<expression_ptr> arguments;
-                    if (!check(token_type::right_brace)) {
-                        arguments.reserve(4);
-                        do {
-                            JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                            arguments.push_back(bound_conditional(std::move(arg)));
-                        } while (match(token_type::comma));
-                    }
-
-                    JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after constructor arguments"));
+                    JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(true));
                     return std::make_shared<new_expr>(identToken.location, type, std::move(arguments));
                 } else if (type && check(token_type::left_paren)) {
                     // Parentheses constructor for user-defined template types
                     advance(); // consume '('
-
-                    std::vector<expression_ptr> arguments;
-                    if (!check(token_type::right_paren)) {
-                        do {
-                            JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                            arguments.push_back(bound_conditional(std::move(arg)));
-                        } while (match(token_type::comma));
-                    }
-
-                    JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after constructor arguments"));
+                    JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(false));
                     return std::make_shared<new_expr>(identToken.location, type, std::move(arguments));
                 }
             }
@@ -1847,23 +1774,9 @@ checked_result<expression_ptr> parser::primary() {
 
                     // Check if this is followed by {} or () for constructor syntax
                     if (check(token_type::left_brace) || check(token_type::left_paren)) {
-                        bool is_brace = check(token_type::left_brace);
+                        const bool is_brace = check(token_type::left_brace);
                         advance(); // consume '{' or '('
-
-                        std::vector<expression_ptr> arguments;
-                        if (!check(is_brace ? token_type::right_brace : token_type::right_paren)) {
-                            arguments.reserve(4);
-                            do {
-                                JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                                arguments.push_back(bound_conditional(std::move(arg)));
-                            } while (match(token_type::comma));
-                        }
-
-                        if (is_brace) {
-                            JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after constructor arguments"));
-                        } else {
-                            JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after constructor arguments"));
-                        }
+                        JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(is_brace));
                         return std::make_shared<new_expr>(typeToken.location, type, std::move(arguments));
                     }
 
@@ -2651,18 +2564,7 @@ checked_result<expression_ptr> parser::postfix() {
             // This should only be valid if expr is an identifier (type name)
             if (expr->get_type() == node_type::identifier_expr) {
                 auto* identExpr = static_cast<identifier_expr*>(expr.get());
-                std::vector<expression_ptr> arguments;
-
-                if (!check(token_type::right_brace)) {
-                    // Reserve capacity for constructor arguments
-                    arguments.reserve(4);
-                    do {
-                        JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                        arguments.push_back(bound_conditional(std::move(arg)));
-                    } while (match(token_type::comma));
-                }
-
-                JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after constructor arguments"));
+                JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(true));
 
                 // Create a new_expr for object construction
                 // The type name is in the identifier
@@ -4438,198 +4340,17 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
         // Parse member declaration
         declaration_ptr member;
 
-        // Check for constructor: ClassName(params)
-        // But NOT a field like: ClassName fieldName = ...
-        // We need to look ahead to distinguish
-        if (check(token_type::identifier) && peek().lexeme == className.lexeme) {
-            // Look ahead to see if this is followed by '(' (constructor) or identifier (field)
-            size_t lookAhead = current_ + 1;
-            if (lookAhead < stream_->size() && (*stream_)[lookAhead].type == token_type::left_paren) {
-                // This is a constructor - use class name's pre-interned symbol
-                advance(); // consume class name
-                auto [ctor_name_id, ctor_name_view] = symbolizer_->intern_with_view(className.lexeme);
-                auto body_result = parse_function_body(ctor_name_view, ctor_name_id, nullptr, /*allow_ctor_initializers=*/true);
-                if (!body_result) {
-                    synchronize_class_member(class_open_index);
-                    continue;
-                }
-                member = std::move(body_result.value());
-                // TODO: Parse constructor delegation syntax (: base(args), : this(args))
-                // Currently no support for constructor chaining
-            } else {
-                // This is a field with the class type, fall through to regular member parsing
-                bool is_static = leading_static || match(token_type::static_keyword);
-                bool is_override = leading_override || match(token_type::override_keyword);
-
-                auto type_result = parse_type();
-                if (!type_result) {
-                    synchronize_class_member(class_open_index);
-                    continue;
-                }
-                type_info_ptr type = std::move(type_result.value());
-                if (reference_method_head()) { type = wrap_reference_return_type(std::move(type)); }   // Box& self_ref() { ... }
-
-                // Continue with regular member parsing...
-                if (check(token_type::identifier) || keyword_member_name_at(*stream_, current_)) {
-                    token name = advance();
-                    std::string method_name(name.lexeme);
-
-                    // Typed operator methods returning the enclosing class land HERE (the
-                    // ctor lookahead saw no '('): consume the operator symbol exactly like
-                    // the general typed path so `Money operator+(Money o)` parses inside
-                    // class Money
-                    if (method_name == "operator") {
-                        auto op_name = parse_operator_method_symbol();
-                        if (!op_name) {
-                            synchronize_class_member(class_open_index);
-                            continue;
-                        }
-                        method_name = std::move(*op_name);
-                    }
-
-                    if (match(token_type::left_paren)) {
-                        // Function
-                        current_--;
-                        auto [fall_name_id, fall_name_view] = symbolizer_->intern_with_view(method_name);
-                        auto func = std::make_shared<function_decl>(previous().location, fall_name_view);
-                        func->name_id = fall_name_id;
-                        func->is_static = is_static;
-                        func->is_override = is_override;
-
-                        // Validate: static methods cannot use override keyword
-                        if (is_static && is_override) {
-                            report_error("Static methods cannot use 'override' keyword - they are not virtual", name);
-                            synchronize_class_member(class_open_index);
-                            continue;
-                        }
-
-                        auto open_paren_result = consume(token_type::left_paren, "Expected '(' after function name");
-                        if (!open_paren_result) {
-                            synchronize_class_member(class_open_index);
-                            continue;
-                        }
-
-                        auto params_result = parse_parameter_list();
-                        if (!params_result) {
-                            synchronize_class_member(class_open_index);
-                            continue;
-                        }
-                        func->parameters = std::move(params_result.value());
-
-                        auto close_paren_result = consume(token_type::right_paren, "Expected ')' after parameters");
-                        if (!close_paren_result) {
-                            synchronize_class_member(class_open_index);
-                            continue;
-                        }
-                        if (const_method_suffix()) {
-                            synchronize_class_member(class_open_index);
-                            continue;
-                        }
-
-                        if (match(token_type::arrow)) {
-                            if (check(token_type::left_brace)) {
-                                // -> { adds no information: keep the leading type
-                                func->return_type = type;
-                            } else {
-                                auto return_type_result = parse_type();
-                                if (!return_type_result) {
-                                    synchronize_class_member(class_open_index);
-                                    continue;
-                                }
-                                func->return_type = wrap_reference_return_type(std::move(return_type_result.value()));
-                                if (type && func->return_type && func->return_type->id != type->id) {
-                                    report_error("Conflicting return types '" + type->type_name + "' and '" +
-                                                 func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
-                                    synchronize_class_member(class_open_index);
-                                    continue;
-                                }
-                            }
-                        } else {
-                            func->return_type = type;
-                        }
-
-                        if (match(token_type::override_keyword)) {
-                            func->is_override = true;
-                            // Validate: static methods cannot use override keyword
-                            if (is_static) {
-                                report_error("Static methods cannot use 'override' keyword - they are not virtual", previous());
-                                synchronize_class_member(class_open_index);
-                                continue;
-                            }
-                        }
-
-                        if (check(token_type::colon)) {
-                            // Initializer lists are constructor-only; on methods
-                            // silently parsing and ignoring them would be a trap
-                            report_error("Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors", peek());
-                            synchronize_class_member(class_open_index);
-                            continue;
-                        }
-
-                        if (!match(token_type::left_brace)) {
-                            report_error("Expected '{' before function body", peek());
-                            synchronize_class_member(class_open_index);
-                            continue;
-                        }
-
-                        // Enter function scope for slot-based local variable tracking
-                        enter_function_scope();
-
-                        // Assign slots to parameters
-                        for (auto& param : func->parameters) {
-                            if (param.symbol_id == UINT64_MAX) {
-                                param.symbol_id = symbolizer_->intern(param.name);
-                            }
-                            param.slot_index = allocate_slot(param.symbol_id);
-                        }
-
-                        auto body_result = block_statement();
-                        if (!body_result) {
-                            exit_function_scope();  // Clean up on error
-                            synchronize_class_member(class_open_index);
-                            continue;
-                        }
-                        func->body = std::dynamic_pointer_cast<block_stmt>(body_result.value());
-                        func->local_count = exit_function_scope();
-                        member = func;
-                    } else {
-                        // Variable
-                        expression_ptr init = nullptr;
-                        if (match(token_type::equal)) {
-                            auto init_result = expression();
-                            if (!init_result) {
-                                synchronize_class_member(class_open_index);
-                                continue;
-                            }
-                            init = std::move(init_result.value());
-                        }
-
-                        auto semicolon_result = consume(token_type::semicolon, "Expected ';' after field declaration");
-                        if (!semicolon_result) {
-                            synchronize_class_member(class_open_index);
-                            continue;
-                        }
-
-                        if (!init && type && type->base_type == script_value_type::jai_object_type && type->type_name == className.lexeme) {
-                            report_error("'" + std::string(className.lexeme) + " " + std::string(name.lexeme) + ";' would build a " + std::string(className.lexeme) +
-                                         " inside every " + std::string(className.lexeme) + ": write '" + std::string(className.lexeme) + " " + std::string(name.lexeme) +
-                                         " = null;' for a link, or 'shared_ptr<" + std::string(className.lexeme) + "> " + std::string(name.lexeme) + ";' to share one", name);
-                            synchronize_class_member(class_open_index);
-                            continue;
-                        }
-                        const bool spelled_init = init != nullptr;
-                        if (!init) { init = default_initializer(type, name.location); }
-                        auto var_decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), init);
-                        var_decl->is_static = is_static;
-                        var_decl->default_initialized = member_const && !spelled_init;   // a class constant needs its initializer (finish_const)
-                        member = var_decl;
-                    }
-                } else {
-                    report_expected_name("Expected member name", "member");
-                    synchronize_class_member(class_open_index);
-                    continue;
-                }
+        // ClassName( is a constructor; ClassName name is a member of the class's type (the general member path)
+        if (check(token_type::identifier) && peek().lexeme == className.lexeme &&
+            current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::left_paren) {
+            advance(); // consume class name
+            auto [ctor_name_id, ctor_name_view] = symbolizer_->intern_with_view(className.lexeme);
+            auto body_result = parse_function_body(ctor_name_view, ctor_name_id, nullptr, /*allow_ctor_initializers=*/true);
+            if (!body_result) {
+                synchronize_class_member(class_open_index);
+                continue;
             }
+            member = std::move(body_result.value());
         } else if (match(token_type::tilde)) {
             auto destructor_name_result = consume(token_type::identifier, "Expected class name after '~'");
             if (!destructor_name_result) {
@@ -5273,28 +4994,41 @@ checked_result<declaration_ptr> parser::include_declaration() {
         return std::make_shared<include_decl>(previous().location, path_expr);
     }
 
-    // Original literal syntax
-    std::string path;
+    JAISCRIPT_TRY_ASSIGN(std::string path, include_literal_path());
+    return std::make_shared<include_decl>(previous().location, path);
+}
 
+// include's literal path: "path" or <path>
+checked_result<std::string> parser::include_literal_path() {
     if (match(token_type::string_literal)) {
-        // include "path"
-        path = previous().string_value;
-    } else if (match(token_type::less)) {
-        // include <path>
-        // Read until we find >
-        std::string path_buffer;
+        return previous().string_value;
+    }
+    if (match(token_type::less)) {
+        std::string result;
         while (!check(token_type::greater) && !is_at_end()) {
-            path_buffer += peek().lexeme;
+            result += peek().lexeme;
             advance();
         }
         JAISCRIPT_TRY(consume(token_type::greater, "Expected '>' after include path"));
-        path = path_buffer;
-    } else {
-        report_error("Expected string literal, '<', or '(' after include", peek());
-    return make_error_code(parse_error_code::unexpected_token);
+        return result;
     }
+    report_error("Expected string literal, '<', or '(' after include", peek());
+    return make_error_code(parse_error_code::unexpected_token);
+}
 
-    return std::make_shared<include_decl>(previous().location, path);
+// A construction's arguments after its '(' or '{', through the closer
+checked_result<std::vector<expression_ptr>> parser::construction_arguments(bool a_brace, const char* a_closeError) {
+    const token_type close = a_brace ? token_type::right_brace : token_type::right_paren;
+    std::vector<expression_ptr> result;
+    if (!check(close)) {
+        result.reserve(4);
+        do {
+            JAISCRIPT_TRY_ASSIGN(auto arg, expression());
+            result.push_back(bound_conditional(std::move(arg)));
+        } while (match(token_type::comma));
+    }
+    JAISCRIPT_TRY(consume(close, a_closeError ? a_closeError : a_brace ? "Expected '}' after constructor arguments" : "Expected ')' after constructor arguments"));
+    return result;
 }
 
 // The call form's arguments after `import(`: paths or arrays of paths, then an optional jai::force (a `jai::` name
@@ -5783,15 +5517,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
         // Type name{args...} / Type name(args...): construction with the declared type (a primitive takes its one value)
         const bool brace = check(token_type::left_brace);
         advance();
-        std::vector<expression_ptr> arguments;
-        if (!check(brace ? token_type::right_brace : token_type::right_paren)) {
-            arguments.reserve(4);
-            do {
-                JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                arguments.push_back(bound_conditional(std::move(arg)));
-            } while (match(token_type::comma));
-        }
-        JAISCRIPT_TRY(consume(brace ? token_type::right_brace : token_type::right_paren, "Expected closing bracket after constructor arguments"));
+        JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(brace, "Expected closing bracket after constructor arguments"));
         JAISCRIPT_TRY_ASSIGN(initializer, initializer_from_arguments(type, std::move(arguments), name.location));
     } else if (check(token_type::left_brace)) {
         // Auto type with brace initializer - parse as expression

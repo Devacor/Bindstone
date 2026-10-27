@@ -1390,8 +1390,15 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 					flags |= load_flag_type_ctor;
 				}
 				if (rs->static_return_proof == proof_same_type) flags |= load_flag_return_proven;
-				const size_t ret_ip = emit(opcode::op_return_ident, identifier_slot_operand(ident), add_symbol(ident->symbol_id), flags);
+				const uint32_t symbol = add_symbol(ident->symbol_id);
+				const size_t ret_ip = emit(opcode::op_return_ident, identifier_slot_operand(ident), symbol, flags);
 				note_ident_node(ret_ip, rs->value);
+				note_this_field(ret_ip, ident);
+				if ((flags & (load_flag_global_only | load_flag_type_ctor)) == 0 && this_global_of(ident)) {
+					auto& table = chunk_->this_global_ips;
+					if (table.size() <= ret_ip) { table.resize(ret_ip + 1, 0); }
+					table[ret_ip] = symbol + 1;
+				}
 				return;
 			} else {
 				// Calls that already yield a reference pass through; anything else
@@ -6725,14 +6732,17 @@ void vm_compiler::compile_member_into_temp(const expression_ptr& e, fused_operan
 	out.direct = true;
 }
 
-// a call the expression consumes as an operand: a plain-name callee (never a member call, never the reflective or parallel
-// intrinsics), its result landed in a compiler temp by op_call_temp, so the consumer takes a slot operand and a block's door lands
+// a call the expression consumes as an operand: a plain-name callee (never the reflective or parallel intrinsics) or an instance
+// method call, its result landed in a compiler temp by op_call_temp, so the consumer takes a slot operand and a block's door lands
 // the result in a temp cell. The call runs ahead of its partner, so the partner must be one the call cannot change: a literal or
-// a private local (a slot no user code can rebind)
+// a private local (a slot no user code can rebind) the call takes neither as an argument nor as its receiver
 bool vm_compiler::call_temp_operand(const expression* e) const {
 	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return false;
 	if (!e || e->get_type() != node_type::call_expr) return false;
 	const auto* call = static_cast<const call_expr*>(e);
+	if (call->callee && call->callee->get_type() == node_type::member_expr) {
+		return !static_cast<const member_expr*>(call->callee.get())->is_static && call->arguments.size() <= 8;
+	}
 	if (!call->callee || call->callee->get_type() != node_type::identifier_expr) return false;
 	const auto* ident = static_cast<const identifier_expr*>(call->callee.get());
 	if (ident->name == "weak_from_this" || ident->name == "shared_from_this" || ident->name == "__jai_parallel_advance" || ident->name == "__jai_parallel_element") return false;

@@ -506,7 +506,7 @@ namespace jai::vm {
         std::vector<std::pair<uint64_t, uint32_t>> this_field_uses;   // (field id, slot) the body addresses
         std::vector<uint32_t> this_global_ips;                   // per instruction: the LOAD's symbols index + 1 for a bare name the body's class resolves past its members (an environment read once the frame's layout holds)
         std::vector<uint64_t> this_global_uses;                  // those names: the receiver's class takes none of them as a member
-        struct member_layout_row { const class_definition* cd = nullptr; uint64_t shape = 0; uint64_t methods = 0; bool same = false; };
+        struct member_layout_row { const class_definition* cd = nullptr; uint64_t gen = 0; bool same = false; };   // gen: engine::layout_generation
         static constexpr uint8_t k_member_layout_rows = 4;
         mutable member_layout_row member_layout_rows[k_member_layout_rows];
         mutable uint8_t member_layout_next = 0;

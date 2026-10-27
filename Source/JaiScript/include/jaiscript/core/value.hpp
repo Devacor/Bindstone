@@ -2790,9 +2790,7 @@ namespace detail {
         // The class instance this value holds, borrowed (no handle copy): the caller keeps this value alive and does not keep
         // the pointer past it
         class_instance* peek_class_instance() const noexcept {
-            const auto t = current_type();
-            if (t != script_value_type::jai_object_type && t != script_value_type::jai_shared_ptr_type) { return nullptr; }
-            const auto* holder = storage_.get_if<strong_ptr<object_holder>>();
+            const auto* holder = storage_.get_if<strong_ptr<object_holder>>();   // an object's storage alone holds one
             if (!holder || !*holder || !(*holder)->is_class_instance_wrapper) { return nullptr; }
             return static_cast<class_instance*>((*holder)->data.get());
         }

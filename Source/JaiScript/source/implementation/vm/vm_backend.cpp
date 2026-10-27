@@ -1891,13 +1891,17 @@ bool vm_backend::handle_admits(const script_value& v, const type_info_ptr& decla
 }
 
 // the receiver's class lays out every field the member-class body addresses at the compiled slot, and resolves each such bare name to that
-// field (no method, getter, user accessor or static of the name, the declaration the body's class sees): remembered per class at its field
-// shape and method epochs
-bool vm_backend::member_layout_same(const chunk& body, const class_definition* cd) {
-	const uint64_t shape = cd->field_shape_epoch(), methods = cd->method_epoch();
+// field (no method, getter, user accessor or static of the name, the declaration the body's class sees): remembered per class at the
+// layout generation (every class's field shape and method epoch moves it)
+JAI_FORCEINLINE bool vm_backend::member_layout_same(const chunk& body, const class_definition* cd) {
+	const uint64_t gen = *layout_gen_;
 	for (const chunk::member_layout_row& row : body.member_layout_rows) {
-		if (row.cd == cd && row.shape == shape && row.methods == methods) { return row.same; }
+		if (row.cd == cd && row.gen == gen) { return row.same; }
 	}
+	return member_layout_verdict(body, cd);
+}
+
+JAI_NOINLINE bool vm_backend::member_layout_verdict(const chunk& body, const class_definition* cd) {
 	const auto cpp_base = cd->find_cpp_base_class();
 	bool same = cd->is_script_class() && !cd->chain_has_nonpublic() && (cd == body.member_class || cd->derives_from(body.member_class));
 	for (size_t i = 0; same && i < body.this_field_uses.size(); ++i) {
@@ -1915,12 +1919,12 @@ bool vm_backend::member_layout_same(const chunk& body, const class_definition* c
 	}
 	chunk::member_layout_row& row = body.member_layout_rows[body.member_layout_next];
 	body.member_layout_next = static_cast<uint8_t>((body.member_layout_next + 1) % chunk::k_member_layout_rows);
-	row = chunk::member_layout_row{cd, shape, methods, same};
+	row = chunk::member_layout_row{cd, *layout_gen_, same};
 	return same;
 }
 
 // a lazy method frame's receiver, once per call: the body's bare fields read straight from it while the layout holds
-void vm_backend::bind_member_layout(frame& f, const chunk& body) {
+JAI_FORCEINLINE void vm_backend::bind_member_layout(frame& f, const chunk& body) {
 	f.this_inst = nullptr;
 	if (parallel_worker_ || !layout_gen_ || !f.locals || !f.locals->this_object_ptr) { return; }
 	class_instance* inst = f.locals->this_object_ptr->peek_class_instance();
@@ -6005,6 +6009,29 @@ bool vm_backend::store_slot_raw(frame& f, const vm_instruction& ins, size_t kind
 	return true;
 }
 
+// store_slot_raw over a member-class body's bare field at its compiled slot: the field declared the result's kind (or untyped) and holding
+// that kind takes the payload, as store_this_field_slot_scalar's lane would
+bool vm_backend::store_this_field_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv) {
+	if (ins.b != k_invalid_u32 || !f.this_inst || !(ins.c & store_flag_no_result) || (ins.c & store_flag_global_only) || !proofs_on()) return false;
+	const uint32_t this_slot = this_field_slot_at(f);
+	if (!this_slot) return false;
+	script_value* cell = frame_this_field(f, this_slot);
+	if (!cell || cell->raw_storage_index() != kind) return false;
+	const bool is_int = kind == script_value::TYPEID_INT;
+	const script_value_type want = is_int ? script_value_type::jai_int_type : script_value_type::jai_float_type;
+	const type_info* declared = f.this_cd->field_declared_type_at(this_slot - 1, f.code->symbols[ins.a]).get();
+	if (declared && declared->base_type != script_value_type::jai_any_type && declared->base_type != want) return false;
+	const type_info* st = cell->type_info_raw();
+	type_info* tag = is_int ? ti_int_ : ti_float_;
+	if (st && st->base_type != want) {
+		if (st->base_type != script_value_type::jai_any_type || st->dynamic_slot) return false;
+		tag = const_cast<type_info*>(st);
+	}
+	if (is_int) { cell->unchecked_set_int_payload(iv); } else { cell->unchecked_set_float_payload(fv); }
+	if (st != tag) { cell->set_type_info(type_info_ptr{tag}); }
+	return true;
+}
+
 // The text a string `+` appends for an operand whose text runs no user code (concat_text's rows): a string's bytes, an int's digits,
 // a char, a float or a bool as to_string writes it; false for anything else (an object's to_string, a utf8_string's kind change)
 static bool plain_concat_text(const script_value& v, char (&digits)[24], std::string& scratch, std::string_view& out) {
@@ -6071,8 +6098,8 @@ op_status vm_backend::exec_binary_fused_store(frame& f, const vm_instruction& in
 		bool landed = false;
 		std::optional<script_value> boxed;
 		void operator()(script_value&& v) { boxed.emplace(std::move(v)); }
-		void raw_int(script_int iv) { if (vm->store_slot_raw(fr, sins, script_value::TYPEID_INT, iv, 0.0)) { landed = true; } else { boxed.emplace(script_value(iv, vm->engine_)); } }
-		void raw_float(script_float fv) { if (vm->store_slot_raw(fr, sins, script_value::TYPEID_FLOAT, 0, fv)) { landed = true; } else { boxed.emplace(script_value(fv, vm->engine_)); } }
+		void raw_int(script_int iv) { if (vm->store_slot_raw(fr, sins, script_value::TYPEID_INT, iv, 0.0) || vm->store_this_field_raw(fr, sins, script_value::TYPEID_INT, iv, 0.0)) { landed = true; } else { boxed.emplace(script_value(iv, vm->engine_)); } }
+		void raw_float(script_float fv) { if (vm->store_slot_raw(fr, sins, script_value::TYPEID_FLOAT, 0, fv) || vm->store_this_field_raw(fr, sins, script_value::TYPEID_FLOAT, 0, fv)) { landed = true; } else { boxed.emplace(script_value(fv, vm->engine_)); } }
 	} lane{this, f, store_ins};
 	VM_TRY(binary_fused_compute(f, dp.binary_proto, lane));
 	if (lane.landed) return {};
@@ -10210,6 +10237,8 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 		if (st && st->base_type == script_value_type::jai_any_type) {
 			// a var: the language lands any kind; the flush keeps the any stamp; a kind the cell's contract does not hold misses
 			if (contract != 0 && kind != contract) return false;
+		} else if (loop.env_mask.test(dk)) {
+			return false;   // an environment value's stamp is its own tag, not its declaration (a var field holds a canonical int): the general store converts
 		} else if (have == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 			bits = cell_bits_of_float(static_cast<script_float>(static_cast<script_int>(bits))); kind = have;   // a float slot widens an int (decl or store)
 		} else if (have == static_cast<uint8_t>(script_value::TYPEID_INT) && kind == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && st && st->base_type == script_value_type::jai_int_type) {
@@ -13291,6 +13320,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 #endif
 	const call_site& site = f.code->call_sites[ins.a];
 	const size_t argc = ins.b;
+	if (f.this_inst && site.mic_cd == f.this_cd && site.mic_dispatch && park_frame_sibling(f, site)) { JAI_PROBE_SECTION(0); JAI_PROBE_SECTION(1); return {}; }
 	if (parallel_worker_ && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) {
 		if (const worker_chunk_env_cache::call_ic* ic = worker_call_ic(f, site); ic && ic->identity && (ic->fn ? argc == ic->argc : ic->native)) {
 			bool plain_frame = !f.locals || f.top_level;
@@ -13386,6 +13416,21 @@ bool vm_backend::park_sibling_method(frame& f, const call_site& site) {
 	pc.value = site.mic_method;
 	pc.method = site.mic_dispatch;
 	pc.native_entry = site.mic_dispatch ? nullptr : site.mic_native.entry;
+	pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
+	return true;
+}
+// park_sibling_method on a lazy frame whose layout holds: the frame has no scope of its own and its receiver is the bound instance, so the
+// site's method of that class at its epoch answers unless a field of the instance takes the name
+JAI_FORCEINLINE bool vm_backend::park_frame_sibling(frame& f, const call_site& site) {
+	if (!cached_global_env_ || site.callee.slot != k_invalid_u32 || (site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only)) ||
+	    f.this_gen != *layout_gen_ || f.this_inst->get_class_definition() != f.this_cd || f.this_cd->method_epoch() != site.mic_epoch ||
+	    mic_field_shadowed(site, *f.this_inst, f.code->symbols[site.callee.symbol])) {
+		return false;
+	}
+	ensure_frame_member_scope(f, environment_.get());   // the call enters on the scope's receiver
+	pending_callee& pc = pending_callees_.emplace_back();
+	pc.value = site.mic_method;
+	pc.method = site.mic_dispatch;
 	pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
 	return true;
 }
@@ -24016,7 +24061,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 	rec.f.code = body_chunk;
 	rec.f.ip = 0;
 	rec.f.locals = &rec.locals;
-	rec.f.entry_env = rec.env_lazy ? nullptr : environment_;
+	if (!rec.env_lazy) { rec.f.entry_env = environment_; } else if (rec.f.entry_env) { rec.f.entry_env = nullptr; }
 	// Slice window: the caller's args ARE slots 0..argc-1 in place; frame_base marks
 	// this frame's stack territory (receiver/callee slot when one sits below), so
 	// pop/unwind truncation destroys window + pin together
@@ -24184,7 +24229,7 @@ op_status vm_backend::push_method_frame(frame& caller, const script_value& metho
 	rec.f.ip = 0;
 	rec.f.locals = &rec.locals;   // frame-kind metadata (this/closure_env); slots live in the window
 	// null entry_env = lazy marker: this/fields/access-context resolve from the frame
-	rec.f.entry_env = rec.env_lazy ? nullptr : environment_;
+	if (!rec.env_lazy) { rec.f.entry_env = environment_; } else if (rec.f.entry_env) { rec.f.entry_env = nullptr; }
 	// Frame window built at the stack top during binding (pooled-vector args)
 	rec.f.window_backed = true;
 	rec.f.window_base = stack_.size();
@@ -24631,7 +24676,7 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 		if (rec.ctor_frame) [[unlikely]] {
 			result = rec.locals.get_this();   // a constructor call yields its instance (a bare `return;` ends the body early)
 			detail::construction_completed(result);
-		} else if (rec.method_result_anchor) {
+		} else if (rec.method_result_anchor && result.raw_storage_index() == script_value::TYPEID_OBJECT) {
 			anchor_method_result(result, rec.locals.get_this());
 		}
 		if (rec.ctor_result_stamp && result.type() == script_value_type::jai_object_type) [[unlikely]] {
@@ -24716,6 +24761,8 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	operand.symbol = ins.b;
 	operand.load_flags = ins.c;
 	operand.ident_node = f.code->ident_nodes.size() > f.ip ? f.code->ident_nodes[f.ip] : k_invalid_u32;
+	operand.this_slot = this_field_slot_at(f);
+	operand.this_global = !operand.this_slot && f.ip < f.code->this_global_ips.size() && f.code->this_global_ips[f.ip] == ins.b + 1;
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
 	if (!resolved) return op_status::failed;

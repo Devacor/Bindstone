@@ -59,7 +59,7 @@ namespace jai::vm {
         }
     }
 
-    class vm_backend : public execution_backend {
+    class vm_backend final : public execution_backend {
     public:
 		checked_result<bool> language_less(const script_value& a_left, const script_value& a_right) override;
 		bool native_less_available() const override;
@@ -855,6 +855,7 @@ namespace jai::vm {
             if (code[ip].op == opcode::op_call_typed && call_typed_land(caller, v)) { caller.ip += 2; return; }
             const opcode next = code[ip + 1].op;
             if (next == opcode::op_pop) { caller.ip += 2; return; }
+            if (next == opcode::op_call_temp) { frame_slot_set(caller, code[ip + 1].a, std::move(v)); caller.ip += 2; return; }   // op_call_temp's move, the stack skipped
             if (next == opcode::op_c_land && caller.code->cell_loops[code[ip + 1].b].calls[code[ip + 1].a].consumer == 0) { ++caller.ip; return; }   // a statement call inside a block: the landing has nothing to consume
             stack_.push_back(std::move(v));
             ++caller.ip;
@@ -2496,6 +2497,8 @@ namespace jai::vm {
         const uint64_t* layout_gen_ = nullptr;   // engine::layout_generation
         void bind_member_layout(frame& f, const chunk& body);
         bool member_layout_same(const chunk& body, const class_definition* cd);
+        bool member_layout_verdict(const chunk& body, const class_definition* cd);
+        bool park_frame_sibling(frame& f, const call_site& site);
         // a member-class body's bare field at slot + 1 `s`: the receiver's cell, while the frame's layout holds (no class anywhere
         // changed methods or field shape, the receiver still has its class); null sends the read to the general ladder
         JAI_FORCEINLINE script_value* frame_this_field(const frame& f, uint32_t s) const noexcept {
@@ -2861,6 +2864,7 @@ namespace jai::vm {
         op_status dyn_string_add(frame& f, const vm_instruction& ins, bool& landed);
         script_value* env_store_cell(frame& f, size_t cache_slot, uint64_t symbol_id);
         bool store_slot_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv);
+        bool store_this_field_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv);
         op_status exec_math_kernel(size_t base, size_t argc, detail::math_fn fn);
         op_status fused_string_add(const script_value& l, const script_value& r, std::optional<script_value>& out);
         op_status binary_fused_tail(const fused_binary_proto& p, token_type op, const script_value* lp, const script_value* rp, std::optional<script_value>& out);

@@ -34,11 +34,10 @@ inline size_t class_instance::trailing_bytes(uint32_t slots) noexcept { return s
 
 inline class_instance::class_instance(interned_name_t, std::string_view interned, engine* eng, const trailing_cells& trailing) : class_instance(interned_name_t{}, interned, eng) {
     if (trailing.memory && trailing.slots) {
-        arena_ = reinterpret_cast<script_value*>(trailing.memory);
-        for (uint32_t i = 0; i < trailing.slots; ++i) { new (arena_ + i) script_value(script_value::make_invalid(eng)); }
-        arena_cells_ = trailing.slots;
-        arena_used_ = trailing.slots;
-        flat_fields_.adopt_implicit(arena_, trailing.slots);
+        auto* cells = reinterpret_cast<script_value*>(trailing.memory);
+        for (uint32_t i = 0; i < trailing.slots; ++i) { new (cells + i) script_value(script_value::make_invalid(eng)); }
+        trailing_cells_ = true;
+        flat_fields_.adopt_implicit(cells, trailing.slots);
     }
 }
 
@@ -50,6 +49,7 @@ inline void class_instance::free_allocation(class_instance* instance) noexcept {
 
 namespace detail {
 static_assert(cb_storage_offset<class_instance> == k_instance_cb_offset, "object_ref finds an instance's control block a fixed distance before it");
+static_assert(sizeof(void*) != 8 || sizeof(class_instance) <= 112, "an instance's header stays within 112 bytes (internal/object_layout.md)");
 
 // An instance handed to its own destructor body as `this`: a dying one (its last strong reference gone, its chain running) holds
 // a count for the span that goes back without a second death; a living one (a re-class) is pinned as usual
@@ -108,7 +108,7 @@ inline strong_ptr<class_instance> class_instance::make(std::string_view interned
 
 inline bool class_instance::has_field_value(uint64_t id) const { return find_field_value(id) != nullptr; }
 
-inline bool class_instance::has_user_overflow_fields() const { return overflow_fields_ && !overflow_fields_->empty(); }
+inline bool class_instance::has_user_overflow_fields() const { return overflow_fields() && !overflow_fields()->empty(); }
 
 inline void class_instance::note_field_ref_released() noexcept { if (live_field_refs_) { --live_field_refs_; } }
 
@@ -185,16 +185,16 @@ inline void* class_instance::cpp_object_pointer() const {
 }
 
 inline void class_instance::reserve_cell_arena(size_t n) {
-    if (!arena_ && n) {
-        cell_arena_.reset(new std::byte[n * sizeof(script_value)]);
-        arena_ = reinterpret_cast<script_value*>(cell_arena_.get());
-        arena_cells_ = static_cast<uint32_t>(n);
-    }
+    if (trailing_cells_ || !n || (extras_ && extras_->arena)) { return; }
+    instance_extras& box = extras();
+    box.arena_memory.reset(new std::byte[n * sizeof(script_value)]);
+    box.arena = reinterpret_cast<script_value*>(box.arena_memory.get());
+    box.arena_cells = static_cast<uint32_t>(n);
 }
 
 inline auto class_instance::make_cell(script_value&& v) -> field_cell {
-    if (arena_used_ < arena_cells_) {
-        auto* p = arena_ + arena_used_++;
+    if (extras_ && extras_->arena_used < extras_->arena_cells) {
+        auto* p = extras_->arena + extras_->arena_used++;
         new (p) script_value(std::move(v));
         return field_cell(p, false);
     }
@@ -202,8 +202,8 @@ inline auto class_instance::make_cell(script_value&& v) -> field_cell {
 }
 
 inline auto class_instance::make_trivial_cell(const script_value& v) -> field_cell {
-    if (arena_used_ < arena_cells_) {
-        auto* p = arena_ + arena_used_++;
+    if (extras_ && extras_->arena_used < extras_->arena_cells) {
+        auto* p = extras_->arena + extras_->arena_used++;
         std::memcpy(static_cast<void*>(p), static_cast<const void*>(&v), sizeof(script_value));
         return field_cell(p, false);
     }
@@ -220,7 +220,7 @@ inline bool class_instance::fields_cascade() const noexcept {
         const script_value* cell = flat_fields_.cell(slot);
         if (cell && cell->release_cascades()) { return true; }
     }
-    return (overflow_fields_ && !overflow_fields_->empty()) || native();
+    return (overflow_fields() && !overflow_fields()->empty()) || native();
 }
 inline void class_definition::detach_for_teardown() noexcept {
     for (class_instance* i = registry_head_; i;) {
@@ -1657,10 +1657,10 @@ inline script_value& class_instance::materialize_field(uint64_t id, script_value
             return *cell;
         }
     }
-    if (!overflow_fields_) {
-        overflow_fields_ = std::make_unique<std::unordered_map<uint64_t, script_value>>();
+    if (!overflow_fields()) {
+        extras().overflow_fields = std::make_unique<std::unordered_map<uint64_t, script_value>>();
     }
-    return overflow_fields_->insert_or_assign(id, std::move(v)).first->second;
+    return overflow_fields()->insert_or_assign(id, std::move(v)).first->second;
 }
 
 inline void class_instance::seed_fields_from_plan(const std::vector<std::pair<uint32_t, script_value>>& plan, uint32_t slot_count, bool detach) {
@@ -1694,19 +1694,19 @@ inline void class_instance::set_field_unchecked(uint64_t id, const script_value&
 inline void class_instance::rehome_overflow_fields() {
     // Declared ids written before the definition arrived (deserialization constructs,
     // then classifies) move into their slots; runtime-only ids stay in overflow.
-    if (!class_def_ || !overflow_fields_) {
+    if (!class_def_ || !overflow_fields()) {
         return;
     }
-    for (auto it = overflow_fields_->begin(); it != overflow_fields_->end();) {
+    for (auto it = overflow_fields()->begin(); it != overflow_fields()->end();) {
         if (class_def_->field_slot(it->first) != class_definition::k_no_field_slot) {
             materialize_field(it->first, std::move(it->second));
-            it = overflow_fields_->erase(it);
+            it = overflow_fields()->erase(it);
         } else {
             ++it;
         }
     }
-    if (overflow_fields_->empty()) {
-        overflow_fields_.reset();
+    if (overflow_fields()->empty()) {
+        extras_->overflow_fields.reset();
     }
 }
 
@@ -1748,10 +1748,10 @@ inline void class_instance::reclass(const std::shared_ptr<class_definition>& cla
             *cell = script_value::make_invalid(owner_);
             extras().retired_cells.emplace_back(id, std::move(cell));
         } else if (cell->raw_storage_index() != script_value::TYPEID_INVALID) {
-            if (!overflow_fields_) {
-                overflow_fields_ = std::make_unique<std::unordered_map<uint64_t, script_value>>();
+            if (!overflow_fields()) {
+                extras().overflow_fields = std::make_unique<std::unordered_map<uint64_t, script_value>>();
             }
-            overflow_fields_->insert_or_assign(id, std::move(*cell));
+            overflow_fields()->insert_or_assign(id, std::move(*cell));
         }
     }
     if (extras_) {   // a field the object regains takes back its retired cell (repeated re-classes allocate nothing)
@@ -1781,8 +1781,8 @@ inline void class_instance::for_each_field(F&& fn) {
             }
         }
     }
-    if (overflow_fields_) {
-        for (auto& [id, value] : *overflow_fields_) {
+    if (overflow_fields()) {
+        for (auto& [id, value] : *overflow_fields()) {
             fn(id, value);
         }
     }
@@ -1799,8 +1799,8 @@ inline void class_instance::for_each_field(F&& fn) const {
             }
         }
     }
-    if (overflow_fields_) {
-        for (const auto& [id, value] : *overflow_fields_) {
+    if (overflow_fields()) {
+        for (const auto& [id, value] : *overflow_fields()) {
             fn(id, value);
         }
     }
@@ -3205,11 +3205,11 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
             }
         }
     }
-    if (overflow_fields_) {
-        for (auto it = overflow_fields_->begin(); it != overflow_fields_->end();) {
+    if (overflow_fields()) {
+        for (auto it = overflow_fields()->begin(); it != overflow_fields()->end();) {
             if (new_field_defaults.find(it->first) == new_field_defaults.end()) {
                 record(it->first, field_migration_outcome::removed, &it->second, nullptr);
-                it = overflow_fields_->erase(it);
+                it = overflow_fields()->erase(it);
             } else {
                 ++it;
             }
@@ -3289,7 +3289,7 @@ inline strong_ptr<class_instance> class_instance::deep_copy_level(detail::deep_c
 #ifdef JAISCRIPT_VM_COVERAGE
     census::add_weight(flat_fields_.size());
 #endif
-    const bool flat = class_def_ && !overflow_fields_;
+    const bool flat = class_def_ && !overflow_fields();
     const bool stepped = depth > detail::k_inline_copy_depth;
     size_t first_step = work.size();
     if (stepped) {

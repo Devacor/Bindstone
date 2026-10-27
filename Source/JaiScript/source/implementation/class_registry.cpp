@@ -316,7 +316,7 @@ void class_instance::release_fields() noexcept {
     if (!m->deferring && m->depth < m->depth_limit) {
         ++m->depth;
         while (!flat_fields_.empty()) { flat_fields_.pop_back(); }
-        overflow_fields_.reset();
+        if (extras_) { extras_->overflow_fields.reset(); }
         extras_.reset();
         --m->depth;
         return;
@@ -327,8 +327,8 @@ void class_instance::release_fields() noexcept {
         script_value* cell = flat_fields_.cell(slot);
         if (cell && cell->release_cascades()) { m->stack.push_back({std::move(*cell), detail::release_machine::k_no_frame}); }
     }
-    if (overflow_fields_) {
-        for (auto& [id, value] : *overflow_fields_) {
+    if (overflow_fields()) {
+        for (auto& [id, value] : *overflow_fields()) {
             if (value.release_cascades()) { m->stack.push_back({std::move(value), detail::release_machine::k_no_frame}); }
         }
     }
@@ -348,8 +348,8 @@ void class_instance::release_orphan_fields() noexcept {
             script_value* cell = from.flat_fields_.cell(slot);
             if (cell && cell->release_cascades()) { work.push_back(std::move(*cell)); }
         }
-        if (from.overflow_fields_) {
-            for (auto& [id, value] : *from.overflow_fields_) {
+        if (from.overflow_fields()) {
+            for (auto& [id, value] : *from.overflow_fields()) {
                 if (value.release_cascades()) { work.push_back(std::move(value)); }
             }
         }

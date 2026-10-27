@@ -294,8 +294,8 @@ public:
     inline void set_native_view(const script_value& value);
     // The parallel region whose chunk made this instance's C++ object (0: none): a non-const C++ method runs on a parallel
     // chunk only over an object that chunk made
-    void region_tag(uint32_t tag) { region_tag_ = tag; }
-    uint32_t region_tag() const { return region_tag_; }
+    void region_tag(uint32_t tag) { if (tag || extras_) { extras().region_tag = tag; } }
+    uint32_t region_tag() const { return extras_ ? extras_->region_tag : 0; }
     inline bool native_lookup_enabled() const;
 
 private:
@@ -309,11 +309,11 @@ private:
     // check, NOT is_invalid(): a reference field derefs). Runtime-added fields and
     // pre-definition writes (deserialization) live in the lazily-built overflow map;
     // set_class_definition re-homes them into slots.
-    // One cell arena per instance: the instance allocation's trailing cells (allocate_instance), else a heap arena sized
-    // to the class's slot count when the definition attaches; slots the class gains afterwards (reload) get heap cells.
-    // Either way a pointee never moves - reclass/migration move the POINTERS - so field_slot_value(slot) stays valid
-    // until the instance dies or a reload/re-class re-seats its slots (the class pointer or the field-shape epoch moves),
-    // and the arena outlives every cell (declared before flat_fields_ on purpose).
+    // One cell arena per instance: the instance allocation's trailing cells (allocate_instance), else a heap arena (in the
+    // extras box) sized to the class's slot count when the definition attaches; slots the class gains afterwards (reload) get
+    // heap cells. Either way a pointee never moves - reclass/migration move the POINTERS - so field_slot_value(slot) stays
+    // valid until the instance dies or a reload/re-class re-seats its slots (the class pointer or the field-shape epoch
+    // moves); the destructor destroys every cell before any member goes, so the arena outlives them.
     // An owning cell pointer in one word: bit 0 marks an arena cell (destroyed in place), clear a heap cell (deleted)
     class field_cell {
     public:
@@ -344,7 +344,8 @@ private:
         }
         uintptr_t bits = 0;
     };
-    // The slot table: the trailing table, or a heap table once the class gains slots past it
+    // The slot table: the implicit table over the instance's trailing cells, or a heap table once something re-seats a slot.
+    // Sixteen bytes, so the class pointer and the table share the instance's first line with its holder
     class field_table {
     public:
         field_table() = default;
@@ -352,108 +353,107 @@ private:
         field_table& operator=(const field_table&) = delete;
         ~field_table() {
             clear();
-            if (heap_) { ::operator delete(static_cast<void*>(data_)); }
+            if (heap()) { ::operator delete(static_cast<void*>(table())); }
         }
         // The implicit table (internal/object_layout.md): slot i's cell is arena[i], constructed (raw-invalid while absent) for
         // the instance's life; no word per slot until something re-seats a slot, which materializes the table over the same cells
-        void adopt_implicit(script_value* arena, uint32_t slots) noexcept { implicit_ = arena; size_ = slots; implicit_mode_ = true; }
-        bool implicit() const noexcept { return implicit_mode_; }
+        void adopt_implicit(script_value* arena, uint32_t slots) noexcept { bits_ = reinterpret_cast<uintptr_t>(arena) | k_implicit; size_ = slots; }
+        bool implicit() const noexcept { return (bits_ & k_implicit) != 0; }
         // slot i's cell (null: none); an implicit slot's cell always exists, raw-invalid while the field is absent
-        script_value* cell(size_t i) const noexcept { return implicit_mode_ ? implicit_ + i : data_[i].get(); }
+        script_value* cell(size_t i) const noexcept { return implicit() ? cells() + i : table()[i].get(); }
         // slot i's cell when the field is present in it as the table form reads presence (null pointer or raw-invalid pointee)
         script_value* present_cell(size_t i) const noexcept {
             script_value* c = cell(i);
             return c && c->raw_storage_index() != script_value::TYPEID_INVALID ? c : nullptr;
         }
         void materialize() const {
-            if (!implicit_mode_) { return; }
-            script_value* arena = implicit_;
+            if (!implicit()) { return; }
+            script_value* arena = cells();
             auto* fresh = static_cast<field_cell*>(::operator new((size_ ? size_ : 1) * sizeof(field_cell)));
             for (uint32_t i = 0; i < size_; ++i) { new (&fresh[i]) field_cell(arena + i, false); }
-            data_ = fresh;
+            bits_ = reinterpret_cast<uintptr_t>(fresh);
             cap_ = size_;
-            heap_ = true;
-            implicit_mode_ = false;
         }
         size_t size() const noexcept { return size_; }
         bool empty() const noexcept { return size_ == 0; }
-        field_cell& operator[](size_t i) { materialize(); return data_[i]; }
-        const field_cell& operator[](size_t i) const { materialize(); return data_[i]; }
-        field_cell* begin() { materialize(); return data_; }
-        field_cell* end() { materialize(); return data_ + size_; }
-        const field_cell* begin() const { materialize(); return data_; }
-        const field_cell* end() const { materialize(); return data_ + size_; }
+        field_cell& operator[](size_t i) { materialize(); return table()[i]; }
+        const field_cell& operator[](size_t i) const { materialize(); return table()[i]; }
+        field_cell* begin() { materialize(); return table(); }
+        field_cell* end() { materialize(); return table() + size_; }
+        const field_cell* begin() const { materialize(); return table(); }
+        const field_cell* end() const { materialize(); return table() + size_; }
         void resize(size_t n) {
             materialize();
             if (n > cap_) { grow(n); }
-            for (size_t i = size_; i < n; ++i) { new (&data_[i]) field_cell(); }
-            while (size_ > n) { data_[--size_].~field_cell(); }
+            for (size_t i = size_; i < n; ++i) { new (&table()[i]) field_cell(); }
+            while (size_ > n) { table()[--size_].~field_cell(); }
             size_ = static_cast<uint32_t>(n);
         }
         void pop_back() noexcept {
-            if (implicit_mode_) { implicit_[--size_].~script_value(); return; }
-            data_[--size_].~field_cell();
+            if (implicit()) { cells()[--size_].~script_value(); return; }
+            table()[--size_].~field_cell();
         }
         void clear() noexcept {
             const uint32_t n = size_;
             size_ = 0;
-            if (implicit_mode_) { for (uint32_t i = 0; i < n; ++i) { implicit_[i].~script_value(); } return; }
-            for (uint32_t i = 0; i < n; ++i) { data_[i].~field_cell(); }
+            if (implicit()) { for (uint32_t i = 0; i < n; ++i) { cells()[i].~script_value(); } return; }
+            for (uint32_t i = 0; i < n; ++i) { table()[i].~field_cell(); }
         }
     private:
+        static constexpr uintptr_t k_implicit = 1;   // the low bit: the word is the arena's cells, not a table
+        field_cell* table() const noexcept { return reinterpret_cast<field_cell*>(bits_); }
+        script_value* cells() const noexcept { return reinterpret_cast<script_value*>(bits_ & ~k_implicit); }
+        bool heap() const noexcept { return bits_ != 0 && !implicit(); }
         void grow(size_t n) {
             const size_t cap = (std::max)(n, static_cast<size_t>(cap_) * 2);
             auto* fresh = static_cast<field_cell*>(::operator new(cap * sizeof(field_cell)));
             for (uint32_t i = 0; i < size_; ++i) {
-                new (&fresh[i]) field_cell(std::move(data_[i]));
-                data_[i].~field_cell();
+                new (&fresh[i]) field_cell(std::move(table()[i]));
+                table()[i].~field_cell();
             }
-            if (heap_) { ::operator delete(static_cast<void*>(data_)); }
-            data_ = fresh;
+            if (heap()) { ::operator delete(static_cast<void*>(table())); }
+            bits_ = reinterpret_cast<uintptr_t>(fresh);
             cap_ = static_cast<uint32_t>(cap);
-            heap_ = true;
         }
-        union {
-            mutable field_cell* data_ = nullptr;
-            mutable script_value* implicit_;
-        };
+        mutable uintptr_t bits_ = 0;
         uint32_t size_ = 0;
         mutable uint32_t cap_ = 0;
-        mutable bool heap_ = false;
-        mutable bool implicit_mode_ = false;
     };
-    std::unique_ptr<std::byte[]> cell_arena_;
-    script_value* arena_ = nullptr;
-    uint32_t arena_cells_ = 0;
-    uint32_t arena_used_ = 0;
     inline void reserve_cell_arena(size_t n);
     inline field_cell make_cell(script_value&& v);
     // A null, int, float, char or bool cell is its bytes: the copy constructor writes exactly the tag, the engine and the payload
     inline field_cell make_trivial_cell(const script_value& v);
-    field_table flat_fields_;
-    std::unique_ptr<std::unordered_map<uint64_t, script_value>> overflow_fields_;
     // Store WITHOUT reference write-through (the old map's raw insert_or_assign shape:
     // copy_fields_from and lazy-default materialization replace a held reference value
     // itself); returns the stored cell. set_field_unchecked keeps write-through.
     inline script_value& materialize_field(uint64_t id, script_value&& v);
     inline void rehome_overflow_fields();
-    class_definition* class_def_ = nullptr;
-    bool script_layer_retired_ = false;
-    bool seeded_from_plan_ = false;   // create_instance landed every default through the class plan
-    bool construction_pending_ = false;
-    bool destructor_armed_ = false;
-    bool late_destructor_ = false;   // armed by a re-class, not by the allocation: ~class_instance runs the chain
-    std::atomic<bool> registered_{false};   // in the class's registry list (read unlocked by its own dying owner)
-    uint16_t constructed_levels_ = k_nothing_constructed;
-    uint32_t region_tag_ = 0;
+    // Runtime-added fields and pre-definition writes (null while there are none)
+    std::unordered_map<uint64_t, script_value>* overflow_fields() const noexcept { return extras_ ? extras_->overflow_fields.get() : nullptr; }
+
     uint32_t live_field_refs_ = 0;
-    cdtor_phase dispatch_phase_ = cdtor_phase::none;
-    // What few instances hold, boxed so the rest pay one pointer: the C++ object (released after the fields, as a C++ base
-    // dies after the derived members) and the cells a re-class retired
+    uint16_t constructed_levels_ = k_nothing_constructed;
+    std::atomic<bool> registered_{false};   // in the class's registry list (read unlocked by its own dying owner)
+    bool script_layer_retired_ : 1 = false;
+    bool seeded_from_plan_ : 1 = false;   // create_instance landed every default through the class plan
+    bool construction_pending_ : 1 = false;
+    bool destructor_armed_ : 1 = false;
+    bool late_destructor_ : 1 = false;   // armed by a re-class, not by the allocation: ~class_instance runs the chain
+    bool trailing_cells_ : 1 = false;   // the allocation carries the instance's cells (class_instance::make)
+    cdtor_phase dispatch_phase_ : 2 = cdtor_phase::none;
+    // What few instances hold, boxed so the rest pay one pointer: the heap cell arena of an instance whose allocation carries
+    // no cells (first, so it outlives every cell the box holds), the C++ object (released after the fields, as a C++ base dies
+    // after the derived members), the cells a re-class retired, runtime-added fields and the parallel region tag
     struct instance_extras {
+        std::unique_ptr<std::byte[]> arena_memory;
+        script_value* arena = nullptr;
+        uint32_t arena_cells = 0;
+        uint32_t arena_used = 0;
         std::optional<script_value> native;
         std::vector<std::pair<uint64_t, field_cell>> retired_cells;
         std::optional<script_value> missing_field;   // what get_field answers for a field the instance does not have
+        std::unique_ptr<std::unordered_map<uint64_t, script_value>> overflow_fields;
+        uint32_t region_tag = 0;
     };
     std::unique_ptr<instance_extras> extras_;
     inline instance_extras& extras();
@@ -461,6 +461,9 @@ private:
     // and unlinking touch the instance and its two neighbours, under the region lock while a region runs
     class_instance* registry_prev_ = nullptr;
     class_instance* registry_next_ = nullptr;
+    // Last, so a field read's class and slot words share a line with the first trailing cells
+    class_definition* class_def_ = nullptr;
+    field_table flat_fields_;
     friend class class_definition;
 
     inline static std::shared_ptr<void> extract_cpp_object_impl(const script_value& val);
@@ -1432,9 +1435,9 @@ inline script_value* class_instance::find_field_value(uint64_t id) {
             return flat_fields_.present_cell(slot);
         }
     }
-    if (overflow_fields_) {
-        auto it = overflow_fields_->find(id);
-        if (it != overflow_fields_->end()) {
+    if (overflow_fields()) {
+        auto it = overflow_fields()->find(id);
+        if (it != overflow_fields()->end()) {
             return &it->second;
         }
     }

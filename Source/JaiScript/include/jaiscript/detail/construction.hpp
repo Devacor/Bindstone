@@ -46,9 +46,6 @@ namespace jai::detail {
 		                                                          const script_value& this_value, class_definition* access, const std::vector<script_value>& args) = 0;
 		virtual checked_result<void> evaluate_field_initializers(const strong_ptr<class_instance>& instance, const std::shared_ptr<script_class_definition>& cls,
 		                                                         construction_scope& scope, bool skip_parent_recursion, const aggregate_plan* aggregate) = 0;
-		// A constructor level's own field initializers in its scope, in declaration order (each evaluated, then stored)
-		virtual checked_result<void> initialize_level_fields(class_instance& instance, const std::shared_ptr<script_class_definition>& level,
-		                                                     construction_scope& scope);
 		// The level's scope: its access context `level`, and the constructor's first args (as the parameters' bindings take them
 		// when bind_for_parameters, else as they are); a null ctor binds none. The default is the level environment
 		virtual void open_scope(construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
@@ -70,17 +67,15 @@ namespace jai::detail {
 		~construction_host() = default;
 	};
 
-	// A constructor's member initialization on an instance under construction: its initializer list (base constructors and their
-	// bodies, or the whole delegated-to constructor), then the field initializers; the body is the caller's. captured_out (the
-	// outermost constructor only) receives the arguments taken ahead of that code, when it runs any; body_args_out (else
-	// captured_out) receives the arguments the body binds when that code ran (its parameters as it left them)
+	// A constructor's member initialization on an instance under construction: its bases (each constructor a level of its own, its
+	// body run there) or the whole delegated-to constructor, then the field initializers; the body is the caller's. captured_out
+	// receives the arguments the body binds when code ran ahead of it (taken first, as the parameters left them)
 	template <class Host>
 	checked_result<script_value> initialize_members(Host& host, const std::shared_ptr<script_class_definition>& cls,
 	                                                const std::shared_ptr<environment>& definition_env, const strong_ptr<class_instance>& instance,
 	                                                const script_value& this_value, const std::shared_ptr<function_decl>& ctor,
 	                                                const std::vector<script_value>& args, std::optional<call_depth_guard>& initializer_depth,
-	                                                size_t delegation_depth, std::vector<script_value>* captured_out,
-	                                                std::vector<script_value>* body_args_out = nullptr);
+	                                                std::vector<script_value>* captured_out);
 
 	// Everything ahead of a constructor's body: the overload, the instance and its member initialization. Success yields the
 	// instance; the picked constructor and the arguments the body binds (when they were taken ahead of it) ride the
@@ -119,7 +114,7 @@ namespace jai::detail {
 		auto instance = cls->create_instance();
 		instance->construction_pending(true);
 		auto this_value = script_value::make_class_object(*cls, instance, host.eng);
-		auto members = initialize_members(host, cls, definition_env, instance, this_value, ctor, args, initializer_depth, 0, &captured_out);
+		auto members = initialize_members(host, cls, definition_env, instance, this_value, ctor, args, initializer_depth, &captured_out);
 		if (!members) { return members; }
 		ctor_out = std::move(ctor);
 		return this_value;

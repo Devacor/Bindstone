@@ -1797,9 +1797,10 @@ namespace jai::vm {
             std::vector<const expression*> asts;
             std::unique_ptr<script_defined_function> fn;
         };
-        // A constructor level's construction chunk (vm_compiler::compile_construction): its initializer-list arguments and the field
-        // initializers of the class and its script bases, with the constructor's first argc parameters in slots; keyed by the level,
-        // the constructor and argc, checked against the expressions it compiled. null code: the level runs in its environment
+        // A level's construction chunk (vm_compiler::compile_construction): its initializer-list arguments and its own field
+        // initializers (a default-constructed base: its own and its script bases'), with the constructor's first argc parameters in
+        // slots; keyed by the level, the constructor and argc, checked against the expressions it compiled. null code: the level
+        // runs in its environment
         struct construction_key {
             const class_definition* level;
             const function_decl* ctor;

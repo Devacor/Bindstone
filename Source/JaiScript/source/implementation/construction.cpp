@@ -28,18 +28,6 @@ void stamp_literal_field_initializers(class_instance& instance, const script_cla
 	}
 }
 
-checked_result<void> construction_host::initialize_level_fields(class_instance& instance, const std::shared_ptr<script_class_definition>& level,
-                                                                construction_scope& scope) {
-	for (const auto& [field_id, initializer_ast] : level->get_field_initializer_asts()) {
-		if (!initializer_ast) { continue; }
-		auto evaluated = evaluate_in(scope, initializer_ast);
-		if (unwinding) { return {}; }
-		if (!evaluated) { return evaluated.error_value(); }
-		instance.set_field(field_id, initializer_store_value(std::move(evaluated.value()), initializer_ast.get()));
-	}
-	return {};
-}
-
 void construction_host::open_scope(construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
                                    script_class_definition* level, const function_decl* ctor, const std::vector<script_value>* args, bool bind_for_parameters) {
 	scope.env = std::make_shared<environment>(definition_env, env_symbols);

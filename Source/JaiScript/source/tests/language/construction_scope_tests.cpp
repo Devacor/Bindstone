@@ -1,7 +1,7 @@
-// What a constructor level's initializer-list arguments and field initializers see: `this`, the constructor's parameters by name
-// (as bound at the level: the call's bindings at the class constructed, the raw initializer arguments at a base), then the
-// definition environment. The vm runs them in one frame per level with the parameters in slots, the interpreter in the level's
-// environment; every case holds both backends to one result, and to the stated value where it is fixed.
+// A construction runs one activation per constructor, as C++ does: each base in declaration order, then the level's field
+// initializers and body. What a level's initializer-list arguments and field initializers see: `this`, its constructor's parameters
+// by name as bound, then the definition environment. The vm runs them in one frame per level with the parameters in slots, the
+// interpreter in the level's environment; every case holds both backends to one result, and to the stated value where it is fixed.
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
@@ -71,6 +71,43 @@ public:
 			     "class M : L, R { int m = 0; M(int p) : L(p = p + 1), R(p = p * 10) { m = p; } } auto x = M(1); [x.l, x.r, x.m];", "[2, 20, 20]",
 			     "bases in declaration order, each store seen by the next and by the body");
 			both("class B0 { B0(int v) {} } class C : B0 { int f = n; C(int n) : super(n = n + 1) {} } C(1).f;", "2", "a field initializer after the list");
+		});
+
+		test("a_base_without_a_constructor_is_default_constructed_under_every_level", [this]() {
+			const std::string note = "string log = \"\"; int note(string s, int v) { log = log + s + \";\"; return v; } ";
+			both(note + "class P { int p = note(\"P.p\", 7); } class B : P { int b = note(\"B.b\", 2); B(int x) { b = b + x; note(\"B()\", 0); } } "
+			     "class C : B { int c = note(\"C.c\", 3); C() : super(1) { note(\"C()\", 0); } } C c = C(); log + \" | \" + c.p + \" \" + c.b + \" \" + c.c;",
+			     "P.p;B.b;B();C.c;C(); | 7 3 3", "a plain base under a base level");
+			both(note + "class L { int l = note(\"L.l\", 1); } class R { int r = note(\"R.r\", 2); R() { note(\"R()\", 0); } } "
+			     "class M : L, R { int m = note(\"M.m\", 3); M(int k) { note(\"M()\", 0); } } class D : M { D() : super(1) { note(\"D()\", 0); } } D(); log;",
+			     "L.l;R.r;R();M.m;M();D();", "both bases of a base level, in declaration order");
+			both(note + "class X { X(int v) { note(\"X\" + v, 0); } } class Y : X { Y() : super(1) { note(\"Y()\", 0); } } class Z : Y { Z() { note(\"Z()\", 0); } } Z(); log;",
+			     "X1;Y();Z();", "an implicit super() over a base level");
+			both("int n = 40; class P { int p = n; } class C : P { C(int n) {} } C(5).p;", "40", "a base's initializers do not see the derived constructor's parameters");
+		});
+
+		test("an_initializer_list_a_level_cannot_honor_raises_at_every_level", [this]() {
+			both("class P { int p = 1; } class B : P { B() : super(7) {} } class C : B { C() : super() {} } string r = \"made\"; try { C(); } catch (e) { r = to_string(e); } r;",
+			     "No matching parent constructor found for super()", "arguments to a base without a constructor");
+			both("class B { B() : super() {} } class C : B { C() : super() {} } string r = \"made\"; try { C(); } catch (e) { r = to_string(e); } r;",
+			     "Cannot call super() - class has no base class", "super() in a base-less base");
+		});
+
+		test("a_throw_at_any_level_destroys_what_it_constructed_in_reverse", [this]() {
+			const std::string prelude = "string log = \"\"; int note(string s, int v) { log = log + s + \";\"; return v; } int at = 0; "
+			                            "int boom(string where, int v) { if (at == v) { throw where; } return v; } string out = \"\"; ";
+			both(prelude + "class A { int a = boom(\"A.a\", 1); A() { note(\"A()\", 0); boom(\"A()\", 2); } ~A() { note(\"~A\", 0); } } "
+			     "class B : A { int b = boom(\"B.b\", 3); B(int x) : super() { note(\"B()\", 0); boom(\"B()\", 4); } ~B() { note(\"~B\", 0); } } "
+			     "class C : B { int c = boom(\"C.c\", 5); C() : super(boom(\"C.super\", 6)) { note(\"C()\", 0); boom(\"C()\", 7); } ~C() { note(\"~C\", 0); } } "
+			     "for (int i = 1; i <= 8; ++i) { at = i; log = \"\"; try { C c = C(); note(\"made\", 0); } catch (e) { log = log + \"!\" + e; } out = out + i + \":\" + log + \" \"; } out;",
+			     "1:!A.a 2:A();!A() 3:A();~A;!B.b 4:A();B();~A;!B() 5:A();B();~B;~A;!C.c 6:!C.super 7:A();B();C();~B;~A;!C() 8:A();B();C();made;~C;~B;~A; ",
+			     "a three-level chain");
+			both(prelude + "class P { int p = boom(\"P.p\", 1); ~P() { note(\"~P\", 0); } } class Q { int q = 0; Q() { boom(\"Q()\", 2); note(\"Q()\", 0); } ~Q() { note(\"~Q\", 0); } } "
+			     "class M : P, Q { int m = boom(\"M.m\", 3); M() { note(\"M()\", 0); boom(\"M()\", 4); } ~M() { note(\"~M\", 0); } } "
+			     "class D : M { D() : super() { note(\"D()\", 0); boom(\"D()\", 5); } ~D() { note(\"~D\", 0); } } "
+			     "for (int i = 1; i <= 6; ++i) { at = i; log = \"\"; try { D d = D(); note(\"made\", 0); } catch (e) { log = log + \"!\" + e; } out = out + i + \":\" + log + \" \"; } out;",
+			     "1:!P.p 2:~P;!Q() 3:Q();~Q;~P;!M.m 4:Q();M();~Q;~P;!M() 5:Q();M();D();~M;~Q;~P;!D() 6:Q();M();D();made;~D;~M;~Q;~P; ",
+			     "two bases under a base level");
 		});
 
 		test("an_initializer_runs_against_the_class_under_construction", [this]() {

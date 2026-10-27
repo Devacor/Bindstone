@@ -204,7 +204,7 @@ namespace value_text_walk {
 				out_ += "null";
 				return {};
 			}
-			if (holder->is_coroutine_handle) {
+			if (holder->is_coroutine_handle()) {
 				out_ += "<coroutine>";
 				return {};
 			}

@@ -3788,7 +3788,7 @@ namespace {
 		const script_value* native = inst.native();
 		if (native) {
 			const auto holder = native->get_object_holder();
-			if (holder) { return holder->holds_object() ? holder->object() : holder->bound_ptr; }
+			if (holder) { return holder->holds_object() ? holder->object() : holder->bound_object(); }
 		}
 		return &inst;
 	}

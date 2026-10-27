@@ -184,7 +184,7 @@ inline void* class_instance::cpp_object_pointer() const {
     if (!held || !held->is_object()) return nullptr;
     auto holder = held->get_object_holder();
     if (!holder) return nullptr;
-    return holder->holds_object() ? holder->object() : holder->bound_ptr;
+    return holder->holds_object() ? holder->object() : holder->bound_object();
 }
 
 inline void class_instance::reserve_cell_arena(size_t n) {
@@ -2897,7 +2897,7 @@ JAI_NOINLINE inline void object_declaration_copies(script_value& value, const ty
 
 // An ordinary object declaration (no lent host object, no handle entering a class slot) returns without a call
 inline void object_declaration_takes_value(script_value& value, const type_info* declared) {
-    if (!value.unchecked_object_handle()->bound_ptr) {
+    if (!value.unchecked_object_handle()->bound_object()) {
         if (!declared || declared->base_type != script_value_type::jai_object_type) { return; }
         const type_info* tag = value.type_info_raw();
         if (!tag || tag->base_type != script_value_type::jai_shared_ptr_type) { return; }
@@ -3103,7 +3103,7 @@ inline void class_instance::note_script_layer_owner(const script_value& value) {
     if (!cpp_base) { return; }
     auto holder = value.get_object_holder();
     if (!holder) { return; }
-    void* object = holder->holds_object() ? holder->object() : holder->bound_ptr;
+    void* object = holder->holds_object() ? holder->object() : holder->bound_object();
     if (!object) { return; }
     auto weak_self = weak_from_this();
     if (weak_self.expired()) { return; }
@@ -3226,7 +3226,7 @@ inline std::shared_ptr<void> class_instance::extract_cpp_object_impl(const scrip
         }
         if (obj_holder->holds_object()) { return obj_holder->host_object(); }
         // an extended object's non-owning holder: hand the pointer out as an unowned alias
-        if (obj_holder->bound_ptr) { return std::shared_ptr<void>(std::shared_ptr<void>(), obj_holder->bound_ptr); }
+        if (obj_holder->bound_object()) { return std::shared_ptr<void>(std::shared_ptr<void>(), obj_holder->bound_object()); }
         return nullptr;
     }
     return nullptr;

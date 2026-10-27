@@ -542,7 +542,7 @@ namespace jai::detail {
 			// layer reached through a C++ object keeps its shared pin
 			if (cur.raw_storage_index() == script_value::TYPEID_OBJECT && cur.unchecked_object_handle() && instance->get_class_definition() &&
 			    instance->get_class_definition()->is_script_class() &&
-			    cur.unchecked_object_handle()->data.get() == static_cast<void*>(instance.get())) {
+			    cur.unchecked_object_handle()->object() == static_cast<void*>(instance.get())) {
 				return rooted(script_value::make_field_reference(cur.unchecked_object_handle(), instance.get(), member_id, eng, std::move(constraint), *field_value));
 			}
 			return rooted(script_value::make_field_reference(instance, member_id, eng, std::move(constraint), *field_value));

@@ -109,14 +109,14 @@ namespace jai::detail {
 bool reuse_map_entry_pair(script_value* cell, const class_definition* pair_class, script_value& first, script_value& second) {
     if (!cell || cell->raw_storage_index() != script_value::TYPEID_OBJECT) { return false; }
     const auto& holder = cell->unchecked_object_handle();
-    if (!holder || !holder.unique() || !holder->is_instance() || holder->data.use_count() != 1) { return false; }
+    if (!holder || !holder.unique() || !holder->is_instance() || holder->object_use_count() != 1) { return false; }
     auto* instance = holder->unchecked_instance();
     if (instance->get_class_definition() != pair_class || instance->live_field_refs() != 0) { return false; }
     const script_value* native = instance->native();
     if (!native || native->raw_storage_index() != script_value::TYPEID_OBJECT) { return false; }
     const auto& native_holder = native->unchecked_object_handle();
-    if (!native_holder || !native_holder.unique() || !native_holder->data || native_holder->data.use_count() != 1) { return false; }
-    auto* pair = static_cast<stdlib::script_pair*>(native_holder->data.get());
+    if (!native_holder || !native_holder.unique() || !native_holder->holds_object() || native_holder->object_use_count() != 1) { return false; }
+    auto* pair = static_cast<stdlib::script_pair*>(native_holder->object());
     pair->second = std::move(second);
     pair->first = std::move(first);
     return true;

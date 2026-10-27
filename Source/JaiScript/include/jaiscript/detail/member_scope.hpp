@@ -116,7 +116,7 @@ inline checked_result<script_value> read_cpp_property(const script_value& receiv
         auto result_holder = value.get_object_holder();
         auto receiver_holder = receiver.get_object_holder();
         if (result_holder && receiver_holder) {
-            result_holder->set_keep_alive(receiver_holder->data ? receiver_holder->data
+            result_holder->set_keep_alive(receiver_holder->holds_object() ? receiver_holder->held()
                                                               : receiver_holder->keep_alive());
         }
     }
@@ -246,7 +246,7 @@ inline object_ref pin_cpp_object(const script_value& receiver, const class_insta
         holder = held ? held->get_object_holder() : nullptr;
     }
     if (!holder) return nullptr;
-    if (holder->data) return holder->data;
+    if (holder->holds_object()) return holder->held();
     if (auto locked = holder->lock_weak_data()) return object_ref(std::move(locked));
     return holder->keep_alive();
 }

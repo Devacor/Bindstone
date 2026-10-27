@@ -101,7 +101,7 @@ script_value engine::make_value_object(std::shared_ptr<T> data) {
             const script_value* held = known->native();
             const auto* holder = held ? held->peek_object_holder() : nullptr;   // a read: workers reach one object's holder together
             const bool layer = def && def->is_script_class() && !std::is_base_of_v<script_extensible, T>;
-            const bool same_object = holder && holder->data && !holder->data.shared().owner_before(data) && !data.owner_before(holder->data.shared());
+            const bool same_object = holder && holder->holds_object() && !holder->host_object().owner_before(data) && !data.owner_before(holder->host_object());
             // A member at offset 0 shares its enclosing object's address (and, through an aliasing handle, its owner)
             std::type_index handed_type = std::type_index(typeid(T));
             if constexpr (std::is_polymorphic_v<T>) { handed_type = std::type_index(typeid(*data)); }

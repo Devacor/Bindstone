@@ -619,7 +619,7 @@ public:
 			const uint32_t leaf_slot = cd->field_slot(e->symbolize("leaf"));
 			const uint32_t tag_slot = leaf_cd->field_slot(e->symbolize("tag"));
 			for (size_t i = 0; i < arr->size(); ++i) {
-				auto* inst = static_cast<class_instance*>(arr->objs()[i].handle->data.get());
+				auto* inst = static_cast<class_instance*>(arr->objs()[i].handle->object());
 				const script_value* counts = inst->field_slot_value(counts_slot);
 				check_true(counts && counts->is_map() && !counts->unchecked_as_map().empty(), "counts present");
 				const script_value& key = counts->unchecked_as_map().begin()->first;
@@ -630,7 +630,7 @@ public:
 				check_eq((long)1, (long)nn->strs()[0].use_count(), "string buffer slot 0 detached for element " + std::to_string(i));
 				check_eq((long)1, (long)nn->strs()[1].use_count(), "string buffer slot 1 detached for element " + std::to_string(i));
 				const script_value* leaf = inst->field_slot_value(leaf_slot);
-				auto* leaf_inst = leaf ? static_cast<class_instance*>(leaf->get_object_holder()->data.get()) : nullptr;
+				auto* leaf_inst = leaf ? static_cast<class_instance*>(leaf->get_object_holder()->object()) : nullptr;
 				const script_value* tag = leaf_inst ? leaf_inst->field_slot_value(tag_slot) : nullptr;
 				check_true(tag && tag->is_string(), "tag present");
 				check_eq((long)1, (long)const_cast<script_value*>(tag)->unchecked_get_string_storage().use_count(), "nested string field detached for element " + std::to_string(i));

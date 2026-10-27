@@ -725,7 +725,7 @@ namespace detail {
 
         bool is_non_owning_object() const {
             auto* h = storage_.get_if<TYPEID_OBJECT>();
-            return h && *h && (*h)->bound_ptr != nullptr && !(*h)->data;
+            return h && *h && (*h)->bound_ptr != nullptr && !(*h)->holds_object();
         }
 
         // Returns nullptr if not cpp_bound. Caller is responsible for type safety.
@@ -1872,7 +1872,7 @@ namespace detail {
                         "script_value is not an object"
                     );
                 }
-                return checked_result<T>((*objHolder)->data);
+                return checked_result<T>((*objHolder)->held());
             }
             // Support for other shared_ptr types
             else if constexpr (is_specialization_v<T, std::shared_ptr>) {
@@ -1892,7 +1892,7 @@ namespace detail {
 
                     // Check for non-owning C++ reference (holder bound_ptr set, data null)
                     // Cannot safely return shared_ptr from non-owning reference
-                    if (objHolder->bound_ptr && !objHolder->data) {
+                    if (objHolder->bound_ptr && !objHolder->holds_object()) {
                         return checked_result<T>(
                             make_error_code(runtime_error_code::type_mismatch),
                             "Cannot extract shared_ptr from non-owning C++ reference. "
@@ -1905,11 +1905,11 @@ namespace detail {
                         if (payload_engine()) {
                             auto registry = get_engine_conversion_registry(payload_engine());
                             if (registry) {
-                                auto extracted = registry->extract_custom_object(objHolder->type_name, objHolder->data);
+                                auto extracted = registry->extract_custom_object(objHolder->type_name, objHolder->held());
                                 if (extracted && extracted.use_count() == 0) {
                                     // an extended object's layer references it without owning it:
                                     // ownership comes from the object's own shared_ptr, weakly held
-                                    extracted = engine_lock_instance_cpp_object(payload_engine(), objHolder->data);
+                                    extracted = engine_lock_instance_cpp_object(payload_engine(), objHolder->held());
                                     if (!extracted) {
                                         return checked_result<T>(
                                             make_error_code(runtime_error_code::type_mismatch),
@@ -1924,7 +1924,7 @@ namespace detail {
                     }
 
                     // Otherwise use static cast
-                    return checked_result<T>(std::static_pointer_cast<typename T::element_type>(objHolder->data.shared()));
+                    return checked_result<T>(std::static_pointer_cast<typename T::element_type>(objHolder->host_object()));
                 }
 
                 return checked_result<T>(
@@ -1974,7 +1974,7 @@ namespace detail {
                     const auto& objHolder = *holderPtr;
 
                     // Handle non-owning C++ reference via the holder's bound_ptr
-                    if (objHolder->bound_ptr && !objHolder->data) {
+                    if (objHolder->bound_ptr && !objHolder->holds_object()) {
                         // Copy from non-owning pointer (only if copyable)
                         if constexpr (std::is_copy_constructible_v<T>) {
                             return checked_result<T>(*static_cast<T*>(objHolder->bound_ptr));
@@ -2137,12 +2137,20 @@ namespace detail {
         struct object_holder {
             std::string_view type_name;      // the type's name: the engine's interned text or a literal (never an owned string)
             uint64_t type_id = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
+        private:
             detail::object_ref data;        // The actual object: a bound C++ object, or a class instance
+        public:
             bool is_instance() const noexcept { return data.is_instance(); }
             class_instance* instance() const noexcept { return data.instance_pointer(); }   // null for a C++ object
             class_instance* unchecked_instance() const noexcept { return static_cast<class_instance*>(data.get()); }   // is_instance() holds
             template <class I = class_instance>
             strong_ptr<I> instance_handle() const noexcept { return data.template instance<I>(); }
+            void* object() const noexcept { return data.get(); }   // the held instance or C++ object
+            bool holds_object() const noexcept { return data != nullptr; }
+            long object_use_count() const noexcept { return data.use_count(); }
+            const std::shared_ptr<void>& host_object() const noexcept { return data.shared(); }   // empty for an instance
+            detail::object_ref held() const noexcept { return data; }
+            void hold(detail::object_ref object) noexcept { data = std::move(object); }
             // A coroutine handle IS a reference to a running computation: clone() shares
             // it (reference semantics, like shared_ptr) instead of deep-copying.
             bool is_coroutine_handle = false;
@@ -3599,7 +3607,7 @@ namespace detail {
             }
             case TYPEID_OBJECT: {
                 const auto& h = storage_.get<TYPEID_OBJECT>();
-                return h.unique() && (h->data ? h->data.use_count() == 1 : h->has_keep_alive());
+                return h.unique() && (h->holds_object() ? h->object_use_count() == 1 : h->has_keep_alive());
             }
             case TYPEID_MAP: return storage_.get<TYPEID_MAP>().unique();
             case TYPEID_FUNCTION: return storage_.get<TYPEID_FUNCTION>().unique();

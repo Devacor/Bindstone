@@ -361,7 +361,7 @@ void class_instance::release_orphan_fields() noexcept {
         work.pop_back();
         if (v.raw_storage_index() == script_value::TYPEID_OBJECT) {
             const auto& holder = v.unchecked_object_handle();
-            if (holder.unique() && holder->is_instance() && holder->data.use_count() == 1) {
+            if (holder.unique() && holder->is_instance() && holder->object_use_count() == 1) {
                 auto* inner = holder->unchecked_instance();
                 if (!inner->class_def_ && !inner->destructor_armed_) { take_cells(*inner); }
             }
@@ -772,7 +772,7 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
         if (!existing.is_null() && existing.is_object()) {
             auto objHolder = existing.get_object_holder();
             if (objHolder && objHolder->type_id == host.class_definition_type_id) {
-                class_def = std::static_pointer_cast<script_class_definition>(objHolder->data.shared());
+                class_def = std::static_pointer_cast<script_class_definition>(objHolder->host_object());
                 is_redefinition = true;
             }
         }
@@ -821,7 +821,7 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
             if (!base_class_var.is_null() && base_class_var.is_object()) {
                 auto objHolder = base_class_var.get_object_holder();
                 if (objHolder && objHolder->type_id == host.class_definition_type_id) {
-                    base_class_def = std::static_pointer_cast<class_definition>(objHolder->data.shared());
+                    base_class_def = std::static_pointer_cast<class_definition>(objHolder->host_object());
                 } else {
                     return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
                 }

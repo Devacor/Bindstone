@@ -3788,7 +3788,7 @@ namespace {
 		const script_value* native = inst.native();
 		if (native) {
 			const auto holder = native->get_object_holder();
-			if (holder) { return holder->data ? holder->data.get() : holder->bound_ptr; }
+			if (holder) { return holder->holds_object() ? holder->object() : holder->bound_ptr; }
 		}
 		return &inst;
 	}
@@ -3933,8 +3933,8 @@ namespace {
 			// distinctness check; a nested one must be its object's only holder, since nothing proves its aliases apart
 			const bool shared = v.is_shared_ptr_type();
 			if (shared && shared_key) {
-				*shared_key = handle->data.get();
-			} else if (shared && (handle.use_count() > 1 || handle->data.use_count() > 1)) {
+				*shared_key = handle->object();
+			} else if (shared && (handle.use_count() > 1 || handle->object_use_count() > 1)) {
 				return false;
 			}
 			// Reference-free fast path: no live field reference pins this instance, and the caller
@@ -3953,7 +3953,7 @@ namespace {
 				}
 				return true;
 			}
-			if (!shared && (handle.use_count() > 1 || handle->data.use_count() > 1)) {
+			if (!shared && (handle.use_count() > 1 || handle->object_use_count() > 1)) {
 				v = v.clone();   // engine-internal aliasing: fresh exclusive instance
 				auto& fresh = v.unchecked_get_object_storage();
 				inst = fresh->unchecked_instance();
@@ -3982,7 +3982,7 @@ namespace {
 				return normalize_instance_fields(inst, cd, eng, reach, false, types);
 			}
 			if (!cd || !cd->flat_value_semantics()) { return false; }
-			*shared_key = locked->data.get();
+			*shared_key = locked->object();
 			return normalize_instance_fields(inst, cd, eng, reach, false, types);
 		}
 		default:
@@ -4274,7 +4274,7 @@ namespace {
 			const script_value* native = inst->native();
 			const auto native_holder = native ? native->get_object_holder() : nullptr;
 			if (!top) { return "a C++ object inside a script object"; }
-			if (!native_holder || !native_holder->data) { return "a C++ object the script does not own"; }
+			if (!native_holder || !native_holder->holds_object()) { return "a C++ object the script does not own"; }
 			shape.host = true;
 			shape.classes.push_back(cd);
 			shape.objects.push_back(element_object_key(*inst));

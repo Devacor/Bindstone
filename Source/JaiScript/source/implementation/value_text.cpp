@@ -183,7 +183,7 @@ namespace value_text_walk {
 						out_ += "null";
 						return {};
 					}
-					script_value target = script_value::make_object(shared->type_name, shared->type_id, shared->data, shared->owner);
+					script_value target = script_value::make_object(shared->type_name, shared->type_id, shared->held(), shared->owner);
 					return enter_object(target, &target, nested);
 				}
 				case script_value::TYPEID_FUNCTION:
@@ -365,7 +365,7 @@ namespace value_text_walk {
 					return &f.next->first;
 				}
 				case frame_shape::fields: {
-					const auto* instance = static_cast<const class_instance*>(f.source().peek_object_holder()->data.get());
+					const auto* instance = static_cast<const class_instance*>(f.source().peek_object_holder()->object());
 					const std::vector<uint64_t>& ids = f.fields();
 					while (f.index < ids.size()) {
 						const uint64_t id = ids[f.index++];

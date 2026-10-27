@@ -1655,7 +1655,7 @@ public:
                     cpp_ptr = instance->get_cpp_object_as<T>().get();
                 }
             } else {
-                auto typed_ptr = std::static_pointer_cast<T>(holder->data.shared());
+                auto typed_ptr = std::static_pointer_cast<T>(holder->host_object());
                 cpp_ptr = typed_ptr.get();
             }
 

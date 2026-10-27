@@ -194,7 +194,7 @@ namespace {
 	// its copy are unobservable - no destructor in its value tree, a copyable script class, no C++ object; else the copy
 	checked_result<script_value> vm_convert_pushed_element(engine* eng, script_value& element, type_info_ptr element_type) {
 		if (element.raw_storage_index() == script_value::TYPEID_OBJECT && detail::uniquely_held(element)) {
-			const auto* instance = static_cast<const class_instance*>(element.unchecked_object_handle()->data.get());
+			const auto* instance = static_cast<const class_instance*>(element.unchecked_object_handle()->object());
 			const class_definition* def = instance->get_class_definition();
 			if (def && def->is_script_class() && !def->nocopy() && !instance->has_cpp_object() && !def->value_tree_runs_destructor()) {
 				if (!element_type || element_type->base_type == script_value_type::jai_any_type) { return std::move(element); }
@@ -1619,7 +1619,7 @@ vm_backend::member_target vm_backend::resolve_member_target(const script_value& 
 				if (auto hooks = target.class_def->slot_hooks()) {
 					auto layer = hooks->read(target.instance->cpp_object_pointer());
 					if (layer && layer != target.instance && layer->get_engine() == engine_) {
-						holder->data = layer;
+						holder->hold(layer);
 						target.instance = std::move(layer);
 						target.class_def = target.instance->get_class_definition();
 					}
@@ -13446,7 +13446,7 @@ int vm_backend::worker_park_sibling(frame& f, const call_site& site) {
 	const uint64_t sym = f.code->symbols[site.callee.symbol];
 	if (!cd || detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) return 0;
 	const auto& holder = const_cast<script_value&>(self).get_object_holder();
-	if (!holder || !holder->data || holder->unchecked_instance()->has_field(sym)) return 0;
+	if (!holder || !holder->holds_object() || holder->unchecked_instance()->has_field(sym)) return 0;
 	const script_value* bound = cd->method_ptr(sym);
 	if (!bound || !bound->is_function() || !bound->as_function().target<script_method_dispatch>()) return 0;
 	const detail::parallel_method_pin* pin = parallel_method_pins_ ? parallel_method_pins_->find(cd, sym) : nullptr;
@@ -13469,7 +13469,7 @@ void vm_backend::arm_sibling_method(frame& f, const call_site& site, const scrip
 	const script_value& this_val = *f.locals->scope_this;
 	const auto& holder = const_cast<script_value&>(this_val).get_object_holder();
 	const auto& bound_holder = const_cast<script_value&>(*thunk->payload.this_obj()).get_object_holder();
-	if (!holder || !holder->is_instance() || !bound_holder || bound_holder->data.get() != holder->data.get()) return;
+	if (!holder || !holder->is_instance() || !bound_holder || bound_holder->object() != holder->object()) return;
 	class_instance& inst = *holder->unchecked_instance();
 	class_definition* cd = inst.get_class_definition();
 	const uint64_t sym = f.code->symbols[site.callee.symbol];
@@ -13669,7 +13669,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 	if (member->object && member->object->get_type() == node_type::super_expr) {
 		std::shared_ptr<class_definition> parent_def;
 		if (objectValue.is_object()) {
-			if (auto objHolder = objectValue.get_object_holder(); objHolder && objHolder->data) {
+			if (auto objHolder = objectValue.get_object_holder(); objHolder && objHolder->holds_object()) {
 				if (auto* class_def = objHolder->instance_handle()->get_class_definition()) {
 					parent_def = class_def->get_parent();
 				}
@@ -15719,7 +15719,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 			return raise_(make_error_code(runtime_error_code::type_mismatch));
 		}
 		auto objHolder = objectValue.get_object_holder();
-		if (!objHolder || !objHolder->data) {
+		if (!objHolder || !objHolder->holds_object()) {
 			return raise_(make_error_code(runtime_error_code::type_mismatch));
 		}
 		auto instance = objHolder->instance_handle();
@@ -15758,7 +15758,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 	if (objectValue.is_object()) {
 		auto objHolder = objectValue.get_object_holder();
 		if (objHolder && objHolder->type_id == coroutine_handle_type_id_) {
-			auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->data.shared());
+			auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->host_object());
 			if (expr->member_id == next_id_) {
 				if (!as_callee) { return raise_method_value(expr, objectValue, false); }
 				auto captured_handle = handle;
@@ -16162,7 +16162,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 				if (class_var.is_object()) {
 					auto objHolder = class_var.get_object_holder();
 					if (objHolder && objHolder->type_name == "class_definition") {
-						fallback_class = std::static_pointer_cast<class_definition>(objHolder->data.shared());
+						fallback_class = std::static_pointer_cast<class_definition>(objHolder->host_object());
 					}
 				}
 			}
@@ -16286,7 +16286,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 
-	auto class_def = std::static_pointer_cast<class_definition>(objHolder->data.shared());
+	auto class_def = std::static_pointer_cast<class_definition>(objHolder->host_object());
 
 	if (class_def->chain_has_nonpublic()) [[unlikely]] {
 		VM_TRY(detail::enforce_member_access(class_def.get(), expr->member_id,
@@ -18885,9 +18885,9 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 			// closure + function value PER STEP just to forward to the handle. Same
 			// handle call, same argument checks and checked_result propagation. Any other member falls
 			// through for member_access_value's coroutine error spelling.
-			if (holder && holder->type_id == coroutine_handle_type_id_ && holder->data &&
+			if (holder && holder->type_id == coroutine_handle_type_id_ && holder->holds_object() &&
 			    (member->member_id == next_id_ || member->member_id == done_id_)) {
-				auto handle = std::static_pointer_cast<coroutine_handle>(holder->data.shared());
+				auto handle = std::static_pointer_cast<coroutine_handle>(holder->host_object());
 				if (member->member_id == next_id_) {
 					return guarded_native_call([&] { return handle->next_from_script(engine_, arguments.data(), arguments.size()); });
 				}
@@ -18897,8 +18897,8 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				stack_.push_back(script_value(handle->done(), engine_));
 				return {};
 			}
-			if (holder && holder->type_id == coroutine_handle_type_id_ && holder->data && member->member_id == advance_id_) {
-				auto handle = std::static_pointer_cast<coroutine_handle>(holder->data.shared());
+			if (holder && holder->type_id == coroutine_handle_type_id_ && holder->holds_object() && member->member_id == advance_id_) {
+				auto handle = std::static_pointer_cast<coroutine_handle>(holder->host_object());
 				// the argument binds as a T& parameter does: through the call site the handle reads (host_reference_argument)
 				pending_call_site saved_pending = pending_site_ctx_;
 				pending_site_ctx_ = arguments.empty() ? saved_pending : pending_call_site{&site, &f, f.code, &arguments};
@@ -18908,8 +18908,8 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				} restore_pending{this, saved_pending};
 				return guarded_native_call([&] { return handle->advance_from_script(engine_, arguments); });
 			}
-			if (holder && holder->type_id == coroutine_handle_type_id_ && holder->data && member->member_id == result_id_) {
-				auto handle = std::static_pointer_cast<coroutine_handle>(holder->data.shared());
+			if (holder && holder->type_id == coroutine_handle_type_id_ && holder->holds_object() && member->member_id == result_id_) {
+				auto handle = std::static_pointer_cast<coroutine_handle>(holder->host_object());
 				return guarded_native_call([&] { return handle->result_from_script(arguments.size()); });
 			}
 			// A user class method WINS over a same-named builtin handle method:
@@ -19654,7 +19654,7 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 					script_value class_var = std::move(class_result.value());
 					auto obj_holder = class_var.get_object_holder();
 					if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
-						auto class_def = std::static_pointer_cast<class_definition>(obj_holder->data.shared());
+						auto class_def = std::static_pointer_cast<class_definition>(obj_holder->host_object());
 						if (class_def->has_static_method_with_arity(func_decl->name_id, func_decl->parameters.size())) {
 							return raise_(make_error_code(runtime_error_code::type_mismatch),
 								"Function '{0}' in namespace '{1}' collides with static method. Use 'override' to override.",
@@ -19692,7 +19692,7 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 					auto obj_holder = class_def_var->get_object_holder();
 					if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
 						detail::register_namespace_class(*engine_, *ns_data, decl->name, class_decl_ptr->name_id,
-						                                 std::static_pointer_cast<class_definition>(obj_holder->data.shared()));
+						                                 std::static_pointer_cast<class_definition>(obj_holder->host_object()));
 					}
 				}
 			}
@@ -20818,7 +20818,7 @@ op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 	} else if (container.is_object()) {
 		auto holder = container.get_object_holder();
 		if (holder && holder->type_id == coroutine_handle_type_id_) {
-			state.coroutine = std::static_pointer_cast<coroutine_handle>(holder->data.shared());
+			state.coroutine = std::static_pointer_cast<coroutine_handle>(holder->host_object());
 			iter_states_.push_back(std::move(state));
 			return {};
 		}
@@ -24392,7 +24392,7 @@ void vm_backend::anchor_method_result(script_value& result, script_value& receiv
 	auto rv_holder = result.get_object_holder();
 	auto recv_holder = receiver.get_object_holder();
 	if (rv_holder && recv_holder) {
-		rv_holder->set_keep_alive(recv_holder->data ? recv_holder->data
+		rv_holder->set_keep_alive(recv_holder->holds_object() ? recv_holder->held()
 		                                          : recv_holder->keep_alive());
 	}
 }

@@ -421,7 +421,7 @@ namespace jai {
         inline bool borrows_host_object(const script_value& value) {
             if (value.raw_storage_index() != script_value::TYPEID_OBJECT) { return false; }
             const auto* holder = value.peek_object_holder();
-            return holder && holder->bound_ptr && !holder->data;
+            return holder && holder->bound_ptr && !holder->holds_object();
         }
     }
 

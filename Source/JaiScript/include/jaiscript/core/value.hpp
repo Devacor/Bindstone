@@ -118,7 +118,7 @@ namespace detail {
     void release_last_instance(class_instance* instance) noexcept;
     inline void retain_instance(class_instance* instance) noexcept { instance_control_block(instance)->add_strong(); }
     inline void release_instance(class_instance* instance) noexcept {
-        if (instance_control_block(instance)->release_strong()) { release_last_instance(instance); }
+        if (instance_control_block(instance)->drop_strong() == 0) { release_last_instance(instance); }
     }
     inline size_t instance_use_count(const class_instance* instance) noexcept { return instance_control_block(instance)->get_strong_count(); }
 

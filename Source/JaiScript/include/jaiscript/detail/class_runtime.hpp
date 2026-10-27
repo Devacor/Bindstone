@@ -36,20 +36,21 @@ inline class_instance::class_instance(interned_name_t, std::string_view interned
     if (trailing.memory && trailing.slots) {
         auto* cells = reinterpret_cast<script_value*>(trailing.memory);
         for (uint32_t i = 0; i < trailing.slots; ++i) { new (cells + i) script_value(script_value::make_invalid(eng)); }
+        assert(cells == flat_fields_.trailing() && "the trailing cells start where the instance ends");
         trailing_cells_ = true;
-        flat_fields_.adopt_implicit(cells, trailing.slots);
+        flat_fields_.adopt_implicit(trailing.slots);
     }
 }
 
 inline void class_instance::free_allocation(class_instance* instance) noexcept {
     detail::control_block_base* cb = detail::cb_from_object(instance);
     instance->~class_instance();
-    if (cb->release_weak()) { cb->dealloc_fn(cb); }
+    if (cb->drop_weak() == 0 && cb->strong_count == 0) { cb->dealloc_fn(cb); }
 }
 
 namespace detail {
 static_assert(cb_storage_offset<class_instance> == k_instance_cb_offset, "object_ref finds an instance's control block a fixed distance before it");
-static_assert(sizeof(void*) != 8 || sizeof(class_instance) <= 112, "an instance's header stays within 112 bytes (internal/object_layout.md)");
+static_assert(sizeof(void*) != 8 || sizeof(class_instance) <= 88, "an instance's header stays within 88 bytes (internal/object_layout.md)");
 
 // An instance handed to its own destructor body as `this`: a dying one (its last strong reference gone, its chain running) holds
 // a count for the span that goes back without a second death; a living one (a re-class) is pinned as usual
@@ -64,7 +65,7 @@ public:
     dying_instance_pin& operator=(const dying_instance_pin&) = delete;
     ~dying_instance_pin() {
         if (revived_) {
-            (void)cb_from_object(instance_)->release_strong();
+            (void)cb_from_object(instance_)->drop_strong();
         } else {
             strong_ptr<class_instance> pinned = adopt_pooled(instance_);
         }
@@ -78,29 +79,35 @@ private:
     bool revived_ = false;
 };
 
-// The instance's part of its object block, given back when its strong family's last weak reference goes
-inline void release_instance_block(control_block_base* cb) noexcept {
+// The instance's object block, given back when its strong family's last weak reference goes
+inline void object_block::release(control_block_base* cb) noexcept {
 #ifndef NDEBUG
     cb->magic = cb_magic_dead;
 #endif
-    auto* head = object_block_head::of_control_block(cb);
     static_cast<control_block<class_instance>*>(cb)->~control_block();
-    object_block_head::release(head);
+    ::operator delete(static_cast<void*>(cb));
+}
+
+inline void object_block::release_pinned(control_block_base* cb) noexcept {
+#ifndef NDEBUG
+    cb->magic = cb_magic_dead;
+#endif
+    auto* memory = reinterpret_cast<std::byte*>(cb) - pin_bytes;
+    reinterpret_cast<std::shared_ptr<class_definition>*>(memory)->~shared_ptr();
+    static_cast<control_block<class_instance>*>(cb)->~control_block();
+    ::operator delete(static_cast<void*>(memory));
 }
 }
 
 inline strong_ptr<class_instance> class_instance::make(std::string_view interned, engine* eng, uint32_t slots, class_definition* destructor_owner) {
     using block_cb = detail::control_block<class_instance>;
-    constexpr size_t cb_bytes = (sizeof(block_cb) + 15) & ~size_t{15};
-    const size_t prefix = destructor_owner ? detail::object_block_head::pin_bytes : 0;
-    auto* memory = static_cast<std::byte*>(::operator new(prefix + detail::object_block_head::size + cb_bytes + trailing_bytes(slots)));
-    std::byte* block = memory + prefix;
-    auto* head = new (block) detail::object_block_head();
-    head->prefix = static_cast<uint32_t>(prefix);
+    static_assert(sizeof(block_cb) == detail::k_instance_cb_offset + sizeof(class_instance), "the cells follow the instance");
+    const size_t prefix = destructor_owner ? detail::object_block::pin_bytes : 0;
+    auto* memory = static_cast<std::byte*>(::operator new(prefix + sizeof(block_cb) + trailing_bytes(slots)));
     if (destructor_owner) { new (memory) std::shared_ptr<class_definition>(destructor_owner->shared_from_this()); }
-    auto* cb = new (block + detail::object_block_head::size) block_cb();
-    cb->dealloc_fn = &detail::release_instance_block;
-    const trailing_cells trailing{block + detail::object_block_head::size + cb_bytes, slots};
+    auto* cb = new (memory + prefix) block_cb();
+    cb->dealloc_fn = destructor_owner ? &detail::object_block::release_pinned : &detail::object_block::release;
+    const trailing_cells trailing{memory + prefix + sizeof(block_cb), slots};
     auto* instance = new (cb->storage) class_instance(interned_name_t{}, interned, eng, trailing);
     if (destructor_owner) { instance->note_destructor_armed(); }
     return detail::adopt_pooled(instance);

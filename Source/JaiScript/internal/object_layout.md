@@ -9,13 +9,14 @@ A bound C++ object a value holds without an instance (a raw C++ object, a corout
 ## The block
 
 ```
-[ definition pin? ]  [ head: prefix ]  [ control block | class_instance (object_holder at offset 0) ]  [ cells ]
+[ definition pin? ]  [ control block | class_instance (object_holder at offset 0) ]  [ cells ]
 ```
 
-`class_instance::make` makes the whole block. The head records how far the block's memory starts before it (a destructor
-class's instance pins its definition there); the strong family's last weak reference frees the block. Every handle of the
-object, a script value's, a `strong_ptr<class_instance>` the runtime keeps and a host `shared_ptr` over it alike, is one count
-on the one control block: two wraps of one C++ object are the same object, and `use_count()` counts every owner.
+`class_instance::make` makes the whole block. The control block's two counts are 32 bits each; its deallocator says whether
+a definition pin precedes it (a destructor class's instance pins its definition there); the strong family's last weak reference
+frees the block. Every handle of the object, a script value's, a `strong_ptr<class_instance>` the runtime keeps and a host
+`shared_ptr` over it alike, is one count on the one control block: two wraps of one C++ object are the same object, and
+`use_count()` counts every owner.
 
 `object_holder` carries what every object value reads without knowing which kind it holds: the type's name and id, the engine,
 and the kind. Its accessors switch on the kind; a host holder's C++ object, bound address and anchors sit in `host_holder`.
@@ -24,13 +25,14 @@ pool.
 
 ## The header
 
-`class_instance` is at most 112 bytes on a 64-bit host (static_assert in `detail/class_runtime.hpp`). The holder part (40
-bytes) comes first; the class pointer and the 16-byte slot table (the arena's cells with the low bit set while the table is
-implicit, else the heap table) come last, so a field read's header words share a line with the first trailing cells. Between
-them: the live field-reference count, the constructed levels, the registry flag and the flag bits (a bitfield byte that also
-carries the construction phase), the extras box and the registry links. What few instances need lives in the extras box: the
-heap cell arena of an instance whose allocation carries no cells, the C++ object, retired cells, the missing-field answer,
-runtime-added fields and the parallel region tag.
+`class_instance` is at most 88 bytes on a 64-bit host (static_assert in `detail/class_runtime.hpp`). The holder part (40
+bytes) comes first; the class pointer and the slot table's one word come last, and the trailing cells start where that word
+ends. While the table is implicit the word is the cell count with its low bit set, so slot i's cell sits a fixed distance past
+the instance and a field read follows no pointer from the instance to it; a materialized table is a heap block (size, capacity,
+one cell pointer per slot). Between them: the live field-reference count, the constructed levels, the registry flag and the
+flag bits (a bitfield byte that also carries the construction phase), the extras box and the registry links. What few
+instances need lives in the extras box: the heap cell arena of an instance whose allocation carries no cells, the C++ object,
+retired cells, the missing-field answer, runtime-added fields and the parallel region tag.
 
 ## Fields
 

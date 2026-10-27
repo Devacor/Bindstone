@@ -579,7 +579,7 @@ void script_value::object_holder::last_release(object_holder* holder, jai::detai
         return;
     }
     static_cast<host_holder*>(holder)->~host_holder();
-    if (cb->release_weak()) { cb->dealloc_fn(cb); }
+    if (cb->drop_weak() == 0 && cb->strong_count == 0) { cb->dealloc_fn(cb); }
 }
 
 strong_ptr<script_vec_node> script_value::acquire_vec_node(engine* eng) {

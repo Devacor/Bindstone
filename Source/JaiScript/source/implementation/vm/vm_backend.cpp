@@ -3255,7 +3255,7 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 
 op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
-	if (f.ip + 1 < f.code->code.size()) { ++profile_load_next_[static_cast<uint8_t>(f.code->code[f.ip + 1].op)]; }
+	if (f.ip + 1 < f.code->code.size()) { ++profile_load_next_[static_cast<size_t>(f.code->code[f.ip + 1].op)]; }
 #endif
 	const uint64_t sym = f.code->symbols[ins.b];
 	if (ins.c & load_flag_global_only) {
@@ -3438,7 +3438,7 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 
 op_status vm_backend::exec_store(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
-	if (f.ip > 0) { ++profile_store_prev_[static_cast<uint8_t>(f.code->code[f.ip - 1].op)]; }
+	if (f.ip > 0) { ++profile_store_prev_[static_cast<size_t>(f.code->code[f.ip - 1].op)]; }
 #endif
 	script_value value = std::move(stack_.back());
 	stack_.pop_back();
@@ -5632,7 +5632,7 @@ op_status vm_backend::exec_unary_temp(frame& f, const vm_instruction& ins) {
 
 op_status vm_backend::exec_binary_fused(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
-	if (f.ip + 1 < f.code->code.size()) { ++profile_binary_fused_next_[static_cast<uint8_t>(f.code->code[f.ip + 1].op)]; }
+	if (f.ip + 1 < f.code->code.size()) { ++profile_binary_fused_next_[static_cast<size_t>(f.code->code[f.ip + 1].op)]; }
 #endif
 	return binary_fused_compute(f, ins.a, [this](script_value&& v) { stack_.push_back(std::move(v)); });
 }
@@ -6871,22 +6871,22 @@ op_status vm_backend::exec_index_assign(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
-op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_index_compound(frame& f, const uint32_t compound) {
 	script_value rightValue = std::move(stack_.back());
 	stack_.pop_back();
 	script_value currentValue = std::move(stack_.back());
 	stack_.pop_back();
-	const bool old_result = (ins.a & compound_flag_old_result) != 0;
+	const bool old_result = (compound & compound_flag_old_result) != 0;
 	script_value postfix_old = old_result ? script_value(currentValue.deref()) : make_null();
-	if (ins.a & compound_flag_incdec) {
+	if (compound & compound_flag_incdec) {
 		// ++/-- gate: numeric targets only, the identifier path's exact error
 		const size_t ci = currentValue.deref().raw_storage_index();
 		if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
-			return raise_from(detail::incdec_mismatch((ins.a & compound_kind_mask) == compound_plus, currentValue.deref(), engine_));
+			return raise_from(detail::incdec_mismatch((compound & compound_kind_mask) == compound_plus, currentValue.deref(), engine_));
 		}
 	}
 
-	const token_type op = compound_kind_token(ins.a);
+	const token_type op = compound_kind_token(compound);
 
 	script_value resultValue = make_null();
 	// Custom operator consult through the flat table (was a per-store string-keyed
@@ -7463,7 +7463,7 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 
 op_status vm_backend::exec_index_fused(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
-	if (f.ip + 1 < f.code->code.size()) { ++profile_index_fused_next_[static_cast<uint8_t>(f.code->code[f.ip + 1].op)]; }
+	if (f.ip + 1 < f.code->code.size()) { ++profile_index_fused_next_[static_cast<size_t>(f.code->code[f.ip + 1].op)]; }
 #endif
 	// a read whose next instruction dereferences it (DEREF_TOP) takes the value: the array and map rows a transient read takes are the
 	// element a dereferenced reference holds, and the dereference instruction is skipped
@@ -8883,8 +8883,8 @@ next_frame:
 	const cell_regs regs{cs.cells.data(), &cs.dirty, block_constants(*f.code), f.code->code.data(), &loop};   // the run's registers: the vectors never move during a run (the entry sized them)
 	const cell_regs hot = regs;   // the inline cases' copy: regs goes by reference to the out-of-line executors, this one stays in registers
 #ifdef JAISCRIPT_VM_PROFILE
-	size_t prof_prev_cell = 256;
-	if (profile_cell_pairs_.size() < 256 * 256) { profile_cell_pairs_.assign(256 * 256, 0); profile_fn_cell_pairs_.assign(256 * 256, 0); }
+	size_t prof_prev_cell = k_opcode_space;
+	if (profile_cell_pairs_.size() < k_opcode_space * k_opcode_space) { profile_cell_pairs_.assign(k_opcode_space * k_opcode_space, 0); profile_fn_cell_pairs_.assign(k_opcode_space * k_opcode_space, 0); }
 #endif
 	size_t ip = f.ip;
 	for (;;) {
@@ -9137,12 +9137,12 @@ next_frame:
 		}
 #ifdef JAISCRIPT_VM_PROFILE
 		{
-			const uint64_t prof_dt = __rdtsc() - prof_c0; const size_t prof_k = static_cast<size_t>(ci.op) & 0xFF;
+			const uint64_t prof_dt = __rdtsc() - prof_c0; const size_t prof_k = static_cast<size_t>(ci.op);
 			profile_cell_cycles_[prof_k] += prof_dt;
-			if (prof_prev_cell < 256) { ++profile_cell_pairs_[prof_prev_cell * 256 + prof_k]; }
+			if (prof_prev_cell < k_opcode_space) { ++profile_cell_pairs_[prof_prev_cell * k_opcode_space + prof_k]; }
 			if (!profile_filter_name_.empty()) {
 				if (!profile_filter_chunk_ && f.code->function_name == profile_filter_name_) { profile_filter_chunk_ = f.code; }
-				if (f.code == profile_filter_chunk_) { ++profile_fn_cell_ops_[prof_k]; profile_fn_cell_cycles_[prof_k] += prof_dt; if (prof_prev_cell < 256) { ++profile_fn_cell_pairs_[prof_prev_cell * 256 + prof_k]; } }
+				if (f.code == profile_filter_chunk_) { ++profile_fn_cell_ops_[prof_k]; profile_fn_cell_cycles_[prof_k] += prof_dt; if (prof_prev_cell < k_opcode_space) { ++profile_fn_cell_pairs_[prof_prev_cell * k_opcode_space + prof_k]; } }
 			}
 			prof_prev_cell = prof_k;
 		}
@@ -12283,8 +12283,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 		return indexed;
 	}
 	stack_.push_back(std::move(rhs));
-	vm_instruction compound_ins{opcode::op_index_compound, ins.a, 0, 0};
-	return exec_index_compound(f, compound_ins);
+	return exec_index_compound(f, ins.a);
 }
 
 // `a[i] op= v;` with its operands in the proto: the value first (an operand, or the stack's top), then the container (the guard's temp
@@ -12492,7 +12491,7 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.a].get());
 	JAI_DECL_SUB(0);
 #ifdef JAISCRIPT_VM_PROFILE
-	if (f.ip > 0) { ++profile_decl_var_prev_[static_cast<uint8_t>(f.code->code[f.ip - 1].op)]; }
+	if (f.ip > 0) { ++profile_decl_var_prev_[static_cast<size_t>(f.code->code[f.ip - 1].op)]; }
 	if (ins.b != 0 && !stack_.empty()) { const size_t k = stack_.back().deref().raw_storage_index(); ++profile_decl_var_kinds_[k < 16 ? k : 15]; }
 #endif
 	const bool has_init = ins.b != 0;
@@ -19376,7 +19375,6 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 // extern declares nothing: the name resolves to whatever defines it, and a use while nothing does raises the
 // extern's own text. KEEP BYTE-PARALLEL with interpreter::visit_extern_decl.
 op_status vm_backend::exec_extern_decl(frame& f, const vm_instruction& ins) {
-	if (ins.b == k_field_init_form) { return exec_field_init(f, ins); }
 	auto* decl = static_cast<extern_decl*>(f.code->nodes[ins.a].get());
 	environment_->note_extern(decl->name_id, decl->is_function);
 	return {};
@@ -21425,6 +21423,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_namespace_decl: return exec_namespace_decl(f, ins);
 		case opcode::op_enum_decl: return exec_enum_decl(f, ins);
 		case opcode::op_extern_decl: return exec_extern_decl(f, ins);
+		case opcode::op_field_init: return exec_field_init(f, ins);
 		case opcode::op_decl_keep: {
 			auto* decl = static_cast<const variable_decl*>(f.code->nodes[ins.a].get());
 			if (decl->is_inline) {
@@ -22141,9 +22140,9 @@ void vm_backend::dump_opcode_profile() const {
 			if (++shown >= 15) break;
 		}
 	}
-	auto dump_next_histogram = [](const char* label, const uint64_t (&hist)[256]) {
+	auto dump_next_histogram = [](const char* label, const uint64_t (&hist)[k_opcode_space]) {
 		std::vector<std::pair<int, uint64_t>> rows;
-		for (int i = 0; i < 256; ++i) if (hist[i]) rows.push_back({i, hist[i]});
+		for (int i = 0; i < static_cast<int>(k_opcode_space); ++i) if (hist[i]) rows.push_back({i, hist[i]});
 		if (rows.empty()) return;
 		std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
 		fprintf(stderr, "[vm-profile] %s result consumers (next opcode):\n", label);
@@ -22191,10 +22190,10 @@ void vm_backend::dump_opcode_profile() const {
 		}
 	}
 	uint64_t total = 0;
-	for (int i = 0; i < 256; ++i) total += profile_cycles_[i];
+	for (int i = 0; i < static_cast<int>(k_opcode_space); ++i) total += profile_cycles_[i];
 	if (total == 0) return;
 	std::vector<int> order;
-	for (int i = 0; i < 256; ++i) if (profile_counts_[i]) order.push_back(i);
+	for (int i = 0; i < static_cast<int>(k_opcode_space); ++i) if (profile_counts_[i]) order.push_back(i);
 	std::sort(order.begin(), order.end(), [&](int a, int b) { return profile_cycles_[a] > profile_cycles_[b]; });
 	fprintf(stderr, "\n[vm-profile] opcode self-time (total %llu Mcycles)\n", (unsigned long long)(total / 1000000));
 	fprintf(stderr, "%-24s %10s %14s %8s %7s\n", "opcode", "count", "cycles(M)", "avg", "pct");
@@ -22410,26 +22409,26 @@ void vm_backend::dump_opcode_profile() const {
 			fprintf(stderr, "\n");
 		}
 		fprintf(stderr, "[vm-profile] cell instructions by opcode (measured span):");
-		for (size_t k = 0; k < 256; ++k) { if (profile_cell_ops_[k]) { fprintf(stderr, " %s %llu |", std::string(opcode_name(static_cast<opcode>(k))).c_str(), (unsigned long long)profile_cell_ops_[k]); } }
+		for (size_t k = 0; k < k_opcode_space; ++k) { if (profile_cell_ops_[k]) { fprintf(stderr, " %s %llu |", std::string(opcode_name(static_cast<opcode>(k))).c_str(), (unsigned long long)profile_cell_ops_[k]); } }
 		fprintf(stderr, "\n");
 		{
 			// the block loop's own switch, cycles per cell opcode; then the named function's general and cell tables
 			auto table = [&](const char* title, const uint64_t* counts, const uint64_t* cycles) {
-				uint64_t tot = 0; for (int i = 0; i < 256; ++i) tot += cycles[i];
+				uint64_t tot = 0; for (int i = 0; i < static_cast<int>(k_opcode_space); ++i) tot += cycles[i];
 				if (tot == 0) return;
-				std::vector<int> ord; for (int i = 0; i < 256; ++i) if (counts[i]) ord.push_back(i);
+				std::vector<int> ord; for (int i = 0; i < static_cast<int>(k_opcode_space); ++i) if (counts[i]) ord.push_back(i);
 				std::sort(ord.begin(), ord.end(), [&](int a, int b) { return cycles[a] > cycles[b]; });
 				fprintf(stderr, "\n[vm-profile] %s (total %llu Mcycles)\n%-24s %10s %14s %8s %7s\n", title, (unsigned long long)(tot / 1000000), "opcode", "count", "cycles(M)", "avg", "pct");
 				for (int i : ord) { fprintf(stderr, "%-24.*s %10llu %14.1f %8.1f %6.2f%%\n", (int)opcode_name(static_cast<opcode>(i)).size(), opcode_name(static_cast<opcode>(i)).data(), (unsigned long long)counts[i], cycles[i] / 1e6, (double)cycles[i] / (double)counts[i], 100.0 * (double)cycles[i] / (double)tot); }
 			};
 			table("cell instruction self-time (the block loop's switch)", profile_cell_ops_, profile_cell_cycles_);
 			auto pairs = [&](const char* title, const std::vector<uint64_t>& counts) {
-				if (counts.size() < 256 * 256) return;
+				if (counts.size() < k_opcode_space * k_opcode_space) return;
 				std::vector<size_t> ord; uint64_t tot = 0; for (size_t i = 0; i < counts.size(); ++i) { if (counts[i]) { ord.push_back(i); tot += counts[i]; } }
 				std::sort(ord.begin(), ord.end(), [&](size_t a, size_t b) { return counts[a] > counts[b]; });
 				fprintf(stderr, "\n[vm-profile] %s (%llu pairs)\n", title, (unsigned long long)tot);
 				size_t shown = 0;
-				for (size_t i : ord) { fprintf(stderr, "  %-16.*s -> %-16.*s %12llu %6.2f%%\n", (int)opcode_name(static_cast<opcode>(i / 256)).size(), opcode_name(static_cast<opcode>(i / 256)).data(), (int)opcode_name(static_cast<opcode>(i % 256)).size(), opcode_name(static_cast<opcode>(i % 256)).data(), (unsigned long long)counts[i], 100.0 * (double)counts[i] / (double)tot); if (++shown >= 24) break; }
+				for (size_t i : ord) { fprintf(stderr, "  %-16.*s -> %-16.*s %12llu %6.2f%%\n", (int)opcode_name(static_cast<opcode>(i / k_opcode_space)).size(), opcode_name(static_cast<opcode>(i / k_opcode_space)).data(), (int)opcode_name(static_cast<opcode>(i % k_opcode_space)).size(), opcode_name(static_cast<opcode>(i % k_opcode_space)).data(), (unsigned long long)counts[i], 100.0 * (double)counts[i] / (double)tot); if (++shown >= 24) break; }
 			};
 			pairs("consecutive cell instruction pairs", profile_cell_pairs_);
 			if (!profile_filter_name_.empty()) { const std::string t3 = "consecutive cell instruction pairs of " + profile_filter_name_; pairs(t3.c_str(), profile_fn_cell_pairs_); }
@@ -22534,7 +22533,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 	// Elapsed cycles attribute to the PREVIOUS op at the next fetch, so call ops
 	// charge only their own machinery, not their callee's body.
 	uint64_t prof_t0 = __rdtsc();
-	unsigned prof_prev = 256;
+	unsigned prof_prev = static_cast<unsigned>(k_opcode_space);
 	const chunk* prof_chunk = nullptr;
 	profile_chunk_stats* prof_stats = nullptr;
 	size_t prof_ip = 0;
@@ -22557,7 +22556,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 #ifdef JAISCRIPT_VM_PROFILE
 		{
 			const uint64_t prof_now = __rdtsc();
-			if (prof_prev < 256) {
+			if (prof_prev < k_opcode_space) {
 				// the previous opcode's own span, less any dispatch loop that ran inside it
 				const uint64_t nested = profile_nested_cycles_ - prof_nested_mark;
 				const uint64_t raw = prof_now - prof_t0;
@@ -22744,7 +22743,6 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			case opcode::op_graft_depth: current_call_depth_ += ins.a ? 1 : -1; break;   // a raise unwinding out of the graft restores the depth at its handler or at the run's end
 			case opcode::op_index: VM_TRY_OP(exec_index(f, ins)); break;
-			case opcode::op_index_compound: VM_TRY_OP(exec_index_compound(f, ins)); break;
 			case opcode::op_unary: VM_TRY_OP(exec_unary(f, ins)); break;
 			case opcode::op_inline_guard: VM_TRY_OP(exec_inline_guard(f, ins)); continue;   // the executor sets the ip: the next instruction, or the fallback
 			case opcode::op_probe_callee: JAI_OP_LABEL(op_probe_callee)
@@ -22892,6 +22890,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_namespace_decl:
 			case opcode::op_enum_decl:
 			case opcode::op_extern_decl:
+			case opcode::op_field_init:
 			case opcode::op_decl_keep:
 			case opcode::op_decl_share:
 			case opcode::op_throw:

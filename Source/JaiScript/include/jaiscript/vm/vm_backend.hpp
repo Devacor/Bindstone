@@ -82,8 +82,8 @@ namespace jai::vm {
         ~vm_backend() override { dump_opcode_profile(); release_site_pins(); release_retained_decls(); }
         void dump_opcode_profile() const;
         void profile_reset() override;
-        uint64_t profile_cycles_[256] = {};
-        uint64_t profile_counts_[256] = {};
+        uint64_t profile_cycles_[k_opcode_space] = {};
+        uint64_t profile_counts_[k_opcode_space] = {};
         // Per-script-function accounting (the sampling interface; main
         // engine only, workers are not attributed). Exclusive = the opcode self time of the
         // function's own instructions (the same rdtsc pairs as the opcode table: callee
@@ -235,14 +235,14 @@ namespace jai::vm {
         std::map<std::string, uint64_t> profile_cells_miss_sites_;       // misses by function, the original instruction and the step
         uint64_t profile_cells_miss_step_[8] = {};       // misses by step kind: 0 cmp 1 arith 2 load 3 store 4 after a call
         uint64_t profile_cells_push_[4] = {};            // block pushes: 0 a raw int into a typed buffer, 1 a raw float, 2 a string handle, 3 a value (boxed or a value source)
-        uint64_t profile_cell_ops_[256] = {};            // cell instructions dispatched by the block loop, by opcode
-        uint64_t profile_cell_cycles_[256] = {};         // rdtsc cycles per cell opcode (the block loop's own switch; diagnostic builds)
+        uint64_t profile_cell_ops_[k_opcode_space] = {};            // cell instructions dispatched by the block loop, by opcode
+        uint64_t profile_cell_cycles_[k_opcode_space] = {};         // rdtsc cycles per cell opcode (the block loop's own switch; diagnostic builds)
         uint64_t profile_cell_cost_cyc_[16] = {}, profile_cell_cost_n_[16] = {};   // block runs, entries, flushes, misses, landings, raw entries, raw returns, door calls, boundary parks, resumes (inclusive)
         std::string profile_filter_name_;                // JAI_VMPROF_FUNCTION: one function's own tables (empty = none)
         const chunk* profile_filter_chunk_ = nullptr;    // the first chunk whose function_name matched, bound when it first runs
-        uint64_t profile_fn_counts_[256] = {}, profile_fn_cycles_[256] = {};           // that function's general instructions
-        uint64_t profile_fn_cell_ops_[256] = {}, profile_fn_cell_cycles_[256] = {};   // that function's cell instructions
-        std::vector<uint64_t> profile_cell_pairs_, profile_fn_cell_pairs_;   // consecutive cell opcode pairs (prev * 256 + this), all functions and the named one
+        uint64_t profile_fn_counts_[k_opcode_space] = {}, profile_fn_cycles_[k_opcode_space] = {};           // that function's general instructions
+        uint64_t profile_fn_cell_ops_[k_opcode_space] = {}, profile_fn_cell_cycles_[k_opcode_space] = {};   // that function's cell instructions
+        std::vector<uint64_t> profile_cell_pairs_, profile_fn_cell_pairs_;   // consecutive cell opcode pairs (prev * k_opcode_space + this), all functions and the named one
         // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident
         // [2]=INDEX_STORE_FUSED typed lane slot [3]=INDEX_STORE_FUSED typed lane env-resident
         uint64_t profile_typed_cont_src_[4] = {};
@@ -264,11 +264,11 @@ namespace jai::vm {
         std::map<std::string, uint64_t> profile_env_walk_names_;   // full-walk symbols by name
         // Result-consumer histograms (lanes stage-1 targeting): the opcode FOLLOWING
         // each BINARY_FUSED / LOAD / INDEX_FUSED dispatch — who eats the pushed value
-        uint64_t profile_binary_fused_next_[256] = {};
-        uint64_t profile_load_next_[256] = {};
-        uint64_t profile_index_fused_next_[256] = {};
-        uint64_t profile_decl_var_prev_[256] = {};    // what produced DECL_VAR's initializer (previous opcode)
-        uint64_t profile_store_prev_[256] = {};       // what produced STORE's value
+        uint64_t profile_binary_fused_next_[k_opcode_space] = {};
+        uint64_t profile_load_next_[k_opcode_space] = {};
+        uint64_t profile_index_fused_next_[k_opcode_space] = {};
+        uint64_t profile_decl_var_prev_[k_opcode_space] = {};    // what produced DECL_VAR's initializer (previous opcode)
+        uint64_t profile_store_prev_[k_opcode_space] = {};       // what produced STORE's value
         uint64_t profile_decl_var_kinds_[32] = {};    // DECL_VAR initializer storage index
         // index_fused_read branch taxonomy: [0]=raw-int lane [1]=raw-float lane
         // [2]=untyped array element copy [3]=lvalue element-ref [4]=const-string map
@@ -2879,7 +2879,7 @@ namespace jai::vm {
         op_status exec_index(frame& f, const vm_instruction& ins);
         op_status exec_index_impl(frame& f, const vm_instruction& ins);
         op_status exec_index_assign(frame& f, const vm_instruction& ins);
-        op_status exec_index_compound(frame& f, const vm_instruction& ins);
+        op_status exec_index_compound(frame& f, uint32_t compound);
         op_status exec_index_store(frame& f, const vm_instruction& ins);
         op_status exec_index_compound_fused(frame& f, const vm_instruction& ins);
         op_status exec_index_compound_operand(frame& f, const vm_instruction& ins);

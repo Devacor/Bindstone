@@ -41,7 +41,7 @@ namespace jai::vm {
         std::vector<uint32_t> line;       // per ip (a copy instruction: its origin's line)
         std::vector<uint16_t> file;       // per ip: index into files (a graft's statements keep their own file)
         std::vector<std::string> files;   // the source files' names
-        std::vector<uint8_t> op;          // per ip
+        std::vector<uint16_t> op;         // per ip
         std::vector<coverage_region> region;   // per general ip
         std::vector<uint32_t> region_index;    // per general ip: the cell_loops index (closed, boundary, straight) or the refusal's site
         std::vector<uint32_t> site;            // per ip: index into sites

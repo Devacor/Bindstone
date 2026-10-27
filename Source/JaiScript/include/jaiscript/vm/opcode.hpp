@@ -3,6 +3,7 @@
 #ifndef __JAISCRIPT_VM_OPCODE_HPP__
 #define __JAISCRIPT_VM_OPCODE_HPP__
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <jaiscript/detail/lexer.hpp>
@@ -11,7 +12,7 @@ namespace jai::vm {
 
     inline constexpr uint32_t k_invalid_u32 = 0xFFFFFFFFu;
 
-    enum class opcode : uint8_t {
+    enum class opcode : uint16_t {
         op_const,           // a=const index: materialize constants[a] with the engine, push
         op_null,            // push null
         op_true,            // push true
@@ -33,8 +34,6 @@ namespace jai::vm {
         op_binary,          // a=token_type, b=binary_shape_none; pops rhs,lhs, pushes result
         op_binary_fused,    // a=fused_binary_proto index, b=shape; resolves operands in place, pushes result
         op_index,           // a=flags(index_flag_*); pops index,container, pushes element/reference
-        op_bind_captures,   // a=first capture slot, b=count: a converted closure's body binds its captured cells into those slots (its first instruction)
-        op_index_compound,  // a=compound kind; pops rhs,reference; computes, assigns through, pushes result
         op_unary,           // a=token_type; pops operand, pushes result
         op_array,           // a=element count; pops elements, pushes array
         op_map,             // a=entry count; pops key/value pairs, pushes map
@@ -58,6 +57,7 @@ namespace jai::vm {
 
         op_func_decl,       // a=function proto index; defines the thunk in the current env
         op_closure,         // a=closure proto index; pushes the closure function value
+        op_bind_captures,   // a=first capture slot, b=count: a converted closure's body binds its captured cells into those slots (its first instruction)
 
         op_this,            // push 'this' from the environment (error outside methods)
         op_super,           // push 'this' for super:: access (distinct error text)
@@ -74,8 +74,7 @@ namespace jai::vm {
         op_namespace_decl,  // a=node index (namespace_decl)
         op_enum_decl,       // a=node index (enum_decl)
         op_extern_decl,     // a=node index (extern_decl): records the name (environment::note_extern), declares nothing.
-                            // b=k_field_init_form: a=chunk::field_inits index, pops a level's field initializer value into this's field
-                            // (vm_compiler::compile_field_initializers; the 256 one-byte opcodes are all taken)
+        op_field_init,      // a=chunk::field_inits index: pops a level's field initializer value into this's field (vm_compiler::compile_field_initializers)
         op_decl_keep,       // a=node index (a program-scope variable_decl written without an initializer, or an inline one); pushes bool: a same-unit re-run keeps the variable (detail::redeclaration_keeps_value), an inline one finds its variable
         op_decl_share,      // a=node index (an inline variable_decl just declared): its cell is shared (environment::share)
 
@@ -333,6 +332,9 @@ namespace jai::vm {
         op_get_member_path, // a=nodes index (the chain's outer member_expr), b=member_path_protos index: `a.b.c`, `grid[y][x].cost` read through, each inner link borrowed where it lives, the final value pushed as op_get_member pushes it
         op_switch_table,    // b=switch_tables index: an int subject jumps through the table to its case's body; anything else runs the case tests that follow. In a cell copy a=the subject's cell, c=the first of the loop's switch_targets (per case, then no match)
     };
+    inline constexpr size_t k_opcode_space = 512;   // tables indexed by opcode (the profile's histograms) are this long
+    static_assert(static_cast<size_t>(opcode::op_switch_table) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
+    static_assert(static_cast<uint32_t>(opcode::op_d_jne) < 256 && static_cast<uint32_t>(opcode::op_t_load) < 256, "a cell instruction packs a typed opcode above k_cell_op_shift in 8 bits");
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
     inline constexpr uint32_t capture_form_stack = 1;    // the callee value below the arguments (op_call)
@@ -457,8 +459,6 @@ namespace jai::vm {
     inline constexpr uint32_t index_flag_string_target = 8;  // a store target: a string base mints a STRING-ELEMENT reference, c = chunk::string_target_sites index
     inline constexpr uint32_t index_flag_no_result = 16;     // an op_index_store a fused statement store runs: its caller pops the result, nothing reads it back
 
-    inline constexpr uint32_t k_field_init_form = 1;   // op_extern_decl's b for a field initializer's store
-
     struct vm_instruction {
         opcode op;
         uint32_t a = 0;
@@ -486,7 +486,6 @@ namespace jai::vm {
             case opcode::op_binary: return "BINARY";
             case opcode::op_binary_fused: return "BINARY_FUSED";
             case opcode::op_index: return "INDEX";
-            case opcode::op_index_compound: return "INDEX_COMPOUND";
             case opcode::op_index_store: return "INDEX_STORE";
             case opcode::op_index_compound_fused: return "INDEX_COMPOUND_FUSED";
             case opcode::op_math: return "MATH";
@@ -574,6 +573,7 @@ namespace jai::vm {
             case opcode::op_catch_end: return "CATCH_END";
             case opcode::op_case_eq: return "CASE_EQ";
             case opcode::op_switch_table: return "SWITCH_TABLE";
+            case opcode::op_field_init: return "FIELD_INIT";
             case opcode::op_bind_captures: return "BIND_CAPTURES";
             case opcode::op_iter_init: return "ITER_INIT";
             case opcode::op_iter_next: return "ITER_NEXT";

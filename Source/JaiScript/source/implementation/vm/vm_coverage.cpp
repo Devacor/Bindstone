@@ -75,7 +75,7 @@ namespace {
 		case opcode::op_member_temp: case opcode::op_set_member_fused: case opcode::op_set_member_value: case opcode::op_this: case opcode::op_super:
 		case opcode::op_from_this: case opcode::op_null_guard: case opcode::op_velem_load: case opcode::op_velem_store:
 			return fam::member;
-		case opcode::op_index: case opcode::op_index_compound: case opcode::op_index_store: case opcode::op_index_compound_fused:
+		case opcode::op_index: case opcode::op_index_store: case opcode::op_index_compound_fused:
 		case opcode::op_index_fused: case opcode::op_index_store_fused: case opcode::op_index_compound_operand: case opcode::op_index_fused_decl: case opcode::op_iter_init: case opcode::op_iter_next:
 		case opcode::op_iter_pop: case opcode::op_iter_entry: case opcode::op_destructure: case opcode::op_parallel_element: case opcode::op_deref_top:
 			return fam::element;
@@ -99,7 +99,7 @@ namespace {
 		case opcode::op_scope_push: case opcode::op_scope_pop: case opcode::op_scope_pop_n: case opcode::op_kill_slot: case opcode::op_try_push: case opcode::op_try_pop: case opcode::op_catch_end:
 		case opcode::op_throw: case opcode::op_yield:
 			return fam::scope;
-		case opcode::op_func_decl: case opcode::op_class_decl: case opcode::op_namespace_decl: case opcode::op_enum_decl: case opcode::op_extern_decl:
+		case opcode::op_func_decl: case opcode::op_class_decl: case opcode::op_namespace_decl: case opcode::op_enum_decl: case opcode::op_extern_decl: case opcode::op_field_init:
 		case opcode::op_include: case opcode::op_import: case opcode::op_parallel_for: case opcode::op_error: case opcode::op_const_guard:
 			return fam::decl;
 		case opcode::op_c_arith: case opcode::op_c_arith_p: case opcode::op_c_arith_any: case opcode::op_c_arith2: case opcode::op_c_arith_load: case opcode::op_c_arith_jump:
@@ -308,7 +308,7 @@ namespace {
 		r.files.push_back("");
 		r.region.assign(n, coverage_region::none); r.region_index.assign(n, k_invalid_u32); r.site.assign(n, k_invalid_u32);
 		for (size_t ip = 0; ip < n; ++ip) {
-			r.op[ip] = static_cast<uint8_t>(c.code[ip].op);
+			r.op[ip] = static_cast<uint16_t>(c.code[ip].op);
 			const ast_node* st = ip < c.stmt_nodes.size() ? c.stmt_nodes[ip] : nullptr;
 			if (st) {
 				r.line[ip] = static_cast<uint32_t>(st->location.line);
@@ -509,7 +509,7 @@ namespace {
 	// the copy census's position: the instruction about to run, its row and source line
 	void census_position(opcode op, const coverage_chunk& row, size_t ip) {
 		const char* file = ip < row.file.size() && row.file[ip] < row.files.size() ? row.files[row.file[ip]].c_str() : "";
-		census::set_position(static_cast<uint8_t>(op), &row, static_cast<uint32_t>(ip), row.name.c_str(), file, ip < row.line.size() ? row.line[ip] : 0);
+		census::set_position(static_cast<uint16_t>(op), &row, static_cast<uint32_t>(ip), row.name.c_str(), file, ip < row.line.size() ? row.line[ip] : 0);
 	}
 }
 
@@ -1140,7 +1140,7 @@ JAI_CENSUS_NOINLINE void hit_named(site s, const char* name, size_t name_size, u
 }
 JAI_CENSUS_NOINLINE void rc_add() noexcept { record(tt(), site::rc_add, JAI_CENSUS_RA(), 0, 1); }
 
-void set_position(uint8_t op, const void* row, uint32_t ip, const char* name, const char* file, uint32_t line) noexcept {
+void set_position(uint16_t op, const void* row, uint32_t ip, const char* name, const char* file, uint32_t line) noexcept {
 	thread_tables& t = tt();
 	++t.instr;
 	t.op = op; t.row = row; t.ip = ip; t.name = name; t.file = file; t.line = line;

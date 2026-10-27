@@ -161,7 +161,6 @@ namespace {
 			case opcode::op_math_guard:
 			case opcode::op_unary_temp:
 			case opcode::op_index:
-			case opcode::op_index_compound:
 			case opcode::op_index_store:
 			case opcode::op_index_compound_fused:
 			case opcode::op_math:
@@ -300,9 +299,7 @@ namespace {
 				// value forms never touch the env; the reference arms resolve storage through it
 				if (ins.b != 0) { JAI_ENV_TRIP(ins.op); return true; }
 				break;
-			case opcode::op_extern_decl:
-				// a field initializer's store reaches this, never the env; a real extern records into it
-				if (ins.b != k_field_init_form) { JAI_ENV_TRIP(ins.op); return true; }
+			case opcode::op_field_init:   // a field initializer's store reaches this, never the env
 				break;
 			case opcode::op_binary_fused_store:
 			case opcode::op_index_fused:
@@ -391,7 +388,6 @@ namespace {
 			case opcode::op_math_guard:
 			case opcode::op_unary_temp:
 			case opcode::op_index:
-			case opcode::op_index_compound:
 			case opcode::op_index_store:
 			case opcode::op_index_compound_fused:
 			case opcode::op_math:
@@ -1188,7 +1184,7 @@ std::shared_ptr<chunk> vm_compiler::compile_construction(std::string_view name, 
 			chunk_->nodes.push_back(initializer);
 			compile_expression(initializer);
 			chunk_->field_inits.emplace_back(field_id, initializer.get());
-			emit(opcode::op_extern_decl, static_cast<uint32_t>(chunk_->field_inits.size() - 1), k_field_init_form);
+			emit(opcode::op_field_init, static_cast<uint32_t>(chunk_->field_inits.size() - 1));
 		}
 		emit(opcode::op_halt);
 	}
@@ -5150,7 +5146,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				}
 				continue;
 			}
-			c.cell_refusals.push_back(chunk::cell_refusal{ static_cast<uint32_t>(head), static_cast<uint32_t>(back), refusal_ip, refusal, static_cast<uint8_t>(code[refusal_ip].op) });
+			c.cell_refusals.push_back(chunk::cell_refusal{ static_cast<uint32_t>(head), static_cast<uint32_t>(back), refusal_ip, refusal, code[refusal_ip].op });
 			continue;
 		}
 		chunk::cell_loop loop;

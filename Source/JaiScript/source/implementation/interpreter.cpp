@@ -3101,74 +3101,8 @@ interpreter::interpreter()
       environment_(std::make_shared<environment>(string_symbolizer_)),
       hasReturnValue_(false),
       current_method_this_(std::monostate{}, nullptr) {
-    env_symbolizer_ = string_symbolizer_;
-    // Initialize optimization pools
-    argument_pool_.reserve(16);  // Reasonable default for most function calls
-    environment_pool_.reserve(8);  // For nested function calls
+    initialize();
     call_stack_.reserve(128);    // Avoid reallocation during deep recursion (e.g., Fibonacci)
-
-    // Pre-populate environment pool
-    for (size_t i = 0; i < 8; ++i) {
-        environment_pool_.emplace_back(std::make_shared<environment>(nullptr, string_symbolizer_));
-    }
-
-    // Initialize cached type IDs for fast object type comparison
-    class_definition_type_id_ = string_symbolizer_->intern("class_definition");
-    weak_ptr_holder_type_id_ = string_symbolizer_->intern("weak_ptr_holder");
-    shared_ptr_holder_type_id_ = string_symbolizer_->intern("shared_ptr_holder");
-    weak_from_this_id_ = string_symbolizer_->intern("weak_from_this");
-    shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
-    coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
-    next_id_ = string_symbolizer_->intern("next");
-    handle_reset_id_ = string_symbolizer_->intern("reset");
-    done_id_ = string_symbolizer_->intern("done");
-    advance_id_ = string_symbolizer_->intern("advance");
-    result_id_ = string_symbolizer_->intern("result");
-    same_as_id_ = string_symbolizer_->intern("same_as");
-    eq_method_id_ = string_symbolizer_->intern("==");
-    to_bool_id_ = string_symbolizer_->intern("to_bool");
-    to_string_id_ = string_symbolizer_->intern("to_string");
-    base_type_ids_.intern(*string_symbolizer_);
-    arity_count_ids_.intern(*string_symbolizer_);
-
-    // Initialize cached operator symbol IDs for fast operator overload lookup
-    op_plus_id_ = string_symbolizer_->intern("+");
-    op_minus_id_ = string_symbolizer_->intern("-");
-    op_star_id_ = string_symbolizer_->intern("*");
-    op_slash_id_ = string_symbolizer_->intern("/");
-    op_percent_id_ = string_symbolizer_->intern("%");
-    op_less_id_ = string_symbolizer_->intern("<");
-    op_less_equal_id_ = string_symbolizer_->intern("<=");
-    op_greater_id_ = string_symbolizer_->intern(">");
-    op_greater_equal_id_ = string_symbolizer_->intern(">=");
-    op_equal_equal_id_ = string_symbolizer_->intern("==");
-    op_bang_equal_id_ = string_symbolizer_->intern("!=");
-    op_spaceship_id_ = string_symbolizer_->intern("<=>");
-    op_ampersand_id_ = string_symbolizer_->intern("&");
-    op_pipe_id_ = string_symbolizer_->intern("|");
-    op_caret_id_ = string_symbolizer_->intern("^");
-    op_left_shift_id_ = string_symbolizer_->intern("<<");
-    op_right_shift_id_ = string_symbolizer_->intern(">>");
-    op_tilde_id_ = string_symbolizer_->intern("~");
-    op_call_id_ = string_symbolizer_->intern("()");
-    subscript_op_id_ = string_symbolizer_->intern("[]");
-    assign_operator_id_ = string_symbolizer_->intern("=");
-
-	// Initialize cached keyword symbol IDs for fast keyword checks
-	this_id_ = string_symbolizer_->intern("this");
-	super_id_ = string_symbolizer_->intern("super");
-
-	// Verify this_id_ matches symbolizer's cached ID
-	if(this_id_ != string_symbolizer_->get_this_id()){
-        throw std::runtime_error("this_id_ mismatch with symbolizer");
-    }
-	getValue_id_ = string_symbolizer_->intern("getValue");
-
-    // Initialize built-in method registries with interned method names
-    init_builtin_methods();
-
-    // Initialize binary operator dispatch table
-    init_dispatch_table();
 }
 
 interpreter::interpreter(string_symbolizer* external_symbolizer)
@@ -3177,73 +3111,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
       environment_(std::make_shared<environment>(string_symbolizer_)),
       hasReturnValue_(false),
       current_method_this_(std::monostate{}, nullptr) {
-    env_symbolizer_ = string_symbolizer_;
-    // Initialize optimization pools
-    argument_pool_.reserve(16);  // Reasonable default for most function calls
-    environment_pool_.reserve(8);  // For nested function calls
-
-    // Pre-populate environment pool
-    for (size_t i = 0; i < 8; ++i) {
-        environment_pool_.emplace_back(std::make_shared<environment>(nullptr, string_symbolizer_));
-    }
-
-    // Initialize cached type IDs for fast object type comparison
-    class_definition_type_id_ = string_symbolizer_->intern("class_definition");
-    weak_ptr_holder_type_id_ = string_symbolizer_->intern("weak_ptr_holder");
-    shared_ptr_holder_type_id_ = string_symbolizer_->intern("shared_ptr_holder");
-    weak_from_this_id_ = string_symbolizer_->intern("weak_from_this");
-    shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
-    coroutine_handle_type_id_ = string_symbolizer_->intern("coroutine_handle");
-    next_id_ = string_symbolizer_->intern("next");
-    handle_reset_id_ = string_symbolizer_->intern("reset");
-    done_id_ = string_symbolizer_->intern("done");
-    advance_id_ = string_symbolizer_->intern("advance");
-    result_id_ = string_symbolizer_->intern("result");
-    same_as_id_ = string_symbolizer_->intern("same_as");
-    eq_method_id_ = string_symbolizer_->intern("==");
-    to_bool_id_ = string_symbolizer_->intern("to_bool");
-    to_string_id_ = string_symbolizer_->intern("to_string");
-    base_type_ids_.intern(*string_symbolizer_);
-    arity_count_ids_.intern(*string_symbolizer_);
-
-    // Initialize cached operator symbol IDs for fast operator overload lookup
-    op_plus_id_ = string_symbolizer_->intern("+");
-    op_minus_id_ = string_symbolizer_->intern("-");
-    op_star_id_ = string_symbolizer_->intern("*");
-    op_slash_id_ = string_symbolizer_->intern("/");
-    op_percent_id_ = string_symbolizer_->intern("%");
-    op_less_id_ = string_symbolizer_->intern("<");
-    op_less_equal_id_ = string_symbolizer_->intern("<=");
-    op_greater_id_ = string_symbolizer_->intern(">");
-    op_greater_equal_id_ = string_symbolizer_->intern(">=");
-    op_equal_equal_id_ = string_symbolizer_->intern("==");
-    op_bang_equal_id_ = string_symbolizer_->intern("!=");
-    op_spaceship_id_ = string_symbolizer_->intern("<=>");
-    op_ampersand_id_ = string_symbolizer_->intern("&");
-    op_pipe_id_ = string_symbolizer_->intern("|");
-    op_caret_id_ = string_symbolizer_->intern("^");
-    op_left_shift_id_ = string_symbolizer_->intern("<<");
-    op_right_shift_id_ = string_symbolizer_->intern(">>");
-    op_tilde_id_ = string_symbolizer_->intern("~");
-    op_call_id_ = string_symbolizer_->intern("()");
-    subscript_op_id_ = string_symbolizer_->intern("[]");
-    assign_operator_id_ = string_symbolizer_->intern("=");
-
-	// Initialize cached keyword symbol IDs for fast keyword checks
-	this_id_ = string_symbolizer_->intern("this");
-	super_id_ = string_symbolizer_->intern("super");
-
-	// Verify this_id_ matches symbolizer's cached ID
-	if (this_id_ != string_symbolizer_->get_this_id()) {
-		throw std::runtime_error("this_id_ mismatch with symbolizer");
-	}
-	getValue_id_ = string_symbolizer_->intern("getValue");
-
-    // Initialize built-in method registries with interned method names
-    init_builtin_methods();
-
-    // Initialize binary operator dispatch table
-    init_dispatch_table();
+    initialize();
 }
 
 interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr<environment> global_env)
@@ -3252,6 +3120,11 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
       environment_(global_env),
       hasReturnValue_(false),
       current_method_this_(std::monostate{}, nullptr) {
+    initialize();
+}
+
+// Every constructor's shared setup: the pools, the cached symbol ids, the builtin registries and the dispatch table
+void interpreter::initialize() {
     env_symbolizer_ = string_symbolizer_;
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
@@ -3682,9 +3555,6 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
             environment_->undefined_text(expr->symbol_id), expr->symbol_id);
     }
-    if (expr->symbol_id == getValue_id_) {
-    }
-
     // ============================================================
     // SLOT-BASED LOCAL ACCESS: O(1) array indexing
     // ============================================================
@@ -4639,6 +4509,103 @@ checked_result<void> interpreter::non_lvalue_target(const expression* target) {
                                 string_symbolizer_->intern(detail::non_lvalue_target_text(target)));
 }
 
+// A member's compound arithmetic, a bound operand decoded LIVE first (the store takes the detached result). KEEP
+// BYTE-PARALLEL with the VM exec_member_compound and implicit-this compound normalization
+checked_result<void> interpreter::member_compound_result(token_type a_op, script_value& currentValue, script_value& rightValue, script_value& result) {
+    if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+        currentValue = currentValue.bound_decoded_temp();
+    if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+        rightValue = rightValue.bound_decoded_temp();
+    // Cache type indices for fast checking
+    const size_t ci = currentValue.raw_storage_index();
+    const size_t ri = rightValue.raw_storage_index();
+    const detail::compound_text text_pair = a_op == token_type::plus_equal ? detail::compound_plus_text(currentValue, rightValue) : detail::compound_text::none;
+    if (text_pair == detail::compound_text::mismatch) { return detail::compound_mismatch(0, currentValue, rightValue, engine_); }
+    if (text_pair == detail::compound_text::append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the VM)
+        JAISCRIPT_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
+    } else if (detail::math::owns_arithmetic(ci, ri)) [[unlikely]] {   // a math field or component operand takes the math rows (KEEP BYTE-PARALLEL with vm_backend::exec_member_compound)
+        auto math_result = detail::math::binary(detail::math::bop_of(a_op), currentValue, rightValue, engine_);
+        if (!math_result) {
+            return math_result.error_value();
+        }
+        result = std::move(math_result.value());
+    } else
+    switch (a_op) {
+        case token_type::plus_equal: {
+            if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+                { script_int rr; if (!ints::try_add(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '+='"); result = make_value(rr); }
+            } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
+                       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+                script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
+                script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
+                result = make_value(cf + rf);
+            } else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
+                // engine::memory_cap chokepoint: deny the concat result before it exists
+                if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_as_string().size() + rightValue.unchecked_as_string().size())) [[unlikely]] {
+                    return detail::raise_memory_cap(*limits_);
+                }
+                result = make_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string());
+            } else if (detail::utf8_operands(ci, ri) && currentValue.is_text() && rightValue.is_text()) {
+                if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_text().size() + rightValue.unchecked_text().size())) [[unlikely]] {
+                    return detail::raise_memory_cap(*limits_);
+                }
+                result = script_value::make_utf8(currentValue.unchecked_text() + rightValue.unchecked_text(), engine_);
+            } else {
+                return detail::compound_mismatch(0, currentValue, rightValue, engine_);
+            }
+            break;
+        }
+        case token_type::minus_equal: {
+            if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+                { script_int rr; if (!ints::try_sub(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '-='"); result = make_value(rr); }
+            } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
+                       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+                script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
+                script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
+                result = make_value(cf - rf);
+            } else {
+                return detail::compound_mismatch(1, currentValue, rightValue, engine_);
+            }
+            break;
+        }
+        case token_type::star_equal: {
+            if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+                { script_int rr; if (!ints::try_mul(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '*='"); result = make_value(rr); }
+            } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
+                       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+                script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
+                script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
+                result = make_value(cf * rf);
+            } else {
+                return detail::compound_mismatch(2, currentValue, rightValue, engine_);
+            }
+            break;
+        }
+        case token_type::slash_equal: {
+            // the local's semantics: int / int divides as integers (C++), a zero divisor and the operand text come from the kernel
+            JAISCRIPT_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
+            break;
+        }
+        case token_type::percent_equal: {
+            if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
+                return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero),
+                    "Modulo by zero");
+            }
+            JAISCRIPT_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
+            break;
+        }
+        default:
+            if (!detail::compound_is_bitwise(a_op)) {
+                return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                    "Unsupported compound assignment operator");
+            }
+            JAISCRIPT_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, detail::compound_base(a_op), rightValue,
+                                                                  detail::compound_index(detail::compound_base(a_op))));
+            break;
+    }
+    return {};
+}
+
 template<bool Replaying>
 checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr, const replay_point* rs) {
     if (expr->const_check) [[unlikely]] { JAISCRIPT_TRY(const_guard_at(expr, expr->const_check)); }
@@ -5163,83 +5130,8 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     }
                 }
 
-                // Perform the compound operation (using standard path, no in-place mutation for fields)
-                // S8: bound-alias class fields decode-read LIVE; set_field stores the detached
-                // result. KEEP BYTE-PARALLEL with the VM implicit-this compound normalization.
-                if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-                    currentValue = currentValue.bound_decoded_temp();
-                if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-                    rightValue = rightValue.bound_decoded_temp();
-                // Cache type indices for fast checking
-                const size_t ci = currentValue.raw_storage_index();
-                const size_t ri = rightValue.raw_storage_index();
                 script_value resultValue = make_value();
-                const detail::compound_text text_pair = expr->op.type == token_type::plus_equal ? detail::compound_plus_text(currentValue, rightValue) : detail::compound_text::none;
-                if (text_pair == detail::compound_text::mismatch) { return detail::compound_mismatch(0, currentValue, rightValue, engine_); }
-                if (text_pair == detail::compound_text::append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the VM)
-                    JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
-                } else
-                switch (expr->op.type) {
-                    case token_type::plus_equal:
-                        if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                            { script_int rr; if (!ints::try_add(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '+='"); resultValue = make_value(rr); }
-                        } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-                                   (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-                            script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-                            script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-                            resultValue = make_value(cf + rf);
-                        } else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-                            // engine::memory_cap chokepoint: deny the concat result before it exists
-                            if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_as_string().size() + rightValue.unchecked_as_string().size())) [[unlikely]] {
-                                return detail::raise_memory_cap(*limits_);
-                            }
-                            resultValue = make_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string());
-                        } else {
-                            return detail::compound_mismatch(0, currentValue, rightValue, engine_);
-                        }
-                        break;
-                    case token_type::minus_equal:
-                        if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                            { script_int rr; if (!ints::try_sub(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '-='"); resultValue = make_value(rr); }
-                        } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-                                   (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-                            script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-                            script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-                            resultValue = make_value(cf - rf);
-                        } else {
-                            return detail::compound_mismatch(1, currentValue, rightValue, engine_);
-                        }
-                        break;
-                    case token_type::star_equal:
-                        if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                            { script_int rr; if (!ints::try_mul(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '*='"); resultValue = make_value(rr); }
-                        } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-                                   (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-                            script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-                            script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-                            resultValue = make_value(cf * rf);
-                        } else {
-                            return detail::compound_mismatch(2, currentValue, rightValue, engine_);
-                        }
-                        break;
-                    case token_type::slash_equal: {
-                        // the local's semantics: int / int divides as integers (C++), a zero divisor and the operand text come from the kernel
-                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
-                        break;
-                    }
-                    case token_type::percent_equal: {
-                        if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-                            return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
-                        }
-                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
-                        break;
-                    }
-                    default:
-                        if (!detail::compound_is_bitwise(expr->op.type)) { return checked_result<void>(make_error_code(runtime_error_code::unknown_operator)); }
-                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, detail::compound_base(expr->op.type), rightValue,
-                                                                              detail::compound_index(detail::compound_base(expr->op.type))));
-                        break;
-                }
+                JAISCRIPT_TRY(member_compound_result(expr->op.type, currentValue, rightValue, resultValue));
 
                 // Store the enforced (declared-type converted) value; a consumed expression's
                 // value is the stored one, read back through a property getter
@@ -5362,101 +5254,8 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 }
             }
 
-            // Perform the compound operation
-            // S8: a bound-alias member decode-reads LIVE and assign_member_value stores the
-            // detached result. KEEP BYTE-PARALLEL with the VM exec_member_compound.
-            if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-                currentValue = currentValue.bound_decoded_temp();
-            if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-                rightValue = rightValue.bound_decoded_temp();
-            // Cache type indices for fast checking
-            const size_t ci = currentValue.raw_storage_index();
-            const size_t ri = rightValue.raw_storage_index();
             script_value resultValue = make_value();
-            const detail::compound_text text_pair = expr->op.type == token_type::plus_equal ? detail::compound_plus_text(currentValue, rightValue) : detail::compound_text::none;
-            if (text_pair == detail::compound_text::mismatch) { return detail::compound_mismatch(0, currentValue, rightValue, engine_); }
-            if (text_pair == detail::compound_text::append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the VM)
-                JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
-            } else if (detail::math::owns_arithmetic(ci, ri)) [[unlikely]] {   // a math field or component operand takes the math rows (KEEP BYTE-PARALLEL with vm_backend::exec_member_compound)
-                auto math_result = detail::math::binary(detail::math::bop_of(expr->op.type), currentValue, rightValue, engine_);
-                if (!math_result) {
-                    return math_result.error_value();
-                }
-                resultValue = std::move(math_result.value());
-            } else
-            switch (expr->op.type) {
-                case token_type::plus_equal: {
-                    if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                        { script_int rr; if (!ints::try_add(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '+='"); resultValue = make_value(rr); }
-                    } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-                               (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-                        script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-                        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-                        resultValue = make_value(cf + rf);
-                    } else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-                        // engine::memory_cap chokepoint: deny the concat result before it exists
-                        if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_as_string().size() + rightValue.unchecked_as_string().size())) [[unlikely]] {
-                            return detail::raise_memory_cap(*limits_);
-                        }
-                        resultValue = make_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string());
-                    } else if (detail::utf8_operands(ci, ri) && currentValue.is_text() && rightValue.is_text()) {
-                        if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_text().size() + rightValue.unchecked_text().size())) [[unlikely]] {
-                            return detail::raise_memory_cap(*limits_);
-                        }
-                        resultValue = script_value::make_utf8(currentValue.unchecked_text() + rightValue.unchecked_text(), engine_);
-                    } else {
-                        return detail::compound_mismatch(0, currentValue, rightValue, engine_);
-                    }
-                    break;
-                }
-                case token_type::minus_equal: {
-                    if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                        { script_int rr; if (!ints::try_sub(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '-='"); resultValue = make_value(rr); }
-                    } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-                               (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-                        script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-                        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-                        resultValue = make_value(cf - rf);
-                    } else {
-                        return detail::compound_mismatch(1, currentValue, rightValue, engine_);
-                    }
-                    break;
-                }
-                case token_type::star_equal: {
-                    if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                        { script_int rr; if (!ints::try_mul(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '*='"); resultValue = make_value(rr); }
-                    } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-                               (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-                        script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-                        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-                        resultValue = make_value(cf * rf);
-                    } else {
-                        return detail::compound_mismatch(2, currentValue, rightValue, engine_);
-                    }
-                    break;
-                }
-                case token_type::slash_equal: {
-                    // the local's semantics: int / int divides as integers (C++), a zero divisor and the operand text come from the kernel
-                    JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
-                    break;
-                }
-                case token_type::percent_equal: {
-                    if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-                        return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero),
-                            "Modulo by zero");
-                    }
-                    JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
-                    break;
-                }
-                default:
-                    if (!detail::compound_is_bitwise(expr->op.type)) {
-                        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                            "Unsupported compound assignment operator");
-                    }
-                    JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, detail::compound_base(expr->op.type), rightValue,
-                                                                          detail::compound_index(detail::compound_base(expr->op.type))));
-                    break;
-            }
+            JAISCRIPT_TRY(member_compound_result(expr->op.type, currentValue, rightValue, resultValue));
             
             if (memberExpr->is_static) {
                 script_value stored_static;
@@ -10835,6 +10634,21 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
 
     // Determine if we can use slot-based access (inside a function with an assigned slot)
     const bool use_slot = stmt->variable_slot_index != SIZE_MAX && !call_stack_.empty();
+    // The body can move the frame's locals (a declaration at a new slot, a callee's frame): the loop variable's pointer is
+    // re-resolved before each write (a use-after-free write otherwise)
+    auto loop_variable = [&]() -> script_value* {
+        script_value* result = use_slot ? call_stack_.back().get_local(stmt->variable_slot_index) : environment_->get_value_ptr(stmt->variable_name_id);
+        if (!result) [[unlikely]] {
+            if (use_slot) {
+                call_stack_.back().set_local(stmt->variable_slot_index, make_value());
+                result = call_stack_.back().get_local(stmt->variable_slot_index);
+            } else {
+                environment_->define(stmt->variable_name_id, make_value());
+                result = environment_->get_value_ptr(stmt->variable_name_id);
+            }
+        }
+        return result;
+    };
     // The loop variable's reference dies with the loop: a slotted by-reference loop clears
     // its slot on every exit but a yield, so no element cursor outlives the loop (a later
     // parallel region over the same array must not see a live reference the program can no
@@ -10887,14 +10701,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                 }
 
                 const bool resume_body = replaying;
-                // The body can move the frame's locals (a declaration at a new slot, a callee's frame): the loop
-                // variable's pointer is re-resolved before it is written again (a use-after-free write otherwise)
-                if (use_slot) { loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
-                else { loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
-                if (!loop_var_ptr) [[unlikely]] {
-                    if (use_slot) { call_stack_.back().set_local(stmt->variable_slot_index, make_value()); loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
-                    else { environment_->define(stmt->variable_name_id, make_value()); loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
-                }
+                loop_var_ptr = loop_variable();
                 if (replaying) {
                     // First replayed iteration: the loop variable is already restored;
                     // the body dispatch below fast-forwards to the yield point
@@ -11023,14 +10830,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                 }
 
                 const bool resume_body = replaying;
-                // The body can move the frame's locals (a declaration at a new slot, a callee's frame): the loop
-                // variable's pointer is re-resolved before it is written again (a use-after-free write otherwise)
-                if (use_slot) { loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
-                else { loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
-                if (!loop_var_ptr) [[unlikely]] {
-                    if (use_slot) { call_stack_.back().set_local(stmt->variable_slot_index, make_value()); loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
-                    else { environment_->define(stmt->variable_name_id, make_value()); loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
-                }
+                loop_var_ptr = loop_variable();
                 if (replaying) {
                     replaying = false;
                 } else {
@@ -11126,14 +10926,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                 }
 
                 const bool resume_body = replaying;
-                // The body can move the frame's locals (a declaration at a new slot, a callee's frame): the loop
-                // variable's pointer is re-resolved before it is written again (a use-after-free write otherwise)
-                if (use_slot) { loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
-                else { loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
-                if (!loop_var_ptr) [[unlikely]] {
-                    if (use_slot) { call_stack_.back().set_local(stmt->variable_slot_index, make_value()); loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
-                    else { environment_->define(stmt->variable_name_id, make_value()); loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
-                }
+                loop_var_ptr = loop_variable();
                 if (replaying) {
                     // First replayed iteration: the loop variable is already restored;
                     // the body dispatch below fast-forwards to the yield point
@@ -11212,14 +11005,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
 
             while (replaying || !handle->done()) {
                 const bool resume_body = replaying;
-                // The body can move the frame's locals (a declaration at a new slot, a callee's frame): the loop
-                // variable's pointer is re-resolved before it is written again (a use-after-free write otherwise)
-                if (use_slot) { loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
-                else { loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
-                if (!loop_var_ptr) [[unlikely]] {
-                    if (use_slot) { call_stack_.back().set_local(stmt->variable_slot_index, make_value()); loop_var_ptr = call_stack_.back().get_local(stmt->variable_slot_index); }
-                    else { environment_->define(stmt->variable_name_id, make_value()); loop_var_ptr = environment_->get_value_ptr(stmt->variable_name_id); }
-                }
+                loop_var_ptr = loop_variable();
                 if (replaying) {
                     // First replayed iteration: the current element is already restored;
                     // the body dispatch below fast-forwards to the yield point

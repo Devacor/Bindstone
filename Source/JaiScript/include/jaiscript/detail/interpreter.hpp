@@ -592,6 +592,8 @@ namespace jai {
 
         // Initialize dispatch table
         void init_dispatch_table();
+        void initialize();
+        checked_result<void> member_compound_result(token_type a_op, script_value& currentValue, script_value& rightValue, script_value& result);
 
         // Optimized binary operation handlers - return checked_result for error propagation
         struct binary_host;   // this backend's hooks for detail/binary_handlers.hpp
@@ -901,11 +903,6 @@ namespace jai {
                 default: return 0;
             }
         }
-
-		// Cached symbol IDs for common keywords (initialized in constructor)
-		uint64_t this_id_;
-		uint64_t super_id_;
-		uint64_t getValue_id_;
 
         // The running assignment's value is consumed (it reads the destination back); false only for the root of an
         // expression statement, whose value is discarded

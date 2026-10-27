@@ -94,8 +94,8 @@ namespace jai::detail {
 		if (info && !info->type_name.empty() && info->base_type != script_value_type::jai_any_type) {
 			return info->type_name;
 		}
-		if (auto holder = v.get_object_holder(); holder && !holder->type_name.empty()) {
-			return std::string(holder->type_name);
+		if (auto holder = v.get_object_holder(); holder && !holder->type_name().empty()) {
+			return std::string(holder->type_name());
 		}
 		return container_base_type_name(v.current_type());
 	}
@@ -284,7 +284,7 @@ namespace jai::detail {
 	inline type_info_ptr object_element_value_tag(const script_value& object, engine* eng) {
 		if (type_info_ptr own = object_element_own_tag(object, eng)) { return own; }
 		const auto* holder = object.peek_object_holder();
-		return holder ? type_info_ptr{eng->get_type_info_object(holder->type_id)} : type_info_ptr{};
+		return holder ? type_info_ptr{eng->get_type_info_object(holder->type_id())} : type_info_ptr{};
 	}
 
 	// A handle stored into a class-typed element: the element takes a copy of the object the handle names, as

@@ -47,17 +47,17 @@ inline bool host_layer_answers(const class_definition* cd, uint64_t member_id, e
 inline bool host_receiver_measure(const class_definition* cd, const class_instance* inst, const class_definition* owner,
                                   engine* eng, const void*& stored, std::ptrdiff_t& owner_delta, host_receiver_layout& out) {
 	const script_value::object_holder* holder = host_member_stored(inst, stored);
-	if (!holder || holder->type_id == UINT64_MAX) { return false; }
-	auto stored_def = eng->get_class_definition(holder->type_id);
+	if (!holder || holder->type_id() == UINT64_MAX) { return false; }
+	auto stored_def = eng->get_class_definition(holder->type_id());
 	if (!stored_def || !stored_def->is_cpp_class()) { return false; }
 	owner_delta = 0;
-	if (owner && holder->type_id != owner->get_type_id()) {
+	if (owner && holder->type_id() != owner->get_type_id()) {
 		if (!owner->cpp_type()) { return false; }
 		void* adjusted = stored_def->adjust_cpp_pointer(const_cast<void*>(stored), *owner->cpp_type());
 		if (!adjusted) { return false; }
 		owner_delta = static_cast<const char*>(adjusted) - static_cast<const char*>(stored);
 	}
-	out.stored_type = holder->type_id;
+	out.stored_type = holder->type_id();
 	out.vptr = stored_def->cpp_polymorphic() ? *static_cast<const void* const*>(stored) : nullptr;
 	out.slot_offset = k_no_slot_check;
 	if (!cd->is_script_class()) {
@@ -76,7 +76,7 @@ inline const char* host_receiver_object(const class_instance* inst, const host_r
 	if (inst->script_layer_retired()) { return nullptr; }
 	const void* stored = nullptr;
 	const script_value::object_holder* holder = host_member_stored(inst, stored);
-	if (!holder || holder->type_id != layout.stored_type) { return nullptr; }
+	if (!holder || holder->type_id() != layout.stored_type) { return nullptr; }
 	if (layout.vptr && *static_cast<const void* const*>(stored) != layout.vptr) { return nullptr; }
 	const char* object = static_cast<const char*>(stored);
 	if (layout.slot_offset != k_no_slot_check &&

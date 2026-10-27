@@ -1627,9 +1627,9 @@ vm_backend::member_target vm_backend::resolve_member_target(const script_value& 
 			}
 		}
 	} else if (engine_) {
-		target.engine_def = holder->type_id != UINT64_MAX
-			? engine_->get_class_definition(holder->type_id)
-			: engine_->get_class_definition(std::string(holder->type_name));
+		target.engine_def = holder->type_id() != UINT64_MAX
+			? engine_->get_class_definition(holder->type_id())
+			: engine_->get_class_definition(std::string(holder->type_name()));
 		target.class_def = target.engine_def.get();
 	}
 	return target;
@@ -13229,7 +13229,7 @@ bool vm_backend::inline_method_holds(frame& f, const chunk::inline_site& site) {
 	const size_t k = v.raw_storage_index();
 	if (k != script_value::TYPEID_OBJECT && k != script_value::TYPEID_SHARED_PTR) return false;
 	const auto& holder = v.unchecked_object_handle();
-	if (!holder || !holder->is_instance() || holder->type_id == coroutine_handle_type_id_) return false;
+	if (!holder || !holder->is_instance() || holder->type_id() == coroutine_handle_type_id_) return false;
 	auto* inst = holder->unchecked_instance();
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) return false;
@@ -13276,7 +13276,7 @@ bool vm_backend::worker_inline_method_holds(frame& f, const chunk::inline_site& 
 	const size_t k = v.raw_storage_index();
 	if (k != script_value::TYPEID_OBJECT && k != script_value::TYPEID_SHARED_PTR) return false;
 	const auto& holder = v.unchecked_object_handle();
-	if (!holder || !holder->is_instance() || holder->type_id == coroutine_handle_type_id_) return false;
+	if (!holder || !holder->is_instance() || holder->type_id() == coroutine_handle_type_id_) return false;
 	auto* inst = holder->unchecked_instance();
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) return false;
@@ -13696,7 +13696,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 	const size_t receiver_type = objectValue.raw_storage_index();
 	if (receiver_type == script_value::TYPEID_OBJECT || receiver_type == script_value::TYPEID_SHARED_PTR) {
 		const auto holder = objectValue.get_object_holder();
-		if (holder && holder->type_id == coroutine_handle_type_id_) {
+		if (holder && holder->type_id() == coroutine_handle_type_id_) {
 			if (member_id == next_id_ || member_id == done_id_ || member_id == advance_id_ || member_id == result_id_) { return {}; }
 			return raise_(make_error_code(runtime_error_code::member_not_found),
 				"coroutine_handle has no member '{0}'", member_id);
@@ -15664,7 +15664,7 @@ op_status vm_backend::raise_method_value(const member_expr* expr, const script_v
 	else if (v.is_string()) { owner = "string"; }
 	else if (v.is_array()) { owner = "array"; }
 	else if (v.is_map()) { owner = "map"; }
-	else if (v.is_object() && v.get_object_holder() && v.get_object_holder()->type_id == coroutine_handle_type_id_) { owner = "coroutine"; }
+	else if (v.is_object() && v.get_object_holder() && v.get_object_holder()->type_id() == coroutine_handle_type_id_) { owner = "coroutine"; }
 	else {
 		value_type = false;
 		auto target = resolve_member_target(v);
@@ -15757,7 +15757,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 
 	if (objectValue.is_object()) {
 		auto objHolder = objectValue.get_object_holder();
-		if (objHolder && objHolder->type_id == coroutine_handle_type_id_) {
+		if (objHolder && objHolder->type_id() == coroutine_handle_type_id_) {
 			auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->host_object());
 			if (expr->member_id == next_id_) {
 				if (!as_callee) { return raise_method_value(expr, objectValue, false); }
@@ -16161,7 +16161,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 				script_value class_var = std::move(class_var_result.value());
 				if (class_var.is_object()) {
 					auto objHolder = class_var.get_object_holder();
-					if (objHolder && objHolder->type_name == "class_definition") {
+					if (objHolder && objHolder->type_name() == "class_definition") {
 						fallback_class = std::static_pointer_cast<class_definition>(objHolder->host_object());
 					}
 				}
@@ -16282,7 +16282,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 	}
 
 	auto objHolder = class_var.get_object_holder();
-	if (!objHolder || objHolder->type_name != "class_definition") {
+	if (!objHolder || objHolder->type_name() != "class_definition") {
 		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 
@@ -18604,7 +18604,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				if (receiver_type != script_value::TYPEID_OBJECT) { held = objd.get_object_holder(); }
 				const strong_ptr<script_value::object_holder>& holder = receiver_type == script_value::TYPEID_OBJECT ? objd.unchecked_object_handle() : held;
 				if (holder && holder->is_instance() &&
-				    holder->type_id != coroutine_handle_type_id_) {
+				    holder->type_id() != coroutine_handle_type_id_) {
 #ifdef JAISCRIPT_VM_PROFILE
 					++profile_slice_gate_[0];   // reached instance receiver
 #endif
@@ -18885,7 +18885,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 			// closure + function value PER STEP just to forward to the handle. Same
 			// handle call, same argument checks and checked_result propagation. Any other member falls
 			// through for member_access_value's coroutine error spelling.
-			if (holder && holder->type_id == coroutine_handle_type_id_ && holder->holds_object() &&
+			if (holder && holder->type_id() == coroutine_handle_type_id_ && holder->holds_object() &&
 			    (member->member_id == next_id_ || member->member_id == done_id_)) {
 				auto handle = std::static_pointer_cast<coroutine_handle>(holder->host_object());
 				if (member->member_id == next_id_) {
@@ -18897,7 +18897,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				stack_.push_back(script_value(handle->done(), engine_));
 				return {};
 			}
-			if (holder && holder->type_id == coroutine_handle_type_id_ && holder->holds_object() && member->member_id == advance_id_) {
+			if (holder && holder->type_id() == coroutine_handle_type_id_ && holder->holds_object() && member->member_id == advance_id_) {
 				auto handle = std::static_pointer_cast<coroutine_handle>(holder->host_object());
 				// the argument binds as a T& parameter does: through the call site the handle reads (host_reference_argument)
 				pending_call_site saved_pending = pending_site_ctx_;
@@ -18908,7 +18908,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				} restore_pending{this, saved_pending};
 				return guarded_native_call([&] { return handle->advance_from_script(engine_, arguments); });
 			}
-			if (holder && holder->type_id == coroutine_handle_type_id_ && holder->holds_object() && member->member_id == result_id_) {
+			if (holder && holder->type_id() == coroutine_handle_type_id_ && holder->holds_object() && member->member_id == result_id_) {
 				auto handle = std::static_pointer_cast<coroutine_handle>(holder->host_object());
 				return guarded_native_call([&] { return handle->result_from_script(arguments.size()); });
 			}
@@ -18923,7 +18923,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				objv.get_type_info()->base_type == script_value_type::jai_shared_ptr_type &&
 				builtins_.shared_ptr_methods.find(member->member_id) != builtins_.shared_ptr_methods.end() &&
 				!sp_class_defines;
-			if (holder && holder->type_id != coroutine_handle_type_id_ && !shared_ptr_builtin) {
+			if (holder && holder->type_id() != coroutine_handle_type_id_ && !shared_ptr_builtin) {
 				auto target = resolve_member_target(objv);
 				if (target && target.class_def && target.class_def->chain_has_nonpublic()) [[unlikely]] {
 					VM_TRY(detail::enforce_member_access(target.class_def, member->member_id,
@@ -19653,7 +19653,7 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 				if (class_result && class_result.value().is_object()) {
 					script_value class_var = std::move(class_result.value());
 					auto obj_holder = class_var.get_object_holder();
-					if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
+					if (obj_holder && obj_holder->type_id() == class_definition_type_id_) {
 						auto class_def = std::static_pointer_cast<class_definition>(obj_holder->host_object());
 						if (class_def->has_static_method_with_arity(func_decl->name_id, func_decl->parameters.size())) {
 							return raise_(make_error_code(runtime_error_code::type_mismatch),
@@ -19690,7 +19690,7 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 			if (auto* class_def_var = environment_->get_value_ptr(class_var_id)) {
 				if (class_def_var->is_object()) {
 					auto obj_holder = class_def_var->get_object_holder();
-					if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
+					if (obj_holder && obj_holder->type_id() == class_definition_type_id_) {
 						detail::register_namespace_class(*engine_, *ns_data, decl->name, class_decl_ptr->name_id,
 						                                 std::static_pointer_cast<class_definition>(obj_holder->host_object()));
 					}
@@ -20817,7 +20817,7 @@ op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 		}
 	} else if (container.is_object()) {
 		auto holder = container.get_object_holder();
-		if (holder && holder->type_id == coroutine_handle_type_id_) {
+		if (holder && holder->type_id() == coroutine_handle_type_id_) {
 			state.coroutine = std::static_pointer_cast<coroutine_handle>(holder->host_object());
 			iter_states_.push_back(std::move(state));
 			return {};

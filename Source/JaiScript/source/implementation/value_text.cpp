@@ -183,7 +183,7 @@ namespace value_text_walk {
 						out_ += "null";
 						return {};
 					}
-					script_value target = script_value::make_object(shared->type_name, shared->type_id, shared->held(), shared->owner);
+					script_value target = script_value::make_object(shared->type_name(), shared->type_id(), shared->held(), shared->owner());
 					return enter_object(target, &target, nested);
 				}
 				case script_value::TYPEID_FUNCTION:
@@ -225,7 +225,7 @@ namespace value_text_walk {
 				}
 			}
 			if (!holder->is_instance()) {
-				append_opaque_name(holder->type_name.empty() ? std::string_view("object") : holder->type_name);
+				append_opaque_name(holder->type_name().empty() ? std::string_view("object") : holder->type_name());
 				return {};
 			}
 			const auto* instance = holder->unchecked_instance();

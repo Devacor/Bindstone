@@ -771,7 +771,7 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
         script_value existing = std::move(existing_result.value());
         if (!existing.is_null() && existing.is_object()) {
             auto objHolder = existing.get_object_holder();
-            if (objHolder && objHolder->type_id == host.class_definition_type_id) {
+            if (objHolder && objHolder->type_id() == host.class_definition_type_id) {
                 class_def = std::static_pointer_cast<script_class_definition>(objHolder->host_object());
                 is_redefinition = true;
             }
@@ -820,7 +820,7 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
 
             if (!base_class_var.is_null() && base_class_var.is_object()) {
                 auto objHolder = base_class_var.get_object_holder();
-                if (objHolder && objHolder->type_id == host.class_definition_type_id) {
+                if (objHolder && objHolder->type_id() == host.class_definition_type_id) {
                     base_class_def = std::static_pointer_cast<class_definition>(objHolder->host_object());
                 } else {
                     return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));

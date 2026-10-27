@@ -114,10 +114,10 @@ inline bool value_of_class(const class_definition* def, const script_value& othe
     const class_definition* other_def = nullptr;
     if (holder->is_instance()) {
         other_def = holder->holds_object() ? holder->unchecked_instance()->get_class_definition() : nullptr;
-    } else if (holder->type_name == def->get_name()) {
+    } else if (holder->type_name() == def->get_name()) {
         return true;
-    } else if (engine* eng = def->get_engine(); eng && !holder->type_name.empty()) {
-        other_def = eng->get_class_definition(std::string(holder->type_name)).get();
+    } else if (engine* eng = def->get_engine(); eng && !holder->type_name().empty()) {
+        other_def = eng->get_class_definition(std::string(holder->type_name())).get();
     }
     return other_def && (other_def == def || other_def->is_subtype_of(def->get_name()));
 }

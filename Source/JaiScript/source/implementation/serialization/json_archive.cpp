@@ -173,9 +173,9 @@ void json_archive_writer::write_binary(const void* data, size_t size) {
     end_scalar();
 }
 
-void json_archive_writer::begin_object() {
-    enter_host_record(open_records_);
-    ++open_records_;
+// A container opens after a separating comma when it follows a sibling in an array (a property's or map entry's value
+// follows its key)
+void json_archive_writer::open_container(char a_brace, ContainerType a_kind) {
     auto ctx = this->current_context();
     bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
@@ -184,28 +184,32 @@ void json_archive_writer::begin_object() {
     }
     write_newline();
     write_indent();
-    out_ += '{';
+    out_ += a_brace;
     json_depth_++;
-    container_stack_.push(ContainerType::Object);
+    container_stack_.push(a_kind);
     first_in_container_.push(true);
 }
 
-void json_archive_writer::begin_object(const std::string& type_name, uint32_t version) {
-    enter_host_record(open_records_);
-    ++open_records_;
-    auto ctx = this->current_context();
-    bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
-
-    if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-        out_ += ',';
-    }
+void json_archive_writer::close_container(char a_brace) {
+    json_depth_--;
+    container_stack_.pop();
+    first_in_container_.pop();
     write_newline();
     write_indent();
-    out_ += '{';
-    json_depth_++;
-    container_stack_.push(ContainerType::Object);
-    first_in_container_.push(true);
+    out_ += a_brace;
+    if (in_container()) {
+        first_in_container_.top() = false;
+    }
+}
 
+void json_archive_writer::begin_object() {
+    enter_host_record(open_records_);
+    ++open_records_;
+    open_container('{', ContainerType::Object);
+}
+
+void json_archive_writer::begin_object(const std::string& type_name, uint32_t version) {
+    json_archive_writer::begin_object();
     if (!type_name.empty()) {
         write_property_name("$type");
         write_string(type_name);
@@ -218,42 +222,15 @@ void json_archive_writer::begin_object(const std::string& type_name, uint32_t ve
 
 void json_archive_writer::end_object() {
     --open_records_;
-    json_depth_--;
-    container_stack_.pop();
-    first_in_container_.pop();
-    write_newline();
-    write_indent();
-    out_ += '}';
-    if (in_container()) {
-        first_in_container_.top() = false;
-    }
+    close_container('}');
 }
 
 void json_archive_writer::begin_array(size_t size) {
-    auto ctx = this->current_context();
-    bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
-
-    if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-        out_ += ',';
-    }
-    write_newline();
-    write_indent();
-    out_ += '[';
-    json_depth_++;
-    container_stack_.push(ContainerType::Array);
-    first_in_container_.push(true);
+    open_container('[', ContainerType::Array);
 }
 
 void json_archive_writer::end_array() {
-    json_depth_--;
-    container_stack_.pop();
-    first_in_container_.pop();
-    write_newline();
-    write_indent();
-    out_ += ']';
-    if (in_container()) {
-        first_in_container_.top() = false;
-    }
+    close_container(']');
 }
 
 void json_archive_writer::write_property_name(const std::string& name) {
@@ -270,44 +247,15 @@ void json_archive_writer::write_property_name(const std::string& name) {
 }
 
 void json_archive_writer::begin_map(size_t size) {
-    auto ctx = this->current_context();
-    bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
-
-    if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-        out_ += ',';
-    }
-    write_newline();
-    write_indent();
-    out_ += '{';
-    json_depth_++;
-    container_stack_.push(ContainerType::Object);
-    first_in_container_.push(true);
+    open_container('{', ContainerType::Object);
 }
 
 void json_archive_writer::end_map() {
-    json_depth_--;
-    container_stack_.pop();
-    first_in_container_.pop();
-    write_newline();
-    write_indent();
-    out_ += '}';
-    if (in_container()) {
-        first_in_container_.top() = false;
-    }
+    close_container('}');
 }
 
 void json_archive_writer::write_map_key(const std::string& key) {
-    // Same as write_property_name
-    if (!first_in_container_.top()) {
-        out_ += ',';
-    }
-    write_newline();
-    write_indent();
-    out_ += '"';
-    append_escaped(key);
-    out_.append("\": ");
-    first_in_container_.top() = false;
-    // Context is managed by base class which pushes MapValue after this
+    json_archive_writer::write_property_name(key);
 }
 
 void json_archive_writer::write_value(const script_value& root) {

@@ -146,6 +146,8 @@ private:
     void write_indent();
     
     void write_newline();
+    void open_container(char a_brace, ContainerType a_kind);
+    void close_container(char a_brace);
     
     template<typename T>
     void write_json_value(T value);

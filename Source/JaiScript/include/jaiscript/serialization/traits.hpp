@@ -224,24 +224,6 @@ template<typename T> struct vector_element { using type = void; };
 template<typename T, typename A> struct vector_element<std::vector<T, A>> { using type = T; };
 template<typename T> using vector_element_t = typename vector_element<T>::type;
 
-template<typename T> struct map_key { using type = void; };
-template<typename K, typename V, typename C, typename A> struct map_key<std::map<K, V, C, A>> { using type = K; };
-template<typename T> using map_key_t = typename map_key<T>::type;
-
-template<typename T> struct map_value { using type = void; };
-template<typename K, typename V, typename C, typename A> struct map_value<std::map<K, V, C, A>> { using type = V; };
-template<typename T> using map_value_t = typename map_value<T>::type;
-
-template<typename T> struct unordered_map_key { using type = void; };
-template<typename K, typename V, typename H, typename E, typename A>
-struct unordered_map_key<std::unordered_map<K, V, H, E, A>> { using type = K; };
-template<typename T> using unordered_map_key_t = typename unordered_map_key<T>::type;
-
-template<typename T> struct unordered_map_value { using type = void; };
-template<typename K, typename V, typename H, typename E, typename A>
-struct unordered_map_value<std::unordered_map<K, V, H, E, A>> { using type = V; };
-template<typename T> using unordered_map_value_t = typename unordered_map_value<T>::type;
-
 template<typename T> struct array_element { using type = void; };
 template<typename T, std::size_t N> struct array_element<std::array<T, N>> { using type = T; };
 template<typename T> using array_element_t = typename array_element<T>::type;

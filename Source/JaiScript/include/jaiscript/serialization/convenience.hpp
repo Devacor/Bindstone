@@ -181,244 +181,111 @@ constexpr bool can_use_direct_archive_read_v = []() {
     }
 }();
 
-} // namespace detail
-
-// Always wraps in begin_object/end_object for consistent format (like binary)
-template<typename T>
-std::string to_json(engine& eng, const T& value, int indent = 2) {
-    serialization::json_archive_writer ar(indent, &eng);
+// The root object every archive's document is: an owning pointer goes through the archive's smart-ptr path ($id/$type/$val),
+// so its dynamic (polymorphic) type and aliasing survive instead of being sliced to the static pointee; a type the
+// archive serializes directly writes its content into the root; anything else is the root's value0
+template<typename Archive, typename T>
+void write_root(Archive& ar, const T& value) {
     ar.begin_object("", 1);
-    if constexpr (detail::is_owning_ptr_v<T>) {
-        // Route owning roots through the archive's smart-ptr path ($id/$type/$val) so the dynamic
-        // (polymorphic) type and aliasing survive — derefing into serialize_object_content would
-        // dispatch on the static pointee type and slice off the derived data + $type. B6.
-        ar.serialize("value0", value);
-    } else if constexpr (detail::can_use_direct_archive_v<T>) {
+    if constexpr (!is_owning_ptr_v<T> && can_use_direct_archive_v<T>) {
         ar.serialize_object_content(value);
     } else {
         ar.serialize("value0", value);
     }
     ar.end_object();
-    return ar.str();
 }
 
-// Always wraps in begin_object/end_object for consistent format (like binary)
-template<typename T, typename Context>
-std::string to_json(engine& eng, const T& value, Context& ctx, int indent = 2) {
-    serialization::json_archive_writer ar(indent, &eng);
-    (void)ctx;
-    ar.begin_object("", 1);
-    if constexpr (detail::is_owning_ptr_v<T>) {
-        // Route owning roots through the archive's smart-ptr path ($id/$type/$val) so the dynamic
-        // (polymorphic) type and aliasing survive instead of being sliced to the static pointee
-        // type by serialize_object_content(*value). B6.
-        ar.serialize("value0", value);
-    } else if constexpr (detail::can_use_direct_archive_v<T>) {
-        ar.serialize_object_content(value);  // Don't double-wrap
-    } else {
-        ar.serialize("value0", value);
-    }
-    ar.end_object();
-    return ar.str();
-}
-
-// Always expects begin_object/end_object wrapper for consistent format (like binary)
-template<typename T>
-T from_json(engine& eng, const std::string& json) {
-    serialization::json_archive_reader ar(json, &eng);
+// The root object back: an owning pointer's $type selects the concrete polymorphic factory
+template<typename T, typename Archive>
+T read_root(Archive& ar) {
     std::string type_name;
     uint32_t version;
     ar.begin_object(type_name, version);
     T result{};
-    if constexpr (detail::is_owning_ptr_v<T>) {
-        // Reconstruct via the archive's smart-ptr path: a $type discriminator selects the concrete
-        // polymorphic factory, restoring the derived object instead of forcing the static pointee
-        // type via make_shared<E>()/make_unique<E>(). B6.
-        ar.serialize("value0", result);
-    } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
+    if constexpr (!is_owning_ptr_v<T> && can_use_direct_archive_read_v<T>) {
         ar(result);
     } else {
         ar.serialize("value0", result);
     }
     ar.end_object();
-    return std::move(result);
+    return result;
 }
 
-// Always expects begin_object/end_object wrapper for consistent format (like binary)
+} // namespace detail
+
+template<typename T>
+std::string to_json(engine& eng, const T& value, int indent = 2) {
+    serialization::json_archive_writer ar(indent, &eng);
+    detail::write_root(ar, value);
+    return ar.str();
+}
+
+template<typename T, typename Context>
+std::string to_json(engine& eng, const T& value, Context& ctx, int indent = 2) {
+    (void)ctx;
+    serialization::json_archive_writer ar(indent, &eng);
+    detail::write_root(ar, value);
+    return ar.str();
+}
+
+template<typename T>
+T from_json(engine& eng, const std::string& json) {
+    serialization::json_archive_reader ar(json, &eng);
+    return detail::read_root<T>(ar);
+}
+
 template<typename T, typename Context>
 T from_json(engine& eng, const std::string& json, Context& ctx) {
     serialization::json_archive_reader ar(json, &eng);
     ar.template set_user_context<Context>(&ctx);
-    std::string type_name;
-    uint32_t version;
-    ar.begin_object(type_name, version);
-    T result{};
-    if constexpr (detail::is_owning_ptr_v<T>) {
-        // Reconstruct via the archive's smart-ptr path: a $type discriminator selects the concrete
-        // polymorphic factory, restoring the derived object instead of forcing the static pointee
-        // type via make_shared<E>()/make_unique<E>(). B6.
-        ar.serialize("value0", result);
-    } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
-        ar(result);
-    } else {
-        ar.serialize("value0", result);
-    }
-    ar.end_object();
-    return std::move(result);
+    return detail::read_root<T>(ar);
 }
 
-// Always wraps in begin_object/end_object for consistent format with property sizes
 template<typename T>
 std::vector<uint8_t> to_binary(engine& eng, const T& value) {
     serialization::binary_archive_writer ar(&eng);
-    ar.begin_object("", 1);
-    if constexpr (detail::is_owning_ptr_v<T>) {
-        // Route owning roots through the archive's smart-ptr path ($id/$type/$val) so the dynamic
-        // (polymorphic) type and aliasing survive instead of being sliced to the static pointee
-        // type by serialize_object_content(*value). B6.
-        ar.serialize("value0", value);
-    } else if constexpr (detail::can_use_direct_archive_v<T>) {
-        ar.serialize_object_content(value);  // Don't double-wrap
-    } else {
-        ar.serialize("value0", value);
-    }
-    ar.end_object();
+    detail::write_root(ar, value);
     return ar.data();
 }
 
-// Always wraps in begin_object/end_object for consistent format with property sizes
 template<typename T>
 std::string to_binary_string(engine& eng, const T& value) {
     serialization::binary_archive_writer ar(&eng);
-    ar.begin_object("", 1);
-    if constexpr (detail::is_owning_ptr_v<T>) {
-        // Route owning roots through the archive's smart-ptr path ($id/$type/$val) so the dynamic
-        // (polymorphic) type and aliasing survive instead of being sliced to the static pointee
-        // type by serialize_object_content(*value). B6.
-        ar.serialize("value0", value);
-    } else if constexpr (detail::can_use_direct_archive_v<T>) {
-        ar.serialize_object_content(value);  // Don't double-wrap
-    } else {
-        ar.serialize("value0", value);
-    }
-    ar.end_object();
+    detail::write_root(ar, value);
     auto& data = ar.data();
     return std::string(data.begin(), data.end());
 }
 
 template<typename T, typename Context>
 std::string to_binary_string(engine& eng, const T& value, Context& ctx) {
-    serialization::binary_archive_writer ar(&eng);
     (void)ctx;
-    ar.begin_object("", 1);
-    if constexpr (detail::is_owning_ptr_v<T>) {
-        // Route owning roots through the archive's smart-ptr path ($id/$type/$val) so the dynamic
-        // (polymorphic) type and aliasing survive instead of being sliced to the static pointee
-        // type by serialize_object_content(*value). B6.
-        ar.serialize("value0", value);
-    } else if constexpr (detail::can_use_direct_archive_v<T>) {
-        ar.serialize_object_content(value);  // Don't double-wrap
-    } else {
-        ar.serialize("value0", value);
-    }
-    ar.end_object();
-    auto& data = ar.data();
-    return std::string(data.begin(), data.end());
+    return to_binary_string(eng, value);
 }
 
-// Always expects begin_object/end_object wrapper for consistent format
 template<typename T>
 T from_binary(engine& eng, const std::vector<uint8_t>& data) {
     serialization::binary_archive_reader ar(data, &eng);
-    std::string type_name;
-    uint32_t version;
-    ar.begin_object(type_name, version);
-    T result{};
-    if constexpr (detail::is_owning_ptr_v<T>) {
-        // Reconstruct via the archive's smart-ptr path: a $type discriminator selects the concrete
-        // polymorphic factory, restoring the derived object instead of forcing the static pointee
-        // type via make_shared<E>()/make_unique<E>(). B6.
-        ar.serialize("value0", result);
-    } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
-        ar(result);
-    } else {
-        ar.serialize("value0", result);
-    }
-    ar.end_object();
-    return result;
+    return detail::read_root<T>(ar);
 }
 
 template<typename T, typename Context>
 T from_binary(engine& eng, const std::vector<uint8_t>& data, Context& ctx) {
     serialization::binary_archive_reader ar(data, &eng);
     ar.template set_user_context<Context>(&ctx);
-    std::string type_name;
-    uint32_t version;
-    ar.begin_object(type_name, version);
-    T result{};
-    if constexpr (detail::is_owning_ptr_v<T>) {
-        // Reconstruct via the archive's smart-ptr path: a $type discriminator selects the concrete
-        // polymorphic factory, restoring the derived object instead of forcing the static pointee
-        // type via make_shared<E>()/make_unique<E>(). B6.
-        ar.serialize("value0", result);
-    } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
-        ar(result);
-    } else {
-        ar.serialize("value0", result);
-    }
-    ar.end_object();
-    return result;
+    return detail::read_root<T>(ar);
 }
 
 template<typename T>
 T from_binary_string(engine& eng, const std::string& data) {
-    serialization::binary_archive_reader ar(
-        reinterpret_cast<const uint8_t*>(data.data()),
-        data.size(),
-        &eng
-    );
-    std::string type_name;
-    uint32_t version;
-    ar.begin_object(type_name, version);
-    T result{};
-    if constexpr (detail::is_owning_ptr_v<T>) {
-        // Reconstruct via the archive's smart-ptr path: a $type discriminator selects the concrete
-        // polymorphic factory, restoring the derived object instead of forcing the static pointee
-        // type via make_shared<E>()/make_unique<E>(). B6.
-        ar.serialize("value0", result);
-    } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
-        ar(result);
-    } else {
-        ar.serialize("value0", result);
-    }
-    ar.end_object();
-    return result;
+    serialization::binary_archive_reader ar(reinterpret_cast<const uint8_t*>(data.data()), data.size(), &eng);
+    return detail::read_root<T>(ar);
 }
 
 template<typename T, typename Context>
 T from_binary_string(engine& eng, const std::string& data, Context& ctx) {
-    serialization::binary_archive_reader ar(
-        reinterpret_cast<const uint8_t*>(data.data()),
-        data.size(),
-        &eng
-    );
+    serialization::binary_archive_reader ar(reinterpret_cast<const uint8_t*>(data.data()), data.size(), &eng);
     ar.template set_user_context<Context>(&ctx);
-    std::string type_name;
-    uint32_t version;
-    ar.begin_object(type_name, version);
-    T result{};
-    if constexpr (detail::is_owning_ptr_v<T>) {
-        // Reconstruct via the archive's smart-ptr path: a $type discriminator selects the concrete
-        // polymorphic factory, restoring the derived object instead of forcing the static pointee
-        // type via make_shared<E>()/make_unique<E>(). B6.
-        ar.serialize("value0", result);
-    } else if constexpr (detail::can_use_direct_archive_read_v<T>) {
-        ar(result);
-    } else {
-        ar.serialize("value0", result);
-    }
-    ar.end_object();
-    return result;
+    return detail::read_root<T>(ar);
 }
 
 template<typename T>

@@ -114,6 +114,7 @@ namespace jai::vm {
         const engine* engine_ = nullptr;
         const class_definition* member_class_ = nullptr;
         uint32_t this_field_slot_of(const identifier_expr* ident);
+        bool this_global_of(const identifier_expr* ident);
         void note_this_field(size_t ip, const identifier_expr* ident);
         // Scope exits destroy the frame-slot locals that may own a script destructor (C++ lifetimes): one scope per block,
         // case body, for initializer and range-for iteration, its slots killed in reverse at its close and by the jumps that

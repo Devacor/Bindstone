@@ -387,6 +387,101 @@ public:
             check_eq(std::string("[10560, 301, 32, 3003]"), r.to_string(), "slot reads across subclasses and a mid-call re-class");
         });
 
+        test("a_method_body_stores_and_declares_handles_and_reads_through_its_fields", [this]() {
+            // a bare handle field stored from its own member (`cur = cur.next`), handle locals declared from null and from the field, an int
+            // field stored and converted into a float field, a member read through a bare field reaching a null (the raise's text), a
+            // subclass handle with its own getter stored through a typed parameter, and the destructors' order as each handle lets go; a
+            // method called on a local receiver and on a program-scope one
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                string log = "";
+                class Node { shared_ptr<Node> next = null; int id = 0; Node(int a) { id = a; } ~Node() { log = log + "~" + id; } }
+                class Special : Node { int extra = 9; Special(int a) : super(a) {} function _get_id() -> int { return 100; } }
+                class Walker {
+                    shared_ptr<Node> cur = null; int steps = 0; int state = 1; float f = 0.5;
+                    int walk(int n) {
+                        int sum = 0;
+                        for (int i = 0; i < n; ++i) {
+                            if (cur == null) { break; }
+                            sum = sum + cur.id;
+                            shared_ptr<Node> here = cur;
+                            shared_ptr<Node> none = null;
+                            cur = cur.next;
+                            state = state * 2 + 1;
+                            f = state;
+                            steps = steps + 1;
+                        }
+                        return sum;
+                    }
+                    string missing() { string err = ""; try { int x = cur.id; } catch (e) { err = e; } return err; }
+                    void drop() { cur = null; }
+                    void retarget(shared_ptr<Special> s) { cur = s; }
+                }
+                string run() {
+                    shared_ptr<Node> a = new Node(1); shared_ptr<Node> b = new Special(2); shared_ptr<Node> c = new Node(3);
+                    a.next = b; b.next = c;
+                    Walker w = Walker(); w.cur = a; a = null;
+                    int s1 = w.walk(2); log = log + "|";
+                    int s2 = w.walk(5);
+                    string err = w.missing();
+                    shared_ptr<Special> sp = new Special(7); w.retarget(sp); sp = null;
+                    int s3 = w.walk(1);
+                    b = null; c = null; w.drop();
+                    return "" + s1 + "," + s2 + "," + s3 + "," + w.steps + "," + w.state + "," + w.f + "|" + err + "|" + log;
+                }
+                string first = run();
+                Walker g = Walker(); g.cur = new Node(5);
+                int t = g.walk(3); g.drop();
+                return first + "|" + t + "," + g.state + "|" + log;
+            )");
+            check_eq(std::string("101,3,100,4,31,31.0|Cannot access 'id' on null ('cur' is null)|~1|~7~2~3|5,3|~1|~7~2~3~5"), r.to_string(),
+                     "handle stores, declarations and member reads through bare fields");
+        });
+
+        test("a_method_bodys_program_scope_names_yield_to_a_receivers_members", [this]() {
+            // a bare program-scope name in a method reads the program scope until the receiver's class takes the name: a subclass field, a
+            // subclass static, then a reload of the class itself adding a field of the name
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                int G = 10;
+                const int K = 3;
+                class A { int n = 1; int f() { return G + K * n; } int g() { return G; } }
+                class B : A { int G = 100; }
+                class C : A { static int K = 7; }
+                A a = A(); B b = B(); C c = C();
+                int s = 0;
+                for (int i = 0; i < 3; ++i) { s = s + a.f() + b.f() + c.f(); G = G + 1; }
+                return "" + s + " " + a.f() + " " + b.f() + " " + c.f() + " " + b.g();
+            )");
+            check_eq(std::string("405 16 103 20 100"), r.to_string(), "the program scope's names and the members that take them");
+            e->execute("class A { int n = 1; int K = 50; int f() { return G + K * n; } int g() { return G; } }");
+            auto r2 = e->execute("return \"\" + a.f() + \" \" + b.f() + \" \" + c.f();");
+            check_eq(std::string("63 150 63"), r2.to_string(), "a reloaded class's own field of the name");
+        });
+
+        test("handle_field_stores_follow_a_reload_that_moves_the_fields", [this]() {
+            // the walker's class is redefined with its fields in another order and a field of another handle type in between: the next
+            // calls store and read by the new layout
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            e->execute(R"(
+                class Node { shared_ptr<Node> next = null; int id = 0; Node(int a) { id = a; } }
+                class Walker { shared_ptr<Node> cur = null; int steps = 0;
+                    int walk(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + cur.id; cur = cur.next; steps = steps + 1; } return s; } }
+                shared_ptr<Node> a = new Node(1); shared_ptr<Node> b = new Node(2); a.next = b; b.next = a;
+                Walker w = Walker(); w.cur = a;
+                int first = w.walk(3);
+            )");
+            e->execute(R"(
+                class Walker { int steps = 0; shared_ptr<Node> spare = null; shared_ptr<Node> cur = null;
+                    int walk(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + cur.id * 10; spare = cur; cur = cur.next; steps = steps + 1; } return s; } }
+            )");
+            auto r = e->execute("int second = w.walk(3); a.next = null; return [first, second, w.steps, w.spare.id, w.cur.id];");
+            check_eq(std::string("[4, 50, 6, 2, 1]"), r.to_string(), "the reloaded layout's stores and reads");
+        });
+
         test("class_destructor_basic", [this]() {
             auto js_engine = make_engine();
             stdlib::register_all(*js_engine);

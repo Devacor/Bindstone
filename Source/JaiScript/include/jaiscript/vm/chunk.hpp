@@ -45,6 +45,8 @@ namespace jai::vm {
         uint32_t ident_node = k_invalid_u32;
         // a bare name the body's class resolves to a plain field (chunk::member_class): its slot + 1 there, 0 for none
         uint32_t this_slot = 0;
+        // a bare name the body's class resolves past its members: read from the environment while the frame's layout holds (chunk::this_global_uses)
+        bool this_global = false;
 
         // Subscript-read operand `base[i][j]...[k]` (every level transient-marked, so the
         // elision rule applies): slot/symbol above name the BASE container; the chain
@@ -502,6 +504,8 @@ namespace jai::vm {
         const class_definition* member_class = nullptr;
         std::vector<uint32_t> this_field_slots;                  // per instruction: slot + 1, 0 = none
         std::vector<std::pair<uint64_t, uint32_t>> this_field_uses;   // (field id, slot) the body addresses
+        std::vector<uint32_t> this_global_ips;                   // per instruction: the LOAD's symbols index + 1 for a bare name the body's class resolves past its members (an environment read once the frame's layout holds)
+        std::vector<uint64_t> this_global_uses;                  // those names: the receiver's class takes none of them as a member
         struct member_layout_row { const class_definition* cd = nullptr; uint64_t shape = 0; uint64_t methods = 0; bool same = false; };
         static constexpr uint8_t k_member_layout_rows = 4;
         mutable member_layout_row member_layout_rows[k_member_layout_rows];

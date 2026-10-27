@@ -260,6 +260,7 @@ namespace {
 			// lexical truth); exec_new never touches environment_
 			case opcode::op_get_member:
 			case opcode::op_get_member_path:
+			case opcode::op_get_member_this:
 			case opcode::op_set_member:
 			case opcode::op_set_member_fused:
 			case opcode::op_member_compound:
@@ -483,6 +484,7 @@ namespace {
 			case opcode::op_halt:
 			case opcode::op_get_member:
 			case opcode::op_get_member_path:
+			case opcode::op_get_member_this:
 			case opcode::op_get_static:
 			case opcode::op_set_member:
 			case opcode::op_set_member_fused:
@@ -2418,6 +2420,7 @@ void vm_compiler::compile_store_arm(identifier_expr* ident, assignment_expr* ass
 		ins.b = 0;
 		ins.c = 0;
 		note_ident_node(code.size() - 1, assign->target);
+		note_this_field(code.size() - 1, ident);
 		return;
 	}
 	if (try_lower_store_move(ident, value, flags)) return;
@@ -2624,6 +2627,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 					ins.b = 0;
 					ins.c = 0;
 					note_ident_node(code.size() - 1, assign->target);
+					note_this_field(code.size() - 1, ident);
 					return true;
 				}
 				if (try_lower_store_move(ident, assign->value, flags)) return true;
@@ -2944,6 +2948,19 @@ uint32_t vm_compiler::this_field_slot_of(const identifier_expr* ident) {
 	return slot + 1;
 }
 
+// a member-class body's bare name its class takes as no member (no field, method, static or host property): the frame whose receiver's
+// class says the same reads it from the environment; listed for that verdict
+bool vm_compiler::this_global_of(const identifier_expr* ident) {
+	const class_definition* cls = member_class_;
+	if (!cls || reference_ || !chunk_ || chunk_->member_class != cls || !ident || ident->global_qualified || identifier_slot_operand(const_cast<identifier_expr*>(ident)) != k_invalid_u32) return false;
+	const uint64_t id = ident->symbol_id;
+	if (id == UINT64_MAX || id == 0 || cls->chain_has_nonpublic() || !cls->is_script_class() || cls->find_cpp_base_class()) return false;
+	if (cls->field_slot(id) != class_definition::k_no_field_slot || cls->chain_declares_field(id) || !cls->get_method(id, false).is_invalid()) return false;
+	if (const_cast<class_definition*>(cls)->find_static_field_in_chain(id) || const_cast<class_definition*>(cls)->find_static_method_in_chain(id)) return false;
+	if (std::find(chunk_->this_global_uses.begin(), chunk_->this_global_uses.end(), id) == chunk_->this_global_uses.end()) { chunk_->this_global_uses.push_back(id); }
+	return true;
+}
+
 void vm_compiler::compile_identifier_load(const expression_ptr& expr) {
 	auto* ident = static_cast<identifier_expr*>(expr.get());
 	uint32_t flags = 0;
@@ -2954,9 +2971,15 @@ void vm_compiler::compile_identifier_load(const expression_ptr& expr) {
 	    (ident->name.find("weak_ptr<") == 0 || ident->name.find("shared_ptr<") == 0)) {
 		flags |= load_flag_type_ctor;
 	}
-	const size_t ip = emit(opcode::op_load, identifier_slot_operand(ident), add_symbol(ident->symbol_id), flags);
+	const uint32_t symbol = add_symbol(ident->symbol_id);
+	const size_t ip = emit(opcode::op_load, identifier_slot_operand(ident), symbol, flags);
 	note_ident_node(ip, expr);
 	note_this_field(ip, ident);
+	if (flags == 0 && this_global_of(ident)) {
+		auto& table = chunk_->this_global_ips;
+		if (table.size() <= ip) { table.resize(ip + 1, 0); }
+		table[ip] = symbol + 1;
+	}
 }
 
 void vm_compiler::note_this_field(size_t ip, const identifier_expr* ident) {
@@ -7429,6 +7452,7 @@ fused_operand vm_compiler::make_fused_operand(const expression* e) {
 		}
 		out.direct = out.slot != k_invalid_u32 && out.load_flags == 0;
 		out.this_slot = this_field_slot_of(ident);
+		out.this_global = out.slot == k_invalid_u32 && !out.this_slot && out.load_flags == 0 && this_global_of(ident);
 	} else if (e->get_type() == node_type::binary_expr) {
 		// fusable_subscript_operand-vetted chain: walk to the base identifier collecting
 		// indexes innermost-first (application order), base rides the ident fields
@@ -8266,6 +8290,17 @@ void vm_compiler::compile_member_read(const std::shared_ptr<member_expr>& expr) 
 		if (const uint32_t base = member_base_slot(expr.get()); base != k_invalid_u32) {
 			emit(opcode::op_get_member, add_node(expr), base + 1);
 			return;
+		}
+		// a member-class body's bare field as the base
+		auto* id = static_cast<identifier_expr*>(expr->object.get());
+		if (id->slot_index == SIZE_MAX && !id->global_qualified) {
+			if (const uint32_t this_slot = this_field_slot_of(id)) {
+				const uint32_t node = add_node(expr);
+				const size_t ip = emit(opcode::op_get_member_this, node, add_symbol(id->symbol_id), this_slot);
+				note_ident_node(ip, expr->object);
+				note_this_field(ip, id);
+				return;
+			}
 		}
 	}
 	member_path_proto path;

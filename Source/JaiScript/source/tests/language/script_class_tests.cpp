@@ -531,6 +531,44 @@ public:
             check_eq(std::string("[300, 3300]"), r2.to_string(), "the reloaded method answers");
         });
 
+        test("method_frames_share_records_with_every_other_frame_kind", [this]() {
+            // plain method calls in turn with a static method, a constructor, a lambda calling a method, a free function taking the receiver
+            // by reference, a method calling siblings, and recursion that throws through the method frames: the results, the caught text and
+            // the escaping trace's frames
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            auto r = e->execute(R"(
+                class Counter { int n = 0; static int made = 0;
+                    Counter() { made = made + 1; }
+                    int bump() { n = n + 1; return n; }
+                    static int twice(int x) { return x * 2; }
+                    int deep(int k) { if (k == 0) { throw "bottom " + n; } return deep(k - 1) + 1; }
+                    int chain() { return bump() + twice(n) + helper(this); } }
+                int helper(Counter& c) { return c.n; }
+                string run() {
+                    Counter c = Counter();
+                    var f = [&](int x) { return x + c.bump(); };
+                    int s = 0;
+                    string caught = "";
+                    for (int i = 0; i < 3; ++i) {
+                        s = s + c.bump() + Counter::twice(i) + f(i) + c.chain();
+                        Counter d = Counter();
+                        s = s + d.bump();
+                        try { c.deep(2); } catch (e) { caught = "" + e; }
+                    }
+                    return "" + s + " " + c.n + " " + Counter::made + " " + caught;
+                }
+                return run();
+            )");
+            check_eq(std::string("111 9 4 bottom 9"), r.to_string(), "the results through the shared records");
+            std::string shape;
+            try { e->execute("Counter k = Counter(); k.bump(); k.deep(3);"); }
+            catch (const std::exception&) {
+                for (const auto& fr : e->last_stack_trace()) { shape += (shape.empty() ? "" : "|") + fr.function + ":" + std::to_string(fr.line); }
+            }
+            check_eq(std::string("deep:6|deep:6|deep:6|deep:6|<script>:1"), shape, "the frames of the escaping throw");
+        });
+
         test("a_method_calls_result_lands_in_its_consumers_operand", [this]() {
             // method results as arithmetic operands: int and float returns into typed locals, a var return of another kind through a
             // subclass, a mutating method between two reads of the same receiver (left to right), builtin calls on both sides of one binary,

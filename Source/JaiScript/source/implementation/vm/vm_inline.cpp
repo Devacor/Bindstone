@@ -575,6 +575,15 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		if (incdec_op(u->op.type) && u->operand) { note_store(u->operand.get(), c, true); }   // an identifier's increment keeps its kind (any other target desugars to a compound store)
 		auto o = clone_expr(u->operand, c);
 		if (!c.ok) return nullptr;
+		if (incdec_op(u->op.type) && o && o->get_type() != node_type::identifier_expr) {
+			// a bare field's increment reads through the receiver: the member's `+= 1` / `-= 1`, as the parser writes `++r.f` (parser::desugar_incdec)
+			const bool increment = u->op.type == token_type::plus_plus;
+			token compound(increment ? token_type::plus_equal : token_type::minus_equal, increment ? "+=" : "-=", u->op.location);
+			auto n = c.make<assignment_expr>(u->location, o, compound, c.make<literal_expr>(u->op.location, script_value(script_value::ast_literal_tag{}, static_cast<script_int>(1))));
+			n->postfix_old_result = u->is_postfix;
+			n->incdec_desugar = true;
+			return n;
+		}
 		return c.make<unary_expr>(u->location, u->op, o, u->is_postfix);
 	}
 	case node_type::assignment_expr: {

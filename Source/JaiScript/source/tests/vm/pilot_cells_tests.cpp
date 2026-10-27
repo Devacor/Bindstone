@@ -4386,6 +4386,21 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(vm, injected(every), "method grafts under an injected miss at every " + std::to_string(every)); }
 		});
+		test("a_grafted_method_increments_its_bare_fields", [this]() {
+			// `++f`, `f++`, `--f` and `f--` on a bare field inside a grafted method run through the receiver as the call's frame runs them,
+			// the prefix forms yielding the new value and the postfix ones the old; a string field's increment keeps its raise
+			const std::string prelude =
+				"class P { int m = 0; float x = 1.5; int nm() { return ++m; } int pm() { return m++; } int dm() { return --m; } int qm() { return m--; }\n"
+				"  float fx() { return ++x; } void bump() { ++m; } }\n"
+				"class S { string t = \"a\"; int up() { ++t; return 1; } }\n"
+				"string run() { P p = P(); int a = p.nm(); int b = p.pm(); int c = p.dm(); int d = p.qm(); float e = p.fx(); p.bump();\n"
+				"  string err = \"\"; S s = S(); try { s.up(); } catch (ex) { err = ex; }\n"
+				"  return \"\" + a + \",\" + b + \",\" + c + \",\" + d + \",\" + e + \",\" + p.m + \",\" + p.x + \"|\" + err; }\n";
+			both(prelude + "run();", "", "bare field increments in grafted methods");
+			check_true(run_on(true, prelude + "run();").find("1,1,1,1,2.5,1,2.5|") == 0, run_on(true, prelude + "run();"));
+			const std::string l = listing_run(prelude + "run();");
+			check_true(l.find("-- inlined nm") != std::string::npos && l.find("-- inlined qm") != std::string::npos, "the methods graft: " + l);
+		});
 		test("a_method_graft_follows_reloads", [this]() {
 			// the guard validates the receiver's class at its method epoch; a reload of the class (a new body)
 			// takes the fallback, so the caller sees the new method without recompiling

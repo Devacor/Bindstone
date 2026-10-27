@@ -716,7 +716,7 @@ namespace detail {
             if (idx == TYPEID_CPP_BOUND) return true;
             if (idx == TYPEID_OBJECT) {
                 auto* h = storage_.get_if<TYPEID_OBJECT>();
-                return *h && (*h)->bound_ptr != nullptr;
+                return *h && (*h)->bound_object() != nullptr;
             }
             return false;
         }
@@ -725,13 +725,13 @@ namespace detail {
 
         bool is_non_owning_object() const {
             auto* h = storage_.get_if<TYPEID_OBJECT>();
-            return h && *h && (*h)->bound_ptr != nullptr && !(*h)->holds_object();
+            return h && *h && (*h)->bound_object() != nullptr && !(*h)->holds_object();
         }
 
         // Returns nullptr if not cpp_bound. Caller is responsible for type safety.
         void* get_cpp_bound_ptr() const {
             if (auto* b = storage_.get_if<TYPEID_CPP_BOUND>()) return *b ? (*b)->ptr : nullptr;
-            if (auto* h = storage_.get_if<TYPEID_OBJECT>()) return *h ? (*h)->bound_ptr : nullptr;
+            if (auto* h = storage_.get_if<TYPEID_OBJECT>()) return *h ? (*h)->bound_object() : nullptr;
             return nullptr;
         }
 
@@ -790,7 +790,7 @@ namespace detail {
             auto* box = bound_box();
             return box && box->semantic_index == idx;
         }
-        // Two-shape: box ptr for index 14, holder->bound_ptr for object-bound (index 8)
+        // Two-shape: box ptr for index 14, holder->bound_object() for object-bound (index 8)
         void* bound_target_ptr() const noexcept {
             return get_cpp_bound_ptr();
         }
@@ -1892,7 +1892,7 @@ namespace detail {
 
                     // Check for non-owning C++ reference (holder bound_ptr set, data null)
                     // Cannot safely return shared_ptr from non-owning reference
-                    if (objHolder->bound_ptr && !objHolder->holds_object()) {
+                    if (objHolder->bound_object() && !objHolder->holds_object()) {
                         return checked_result<T>(
                             make_error_code(runtime_error_code::type_mismatch),
                             "Cannot extract shared_ptr from non-owning C++ reference. "
@@ -1974,10 +1974,10 @@ namespace detail {
                     const auto& objHolder = *holderPtr;
 
                     // Handle non-owning C++ reference via the holder's bound_ptr
-                    if (objHolder->bound_ptr && !objHolder->holds_object()) {
+                    if (objHolder->bound_object() && !objHolder->holds_object()) {
                         // Copy from non-owning pointer (only if copyable)
                         if constexpr (std::is_copy_constructible_v<T>) {
-                            return checked_result<T>(*static_cast<T*>(objHolder->bound_ptr));
+                            return checked_result<T>(*static_cast<T*>(objHolder->bound_object()));
                         } else {
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
@@ -2135,57 +2135,60 @@ namespace detail {
 	public: // Match the public forward declaration and holder accessors.
         // For object storage - external serialization will handle this
         struct object_holder {
-        private:
-            std::string_view type_name_;      // the type's name: the engine's interned text or a literal (never an owned string)
-            uint64_t type_id_ = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
-            detail::object_ref data;        // The actual object: a bound C++ object, or a class instance
         public:
             std::string_view type_name() const noexcept { return type_name_; }
             uint64_t type_id() const noexcept { return type_id_; }
             void set_type(std::string_view name, uint64_t id) noexcept { type_name_ = name; type_id_ = id; }
             engine* owner() const noexcept { return owner_; }
             void set_owner(engine* eng) noexcept { owner_ = eng; }
-            bool is_instance() const noexcept { return data.is_instance(); }
-            class_instance* instance() const noexcept { return data.instance_pointer(); }   // null for a C++ object
-            class_instance* unchecked_instance() const noexcept { return static_cast<class_instance*>(data.get()); }   // is_instance() holds
+            bool is_instance() const noexcept { return data_.is_instance(); }
+            class_instance* instance() const noexcept { return data_.instance_pointer(); }   // null for a C++ object
+            class_instance* unchecked_instance() const noexcept { return static_cast<class_instance*>(data_.get()); }   // is_instance() holds
             template <class I = class_instance>
-            strong_ptr<I> instance_handle() const noexcept { return data.template instance<I>(); }
-            void* object() const noexcept { return data.get(); }   // the held instance or C++ object
-            bool holds_object() const noexcept { return data != nullptr; }
-            long object_use_count() const noexcept { return data.use_count(); }
-            const std::shared_ptr<void>& host_object() const noexcept { return data.shared(); }   // empty for an instance
-            detail::object_ref held() const noexcept { return data; }
-            void hold(detail::object_ref object) noexcept { data = std::move(object); }
-            // A coroutine handle IS a reference to a running computation: clone() shares
-            // it (reference semantics, like shared_ptr) instead of deep-copying.
-            bool is_coroutine_handle = false;
+            strong_ptr<I> instance_handle() const noexcept { return data_.template instance<I>(); }
+            void* object() const noexcept { return data_.get(); }   // the held instance or C++ object
+            bool holds_object() const noexcept { return data_ != nullptr; }
+            long object_use_count() const noexcept { return data_.use_count(); }
+            const std::shared_ptr<void>& host_object() const noexcept { return data_.shared(); }   // empty for an instance
+            detail::object_ref held() const noexcept { return data_; }
+            void hold(detail::object_ref object) noexcept { data_ = std::move(object); }
+            // A coroutine handle IS a reference to a running computation: clone() shares it (reference semantics, like
+            // shared_ptr) instead of deep-copying
+            bool is_coroutine_handle() const noexcept { return is_coroutine_handle_; }
+            void mark_coroutine_handle() noexcept { is_coroutine_handle_ = true; }
+            // Registered-class T& binding: the live C++ object (the held object stays null). Non-owning!
+            void* bound_object() const noexcept { return bound_ptr_; }
+            void bind_object(void* object) noexcept { bound_ptr_ = object; }
 
-            // Registered-class T& binding: the live C++ object (data stays null). Non-owning!
-            void* bound_ptr = nullptr;
+            detail::object_ref keep_alive() const { return links_ ? links_->keep_alive : detail::object_ref(); }
+            bool has_keep_alive() const noexcept { return links_ && links_->keep_alive; }
+            std::shared_ptr<void> lock_weak_data() const { return links_ ? links_->weak_data.lock() : nullptr; }
+            void set_keep_alive(detail::object_ref pin) {
+                if (pin || links_) { host().keep_alive = std::move(pin); }
+            }
+            void set_weak_data(std::weak_ptr<void> object) { host().weak_data = std::move(object); }
 
         private:
-            engine* owner_ = nullptr;   // the engine that made this object (after the hot fields): copies and class lookups run against it
-        public:
             // The non-owning forms' anchors, boxed so an owning object pays one pointer. weak_data: an extended object's
             // native object (internal/script_extensible.md), reachable weakly so shared_ptr extraction can still hand out
             // ownership while it lives. keep_alive: a non-owning reference's receiver (a C++ method returning a reference
-            // into it, `return *this`), pinned without taking part in extraction (bound_ptr stays the target).
+            // into it, `return *this`), pinned without taking part in extraction (the bound object stays the target).
             struct host_links {
                 std::weak_ptr<void> weak_data;
                 detail::object_ref keep_alive;
             };
-            std::unique_ptr<host_links> links;
-            detail::object_ref keep_alive() const { return links ? links->keep_alive : detail::object_ref(); }
-            bool has_keep_alive() const noexcept { return links && links->keep_alive; }
-            std::shared_ptr<void> lock_weak_data() const { return links ? links->weak_data.lock() : nullptr; }
-            void set_keep_alive(detail::object_ref pin) {
-                if (pin || links) { host().keep_alive = std::move(pin); }
-            }
-            void set_weak_data(std::weak_ptr<void> object) { host().weak_data = std::move(object); }
             host_links& host() {
-                if (!links) { links = std::make_unique<host_links>(); }
-                return *links;
+                if (!links_) { links_ = std::make_unique<host_links>(); }
+                return *links_;
             }
+
+            std::string_view type_name_;      // the type's name: the engine's interned text or a literal (never an owned string)
+            uint64_t type_id_ = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
+            detail::object_ref data_;        // The actual object: a bound C++ object, or a class instance
+            bool is_coroutine_handle_ = false;
+            void* bound_ptr_ = nullptr;
+            engine* owner_ = nullptr;   // the engine that made this object (after the hot fields): copies and class lookups run against it
+            std::unique_ptr<host_links> links_;
         };
 
 	private:

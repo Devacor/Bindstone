@@ -355,7 +355,7 @@ namespace jai::detail {
         const auto holder = v.get_object_holder();
         if (!holder) { return nullptr; }
         if (holder->holds_object()) { return holder->object(); }
-        if (holder->bound_ptr) { return holder->bound_ptr; }
+        if (holder->bound_object()) { return holder->bound_object(); }
         return holder.get();
     }
 

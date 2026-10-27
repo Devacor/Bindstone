@@ -15,7 +15,7 @@ inline const script_value::object_holder* host_member_stored(const class_instanc
 	if (!native || native->raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
 	const auto& holder = native->unchecked_object_handle();
 	if (!holder) { return nullptr; }
-	stored = holder->holds_object() ? holder->object() : holder->bound_ptr;
+	stored = holder->holds_object() ? holder->object() : holder->bound_object();
 	return stored ? holder.get() : nullptr;
 }
 

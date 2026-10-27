@@ -2590,7 +2590,7 @@ void engine::initialize_engine_reference() {
                 // shared_ptr extraction path upgrades it through engine_lock_instance_cpp_object).
                 auto objHolder = cppObjValue.get_object_holder();
                 if (objHolder->holds_object()) { return objHolder->host_object(); }
-                if (objHolder->bound_ptr) { return std::shared_ptr<void>(std::shared_ptr<void>(), objHolder->bound_ptr); }
+                if (objHolder->bound_object()) { return std::shared_ptr<void>(std::shared_ptr<void>(), objHolder->bound_object()); }
             }
         }
         return nullptr;
@@ -6696,7 +6696,7 @@ std::string engine::detach_object(const strong_ptr<class_instance>& layer) {
     script_value owning = *layer->native();
     auto holder = owning.get_object_holder();
     if (!holder) { return fields; }
-    void* object = holder->holds_object() ? holder->object() : holder->bound_ptr;
+    void* object = holder->holds_object() ? holder->object() : holder->bound_object();
     if (!object) { return fields; }
     auto class_def = layer->get_class_definition();
     auto base = class_def ? class_def->find_cpp_base_class() : nullptr;

@@ -64,10 +64,10 @@ checked_result<void*> checked_native_reference(const script_value& value, const 
 			return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch), "Object type mismatch");
 		}
 		return checked_native_pointer(holder->owner(), native_holder->type_id(), target, target_id,
-			native_holder->holds_object() ? native_holder->object() : native_holder->bound_ptr);
+			native_holder->holds_object() ? native_holder->object() : native_holder->bound_object());
 	}
 	return checked_native_pointer(holder->owner(), holder->type_id(), target, target_id,
-		holder->holds_object() ? holder->object() : holder->bound_ptr);
+		holder->holds_object() ? holder->object() : holder->bound_object());
 }
 
 void* lane_object_pointer(const script_value& value, const std::type_info& target) {
@@ -120,7 +120,7 @@ checked_result<std::shared_ptr<void>> checked_native_object(engine* eng, const s
 		return checked_native_object(eng, *native_holder, target, target_id);
 	}
 	std::shared_ptr<void> owner = holder.host_object();
-	if (!owner && holder.bound_ptr) {
+	if (!owner && holder.bound_object()) {
 		owner = holder.lock_weak_data();
 		if (!owner) {
 			return checked_result<std::shared_ptr<void>>(make_error_code(runtime_error_code::type_mismatch),

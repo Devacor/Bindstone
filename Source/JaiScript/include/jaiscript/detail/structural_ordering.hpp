@@ -179,7 +179,7 @@ namespace jai::detail {
 		if (a_left.is_function() && a_right.is_function()) { return result(order_sign(a_left <=> a_right)); }
 		if (a_left.is_object() && a_right.is_object()) {
 			const auto left = a_left.get_object_holder(), right = a_right.get_object_holder();
-			if (left && right && left->is_coroutine_handle && right->is_coroutine_handle) { return result(order_sign(a_left <=> a_right)); }
+			if (left && right && left->is_coroutine_handle() && right->is_coroutine_handle()) { return result(order_sign(a_left <=> a_right)); }
 		}
 		if (a_left.is_shared_ptr_type() && a_right.is_shared_ptr_type()) { return result(order_sign(a_left <=> a_right)); }
 		if (a_left.is_weak_ptr() && a_right.is_weak_ptr()) {

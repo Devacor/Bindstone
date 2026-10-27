@@ -1001,7 +1001,7 @@ script_value script_value::make_coroutine_handle(uint64_t type_id, std::shared_p
     auto obj = acquire_object_holder(eng);
     obj->set_type(interned_type_text(eng, "coroutine_handle", type_id), type_id);
     obj->hold(std::move(handle));
-    obj->is_coroutine_handle = true;
+    obj->mark_coroutine_handle();
     v.storage_ = obj;
     return v;
 }
@@ -1042,7 +1042,7 @@ script_value script_value::make_cpp_reference(std::string_view type_name, uint64
     v.set_stamp(class_def->get_type_info());
     auto obj = acquire_object_holder(eng);
     obj->set_type(interned_type_text(eng, type_name, type_id), type_id);
-    obj->bound_ptr = object;
+    obj->bind_object(object);
     obj->set_weak_data(std::move(owner));
     v.storage_ = obj;
     return v;
@@ -1236,7 +1236,7 @@ script_value script_value::make_referent_reference(const script_value& handle, e
         throw runtime_error("Cannot create reference: null engine pointer");
     }
     auto holder = handle.get_object_holder();
-    if (!holder || !holder->bound_ptr) {
+    if (!holder || !holder->bound_object()) {
         throw runtime_error("Cannot create reference to null");
     }
     script_value v(std::monostate{}, eng);
@@ -1247,7 +1247,7 @@ script_value script_value::make_referent_reference(const script_value& handle, e
     ref->property->receiver_tag = handle.get_type_info();
     ref->property->object_pin = holder->keep_alive();
     ref->property->live_member = true;
-    ref->property->referent = holder->bound_ptr;
+    ref->property->referent = holder->bound_object();
     ref->property->referent_class = holder->type_id() != UINT64_MAX ? eng->get_class_definition(holder->type_id()).get() : nullptr;
     new (ref->cell_storage) script_value(handle);
     v.storage_ = ref;
@@ -1646,7 +1646,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             // every copy shares it (field stores, aliases, params, containers all see
             // the same resume/done state). Deep-copying a suspended coroutine is
             // meaningless - this is the ruled reference-semantics-on-copy design.
-            if (obj_holder->is_coroutine_handle) {
+            if (obj_holder->is_coroutine_handle()) {
                 return *this;
             }
 
@@ -1665,7 +1665,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                         // cpp_bound references own nothing (data null) - the live object is
                         // bound_ptr. Deep copy from it and drop the binding so the
                         // clone is an independent owned object, not an alias.
-                        const void* copy_src = obj_holder->holds_object() ? obj_holder->object() : obj_holder->bound_ptr;
+                        const void* copy_src = obj_holder->holds_object() ? obj_holder->object() : obj_holder->bound_object();
                         auto new_cpp_obj = copy_src ? class_def->copy_object(copy_src) : nullptr;
                         if (new_cpp_obj) {
                             auto new_holder = acquire_object_holder(owner);

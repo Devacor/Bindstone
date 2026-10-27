@@ -88,7 +88,7 @@ class engine;
                 } else if constexpr (std::is_class_v<T> && !std::is_same_v<T, std::string>) {
                     if (v.is_object()) {
                         // a borrowed object has no owner to share: copy it without the shared attempt's throw
-                        if (const auto* holder = v.peek_object_holder(); holder && holder->bound_ptr && !holder->holds_object()) {
+                        if (const auto* holder = v.peek_object_holder(); holder && holder->bound_object() && !holder->holds_object()) {
                             return v.as<T>();
                         }
                         try {

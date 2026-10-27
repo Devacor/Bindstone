@@ -199,6 +199,7 @@ inline class_definition::class_definition(std::string_view name, uint64_t type_i
 
 inline void class_definition::bump_method_epoch() {
     ++method_epoch_;
+    detail::note_class_layout_change(engine_);
     for (auto& weak_derived : derived_classes_) {
         if (auto derived = weak_derived.lock()) {
             derived->bump_method_epoch();
@@ -208,6 +209,7 @@ inline void class_definition::bump_method_epoch() {
 
 inline void class_definition::bump_field_shape_epoch() {
     ++field_shape_epoch_;
+    detail::note_class_layout_change(engine_);
     if (field_slots_current_.load(std::memory_order_acquire)) { rebuild_declared_slot_types(); }   // a definition's thread, between regions
     for (auto& weak_derived : derived_classes_) {
         if (auto derived = weak_derived.lock()) {

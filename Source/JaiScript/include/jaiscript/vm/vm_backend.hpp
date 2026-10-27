@@ -634,6 +634,11 @@ namespace jai::vm {
             const chunk* env_table_code = nullptr;
             env_lookup_cache_entry* env_table = nullptr;
             const script_defined_function::converted_captures* captures = nullptr;   // the running converted closure's (op_bind_captures)
+            // a member-class body's receiver whose class lays the body's fields out at the compiled slots (bind_member_layout), under
+            // the engine's layout generation this_gen; null: the body's bare names take the general reads
+            class_instance* this_inst = nullptr;
+            const class_definition* this_cd = nullptr;
+            uint64_t this_gen = 0;
         };
         // a byte per cell: a cell store marks its cell with one byte write, so consecutive stores carry no read-modify-write chain
         struct cell_dirty {
@@ -2488,6 +2493,19 @@ namespace jai::vm {
         bool inline_forward_callees_hold(const chunk::inline_site& site);
         bool inline_method_verdict(const chunk::inline_site& site, const class_definition* cd);
         bool comparison_free(const script_value& v);
+        const uint64_t* layout_gen_ = nullptr;   // engine::layout_generation
+        void bind_member_layout(frame& f, const chunk& body);
+        bool member_layout_same(const chunk& body, const class_definition* cd);
+        // a member-class body's bare field at slot + 1 `s`: the receiver's cell, while the frame's layout holds (no class anywhere
+        // changed methods or field shape, the receiver still has its class); null sends the read to the general ladder
+        JAI_FORCEINLINE script_value* frame_this_field(const frame& f, uint32_t s) const noexcept {
+            if (!f.this_inst || f.this_gen != *layout_gen_ || f.this_inst->get_class_definition() != f.this_cd) { return nullptr; }
+            return f.this_inst->field_slot_value(s - 1);
+        }
+        static uint32_t this_field_slot_at(const frame& f) noexcept {
+            const auto& t = f.code->this_field_slots;
+            return f.ip < t.size() ? t[f.ip] : 0;
+        }
         bool handle_admits(const script_value& v, const type_info_ptr& declared);
         struct handle_admits_row { const class_definition* cd = nullptr; const type_info* tag = nullptr; const type_info* declared = nullptr; uint64_t epoch = 0; bool admits = false; };
         static constexpr size_t k_handle_admits_rows = 8;

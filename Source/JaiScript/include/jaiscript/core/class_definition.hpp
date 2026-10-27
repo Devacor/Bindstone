@@ -26,6 +26,7 @@ namespace jai {
 enum class serial_overloads : uint8_t { non_const, every };
 
 namespace detail {
+void note_class_layout_change(engine* eng) noexcept;   // engine::bump_layout_generation for a class's engine (defined in engine.cpp)
 struct fault_injection;
 struct host_member_lane;
 struct slot_site;

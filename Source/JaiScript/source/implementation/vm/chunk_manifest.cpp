@@ -56,7 +56,8 @@ namespace {
 		}
 		std::string operand(const chunk& ch, const fused_operand& o) const {
 			std::string r = "{slot=" + u(o.slot) + " sym=" + symidx(ch, o.symbol) + " const=" + u(o.const_index) + " flags=" + std::to_string(o.load_flags) +
-			                " ident=" + u(o.ident_node) + " member=" + u(o.member_node) + " direct=" + b(o.direct);
+			                " ident=" + u(o.ident_node) + " member=" + u(o.member_node) + " direct=" + b(o.direct) +
+			                (o.this_slot ? " this_slot=" + std::to_string(o.this_slot - 1) : std::string());
 			if (o.is_subscript()) {
 				r += " chain=[";
 				for (const auto& s : o.subscript_chain) {
@@ -78,6 +79,7 @@ namespace {
 				out << pre << " " << i << " " << ins(ch.code[i]);
 				if (i < ch.stmt_nodes.size()) { out << " stmt=" << node(ch.stmt_nodes[i]); }
 				if (i < ch.ident_nodes.size()) { out << " ident=" << u(ch.ident_nodes[i]); }
+				if (i < ch.this_field_slots.size() && ch.this_field_slots[i]) { out << " this_slot=" << (ch.this_field_slots[i] - 1); }
 				out << "\n";
 			}
 			out << pre << "constants " << ch.constants.size() << "\n";

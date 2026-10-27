@@ -280,6 +280,7 @@ vm_backend::vm_backend(string_symbolizer* symbolizer, std::shared_ptr<environmen
 
 void vm_backend::set_engine_reference(engine* engine_ref) {
 	engine_ = engine_ref;
+	layout_gen_ = engine_ ? engine_->layout_generation() : nullptr;
 	if (engine_) {
 #ifdef JAISCRIPT_VM_COVERAGE
 		engine_->vm_coverage_adopt(coverage_);
@@ -1922,6 +1923,43 @@ bool vm_backend::handle_admits(const script_value& v, const type_info_ptr& decla
 	return admits;
 }
 
+// the receiver's class lays out every field the member-class body addresses at the compiled slot, and resolves each such bare name to that
+// field (no method, getter, user accessor or static of the name, the declaration the body's class sees): remembered per class at its field
+// shape and method epochs
+bool vm_backend::member_layout_same(const chunk& body, const class_definition* cd) {
+	const uint64_t shape = cd->field_shape_epoch(), methods = cd->method_epoch();
+	for (const chunk::member_layout_row& row : body.member_layout_rows) {
+		if (row.cd == cd && row.shape == shape && row.methods == methods) { return row.same; }
+	}
+	const auto cpp_base = cd->find_cpp_base_class();
+	bool same = cd->is_script_class() && !cd->chain_has_nonpublic() && (cd == body.member_class || cd->derives_from(body.member_class));
+	for (size_t i = 0; same && i < body.this_field_uses.size(); ++i) {
+		const auto [id, slot] = body.this_field_uses[i];
+		same = cd->field_slot(id) == slot && !cd->slot_is_cpp_property(slot) && cd->get_method(id, false).is_invalid() &&
+		       cd->find_field_declaring_class(id) == body.member_class->find_field_declaring_class(id) &&
+		       !cd->user_accessor(symbolizer_->get_getter_id_with_view(id).first) && !cd->user_accessor(symbolizer_->get_setter_id_with_view(id).first) &&
+		       !const_cast<class_definition*>(cd)->find_static_field_in_chain(id) && !const_cast<class_definition*>(cd)->find_static_method_in_chain(id) &&
+		       !(cpp_base && cpp_base->get_property_setter_id(id) != 0);   // a hybrid's C++ setter takes the name's stores
+	}
+	chunk::member_layout_row& row = body.member_layout_rows[body.member_layout_next];
+	body.member_layout_next = static_cast<uint8_t>((body.member_layout_next + 1) % chunk::k_member_layout_rows);
+	row = chunk::member_layout_row{cd, shape, methods, same};
+	return same;
+}
+
+// a lazy method frame's receiver, once per call: the body's bare fields read straight from it while the layout holds
+void vm_backend::bind_member_layout(frame& f, const chunk& body) {
+	f.this_inst = nullptr;
+	if (parallel_worker_ || !layout_gen_ || !f.locals || !f.locals->this_object_ptr) { return; }
+	class_instance* inst = f.locals->this_object_ptr->peek_class_instance();
+	if (!inst || inst->has_user_overflow_fields()) { return; }
+	const class_definition* cd = inst->get_class_definition();
+	if (!cd || !member_layout_same(body, cd)) { return; }
+	f.this_inst = inst;
+	f.this_cd = cd;
+	f.this_gen = *layout_gen_;
+}
+
 bool vm_backend::comparison_free(const script_value& v) {
 	if (parallel_worker_) { return false; }
 	class_instance* inst = v.peek_class_instance();
@@ -3254,6 +3292,14 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 			return {};
 		}
 	}
+	if (f.this_inst) {
+		if (const uint32_t this_slot = this_field_slot_at(f)) {
+			if (script_value* cell = frame_this_field(f, this_slot)) {
+				stack_.push_back(*cell);
+				return {};
+			}
+		}
+	}
 	// This-field IC: serial-guarded walk-miss proof, checked BEFORE the env cache — the
 	// push copy is byte-identical to the armed fallback below (see fused_ident_value's
 	// twin for the ordering argument)
@@ -3736,7 +3782,17 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 	// cell, texts included (KEEP BYTE-PARALLEL with the this-field landing below).
 	if (!(ins.c & store_flag_global_only) && f.locals && !f.top_level) {
 		type_info* ic_declared = nullptr;
-		if (script_value* cell = this_field_store_probe(f, f.ip * 3, sym, ic_declared)) {
+		script_value* cell = nullptr;
+		// a member-class body's bare field: the receiver's cell at the compiled slot under the frame's layout (the field IC's store
+		// below, its facts read from the class instead of the site row)
+		if (const uint32_t this_slot = f.this_inst ? this_field_slot_at(f) : 0) {
+			if ((cell = frame_this_field(f, this_slot)) && !detail::field_slot_holds_object(f.this_inst, this_slot - 1)) {
+				ic_declared = f.this_cd->field_declared_type_at(this_slot - 1, sym).get();
+			} else {
+				cell = nullptr;
+			}
+		}
+		if (cell || (cell = this_field_store_probe(f, f.ip * 3, sym, ic_declared))) {
 			if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 				value = value.detached_for_store();
 			}
@@ -3751,7 +3807,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			}
 			if (declared && declared->base_type != script_value_type::jai_any_type) {
 				auto converted = detail::field_store_convert(incoming, declared, engine_, sym,
-					static_cast<const class_definition*>((*frame_lookup_rows(f))[f.ip * 3].this_field_class));
+					f.this_inst ? f.this_cd : static_cast<const class_definition*>((*frame_lookup_rows(f))[f.ip * 3].this_field_class));
 				if (!converted) {
 					return raise_from(converted);
 				}
@@ -5043,6 +5099,12 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 			return &scratch.value();
 		}
 	}
+	if (operand.this_slot && f.this_inst) {
+		if (script_value* cell = frame_this_field(f, operand.this_slot)) {
+			scratch.emplace(*cell);   // the field IC's copy, below
+			return &scratch.value();
+		}
+	}
 	// This-field IC: serial-guarded walk-miss proof (see this_field_ic_probe), checked
 	// BEFORE the env cache — an unchanged serial proves the whole chain unchanged since
 	// a full walk missed here, so the cache could only re-miss (its hits are chain
@@ -6026,6 +6088,9 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 			return &local->deref();
 		}
 		return nullptr;
+	}
+	if (operand.this_slot && f.this_inst) {
+		if (script_value* cell = frame_this_field(f, operand.this_slot)) { return cell; }
 	}
 	// the lookup cache's armed head, where no member scope of the frame can take the name: env_lookup_cached's answer without its calls
 	if (cached_global_env_ && cache_slot < f.code->env_lookup_cache.size() && (!f.locals || f.top_level || (f.locals->scope_state != 0 && !frame_scope_active(f)))) {
@@ -23782,7 +23847,9 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 		if (dispatch.body_cache_key == ast->body.get()) {
 			body_chunk = static_cast<chunk*>(dispatch.body_cache.get());
 		} else {
+			compiler_.member_class(dispatch.cls.get());
 			auto compiled = chunk_for_body(ast->name, ast->parameters, ast->body, ast->local_count, ast->unit);
+			compiler_.member_class(nullptr);
 			dispatch.body_cache = compiled;
 			dispatch.body_cache_key = ast->body.get();
 			body_chunk = compiled.get();
@@ -23909,6 +23976,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 	rec.f.unit = ast->unit;
 	enter_unit(ast->unit);
 	enter_frame(rec.f);   // before binding: the ref-param frames_ scan must see this frame
+	if (body_chunk->member_class && rec.env_lazy) { bind_member_layout(rec.f, *body_chunk); } else { rec.f.this_inst = nullptr; }
 	JAI_MPUSH_SECTION(3);
 
 	if (!method_binds_in_place(*rec.ast, stack_.data() + args_base, argc)) {
@@ -23960,7 +24028,9 @@ op_status vm_backend::push_method_frame(frame& caller, const script_value& metho
 		if (dispatch.body_cache_key == ast->body.get()) {
 			body_chunk = static_cast<chunk*>(dispatch.body_cache.get());
 		} else {
+			compiler_.member_class(dispatch.cls.get());
 			auto compiled = chunk_for_body(ast->name, ast->parameters, ast->body, ast->local_count, ast->unit);
+			compiler_.member_class(nullptr);
 			dispatch.body_cache = compiled;
 			dispatch.body_cache_key = ast->body.get();
 			body_chunk = compiled.get();
@@ -24311,6 +24381,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	rec.ctor_result_stamp = nullptr;
 	rec.ctor_frame = false;
 	rec.f.code = nullptr;   // record frames borrow the chunk (chunk_cache_ pins it), no f.pin
+	rec.f.this_inst = nullptr;
 	rec.raw_prepared = nullptr;
 	--current_call_depth_;
 	frames_.pop_back();

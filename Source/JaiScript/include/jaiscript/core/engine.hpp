@@ -1152,6 +1152,10 @@ namespace jai {
         // per-class epochs cannot see containment.
         uint64_t class_definition_epoch() const;
         void bump_class_definition_epoch();
+        // moves whenever any class's methods or field shape change: a frame that addresses its receiver's fields by slot (the vm's
+        // member-class bodies) took its receiver's layout under one value and drops back to the general reads under any other
+        const uint64_t* layout_generation() const noexcept;
+        void bump_layout_generation() noexcept;
         // Monotonic counter bumped whenever the set of definitions a call could resolve
         // against changes (every top-level run, every function/class/global (re)definition,
         // every host registration). Cross-function proofs cache against it.

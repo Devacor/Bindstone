@@ -39,6 +39,8 @@ namespace jai::vm {
         void reference(bool on) { reference_ = on; inlining_off_ = on; if (on) { typed_lowering_ = false; ir_passes_ = false; } }
         // the stdlib math aliases a bare call may lower to (engine::register_math_alias)
         void math_aliases(const engine* e) { engine_ = e; }
+        // the declaring class of the next method body compile_callable compiles (null: not a method body)
+        void member_class(const class_definition* cls) { member_class_ = cls; }
 
         // program_frame: the chunk runs in a program frame with a window (vm_backend::run_program), so its block-scoped declarations take slots
         std::shared_ptr<chunk> compile_program(const std::vector<declaration_ptr>& declarations, bool program_frame = false);
@@ -110,6 +112,9 @@ namespace jai::vm {
         string_symbolizer* symbolizer_;
         const builtin_method_registries* builtins_ = nullptr;   // compile-time bi_* fill
         const engine* engine_ = nullptr;
+        const class_definition* member_class_ = nullptr;
+        uint32_t this_field_slot_of(const identifier_expr* ident);
+        void note_this_field(size_t ip, const identifier_expr* ident);
         // Scope exits destroy the frame-slot locals that may own a script destructor (C++ lifetimes): one scope per block,
         // case body, for initializer and range-for iteration, its slots killed in reverse at its close and by the jumps that
         // leave it; a catch entry kills what its try block declared

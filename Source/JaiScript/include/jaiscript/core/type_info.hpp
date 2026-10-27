@@ -29,6 +29,29 @@ namespace jai {
         }
     }
     constexpr bool is_math_type(script_value_type kind) noexcept { return math_type_name(kind) != nullptr; }
+
+    // A base type's script spelling in diagnostics
+    inline constexpr std::string_view base_type_spelling(script_value_type type) {
+        switch (type) {
+            case script_value_type::jai_null_type: return "null";
+            case script_value_type::jai_int_type: return "int";
+            case script_value_type::jai_float_type: return "float";
+            case script_value_type::jai_string_type: return "string";
+            case script_value_type::jai_utf8_string_type: return "utf8_string";
+            case script_value_type::jai_char_type: return "char";
+            case script_value_type::jai_bool_type: return "bool";
+            case script_value_type::jai_array_type: return "array";
+            case script_value_type::jai_map_type: return "map";
+            case script_value_type::jai_object_type: return "object";
+            case script_value_type::jai_function_type: return "function";
+            case script_value_type::jai_reference_type: return "reference";
+            case script_value_type::jai_shared_ptr_type: return "shared_ptr";
+            case script_value_type::jai_weak_ptr_type: return "weak_ptr";
+            case script_value_type::jai_any_type: return "any";
+            case script_value_type::jai_invalid_type: return "invalid";
+            default: return math_type_name(type) ? math_type_name(type) : "unknown";
+        }
+    }
     // The math kind a fused type token names ("math::vec3", lexer.cpp); jai_null_type for any other spelling
     constexpr script_value_type math_type_from_name(std::string_view name) noexcept {
         if (name == "math::vec2") return script_value_type::jai_vec2_type;

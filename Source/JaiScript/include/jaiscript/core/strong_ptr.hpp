@@ -56,11 +56,12 @@ struct control_block_base {
 #ifdef JAISCRIPT_DIAG_ATOMIC_RC
     // Diagnostic build: atomic counts. If a flaky corruption VANISHES under this flag,
     // it is a cross-thread refcount race; if it persists, look for a wild write.
-    std::atomic<size_t> strong_count{1};
-    std::atomic<size_t> weak_count{1};
+    std::atomic<uint32_t> strong_count{1};
+    std::atomic<uint32_t> weak_count{1};
 #else
-    size_t strong_count = 1;
-    size_t weak_count = 1;  // Strong family's collective weak ref prevents premature CB deletion
+    // 32 bits: four billion handles to one block would take 64 GB of values (overflow asserts in Debug)
+    uint32_t strong_count = 1;
+    uint32_t weak_count = 1;  // Strong family's collective weak ref prevents premature CB deletion
 #endif
     void (*dealloc_fn)(control_block_base*) = nullptr;
 #ifndef NDEBUG
@@ -80,17 +81,20 @@ struct control_block_base {
     control_block_base& operator=(const control_block_base&) = delete;
 
 #ifdef JAISCRIPT_DIAG_XTHREAD_RC
-    void add_strong() noexcept { diag_check(); ++strong_count; }
-    bool release_strong() noexcept { diag_check(); return --strong_count == 0; }
+    void add_strong() noexcept { diag_check(); assert(strong_count != UINT32_MAX && "strong count overflow"); ++strong_count; }
+    uint32_t drop_strong() noexcept { diag_check(); return --strong_count; }
 #else
-    void add_strong() noexcept { ++strong_count; }
-    bool release_strong() noexcept { return --strong_count == 0; }
+    void add_strong() noexcept { assert(strong_count != UINT32_MAX && "strong count overflow"); ++strong_count; }
+    // The count left after a drop; callers test it against 0 themselves, which MSVC folds into one flag-setting decrement
+    // (a bool compare returned from here compiles to a load, a store and a compare)
+    uint32_t drop_strong() noexcept { return --strong_count; }
 #endif
-    void add_weak() noexcept { ++weak_count; }
-    bool release_weak() noexcept { return --weak_count == 0 && strong_count == 0; }
+    void add_weak() noexcept { assert(weak_count != UINT32_MAX && "weak count overflow"); ++weak_count; }
+    uint32_t drop_weak() noexcept { return --weak_count; }
 
     bool try_add_strong() noexcept {
         if (strong_count == 0) return false;
+        assert(strong_count != UINT32_MAX && "strong count overflow");
         ++strong_count;
         return true;
     }
@@ -172,7 +176,7 @@ struct strong_last_release {
             T::last_release(object, cb);
         } else {
             object->~T();
-            if (cb->release_weak()) { cb->dealloc_fn(cb); }
+            if (cb->drop_weak() == 0 && cb->strong_count == 0) { cb->dealloc_fn(cb); }
         }
     }
 };
@@ -255,7 +259,7 @@ public:
 
         // Derive from the local: ~T() never changes the address, and the memory is
         // still allocated because this handle held live strong+weak counts.
-        if (local_ptr && detail::cb_from_object(local_ptr)->release_strong()) {
+        if (local_ptr && detail::cb_from_object(local_ptr)->drop_strong() == 0) {
             destroy_last(local_ptr);
         }
     }
@@ -413,7 +417,7 @@ public:
 
         if (local_ptr) {
             auto* local_cb = detail::cb_from_object(local_ptr);
-            if (local_cb->release_weak()) {
+            if (local_cb->drop_weak() == 0 && local_cb->strong_count == 0) {
                 local_cb->dealloc_fn(local_cb);
             }
         }

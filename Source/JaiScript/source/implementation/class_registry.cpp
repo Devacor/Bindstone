@@ -376,7 +376,7 @@ void class_instance::release_orphan_fields() noexcept {
 namespace detail {
 
 void strong_last_release<class_instance>::run(class_instance* object, control_block_base* cb) noexcept {
-    if (std::shared_ptr<class_definition>* pin = object_block_head::of_control_block(cb)->definition_pin(); pin && *pin) {
+    if (std::shared_ptr<class_definition>* pin = object_block::definition_pin(cb); pin && *pin) {
         instance_deleter{std::move(*pin)}(object);
         return;
     }

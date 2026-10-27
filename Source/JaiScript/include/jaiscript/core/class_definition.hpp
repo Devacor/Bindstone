@@ -45,29 +45,18 @@ namespace detail {
         std::shared_ptr<class_definition> def;
         void operator()(class_instance* ptr) const noexcept;
     };
-    // The object block (internal/object_layout.md): a destructor class's pin on its definition, the head (how far the block's
-    // memory starts before it), the instance's strong_ptr control block and instance (an object value's holder itself), then the
-    // cells. The strong family's last weak reference frees the block.
-    struct object_block_head {
-        uint32_t prefix = 0;   // bytes before the head: the definition pin of a destructor class's instance
-        uint32_t reserved = 0;
-        static constexpr size_t size = 8;
-        static constexpr size_t pin_bytes = (sizeof(std::shared_ptr<class_definition>) + 15) & ~size_t{15};
-        std::byte* memory() noexcept { return reinterpret_cast<std::byte*>(this) - prefix; }
-        static void release(object_block_head* head) noexcept {
-            std::byte* memory = head->memory();
-            if (head->prefix) { reinterpret_cast<std::shared_ptr<class_definition>*>(memory)->~shared_ptr(); }
-            head->~object_block_head();
-            ::operator delete(memory);
-        }
-        static object_block_head* of_control_block(control_block_base* cb) noexcept {
-            return reinterpret_cast<object_block_head*>(reinterpret_cast<std::byte*>(cb) - size);
-        }
-        std::shared_ptr<class_definition>* definition_pin() noexcept {
-            return prefix ? reinterpret_cast<std::shared_ptr<class_definition>*>(memory()) : nullptr;
+    // The object block (internal/object_layout.md): a destructor class's pin on its definition, the instance's strong_ptr
+    // control block and instance (an object value's holder itself), then the cells. The strong family's last weak reference
+    // frees the block through one of two deallocators, and which one it is says whether the pin is there.
+    struct object_block {
+        static constexpr size_t pin_bytes = sizeof(std::shared_ptr<class_definition>);
+        inline static void release(control_block_base* cb) noexcept;
+        inline static void release_pinned(control_block_base* cb) noexcept;
+        static std::shared_ptr<class_definition>* definition_pin(control_block_base* cb) noexcept {
+            return cb->dealloc_fn == &release_pinned
+                ? reinterpret_cast<std::shared_ptr<class_definition>*>(reinterpret_cast<std::byte*>(cb) - pin_bytes) : nullptr;
         }
     };
-    static_assert(sizeof(object_block_head) == object_block_head::size, "the control block follows the head");
 }
 
 namespace detail {
@@ -100,7 +89,7 @@ class class_definition;
 // points at it as its holder (script_value::object_holder at offset 0)
 class alignas(8) class_instance : public script_value::object_holder {
 public:
-    // An instance in its own object block (detail::object_block_head), owned by strong_ptr; a destructor_owner arms the
+    // An instance in its own object block (detail::object_block), owned by strong_ptr; a destructor_owner arms the
     // instance's destructor chain and pins the definition until the instance dies
     inline static strong_ptr<class_instance> make(std::string_view interned, engine* eng, uint32_t slots = 0,
                                                   class_definition* destructor_owner = nullptr);
@@ -344,8 +333,8 @@ private:
         }
         uintptr_t bits = 0;
     };
-    // The slot table: the implicit table over the instance's trailing cells, or a heap table once something re-seats a slot.
-    // Sixteen bytes, so the class pointer and the table share the instance's first line with its holder
+    // The slot table in one word: the trailing cells' count, low bit set, while implicit (slot i sits a fixed distance past the
+    // instance's end, which is this word's end), else a heap table (size, capacity, one cell pointer per slot)
     class field_table {
     public:
         field_table() = default;
@@ -353,14 +342,16 @@ private:
         field_table& operator=(const field_table&) = delete;
         ~field_table() {
             clear();
-            if (heap()) { ::operator delete(static_cast<void*>(table())); }
+            if (heap()) { ::operator delete(static_cast<void*>(header())); }
         }
-        // The implicit table (internal/object_layout.md): slot i's cell is arena[i], constructed (raw-invalid while absent) for
-        // the instance's life; no word per slot until something re-seats a slot, which materializes the table over the same cells
-        void adopt_implicit(script_value* arena, uint32_t slots) noexcept { bits_ = reinterpret_cast<uintptr_t>(arena) | k_implicit; size_ = slots; }
-        bool implicit() const noexcept { return (bits_ & k_implicit) != 0; }
+        // The implicit table (internal/object_layout.md): slot i's cell is the i-th trailing cell, constructed (raw-invalid while
+        // absent) for the instance's life; no word per slot until something re-seats a slot, which materializes the table over
+        // the same cells
+        void adopt_implicit(uint32_t slots) noexcept { word_ = (static_cast<uintptr_t>(slots) << 1) | k_implicit; }
+        script_value* trailing() const noexcept { return reinterpret_cast<script_value*>(const_cast<field_table*>(this) + 1); }
+        bool implicit() const noexcept { return (word_ & k_implicit) != 0; }
         // slot i's cell (null: none); an implicit slot's cell always exists, raw-invalid while the field is absent
-        script_value* cell(size_t i) const noexcept { return implicit() ? cells() + i : table()[i].get(); }
+        script_value* cell(size_t i) const noexcept { return implicit() ? trailing() + i : table()[i].get(); }
         // slot i's cell when the field is present in it as the table form reads presence (null pointer or raw-invalid pointee)
         script_value* present_cell(size_t i) const noexcept {
             script_value* c = cell(i);
@@ -368,56 +359,79 @@ private:
         }
         void materialize() const {
             if (!implicit()) { return; }
-            script_value* arena = cells();
-            auto* fresh = static_cast<field_cell*>(::operator new((size_ ? size_ : 1) * sizeof(field_cell)));
-            for (uint32_t i = 0; i < size_; ++i) { new (&fresh[i]) field_cell(arena + i, false); }
-            bits_ = reinterpret_cast<uintptr_t>(fresh);
-            cap_ = size_;
+            const uint32_t n = static_cast<uint32_t>(word_ >> 1);
+            script_value* arena = trailing();
+            heap_header* fresh = allocate(n);
+            fresh->size = n;
+            for (uint32_t i = 0; i < n; ++i) { new (&fresh->cells()[i]) field_cell(arena + i, false); }
+            word_ = reinterpret_cast<uintptr_t>(fresh);
         }
-        size_t size() const noexcept { return size_; }
-        bool empty() const noexcept { return size_ == 0; }
+        size_t size() const noexcept { return implicit() ? static_cast<size_t>(word_ >> 1) : (word_ ? header()->size : 0); }
+        bool empty() const noexcept { return size() == 0; }
         field_cell& operator[](size_t i) { materialize(); return table()[i]; }
         const field_cell& operator[](size_t i) const { materialize(); return table()[i]; }
         field_cell* begin() { materialize(); return table(); }
-        field_cell* end() { materialize(); return table() + size_; }
+        field_cell* end() { materialize(); return table() + size(); }
         const field_cell* begin() const { materialize(); return table(); }
-        const field_cell* end() const { materialize(); return table() + size_; }
+        const field_cell* end() const { materialize(); return table() + size(); }
         void resize(size_t n) {
             materialize();
-            if (n > cap_) { grow(n); }
-            for (size_t i = size_; i < n; ++i) { new (&table()[i]) field_cell(); }
-            while (size_ > n) { table()[--size_].~field_cell(); }
-            size_ = static_cast<uint32_t>(n);
+            const uint32_t held = static_cast<uint32_t>(size());
+            if (n > (word_ ? header()->cap : 0)) { grow(n); }
+            if (!word_) { return; }
+            field_cell* cells = table();
+            for (size_t i = held; i < n; ++i) { new (&cells[i]) field_cell(); }
+            for (size_t i = held; i > n;) { cells[--i].~field_cell(); }
+            header()->size = static_cast<uint32_t>(n);
         }
         void pop_back() noexcept {
-            if (implicit()) { cells()[--size_].~script_value(); return; }
-            table()[--size_].~field_cell();
+            if (implicit()) {
+                word_ -= uintptr_t{2};
+                trailing()[word_ >> 1].~script_value();
+                return;
+            }
+            table()[--header()->size].~field_cell();
         }
         void clear() noexcept {
-            const uint32_t n = size_;
-            size_ = 0;
-            if (implicit()) { for (uint32_t i = 0; i < n; ++i) { cells()[i].~script_value(); } return; }
+            if (implicit()) {
+                const uint32_t n = static_cast<uint32_t>(word_ >> 1);
+                word_ = k_implicit;
+                for (uint32_t i = 0; i < n; ++i) { trailing()[i].~script_value(); }
+                return;
+            }
+            if (!word_) { return; }
+            const uint32_t n = header()->size;
+            header()->size = 0;
             for (uint32_t i = 0; i < n; ++i) { table()[i].~field_cell(); }
         }
     private:
-        static constexpr uintptr_t k_implicit = 1;   // the low bit: the word is the arena's cells, not a table
-        field_cell* table() const noexcept { return reinterpret_cast<field_cell*>(bits_); }
-        script_value* cells() const noexcept { return reinterpret_cast<script_value*>(bits_ & ~k_implicit); }
-        bool heap() const noexcept { return bits_ != 0 && !implicit(); }
+        static constexpr uintptr_t k_implicit = 1;   // the low bit: the word is the trailing cells' count, not a table
+        struct heap_header {
+            uint32_t size = 0;
+            uint32_t cap = 0;
+            field_cell* cells() noexcept { return reinterpret_cast<field_cell*>(this + 1); }
+        };
+        static heap_header* allocate(size_t cap) {
+            auto* fresh = new (::operator new(sizeof(heap_header) + cap * sizeof(field_cell))) heap_header();
+            fresh->cap = static_cast<uint32_t>(cap);
+            return fresh;
+        }
+        heap_header* header() const noexcept { return reinterpret_cast<heap_header*>(word_); }
+        field_cell* table() const noexcept { return word_ ? header()->cells() : nullptr; }
+        bool heap() const noexcept { return word_ != 0 && !implicit(); }
         void grow(size_t n) {
-            const size_t cap = (std::max)(n, static_cast<size_t>(cap_) * 2);
-            auto* fresh = static_cast<field_cell*>(::operator new(cap * sizeof(field_cell)));
-            for (uint32_t i = 0; i < size_; ++i) {
-                new (&fresh[i]) field_cell(std::move(table()[i]));
+            const uint32_t held = static_cast<uint32_t>(size());
+            const size_t cap = (std::max)(n, static_cast<size_t>(word_ ? header()->cap : 0) * 2);
+            heap_header* fresh = allocate(cap);
+            fresh->size = held;
+            for (uint32_t i = 0; i < held; ++i) {
+                new (&fresh->cells()[i]) field_cell(std::move(table()[i]));
                 table()[i].~field_cell();
             }
-            if (heap()) { ::operator delete(static_cast<void*>(table())); }
-            bits_ = reinterpret_cast<uintptr_t>(fresh);
-            cap_ = static_cast<uint32_t>(cap);
+            if (heap()) { ::operator delete(static_cast<void*>(header())); }
+            word_ = reinterpret_cast<uintptr_t>(fresh);
         }
-        mutable uintptr_t bits_ = 0;
-        uint32_t size_ = 0;
-        mutable uint32_t cap_ = 0;
+        mutable uintptr_t word_ = 0;
     };
     inline void reserve_cell_arena(size_t n);
     inline field_cell make_cell(script_value&& v);
@@ -461,7 +475,7 @@ private:
     // and unlinking touch the instance and its two neighbours, under the region lock while a region runs
     class_instance* registry_prev_ = nullptr;
     class_instance* registry_next_ = nullptr;
-    // Last, so a field read's class and slot words share a line with the first trailing cells
+    // Last, so a field read's class and slot words share a line with the first trailing cells, which start at the table's end
     class_definition* class_def_ = nullptr;
     field_table flat_fields_;
     friend class class_definition;

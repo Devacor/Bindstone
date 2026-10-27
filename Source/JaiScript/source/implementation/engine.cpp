@@ -1272,14 +1272,9 @@ struct engine::implementation {
     // A proof-only walk over an entry (diagnostics off): the program's globals type here, and a class-typed one waits for its class
     // (entry.proofs_deferred; restamp_deferred after an import completes)
     void stamp_proofs(engine& self, script_cache_entry& entry) {
-        detail::check_options o;
+        detail::check_options o = program_check_options(type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear);
         o.diagnostics = false;
-        o.proofs = type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear;
         o.stats = &last_proof_stats_;
-        o.program_names = &program_names_;
-        o.program_classes = &program_classes_; o.program_enums = &program_enums_;
-        o.program_functions = &program_functions_;
-        o.program_globals = &program_globals_;
         entry.deferred_classes.clear();
         o.deferred_classes = &entry.deferred_classes;
         detail::run_static_check(self, checked_declarations(entry), nullptr, o);
@@ -1321,13 +1316,8 @@ struct engine::implementation {
                                  (lowering_on() && !entry.lowering.built) || entry.lowering.lowered_view != lowering_on();
         if (need_check) {   // the diagnostics walk leaves the proofs alone: the proof pass follows, and it alone reads the program's globals
             detail::set_aggregate_view(entry.lowering, false);   // diagnostics read the parsed bodies
-            detail::check_options o;
+            detail::check_options o = program_check_options(detail::check_options::proofs_t::leave);
             o.diagnostics = true;
-            o.proofs = detail::check_options::proofs_t::leave;
-            o.program_names = &program_names_;
-            o.program_classes = &program_classes_; o.program_enums = &program_enums_;
-            o.program_functions = &program_functions_;
-            o.program_globals = &program_globals_;
             entry.check_result = detail::run_static_check(self, checked_declarations(entry), nullptr, o);
             entry.checked = true;
             entry.checked_epoch = check_surface_epoch_;
@@ -1450,6 +1440,18 @@ struct engine::implementation {
         }
     }
 
+    // Check options over the program's names, classes, enums, functions and globals
+    detail::check_options program_check_options(detail::check_options::proofs_t a_proofs) {
+        detail::check_options result;
+        result.proofs = a_proofs;
+        result.program_names = &program_names_;
+        result.program_classes = &program_classes_;
+        result.program_enums = &program_enums_;
+        result.program_functions = &program_functions_;
+        result.program_globals = &program_globals_;
+        return result;
+    }
+
     // Per-call check with host instance variables: diagnostics only, never touches the
     // entry's stamps (proofs_t::leave).
     check_report check_with_instance_vars(engine& self, const script_cache_entry& entry, const instance_variables& instanceVars) {
@@ -1457,12 +1459,7 @@ struct engine::implementation {
         extra.reserve(instanceVars.size());
         for (const auto& [name, value] : instanceVars) { extra.push_back(name); }
         detail::aggregate_source_view source(&entry.lowering);
-        detail::check_options o;
-        o.proofs = detail::check_options::proofs_t::leave;
-        o.program_names = &program_names_;
-        o.program_classes = &program_classes_; o.program_enums = &program_enums_;
-        o.program_functions = &program_functions_;
-        o.program_globals = &program_globals_;
+        const detail::check_options o = program_check_options(detail::check_options::proofs_t::leave);
         return detail::run_static_check(self, checked_declarations(entry), &extra, o);
     }
 
@@ -1529,12 +1526,7 @@ struct engine::implementation {
             script_cache_entry& entry = *loaded.entry;
             const bool lowered = entry.lowering.lowered_view;
             detail::set_aggregate_view(entry.lowering, false);
-            detail::check_options o;
-            o.proofs = detail::check_options::proofs_t::leave;
-            o.program_names = &program_names_;
-            o.program_classes = &program_classes_; o.program_enums = &program_enums_;
-            o.program_functions = &program_functions_;
-            o.program_globals = &program_globals_;
+            const detail::check_options o = program_check_options(detail::check_options::proofs_t::leave);
             const check_report recheck = detail::run_static_check(self, checked_declarations(entry), nullptr, o);
             detail::set_aggregate_view(entry.lowering, lowered);
             check_report broken;

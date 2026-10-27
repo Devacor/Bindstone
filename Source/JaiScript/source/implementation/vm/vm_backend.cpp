@@ -20345,6 +20345,14 @@ struct vm_backend::construction_lender final : detail::construction_host {
 	void close_scope(detail::construction_scope& scope) override {
 		if (scope.frame) { self.close_construction_frame(scope); }
 	}
+	void read_back_parameters(detail::construction_scope& scope, const function_decl* ctor, std::vector<script_value>& args) override {
+		if (!scope.frame) { detail::construction_host::read_back_parameters(scope, ctor, args); return; }
+		const auto& cf = *static_cast<construction_frame*>(scope.frame);
+		for (size_t i = 0; ctor && i < ctor->parameters.size() && i < args.size() && i < cf.f.window_live; ++i) {
+			if (ctor->parameters[i].is_reference) { continue; }
+			args[i] = self.stack_[cf.window_base + i].deref();
+		}
+	}
 	checked_result<script_value> evaluate_in(detail::construction_scope& scope, const expression_ptr& expr) override {
 		if (scope.frame) {
 			bool found = false;

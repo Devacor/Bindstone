@@ -53,6 +53,15 @@ void construction_host::open_scope(construction_scope& scope, const std::shared_
 	}
 }
 
+void construction_host::read_back_parameters(construction_scope& scope, const function_decl* ctor, std::vector<script_value>& args) {
+	if (!ctor || !scope.env) { return; }
+	for (size_t i = 0; i < ctor->parameters.size() && i < args.size(); ++i) {
+		const parameter& param = ctor->parameters[i];
+		if (param.is_reference) { continue; }
+		if (const script_value* bound = scope.env->get_own_value_ptr(param.symbol_id)) { args[i] = bound->deref(); }
+	}
+}
+
 JAI_NOINLINE std::optional<error_propagator> refuse_cdtor_call(class_instance* instance, uint64_t name_id) {
 	if (!instance) { return std::nullopt; }
 	auto phase = instance->dispatch_phase();

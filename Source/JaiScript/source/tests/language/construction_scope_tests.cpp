@@ -57,6 +57,22 @@ public:
 			     "3 8 7", "two bases named in the list");
 		});
 
+		test("a_parameter_the_initializer_list_stores_is_the_bodys", [this]() {
+			// C++: one activation per constructor, so a store to a parameter in the initializer list is what the level's field
+			// initializers and body read, at every level of a chain
+			both("string log = \"\"; class A { int a = 0; A(int x) { a = x; log = log + \"A\" + x + \";\"; } } "
+			     "class B : A { int b = 0; B(int x) : super(x = x + 10) { b = x; log = log + \"B\" + x + \";\"; } } "
+			     "class C : B { int c = 0; C(int x) : super(x = x + 100) { c = x; log = log + \"C\" + x + \";\"; } } "
+			     "C c = C(1); log + \" | \" + c.a + \" \" + c.b + \" \" + c.c;", "A111;B111;C101; | 111 111 101", "a three-level chain");
+			both("class P { int p = 0; P(int v) { p = v; } } class Q : P { int q = 0; Q(int v) : super(v = v * 3) { q = v; } } auto x = Q(2); [x.p, x.q];",
+			     "[6, 6]", "a two-level chain");
+			both("class E { int a = 0; E(int k) { a = k; } E(int k, int j) : this(k = k + j) { a = a * 100 + k; } } E(1, 2).a;", "303", "a delegating constructor");
+			both("class L { int l = 0; L(int v) { l = v; } } class R { int r = 0; R(int v) { r = v; } } "
+			     "class M : L, R { int m = 0; M(int p) : L(p = p + 1), R(p = p * 10) { m = p; } } auto x = M(1); [x.l, x.r, x.m];", "[2, 20, 20]",
+			     "bases in declaration order, each store seen by the next and by the body");
+			both("class B0 { B0(int v) {} } class C : B0 { int f = n; C(int n) : super(n = n + 1) {} } C(1).f;", "2", "a field initializer after the list");
+		});
+
 		test("an_initializer_runs_against_the_class_under_construction", [this]() {
 			both("class G { int v = who(); int who() { return 1; } } class H : G { int who() override { return 2; } H() : super() {} } H().v;", "1",
 			     "a virtual call in a base's field initializer");

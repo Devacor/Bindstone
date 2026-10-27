@@ -54,6 +54,9 @@ namespace jai::detail {
 		virtual void open_scope(construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
 		                        script_class_definition* level, const function_decl* ctor, const std::vector<script_value>* args, bool bind_for_parameters);
 		virtual void close_scope(construction_scope&) {}
+		// The constructor's by-value parameters as the level's code left them, into args (C++: one activation per constructor, so what
+		// its initializer list stores to a parameter its body reads); a reference parameter already names its argument
+		virtual void read_back_parameters(construction_scope& scope, const function_decl* ctor, std::vector<script_value>& args);
 		virtual checked_result<script_value> evaluate_in(construction_scope& scope, const expression_ptr& expr) { return evaluate(expr, scope.env); }
 		virtual std::optional<error_propagator> pass_depth_gate() = 0;
 		virtual std::shared_ptr<environment> current_environment() = 0;
@@ -69,13 +72,15 @@ namespace jai::detail {
 
 	// A constructor's member initialization on an instance under construction: its initializer list (base constructors and their
 	// bodies, or the whole delegated-to constructor), then the field initializers; the body is the caller's. captured_out (the
-	// outermost constructor only) receives the arguments taken ahead of that code, when it runs any.
+	// outermost constructor only) receives the arguments taken ahead of that code, when it runs any; body_args_out (else
+	// captured_out) receives the arguments the body binds when that code ran (its parameters as it left them)
 	template <class Host>
 	checked_result<script_value> initialize_members(Host& host, const std::shared_ptr<script_class_definition>& cls,
 	                                                const std::shared_ptr<environment>& definition_env, const strong_ptr<class_instance>& instance,
 	                                                const script_value& this_value, const std::shared_ptr<function_decl>& ctor,
 	                                                const std::vector<script_value>& args, std::optional<call_depth_guard>& initializer_depth,
-	                                                size_t delegation_depth, std::vector<script_value>* captured_out);
+	                                                size_t delegation_depth, std::vector<script_value>* captured_out,
+	                                                std::vector<script_value>* body_args_out = nullptr);
 
 	// Everything ahead of a constructor's body: the overload, the instance and its member initialization. Success yields the
 	// instance; the picked constructor and the arguments the body binds (when they were taken ahead of it) ride the

@@ -182,8 +182,7 @@ protected:
     // The object a locked weak handle serializes as, the first time the archive sees it
     template <class Holder>
     script_value weak_target_value(const Holder& shared) const {
-        return script_value::make_object(std::string(shared->type_name), shared->type_id, shared->data, engine_ref_,
-                                         shared->is_class_instance_wrapper);
+        return script_value::make_object(std::string(shared->type_name), shared->type_id, shared->data, engine_ref_);
     }
 
     // Every property in the class's order: C++ bound properties through their getters, script fields as stored (a

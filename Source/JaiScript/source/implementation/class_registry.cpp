@@ -361,7 +361,7 @@ void class_instance::release_orphan_fields() noexcept {
         work.pop_back();
         if (v.raw_storage_index() == script_value::TYPEID_OBJECT) {
             const auto& holder = v.unchecked_object_handle();
-            if (holder.unique() && holder->is_class_instance_wrapper && holder->data && holder->data.use_count() == 1) {
+            if (holder.unique() && holder->is_instance() && holder->data.use_count() == 1) {
                 auto* inner = static_cast<class_instance*>(holder->data.get());
                 if (!inner->class_def_ && !inner->destructor_armed_) { take_cells(*inner); }
             }
@@ -1138,7 +1138,7 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
     eng->bump_class_definition_epoch();
     warn_shadowed_handle_builtins(*eng, *class_def);
 
-    global_env->define(class_var_id, script_value::make_object("class_definition", host.class_definition_type_id, class_def, eng, false));
+    global_env->define(class_var_id, script_value::make_object("class_definition", host.class_definition_type_id, class_def, eng));
     return {};
 }
 

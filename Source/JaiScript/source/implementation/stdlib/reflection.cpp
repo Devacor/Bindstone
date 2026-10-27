@@ -121,7 +121,7 @@ inline member_door resolve_member_door(engine* eng, const script_value& value) {
     const script_value& v = value.deref();
     auto holder = const_cast<script_value&>(v).get_object_holder();
     if (!holder) { return door; }
-    if (holder->is_class_instance_wrapper) {
+    if (holder->is_instance()) {
         door.instance = holder->data.instance();
         if (door.instance) { door.def = door.instance->get_class_definition(); }
     } else {

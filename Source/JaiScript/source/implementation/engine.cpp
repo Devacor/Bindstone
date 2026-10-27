@@ -372,7 +372,7 @@ static int object_param_cost(
         if (instance && argClassDef->is_script_class() && classes_by_name) {
             const script_value* native = instance->native();
             const auto* native_holder = native ? native->peek_object_holder() : nullptr;
-            if (native_holder && !native_holder->is_class_instance_wrapper && !native_holder->type_name.empty()) {
+            if (native_holder && !native_holder->is_instance() && !native_holder->type_name.empty()) {
                 auto stored = classes_by_name->find(native_holder->type_name);
                 if (stored != classes_by_name->end() &&
                     (stored->second->get_name() == expectedClassName || stored->second->is_subtype_of(expectedClassName))) {
@@ -2818,7 +2818,7 @@ void engine::initialize_engine_reference() {
         // copies and `var& w = extend(v, B)` aliases v (the call-result rule)
         const script_value& object = args[0].deref();
         auto holder = object.raw_storage_index() == script_value::TYPEID_OBJECT && !object.is_shared_ptr_type() ? object.get_object_holder() : nullptr;
-        if (!holder || !holder->is_class_instance_wrapper || !holder->data ||
+        if (!holder || !holder->is_instance() ||
             static_cast<class_instance*>(holder->data.get())->has_cpp_object()) {
             return extended;
         }
@@ -4020,7 +4020,7 @@ void engine::add_class_impl(const std::string& name, std::shared_ptr<class_defin
     // Use optimized make_object with cached type_id for fast type checking
     uint64_t name_id = impl->string_symbolizer_.intern(name);
     auto [class_var_id, class_var_name] = impl->string_symbolizer_.get_class_var_id_with_view(name_id);
-    impl->global_environment_->define(class_var_id, script_value::make_object("class_definition", impl->class_definition_type_id_, classDef, this, false));   // the definition itself, no class_instance
+    impl->global_environment_->define(class_var_id, script_value::make_object("class_definition", impl->class_definition_type_id_, classDef, this));   // the definition itself, no class_instance
 }
 
 std::vector<std::string> engine::registered_class_names() const {
@@ -4433,7 +4433,7 @@ script_value engine::marked_shared_handle(script_value object) {
     }
     const auto* holder = object.unchecked_object_handle().get();
     class_definition* def = nullptr;
-    if (holder->is_class_instance_wrapper && holder->data) {
+    if (holder->is_instance()) {
         def = static_cast<const class_instance*>(holder->data.get())->get_class_definition();
     }
     type_info* handle_type = def ? def->handle_type() : nullptr;
@@ -6571,7 +6571,7 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
     const std::shared_ptr<class_definition>& script_def = resolved.value();
     const uint64_t class_id = script_def->get_type_id();
     auto holder = object.deref().get_object_holder();
-    if (!holder || !holder->is_class_instance_wrapper || !holder->data) {
+    if (!holder || !holder->is_instance()) {
         return result(make_error_code(runtime_error_code::extend_rejected), "extend: '{0}' needs an object to extend", class_id);
     }
     auto instance = holder->data.instance();

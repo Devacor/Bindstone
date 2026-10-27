@@ -928,7 +928,7 @@ script_value script_value::make_object(std::string_view type_name, detail::objec
     return make_object(type_name, type_id, std::move(data), eng);
 }
 
-script_value script_value::make_object(std::string_view type_name, uint64_t type_id, detail::object_ref data, engine* eng, bool is_cpp_class) {
+script_value script_value::make_object(std::string_view type_name, uint64_t type_id, detail::object_ref data, engine* eng) {
     if (!eng) {
         throw runtime_error("Cannot create object with null engine pointer");
     }
@@ -944,11 +944,10 @@ script_value script_value::make_object(std::string_view type_name, uint64_t type
     script_value v(std::monostate{}, eng);
     v.set_stamp(class_def->get_type_info());
 
-    auto obj = is_cpp_class ? claim_object_holder(data.instance_pointer(), eng) : acquire_object_holder(eng);
+    auto obj = claim_object_holder(data.instance_pointer(), eng);
     obj->type_name = interned_type_text(eng, type_name, type_id);
     obj->type_id = type_id;  // Set the cached type_id for fast comparison
     obj->data = std::move(data);
-    obj->is_class_instance_wrapper = is_cpp_class;  // True when data is a class_instance object (both C++ and script classes), false for raw data
     v.storage_ = obj;
     return v;
 }
@@ -992,7 +991,6 @@ script_value script_value::make_class_object(const class_definition& cd, strong_
     obj->type_name = cd.interned_name();
     obj->type_id = cd.get_type_id();
     obj->data = std::move(data);
-    obj->is_class_instance_wrapper = true;
     v.storage_ = obj;
     return v;
 }
@@ -1003,7 +1001,6 @@ script_value script_value::make_coroutine_handle(uint64_t type_id, std::shared_p
     obj->type_name = interned_type_text(eng, "coroutine_handle", type_id);
     obj->type_id = type_id;
     obj->data = std::move(handle);
-    obj->is_class_instance_wrapper = false;
     obj->is_coroutine_handle = true;
     v.storage_ = obj;
     return v;
@@ -1029,7 +1026,6 @@ script_value script_value::make_cpp_object(std::string_view type_name, uint64_t 
     obj->type_name = interned_type_text(eng, type_name, type_id);
     obj->type_id = type_id;  // Use the provided type_id directly (no re-interning)
     obj->data = data;
-    obj->is_class_instance_wrapper = false;  // make_cpp_object is for raw C++ objects
     v.storage_ = obj;
     return v;
 }
@@ -1050,7 +1046,6 @@ script_value script_value::make_cpp_reference(std::string_view type_name, uint64
     obj->type_id = type_id;
     obj->bound_ptr = object;
     obj->set_weak_data(std::move(owner));
-    obj->is_class_instance_wrapper = false;
     v.storage_ = obj;
     return v;
 }
@@ -1431,7 +1426,7 @@ script_value script_value::clone() const {
             node = h.get();
             unique = h && h.use_count() == 1 && h->data && h->data.use_count() == 1;
             const bool shared = src.stamp() && src.stamp()->base_type == script_value_type::jai_shared_ptr_type;
-            kind = shared ? census::copied_kind::shared_deep : (h && h->is_class_instance_wrapper) ? census::copied_kind::instance : census::copied_kind::cpp_object;
+            kind = shared ? census::copied_kind::shared_deep : (h && h->is_instance()) ? census::copied_kind::instance : census::copied_kind::cpp_object;
             break;
         }
         case TYPEID_STRING: kind = census::copied_kind::string; break;
@@ -1525,14 +1520,13 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             throw runtime_error("Cannot clone shared_ptr: null object_holder");
         }
 
-        if (obj_holder->is_class_instance_wrapper) {
+        if (obj_holder->is_instance()) {
             auto new_instance = static_cast<const class_instance*>(obj_holder->data.get())->deep_copy_level(work, depth);
 
             auto new_holder = claim_object_holder(new_instance.get(), obj_holder->owner);
             new_holder->type_name = obj_holder->type_name;
             new_holder->type_id = obj_holder->type_id;
             new_holder->data = std::move(new_instance);
-            new_holder->is_class_instance_wrapper = true;
 
             script_value result = tagged_null();
             result.storage_ = new_holder;
@@ -1547,7 +1541,6 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                 new_holder->type_name = obj_holder->type_name;
                 new_holder->type_id = obj_holder->type_id;
                 new_holder->data = new_cpp_obj;
-                new_holder->is_class_instance_wrapper = false;
 
                 script_value result = tagged_null();
                 result.storage_ = new_holder;
@@ -1661,14 +1654,13 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                 return *this;
             }
 
-            if (obj_holder->is_class_instance_wrapper) {
+            if (obj_holder->is_instance()) {
                 auto new_instance = static_cast<const class_instance*>(obj_holder->data.get())->deep_copy_level(work, depth);
 
                 auto new_holder = claim_object_holder(new_instance.get(), obj_holder->owner);
                 new_holder->type_name = obj_holder->type_name;
                 new_holder->type_id = obj_holder->type_id;  // Preserve the cached type_id
                 new_holder->data = std::move(new_instance);
-                new_holder->is_class_instance_wrapper = true;
                 result.storage_ = std::move(new_holder);
             } else {
                 bool copied = false;
@@ -1685,7 +1677,6 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                             new_holder->type_name = obj_holder->type_name;
                             new_holder->type_id = obj_holder->type_id;
                             new_holder->data = new_cpp_obj;
-                            new_holder->is_class_instance_wrapper = false;
                             result.storage_ = new_holder;  // fresh holder: bound_ptr stays null (clone detaches)
                             copied = true;
                         }
@@ -1791,7 +1782,7 @@ namespace {
 
 script_value script_value::parallel_host_view() const {
     const auto& holder = storage_.get<strong_ptr<object_holder>>();
-    if (!holder || !holder->is_class_instance_wrapper || !holder->data) { throw runtime_error("parallel_host_view: not a class instance"); }
+    if (!holder || !holder->is_instance()) { throw runtime_error("parallel_host_view: not a class instance"); }
     const auto* inst = static_cast<const class_instance*>(holder->data.get());
     class_definition* cd = inst->get_class_definition();
     const script_value* native = inst->native();
@@ -1805,7 +1796,6 @@ script_value script_value::parallel_host_view() const {
     view_holder->type_name = holder->type_name;
     view_holder->type_id = holder->type_id;
     view_holder->data = std::move(view);
-    view_holder->is_class_instance_wrapper = true;
     script_value result = tagged_null();
     result.storage_ = view_holder;
     return result;
@@ -2515,7 +2505,7 @@ namespace {
 		if (key.type() != script_value_type::jai_object_type) { return nullptr; }
 		const auto* holder = key.peek_object_holder();
 		if (!holder) { return nullptr; }
-		if (holder->is_class_instance_wrapper) {
+		if (holder->is_instance()) {
 			return holder->data ? static_cast<class_instance*>(holder->data.get())->get_class_definition() : nullptr;
 		}
 		engine* eng = key.payload_engine();

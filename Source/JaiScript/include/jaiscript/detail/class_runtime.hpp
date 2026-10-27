@@ -1923,7 +1923,7 @@ inline slot_class_view resolve_slot_class(const script_value& v, engine* eng) {
     if (!holder) {
         return view;
     }
-    if (holder->is_class_instance_wrapper) {
+    if (holder->is_instance()) {
         view.instance = holder->data.instance();
         if (view.instance) {
             view.def = view.instance->get_class_definition();
@@ -2764,7 +2764,7 @@ inline std::optional<checked_result<void>> class_copy_assign(const script_value&
     const type_info_ptr tag = current.get_type_info();
     if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return std::nullopt; }   // a handle rebinds
     auto holder = const_cast<script_value&>(current).get_object_holder();
-    if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return std::nullopt; }
+    if (!holder || !holder->is_instance()) { return std::nullopt; }
     auto* instance = static_cast<class_instance*>(holder->data.get());
     const class_definition* def = instance->get_class_definition();
     if (!def) { return std::nullopt; }
@@ -2772,7 +2772,7 @@ inline std::optional<checked_result<void>> class_copy_assign(const script_value&
     const size_t vi = value.raw_storage_index();
     if (vi != script_value::TYPEID_OBJECT && vi != script_value::TYPEID_SHARED_PTR) { return std::nullopt; }
     auto source_holder = const_cast<script_value&>(value).get_object_holder();
-    if (!source_holder || !source_holder->is_class_instance_wrapper || !source_holder->data) { return std::nullopt; }
+    if (!source_holder || !source_holder->is_instance()) { return std::nullopt; }
     auto* source = static_cast<class_instance*>(source_holder->data.get());
     const class_definition* source_def = source->get_class_definition();
     if (!source_def) { return std::nullopt; }
@@ -2832,7 +2832,7 @@ inline std::optional<checked_result<void>> script_assign_operator(const script_v
     const type_info* tag = current.type_info_raw();
     if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return std::nullopt; }   // a handle rebinds
     auto holder = const_cast<script_value&>(current).get_object_holder();
-    if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return std::nullopt; }
+    if (!holder || !holder->is_instance()) { return std::nullopt; }
     const class_definition* def = static_cast<class_instance*>(holder->data.get())->get_class_definition();
     const uint64_t assign_id = def ? def->script_assign_operator_id() : 0;
     if (assign_id == 0) { return std::nullopt; }
@@ -2849,7 +2849,7 @@ inline std::optional<checked_result<void>> user_assign_operator(const script_val
     const type_info_ptr tag = current.get_type_info();
     if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return std::nullopt; }   // a handle rebinds
     auto holder = const_cast<script_value&>(current).get_object_holder();
-    if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return std::nullopt; }
+    if (!holder || !holder->is_instance()) { return std::nullopt; }
     auto* instance = static_cast<class_instance*>(holder->data.get());
     const class_definition* def = instance->get_class_definition();
     if (!def) { return std::nullopt; }
@@ -2858,7 +2858,7 @@ inline std::optional<checked_result<void>> user_assign_operator(const script_val
     const uint64_t assign_id = eng->get_symbolizer()->intern("=");
     if (value.raw_storage_index() == script_value::TYPEID_OBJECT || value.raw_storage_index() == script_value::TYPEID_SHARED_PTR) {
         auto source_holder = const_cast<script_value&>(value).get_object_holder();
-        if (source_holder && source_holder->is_class_instance_wrapper && source_holder->data) {
+        if (source_holder && source_holder->is_instance()) {
             const class_definition* source_def = static_cast<class_instance*>(source_holder->data.get())->get_class_definition();
             // a bound class's own copy runs the operator= its binding binds ("="), as C++ assigns into the held object; without one
             // the store replaces the object with a copy-constructed one (script owns the slot's storage)
@@ -3068,7 +3068,7 @@ inline std::optional<checked_result<void>> element_copy_assign(const script_valu
     const script_value& held = current.is_reference() ? current.deref() : current;
     if (!eng || held.raw_storage_index() != script_value::TYPEID_OBJECT) { return std::nullopt; }
     auto holder = const_cast<script_value&>(held).get_object_holder();
-    if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return std::nullopt; }
+    if (!holder || !holder->is_instance()) { return std::nullopt; }
     const class_definition* def = static_cast<class_instance*>(holder->data.get())->get_class_definition();
     if (!def || !def->is_cpp_class() || !def->has_method(eng->get_symbolizer()->intern("="))) { return std::nullopt; }
     return user_assign_operator(current, source, eng, element_type.get());

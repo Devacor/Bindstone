@@ -60,7 +60,7 @@ namespace jai::detail {
         const script_value& r = receiver_in.is_reference() ? receiver_in.deref() : receiver_in;
         if (r.raw_storage_index() != script_value::TYPEID_OBJECT) return nullptr;
         auto& holder = const_cast<script_value&>(r).unchecked_get_object_storage();
-        if (!holder || !holder->is_class_instance_wrapper || !holder->data) return nullptr;
+        if (!holder || !holder->is_instance()) return nullptr;
         auto* inst = static_cast<class_instance*>(holder->data.get());
         class_definition* cd = inst->get_class_definition();
         if (cd != cls || cd->field_shape_epoch() != epoch) return nullptr;

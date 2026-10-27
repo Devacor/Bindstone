@@ -233,7 +233,7 @@ namespace jai::detail {
 		const type_info* tag = base_raw.type_info_raw();
 		if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return false; }
 		const auto& holder = base_raw.unchecked_object_handle();
-		return holder && holder->is_class_instance_wrapper && holder->data && holder->data.use_count() == 1;
+		return holder && holder->is_instance() && holder->data.use_count() == 1;
 	}
 
 	JAI_NOINLINE inline checked_result<void> class_temporary_member_error() {

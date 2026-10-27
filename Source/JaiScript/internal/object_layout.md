@@ -22,6 +22,16 @@ and the kind. Its accessors switch on the kind; a host holder's C++ object, boun
 `object_holder::last_release` ends either kind: an instance dies through its destructor chain, a host holder goes back to its
 pool.
 
+## The header
+
+`class_instance` is at most 112 bytes on a 64-bit host (static_assert in `detail/class_runtime.hpp`). The holder part (40
+bytes) comes first; the class pointer and the 16-byte slot table (the arena's cells with the low bit set while the table is
+implicit, else the heap table) come last, so a field read's header words share a line with the first trailing cells. Between
+them: the live field-reference count, the constructed levels, the registry flag and the flag bits (a bitfield byte that also
+carries the construction phase), the extras box and the registry links. What few instances need lives in the extras box: the
+heap cell arena of an instance whose allocation carries no cells, the C++ object, retired cells, the missing-field answer,
+runtime-added fields and the parallel region tag.
+
 ## Fields
 
 Every slot the class has when the instance is made has a cell in the block (the arena). The slot table stays implicit while

@@ -365,7 +365,7 @@ std::shared_ptr<void> bound_class_conversion::unwrap_shared(const script_value& 
 	if (!holder) {
 		throw_concat("Cannot convert script_value to shared_ptr<", name, ">");
 	}
-	return native_cast_or_throw(checked_native_object(holder->owner, *holder, type, def->get_type_id()), holder->owner);
+	return native_cast_or_throw(checked_native_object(holder->owner(), *holder, type, def->get_type_id()), holder->owner());
 }
 
 void bound_class_conversion::require_object(const script_value& v) const {

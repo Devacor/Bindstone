@@ -43,7 +43,7 @@ namespace jai::detail {
 				"'{0}' is not a class", class_name_id);
 		}
 		auto holder = class_var.get_object_holder();
-		if (!holder || holder->type_name != "class_definition") {
+		if (!holder || holder->type_name() != "class_definition") {
 			return result(make_error_code(runtime_error_code::type_mismatch),
 				"'{0}' is not a valid class", class_name_id);
 		}

@@ -352,10 +352,10 @@ static int object_param_cost(
     } else {
         // cpp_bound / raw C++ holders carry the registered name on the holder
         auto holder = arg.get_object_holder();
-        if (holder && !holder->type_name.empty()) {
-            argClassName = holder->type_name;
+        if (holder && !holder->type_name().empty()) {
+            argClassName = holder->type_name();
             if (classes_by_name) {
-                auto argClassIt = classes_by_name->find(holder->type_name);
+                auto argClassIt = classes_by_name->find(holder->type_name());
                 if (argClassIt != classes_by_name->end()) {
                     argClassDef = argClassIt->second.get();
                 }
@@ -372,8 +372,8 @@ static int object_param_cost(
         if (instance && argClassDef->is_script_class() && classes_by_name) {
             const script_value* native = instance->native();
             const auto* native_holder = native ? native->peek_object_holder() : nullptr;
-            if (native_holder && !native_holder->is_instance() && !native_holder->type_name.empty()) {
-                auto stored = classes_by_name->find(native_holder->type_name);
+            if (native_holder && !native_holder->is_instance() && !native_holder->type_name().empty()) {
+                auto stored = classes_by_name->find(native_holder->type_name());
                 if (stored != classes_by_name->end() &&
                     (stored->second->get_name() == expectedClassName || stored->second->is_subtype_of(expectedClassName))) {
                     return 1;
@@ -432,7 +432,7 @@ static int compute_param_match_cost(
                 totalCost += 1;                  // an expired weak_ptr is an empty one
                 continue;
             }
-            script_value target(std::monostate{}, locked->owner);
+            script_value target(std::monostate{}, locked->owner());
             target.set_object_holder(locked);
             const int cost = object_param_cost(target, script_value_type::jai_shared_ptr_type, paramInfo, classes_by_type, classes_by_name);
             if (cost < 0) {
@@ -4438,7 +4438,7 @@ script_value engine::marked_shared_handle(script_value object) {
     }
     type_info* handle_type = def ? def->handle_type() : nullptr;
     if (!handle_type) {
-        handle_type = get_type_info_shared_ptr(get_type_info_object(holder->type_id));
+        handle_type = get_type_info_shared_ptr(get_type_info_object(holder->type_id()));
         if (def) { def->set_handle_type(handle_type); }
     }
     object.set_type_info(type_info_ptr{handle_type});
@@ -6618,8 +6618,8 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
     }
     // the class's C++ base is the object's C++ class or one of its bases, asked of the object's own stored type; the layer then
     // speaks for the object as that type, so objects of different C++ types share one script class
-    if (cpp_holder->type_id != UINT64_MAX && cpp_holder->type_id != base->get_type_id()) {
-        if (auto stored_def = get_class_definition(cpp_holder->type_id)) { base = std::move(stored_def); }
+    if (cpp_holder->type_id() != UINT64_MAX && cpp_holder->type_id() != base->get_type_id()) {
+        if (auto stored_def = get_class_definition(cpp_holder->type_id())) { base = std::move(stored_def); }
     }
     if (!base->derives_from(script_base.get())) {
         const std::string text = "extend: '" + script_def->get_name() + "' derives the C++ class '" + script_base->get_name() +

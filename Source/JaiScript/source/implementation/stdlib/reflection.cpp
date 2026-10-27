@@ -125,9 +125,9 @@ inline member_door resolve_member_door(engine* eng, const script_value& value) {
         door.instance = holder->instance_handle();
         if (door.instance) { door.def = door.instance->get_class_definition(); }
     } else {
-        door.engine_def = holder->type_id != UINT64_MAX
-            ? eng->get_class_definition(holder->type_id)
-            : eng->get_class_definition(std::string(holder->type_name));
+        door.engine_def = holder->type_id() != UINT64_MAX
+            ? eng->get_class_definition(holder->type_id())
+            : eng->get_class_definition(std::string(holder->type_name()));
         door.def = door.engine_def.get();
     }
     return door;
@@ -808,7 +808,7 @@ void register_reflection_functions(engine& eng_ref) {
             if (value.is_function()) { continue; }
             if (value.is_object()) {   // class-definition holders are registry internals
                 auto holder = value.get_object_holder();
-                if (holder && holder->type_name == "class_definition") { continue; }
+                if (holder && holder->type_name() == "class_definition") { continue; }
             }
             names.insert(std::string(name_view));
         }

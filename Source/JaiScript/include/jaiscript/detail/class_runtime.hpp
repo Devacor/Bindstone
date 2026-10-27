@@ -1939,8 +1939,8 @@ inline slot_class_view resolve_slot_class(const script_value& v, engine* eng) {
             }
         }
     } else if (eng) {
-        view.engine_def = holder->type_id != UINT64_MAX ? eng->get_class_definition(holder->type_id)
-                                                        : eng->get_class_definition(std::string(holder->type_name));
+        view.engine_def = holder->type_id() != UINT64_MAX ? eng->get_class_definition(holder->type_id())
+                                                        : eng->get_class_definition(std::string(holder->type_name()));
         view.def = view.engine_def.get();
     }
     return view;
@@ -1971,7 +1971,7 @@ inline bool class_slot_admits(const slot_class_view& view, const script_value& v
     if (view.def && view.def->is_subtype_of(want)) {
         return true;
     }
-    if (holder->type_name == want) {
+    if (holder->type_name() == want) {
         return true;
     }
     return !view.def && !tagged;
@@ -2350,7 +2350,7 @@ inline std::string slot_source_type_name(const script_value& value_in, engine* e
             if (named_tag) return tag->type_name;
             auto view = resolve_slot_class(v, eng);
             if (view.def) return view.def->get_name();
-            if (auto holder = v.get_object_holder(); holder && !holder->type_name.empty()) return std::string(holder->type_name);
+            if (auto holder = v.get_object_holder(); holder && !holder->type_name().empty()) return std::string(holder->type_name());
             return "object";
         }
         default:
@@ -2743,8 +2743,7 @@ inline checked_result<void> reclass_assign(script_value& current, auto& holder, 
     const class_definition* def = instance->get_class_definition();
     def->destroy_levels(instance, def, source_def);
     instance->reclass(std::const_pointer_cast<class_definition>(source_def->shared_from_this()), true);
-    holder.type_name = source_def->interned_name();
-    holder.type_id = source_def->get_type_id();
+    holder.set_type(source_def->interned_name(), source_def->get_type_id());
     if (current.type_info_raw() == def->get_type_info().get() && def != slot_class) { current.set_type_info(source_def->get_type_info()); }
     auto copied = implicit_copy_assign(instance, source_def, source, eng);
     if (!copied) { return copied; }

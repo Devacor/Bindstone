@@ -2224,7 +2224,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             } else {
                 // Fallback: use the object type
                 if (auto eng = ctx.get_engine()) {
-                    result.set_type_info(eng->get_type_info_object(locked->type_id));
+                    result.set_type_info(eng->get_type_info_object(locked->type_id()));
                 }
             }
 
@@ -2645,9 +2645,9 @@ interpreter::member_target interpreter::resolve_member_target(const script_value
             }
         }
     } else if (engine_) {
-        target.engine_def = holder->type_id != UINT64_MAX
-            ? engine_->get_class_definition(holder->type_id)
-            : engine_->get_class_definition(std::string(holder->type_name));
+        target.engine_def = holder->type_id() != UINT64_MAX
+            ? engine_->get_class_definition(holder->type_id())
+            : engine_->get_class_definition(std::string(holder->type_name()));
         target.class_def = target.engine_def.get();
     }
     return target;
@@ -7420,7 +7420,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
 
             if (member && objectValue.is_object()) {
                 auto holder = objectValue.get_object_holder();
-                if (holder && holder->type_id != coroutine_handle_type_id_) {
+                if (holder && holder->type_id() != coroutine_handle_type_id_) {
                     class_instance* inst_raw = nullptr;
                     if (holder->is_instance()) {
                         inst_raw = holder->unchecked_instance();
@@ -7998,7 +7998,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                     script_value class_var = std::move(class_var_result.value());
                     if (class_var.is_object()) {
                         auto objHolder = class_var.get_object_holder();
-                        if (objHolder && objHolder->type_name == "class_definition") {
+                        if (objHolder && objHolder->type_name() == "class_definition") {
                             fallback_class = std::static_pointer_cast<class_definition>(objHolder->host_object());
                         }
                     }
@@ -8137,7 +8137,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
 
         // Extract the class definition
         auto objHolder = class_var.get_object_holder();
-        if (!objHolder || objHolder->type_name != "class_definition") {
+        if (!objHolder || objHolder->type_name() != "class_definition") {
             // Not a valid class
             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
@@ -8267,7 +8267,7 @@ checked_result<void> interpreter::method_value_error(const member_expr* expr, co
     else if (v.is_string()) { owner = "string"; }
     else if (v.is_array()) { owner = "array"; }
     else if (v.is_map()) { owner = "map"; }
-    else if (v.is_object() && v.get_object_holder() && v.get_object_holder()->type_id == coroutine_handle_type_id_) { owner = "coroutine"; }
+    else if (v.is_object() && v.get_object_holder() && v.get_object_holder()->type_id() == coroutine_handle_type_id_) { owner = "coroutine"; }
     else {
         value_type = false;
         auto target = resolve_member_target(v);
@@ -8464,7 +8464,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     // Handle coroutine_handle methods
     if (objectValue.is_object()) {
         auto objHolder = objectValue.get_object_holder();
-        if (objHolder && objHolder->type_id == coroutine_handle_type_id_) {
+        if (objHolder && objHolder->type_id() == coroutine_handle_type_id_) {
             auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->host_object());
             if (expr->member_id == next_id_) {
 	            if (!as_callee) { return method_value_error(expr, objectValue, false); }
@@ -10987,7 +10987,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
     } else if (container.is_object()) {
         // Check for coroutine/generator iteration
         auto objHolder = container.get_object_holder();
-        if (objHolder && objHolder->type_id == coroutine_handle_type_id_) {
+        if (objHolder && objHolder->type_id() == coroutine_handle_type_id_) {
             auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->host_object());
 
             script_value* loop_var_ptr = nullptr;
@@ -11867,7 +11867,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                     script_value class_var = std::move(class_result.value());
                     {
                         auto obj_holder = class_var.get_object_holder();
-                        if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
+                        if (obj_holder && obj_holder->type_id() == class_definition_type_id_) {
                             auto class_def = std::static_pointer_cast<class_definition>(obj_holder->host_object());
 
                             // Arity-aware collision check
@@ -11922,7 +11922,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             if (auto* class_def_var = environment_->get_value_ptr(class_var_id)) {
                 if (class_def_var->is_object()) {
                     auto obj_holder = class_def_var->get_object_holder();
-                    if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
+                    if (obj_holder && obj_holder->type_id() == class_definition_type_id_) {
                         detail::register_namespace_class(*engine_, *ns_data, decl->name, class_decl_ptr->name_id,
                                                          std::static_pointer_cast<class_definition>(obj_holder->host_object()));
                     }

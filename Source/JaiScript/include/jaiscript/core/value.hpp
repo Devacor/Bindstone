@@ -1905,7 +1905,7 @@ namespace detail {
                         if (payload_engine()) {
                             auto registry = get_engine_conversion_registry(payload_engine());
                             if (registry) {
-                                auto extracted = registry->extract_custom_object(objHolder->type_name, objHolder->held());
+                                auto extracted = registry->extract_custom_object(objHolder->type_name(), objHolder->held());
                                 if (extracted && extracted.use_count() == 0) {
                                     // an extended object's layer references it without owning it:
                                     // ownership comes from the object's own shared_ptr, weakly held
@@ -1944,7 +1944,7 @@ namespace detail {
                     if (!locked) {
                         return checked_result<T>(T{});
                     }
-                    script_value target(std::monostate{}, locked->owner);
+                    script_value target(std::monostate{}, locked->owner());
                     target.set_object_holder(locked);
                     auto shared = target.template checked_as<shared_type>();
                     if (!shared) {
@@ -2135,11 +2135,16 @@ namespace detail {
 	public: // Match the public forward declaration and holder accessors.
         // For object storage - external serialization will handle this
         struct object_holder {
-            std::string_view type_name;      // the type's name: the engine's interned text or a literal (never an owned string)
-            uint64_t type_id = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
         private:
+            std::string_view type_name_;      // the type's name: the engine's interned text or a literal (never an owned string)
+            uint64_t type_id_ = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
             detail::object_ref data;        // The actual object: a bound C++ object, or a class instance
         public:
+            std::string_view type_name() const noexcept { return type_name_; }
+            uint64_t type_id() const noexcept { return type_id_; }
+            void set_type(std::string_view name, uint64_t id) noexcept { type_name_ = name; type_id_ = id; }
+            engine* owner() const noexcept { return owner_; }
+            void set_owner(engine* eng) noexcept { owner_ = eng; }
             bool is_instance() const noexcept { return data.is_instance(); }
             class_instance* instance() const noexcept { return data.instance_pointer(); }   // null for a C++ object
             class_instance* unchecked_instance() const noexcept { return static_cast<class_instance*>(data.get()); }   // is_instance() holds
@@ -2158,7 +2163,9 @@ namespace detail {
             // Registered-class T& binding: the live C++ object (data stays null). Non-owning!
             void* bound_ptr = nullptr;
 
-            engine* owner = nullptr;   // the engine that made this object (after the hot fields): copies and class lookups run against it
+        private:
+            engine* owner_ = nullptr;   // the engine that made this object (after the hot fields): copies and class lookups run against it
+        public:
             // The non-owning forms' anchors, boxed so an owning object pays one pointer. weak_data: an extended object's
             // native object (internal/script_extensible.md), reachable weakly so shared_ptr extraction can still hand out
             // ownership while it lives. keep_alive: a non-owning reference's receiver (a C++ method returning a reference

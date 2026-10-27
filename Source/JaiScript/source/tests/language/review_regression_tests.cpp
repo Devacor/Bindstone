@@ -4552,7 +4552,7 @@ public:
             auto r = e->execute("pair(1, 2)");
             auto holder = r.get_object_holder();
             check_not_null(holder.get());
-            auto pair_cls = e->get_class_definition(holder->type_id);
+            auto pair_cls = e->get_class_definition(holder->type_id());
             check_not_null(pair_cls.get());
             check_false(pair_cls->flat_value_semantics());
         });

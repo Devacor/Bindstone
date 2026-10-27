@@ -12261,12 +12261,16 @@ void interpreter::apply_field_initializers(const strong_ptr<class_instance>& ins
 struct interpreter::construction_lender final : detail::construction_host {
     interpreter& self;
     std::shared_ptr<environment> entry_env;
+    const detail::call_site_context* call_ctx = nullptr;   // the constructor call's site, while it names these arguments
 
-    explicit construction_lender(interpreter& a_self) :
+    explicit construction_lender(interpreter& a_self, const std::vector<script_value>* a_callArgs = nullptr) :
         detail::construction_host(a_self.engine_, a_self.string_symbolizer_, a_self.env_symbolizer_, a_self.current_call_depth_,
                                   a_self.limits_->interpreter_call_depth_limit, a_self.is_unwinding_),
         self(a_self),
         entry_env(a_self.environment_) {
+        if (a_callArgs && a_self.pending_call_ctx_ && a_self.pending_call_ctx_->values == a_callArgs && a_self.pending_call_ctx_->arg_exprs) {
+            call_ctx = a_self.pending_call_ctx_;
+        }
     }
     ~construction_lender() { self.environment_ = std::move(entry_env); }
 
@@ -12294,6 +12298,38 @@ struct interpreter::construction_lender final : detail::construction_host {
         return self.evaluate_field_initializers(instance, cls, scope.env, skip_parent_recursion, aggregate);
     }
 
+    checked_result<void> bind_reference_arguments(const function_decl& ctor, std::vector<script_value>& args) override {
+        if (!call_ctx) { return {}; }
+        call_frame* caller_locals = self.call_stack_.empty() ? nullptr : &self.call_stack_.back();
+        for (size_t i = 0; i < ctor.parameters.size() && i < args.size() && i < call_ctx->arg_exprs->size(); ++i) {
+            if (!ctor.parameters[i].is_reference) { continue; }
+            if (const script_value* early = detail::early_bound_reference(args[i])) {
+                script_value bound = *early;
+                args[i] = std::move(bound);
+                continue;
+            }
+            script_value bound(std::monostate{}, self.engine_);
+            auto site = self.bind_site_reference((*call_ctx->arg_exprs)[i].get(), caller_locals, entry_env, bound);
+            if (!site) { return site.error_value(); }
+            if (site.value()) {
+                args[i] = std::move(bound);
+                continue;
+            }
+            script_value taken = detail::argument_for_binding(args[i], detail::arg_binding::reference);
+            JAISCRIPT_TRY(detail::bind_placeless_reference_argument(self.engine_, ctor, i, taken, !self.parallel_worker_));
+            args[i] = std::move(taken);
+        }
+        return {};
+    }
+    checked_result<bool> initializer_place(detail::construction_scope& scope, const expression* argument, script_value& out) override {
+        if (!scope.env || !argument) { return false; }
+        if (argument->get_type() == node_type::identifier_expr) {
+            const auto* name = static_cast<const identifier_expr*>(argument);
+            const uint64_t id = name->symbol_id != UINT64_MAX ? name->symbol_id : self.string_symbolizer_->intern(name->name);
+            if (!scope.env->get_value_ptr(id)) { return false; }   // a name the level's scope does not hold (a field by its bare name) binds as its value did
+        }
+        return self.bind_site_reference(argument, nullptr, scope.env, out);
+    }
     std::optional<error_propagator> pass_depth_gate() override { return detail::raise_call_depth(); }
     std::shared_ptr<environment> current_environment() override { return self.environment_; }
     std::shared_ptr<environment> global_environment() override { return self.get_global_environment(); }
@@ -12391,7 +12427,7 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
 checked_result<script_value> interpreter::construct_instance(std::shared_ptr<script_class_definition> class_def,
                                                               std::shared_ptr<environment> definition_env,
                                                               const std::vector<script_value>& args, bool check_access) {
-    construction_lender host(*this);
+    construction_lender host(*this, &args);
     // the initializers run before call_function owns the constructor's activation: the depth is handed back before each body
     // call rather than counted twice
     std::optional<detail::call_depth_guard> initializer_depth;

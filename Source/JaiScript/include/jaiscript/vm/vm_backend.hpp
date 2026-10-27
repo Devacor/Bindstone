@@ -1749,13 +1749,14 @@ namespace jai::vm {
                                                         const std::vector<script_value>& args, bool check_access = true);
         // detail::begin_construction under this backend: success value = the new instance ('this'); captured_out = the
         // arguments taken ahead of the code the construction runs before the body, when it runs any (the body binds them);
-        // caller = the frame whose class a private constructor's access is checked against (null: the current context)
+        // caller = the frame whose class a private constructor's access is checked against (null: the current context); site = the
+        // call's site, where a T& parameter binds its place
         checked_result<script_value> construct_instance_pre_body(const std::shared_ptr<script_class_definition>& class_def,
                                                         const std::shared_ptr<environment>& definition_env,
                                                         const std::vector<script_value>& args,
                                                         std::shared_ptr<function_decl>& matching_ctor_out,
                                                         std::vector<script_value>& captured_out,
-                                                        const frame* caller, bool check_access);
+                                                        const frame* caller, bool check_access, const call_site* site = nullptr);
         // What the vm lends the construction kernel (detail/construction.hpp)
         struct construction_lender;
         // Construction protocol native, ctor BODY on the dispatch loop (op_new + direct

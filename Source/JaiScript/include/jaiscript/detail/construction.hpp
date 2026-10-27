@@ -4,6 +4,7 @@
 #include <jaiscript/core/script_class.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -55,6 +56,11 @@ namespace jai::detail {
 		// its initializer list stores to a parameter its body reads); a reference parameter already names its argument
 		virtual void read_back_parameters(construction_scope& scope, const function_decl* ctor, std::vector<script_value>& args);
 		virtual checked_result<script_value> evaluate_in(construction_scope& scope, const expression_ptr& expr) { return evaluate(expr, scope.env); }
+		// The picked constructor's T& parameters bind the call's places now, ahead of any of the construction's code (C++: the
+		// parameters bind at the call): each such argument becomes its reference. A host without the call's site leaves them
+		virtual checked_result<void> bind_reference_arguments(const function_decl& ctor, std::vector<script_value>& args) = 0;
+		// The reference to the place an initializer-list argument names in the level's scope, for a T& it may bind; false: none
+		virtual checked_result<bool> initializer_place(construction_scope& scope, const expression* argument, script_value& out) = 0;
 		virtual std::optional<error_propagator> pass_depth_gate() = 0;
 		virtual std::shared_ptr<environment> current_environment() = 0;
 		virtual std::shared_ptr<environment> global_environment() = 0;
@@ -76,6 +82,31 @@ namespace jai::detail {
 	                                                const script_value& this_value, const std::shared_ptr<function_decl>& ctor,
 	                                                const std::vector<script_value>& args, std::optional<call_depth_guard>& initializer_depth,
 	                                                std::vector<script_value>* captured_out);
+
+	inline bool constructor_takes_references(const function_decl& ctor) {
+		return std::any_of(ctor.parameters.begin(), ctor.parameters.end(), [](const parameter& param) { return param.is_reference; });
+	}
+
+	// some constructor of `cls` takes a T&: an initializer list's arguments to it may bind places
+	inline bool constructors_take_references(const class_definition* cls) {
+		if (!cls || !cls->is_script_class()) { return false; }
+		const auto& ctors = static_cast<const script_class_definition*>(cls)->get_constructor_asts();
+		return std::any_of(ctors.begin(), ctors.end(), [](const std::shared_ptr<function_decl>& ctor) { return constructor_takes_references(*ctor); });
+	}
+
+	// the class an initializer constructs: the level for this(...), its first base for super(...), else the base it names
+	inline const class_definition* initializer_target(const class_definition& level, const constructor_initializer& initializer) {
+		if (initializer.target == "this") { return &level; }
+		if (initializer.target == "super") { return level.parent_ptr(); }
+		for (const auto& base : level.get_parent_classes()) {
+			if (base && initializer_names(initializer.target, base->get_name())) { return base.get(); }
+		}
+		return nullptr;
+	}
+
+	// A T& argument that names no place: a reference or a host object a T& result named binds as it is, a temporary the parameter
+	// takes (a string&, a const T&, one the body never writes through) binds as one, anything else raises
+	checked_result<void> bind_placeless_reference_argument(engine* eng, const function_decl& ctor, size_t i, script_value& arg, bool may_prove);
 
 	// Everything ahead of a constructor's body: the overload, the instance and its member initialization. Success yields the
 	// instance; the picked constructor and the arguments the body binds (when they were taken ahead of it) ride the
@@ -111,10 +142,16 @@ namespace jai::detail {
 				return access.error_value();
 			}
 		}
+		const std::vector<script_value>* argv = &args;
+		if (constructor_takes_references(*ctor)) {
+			captured_out = args;
+			if (auto bound = host.bind_reference_arguments(*ctor, captured_out); !bound) { return bound.error_value(); }
+			argv = &captured_out;
+		}
 		auto instance = cls->create_instance();
 		instance->construction_pending(true);
 		auto this_value = script_value::make_class_object(*cls, instance, host.eng);
-		auto members = initialize_members(host, cls, definition_env, instance, this_value, ctor, args, initializer_depth, &captured_out);
+		auto members = initialize_members(host, cls, definition_env, instance, this_value, ctor, *argv, initializer_depth, &captured_out);
 		if (!members) { return members; }
 		ctor_out = std::move(ctor);
 		return this_value;

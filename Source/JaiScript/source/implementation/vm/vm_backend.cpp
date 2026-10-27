@@ -20055,6 +20055,12 @@ const std::shared_ptr<chunk>* vm_backend::construction_chunk(const std::shared_p
 		}
 	}
 	for (const auto& argument : arguments) { if (eligible && !construction_frame_expression(argument.get())) { eligible = false; } }
+	if (ctor) {
+		// a list whose constructor may bind a T& binds the place its argument names, which the level's environment resolves
+		for (const auto& initializer : level.effective_initializers(*ctor)) {
+			if (eligible && !initializer.arguments.empty() && detail::constructors_take_references(detail::initializer_target(level, initializer))) { eligible = false; }
+		}
+	}
 	for (const auto& entry : fields) {
 		for (const auto& [field_id, initializer] : entry.initializers) { if (eligible && !construction_frame_expression(initializer.get())) { eligible = false; } }
 	}
@@ -20289,11 +20295,15 @@ void vm_backend::note_fresh_layer_fields(const strong_ptr<class_instance>& insta
 struct vm_backend::construction_lender final : detail::construction_host {
 	vm_backend& self;
 	const frame* caller;
+	const call_site* site;   // the constructor call's site (null: a call from outside the dispatch loop)
+	std::shared_ptr<environment> caller_env;
 
-	explicit construction_lender(vm_backend& a_self, const frame* a_caller = nullptr) :
+	explicit construction_lender(vm_backend& a_self, const frame* a_caller = nullptr, const call_site* a_site = nullptr) :
 		detail::construction_host(a_self.engine_, a_self.symbolizer_, a_self.env_symbolizer_, a_self.current_call_depth_, a_self.limits_->vm_depth_gate, a_self.is_unwinding_),
 		self(a_self),
-		caller(a_caller) {
+		caller(a_caller),
+		site(a_caller ? a_site : nullptr),
+		caller_env(a_self.environment_) {
 	}
 
 	checked_result<script_value> evaluate(const expression_ptr& expr, const std::shared_ptr<environment>& env) override {
@@ -20347,6 +20357,51 @@ struct vm_backend::construction_lender final : detail::construction_host {
 		}
 		return evaluate(expr, scope.env);
 	}
+	checked_result<void> bind_reference_arguments(const function_decl& ctor, std::vector<script_value>& args) override {
+		if (!site) { return {}; }
+		frame* caller_frame = const_cast<frame*>(caller);
+		for (size_t i = 0; i < ctor.parameters.size() && i < args.size(); ++i) {
+			if (!ctor.parameters[i].is_reference) { continue; }
+			if (const script_value* early = detail::early_bound_reference(args[i])) {
+				script_value bound = *early;
+				args[i] = std::move(bound);
+				continue;
+			}
+			script_value taken = detail::argument_for_binding(args[i], detail::arg_binding::reference);
+			if (i < site->arg_lvalue_nodes.size() && site->arg_lvalue_nodes[i] != k_invalid_u32 && taken.is_reference() && taken.get_reference_holder()) {
+				args[i] = std::move(taken);   // a place argument its evaluation bound
+				continue;
+			}
+			script_value bound = self.make_null();
+			bool placed = false;
+			if (self.bind_site_reference(i, *site, caller_frame, caller_frame->code, caller_env, bound, placed) == op_status::failed) {
+				return self.pending_error_;
+			}
+			if (placed) {
+				args[i] = std::move(bound);
+				continue;
+			}
+			JAISCRIPT_TRY(detail::bind_placeless_reference_argument(self.engine_, ctor, i, taken, !self.parallel_worker_));
+			args[i] = std::move(taken);
+		}
+		return {};
+	}
+	checked_result<bool> initializer_place(detail::construction_scope& scope, const expression* argument, script_value& out) override {
+		if (!scope.env || !argument) { return false; }   // a frame scope runs no list a T& binds (construction_chunk)
+		bool placed = false;
+		op_status status {};
+		if (argument->get_type() == node_type::identifier_expr) {
+			const auto* name = static_cast<const identifier_expr*>(argument);
+			const uint64_t id = name->symbol_id != UINT64_MAX ? name->symbol_id : self.symbolizer_->intern(name->name);
+			script_value* storage = scope.env->get_value_ptr(id);
+			if (!storage) { return false; }   // a name the level's scope does not hold (a field by its bare name) binds as its value did
+			status = self.reference_to_storage(*storage, out, placed);
+		} else {
+			status = self.bind_place_reference(argument, nullptr, scope.env, out, placed);
+		}
+		if (status == op_status::failed) { return self.pending_error_; }
+		return placed;
+	}
 	std::optional<error_propagator> pass_depth_gate() override { return self.pass_depth_gate(); }
 	std::shared_ptr<environment> current_environment() override { return self.environment_; }
 	std::shared_ptr<environment> global_environment() override { return self.engine_ ? self.engine_->get_global_environment() : self.environment_; }
@@ -20361,9 +20416,9 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(const std::
                                                             const std::vector<script_value>& args,
                                                             std::shared_ptr<function_decl>& matching_ctor_out,
                                                             std::vector<script_value>& captured_out,
-                                                            const frame* caller, bool check_access) {
+                                                            const frame* caller, bool check_access, const call_site* site) {
 	// This native phase owns the constructor depth only until a body takes over
-	construction_lender host(*this, caller);
+	construction_lender host(*this, caller, site);
 	std::optional<detail::call_depth_guard> initializer_depth;
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_c0 = __rdtsc();
@@ -20416,7 +20471,7 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
                                                 type_info* result_stamp, const call_site* site) {
 	std::shared_ptr<function_decl> matching_ctor;
 	std::vector<script_value> captured;
-	auto pre = construct_instance_pre_body(class_def, definition_env, call_args, matching_ctor, captured, &f, true);
+	auto pre = construct_instance_pre_body(class_def, definition_env, call_args, matching_ctor, captured, &f, true, site);
 	const std::vector<script_value>& args = captured.empty() ? call_args : captured;
 	struct owned_scope {
 		vm_backend* vm; std::vector<script_value>* saved;

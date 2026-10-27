@@ -51,7 +51,7 @@ namespace jai {
 
     // shared_ptr extraction (engine.cpp): locks an extended object's weakly held owner
     // (null once the object died); an owning native object is returned as is.
-    namespace detail { class object_ref; }
+    namespace detail { class object_ref; struct object_borrow_record; }
     std::shared_ptr<void> engine_lock_instance_cpp_object(engine* eng, const detail::object_ref& instance_data);
     
 	namespace detail {
@@ -116,11 +116,11 @@ namespace detail {
         return reinterpret_cast<control_block_base*>(reinterpret_cast<unsigned char*>(const_cast<class_instance*>(instance)) - k_instance_cb_offset);
     }
     void release_last_instance(class_instance* instance) noexcept;
-    inline void retain_instance(class_instance* instance) noexcept { strong_counts<class_instance>::add_strong(instance_control_block(instance)); }
+    inline void retain_instance(class_instance* instance) noexcept { instance_control_block(instance)->add_strong(); }
     inline void release_instance(class_instance* instance) noexcept {
-        if (strong_counts<class_instance>::release_strong(instance_control_block(instance))) { release_last_instance(instance); }
+        if (instance_control_block(instance)->release_strong()) { release_last_instance(instance); }
     }
-    inline size_t instance_use_count(const class_instance* instance) noexcept { return strong_counts<class_instance>::strong_count(instance_control_block(instance)); }
+    inline size_t instance_use_count(const class_instance* instance) noexcept { return instance_control_block(instance)->get_strong_count(); }
 
     // A std::shared_ptr owning a class instance through its strong_ptr, for a host that holds the instance as a C++ object's owner
     // (a hybrid's load, an aliasing handle): the last host handle drops the strong count, so it drops on the script's thread
@@ -435,6 +435,10 @@ namespace detail {
         // Arrays hand back the NODE (its address is the identity; callers dispatch on its kind).
         const script_array* parallel_borrow_array() const noexcept;
         const script_map* parallel_borrow_map() const noexcept;
+        // A shared object a worker reached through a host call (internal/parallel_design.md, shared objects), read through
+        // detail::parallel_object_member; `tag` is the type its handle would carry
+        static script_value make_object_borrow(const detail::object_borrow_record* record, type_info_ptr tag, engine* eng);
+        const detail::object_borrow_record* parallel_object_borrow() const noexcept;
 
     public:
         // Engine-aware factory methods (preferred - ALWAYS use these)
@@ -2368,15 +2372,19 @@ namespace detail {
         // Parallel captured-read borrow payload (variant alternative 15): ONE tagged raw
         // pointer to an engine-owned container that a parallel region proved read-only.
         // Trivially copyable ON PURPOSE - copying a borrow must never touch a refcount
-        // (see make_parallel_borrow). Low bit = kind (0 array, 1 map), the next = sliced; container
-        // allocations are 8+ aligned so the bits are free.
+        // (see make_parallel_borrow). Low bit = kind (0 array, 1 map), the next = sliced, the third = a shared object's
+        // instance; container and instance allocations are 8+ aligned so the bits are free.
+        // Inside a region no worker touches a shared instance's count: every read through an object borrow yields a borrow
+        // or a worker-local copy, never the instance's handle.
         struct parallel_borrow_tag {
             uintptr_t bits = 0;
             static constexpr uintptr_t k_map_bit = 1;
             static constexpr uintptr_t k_sliced_bit = 2;
-            const void* pointer() const noexcept { return reinterpret_cast<const void*>(bits & ~(k_map_bit | k_sliced_bit)); }
+            static constexpr uintptr_t k_object_bit = 4;
+            const void* pointer() const noexcept { return reinterpret_cast<const void*>(bits & ~(k_map_bit | k_sliced_bit | k_object_bit)); }
             bool is_map_kind() const noexcept { return (bits & k_map_bit) != 0; }
             bool is_sliced() const noexcept { return (bits & k_sliced_bit) != 0; }
+            bool is_object_kind() const noexcept { return (bits & k_object_bit) != 0; }
         };
 
         // Variant indices for ultra-fast unchecked access

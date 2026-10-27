@@ -10,6 +10,7 @@
 // KEEP BYTE-PARALLEL: both backends reach these through binary_equal (binary_handlers.hpp).
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
+#include <jaiscript/detail/object_borrow.hpp>
 #include <cstring>
 #include <optional>
 #include <utility>
@@ -24,7 +25,10 @@ namespace jai::detail {
     // method value
     inline const class_definition* operand_instance_class(const script_value& v) {
         const script_value& d = v.is_reference() ? v.deref() : v;
-        if (!d.is_object()) { return nullptr; }
+        if (!d.is_object()) {
+            const object_borrow_record* borrowed = d.parallel_object_borrow();
+            return borrowed ? borrowed->source->get_class_definition() : nullptr;
+        }
         auto holder = const_cast<script_value&>(d).get_object_holder();
         if (!holder || !holder->is_instance()) { return nullptr; }
         return holder->unchecked_instance()->get_class_definition();

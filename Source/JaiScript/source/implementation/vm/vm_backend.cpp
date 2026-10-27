@@ -15688,29 +15688,46 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 	// race on the non-atomic strong_ptr. Fields live on the (exclusively owned)
 	// instance, so read them directly; anything that is not a backing field would
 	// need method machinery - wall it (unsafe mode included: the count is the runtime's).
-	if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
-		auto& holder = objectValue.unchecked_get_object_storage();
-		if (holder && holder->is_instance()) {
-			auto* inst = holder->unchecked_instance();
-			if (script_value* field = detail::parallel_script_field(*inst, expr->member_id)) {
-				out = field->is_reference() ? field->deref() : *field;
-				return {};
+	if (parallel_worker_) [[unlikely]] {
+		if (objectValue.parallel_object_borrow()) {
+			// a shared object: a script field as the worker's own copy, a host member on its view (KEEP BYTE-PARALLEL with
+			// interpreter::member_read_on)
+			if (as_callee) { VM_TRY(detail::parallel_borrow_call(objectValue, expr->member_id, parallel_method_pins_)); }
+			if (!as_callee) {
+				if (auto field = detail::parallel_borrow_field(objectValue, expr->member_id)) {
+					if (!*field) { return raise_from(*field); }
+					out = std::move(field->value());
+					return {};
+				}
 			}
-			const class_definition* cls = inst->get_class_definition();
-			if (const detail::parallel_method_pin* pin = as_callee && parallel_method_pins_ ? parallel_method_pins_->find(cls, expr->member_id) : nullptr;
-			    pin && !pin->resolved) {
-				out = detail::parallel_bound_pin(*pin, objectValue, expr->member_id, engine_);
-				return {};
-			}
-			if (const detail::parallel_method_pin* getter = !as_callee && parallel_method_pins_
-			        ? parallel_method_pins_->find(cls, symbolizer_->get_getter_id_with_view(expr->member_id).first) : nullptr) {
-				auto read = detail::call_parallel_host_pin(*getter, objectValue, expr->member_id, {}, engine_, true);
-				if (!read) { return raise_from(read); }
-				out = std::move(read.value());
-				return {};
-			}
+			if (const script_value* view = detail::parallel_borrow_view(objectValue)) { return member_access_value(f, *view, expr, out, as_callee); }
 			return raise_(make_error_code(runtime_error_code::unsupported_operation),
 				"only direct field access on class instances is allowed in a parallel body");
+		}
+		if (objectValue.raw_storage_index() == script_value::TYPEID_OBJECT) {
+			auto& holder = objectValue.unchecked_get_object_storage();
+			if (holder && holder->is_instance()) {
+				auto* inst = holder->unchecked_instance();
+				if (script_value* field = detail::parallel_script_field(*inst, expr->member_id)) {
+					out = field->is_reference() ? field->deref() : *field;
+					return {};
+				}
+				const class_definition* cls = inst->get_class_definition();
+				if (const detail::parallel_method_pin* pin = as_callee && parallel_method_pins_ ? parallel_method_pins_->find(cls, expr->member_id) : nullptr;
+				    pin && !pin->resolved) {
+					out = detail::parallel_bound_pin(*pin, objectValue, expr->member_id, engine_);
+					return {};
+				}
+				if (const detail::parallel_method_pin* getter = !as_callee && parallel_method_pins_
+				        ? parallel_method_pins_->find(cls, symbolizer_->get_getter_id_with_view(expr->member_id).first) : nullptr) {
+					auto read = detail::call_parallel_host_pin(*getter, objectValue, expr->member_id, {}, engine_, true);
+					if (!read) { return raise_from(read); }
+					out = std::move(read.value());
+					return {};
+				}
+				return raise_(make_error_code(runtime_error_code::unsupported_operation),
+					"only direct field access on class instances is allowed in a parallel body");
+			}
 		}
 	}
 
@@ -17027,6 +17044,7 @@ op_status vm_backend::assign_member(frame& f, const script_value& object_value, 
 	}
 	auto target = resolve_member_target(object_value);
 	if (!target) {
+		if (object_value.deref().parallel_object_borrow()) [[unlikely]] { return raise_from(detail::parallel_shared_store_refusal(member->member_id)); }
 		return raise_(make_error_code(runtime_error_code::type_mismatch),
 			"Cannot assign property to non-object value");
 	}
@@ -17103,6 +17121,7 @@ op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, ui
 			if (want_result) { stack_.push_back(assignment_result_used(f) ? std::move(stored) : std::move(value)); }
 			return {};
 		}
+		if (dereferenced.parallel_object_borrow()) [[unlikely]] { return raise_from(detail::parallel_shared_store_refusal(member->member_id)); }
 		raise_script_exception(dereferenced.is_null() ? null_member_store_text(member->object.get(), member->member)
 		                                              : non_object_member_store_text(class_named_by_dot_receiver(member->object.get(), dereferenced, engine_), member->member),
 		                       member->location);
@@ -17830,6 +17849,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 			stack_.push_back(old_result ? std::move(postfix_old) : result_needed ? std::move(stored) : std::move(resultValue));
 			return {};
 		}
+		if (objectValue.parallel_object_borrow()) [[unlikely]] { return raise_from(detail::parallel_shared_store_refusal(member->member_id)); }
 		raise_script_exception("Cannot assign to member of non-object type", member->location);
 		stack_.push_back(make_null());
 		return {};
@@ -18769,6 +18789,11 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 #endif
 					return {};
 				}
+			} else if (receiver_type == script_value::TYPEID_PARALLEL_BORROW && objd.parallel_object_borrow()) [[unlikely]] {
+				// a shared object's host method runs on the worker's view of its C++ object (KEEP BYTE-PARALLEL with
+				// interpreter::member_read_on); the general call below dispatches it
+				VM_TRY(detail::parallel_borrow_call(objd, member->member_id, parallel_method_pins_));
+				stack_[args_base - 1] = *detail::parallel_borrow_view(objd);
 			} else if (receiver_type == script_value::TYPEID_PARALLEL_BORROW) [[unlikely]] {
 				// a captured container's count in a parallel body (KEEP BYTE-PARALLEL with interpreter::member_read_on)
 				auto count = detail::parallel_borrow_count(objd, member->member, argc, engine_);

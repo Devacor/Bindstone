@@ -45,7 +45,7 @@ inline class_instance::class_instance(interned_name_t, std::string_view interned
 inline void class_instance::free_allocation(class_instance* instance) noexcept {
     detail::control_block_base* cb = detail::cb_from_object(instance);
     instance->~class_instance();
-    if (detail::strong_counts<class_instance>::release_weak(cb)) { cb->dealloc_fn(cb); }
+    if (cb->release_weak()) { cb->dealloc_fn(cb); }
 }
 
 namespace detail {
@@ -57,20 +57,20 @@ class dying_instance_pin {
 public:
     explicit dying_instance_pin(class_instance* instance) noexcept : instance_(instance) {
         control_block_base* cb = cb_from_object(instance);
-        revived_ = strong_counts<class_instance>::strong_count(cb) == 0;
-        strong_counts<class_instance>::add_strong(cb);
+        revived_ = cb->get_strong_count() == 0;
+        cb->add_strong();
     }
     dying_instance_pin(const dying_instance_pin&) = delete;
     dying_instance_pin& operator=(const dying_instance_pin&) = delete;
     ~dying_instance_pin() {
         if (revived_) {
-            (void)strong_counts<class_instance>::release_strong(cb_from_object(instance_));
+            (void)cb_from_object(instance_)->release_strong();
         } else {
             strong_ptr<class_instance> pinned = adopt_pooled(instance_);
         }
     }
     strong_ptr<class_instance> handle() const noexcept {
-        strong_counts<class_instance>::add_strong(cb_from_object(instance_));
+        cb_from_object(instance_)->add_strong();
         return adopt_pooled(instance_);
     }
 private:
@@ -98,7 +98,6 @@ inline strong_ptr<class_instance> class_instance::make(std::string_view interned
     std::byte* block = memory + prefix + room;
     auto* head = new (block) detail::object_block_head();
     head->prefix = static_cast<uint32_t>(prefix);
-    head->region_flag = eng ? eng->parallel_region_flag() : nullptr;
     if (destructor_owner) { new (memory) std::shared_ptr<class_definition>(destructor_owner->shared_from_this()); }
     auto* cb = new (block + detail::object_block_head::size) block_cb();
     cb->dealloc_fn = &detail::release_instance_block;
@@ -3236,6 +3235,8 @@ inline void class_instance::set_native(const script_value& value) {
     if (class_def_ && !value.is_null()) { note_script_layer_owner(value); }
     extras().native = value;
 }
+
+inline void class_instance::set_native_view(const script_value& value) { extras().native = value; }
 
 inline bool class_instance::native_lookup_enabled() const { return class_def_ && class_def_->get_engine(); }
 

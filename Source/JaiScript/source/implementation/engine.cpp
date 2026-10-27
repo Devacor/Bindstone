@@ -4428,17 +4428,20 @@ type_info* engine::get_type_info_weak_ptr(type_info* pointee_type) {
 }
 
 script_value engine::marked_shared_handle(script_value object) {
-    if (object.raw_storage_index() != script_value::TYPEID_OBJECT) {
+    const detail::object_borrow_record* borrowed = object.parallel_object_borrow();
+    if (object.raw_storage_index() != script_value::TYPEID_OBJECT && !borrowed) {
         return object;
     }
-    const auto* holder = object.unchecked_object_handle().get();
+    const auto* holder = borrowed ? nullptr : object.unchecked_object_handle().get();
     class_definition* def = nullptr;
-    if (holder->is_instance()) {
+    if (borrowed) {
+        def = borrowed->source->get_class_definition();
+    } else if (holder->is_instance()) {
         def = holder->unchecked_instance()->get_class_definition();
     }
     type_info* handle_type = def ? def->handle_type() : nullptr;
     if (!handle_type) {
-        handle_type = get_type_info_shared_ptr(get_type_info_object(holder->type_id()));
+        handle_type = get_type_info_shared_ptr(get_type_info_object(holder ? holder->type_id() : def->get_type_id()));
         if (def) { def->set_handle_type(handle_type); }
     }
     object.set_type_info(type_info_ptr{handle_type});
@@ -5130,7 +5133,15 @@ script_value engine::make_parallel_host_function_copy(const std::string& name) {
             snapshot->overloads.push_back(std::move(overload));
         }
         uint64_t name_id = impl->string_symbolizer_.intern(name);
-        script_function dispatcher = [snapshot, name_id, this](const std::vector<script_value>& args) -> checked_result<script_value> {
+        script_function dispatcher = [snapshot, name_id, this](const std::vector<script_value>& given) -> checked_result<script_value> {
+            // a worker's copy: a shared object passes as the worker's view of its C++ object
+            std::vector<script_value> viewed;
+            const bool borrowed = std::any_of(given.begin(), given.end(), [](const script_value& a) { return a.deref().parallel_object_borrow() != nullptr; });
+            if (borrowed) {
+                viewed = given;
+                if (!detail::parallel_host_arguments(viewed)) { return detail::parallel_shared_host_refusal(name_id); }
+            }
+            const std::vector<script_value>& args = borrowed ? viewed : given;
             script_value bestMatch = snapshot->findBestMatch(args);
             if (bestMatch.is_null()) {
                 return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
@@ -6343,6 +6354,17 @@ strong_ptr<class_instance> engine::object_instance_of(const void* cpp_object) co
     if (layers.empty()) { return nullptr; }
     auto it = layers.find(cpp_object);
     return it == layers.end() ? nullptr : it->second.lock();
+}
+
+const class_instance* engine::object_instance_peek(const void* cpp_object) const {
+    auto& layers = impl->script_layers_;
+    if (layers.empty()) { return nullptr; }
+    auto it = layers.find(cpp_object);
+    return it == layers.end() ? nullptr : it->second.peek();
+}
+
+script_value engine::parallel_borrow_of(const class_instance& source, type_info_ptr tag) {
+    return detail::parallel_object_borrow(source, std::move(tag), *this);
 }
 
 strong_ptr<class_instance> engine::script_layer_of(const void* cpp_object) const {

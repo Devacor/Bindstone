@@ -26,6 +26,7 @@ class script_extensible {
 public:
     strong_ptr<class_instance> script_layer() const { return layer_.lock(); }
     bool has_script_layer() const { return !layer_.expired(); }
+    class_instance* peek_script_layer() const noexcept { return layer_.peek(); }   // no count: a parallel region's reads
 
     // The layer's script state as {"$type": class, "$script": fields} - what extend's
     // fields_json and a cross-engine move speak. "" without a layer. from_json hydrates the

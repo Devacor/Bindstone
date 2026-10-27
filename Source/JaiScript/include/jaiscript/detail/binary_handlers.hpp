@@ -278,7 +278,7 @@ namespace jai::detail {
 		if (!((left.is_weak_ptr() && right.is_null()) || (left.is_null() && right.is_weak_ptr()))) { return std::nullopt; }
 		if (left.is_weak_ptr()) { return left.get_weak_ptr().expired(); }
 		if (right.is_weak_ptr()) { return right.get_weak_ptr().expired(); }
-		if (auto holder = right.get_object_holder()) { return holder->type_name == "weak_ptr_holder" && !holder->data; }
+		if (auto holder = right.get_object_holder()) { return holder->type_name == "weak_ptr_holder" && !holder->holds_object(); }
 		return true;
 	}
 

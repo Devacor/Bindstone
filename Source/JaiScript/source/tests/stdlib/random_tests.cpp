@@ -201,8 +201,8 @@ public:
 			auto* raw = engine.get();
 			engine->add_function("share_generator", [raw](const script_value& a_from, const script_value& a_to) {
 				const uint64_t id = raw->symbolize("rng");
-				auto* from = static_cast<class_instance*>(a_from.get_object_holder()->data.get());
-				auto* to = static_cast<class_instance*>(a_to.get_object_holder()->data.get());
+				auto* from = static_cast<class_instance*>(a_from.get_object_holder()->object());
+				auto* to = static_cast<class_instance*>(a_to.get_object_holder()->object());
 				*to->find_field_value(id) = *from->find_field_value(id);
 			});
 			check_eq(std::string("parallel_for: elements 0 and 2 share one 'random' in field 'rng' (an element owns the C++ values it holds: give each element its own, or capture one from outside the loop)"),

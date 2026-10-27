@@ -138,7 +138,7 @@ checked_result<script_value> script_callable_thunk::call(const std::vector<scrip
                 auto rv_holder = rv.get_object_holder();
                 auto recv_holder = this_obj.get_object_holder();
                 if (rv_holder && recv_holder) {
-                    rv_holder->set_keep_alive(recv_holder->data ? recv_holder->data
+                    rv_holder->set_keep_alive(recv_holder->holds_object() ? recv_holder->held()
                                                               : recv_holder->keep_alive());
                 }
             }
@@ -2589,7 +2589,7 @@ void engine::initialize_engine_reference() {
                 // object's holder is non-owning: hand its pointer out as an unowned alias (the
                 // shared_ptr extraction path upgrades it through engine_lock_instance_cpp_object).
                 auto objHolder = cppObjValue.get_object_holder();
-                if (objHolder->data) { return objHolder->data.shared(); }
+                if (objHolder->holds_object()) { return objHolder->host_object(); }
                 if (objHolder->bound_ptr) { return std::shared_ptr<void>(std::shared_ptr<void>(), objHolder->bound_ptr); }
             }
         }
@@ -6611,7 +6611,7 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
     }
     script_value cpp_value = instance->native_or_throw();
     auto cpp_holder = cpp_value.get_object_holder();
-    std::shared_ptr<void> cpp_object = cpp_holder->data ? cpp_holder->data.shared() : cpp_holder->lock_weak_data();
+    std::shared_ptr<void> cpp_object = cpp_holder->holds_object() ? cpp_holder->host_object() : cpp_holder->lock_weak_data();
     if (!cpp_object) {
         return result(make_error_code(runtime_error_code::extend_rejected),
             "extend: the C++ object behind '{0}' no longer exists", instance_def->get_type_id());
@@ -6650,7 +6650,7 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
         reclass_in_place(*this, instance, script_def);
         if (was_wrapper) {
             // an object only the script owns at this moment stays the script's: the layer keeps owning it, as a constructed hybrid's does
-            const bool script_owns_alone = cpp_holder->data && cpp_object.use_count() <= 2;   // the wrapper's holder and cpp_object
+            const bool script_owns_alone = cpp_holder->holds_object() && cpp_object.use_count() <= 2;   // the wrapper's holder and cpp_object
             if (auto hooks = base->slot_hooks(); hooks && script_owns_alone) {
                 hooks->attach(key, instance);
             } else if (hooks) {
@@ -6696,7 +6696,7 @@ std::string engine::detach_object(const strong_ptr<class_instance>& layer) {
     script_value owning = *layer->native();
     auto holder = owning.get_object_holder();
     if (!holder) { return fields; }
-    void* object = holder->data ? holder->data.get() : holder->bound_ptr;
+    void* object = holder->holds_object() ? holder->object() : holder->bound_ptr;
     if (!object) { return fields; }
     auto class_def = layer->get_class_definition();
     auto base = class_def ? class_def->find_cpp_base_class() : nullptr;
@@ -6771,7 +6771,7 @@ std::shared_ptr<void> engine_lock_instance_cpp_object(engine* eng, const detail:
     if (cppObjValue.is_null() || cppObjValue.type() != script_value_type::jai_object_type) { return nullptr; }
     auto objHolder = cppObjValue.get_object_holder();
     if (!objHolder) { return nullptr; }
-    return objHolder->data ? objHolder->data.shared() : objHolder->lock_weak_data();
+    return objHolder->holds_object() ? objHolder->host_object() : objHolder->lock_weak_data();
 }
 
 std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng) {

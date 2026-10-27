@@ -1596,7 +1596,7 @@ public:
             std::cerr << "[TEST] loaded storage type = " << static_cast<int>(loaded_val.current_type()) << std::endl;
             if (loaded_val.type() == script_value_type::jai_object_type || loaded_val.type() == script_value_type::jai_shared_ptr_type) {
                 auto obj_holder = loaded_val.get_object_holder();
-                if (obj_holder && obj_holder->data) {
+                if (obj_holder && obj_holder->holds_object()) {
                     auto inst = obj_holder->instance_handle();
                     std::cerr << "[TEST] loaded is class instance: " << inst->get_class_name() << std::endl;
                     std::cerr << "[TEST] Instance fields: ";

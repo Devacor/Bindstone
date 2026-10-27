@@ -184,7 +184,7 @@ inline void* class_instance::cpp_object_pointer() const {
     if (!held || !held->is_object()) return nullptr;
     auto holder = held->get_object_holder();
     if (!holder) return nullptr;
-    return holder->data ? holder->data.get() : holder->bound_ptr;
+    return holder->holds_object() ? holder->object() : holder->bound_ptr;
 }
 
 inline void class_instance::reserve_cell_arena(size_t n) {
@@ -1931,7 +1931,7 @@ inline slot_class_view resolve_slot_class(const script_value& v, engine* eng) {
                 if (auto hooks = view.def->slot_hooks()) {
                     auto layer = hooks->read(view.instance->cpp_object_pointer());
                     if (layer && layer != view.instance && layer->get_engine() == eng) {
-                        holder->data = layer;
+                        holder->hold(layer);
                         view.instance = std::move(layer);
                         view.def = view.instance->get_class_definition();
                     }
@@ -2787,7 +2787,7 @@ inline std::optional<checked_result<void>> class_copy_assign(const script_value&
     if (source == instance) { return checked_result<void>(); }   // self-assignment
 #ifdef JAISCRIPT_VM_COVERAGE
     census::copy_scope census_scope(census::site::copy_assign, nullptr, source_holder.get(),
-        (source_holder.use_count() == 2 && source_holder->data.use_count() == 1) ? census::k_src_unique : 0u);
+        (source_holder.use_count() == 2 && source_holder->object_use_count() == 1) ? census::k_src_unique : 0u);
     census::add_weight(source_def->field_slot_count());
 #endif
     if (source_def == def) { return implicit_copy_assign(instance, def, source, eng); }
@@ -3104,7 +3104,7 @@ inline void class_instance::note_script_layer_owner(const script_value& value) {
     if (!cpp_base) { return; }
     auto holder = value.get_object_holder();
     if (!holder) { return; }
-    void* object = holder->data ? holder->data.get() : holder->bound_ptr;
+    void* object = holder->holds_object() ? holder->object() : holder->bound_ptr;
     if (!object) { return; }
     auto weak_self = weak_from_this();
     if (weak_self.expired()) { return; }
@@ -3225,7 +3225,7 @@ inline std::shared_ptr<void> class_instance::extract_cpp_object_impl(const scrip
         if (!obj_holder) {
             throw runtime_error("script_value is not an object type");
         }
-        if (obj_holder->data) { return obj_holder->data.shared(); }
+        if (obj_holder->holds_object()) { return obj_holder->host_object(); }
         // an extended object's non-owning holder: hand the pointer out as an unowned alias
         if (obj_holder->bound_ptr) { return std::shared_ptr<void>(std::shared_ptr<void>(), obj_holder->bound_ptr); }
         return nullptr;

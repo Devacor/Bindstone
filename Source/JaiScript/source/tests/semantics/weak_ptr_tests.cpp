@@ -202,7 +202,7 @@ public:
                 auto held = e->execute("a");
                 auto holder = held.get_object_holder();
                 check_not_null(holder.get(), "holder");
-                auto cpp_share = holder->data;   // the C++-side share the old number counted
+                auto cpp_share = holder->held();   // the C++-side share the old number counted
                 check_eq((int64_t)2, e->execute("a.cpp_ref_count()").as_int(),
                          use_vm ? "vm inner count sees C++ share" : "interp inner count sees C++ share");
             }

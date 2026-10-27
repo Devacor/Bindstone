@@ -56,7 +56,7 @@ namespace stdlib {
                 throw runtime_error(eng->format_error(made));
             }
             auto holder = made.value().get_object_holder();
-            object = holder ? holder->data.shared() : nullptr;
+            object = holder ? holder->host_object() : nullptr;
         } else {
             throw runtime_error("Cannot load hybrid script class '" + class_def->get_name() + "': its C++ base '" + base_name +
                                 "' is not default constructible and has no load_and_construct");

@@ -46,7 +46,7 @@ namespace jai {
                     auto holder = acquire_object_holder(eng);
                     holder->type_name = bound_def->interned_name();   // interned once per class
                     holder->type_id = bound_def->interned_name_id();
-                    holder->data = nullptr;  // Non-owning! bound_ptr holds the pointer
+                    holder->hold(nullptr);  // Non-owning! bound_ptr holds the pointer
                     holder->bound_ptr = boundPtr;
 
                     val.set_stamp(eng->get_type_info_object(holder->type_id));

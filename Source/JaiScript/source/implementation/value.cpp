@@ -947,7 +947,7 @@ script_value script_value::make_object(std::string_view type_name, uint64_t type
     auto obj = claim_object_holder(data.instance_pointer(), eng);
     obj->type_name = interned_type_text(eng, type_name, type_id);
     obj->type_id = type_id;  // Set the cached type_id for fast comparison
-    obj->data = std::move(data);
+    obj->hold(std::move(data));
     v.storage_ = obj;
     return v;
 }
@@ -990,7 +990,7 @@ script_value script_value::make_class_object(const class_definition& cd, strong_
     auto obj = claim_object_holder(data.get(), eng);
     obj->type_name = cd.interned_name();
     obj->type_id = cd.get_type_id();
-    obj->data = std::move(data);
+    obj->hold(std::move(data));
     v.storage_ = obj;
     return v;
 }
@@ -1000,7 +1000,7 @@ script_value script_value::make_coroutine_handle(uint64_t type_id, std::shared_p
     auto obj = acquire_object_holder(eng);
     obj->type_name = interned_type_text(eng, "coroutine_handle", type_id);
     obj->type_id = type_id;
-    obj->data = std::move(handle);
+    obj->hold(std::move(handle));
     obj->is_coroutine_handle = true;
     v.storage_ = obj;
     return v;
@@ -1025,7 +1025,7 @@ script_value script_value::make_cpp_object(std::string_view type_name, uint64_t 
     auto obj = acquire_object_holder(eng);
     obj->type_name = interned_type_text(eng, type_name, type_id);
     obj->type_id = type_id;  // Use the provided type_id directly (no re-interning)
-    obj->data = data;
+    obj->hold(data);
     v.storage_ = obj;
     return v;
 }
@@ -1424,7 +1424,7 @@ script_value script_value::clone() const {
         case TYPEID_OBJECT: {
             const auto& h = src.unchecked_object_handle();
             node = h.get();
-            unique = h && h.use_count() == 1 && h->data && h->data.use_count() == 1;
+            unique = h && h.use_count() == 1 && h->holds_object() && h->object_use_count() == 1;
             const bool shared = src.stamp() && src.stamp()->base_type == script_value_type::jai_shared_ptr_type;
             kind = shared ? census::copied_kind::shared_deep : (h && h->is_instance()) ? census::copied_kind::instance : census::copied_kind::cpp_object;
             break;
@@ -1526,7 +1526,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             auto new_holder = claim_object_holder(new_instance.get(), obj_holder->owner);
             new_holder->type_name = obj_holder->type_name;
             new_holder->type_id = obj_holder->type_id;
-            new_holder->data = std::move(new_instance);
+            new_holder->hold(std::move(new_instance));
 
             script_value result = tagged_null();
             result.storage_ = new_holder;
@@ -1535,12 +1535,12 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
 
         auto class_def = obj_holder->owner ? obj_holder->owner->get_class_definition(obj_holder->type_id) : nullptr;
         if (class_def && class_def->has_copy_function()) {
-            auto new_cpp_obj = class_def->copy_object(obj_holder->data.get());
+            auto new_cpp_obj = class_def->copy_object(obj_holder->object());
             if (new_cpp_obj) {
                 auto new_holder = acquire_object_holder(obj_holder->owner);
                 new_holder->type_name = obj_holder->type_name;
                 new_holder->type_id = obj_holder->type_id;
-                new_holder->data = new_cpp_obj;
+                new_holder->hold(new_cpp_obj);
 
                 script_value result = tagged_null();
                 result.storage_ = new_holder;
@@ -1660,7 +1660,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                 auto new_holder = claim_object_holder(new_instance.get(), obj_holder->owner);
                 new_holder->type_name = obj_holder->type_name;
                 new_holder->type_id = obj_holder->type_id;  // Preserve the cached type_id
-                new_holder->data = std::move(new_instance);
+                new_holder->hold(std::move(new_instance));
                 result.storage_ = std::move(new_holder);
             } else {
                 bool copied = false;
@@ -1670,13 +1670,13 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
                         // cpp_bound references own nothing (data null) - the live object is
                         // bound_ptr. Deep copy from it and drop the binding so the
                         // clone is an independent owned object, not an alias.
-                        const void* copy_src = obj_holder->data ? obj_holder->data.get() : obj_holder->bound_ptr;
+                        const void* copy_src = obj_holder->holds_object() ? obj_holder->object() : obj_holder->bound_ptr;
                         auto new_cpp_obj = copy_src ? class_def->copy_object(copy_src) : nullptr;
                         if (new_cpp_obj) {
                             auto new_holder = acquire_object_holder(owner);
                             new_holder->type_name = obj_holder->type_name;
                             new_holder->type_id = obj_holder->type_id;
-                            new_holder->data = new_cpp_obj;
+                            new_holder->hold(new_cpp_obj);
                             result.storage_ = new_holder;  // fresh holder: bound_ptr stays null (clone detaches)
                             copied = true;
                         }
@@ -1787,15 +1787,15 @@ script_value script_value::parallel_host_view() const {
     class_definition* cd = inst->get_class_definition();
     const script_value* native = inst->native();
     const auto native_holder = native ? native->get_object_holder() : nullptr;
-    if (!cd || !native_holder || !native_holder->data) { throw runtime_error("parallel_host_view: the instance owns no C++ object"); }
+    if (!cd || !native_holder || !native_holder->holds_object()) { throw runtime_error("parallel_host_view: the instance owns no C++ object"); }
     auto view = cd->allocate_instance();
     view->set_class_definition(cd);
-    view->set_native(make_cpp_object(native_holder->type_name, native_holder->type_id, native_holder->data.shared(), holder->owner));
+    view->set_native(make_cpp_object(native_holder->type_name, native_holder->type_id, native_holder->host_object(), holder->owner));
     cd->register_live_instance(view.get());
     auto view_holder = acquire_object_holder(holder->owner);
     view_holder->type_name = holder->type_name;
     view_holder->type_id = holder->type_id;
-    view_holder->data = std::move(view);
+    view_holder->hold(std::move(view));
     script_value result = tagged_null();
     result.storage_ = view_holder;
     return result;
@@ -2506,7 +2506,7 @@ namespace {
 		const auto* holder = key.peek_object_holder();
 		if (!holder) { return nullptr; }
 		if (holder->is_instance()) {
-			return holder->data ? holder->unchecked_instance()->get_class_definition() : nullptr;
+			return holder->holds_object() ? holder->unchecked_instance()->get_class_definition() : nullptr;
 		}
 		engine* eng = key.payload_engine();
 		if (!eng) { return nullptr; }

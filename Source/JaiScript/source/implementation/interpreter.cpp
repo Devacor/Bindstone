@@ -2351,7 +2351,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
         if (self.is_object()) {
             auto obj_holder = self.get_object_holder();
-            if (obj_holder && obj_holder->data) {
+            if (obj_holder && obj_holder->holds_object()) {
                 const long transient_k =
                     (ctx.engine_ref && ctx.engine_ref->get_backend_type() == backend_type::vm) ? 3 : 2;
                 long count = static_cast<long>(obj_holder.use_count()) - transient_k;
@@ -2373,8 +2373,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
         if (self.is_object()) {
             auto obj_holder = self.get_object_holder();
-            if (obj_holder && obj_holder->data) {
-                long count = obj_holder->data.use_count();
+            if (obj_holder && obj_holder->holds_object()) {
+                long count = obj_holder->object_use_count();
                 return ctx.make_value(static_cast<script_int>(count));
             }
         }
@@ -2389,7 +2389,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
         if (self.is_object()) {
             auto obj_holder = self.get_object_holder();
-            if (obj_holder && obj_holder->data) {
+            if (obj_holder && obj_holder->holds_object()) {
                 // unique = exactly one script handle (mirrors the ruled use_count layer)
                 const long transient_k =
                     (ctx.engine_ref && ctx.engine_ref->get_backend_type() == backend_type::vm) ? 3 : 2;
@@ -2637,7 +2637,7 @@ interpreter::member_target interpreter::resolve_member_target(const script_value
                 if (auto hooks = target.class_def->slot_hooks()) {
                     auto layer = hooks->read(target.instance->cpp_object_pointer());
                     if (layer && layer != target.instance && layer->get_engine() == engine_) {
-                        holder->data = layer;
+                        holder->hold(layer);
                         target.instance = std::move(layer);
                         target.class_def = target.instance->get_class_definition();
                     }
@@ -7727,7 +7727,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         auto rv_holder = rv.get_object_holder();
                         auto recv_holder = objectValue.get_object_holder();
                         if (rv_holder && recv_holder) {
-                            rv_holder->set_keep_alive(recv_holder->data ? recv_holder->data
+                            rv_holder->set_keep_alive(recv_holder->holds_object() ? recv_holder->held()
                                                                       : recv_holder->keep_alive());
                         }
                     }
@@ -7999,7 +7999,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                     if (class_var.is_object()) {
                         auto objHolder = class_var.get_object_holder();
                         if (objHolder && objHolder->type_name == "class_definition") {
-                            fallback_class = std::static_pointer_cast<class_definition>(objHolder->data.shared());
+                            fallback_class = std::static_pointer_cast<class_definition>(objHolder->host_object());
                         }
                     }
                 }
@@ -8142,7 +8142,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
 
-        auto class_def = std::static_pointer_cast<class_definition>(objHolder->data.shared());
+        auto class_def = std::static_pointer_cast<class_definition>(objHolder->host_object());
 
         if (class_def->chain_has_nonpublic()) [[unlikely]] {
             JAISCRIPT_TRY(detail::enforce_member_access(class_def.get(), expr->member_id,
@@ -8388,7 +8388,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
 
         // Get the class instance
         auto objHolder = objectValue.get_object_holder();
-        if (!objHolder || !objHolder->data) {
+        if (!objHolder || !objHolder->holds_object()) {
             // super:: used on non-class object
             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
@@ -8465,7 +8465,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     if (objectValue.is_object()) {
         auto objHolder = objectValue.get_object_holder();
         if (objHolder && objHolder->type_id == coroutine_handle_type_id_) {
-            auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->data.shared());
+            auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->host_object());
             if (expr->member_id == next_id_) {
 	            if (!as_callee) { return method_value_error(expr, objectValue, false); }
                 auto captured_handle = handle;
@@ -10988,7 +10988,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
         // Check for coroutine/generator iteration
         auto objHolder = container.get_object_holder();
         if (objHolder && objHolder->type_id == coroutine_handle_type_id_) {
-            auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->data.shared());
+            auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->host_object());
 
             script_value* loop_var_ptr = nullptr;
             if (use_slot) {
@@ -11868,7 +11868,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                     {
                         auto obj_holder = class_var.get_object_holder();
                         if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
-                            auto class_def = std::static_pointer_cast<class_definition>(obj_holder->data.shared());
+                            auto class_def = std::static_pointer_cast<class_definition>(obj_holder->host_object());
 
                             // Arity-aware collision check
                             if (class_def->has_static_method_with_arity(func_decl->name_id, func_decl->parameters.size())) {
@@ -11924,7 +11924,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                     auto obj_holder = class_def_var->get_object_holder();
                     if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
                         detail::register_namespace_class(*engine_, *ns_data, decl->name, class_decl_ptr->name_id,
-                                                         std::static_pointer_cast<class_definition>(obj_holder->data.shared()));
+                                                         std::static_pointer_cast<class_definition>(obj_holder->host_object()));
                     }
                 }
             }

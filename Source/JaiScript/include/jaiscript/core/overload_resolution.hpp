@@ -113,7 +113,7 @@ inline bool value_of_class(const class_definition* def, const script_value& othe
     if (!holder) { return false; }
     const class_definition* other_def = nullptr;
     if (holder->is_instance()) {
-        other_def = holder->data ? holder->unchecked_instance()->get_class_definition() : nullptr;
+        other_def = holder->holds_object() ? holder->unchecked_instance()->get_class_definition() : nullptr;
     } else if (holder->type_name == def->get_name()) {
         return true;
     } else if (engine* eng = def->get_engine(); eng && !holder->type_name.empty()) {

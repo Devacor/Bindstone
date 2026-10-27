@@ -64,10 +64,10 @@ checked_result<void*> checked_native_reference(const script_value& value, const 
 			return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch), "Object type mismatch");
 		}
 		return checked_native_pointer(holder->owner, native_holder->type_id, target, target_id,
-			native_holder->data ? native_holder->data.get() : native_holder->bound_ptr);
+			native_holder->holds_object() ? native_holder->object() : native_holder->bound_ptr);
 	}
 	return checked_native_pointer(holder->owner, holder->type_id, target, target_id,
-		holder->data ? holder->data.get() : holder->bound_ptr);
+		holder->holds_object() ? holder->object() : holder->bound_ptr);
 }
 
 void* lane_object_pointer(const script_value& value, const std::type_info& target) {
@@ -93,7 +93,7 @@ void anchor_to_receiver(script_value& result, const script_value& receiver) {
 	auto result_holder = result.get_object_holder();
 	auto receiver_holder = receiver.get_object_holder();
 	if (result_holder && receiver_holder) {
-		result_holder->set_keep_alive(receiver_holder->data ? receiver_holder->data : receiver_holder->keep_alive());
+		result_holder->set_keep_alive(receiver_holder->holds_object() ? receiver_holder->held() : receiver_holder->keep_alive());
 	}
 }
 
@@ -119,7 +119,7 @@ checked_result<std::shared_ptr<void>> checked_native_object(engine* eng, const s
 		}
 		return checked_native_object(eng, *native_holder, target, target_id);
 	}
-	std::shared_ptr<void> owner = holder.data.shared();
+	std::shared_ptr<void> owner = holder.host_object();
 	if (!owner && holder.bound_ptr) {
 		owner = holder.lock_weak_data();
 		if (!owner) {

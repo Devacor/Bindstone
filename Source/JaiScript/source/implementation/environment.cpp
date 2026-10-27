@@ -91,7 +91,7 @@ std::optional<checked_result<value_store>> handle_value_assign(const script_valu
     }
     if (dynamic && !compatible) { return value_store::rebind; }
     auto holder = const_cast<script_value&>(current).get_object_holder();
-    if (!holder || !holder->data) {
+    if (!holder || !holder->holds_object()) {
         return checked_result<value_store>(make_error_code(runtime_error_code::invalid_reference), "Cannot assign to null shared_ptr");
     }
     class_instance* instance = held_instance(current);
@@ -403,7 +403,7 @@ checked_result<script_value> environment::get(uint64_t id) const {
             (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
             !method_->this_object.is_null()) {
             auto obj_holder = method_->this_object.get_object_holder();
-            if (obj_holder && obj_holder->data) {
+            if (obj_holder && obj_holder->holds_object()) {
                 auto instance = obj_holder->instance_handle();
 
                 if (auto access = receiver_member_access(*this, *instance, id); !access) [[unlikely]] {
@@ -699,7 +699,7 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
             (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
             !method_->this_object.is_null()) {
             auto obj_holder = method_->this_object.get_object_holder();
-            if (obj_holder && obj_holder->data) {
+            if (obj_holder && obj_holder->holds_object()) {
                 auto instance = obj_holder->instance_handle();
 
                 if (auto access = receiver_member_access(*this, *instance, id); !access) [[unlikely]] {
@@ -777,7 +777,7 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
             (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
             !method_->this_object.is_null()) {
             auto obj_holder = method_->this_object.get_object_holder();
-            if (obj_holder && obj_holder->data) {
+            if (obj_holder && obj_holder->holds_object()) {
                 auto instance = obj_holder->instance_handle();
 
                 if (auto access = receiver_member_access(*this, *instance, id); !access) [[unlikely]] {
@@ -855,7 +855,7 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
         if (id != symbolizer_->get_this_id() &&
             (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
             auto obj_holder = method_->this_object.get_object_holder();
-            if (obj_holder && obj_holder->data) {
+            if (obj_holder && obj_holder->holds_object()) {
                 auto instance = obj_holder->instance_handle();
                 if (instance && instance->has_field(id)) {
                     // A hybrid's C++ property stores through its setter (a same-named
@@ -931,7 +931,7 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
         if (id != symbolizer_->get_this_id() &&
             (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
             auto obj_holder = method_->this_object.get_object_holder();
-            if (obj_holder && obj_holder->data) {
+            if (obj_holder && obj_holder->holds_object()) {
                 auto instance = obj_holder->instance_handle();
                 if (instance && instance->has_field(id)) {
                     if (uint64_t setter_id = detail::cpp_property_setter_id(instance.get(), id)) {
@@ -1201,7 +1201,7 @@ script_value* environment::kind_fallback_ptr(uint64_t id) {
             (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) &&
             !method_->this_object.is_null()) {
             auto obj_holder = method_->this_object.get_object_holder();
-            if (obj_holder && obj_holder->data) {
+            if (obj_holder && obj_holder->holds_object()) {
                 auto instance = obj_holder->instance_handle();
 
                 if (!receiver_member_access(*this, *instance, id)) [[unlikely]] {
@@ -1291,7 +1291,7 @@ void detail::anchor_bound_method_result(const script_value& this_obj, checked_re
             if (rv_holder && recv_holder) {
                 // Prefer the receiver's owning data; if the receiver is itself a
                 // non-owning link in the chain, propagate its existing anchor.
-                rv_holder->set_keep_alive(recv_holder->data ? recv_holder->data
+                rv_holder->set_keep_alive(recv_holder->holds_object() ? recv_holder->held()
                                                           : recv_holder->keep_alive());
             }
         }

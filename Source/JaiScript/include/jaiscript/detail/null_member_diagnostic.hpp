@@ -107,34 +107,6 @@ inline uint64_t callee_name_symbol(const expression* callee) {
     }
 }
 
-inline constexpr std::string_view base_type_spelling(script_value_type type) {
-    switch (type) {
-        case script_value_type::jai_null_type: return "null";
-        case script_value_type::jai_int_type: return "int";
-        case script_value_type::jai_float_type: return "float";
-        case script_value_type::jai_string_type: return "string";
-        case script_value_type::jai_utf8_string_type: return "utf8_string";
-        case script_value_type::jai_vec2_type: return "math::vec2";
-        case script_value_type::jai_vec3_type: return "math::vec3";
-        case script_value_type::jai_vec4_type: return "math::vec4";
-        case script_value_type::jai_color_type: return "math::color";
-        case script_value_type::jai_ivec2_type: return "math::ivec2";
-        case script_value_type::jai_ivec3_type: return "math::ivec3";
-        case script_value_type::jai_char_type: return "char";
-        case script_value_type::jai_bool_type: return "bool";
-        case script_value_type::jai_array_type: return "array";
-        case script_value_type::jai_map_type: return "map";
-        case script_value_type::jai_object_type: return "object";
-        case script_value_type::jai_function_type: return "function";
-        case script_value_type::jai_reference_type: return "reference";
-        case script_value_type::jai_shared_ptr_type: return "shared_ptr";
-        case script_value_type::jai_weak_ptr_type: return "weak_ptr";
-        case script_value_type::jai_any_type: return "any";
-        case script_value_type::jai_invalid_type: return "invalid";
-        default: return "unknown";
-    }
-}
-
 // Interned base-type spellings, filled once at backend init: error paths never intern
 // (parallel workers run against a frozen symbolizer)
 struct base_type_symbols {

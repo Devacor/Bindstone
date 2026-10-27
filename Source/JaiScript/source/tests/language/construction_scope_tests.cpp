@@ -110,6 +110,27 @@ public:
 			     "two bases under a base level");
 		});
 
+		test("a_reference_parameter_binds_the_callers_place_at_every_level", [this]() {
+			both("int h = 1; class D { int d = 0; D(int& r) { r = r + 1; d = r; } } D x = D(h); [h, x.d];", "[2, 2]", "the class's own constructor");
+			both("int g = 1; class A { int a = 0; A(int x) { a = x; } } class B : A { B(int& r) : super(r = r + 5) { r = r * 2; } } B b = B(g); [g, b.a];",
+			     "[12, 6]", "the initializer list writes through the parameter");
+			both("int k = 1; class P { int a = 0; P(int& x) { x = x + 10; a = x; } } class Q : P { int b = 0; Q(int& r) : super(r) { r = r + 1; b = r; } } "
+			     "Q q = Q(k); [k, q.a, q.b];", "[12, 11, 12]", "a base level's parameter through super(r) from the class's own");
+			both("int m = 5; class S { S(int& x) { x = x * 2; } } class T : S { T(int v) : super(m) {} } T(0); m;", "10", "a base level's parameter bound to a global");
+			both("int n = 4; class F { int f = r * 3; F(int& r) { r = 0; } } F x = F(n); [n, x.f];", "[0, 12]", "a field initializer reads the parameter");
+			both("array<int> arr = [1, 2]; class D { int d = 0; D(int& r) { r = r + 1; d = r; } } D x = D(arr[1]); to_string(arr) + \" \" + x.d;", "[1, 3] 3",
+			     "an element place");
+			both("int h = 1; class D { int d = 0; D(int& r) { r = r + 1; d = r; } } shared_ptr<D> p = new D(h); [h, p.d];", "[2, 2]", "a new expression");
+			both("int f() { return 3; } class W { int w = 0; W(const int& c) { w = c; } } W(f()).w;", "3", "a const reference takes a temporary");
+		});
+
+		test("a_reference_parameter_without_a_place_raises", [this]() {
+			both("int f() { return 3; } class D { int d = 0; D(int& r) { r = r + 1; d = r; } } string s = \"made\"; try { D(f()); } catch (e) { s = to_string(e); } s;",
+			     "Cannot pass non-lvalue to reference parameter", "the class's own constructor");
+			both("int f() { return 3; } class S { S(int& x) { x = x * 2; } } class U : S { U() : super(f()) {} } string s = \"made\"; try { U(); } catch (e) { s = to_string(e); } s;",
+			     "Cannot pass non-lvalue to reference parameter", "a base level's constructor");
+		});
+
 		test("an_initializer_runs_against_the_class_under_construction", [this]() {
 			both("class G { int v = who(); int who() { return 1; } } class H : G { int who() override { return 2; } H() : super() {} } H().v;", "1",
 			     "a virtual call in a base's field initializer");

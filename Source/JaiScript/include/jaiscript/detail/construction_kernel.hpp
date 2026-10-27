@@ -27,11 +27,13 @@ namespace construction_kernel {
 		~level_scope() { if (scope) { host.close_scope(scope); } }
 	};
 
-	// an initializer list's arguments, each taken as it evaluates; a failure propagates as raised
+	// an initializer list's arguments, each taken as it evaluates (one a T& may bind carries the place it names); a failure
+	// propagates as raised
 	template <class Host>
 	checked_result<void> evaluate_initializer_arguments(Host& host, const constructor_initializer& initializer, construction_scope& scope,
 	                                                    bool fields_run_code, const class_definition* binding_class, std::vector<script_value>& result) {
 		result.reserve(initializer.arguments.size());
+		const bool may_bind_places = constructors_take_references(binding_class);
 		for (const auto& arg_expr : initializer.arguments) {
 			auto evaluated = host.evaluate_in(scope, arg_expr);
 			if (!evaluated) { return evaluated.error_value(); }
@@ -39,6 +41,14 @@ namespace construction_kernel {
 			capture_initializer_argument(host.eng, initializer, result.size() - 1, fields_run_code, result.back(),
 			                             [&] { return constructor_binding(binding_class, result.size() - 1); });
 			if (host.unwinding) { return {}; }
+			if (may_bind_places && !early_bound_reference(result.back())) {
+				const arg_binding binding = constructor_binding(binding_class, result.size() - 1);
+				if (!binds_reference(binding)) { continue; }
+				script_value minted(std::monostate{}, host.eng);
+				auto placed = host.initializer_place(scope, arg_expr.get(), minted);
+				if (!placed) { return placed.error_value(); }
+				if (placed.value()) { hold_minted_reference(host.eng, result.back(), binding, std::move(minted)); }
+			}
 		}
 		return {};
 	}

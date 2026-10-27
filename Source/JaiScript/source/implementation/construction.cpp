@@ -4,6 +4,8 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/aggregate_init.hpp>
 #include <jaiscript/detail/arg_capture.hpp>
+#include <jaiscript/detail/parallel_transform.hpp>
+#include <jaiscript/detail/ref_lvalue.hpp>
 
 namespace jai::detail {
 
@@ -39,6 +41,17 @@ void construction_host::open_scope(construction_scope& scope, const std::shared_
 		if (param.symbol_id == UINT64_MAX) { param.symbol_id = symbols->intern(param.name); }
 		scope.env->define(param.symbol_id, bind_for_parameters ? argument_for_binding((*args)[i], parameter_binding(param)) : (*args)[i]);
 	}
+}
+
+checked_result<void> bind_placeless_reference_argument(engine* eng, const function_decl& ctor, size_t i, script_value& arg, bool may_prove) {
+	const parameter& param = ctor.parameters[i];
+	if ((arg.is_reference() && arg.get_reference_holder()) || borrows_host_object(arg)) { return {}; }
+	if (is_string_reference_temporary(param, arg) || param.is_const ||
+	    (eng && ref_parameter_takes_temporary(*eng, ctor.parameters, ctor.body.get(), i, may_prove))) {
+		arg = make_reference_argument_temporary(param, arg, eng);
+		return {};
+	}
+	return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Cannot pass non-lvalue to reference parameter");
 }
 
 void construction_host::read_back_parameters(construction_scope& scope, const function_decl* ctor, std::vector<script_value>& args) {

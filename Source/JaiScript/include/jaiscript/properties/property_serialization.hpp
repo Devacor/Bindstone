@@ -20,102 +20,40 @@
 namespace jai {
 namespace property_serialization {
 
-	// Type traits for detecting containers without accessing nested types directly
-	template<typename T> struct is_std_vector : std::false_type {};
-	template<typename T, typename A> struct is_std_vector<std::vector<T, A>> : std::true_type {};
-	template<typename T> inline constexpr bool is_std_vector_v = is_std_vector<T>::value;
-
-	template<typename T> struct is_std_map : std::false_type {};
-	template<typename K, typename V, typename C, typename A> struct is_std_map<std::map<K, V, C, A>> : std::true_type {};
-	template<typename T> inline constexpr bool is_std_map_v = is_std_map<T>::value;
-
-	// Element type extractors (only valid when the type IS a container)
-	template<typename T> struct vector_element { using type = void; };
-	template<typename T, typename A> struct vector_element<std::vector<T, A>> { using type = T; };
-	template<typename T> using vector_element_t = typename vector_element<T>::type;
-
-	template<typename T> struct map_key { using type = void; };
-	template<typename K, typename V, typename C, typename A> struct map_key<std::map<K, V, C, A>> { using type = K; };
-	template<typename T> using map_key_t = typename map_key<T>::type;
-
-	template<typename T> struct map_value { using type = void; };
-	template<typename K, typename V, typename C, typename A> struct map_value<std::map<K, V, C, A>> { using type = V; };
-	template<typename T> using map_value_t = typename map_value<T>::type;
-
-	// Smart pointer type detection
-	template<typename T> struct is_std_weak_ptr : std::false_type {};
-	template<typename T> struct is_std_weak_ptr<std::weak_ptr<T>> : std::true_type {};
-	template<typename T> inline constexpr bool is_std_weak_ptr_v = is_std_weak_ptr<T>::value;
-
-	template<typename T> struct is_std_shared_ptr : std::false_type {};
-	template<typename T> struct is_std_shared_ptr<std::shared_ptr<T>> : std::true_type {};
-	template<typename T> inline constexpr bool is_std_shared_ptr_v = is_std_shared_ptr<T>::value;
-
-	template<typename T> struct is_std_unique_ptr : std::false_type {};
-	template<typename T, typename D> struct is_std_unique_ptr<std::unique_ptr<T, D>> : std::true_type {};
-	template<typename T> inline constexpr bool is_std_unique_ptr_v = is_std_unique_ptr<T>::value;
-
-	// Combined smart pointer detection
-	template<typename T>
-	inline constexpr bool is_smart_ptr_v = is_std_weak_ptr_v<T> || is_std_shared_ptr_v<T> || is_std_unique_ptr_v<T>;
-
-	// Unordered map detection
-	template<typename T> struct is_std_unordered_map : std::false_type {};
-	template<typename K, typename V, typename H, typename E, typename A>
-	struct is_std_unordered_map<std::unordered_map<K, V, H, E, A>> : std::true_type {};
-	template<typename T> inline constexpr bool is_std_unordered_map_v = is_std_unordered_map<T>::value;
-
-	// std::array detection
-	template<typename T> struct is_std_array : std::false_type {};
-	template<typename T, std::size_t N> struct is_std_array<std::array<T, N>> : std::true_type {};
-	template<typename T> inline constexpr bool is_std_array_v = is_std_array<T>::value;
-
-	// std::pair detection
-	template<typename T> struct is_std_pair : std::false_type {};
-	template<typename T1, typename T2> struct is_std_pair<std::pair<T1, T2>> : std::true_type {};
-	template<typename T> inline constexpr bool is_std_pair_v = is_std_pair<T>::value;
-
-	// std::pair element type extractors
-	template<typename T> struct pair_first { using type = void; };
-	template<typename T1, typename T2> struct pair_first<std::pair<T1, T2>> { using type = T1; };
-	template<typename T> using pair_first_t = typename pair_first<T>::type;
-
-	template<typename T> struct pair_second { using type = void; };
-	template<typename T1, typename T2> struct pair_second<std::pair<T1, T2>> { using type = T2; };
-	template<typename T> using pair_second_t = typename pair_second<T>::type;
-
-	// Smart pointer element type extractors
-	template<typename T> struct weak_ptr_element { using type = void; };
-	template<typename T> struct weak_ptr_element<std::weak_ptr<T>> { using type = T; };
-	template<typename T> using weak_ptr_element_t = typename weak_ptr_element<T>::type;
-
-	template<typename T> struct shared_ptr_element { using type = void; };
-	template<typename T> struct shared_ptr_element<std::shared_ptr<T>> { using type = T; };
-	template<typename T> using shared_ptr_element_t = typename shared_ptr_element<T>::type;
-
-	template<typename T> struct unique_ptr_element { using type = void; };
-	template<typename T, typename D> struct unique_ptr_element<std::unique_ptr<T, D>> { using type = T; };
-	template<typename T> using unique_ptr_element_t = typename unique_ptr_element<T>::type;
-
-	// Unordered map element type extractors
-	template<typename T> struct unordered_map_key { using type = void; };
-	template<typename K, typename V, typename H, typename E, typename A>
-	struct unordered_map_key<std::unordered_map<K, V, H, E, A>> { using type = K; };
-	template<typename T> using unordered_map_key_t = typename unordered_map_key<T>::type;
-
-	template<typename T> struct unordered_map_value { using type = void; };
-	template<typename K, typename V, typename H, typename E, typename A>
-	struct unordered_map_value<std::unordered_map<K, V, H, E, A>> { using type = V; };
-	template<typename T> using unordered_map_value_t = typename unordered_map_value<T>::type;
-
-	// std::array element type extractors
-	template<typename T> struct array_element { using type = void; };
-	template<typename T, std::size_t N> struct array_element<std::array<T, N>> { using type = T; };
-	template<typename T> using array_element_t = typename array_element<T>::type;
-
-	template<typename T> struct array_size { static constexpr std::size_t value = 0; };
-	template<typename T, std::size_t N> struct array_size<std::array<T, N>> { static constexpr std::size_t value = N; };
-	template<typename T> inline constexpr std::size_t array_size_v = array_size<T>::value;
+	// The container and smart-pointer traits (serialization/traits.hpp)
+	using serialization_traits::is_std_vector;
+	using serialization_traits::is_std_vector_v;
+	using serialization_traits::is_std_map;
+	using serialization_traits::is_std_map_v;
+	using serialization_traits::vector_element;
+	using serialization_traits::vector_element_t;
+	using serialization_traits::is_std_weak_ptr;
+	using serialization_traits::is_std_weak_ptr_v;
+	using serialization_traits::is_std_shared_ptr;
+	using serialization_traits::is_std_shared_ptr_v;
+	using serialization_traits::is_std_unique_ptr;
+	using serialization_traits::is_std_unique_ptr_v;
+	using serialization_traits::is_smart_ptr_v;
+	using serialization_traits::is_std_unordered_map;
+	using serialization_traits::is_std_unordered_map_v;
+	using serialization_traits::is_std_array;
+	using serialization_traits::is_std_array_v;
+	using serialization_traits::is_std_pair;
+	using serialization_traits::is_std_pair_v;
+	using serialization_traits::pair_first;
+	using serialization_traits::pair_first_t;
+	using serialization_traits::pair_second;
+	using serialization_traits::pair_second_t;
+	using serialization_traits::weak_ptr_element;
+	using serialization_traits::weak_ptr_element_t;
+	using serialization_traits::shared_ptr_element;
+	using serialization_traits::shared_ptr_element_t;
+	using serialization_traits::unique_ptr_element;
+	using serialization_traits::unique_ptr_element_t;
+	using serialization_traits::array_element;
+	using serialization_traits::array_element_t;
+	using serialization_traits::array_size;
+	using serialization_traits::array_size_v;
 
 	// ============================================================================
 	// Serialization support detection (CRTP-compatible)
@@ -185,34 +123,18 @@ namespace property_serialization {
 	template<typename T>
 	inline constexpr bool has_free_load_and_construct_unique_v = false;
 
-	// --- property_owner detection ---
-	// Detects: T has a property_mgr member (inherits from property_owner<T>)
-	// This enables automatic serialization via JAI_PROPERTY definitions
-	template<typename T, typename = void>
-	struct is_property_owner : std::false_type {};
-
-	template<typename T>
-	struct is_property_owner<T, std::void_t<
-		decltype(std::declval<T&>().property_mgr)
-	>> : std::true_type {};
-
-	template<typename T>
-	inline constexpr bool is_property_owner_v = is_property_owner<T>::value;
-
-	template<typename T>
-	constexpr bool is_direct_serializable_v =
-		std::is_arithmetic_v<T> ||
-		std::is_enum_v<T> ||  // Enum classes serialize as their underlying type
-		std::is_same_v<T, std::string> ||
-		std::is_same_v<T, char> ||
-		std::is_same_v<T, unsigned char>;
+	using serialization_traits::is_property_owner;
+	using serialization_traits::is_property_owner_v;
+	using serialization_traits::is_direct_serializable_v;
 
 	// ============================================================================
 	// Type-erased dispatch for property serialization
 	// ============================================================================
 
-	template<typename T>
-	inline void write_primitive_erased(serialization::any_archive_writer& ar, const T& value) {
+	// Primitive write/read, for the type-erased archives and the CRTP ones alike
+
+	template<typename Archive, typename T>
+	inline void write_primitive_templated(Archive& ar, const T& value) {
 		if constexpr (std::is_same_v<T, int8_t>) {
 			ar.write_int8(value);
 		} else if constexpr (std::is_same_v<T, int16_t>) {
@@ -243,7 +165,7 @@ namespace property_serialization {
 			ar.write_uint8(value);
 		} else if constexpr (std::is_enum_v<T>) {
 			using underlying = std::underlying_type_t<T>;
-			write_primitive_erased(ar, static_cast<underlying>(value));
+			write_primitive_templated(ar, static_cast<underlying>(value));
 		} else if constexpr (std::is_integral_v<T>) {
 			ar.write_int64(static_cast<int64_t>(value));
 		} else if constexpr (std::is_floating_point_v<T>) {
@@ -253,8 +175,8 @@ namespace property_serialization {
 		}
 	}
 
-	template<typename T>
-	inline void read_primitive_erased(serialization::any_archive_reader& ar, T& value) {
+	template<typename Archive, typename T>
+	inline void read_primitive_templated(Archive& ar, T& value) {
 		if constexpr (std::is_same_v<T, int8_t>) {
 			value = ar.read_int8();
 		} else if constexpr (std::is_same_v<T, int16_t>) {
@@ -286,7 +208,7 @@ namespace property_serialization {
 		} else if constexpr (std::is_enum_v<T>) {
 			using underlying = std::underlying_type_t<T>;
 			underlying temp;
-			read_primitive_erased(ar, temp);
+			read_primitive_templated(ar, temp);
 			value = static_cast<T>(temp);
 		} else if constexpr (std::is_integral_v<T>) {
 			value = static_cast<T>(ar.read_int64());
@@ -300,7 +222,7 @@ namespace property_serialization {
 	template<typename T>
 	void dispatch_save_erased(serialization::any_archive_writer& ar, const T& value) {
 		if constexpr (is_direct_serializable_v<T>) {
-			write_primitive_erased(ar, value);
+			write_primitive_templated(ar, value);
 		}
 		else if constexpr (is_std_vector_v<T>) {
 			using elem_type = vector_element_t<T>;
@@ -310,25 +232,8 @@ namespace property_serialization {
 			}
 			ar.end_array();
 		}
-		else if constexpr (is_std_map_v<T>) {
-			using key_type = map_key_t<T>;
-			using val_type = map_value_t<T>;
-			ar.begin_map(value.size());
-			for (const auto& [k, v] : value) {
-				std::string key_str;
-				if constexpr (std::is_same_v<key_type, std::string>) {
-					key_str = k;
-				} else if constexpr (std::is_arithmetic_v<key_type>) {
-					key_str = std::to_string(k);
-				}
-				ar.write_map_key(key_str);
-				dispatch_save_erased(ar, v);
-			}
-			ar.end_map();
-		}
-		else if constexpr (is_std_unordered_map_v<T>) {
-			using key_type = unordered_map_key_t<T>;
-			using val_type = unordered_map_value_t<T>;
+		else if constexpr (is_std_map_v<T> || is_std_unordered_map_v<T>) {
+			using key_type = typename T::key_type;
 			ar.begin_map(value.size());
 			for (const auto& [k, v] : value) {
 				std::string key_str;
@@ -389,7 +294,7 @@ namespace property_serialization {
 	template<typename T>
 	void dispatch_load_erased(serialization::any_archive_reader& ar, T& value) {
 		if constexpr (is_direct_serializable_v<T>) {
-			read_primitive_erased(ar, value);
+			read_primitive_templated(ar, value);
 		}
 		else if constexpr (is_std_vector_v<T>) {
 			using elem_type = vector_element_t<T>;
@@ -403,34 +308,12 @@ namespace property_serialization {
 			}
 			ar.end_array();
 		}
-		else if constexpr (is_std_map_v<T>) {
-			using key_type = map_key_t<T>;
-			using val_type = map_value_t<T>;
+		else if constexpr (is_std_map_v<T> || is_std_unordered_map_v<T>) {
+			using key_type = typename T::key_type;
+			using val_type = typename T::mapped_type;
 			size_t size = ar.begin_map();
 			value.clear();
-			for (size_t i = 0; i < size; ++i) {
-				std::string key_str;
-				if (!ar.read_map_key(key_str)) break;
-				key_type key;
-				if constexpr (std::is_same_v<key_type, std::string>) {
-					key = key_str;
-				} else if constexpr (std::is_integral_v<key_type>) {
-					key = static_cast<key_type>(std::stoll(key_str));
-				} else if constexpr (std::is_floating_point_v<key_type>) {
-					key = static_cast<key_type>(std::stod(key_str));
-				}
-				val_type val;
-				dispatch_load_erased(ar, val);
-				value[std::move(key)] = std::move(val);
-			}
-			ar.end_map();
-		}
-		else if constexpr (is_std_unordered_map_v<T>) {
-			using key_type = unordered_map_key_t<T>;
-			using val_type = unordered_map_value_t<T>;
-			size_t size = ar.begin_map();
-			value.clear();
-			value.reserve(size);
+			if constexpr (is_std_unordered_map_v<T>) { value.reserve(size); }
 			for (size_t i = 0; i < size; ++i) {
 				std::string key_str;
 				if (!ar.read_map_key(key_str)) break;
@@ -517,96 +400,6 @@ namespace property_serialization {
 		}
 		else {
 			throw std::runtime_error("Type is not deserializable via type-erased archive (use JAI_STATIC_BINDER, property_owner, or mark property as transient)");
-		}
-	}
-
-	// ============================================================================
-	// Templated primitive write/read helpers (for CRTP archives)
-	// ============================================================================
-
-	template<typename Archive, typename T>
-	inline void write_primitive_templated(Archive& ar, const T& value) {
-		if constexpr (std::is_same_v<T, int8_t>) {
-			ar.write_int8(value);
-		} else if constexpr (std::is_same_v<T, int16_t>) {
-			ar.write_int16(value);
-		} else if constexpr (std::is_same_v<T, int32_t>) {
-			ar.write_int32(value);
-		} else if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, long long>) {
-			ar.write_int64(value);
-		} else if constexpr (std::is_same_v<T, uint8_t>) {
-			ar.write_uint8(value);
-		} else if constexpr (std::is_same_v<T, uint16_t>) {
-			ar.write_uint16(value);
-		} else if constexpr (std::is_same_v<T, uint32_t>) {
-			ar.write_uint32(value);
-		} else if constexpr (std::is_same_v<T, uint64_t> || std::is_same_v<T, unsigned long long>) {
-			ar.write_uint64(value);
-		} else if constexpr (std::is_same_v<T, float>) {
-			ar.write_float32(value);
-		} else if constexpr (std::is_same_v<T, double>) {
-			ar.write_float64(value);
-		} else if constexpr (std::is_same_v<T, bool>) {
-			ar.write_bool(value);
-		} else if constexpr (std::is_same_v<T, std::string>) {
-			ar.write_string(value);
-		} else if constexpr (std::is_same_v<T, char>) {
-			ar.write_int8(static_cast<int8_t>(value));
-		} else if constexpr (std::is_same_v<T, unsigned char>) {
-			ar.write_uint8(value);
-		} else if constexpr (std::is_enum_v<T>) {
-			using underlying = std::underlying_type_t<T>;
-			write_primitive_templated(ar, static_cast<underlying>(value));
-		} else if constexpr (std::is_integral_v<T>) {
-			ar.write_int64(static_cast<int64_t>(value));
-		} else if constexpr (std::is_floating_point_v<T>) {
-			ar.write_float64(static_cast<double>(value));
-		} else {
-			static_assert(sizeof(T) == 0, "Unsupported primitive type for serialization");
-		}
-	}
-
-	template<typename Archive, typename T>
-	inline void read_primitive_templated(Archive& ar, T& value) {
-		if constexpr (std::is_same_v<T, int8_t>) {
-			value = ar.read_int8();
-		} else if constexpr (std::is_same_v<T, int16_t>) {
-			value = ar.read_int16();
-		} else if constexpr (std::is_same_v<T, int32_t>) {
-			value = ar.read_int32();
-		} else if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, long long>) {
-			value = ar.read_int64();
-		} else if constexpr (std::is_same_v<T, uint8_t>) {
-			value = ar.read_uint8();
-		} else if constexpr (std::is_same_v<T, uint16_t>) {
-			value = ar.read_uint16();
-		} else if constexpr (std::is_same_v<T, uint32_t>) {
-			value = ar.read_uint32();
-		} else if constexpr (std::is_same_v<T, uint64_t> || std::is_same_v<T, unsigned long long>) {
-			value = ar.read_uint64();
-		} else if constexpr (std::is_same_v<T, float>) {
-			value = ar.read_float32();
-		} else if constexpr (std::is_same_v<T, double>) {
-			value = ar.read_float64();
-		} else if constexpr (std::is_same_v<T, bool>) {
-			value = ar.read_bool();
-		} else if constexpr (std::is_same_v<T, std::string>) {
-			value = ar.read_string();
-		} else if constexpr (std::is_same_v<T, char>) {
-			value = static_cast<char>(ar.read_int8());
-		} else if constexpr (std::is_same_v<T, unsigned char>) {
-			value = ar.read_uint8();
-		} else if constexpr (std::is_enum_v<T>) {
-			using underlying = std::underlying_type_t<T>;
-			underlying temp;
-			read_primitive_templated(ar, temp);
-			value = static_cast<T>(temp);
-		} else if constexpr (std::is_integral_v<T>) {
-			value = static_cast<T>(ar.read_int64());
-		} else if constexpr (std::is_floating_point_v<T>) {
-			value = static_cast<T>(ar.read_float64());
-		} else {
-			static_assert(sizeof(T) == 0, "Unsupported primitive type for deserialization");
 		}
 	}
 

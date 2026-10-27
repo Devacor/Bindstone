@@ -650,6 +650,20 @@ private:
         else if constexpr (std::is_floating_point_v<T>) self()->write_float64(static_cast<double>(value));
     }
 
+    // A registered dynamic type's payload under "$val", written through its save function
+    template<typename Entry>
+    void write_registered_payload(const Entry& entry, const void* complete) {
+        self()->write_property_name("$val");
+        push_context(SerializationContext::PropertyValue);
+        self()->begin_object();
+        push_context(SerializationContext::ObjectBody);
+        any_archive_writer wrapper(*self());
+        entry.save_fn(wrapper, complete);
+        pop_context();
+        self()->end_object();
+        pop_context();
+    }
+
     // Writes the polymorphic-aware payload of a shared object (the caller is already
     // inside the wrapping object body): "$type"+"$val" for a registered polymorphic
     // dynamic type, else "$val". Shared by the shared_ptr and the forward-referencing
@@ -684,30 +698,14 @@ private:
                 }
                 self()->serialize("$type", hybrid_type);
                 self()->serialize("$script", hybrid_fields);
-                self()->write_property_name("$val");
-                push_context(SerializationContext::PropertyValue);
-                self()->begin_object();
-                push_context(SerializationContext::ObjectBody);
-                any_archive_writer wrapper(*self());
-                entry->save_fn(wrapper, complete);
-                pop_context();
-                self()->end_object();
-                pop_context();
+                write_registered_payload(*entry, complete);
                 return;
             }
             if (actual_type != typeid(elem_type)) {
                 auto* entry = polymorphic_registry::instance().find(std::type_index(actual_type));
                 if (entry && entry->save_fn) {
                     self()->serialize("$type", entry->name);
-                    self()->write_property_name("$val");
-                    push_context(SerializationContext::PropertyValue);
-                    self()->begin_object();
-                    push_context(SerializationContext::ObjectBody);
-                    any_archive_writer wrapper(*self());
-                    entry->save_fn(wrapper, complete);
-                    pop_context();
-                    self()->end_object();
-                    pop_context();
+                    write_registered_payload(*entry, complete);
                     return;
                 }
                 // Writing the static type's payload here would silently slice the object
@@ -1046,37 +1044,9 @@ public:
             }
             self()->end_array();
         }
-        else if constexpr (is_std_map_v<T>) {
-            using K = map_key_t<T>;
-            using V = map_value_t<T>;
-            value.clear();
-            if constexpr (std::is_same_v<K, std::string>) {
-                size_t size = self()->begin_map();
-                for (size_t i = 0; i < size; ++i) {
-                    std::string key;
-                    if (!self()->read_map_key(key)) break;
-                    V val{};
-                    read_element(val);
-                    value[key] = std::move(val);
-                }
-                self()->end_map();
-            } else {
-                size_t size = self()->begin_array();
-                for (size_t i = 0; i < size; ++i) {
-                    self()->begin_array();
-                    K key{};
-                    V val{};
-                    read_element(key);
-                    read_element(val);
-                    self()->end_array();
-                    value[std::move(key)] = std::move(val);
-                }
-                self()->end_array();
-            }
-        }
-        else if constexpr (is_std_unordered_map_v<T>) {
-            using K = unordered_map_key_t<T>;
-            using V = unordered_map_value_t<T>;
+        else if constexpr (is_std_map_v<T> || is_std_unordered_map_v<T>) {
+            using K = typename T::key_type;
+            using V = typename T::mapped_type;
             value.clear();
             if constexpr (std::is_same_v<K, std::string>) {
                 size_t size = self()->begin_map();

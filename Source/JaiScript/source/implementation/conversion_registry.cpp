@@ -171,6 +171,43 @@ int conversion_registry::get_builtin_conversion_cost(script_value_type from, scr
     }
 }
 
+namespace {
+
+// a host scalar as the script scalar it stores as (int widens to int64, float to double)
+template<typename T>
+decltype(auto) script_widened(const T& a_value) {
+    if constexpr (std::is_same_v<T, int>) {
+        return static_cast<int64_t>(a_value);
+    } else if constexpr (std::is_same_v<T, float>) {
+        return static_cast<double>(a_value);
+    } else {
+        return (a_value);
+    }
+}
+
+template<typename T>
+script_value vector_as_script_array(const std::vector<T>& a_vector, engine* a_engine) {
+    if (!a_engine) {
+        throw std::runtime_error("Engine reference required for vector conversion");
+    }
+    return conversions::convert_vector_to_script_array(a_vector, a_engine);
+}
+
+template<typename K, typename V>
+script_value stdmap_as_script_map(const std::map<K, V>& a_map, engine* a_engine) {
+    if (!a_engine) {
+        throw std::runtime_error("Engine reference required for map conversion");
+    }
+    auto result = script_value::make_map(nullptr, nullptr, a_engine);
+    auto& sm = const_cast<script_map&>(result.as_map());
+    for (const auto& [key, value] : a_map) {
+        sm.insert_or_assign(script_value(script_widened(key), a_engine), script_value(script_widened(value), a_engine));
+    }
+    return result;
+}
+
+}
+
 // The registry owns these converters, so they reach it through a raw pointer: a captured shared_ptr kept every engine's
 // registry (and the host classes its converters name) alive forever
 void register_standard_vector_conversions(std::shared_ptr<conversion_registry> registry) {
@@ -199,11 +236,7 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
             return result;
         },
         [registry = registry.get()](const std::vector<int>& vec) -> script_value {
-            auto eng = registry->get_engine();
-            if (!eng) {
-                throw std::runtime_error("Engine reference required for vector conversion");
-            }
-            return conversions::convert_vector_to_script_array(vec, eng);
+            return vector_as_script_array(vec, registry->get_engine());
         }
     );
     
@@ -215,11 +248,7 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
             return conversions::convert_script_array_to_vector<int64_t>(v, registry->get_engine());
         },
         [registry = registry.get()](const std::vector<int64_t>& vec) -> script_value {
-            auto eng = registry->get_engine();
-            if (!eng) {
-                throw std::runtime_error("Engine reference required for vector conversion");
-            }
-            return conversions::convert_vector_to_script_array(vec, eng);
+            return vector_as_script_array(vec, registry->get_engine());
         }
     );
     
@@ -243,11 +272,7 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
             return result;
         },
         [registry = registry.get()](const std::vector<float>& vec) -> script_value {
-            auto eng = registry->get_engine();
-            if (!eng) {
-                throw std::runtime_error("Engine reference required for vector conversion");
-            }
-            return conversions::convert_vector_to_script_array(vec, eng);
+            return vector_as_script_array(vec, registry->get_engine());
         }
     );
     
@@ -271,11 +296,7 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
             return result;
         },
         [registry = registry.get()](const std::vector<double>& vec) -> script_value {
-            auto eng = registry->get_engine();
-            if (!eng) {
-                throw std::runtime_error("Engine reference required for vector conversion");
-            }
-            return conversions::convert_vector_to_script_array(vec, eng);
+            return vector_as_script_array(vec, registry->get_engine());
         }
     );
     
@@ -285,11 +306,7 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
             return conversions::convert_script_array_to_vector<std::string>(v, registry->get_engine());
         },
         [registry = registry.get()](const std::vector<std::string>& vec) -> script_value {
-            auto eng = registry->get_engine();
-            if (!eng) {
-                throw std::runtime_error("Engine reference required for vector conversion");
-            }
-            return conversions::convert_vector_to_script_array(vec, eng);
+            return vector_as_script_array(vec, registry->get_engine());
         }
     );
     
@@ -313,11 +330,7 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
             return result;
         },
         [registry = registry.get()](const std::vector<bool>& vec) -> script_value {
-            auto eng = registry->get_engine();
-            if (!eng) {
-                throw std::runtime_error("Engine reference required for vector conversion");
-            }
-            return conversions::convert_vector_to_script_array(vec, eng);
+            return vector_as_script_array(vec, registry->get_engine());
         }
     );
 }
@@ -352,19 +365,7 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             return result;
         },
         [registry = registry.get()](const std::map<std::string, int>& map) -> script_value {
-            auto eng = registry->get_engine();
-            if (!eng) {
-                throw std::runtime_error("Engine reference required for map conversion");
-            }
-            auto eng_ptr = eng;
-            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<script_map&>(local_map.as_map());
-            
-            for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(key, eng_ptr), script_value(static_cast<int64_t>(value), eng_ptr));
-            }
-            
-            return local_map;
+            return stdmap_as_script_map(map, registry->get_engine());
         }
     );
     
@@ -375,17 +376,7 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             return conversions::convert_script_map_to_stdmap<std::string, int64_t>(v, registry->get_engine());
         },
         [registry = registry.get()](const std::map<std::string, int64_t>& map) -> script_value {
-            auto eng = registry->get_engine();
-            if (!eng) {
-                throw std::runtime_error("Engine reference required for map conversion");
-            }
-            auto eng_ptr = eng;
-            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<script_map&>(local_map.as_map());
-            for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
-            }
-            return local_map;
+            return stdmap_as_script_map(map, registry->get_engine());
         }
     );
     
@@ -415,17 +406,7 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             return result;
         },
         [registry = registry.get()](const std::map<std::string, double>& map) -> script_value {
-            auto eng = registry->get_engine();
-            if (!eng) {
-                throw std::runtime_error("Engine reference required for map conversion");
-            }
-            auto eng_ptr = eng;
-            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<script_map&>(local_map.as_map());
-            for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
-            }
-            return local_map;
+            return stdmap_as_script_map(map, registry->get_engine());
         }
     );
     
@@ -455,17 +436,7 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             return result;
         },
         [registry = registry.get()](const std::map<std::string, float>& map) -> script_value {
-            auto eng = registry->get_engine();
-            if (!eng) {
-                throw std::runtime_error("Engine reference required for map conversion");
-            }
-            auto eng_ptr = eng;
-            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<script_map&>(local_map.as_map());
-            for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(key, eng_ptr), script_value(static_cast<double>(value), eng_ptr));
-            }
-            return local_map;
+            return stdmap_as_script_map(map, registry->get_engine());
         }
     );
     
@@ -475,17 +446,7 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             return conversions::convert_script_map_to_stdmap<std::string, std::string>(v, registry->get_engine());
         },
         [registry = registry.get()](const std::map<std::string, std::string>& map) -> script_value {
-            auto eng = registry->get_engine();
-            if (!eng) {
-                throw std::runtime_error("Engine reference required for map conversion");
-            }
-            auto eng_ptr = eng;
-            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<script_map&>(local_map.as_map());
-            for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
-            }
-            return local_map;
+            return stdmap_as_script_map(map, registry->get_engine());
         }
     );
     
@@ -515,17 +476,7 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             return result;
         },
         [registry = registry.get()](const std::map<std::string, bool>& map) -> script_value {
-            auto eng = registry->get_engine();
-            if (!eng) {
-                throw std::runtime_error("Engine reference required for map conversion");
-            }
-            auto eng_ptr = eng;
-            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<script_map&>(local_map.as_map());
-            for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
-            }
-            return local_map;
+            return stdmap_as_script_map(map, registry->get_engine());
         }
     );
     
@@ -556,19 +507,7 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             return result;
         },
         [registry = registry.get()](const std::map<int, std::string>& map) -> script_value {
-            auto eng = registry->get_engine();
-            if (!eng) {
-                throw std::runtime_error("Engine reference required for map conversion");
-            }
-            auto eng_ptr = eng;
-            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<script_map&>(local_map.as_map());
-            
-            for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(static_cast<int64_t>(key), eng_ptr), script_value(value, eng_ptr));
-            }
-            
-            return local_map;
+            return stdmap_as_script_map(map, registry->get_engine());
         }
     );
     
@@ -578,17 +517,7 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             return conversions::convert_script_map_to_stdmap<int64_t, std::string>(v, registry->get_engine());
         },
         [registry = registry.get()](const std::map<int64_t, std::string>& map) -> script_value {
-            auto eng = registry->get_engine();
-            if (!eng) {
-                throw std::runtime_error("Engine reference required for map conversion");
-            }
-            auto eng_ptr = eng;
-            auto local_map = script_value::make_map(nullptr, nullptr, eng_ptr);
-            auto& sm = const_cast<script_map&>(local_map.as_map());
-            for (const auto& [key, value] : map) {
-                sm.insert_or_assign(script_value(key, eng_ptr), script_value(value, eng_ptr));
-            }
-            return local_map;
+            return stdmap_as_script_map(map, registry->get_engine());
         }
     );
 }

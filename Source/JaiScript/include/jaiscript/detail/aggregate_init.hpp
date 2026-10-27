@@ -55,7 +55,7 @@ inline bool is_instance_of_class(const script_value& value_in, const class_defin
     if (auto tag = value.get_type_info(); tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return false; }
     auto holder = const_cast<script_value&>(value).get_object_holder();
     if (!holder || !holder->is_instance()) { return false; }
-    const class_definition* def = static_cast<class_instance*>(holder->data.get())->get_class_definition();
+    const class_definition* def = holder->unchecked_instance()->get_class_definition();
     return def && (def == &cls || def->derives_from(&cls));
 }
 

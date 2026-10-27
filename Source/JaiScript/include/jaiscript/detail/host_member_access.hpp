@@ -25,7 +25,7 @@ inline class_instance* host_this_instance(const script_value& self) {
 	if (kind != script_value::TYPEID_OBJECT && kind != script_value::TYPEID_SHARED_PTR) { return nullptr; }
 	const auto& holder = const_cast<script_value&>(self).get_object_holder();
 	if (!holder || !holder->is_instance()) { return nullptr; }
-	return static_cast<class_instance*>(holder->data.get());
+	return holder->unchecked_instance();
 }
 
 // A script class of a layer's chain answers the name before its C++ base: a script field (not a C++ property's

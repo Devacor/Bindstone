@@ -2627,7 +2627,7 @@ interpreter::member_target interpreter::resolve_member_target(const script_value
         return target;
     }
     if (holder->is_instance()) {
-        target.instance = holder->data.instance();
+        target.instance = holder->instance_handle();
         if (target.instance) {
             target.class_def = target.instance->get_class_definition();
             // A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
@@ -2660,8 +2660,8 @@ bool interpreter::object_to_bool_via_method(const script_value& value) {
     if (const auto* h = value.get_storage().get_if<script_value::TYPEID_OBJECT>(); h && *h) {
         auto* oh = h->get();
         if (oh->is_instance()) {
-            if (auto* cd = static_cast<class_instance*>(oh->data.get())->get_class_definition();
-                cd && !cd->may_define_to_bool() && !cd->wrapped_object_has_layer(*static_cast<class_instance*>(oh->data.get()))) {
+            if (auto* cd = oh->unchecked_instance()->get_class_definition();
+                cd && !cd->may_define_to_bool() && !cd->wrapped_object_has_layer(*oh->unchecked_instance())) {
                 return true;
             }
         }
@@ -4433,7 +4433,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
         auto& holder = const_cast<script_value&>(objectValue).unchecked_get_object_storage();
         if (holder && holder->is_instance()) {
-            auto* inst = static_cast<class_instance*>(holder->data.get());
+            auto* inst = holder->unchecked_instance();
             if (memberExpr->member_id != UINT64_MAX && detail::parallel_script_field(*inst, memberExpr->member_id)) {
                 auto enforced = inst->field_store(memberExpr->member_id, value, [&] { return clone_for_assignment(value); });
                 if (!enforced) {
@@ -5860,7 +5860,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     if (this_val.is_object()) {
                         auto obj_holder = this_val.get_object_holder();
                         if (obj_holder->is_instance()) {
-                            auto instance = obj_holder->data.instance();
+                            auto instance = obj_holder->instance_handle();
 
                             // First try instance fields
                             if (instance->has_field(identifier->symbol_id)) {
@@ -7423,7 +7423,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                 if (holder && holder->type_id != coroutine_handle_type_id_) {
                     class_instance* inst_raw = nullptr;
                     if (holder->is_instance()) {
-                        inst_raw = static_cast<class_instance*>(holder->data.get());
+                        inst_raw = holder->unchecked_instance();
                         cls_raw = inst_raw->get_class_definition();
                     }
                     // Worker method wall → admission verdict (parallel-method-admission
@@ -7551,7 +7551,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                 if (ti == script_value::TYPEID_OBJECT || ti == script_value::TYPEID_SHARED_PTR) {
                     auto holder = objectValue.get_object_holder();
                     if (holder && holder->is_instance()) {
-                        inst_raw = static_cast<class_instance*>(holder->data.get());
+                        inst_raw = holder->unchecked_instance();
                     }
                 }
                 cls_raw = inst_raw ? inst_raw->get_class_definition() : nullptr;
@@ -8394,7 +8394,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         }
 
         // Both script and C++ classes store class_instance in data
-        auto instance = objHolder->data.instance();
+        auto instance = objHolder->instance_handle();
         if (!instance) {
             // super:: used on non-class object
             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
@@ -8438,7 +8438,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
         auto& holder = objectValue.unchecked_get_object_storage();
         if (holder && holder->is_instance()) {
-            auto* inst = static_cast<class_instance*>(holder->data.get());
+            auto* inst = holder->unchecked_instance();
             const class_definition* cls = inst->get_class_definition();
             if (script_value* field = detail::parallel_script_field(*inst, expr->member_id)) {
                 push_value(field->is_reference() ? field->deref() : *field);

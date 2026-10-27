@@ -1521,7 +1521,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
         }
 
         if (obj_holder->is_instance()) {
-            auto new_instance = static_cast<const class_instance*>(obj_holder->data.get())->deep_copy_level(work, depth);
+            auto new_instance = obj_holder->unchecked_instance()->deep_copy_level(work, depth);
 
             auto new_holder = claim_object_holder(new_instance.get(), obj_holder->owner);
             new_holder->type_name = obj_holder->type_name;
@@ -1655,7 +1655,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             }
 
             if (obj_holder->is_instance()) {
-                auto new_instance = static_cast<const class_instance*>(obj_holder->data.get())->deep_copy_level(work, depth);
+                auto new_instance = obj_holder->unchecked_instance()->deep_copy_level(work, depth);
 
                 auto new_holder = claim_object_holder(new_instance.get(), obj_holder->owner);
                 new_holder->type_name = obj_holder->type_name;
@@ -1783,7 +1783,7 @@ namespace {
 script_value script_value::parallel_host_view() const {
     const auto& holder = storage_.get<strong_ptr<object_holder>>();
     if (!holder || !holder->is_instance()) { throw runtime_error("parallel_host_view: not a class instance"); }
-    const auto* inst = static_cast<const class_instance*>(holder->data.get());
+    const auto* inst = holder->unchecked_instance();
     class_definition* cd = inst->get_class_definition();
     const script_value* native = inst->native();
     const auto native_holder = native ? native->get_object_holder() : nullptr;
@@ -2506,7 +2506,7 @@ namespace {
 		const auto* holder = key.peek_object_holder();
 		if (!holder) { return nullptr; }
 		if (holder->is_instance()) {
-			return holder->data ? static_cast<class_instance*>(holder->data.get())->get_class_definition() : nullptr;
+			return holder->data ? holder->unchecked_instance()->get_class_definition() : nullptr;
 		}
 		engine* eng = key.payload_engine();
 		if (!eng) { return nullptr; }

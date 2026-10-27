@@ -228,7 +228,7 @@ namespace value_text_walk {
 				append_opaque_name(holder->type_name.empty() ? std::string_view("object") : holder->type_name);
 				return {};
 			}
-			const auto* instance = static_cast<const class_instance*>(holder->data.get());
+			const auto* instance = holder->unchecked_instance();
 			const class_definition* def = instance->get_class_definition();
 			if (def && def->is_transparent_wrapper()) {
 				script_value wrapper = *object;

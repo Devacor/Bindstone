@@ -362,7 +362,7 @@ void class_instance::release_orphan_fields() noexcept {
         if (v.raw_storage_index() == script_value::TYPEID_OBJECT) {
             const auto& holder = v.unchecked_object_handle();
             if (holder.unique() && holder->is_instance() && holder->data.use_count() == 1) {
-                auto* inner = static_cast<class_instance*>(holder->data.get());
+                auto* inner = holder->unchecked_instance();
                 if (!inner->class_def_ && !inner->destructor_armed_) { take_cells(*inner); }
             }
         } else if (v.release_flattens()) {

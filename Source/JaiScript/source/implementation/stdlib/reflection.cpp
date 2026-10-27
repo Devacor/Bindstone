@@ -122,7 +122,7 @@ inline member_door resolve_member_door(engine* eng, const script_value& value) {
     auto holder = const_cast<script_value&>(v).get_object_holder();
     if (!holder) { return door; }
     if (holder->is_instance()) {
-        door.instance = holder->data.instance();
+        door.instance = holder->instance_handle();
         if (door.instance) { door.def = door.instance->get_class_definition(); }
     } else {
         door.engine_def = holder->type_id != UINT64_MAX

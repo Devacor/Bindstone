@@ -346,7 +346,7 @@ void note_region_made(const script_value& value, engine* eng) {
 	if (self.raw_storage_index() != script_value::TYPEID_OBJECT && self.raw_storage_index() != script_value::TYPEID_SHARED_PTR) { return; }
 	const auto holder = self.get_object_holder();
 	if (holder && holder->is_instance()) {
-		static_cast<class_instance*>(holder->data.get())->region_tag(eng->parallel_region_serial());
+		holder->unchecked_instance()->region_tag(eng->parallel_region_serial());
 	}
 }
 

@@ -208,6 +208,10 @@ namespace jai {
         void unlink_entry(entry* gone) noexcept {
             size_t i = home(gone->hash);
             while (slots_[i].e != gone) { i = (i + 1) & mask(); }
+            remove_slot(i);
+        }
+        // slot i's entry leaves the index: the probe run after it shifts back over the hole
+        void remove_slot(size_t i) noexcept {
             for (size_t j = i;;) {
                 j = (j + 1) & mask();
                 if (!slots_[j].e) break;
@@ -338,15 +342,7 @@ namespace jai {
                 if (s.hash == h && script_value_key_eq{}(s.e->kv.first, key)) break;
             }
             entry* gone = slots_[i].e;
-            for (size_t j = i;;) {
-                j = (j + 1) & mask();
-                if (!slots_[j].e) break;
-                const size_t k = home(slots_[j].hash);
-                if ((j > i && (k <= i || k > j)) || (j < i && k <= i && k > j)) { slots_[i] = slots_[j]; i = j; }
-            }
-            slots_[i] = slot{0, nullptr};
-            --size_;
-            changed();
+            remove_slot(i);
             return gone;
         }
         // every entry, detached from the index: the map is empty and consistent before any value dies

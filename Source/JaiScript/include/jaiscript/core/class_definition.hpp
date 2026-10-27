@@ -46,18 +46,13 @@ namespace detail {
         void operator()(class_instance* ptr) const noexcept;
     };
     // The object block (internal/object_layout.md): a destructor class's pin on its definition, the room for the instance's
-    // holder, the head (the parts that still need the memory, then the engine's parallel-region flag, the word right before the
-    // control block: detail::strong_counts<class_instance>), the instance's strong_ptr control block and instance, then the
+    // holder, the head (the parts that still need the memory), the instance's strong_ptr control block and instance, then the
     // cells. The instance's part and the holder's part each give their part back; the last one frees the block.
     struct object_block_head {
         std::atomic<uint32_t> parts{1};
         uint32_t prefix = 0;   // bytes before the holder room: the definition pin of a destructor class's instance
-#if UINTPTR_MAX == 0xFFFFFFFFu
-        uint32_t pad = 0;
-#endif
-        const bool* region_flag = nullptr;
         static constexpr size_t holder_room = (sizeof(control_block<script_value::object_holder>) + 15) & ~size_t{15};
-        static constexpr size_t size = 16;
+        static constexpr size_t size = 8;
         static constexpr size_t pin_bytes = (sizeof(std::shared_ptr<class_definition>) + 15) & ~size_t{15};
         std::byte* memory() noexcept { return reinterpret_cast<std::byte*>(this) - holder_room - prefix; }
         static void release(object_block_head* head) noexcept {
@@ -77,8 +72,7 @@ namespace detail {
             return prefix ? reinterpret_cast<std::shared_ptr<class_definition>*>(memory()) : nullptr;
         }
     };
-    static_assert(sizeof(object_block_head) == object_block_head::size && offsetof(object_block_head, region_flag) == object_block_head::size - sizeof(void*),
-                  "the region flag is the word right before the control block");
+    static_assert(sizeof(object_block_head) == object_block_head::size, "the control block follows the head");
 }
 
 namespace detail {
@@ -136,15 +130,8 @@ public:
     // allocation goes with its control block (detail::block_head_allocator)
     inline static void free_allocation(class_instance* instance) noexcept;
     // The holder room of the instance's block (detail::object_block_head), for the first wrap to claim; null once claimed or
-    // for an instance made outside one. Workers of a region can wrap one instance together (a C++ object's wrapper or script layer)
+    // for an instance made outside one (a worker never wraps a shared instance: it reads one through a borrow)
     std::byte* take_embedded_holder() noexcept {
-        if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
-#if defined(_MSC_VER) && !defined(__clang__)
-            return std::atomic_ref<std::byte*>(embedded_holder_).exchange(nullptr, std::memory_order_acq_rel);
-#else
-            return __atomic_exchange_n(&embedded_holder_, nullptr, __ATOMIC_ACQ_REL);
-#endif
-        }
         std::byte* slot = embedded_holder_;
         embedded_holder_ = nullptr;
         return slot;
@@ -316,6 +303,8 @@ public:
     const script_value* native() const { return extras_ && extras_->native ? &*extras_->native : nullptr; }
     inline const script_value& native_or_throw() const;
     inline void set_native(const script_value& value);
+    // A worker's view of a shared object's C++ object: the C++ object's script layer stays the shared instance
+    inline void set_native_view(const script_value& value);
     // The parallel region whose chunk made this instance's C++ object (0: none): a non-const C++ method runs on a parallel
     // chunk only over an object that chunk made
     void region_tag(uint32_t tag) { region_tag_ = tag; }

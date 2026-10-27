@@ -91,12 +91,21 @@ script_value engine::make_value_object(std::shared_ptr<T> data) {
     bool key_held_by_another_object = false;
     if (data) {
         if constexpr (std::is_polymorphic_v<T>) { key = dynamic_cast<const void*>(data.get()); } else { key = static_cast<const void*>(data.get()); }
+        // While a region runs an object found here is shared: workers read it through a borrow, never its handle
+        const bool region = parallel_region_active_;
         if constexpr (std::is_base_of_v<script_extensible, T>) {
-            if (auto layer = data->jai_script_slot().script_layer(); layer && layer->get_engine() == this) {
+            if (region) [[unlikely]] {
+                if (const auto* layer = data->jai_script_slot().peek_script_layer(); layer && layer->get_engine() == this) {
+                    return parallel_borrow_of(*layer, layer->get_class_definition()->get_type_info());
+                }
+            } else if (auto layer = data->jai_script_slot().script_layer(); layer && layer->get_engine() == this) {
                 return script_value::make_object(layer->get_class_definition()->get_name(), layer, this);
             }
         }
-        if (strong_ptr<detail::first_type_t<class_instance, T>> known = object_instance_of(key)) {
+        strong_ptr<detail::first_type_t<class_instance, T>> known_handle;
+        const detail::first_type_t<class_instance, T>* known = nullptr;
+        if (region) [[unlikely]] { known = object_instance_peek(key); } else { known_handle = object_instance_of(key); known = known_handle.get(); }
+        if (known) {
             const class_definition* def = known->get_class_definition();
             const script_value* held = known->native();
             const auto* holder = held ? held->peek_object_holder() : nullptr;   // a read: workers reach one object's holder together
@@ -109,7 +118,8 @@ script_value engine::make_value_object(std::shared_ptr<T> data) {
             if (!handed_def && handed_type != std::type_index(typeid(T))) { handed_def = get_class_definition_by_type(std::type_index(typeid(T))); }
             const bool same_type_family = detail::same_class_family(def, handed_def.get());
             if (def && (layer || same_object) && same_type_family) {
-                return script_value::make_object(def->get_name(), known, this);
+                if (region) [[unlikely]] { return parallel_borrow_of(*known, def->get_type_info()); }
+                return script_value::make_object(def->get_name(), known_handle, this);
             }
             key_held_by_another_object = def && !same_type_family;
         }

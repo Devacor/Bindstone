@@ -8,6 +8,8 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <functional>
 #include <string>
+#include <thread>
+#include <vector>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -135,6 +137,154 @@ total;
 			for (int r = 0; r < 200; ++r) { for (int64_t x = 0; x < 300; ++x) { expected = (expected + x + r + 4) % 1000000007; } }
 			for (size_t workers : { size_t(1), size_t(8) }) {
 				check_eq(std::to_string(expected), run(program, workers), "returned objects on " + std::to_string(workers) + " workers");
+			}
+		});
+
+		// Shared objects: a C++ object's script layer every worker reaches through a host call is read through a borrow. Its fields'
+		// blocks are tagged to the main thread in a canary build (JAISCRIPT_DIAG_XTHREAD_RC), so a worker's count touch reports there.
+		auto bind_shared = [](engine& e) {
+			auto object = std::make_shared<shared_probe>();
+			dynamic_binder<shared_probe>(e, "Probe").constructor<>().method("read", &shared_probe::read).build();
+			e.add_function("probe", [object]() { return object; });
+			e.add_function("tag", [](script_value v) {
+#ifdef JAISCRIPT_DIAG_XTHREAD_RC
+				v.diag_tag_single_thread();
+#endif
+				return true;
+			});
+		};
+		const std::string shared_defs = R"JAI(
+class Leaf { int n = 3; string label = ""; Leaf() {} }
+class Layered : Probe { int extra = 2; string name = ""; array<int> list = []; Leaf leaf = Leaf(); Layered() : super() {} }
+var held = probe();
+extend(held, Layered);
+held.name = "layer-" + to_string(7) + "-name-long-enough-to-own-a-heap-block";
+held.list = [1, 2, 3, 4];
+held.leaf.label = "leaf-" + to_string(11) + "-label-long-enough-to-own-a-heap-block";
+tag(held.name);
+tag(held.leaf.label);
+var warm = probe();
+array<int> xs = []; array<int> out = [];
+for (int i = 0; i < 512; ++i) { xs.push(i); out.push(0); }
+int total = 0;
+)JAI";
+
+		test("workers_copy_a_string_field_of_one_shared_layer", [this, bind_shared, shared_defs]() {
+			const std::string program = shared_defs + R"JAI(
+for (int r = 0; r < 200; ++r) {
+	parallel_for (int x, auto& o : xs, out) { var q = probe(); string s = q.name; string t = s; o = s.size() + t.size() + q.name.size() + x; }
+	for (int v : out) { total = (total + v) % 1000000007; }
+}
+total + held.name.size();
+)JAI";
+			int64_t expected = 0;
+			for (int r = 0; r < 200; ++r) { for (int64_t x = 0; x < 512; ++x) { expected = (expected + 3 * 44 + x) % 1000000007; } }
+			for (size_t workers : { size_t(1), size_t(8) }) {
+				check_eq(std::to_string(expected + 44), run(program, workers, bind_shared), "a shared layer's string on " + std::to_string(workers) + " workers");
+			}
+		});
+
+		test("workers_copy_object_and_array_fields_of_one_shared_layer", [this, bind_shared, shared_defs]() {
+			const std::string program = shared_defs + R"JAI(
+for (int r = 0; r < 200; ++r) {
+	parallel_for (int x, auto& o : xs, out) { var q = probe(); var leaf = q.leaf; var l = q.list; string lab = leaf.label; o = leaf.n + l.size() + lab.size() + q.leaf.n + x; }
+	for (int v : out) { total = (total + v) % 1000000007; }
+}
+total + held.leaf.label.size();
+)JAI";
+			int64_t expected = 0;
+			for (int r = 0; r < 200; ++r) { for (int64_t x = 0; x < 512; ++x) { expected = (expected + 3 + 4 + 45 + 3 + x) % 1000000007; } }
+			for (size_t workers : { size_t(1), size_t(8) }) {
+				check_eq(std::to_string(expected + 45), run(program, workers, bind_shared), "a shared layer's object and array on " + std::to_string(workers) + " workers");
+			}
+		});
+
+		test("a_shared_layer_returned_from_the_region_outlives_it_as_the_object_itself", [this, bind_shared, shared_defs]() {
+			// each worker lands its borrow in its output; the join hands the caller the object's own handle, the serial loop's answer
+			const std::string body = shared_defs + R"JAI(
+array<var> got = [];
+for (int i = 0; i < 512; ++i) { got.push(null); }
+LOOP
+int same = 0;
+for (var g : got) { if (g == held) { same = same + 1; } total = total + g.extra + g.name.size(); }
+held.extra = 9;
+same * 1000000 + total + got[17].extra;
+)JAI";
+			auto with = [&](const std::string& loop) { std::string p = body; p.replace(p.find("LOOP"), 4, loop); return p; };
+			const std::string expected = run(with("for (int x = 0; x < 512; ++x) { got[x] = probe(); }"), 1, bind_shared);
+			check(expected.rfind("throw:", 0) != 0, "the serial loop runs: " + expected);
+			for (size_t workers : { size_t(1), size_t(8) }) {
+				check_eq(expected, run(with("parallel_for (int x, auto& g : xs, got) { g = probe(); }"), workers, bind_shared), "returned borrows on " + std::to_string(workers) + " workers");
+			}
+		});
+
+		test("borrows_of_one_shared_layer_compare_equal", [this, bind_shared, shared_defs]() {
+			const std::string body = shared_defs + R"JAI(
+LOOP
+int sum = 0;
+for (int v : out) { sum = sum + v; }
+sum;
+)JAI";
+			// two wraps of the host object are two handles; its field compares fieldwise, against itself and against a worker's copy
+			const std::string compare = "{ var p = probe(); var q = probe(); var r = q; Leaf mine = Leaf(); mine.label = p.leaf.label; "
+			                            "o = (p == q ? 1 : 0) + (r == p ? 2 : 0) + (p != q ? 4 : 0) + (p.leaf == q.leaf ? 8 : 0) + (mine == p.leaf ? 16 : 0) + x; }";
+			auto with = [&](const std::string& loop) { std::string p = body; p.replace(p.find("LOOP"), 4, loop); return p; };
+			const std::string expected = run(with("for (int x = 0; x < 512; ++x) { auto& o = out[x]; " + compare + " }"), 1, bind_shared);
+			check_eq(std::string("145152"), expected, "the serial loop's comparisons: each wrap of a host object is its own handle");
+			for (size_t workers : { size_t(1), size_t(8) }) {
+				check_eq(expected, run(with("parallel_for (int x, auto& o : xs, out) " + compare), workers, bind_shared), "compared borrows on " + std::to_string(workers) + " workers");
+			}
+		});
+
+		test("a_store_into_a_shared_layer_is_an_error", [this, bind_shared, shared_defs]() {
+			const std::string program = shared_defs + R"JAI(
+string caught = "";
+try { parallel_for (int x, auto& o : xs, out) { var q = probe(); q.extra = x; } } catch (e) { caught = e; }
+caught + "|" + to_string(held.extra);
+)JAI";
+			for (size_t workers : { size_t(1), size_t(8) }) {
+				const std::string got = run(program, workers, bind_shared);
+				check(got.find("member 'extra' is stored on a shared object in a parallel body") != std::string::npos && got.find("|2") != std::string::npos,
+				      "the store refuses and the layer keeps its field on " + std::to_string(workers) + " workers: " + got);
+			}
+		});
+
+		test("a_layer_many_workers_read_dies_on_the_main_thread_when_its_object_does", [this]() {
+			// the layer's destructor runs at the C++ object's release after the region, on the calling thread, not inside it
+			auto log = std::make_shared<std::vector<std::string>>();
+			auto slot = std::make_shared<std::shared_ptr<shared_probe>>(std::make_shared<shared_probe>());
+			auto main_thread = std::this_thread::get_id();
+			auto bind = [log, slot, main_thread](engine& e) {
+				dynamic_binder<shared_probe>(e, "Probe").constructor<>().method("read", &shared_probe::read).build();
+				e.add_function("probe", [slot]() { return *slot; });
+				e.add_function("release", [slot]() { slot->reset(); return true; });
+				e.add_function("note", [log, main_thread](std::string s) { log->push_back(s + (std::this_thread::get_id() == main_thread ? "@main" : "@worker")); return true; });
+			};
+			const std::string program = R"JAI(
+class Layered : Probe { int extra = 2; Layered() : super() {} ~Layered() { note("layer dies"); } }
+var held = probe();
+extend(held, Layered);
+var warm = probe();
+held = null; warm = null;
+array<int> xs = []; array<int> out = [];
+for (int i = 0; i < 512; ++i) { xs.push(i); out.push(0); }
+for (int r = 0; r < 50; ++r) { parallel_for (int x, auto& o : xs, out) { var q = probe(); o = q.extra + x; } }
+string refused = "";
+try { parallel_for (int x, auto& o : xs, out) { var q = probe(); o = q.read(); } } catch (e) { refused = e; }
+note("joined");
+release();
+note("released");
+to_string(out[511]) + "|" + refused;
+)JAI";
+			const std::string refusal = "method 'read' was not admitted in this parallel body";
+			for (size_t workers : { size_t(1), size_t(8) }) {
+				log->clear();
+				*slot = std::make_shared<shared_probe>();
+				const std::string got = run(program, workers, bind);
+				check(got.rfind("513|", 0) == 0 && got.find(refusal) != std::string::npos, "the region's reads, and a host method refused as on master, on " + std::to_string(workers) + " workers: " + got);
+				std::string seen;
+				for (const auto& line : *log) { seen += line + ";"; }
+				check_eq(std::string("joined@main;layer dies@main;released@main;"), seen, "destructor timing on " + std::to_string(workers) + " workers");
 			}
 		});
 	}

@@ -12,6 +12,7 @@
 #include <jaiscript/detail/math_values.hpp>
 #include <jaiscript/detail/float_text.hpp>
 #include <jaiscript/detail/value_text.hpp>
+#include <jaiscript/detail/object_borrow.hpp>
 #include <atomic>
 #include <optional>
 #include <thread>
@@ -541,6 +542,7 @@ engine* script_value::payload_engine() const noexcept {
         case TYPEID_FUNCTION: return owner_of(storage_.get<strong_ptr<script_function_node>>());
         case TYPEID_PARALLEL_BORROW: {
             if (const script_array* borrowed = parallel_borrow_array()) { return borrowed->owner; }
+            if (const auto* record = parallel_object_borrow()) { return record->eng; }
             const script_map* borrowed = parallel_borrow_map();
             return borrowed ? borrowed->owner : nullptr;
         }
@@ -1507,6 +1509,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
     // (store kernel / explicit clone inside a region). The silent deep clone reads the
     // shared container by const& only - no transient handle copies, no refcount race.
     if (raw_storage_index() == TYPEID_PARALLEL_BORROW) {
+        if (const auto* record = parallel_object_borrow()) { return detail::parallel_object_copy(*this, *record); }
         return parallel_detached_copy(payload_engine());
     }
 
@@ -1952,6 +1955,7 @@ script_value script_value::parallel_detached_level(engine* eng, std::vector<type
             // viewed structure is all-primitive by the barrier's classification, and the
             // traversal below reads it by const& only.
             const auto& tag = storage_.get<parallel_borrow_tag>();
+            if (const auto* record = parallel_object_borrow()) { return detail::parallel_object_copy(*this, *record); }
             if (const auto* arr = parallel_borrow_array()) {
                 if (arr->is_typed()) {
                     auto fresh = detached_typed_array(*arr, eng);
@@ -1981,6 +1985,8 @@ script_value script_value::parallel_detached_level(engine* eng, std::vector<type
             break;
         }
         default: {
+            // a worker's read through a shared object reaches its objects as borrows, never their handles
+            if (idx == TYPEID_OBJECT && eng && eng->parallel_region_active()) { return detail::parallel_shared_object(*this, *eng); }
             const char* what = idx == TYPEID_OBJECT ? "object"
                 : idx == TYPEID_FUNCTION ? "function"
                 : idx == TYPEID_SHARED_PTR ? "shared_ptr"
@@ -2015,7 +2021,7 @@ script_value script_value::make_parallel_borrow(const script_value& source, engi
 
 const script_array* script_value::parallel_borrow_array() const noexcept {
     if (const auto* tag = storage_.get_if<TYPEID_PARALLEL_BORROW>()) {
-        if (!tag->is_map_kind()) {
+        if (!tag->is_map_kind() && !tag->is_object_kind()) {
             return static_cast<const script_array*>(tag->pointer());
         }
     }
@@ -2025,6 +2031,20 @@ const script_array* script_value::parallel_borrow_array() const noexcept {
 bool script_value::is_sliced_parallel_borrow() const noexcept {
     const auto* tag = storage_.get_if<TYPEID_PARALLEL_BORROW>();
     return tag && tag->is_sliced();
+}
+
+script_value script_value::make_object_borrow(const detail::object_borrow_record* record, type_info_ptr tag, engine* eng) {
+    script_value result(std::monostate{}, eng);
+    result.set_stamp(tag.get());
+    parallel_borrow_tag bits;
+    bits.bits = reinterpret_cast<uintptr_t>(static_cast<const void*>(record)) | parallel_borrow_tag::k_object_bit;
+    result.storage_ = bits;
+    return result;
+}
+
+const detail::object_borrow_record* script_value::parallel_object_borrow() const noexcept {
+    const auto* tag = storage_.get_if<TYPEID_PARALLEL_BORROW>();
+    return tag && tag->is_object_kind() ? static_cast<const detail::object_borrow_record*>(tag->pointer()) : nullptr;
 }
 
 const script_map* script_value::parallel_borrow_map() const noexcept {

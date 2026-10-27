@@ -780,6 +780,32 @@ gates `parameter_alias_differential_gate` (the read-only local band always on, b
 flipped) and `jaiscript_fuzz --no-param-alias` (both switches; `--local-alias-band` forces the
 band).
 
+## 16. Shared objects (objects a body reaches through a host call)
+
+A worker may write its element (through its handle too, behind the distinctness check), `out[i]`, and what it made. Everything
+else it reaches is shared. The barrier provisions the shared state it can see (captures, §13); an object a host call hands back
+that the program already holds (a C++ object's script layer or recorded wrapper, `engine::make_value_object`) is shared too, and
+the barrier cannot see it. While a region runs, make_value_object's found-instance branch (behind the region check it already
+made for `note_script_layer`) hands out an object borrow instead of a handle: storage index 15 with the object bit
+(`parallel_borrow_tag::k_object_bit`), pointing at a worker-owned `detail::object_borrow_record` (detail/object_borrow.hpp).
+
+- Copying or dropping a borrow touches no count; the serial copy and release paths already switch on the storage index, so the
+  borrow costs them nothing. No worker touches a shared instance's count.
+- A member read takes a script field as the worker's own copy (`parallel_shared_value`: scalars as they are, strings and
+  containers detached by the refcount-silent walk, an object a field holds as its own borrow, one per holder so its identity is
+  the serial one) and runs a C++ member on the worker's view of the instance: a worker-owned instance with holders of its own over
+  the same C++ object, never noted as its script layer.
+- A store into a borrow, a script method on it and a C++ method the barrier did not pin refuse. The borrow branches sit inside the
+  worker's existing `parallel_worker_` gates and the stores' non-object branches.
+- Each host wrap is its own record (a serial wrap is its own holder, so `probe() == probe()` is false on both paths); a field's
+  object is one record per holder.
+- An instance an iteration owns (`region_tag` is the region's: a host-backed element, an object a chunk made) refuses to be
+  borrowed, so no instance is both counted by its owner and read through a borrow.
+- The join (single-threaded) walks the range, the zipped arrays and the index-write targets when any worker minted a borrow and
+  swaps each escaped borrow for a handle of its instance; the records go with the region.
+
+Counts are plain everywhere: nothing counts atomically during a region.
+
 ## Appendix: possible future — background jobs on separate engines
 
 NOT the `parallel_for` substrate. A sketch for long-running background work

@@ -17,6 +17,7 @@
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/fault_injection.hpp>
+#include <jaiscript/detail/object_borrow.hpp>
 #include <jaiscript/thread_pool.hpp>
 #include <map>
 #include <functional>
@@ -94,6 +95,8 @@ namespace jai::detail {
             // The C++ objects of serial-only classes that die on this chunk, released by the join; cursors name the element running
             std::vector<deferred_release>* deferred_releases = nullptr;
             const std::vector<script_value>* cursors = nullptr;
+            // The shared objects this chunk reads through borrows (detail/object_borrow.hpp), swapped for handles by the join
+            object_borrows* borrows = nullptr;
             size_t element() const noexcept { return cursors && !cursors->empty() ? cursors->front().element_cursor_index() : SIZE_MAX; }
         };
         std::vector<entry> entries;
@@ -310,6 +313,23 @@ namespace jai::detail {
     script_value parallel_bound_pin(const parallel_method_pin& pin, const script_value& receiver, uint64_t name_id, engine* eng);
     // An instance's script field a worker reads and stores in place (a C++ property goes through its pinned accessor)
     script_value* parallel_script_field(class_instance& inst, uint64_t member_id);
+
+    // Member access through an object borrow (detail/object_borrow.hpp), the one rule both backends' member reads, calls and
+    // stores take: a script field of the shared instance reads as a worker-local copy (nullopt: no such script field), a host
+    // member runs on the worker's view of its C++ object, a script method or any store refuses
+    std::optional<checked_result<script_value>> parallel_borrow_field(const script_value& borrow, uint64_t member_id);
+    // A method call on an object borrow: refused unless the barrier pinned a C++ method of the shared instance's class (it then runs
+    // on the worker's view)
+    checked_result<void> parallel_borrow_call(const script_value& borrow, uint64_t name_id, const parallel_method_pin_table* pins);
+    const script_value* parallel_borrow_view(const script_value& borrow) noexcept;
+    checked_result<script_value> parallel_shared_store_refusal(uint64_t member_id);
+    checked_result<script_value> parallel_shared_host_refusal(uint64_t name_id);
+    // A host call's arguments from a worker: a shared object passes as the worker's view of its C++ object (false: one has none)
+    bool parallel_host_arguments(std::vector<script_value>& args);
+    // A value a worker reads out of shared data, as its own: scalars as they are, strings and containers detached, objects borrowed
+    script_value parallel_shared_value(const script_value& value, engine& eng);
+    // The join's swap of every object borrow reachable from `root` for the shared instance's handle (single-threaded)
+    void parallel_swap_borrows(script_value& root, engine& eng, std::unordered_set<const void*>& seen);
 
     // A reusable worker execution context (definition private to parallel_transform.cpp:
     // backend instance, root env, epoch sink, limits, provisioned callables).

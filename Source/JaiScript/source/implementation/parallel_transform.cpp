@@ -106,6 +106,7 @@ namespace jai::detail {
 		std::vector<deferred_report> deferred_reports;
 		std::vector<std::pair<const void*, weaker_ptr<class_instance>>> pending_script_layers;   // recorded by the join
 		std::vector<deferred_release> deferred_releases;   // released by the join
+		object_borrows borrows;   // the shared objects this worker read; the join swaps escaped borrows for handles, then clears
 		cell_counters cells_folded{};   // this worker's block counters already folded into the engine's
 		parallel_schedule_cursor sched;   // this worker's place in the region's shared blocks (schedule null: the static partition)
 		std::vector<script_value> cursors;   // [0] = the range's chunk cursor, then the zip's arrays
@@ -2933,6 +2934,7 @@ namespace {
 		slice_worker_limits(eng, slot);
 		slot.deferred_reports.clear();
 		slot.pending_script_layers.clear();
+		slot.borrows.clear();
 		slot.deferred_releases.clear();
 		if (slot.vm) {
 			slot.vm->configure_parallel_worker(slot.root_env, slot.env_epoch_sink.get(), &slot.limits, budget);
@@ -4541,8 +4543,220 @@ script_value* parallel_script_field(class_instance& inst, uint64_t member_id) {
 	return inst.find_field_value(member_id);
 }
 
+// === Shared objects: what a worker reaches through a host call is read through a borrow, never through its handle ===
+
+script_value parallel_object_borrow(const class_instance& source, type_info_ptr tag, engine& eng, const void* identity) {
+	parallel_engine_state& state = eng.parallel_state();
+	if (source.region_tag() != 0 && source.region_tag() == eng.parallel_region_serial()) {
+		throw runtime_error("a host call in a parallel body returned an object one of its iterations owns (an element, or an object a chunk made)");
+	}
+	const parallel_region_table::entry* entry = state.active_region ? state.active_region->find_entry(std::this_thread::get_id()) : nullptr;
+	if (!entry || !entry->borrows) { throw runtime_error("a shared object was reached outside a parallel chunk"); }
+	object_borrows& borrows = *entry->borrows;
+	if (identity) {
+		if (auto known = borrows.by_holder.find(identity); known != borrows.by_holder.end()) {
+			return script_value::make_object_borrow(known->second, std::move(tag), &eng);
+		}
+	}
+	auto fresh = std::make_unique<object_borrow_record>();
+	fresh->source = &source;
+	fresh->eng = &eng;
+	auto [view, made] = borrows.views.try_emplace(&source, std::monostate{}, &eng);
+	if (made) {
+		class_definition* cd = source.get_class_definition();
+		const script_value* native = source.native();
+		const auto* native_holder = native ? native->peek_object_holder() : nullptr;
+		if (cd && native_holder && (native_holder->holds_object() || native_holder->bound_object())) {
+			// the worker's own instance and holders over the same C++ object: host members run on it, never on the shared handle
+			auto instance = class_instance::make(cd->interned_name(), &eng);
+			instance->set_class_definition(cd);
+			instance->set_native_view(native_holder->holds_object()
+				? script_value::make_cpp_object(native_holder->type_name(), native_holder->type_id(), native_holder->host_object(), &eng)
+				: script_value::make_cpp_reference(native_holder->type_name(), native_holder->type_id(), native_holder->bound_object(), native_holder->lock_weak_data(), &eng));
+			view->second = script_value::make_class_object(*cd, std::move(instance), &eng);
+		}
+	}
+	fresh->view = view->second;
+	const object_borrow_record* record = fresh.get();
+	borrows.records.push_back(std::move(fresh));
+	if (identity) { borrows.by_holder.emplace(identity, record); }
+	return script_value::make_object_borrow(record, std::move(tag), &eng);
+}
+
+script_value parallel_shared_object(const script_value& object, engine& eng) {
+	const auto* holder = object.peek_object_holder();
+	if (!holder) { return script_value(std::monostate{}, &eng); }
+	if (holder->is_instance()) { return parallel_object_borrow(*holder->unchecked_instance(), object.get_type_info(), eng, holder); }
+	if (holder->holds_object()) {
+		script_value view = script_value::make_cpp_object(holder->type_name(), holder->type_id(), holder->host_object(), &eng);
+		view.set_type_info(object.get_type_info());
+		return view;
+	}
+	throw runtime_error("value is not value-semantic (object)");
+}
+
+script_value parallel_shared_value(const script_value& value, engine& eng) {
+	const script_value& v = value.deref();
+	switch (v.raw_storage_index()) {
+		case script_value::TYPEID_NULL:
+		case script_value::TYPEID_INT:
+		case script_value::TYPEID_FLOAT:
+		case script_value::TYPEID_CHAR:
+		case script_value::TYPEID_BOOL:
+		case script_value::TYPEID_PARALLEL_BORROW:
+			return v;
+		default:
+			return v.parallel_detached_copy(&eng);
+	}
+}
+
+script_value parallel_object_copy(const script_value& borrow, const object_borrow_record& record) {
+	if (borrow.is_shared_ptr_type()) { return borrow; }
+	engine& eng = *record.eng;
+	const class_instance& source = *record.source;
+	class_definition* cd = source.get_class_definition();
+	if (!cd) { throw runtime_error("a shared object in a parallel body has no class to copy it by"); }
+	auto copy = cd->allocate_instance();
+	copy->set_class_definition(cd);
+	source.for_each_field([&](uint64_t id, const script_value& value) { copy->set_field(id, parallel_shared_value(value, eng)); });
+	if (const script_value* native = source.native()) {
+		const auto* native_holder = native->peek_object_holder();
+		if (!native_holder || !native_holder->holds_object() || !cd->has_copy_function()) {
+			throw runtime_error("a shared object in a parallel body cannot be copied by value: its C++ object has no copy function");
+		}
+		auto copied = cd->copy_object(native_holder->host_object().get());
+		if (!copied) { throw runtime_error("Failed to copy C++ object of type '" + std::string(source.get_class_name()) + "'. The registered copy function returned null."); }
+		copy->set_native(script_value::make_cpp_object(source.get_class_name(), cd->get_type_id(), copied, &eng));
+		copy->region_tag(eng.parallel_region_serial());
+	}
+	cd->register_live_instance(copy.get());
+	script_value result = script_value::make_class_object(*cd, std::move(copy), &eng);
+	result.set_type_info(borrow.get_type_info());
+	return result;
+}
+
+std::optional<checked_result<script_value>> parallel_borrow_field(const script_value& borrow, uint64_t member_id) {
+	const object_borrow_record* record = borrow.parallel_object_borrow();
+	const script_value* field = parallel_script_field(const_cast<class_instance&>(*record->source), member_id);
+	if (!field) { return std::nullopt; }
+	try {
+		return checked_result<script_value>(parallel_shared_value(*field, *record->eng));
+	} catch (const runtime_error&) {
+		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+			"member '{0}' of a shared object cannot be read in a parallel body (it holds a function or a weak_ptr)", member_id);
+	}
+}
+
+checked_result<void> parallel_borrow_call(const script_value& borrow, uint64_t name_id, const parallel_method_pin_table* pins) {
+	const class_definition* cd = borrow.parallel_object_borrow()->source->get_class_definition();
+	const parallel_method_pin* pin = pins && cd ? pins->find(cd, name_id) : nullptr;
+	if (!pin) {
+		return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+			"method '{0}' was not admitted in this parallel body (admitted: single-overload "
+			"public methods of the element's class or its bases touching only element, local, or "
+			"captured-read state)", name_id);
+	}
+	if (pin->resolved || !parallel_borrow_view(borrow)) {
+		return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+			"method '{0}' cannot run on a shared object in a parallel body (an object reached through a host call takes only its "
+			"C++ class's const methods)", name_id);
+	}
+	return {};
+}
+
+const script_value* parallel_borrow_view(const script_value& borrow) noexcept {
+	const object_borrow_record* record = borrow.parallel_object_borrow();
+	return record && !record->view.is_null() ? &record->view : nullptr;
+}
+
+checked_result<script_value> parallel_shared_store_refusal(uint64_t member_id) {
+	return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+		"member '{0}' is stored on a shared object in a parallel body (a body writes its element, out[i] and the objects it made)", member_id);
+}
+
+checked_result<script_value> parallel_shared_host_refusal(uint64_t name_id) {
+	return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+		"C++ call '{0}' takes a shared object that holds no C++ object in a parallel body", name_id);
+}
+
+namespace {
+	script_value borrow_handle(const script_value& borrow, engine& eng) {
+		const object_borrow_record* record = borrow.parallel_object_borrow();
+		auto* source = const_cast<class_instance*>(record->source);
+		class_definition* cd = source->get_class_definition();
+		script_value handle = script_value::make_class_object(*cd, source->strong_from_this(), &eng);
+		handle.set_type_info(borrow.get_type_info());
+		return handle;
+	}
+}
+
+void parallel_swap_borrows(script_value& root, engine& eng, std::unordered_set<const void*>& seen) {
+	std::vector<script_value*> work{ &root };
+	auto visit_instance = [&](const script_value::object_holder* holder) {
+		if (!holder || !holder->is_instance()) { return; }
+		class_instance* inst = holder->unchecked_instance();
+		if (!seen.insert(inst).second) { return; }
+		inst->for_each_field([&](uint64_t, script_value& field) { work.push_back(&field); });
+	};
+	while (!work.empty()) {
+		script_value* v = work.back();
+		work.pop_back();
+		switch (v->raw_storage_index()) {
+			case script_value::TYPEID_PARALLEL_BORROW:
+				if (v->parallel_object_borrow()) { *v = borrow_handle(*v, eng); }
+				break;
+			case script_value::TYPEID_ARRAY: {
+				script_array* node = const_cast<script_array*>(v->unchecked_array_node());
+				if (!node || !seen.insert(node).second) { break; }
+				if (node->kind() == script_array::kind_t::obj) {
+					for (auto& slot : node->objs()) { visit_instance(slot.handle.get()); }
+				} else if (!node->is_typed()) {
+					for (auto& element : node->values()) { work.push_back(&element); }
+				}
+				break;
+			}
+			case script_value::TYPEID_MAP: {
+				script_map& map = const_cast<script_map&>(v->unchecked_as_map());
+				if (!seen.insert(&map).second) { break; }
+				bool borrowed_key = false;
+				for (const auto& [key, value] : map) {
+					(void)value;
+					if (key.parallel_object_borrow()) { borrowed_key = true; }
+				}
+				if (borrowed_key) {
+					script_map rebuilt(&eng);
+					for (const auto& [key, value] : map) { rebuilt.emplace(key.parallel_object_borrow() ? borrow_handle(key, eng) : key, value); }
+					map = std::move(rebuilt);
+				}
+				for (auto& [key, value] : map) {
+					(void)key;
+					work.push_back(&value);
+				}
+				break;
+			}
+			case script_value::TYPEID_OBJECT:
+				visit_instance(v->peek_object_holder());
+				break;
+			default:
+				break;
+		}
+	}
+}
+
+bool parallel_host_arguments(std::vector<script_value>& args) {
+	for (auto& arg : args) {
+		if (arg.deref().parallel_object_borrow()) {
+			const script_value* view = parallel_borrow_view(arg.deref());
+			if (!view) { return false; }
+			arg = *view;
+		}
+	}
+	return true;
+}
+
 checked_result<script_value> call_parallel_host_pin(const parallel_method_pin& pin, const script_value& receiver, uint64_t name_id,
                                                     std::vector<script_value> args, engine* eng, bool property) {
+	if (!parallel_host_arguments(args)) { return parallel_shared_host_refusal(name_id); }
 	const script_value& self = receiver.deref();
 	const class_definition* cls = nullptr;
 	const class_instance* inst = nullptr;
@@ -5750,7 +5964,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	auto& table = region_guard.table;
 	state.faults.checkpoint("region.table_entry", 0);
 	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits, &contexts[0]->pending_instances, contexts[0]->backend.get(), &contexts[0]->method_env,
-	                          &contexts[0]->deferred_reports, &contexts[0]->pending_script_layers, &contexts[0]->deferred_releases, &contexts[0]->cursors });
+	                          &contexts[0]->deferred_reports, &contexts[0]->pending_script_layers, &contexts[0]->deferred_releases, &contexts[0]->cursors,
+	                          &contexts[0]->borrows });
 	if (worker_count > 1) {
 		const size_t pool_workers_needed = worker_count - 1;
 		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
@@ -5773,7 +5988,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			state.faults.checkpoint("region.table_entry", k);
 			table.entries.push_back({ detail::thread_pool_access::worker_thread_id(*state.pool, k - 1), &contexts[k]->limits, &contexts[k]->pending_instances,
 			                          contexts[k]->backend.get(), &contexts[k]->method_env, &contexts[k]->deferred_reports,
-			                          &contexts[k]->pending_script_layers, &contexts[k]->deferred_releases, &contexts[k]->cursors });
+			                          &contexts[k]->pending_script_layers, &contexts[k]->deferred_releases, &contexts[k]->cursors, &contexts[k]->borrows });
 		}
 	}
 	region_guard.prepared = true;
@@ -5946,6 +6161,15 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 				live->set(slot, copy->unchecked_array_node()->get(slot, &eng));
 			}
 		}
+	}
+	// A shared object a worker stored where the caller sees it (an element, out[i], an output) leaves the region as its handle
+	if (std::any_of(contexts.begin(), contexts.end(), [](const parallel_worker_slot* ctx) { return !ctx->borrows.records.empty(); })) {
+		std::unordered_set<const void*> seen;
+		for (auto& container : *plan.containers) { parallel_swap_borrows(const_cast<script_value&>(container.deref()), eng, seen); }
+		for (const auto& iw : adm->index_writes) {
+			if (const resolved_capture* target = written_capture(iw.name_id)) { parallel_swap_borrows(const_cast<script_value&>(target->source->deref()), eng, seen); }
+		}
+		for (auto* ctx : contexts) { ctx->borrows.clear(); }
 	}
 	if (winner) {
 		if (winner->escaped) {

@@ -298,6 +298,28 @@ namespace jai::detail {
 		return h.object_equality(right, left);
 	}
 
+	template <class Host>
+	checked_result<script_value> equal_operands(Host& h, const script_value& left, const script_value& right, equality_walk* walk);
+
+	// == with a parallel worker's borrow of a shared object: two handles are one object when they are one wrap, as on the serial
+	// path; a value compares as the worker's own copy of it, whose class's == runs through its pins
+	template <class Host>
+	checked_result<script_value> shared_object_equal(Host& h, const script_value& left, const script_value& right, equality_walk* walk) {
+		const script_value& l = left.deref();
+		const script_value& r = right.deref();
+		const object_borrow_record* lb = l.parallel_object_borrow();
+		const object_borrow_record* rb = r.parallel_object_borrow();
+		if (l.is_shared_ptr_type() || r.is_shared_ptr_type()) {
+			if (h.defines_custom_equality(l) || h.defines_custom_equality(r)) {
+				return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), parallel_operator_verdict_text);
+			}
+			return h.make_bool(lb && rb && lb == rb);
+		}
+		const script_value lc = lb ? parallel_object_copy(l, *lb) : l;
+		const script_value rc = rb ? parallel_object_copy(r, *rb) : r;
+		return equal_operands(h, lc, rc, walk);
+	}
+
 	// == : memberwise on heavy values (detail/structural_equality.hpp), identity for handles and host objects. A bound
 	// operand is not decoded: an opaque host pointer compares by identity. walk is the memberwise comparison this pair is a
 	// member of (null for an operator's own operands).
@@ -354,11 +376,14 @@ namespace jai::detail {
 			return compare_members(h, walk, [&](equality_walk& w) { return open_maps_equal(left, right, w); });
 		}
 
-		// safe-mode workers: the operator wall would skip a custom operator== and the structural answer would diverge
-		// from the serial loop
-		if (h.parallel_worker() && (h.worker_equality_refused(left) || h.worker_equality_refused(right))) [[unlikely]] {
-			return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
-				"custom operator dispatch on class instances is not admitted in a parallel body");
+		if (h.parallel_worker()) [[unlikely]] {
+			if (left.deref().parallel_object_borrow() || right.deref().parallel_object_borrow()) { return shared_object_equal(h, left, right, walk); }
+			// safe-mode workers: the operator wall would skip a custom operator== and the structural answer would diverge
+			// from the serial loop
+			if (h.worker_equality_refused(left) || h.worker_equality_refused(right)) {
+				return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+					"custom operator dispatch on class instances is not admitted in a parallel body");
+			}
 		}
 		if (auto custom = equality_candidates(h, left, right)) {
 			if (!*custom) { return custom->error_value(); }

@@ -1119,6 +1119,10 @@ namespace jai {
         // The instance script already holds for a native object: its layer, or the plain wrapper make_object handed out
         // (one identity per object, so extend re-classes the object every holder sees)
         strong_ptr<class_instance> object_instance_of(const void* cpp_object) const;
+        // The same lookup taking no count, and the borrow a parallel worker reads such a shared instance through
+        // (detail/object_borrow.hpp): what make_value_object hands out while a region runs
+        const class_instance* object_instance_peek(const void* cpp_object) const;
+        script_value parallel_borrow_of(const class_instance& source, type_info_ptr tag);
         // Archive: $type (script class) + $script (fields as JSON) for a layer this engine owns;
         // the C++ base a script class extends ("" when it is not such a class); re-attachment
         // around a freshly loaded object (initializers, then hydration, then post_load) - the
@@ -1270,8 +1274,6 @@ namespace jai {
         // True while a parallel region's workers run (main thread parked). Worker-side
         // mints must not touch the single-threaded pool.
         bool parallel_region_active() const noexcept { return parallel_region_active_; }
-        // what an instance's block reads to count atomically while a region runs (detail::strong_counts<class_instance>)
-        const bool* parallel_region_flag() const noexcept { return &parallel_region_active_; }
         // the region guard's record of its region (on while workers run, back to the enclosing region's state after)
         void note_parallel_region(bool active) noexcept { parallel_region_active_ = active; }
         // Workers copy and construct class instances (by-value bindings, whole reads): the

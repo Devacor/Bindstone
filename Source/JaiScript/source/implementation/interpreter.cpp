@@ -4454,6 +4454,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     }
     auto target = resolve_member_target(objectValue);
     if (!target) {
+        if (objectValue.deref().parallel_object_borrow()) [[unlikely]] { return detail::parallel_shared_store_refusal(memberExpr->member_id).error_value(); }
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
             "Cannot assign property to non-object value");
     }
@@ -5281,6 +5282,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
 
             // Check if it's an object
             if (!target_obj.is_object()) {
+                if (target_obj.parallel_object_borrow()) [[unlikely]] { return detail::parallel_shared_store_refusal(memberExpr->member_id).error_value(); }
                 // Set exception state instead of throwing
                 raise_script_text(non_object_member_store_text({}, {}), memberExpr->location);
                 push_value(make_value());
@@ -6024,6 +6026,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
 
             // Check if it's an object
             if (!dereferenced.is_object()) {
+                if (dereferenced.parallel_object_borrow()) [[unlikely]] { return detail::parallel_shared_store_refusal(memberExpr->member_id).error_value(); }
                 // Set exception state instead of throwing
                 raise_script_text(dereferenced.is_null() ? null_member_store_text(memberExpr->object.get(), memberExpr->member) : non_object_member_store_text(class_named_by_dot_receiver(memberExpr->object.get(), dereferenced, engine_),
                                                                        memberExpr->member), memberExpr->location);
@@ -8435,6 +8438,21 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     // COPIES shared method values out of class_definition state - a cross-worker
     // count race on the non-atomic strong_ptr. Fields live on the (exclusively
     // owned) instance; anything else needs method machinery - wall it.
+    if (parallel_worker_ && objectValue.parallel_object_borrow()) [[unlikely]] {
+        // a shared object: a script field as the worker's own copy, a host member on its view (KEEP BYTE-PARALLEL with
+        // vm_backend::member_access_value)
+        if (as_callee) { JAISCRIPT_TRY(detail::parallel_borrow_call(objectValue, expr->member_id, parallel_method_pins_)); }
+        if (!as_callee) {
+            if (auto field = detail::parallel_borrow_field(objectValue, expr->member_id)) {
+                if (!*field) { return field->error_value(); }
+                push_value(std::move(field->value()));
+                return {};
+            }
+        }
+        if (const script_value* view = detail::parallel_borrow_view(objectValue)) { return member_read_on(expr, *view, as_callee); }
+        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+            "only direct field access on class instances is allowed in a parallel body");
+    }
     if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
         auto& holder = objectValue.unchecked_get_object_storage();
         if (holder && holder->is_instance()) {

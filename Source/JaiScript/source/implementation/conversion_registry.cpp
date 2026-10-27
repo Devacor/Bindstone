@@ -50,7 +50,7 @@ checked_result<void*> checked_native_reference(const script_value& value, const 
 	if (!holder) {
 		return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch), "Object type mismatch");
 	}
-	if (holder->is_class_instance_wrapper) {
+	if (holder->is_instance()) {
 		const auto* instance = static_cast<const class_instance*>(holder->data.get());
 		if (!instance) {
 			return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch), "Cannot extract C++ receiver from null");
@@ -60,7 +60,7 @@ checked_result<void*> checked_native_reference(const script_value& value, const 
 		}
 		auto* native = instance->native();
 		const auto* native_holder = native ? native->peek_object_holder() : nullptr;
-		if (!native_holder || native_holder->is_class_instance_wrapper) {
+		if (!native_holder || native_holder->is_instance()) {
 			return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch), "Object type mismatch");
 		}
 		return checked_native_pointer(holder->owner, native_holder->type_id, target, target_id,
@@ -99,7 +99,7 @@ void anchor_to_receiver(script_value& result, const script_value& receiver) {
 
 checked_result<std::shared_ptr<void>> checked_native_object(engine* eng, const script_value::object_holder& holder,
 	const std::type_info& target, uint64_t target_id) {
-	if (holder.is_class_instance_wrapper) {
+	if (holder.is_instance()) {
 		const auto* instance = static_cast<const class_instance*>(holder.data.get());
 		if (!instance) {
 			return std::shared_ptr<void>{};
@@ -113,7 +113,7 @@ checked_result<std::shared_ptr<void>> checked_native_object(engine* eng, const s
 				"Field '_cpp_object' not found and no default value available");
 		}
 		const auto* native_holder = native->peek_object_holder();
-		if (!native_holder || native_holder->is_class_instance_wrapper) {
+		if (!native_holder || native_holder->is_instance()) {
 			return checked_result<std::shared_ptr<void>>(make_error_code(runtime_error_code::type_mismatch),
 				"C++ object field not found in class_instance");
 		}

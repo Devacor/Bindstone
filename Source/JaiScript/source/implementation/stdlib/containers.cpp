@@ -109,7 +109,7 @@ namespace jai::detail {
 bool reuse_map_entry_pair(script_value* cell, const class_definition* pair_class, script_value& first, script_value& second) {
     if (!cell || cell->raw_storage_index() != script_value::TYPEID_OBJECT) { return false; }
     const auto& holder = cell->unchecked_object_handle();
-    if (!holder || !holder.unique() || !holder->is_class_instance_wrapper || !holder->data || holder->data.use_count() != 1) { return false; }
+    if (!holder || !holder.unique() || !holder->is_instance() || holder->data.use_count() != 1) { return false; }
     auto* instance = static_cast<class_instance*>(holder->data.get());
     if (instance->get_class_definition() != pair_class || instance->live_field_refs() != 0) { return false; }
     const script_value* native = instance->native();

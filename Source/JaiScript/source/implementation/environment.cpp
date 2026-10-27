@@ -70,7 +70,7 @@ checked_result<slot_conversion> convert_typed_slot_script_rows(slot_conversion p
 namespace {
 class_instance* held_instance(const script_value& v) {
     auto holder = const_cast<script_value&>(v).get_object_holder();
-    return holder && holder->is_class_instance_wrapper && holder->data ? static_cast<class_instance*>(holder->data.get()) : nullptr;
+    return holder && holder->is_instance() ? static_cast<class_instance*>(holder->data.get()) : nullptr;
 }
 
 checked_result<value_store> run_assign_operator(const script_value& self, const script_value& method, const script_value& value, uint64_t assign_id, engine* eng) {

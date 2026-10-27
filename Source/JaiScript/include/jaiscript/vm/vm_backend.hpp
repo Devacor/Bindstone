@@ -1948,7 +1948,7 @@ namespace jai::vm {
             const script_value& this_val = *f.locals->scope_this;
             if (this_val.raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
             auto* oh = const_cast<script_value&>(this_val).unchecked_get_object_storage().get();
-            if (!oh || !oh->is_class_instance_wrapper || !oh->data) { return nullptr; }
+            if (!oh || !oh->is_instance()) { return nullptr; }
             const auto* instance = static_cast<const class_instance*>(oh->data.get());
             if (instance->has_user_overflow_fields()) { return nullptr; }
             return instance->get_class_definition();
@@ -2101,7 +2101,7 @@ namespace jai::vm {
             // copies): the frame's this anchor pins the instance for the whole call,
             // so a raw pointer over the op is sound.
             auto* oh = this_val.unchecked_get_object_storage().get();
-            if (!oh || !oh->is_class_instance_wrapper) { return nullptr; }
+            if (!oh || !oh->is_instance()) { return nullptr; }
             auto* instance = static_cast<class_instance*>(oh->data.get());
             if (!instance) { return nullptr; }
             if (entry.this_field_class &&
@@ -2209,7 +2209,7 @@ namespace jai::vm {
             script_value& this_val = f.locals->get_this();
             if (!this_val.is_object() || this_val.is_null()) { return nullptr; }
             auto* oh = this_val.unchecked_get_object_storage().get();
-            if (!oh || !oh->is_class_instance_wrapper) { return nullptr; }
+            if (!oh || !oh->is_instance()) { return nullptr; }
             auto* instance = static_cast<class_instance*>(oh->data.get());
             if (!instance) { return nullptr; }
             class_definition* cd = instance->get_class_definition();

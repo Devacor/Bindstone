@@ -26,7 +26,7 @@ namespace jai::detail {
         const script_value& d = v.is_reference() ? v.deref() : v;
         if (!d.is_object()) { return nullptr; }
         auto holder = const_cast<script_value&>(d).get_object_holder();
-        if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return nullptr; }
+        if (!holder || !holder->is_instance()) { return nullptr; }
         return static_cast<class_instance*>(holder->data.get())->get_class_definition();
     }
 
@@ -156,7 +156,7 @@ namespace jai::detail {
         if (l.type() == script_value_type::jai_shared_ptr_type || r.type() == script_value_type::jai_shared_ptr_type) { return std::nullopt; }
         const auto& lh = l.unchecked_object_handle();
         const auto& rh = r.unchecked_object_handle();
-        if (!lh || !rh || !lh->is_class_instance_wrapper || !rh->is_class_instance_wrapper || !lh->data || !rh->data) { return std::nullopt; }
+        if (!lh || !rh || !lh->is_instance() || !rh->is_instance()) { return std::nullopt; }
         const auto* a = static_cast<const class_instance*>(lh->data.get());
         const auto* b = static_cast<const class_instance*>(rh->data.get());
         const class_definition* ca = a->get_class_definition();

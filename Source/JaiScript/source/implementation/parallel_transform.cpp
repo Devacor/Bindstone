@@ -3908,7 +3908,7 @@ namespace {
 #define JAI_OBJ_SEC(i)
 #endif
 			auto& handle = v.unchecked_get_object_storage();
-			if (!handle || !handle->is_class_instance_wrapper || !handle->data) {
+			if (!handle || !handle->is_instance()) {
 				return false;   // bound host object wrapper
 			}
 			auto* inst = static_cast<class_instance*>(handle->data.get());
@@ -3973,7 +3973,7 @@ namespace {
 			if (!shared_key) { return false; }
 			auto locked = v.get_weak_ptr().lock();
 			if (!locked) { return true; }   // expired: lock() yields null in the body
-			if (!locked->is_class_instance_wrapper || !locked->data) { return false; }
+			if (!locked->is_instance()) { return false; }
 			auto* inst = static_cast<class_instance*>(locked->data.get());
 			const class_definition* cd = inst->get_class_definition();
 			if (cd && host_backed_element(*inst, *cd)) {
@@ -4025,7 +4025,7 @@ namespace {
 			return nullptr;
 		case script_value::TYPEID_OBJECT: {
 			auto holder = v.get_object_holder();
-			if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return "bound host object"; }
+			if (!holder || !holder->is_instance()) { return "bound host object"; }
 			if (v.is_shared_ptr_type()) { return "shared_ptr"; }
 			const auto* inst = static_cast<const class_instance*>(holder->data.get());
 			const class_definition* cd = inst->get_class_definition();
@@ -4138,7 +4138,7 @@ namespace {
 			}
 			if (!proof.typed_obj && elements[i].is_object()) {
 				auto holder = elements[i].get_object_holder();
-				if (holder && holder->is_class_instance_wrapper && holder->data) {
+				if (holder && holder->is_instance()) {
 					auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
 					if (cd && (proof.element_classes.empty() || proof.element_classes.back() != cd) &&
 					    std::find(proof.element_classes.begin(), proof.element_classes.end(), cd) == proof.element_classes.end()) {
@@ -4266,7 +4266,7 @@ namespace {
 	};
 	const char* captured_object_refusal(const script_value& v, captured_object_shape& shape, bool top) {
 		const auto& holder = v.unchecked_object_handle();
-		if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return "a bound host object"; }
+		if (!holder || !holder->is_instance()) { return "a bound host object"; }
 		const auto* inst = static_cast<const class_instance*>(holder->data.get());
 		const class_definition* cd = inst->get_class_definition();
 		if (!cd) { return "an object of no class"; }
@@ -4318,7 +4318,7 @@ namespace {
 		switch (v.raw_storage_index()) {
 		case script_value::TYPEID_OBJECT: {
 			const auto& holder = v.unchecked_object_handle();
-			if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return nullptr; }
+			if (!holder || !holder->is_instance()) { return nullptr; }
 			auto* inst = static_cast<class_instance*>(holder->data.get());
 			const void* key = element_object_key(*inst);
 			if (std::binary_search(objects.begin(), objects.end(), key) ||
@@ -4548,7 +4548,7 @@ checked_result<script_value> call_parallel_host_pin(const parallel_method_pin& p
 	const class_instance* inst = nullptr;
 	if (self.raw_storage_index() == script_value::TYPEID_OBJECT || self.raw_storage_index() == script_value::TYPEID_SHARED_PTR) {
 		const auto holder = self.get_object_holder();
-		if (holder && holder->is_class_instance_wrapper && holder->data) {
+		if (holder && holder->is_instance()) {
 			inst = static_cast<const class_instance*>(holder->data.get());
 			cls = inst->get_class_definition();
 		}
@@ -5496,7 +5496,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 					break;
 				case parallel_capture_kind::stream:
 					provisioned = stdlib::random_detail::region_copy(*cap.source, &eng, &slot->cursors, 0);
-					if (auto holder = provisioned.get_object_holder(); holder && holder->is_class_instance_wrapper && holder->data) {
+					if (auto holder = provisioned.get_object_holder(); holder && holder->is_instance()) {
 						static_cast<class_instance*>(holder->data.get())->region_tag(state.region_serial);   // the worker's own copy takes its draws
 					}
 					cap.stream_copies.emplace_back(provisioned, &slot->cursors);
@@ -6501,7 +6501,7 @@ bool parameter_alias_allows(const script_value& derefed) {
 		return true;
 	case script_value::TYPEID_OBJECT: {
 		const auto& holder = derefed.unchecked_object_handle();
-		if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return false; }
+		if (!holder || !holder->is_instance()) { return false; }
 		const auto* inst = static_cast<const class_instance*>(holder->data.get());
 		const class_definition* cls = inst->get_class_definition();
 		return cls && cls->is_script_class() && !cls->nocopy();

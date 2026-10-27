@@ -1649,7 +1649,7 @@ public:
 
             // Get the typed pointer - check if it's a class_instance wrapper
             T* cpp_ptr = nullptr;
-            if (holder->is_class_instance_wrapper) {
+            if (holder->is_instance()) {
                 auto instance = holder->data.instance();
                 if (instance) {
                     cpp_ptr = instance->get_cpp_object_as<T>().get();

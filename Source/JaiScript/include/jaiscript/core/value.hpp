@@ -442,7 +442,7 @@ namespace detail {
         static script_value make_map(type_info_ptr keyType, type_info_ptr valueType, engine* eng);
         static script_value make_object(std::string_view type_name, detail::object_ref data, engine* eng);
         // Optimized version with cached type_id
-        static script_value make_object(std::string_view type_name, uint64_t type_id, detail::object_ref data, engine* eng, bool is_cpp_class = true);
+        static script_value make_object(std::string_view type_name, uint64_t type_id, detail::object_ref data, engine* eng);
         static script_value make_class_object(const class_definition& cd, strong_ptr<class_instance> data, engine* eng);   // an instance of the class in hand (no registry lookup)
         // Internal factory method for raw C++ objects - always requires type_id to avoid re-interning
         static script_value make_cpp_object(std::string_view type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng);
@@ -1846,7 +1846,7 @@ namespace detail {
                         type_id()
                     );
                 }
-                if (!(*objHolder)->is_class_instance_wrapper) {
+                if (!(*objHolder)->is_instance()) {
                     return checked_result<T>(
                         make_error_code(runtime_error_code::not_a_class),
                         "Object is not a class_instance. Actual type: {0}",
@@ -1901,7 +1901,7 @@ namespace detail {
                     }
 
                     // Check if we need to use the custom extractor
-                    if (objHolder->is_class_instance_wrapper) {
+                    if (objHolder->is_instance()) {
                         if (payload_engine()) {
                             auto registry = get_engine_conversion_registry(payload_engine());
                             if (registry) {
@@ -2138,7 +2138,7 @@ namespace detail {
             std::string_view type_name;      // the type's name: the engine's interned text or a literal (never an owned string)
             uint64_t type_id = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
             detail::object_ref data;        // The actual object: a bound C++ object, or a class instance
-            bool is_class_instance_wrapper = false;  // True if data is a class_instance object (both C++ and script classes), false for raw data
+            bool is_instance() const noexcept { return data.is_instance(); }
             // A coroutine handle IS a reference to a running computation: clone() shares
             // it (reference semantics, like shared_ptr) instead of deep-copying.
             bool is_coroutine_handle = false;
@@ -2918,7 +2918,7 @@ namespace detail {
         // the pointer past it
         class_instance* peek_class_instance() const noexcept {
             const auto* holder = storage_.get_if<strong_ptr<object_holder>>();   // an object's storage alone holds one
-            if (!holder || !*holder || !(*holder)->is_class_instance_wrapper) { return nullptr; }
+            if (!holder || !*holder || !(*holder)->is_instance()) { return nullptr; }
             return static_cast<class_instance*>((*holder)->data.get());
         }
 
@@ -2926,7 +2926,7 @@ namespace detail {
         strong_ptr<class_instance> get_class_instance() {
             JAI_CENSUS(holder_inspect);
             auto holder = get_object_holder();
-            if (holder && holder->is_class_instance_wrapper) {
+            if (holder && holder->is_instance()) {
                 return holder->data.instance();
             }
             return nullptr;

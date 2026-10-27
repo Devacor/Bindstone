@@ -24,7 +24,7 @@ inline class_instance* host_this_instance(const script_value& self) {
 	const size_t kind = self.raw_storage_index();
 	if (kind != script_value::TYPEID_OBJECT && kind != script_value::TYPEID_SHARED_PTR) { return nullptr; }
 	const auto& holder = const_cast<script_value&>(self).get_object_holder();
-	if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return nullptr; }
+	if (!holder || !holder->is_instance()) { return nullptr; }
 	return static_cast<class_instance*>(holder->data.get());
 }
 

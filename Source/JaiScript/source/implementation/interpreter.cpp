@@ -2626,7 +2626,7 @@ interpreter::member_target interpreter::resolve_member_target(const script_value
     if (!holder) {
         return target;
     }
-    if (holder->is_class_instance_wrapper) {
+    if (holder->is_instance()) {
         target.instance = holder->data.instance();
         if (target.instance) {
             target.class_def = target.instance->get_class_definition();
@@ -2659,7 +2659,7 @@ bool interpreter::object_to_bool_via_method(const script_value& value) {
     // the typed-slot table's bool row (detail::convert_typed_slot_script_rows_impl)
     if (const auto* h = value.get_storage().get_if<script_value::TYPEID_OBJECT>(); h && *h) {
         auto* oh = h->get();
-        if (oh->is_class_instance_wrapper && oh->data) {
+        if (oh->is_instance()) {
             if (auto* cd = static_cast<class_instance*>(oh->data.get())->get_class_definition();
                 cd && !cd->may_define_to_bool() && !cd->wrapped_object_has_layer(*static_cast<class_instance*>(oh->data.get()))) {
                 return true;
@@ -4432,7 +4432,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     // non-field member store needs method machinery - wall it.
     if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
         auto& holder = const_cast<script_value&>(objectValue).unchecked_get_object_storage();
-        if (holder && holder->is_class_instance_wrapper && holder->data) {
+        if (holder && holder->is_instance()) {
             auto* inst = static_cast<class_instance*>(holder->data.get());
             if (memberExpr->member_id != UINT64_MAX && detail::parallel_script_field(*inst, memberExpr->member_id)) {
                 auto enforced = inst->field_store(memberExpr->member_id, value, [&] { return clone_for_assignment(value); });
@@ -5859,7 +5859,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     script_value& this_val = *this_ptr;
                     if (this_val.is_object()) {
                         auto obj_holder = this_val.get_object_holder();
-                        if (obj_holder->is_class_instance_wrapper) {
+                        if (obj_holder->is_instance()) {
                             auto instance = obj_holder->data.instance();
 
                             // First try instance fields
@@ -7422,7 +7422,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                 auto holder = objectValue.get_object_holder();
                 if (holder && holder->type_id != coroutine_handle_type_id_) {
                     class_instance* inst_raw = nullptr;
-                    if (holder->is_class_instance_wrapper && holder->data) {
+                    if (holder->is_instance()) {
                         inst_raw = static_cast<class_instance*>(holder->data.get());
                         cls_raw = inst_raw->get_class_definition();
                     }
@@ -7550,7 +7550,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                 class_instance* inst_raw = nullptr;
                 if (ti == script_value::TYPEID_OBJECT || ti == script_value::TYPEID_SHARED_PTR) {
                     auto holder = objectValue.get_object_holder();
-                    if (holder && holder->is_class_instance_wrapper && holder->data) {
+                    if (holder && holder->is_instance()) {
                         inst_raw = static_cast<class_instance*>(holder->data.get());
                     }
                 }
@@ -8437,7 +8437,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     // owned) instance; anything else needs method machinery - wall it.
     if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
         auto& holder = objectValue.unchecked_get_object_storage();
-        if (holder && holder->is_class_instance_wrapper && holder->data) {
+        if (holder && holder->is_instance()) {
             auto* inst = static_cast<class_instance*>(holder->data.get());
             const class_definition* cls = inst->get_class_definition();
             if (script_value* field = detail::parallel_script_field(*inst, expr->member_id)) {

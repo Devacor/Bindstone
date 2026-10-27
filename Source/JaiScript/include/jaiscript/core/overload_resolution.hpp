@@ -112,7 +112,7 @@ inline bool value_of_class(const class_definition* def, const script_value& othe
     auto holder = const_cast<script_value&>(d).get_object_holder();
     if (!holder) { return false; }
     const class_definition* other_def = nullptr;
-    if (holder->is_class_instance_wrapper) {
+    if (holder->is_instance()) {
         other_def = holder->data ? static_cast<class_instance*>(holder->data.get())->get_class_definition() : nullptr;
     } else if (holder->type_name == def->get_name()) {
         return true;

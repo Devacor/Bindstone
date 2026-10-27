@@ -114,7 +114,7 @@ namespace jai::detail {
         const size_t ri = recv.raw_storage_index();
         if (ri != script_value::TYPEID_OBJECT && ri != script_value::TYPEID_SHARED_PTR) return arg_binding::opaque;
         const auto holder = recv.get_object_holder();
-        if (!holder || !holder->is_class_instance_wrapper || !holder->data) return arg_binding::opaque;
+        if (!holder || !holder->is_instance()) return arg_binding::opaque;
         auto* inst = static_cast<class_instance*>(holder->data.get());
         const class_definition* cd = inst->get_class_definition();
         if (!cd) return arg_binding::opaque;

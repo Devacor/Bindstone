@@ -11,6 +11,7 @@
 #include <jaiscript/detail/copy_census.hpp>
 #include <jaiscript/jaiscript_fwd.hpp>
 #include <variant>
+#include <optional>
 #include <tuple>
 #include <memory>
 #include <compare>
@@ -1225,6 +1226,25 @@ namespace detail {
             return checked_result<script_char>(val.storage_.get<script_char>());
         }
 
+        // The conversion the engine's registry holds for T, its failures as checked errors; nullopt when none is registered
+        template<typename T>
+        std::optional<checked_result<T>> registered_conversion() const {
+            if (!payload_engine()) {
+                return std::nullopt;
+            }
+            auto registry = get_engine_conversion_registry(payload_engine());
+            if (!registry || !registry->template has_conversion<T>()) {
+                return std::nullopt;
+            }
+            try {
+                return checked_result<T>(registry->template convert_from_script<T>(*this));
+            } catch (const runtime_error& e) {
+                return conversion_exception_result<T>(payload_engine(), e.what());
+            } catch (...) {
+                return checked_result<T>(make_error_code(runtime_error_code::type_mismatch), "Custom conversion failed");
+            }
+        }
+
         // ============================================================================
         // COMPREHENSIVE checked_as<T>() - Returns checked_result instead of throwing
         // ============================================================================
@@ -1569,20 +1589,8 @@ namespace detail {
             // Vector types
             else if constexpr (is_specialization_v<T, std::vector>) {
                 // Use engine's conversion registry first
-                if (payload_engine()) {
-                    auto registry = get_engine_conversion_registry(payload_engine());
-                    if (registry && registry->template has_conversion<T>()) {
-                        try {
-                            return checked_result<T>(registry->template convert_from_script<T>(*this));
-                        } catch (const runtime_error& e) {
-                            return conversion_exception_result<T>(payload_engine(), e.what());
-                        } catch (...) {
-                            return checked_result<T>(
-                                make_error_code(runtime_error_code::type_mismatch),
-                                "Custom conversion failed"
-                            );
-                        }
-                    }
+                if (auto converted = registered_conversion<T>()) {
+                    return std::move(*converted);
                 }
 
                 // Built-in vector handling
@@ -1638,20 +1646,8 @@ namespace detail {
             // Map types
             else if constexpr (is_script_map_like_v<T>) {
                 // Use engine's conversion registry first
-                if (payload_engine()) {
-                    auto registry = get_engine_conversion_registry(payload_engine());
-                    if (registry && registry->template has_conversion<T>()) {
-                        try {
-                            return checked_result<T>(registry->template convert_from_script<T>(*this));
-                        } catch (const runtime_error& e) {
-                            return conversion_exception_result<T>(payload_engine(), e.what());
-                        } catch (...) {
-                            return checked_result<T>(
-                                make_error_code(runtime_error_code::type_mismatch),
-                                "Custom conversion failed"
-                            );
-                        }
-                    }
+                if (auto converted = registered_conversion<T>()) {
+                    return std::move(*converted);
                 }
 
                 // Built-in map handling
@@ -1757,20 +1753,8 @@ namespace detail {
                     return checked_result<T>(T{});
                 }
                 // First check if there's a registered conversion
-                if (payload_engine()) {
-                    auto registry = get_engine_conversion_registry(payload_engine());
-                    if (registry && registry->template has_conversion<T>()) {
-                        try {
-                            return checked_result<T>(registry->template convert_from_script<T>(*this));
-                        } catch (const runtime_error& e) {
-                            return conversion_exception_result<T>(payload_engine(), e.what());
-                        } catch (...) {
-                            return checked_result<T>(
-                                make_error_code(runtime_error_code::type_mismatch),
-                                "Custom conversion failed"
-                            );
-                        }
-                    }
+                if (auto converted = registered_conversion<T>()) {
+                    return std::move(*converted);
                 }
 
                 // Fall back to default shared_ptr extraction. Declared-type gates lie for
@@ -1853,20 +1837,8 @@ namespace detail {
                              !is_specialization_v<T, std::vector> &&
                              !is_script_map_like_v<T>) {
                 // Check custom converter first
-                if (payload_engine()) {
-                    auto registry = get_engine_conversion_registry(payload_engine());
-                    if (registry && registry->template has_conversion<T>()) {
-                        try {
-                            return checked_result<T>(registry->template convert_from_script<T>(*this));
-                        } catch (const runtime_error& e) {
-                            return conversion_exception_result<T>(payload_engine(), e.what());
-                        } catch (...) {
-                            return checked_result<T>(
-                                make_error_code(runtime_error_code::type_mismatch),
-                                "Custom conversion failed"
-                            );
-                        }
-                    }
+                if (auto converted = registered_conversion<T>()) {
+                    return std::move(*converted);
                 }
 
                 // For custom classes, try to extract shared_ptr and dereference. Storage
@@ -1939,6 +1911,10 @@ namespace detail {
         // Assignment through reference - assigns to target if this is a reference
         void assign_through(const script_value& value);
         void assign_through(script_value&& value);
+    private:
+        template<typename V>
+        void assign_through_reference(V&& value);
+    public:
         
         // Operators
         bool operator==(const script_value& other) const;

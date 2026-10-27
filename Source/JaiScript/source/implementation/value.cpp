@@ -2187,133 +2187,89 @@ const script_value& script_value::deref_slow() const {
     return *this;
 }
 
+// A typed element, a property, a string element or a component hands back a materialized VIEW: writers go through
+// assign_through / commit_scratch and the element, string and component stores, never through this deref
 script_value& script_value::deref_slow() {
-    // Use current_type() not defined_type() - references may have type_info with different base_type
-    if (current_type() == script_value_type::jai_reference_type) {
-        // See const overload: bind, don't copy, the strong_ptr (avoids refcount churn).
-        auto& refHolder = storage_.get<strong_ptr<reference_holder>>();
-        if (!refHolder) {
-            throw runtime_error("Null reference");
-        }
-        if (refHolder->has_cell) {
-            return refHolder->cell()->deref();
-        }
-        if (refHolder->has_map_key) {
-            script_value* entry_value = refHolder->map_entry_value();
-            if (!entry_value) {
-                throw runtime_error("Reference to a removed map entry");
-            }
-            return entry_value->deref();
-        }
-        if (refHolder->container) {
-            if (refHolder->container_index >= refHolder->container->size()) {
-                throw runtime_error("Reference to a removed array element");
-            }
-            if (refHolder->container->is_typed()) {
-                // Materialized VIEW: reads are correct (refreshed per touch); WRITERS
-                // must never come through mutable deref on a typed element (audited -
-                // they use assign_through / the typed store chokepoints)
-                return const_cast<script_value&>(refHolder->materialize_typed_element(refHolder->owner));
-            }
-            return refHolder->container->values()[refHolder->container_index].deref();
-        }
-        if (refHolder->owner_instance) {
-            script_value* field_value = refHolder->field_cell();
-            if (!field_value) {
-                throw runtime_error("Reference to a removed field");
-            }
-            return field_value->deref();
-        }
-        if (refHolder->property) {
-            // PROPERTY hands back a materialized VIEW like typed elements do: writers go
-            // through assign_through / commit_scratch, never through this deref
-            return refHolder->property->live_member ? *refHolder->cell()
-                                                    : const_cast<script_value&>(refHolder->materialize_property(refHolder->owner));
-        }
-        if (refHolder->string_base) {
-            // a materialized VIEW: writers go through the string-element store (detail/string_element.hpp)
-            return const_cast<script_value&>(refHolder->materialize_string_element(refHolder->owner));
-        }
-        if (refHolder->component_base) {
-            // a materialized VIEW: writers go through the component store
-            return const_cast<script_value&>(refHolder->materialize_component(refHolder->owner));
-        }
-        throw runtime_error("Null reference");   // unreachable: every factory sets a mode
+    return const_cast<script_value&>(std::as_const(*this).deref_slow());
+}
+
+// A reference's store: the target its holder resolves to takes the value (moved where the target is plain storage)
+template<typename V>
+void script_value::assign_through_reference(V&& value) {
+    auto refHolder = storage_.get<strong_ptr<reference_holder>>();
+    if (!refHolder) {
+        throw runtime_error("Null reference in assign_through");
     }
-    return *this;
+    if (refHolder->has_cell) {
+        if (refHolder->cell()->is_cpp_bound_primitive()) { refHolder->cell()->assign_through(value); return; }   // a boxed host-bound variable: the C++ memory
+        *refHolder->cell() = std::forward<V>(value);
+        return;
+    }
+    if (refHolder->has_map_key) {
+        script_value* entry_value = refHolder->map_entry_value();
+        if (!entry_value) {
+            throw runtime_error("Assignment to a removed map entry");
+        }
+        *entry_value = std::forward<V>(value);
+        return;
+    }
+    if (refHolder->container) {
+        // Vector-element reference: resolve fresh + bounds-check before writing,
+        // so a write-through after a reallocation/shrink can't corrupt the heap (#41).
+        if (refHolder->container_index >= refHolder->container->size()) {
+            throw runtime_error("Assignment to a removed array element");
+        }
+        if (refHolder->container->is_typed()) {
+            // constraint enforcement ran upstream (the tag is airtight) - defensive
+            // wall for the unreachable non-numeric case
+            const script_value& v = value.is_reference() ? value.deref() : value;
+            const size_t vi = v.raw_storage_index();
+            if (vi != TYPEID_INT && vi != TYPEID_FLOAT) {
+                throw runtime_error("Type mismatch in assignment");
+            }
+            refHolder->container->set(refHolder->container_index, v);
+            return;
+        }
+        refHolder->container->values()[refHolder->container_index] = std::forward<V>(value);
+        return;
+    }
+    if (refHolder->owner_instance) {
+        script_value* field_value = refHolder->field_cell();
+        if (!field_value) {
+            throw runtime_error("Reference to a removed field");
+        }
+        *field_value = std::forward<V>(value);
+        return;
+    }
+    if (refHolder->property) {
+        // CPP-MEMBER: the box's typed memory write (never a memberwise replace, which
+        // would detach the box); PROPERTY: the setter
+        if (refHolder->property->referent) {
+            refHolder->store_referent(value, refHolder->owner);
+        } else if (refHolder->property->live_member) {
+            refHolder->cell()->assign_through(value);
+        } else {
+            refHolder->store_property(value, refHolder->owner);
+        }
+        return;
+    }
+    if (refHolder->string_base) {
+        auto stored = detail::store_string_element(*refHolder, value, refHolder->owner);
+        if (!stored) {
+            throw runtime_error(format_error(stored, *refHolder->owner->get_symbolizer()));
+        }
+        return;
+    }
+    if (refHolder->component_base) {
+        refHolder->store_component(value, refHolder->owner);
+        return;
+    }
+    throw runtime_error("Null reference in assign_through");   // unreachable: every factory sets a mode
 }
 
 void script_value::assign_through(const script_value& value) {
     if (type() == script_value_type::jai_reference_type) {
-        auto refHolder = storage_.get<strong_ptr<reference_holder>>();
-        if (!refHolder) {
-            throw runtime_error("Null reference in assign_through");
-        }
-        if (refHolder->has_cell) {
-            if (refHolder->cell()->is_cpp_bound_primitive()) { refHolder->cell()->assign_through(value); return; }   // a boxed host-bound variable: the C++ memory
-            *refHolder->cell() = value;
-            return;
-        }
-        if (refHolder->has_map_key) {
-            script_value* entry_value = refHolder->map_entry_value();
-            if (!entry_value) {
-                throw runtime_error("Assignment to a removed map entry");
-            }
-            *entry_value = value;
-            return;
-        }
-        if (refHolder->container) {
-            // Vector-element reference: resolve fresh + bounds-check before writing,
-            // so a write-through after a reallocation/shrink can't corrupt the heap (#41).
-            if (refHolder->container_index >= refHolder->container->size()) {
-                throw runtime_error("Assignment to a removed array element");
-            }
-            if (refHolder->container->is_typed()) {
-                // constraint enforcement ran upstream (the tag is airtight) - defensive
-                // wall for the unreachable non-numeric case
-                const script_value& v = value.is_reference() ? value.deref() : value;
-                const size_t vi = v.raw_storage_index();
-                if (vi != TYPEID_INT && vi != TYPEID_FLOAT) {
-                    throw runtime_error("Type mismatch in assignment");
-                }
-                refHolder->container->set(refHolder->container_index, v);
-                return;
-            }
-            refHolder->container->values()[refHolder->container_index] = value;
-            return;
-        }
-        if (refHolder->owner_instance) {
-            script_value* field_value = refHolder->field_cell();
-            if (!field_value) {
-                throw runtime_error("Reference to a removed field");
-            }
-            *field_value = value;
-            return;
-        }
-        if (refHolder->property) {
-            // CPP-MEMBER: the box's typed memory write (never a memberwise replace, which
-            // would detach the box); PROPERTY: the setter
-            if (refHolder->property->referent) {
-                refHolder->store_referent(value, refHolder->owner);
-            } else if (refHolder->property->live_member) {
-                refHolder->cell()->assign_through(value);
-            } else {
-                refHolder->store_property(value, refHolder->owner);
-            }
-            return;
-        }
-        if (refHolder->string_base) {
-            auto stored = detail::store_string_element(*refHolder, value, refHolder->owner);
-            if (!stored) {
-                throw runtime_error(format_error(stored, *refHolder->owner->get_symbolizer()));
-            }
-            return;
-        }
-        if (refHolder->component_base) {
-            refHolder->store_component(value, refHolder->owner);
-            return;
-        }
-        throw runtime_error("Null reference in assign_through");   // unreachable: every factory sets a mode
+        assign_through_reference(value);
     } else if (is_cpp_bound()) {
         void* boundPtr = bound_target_ptr();
         const uint8_t sizeAndSign = bound_size_and_sign();
@@ -2364,69 +2320,7 @@ void script_value::assign_through(const script_value& value) {
 
 void script_value::assign_through(script_value&& value) {
     if (type() == script_value_type::jai_reference_type) {
-        auto refHolder = storage_.get<strong_ptr<reference_holder>>();
-        if (!refHolder) {
-            throw runtime_error("Null reference in assign_through");
-        }
-        if (refHolder->has_cell) {
-            if (refHolder->cell()->is_cpp_bound_primitive()) { refHolder->cell()->assign_through(value); return; }
-            *refHolder->cell() = std::move(value);
-            return;
-        }
-        if (refHolder->has_map_key) {
-            script_value* entry_value = refHolder->map_entry_value();
-            if (!entry_value) {
-                throw runtime_error("Assignment to a removed map entry");
-            }
-            *entry_value = std::move(value);
-            return;
-        }
-        if (refHolder->container) {
-            if (refHolder->container_index >= refHolder->container->size()) {
-                throw runtime_error("Assignment to a removed array element");
-            }
-            if (refHolder->container->is_typed()) {
-                const script_value& v = value.is_reference() ? value.deref() : value;
-                const size_t vi = v.raw_storage_index();
-                if (vi != TYPEID_INT && vi != TYPEID_FLOAT) {
-                    throw runtime_error("Type mismatch in assignment");
-                }
-                refHolder->container->set(refHolder->container_index, v);
-                return;
-            }
-            refHolder->container->values()[refHolder->container_index] = std::move(value);
-            return;
-        }
-        if (refHolder->owner_instance) {
-            script_value* field_value = refHolder->field_cell();
-            if (!field_value) {
-                throw runtime_error("Reference to a removed field");
-            }
-            *field_value = std::move(value);
-            return;
-        }
-        if (refHolder->property) {
-            if (refHolder->property->referent) {
-                refHolder->store_referent(value, refHolder->owner);
-            } else if (refHolder->property->live_member) {
-                refHolder->cell()->assign_through(value);
-            } else {
-                refHolder->store_property(value, refHolder->owner);
-            }
-            return;
-        }
-        if (refHolder->string_base) {
-            auto stored = detail::store_string_element(*refHolder, value, refHolder->owner);
-            if (!stored) {
-                throw runtime_error(format_error(stored, *refHolder->owner->get_symbolizer()));
-            }
-            return;
-        }
-        if (refHolder->component_base) {
-            refHolder->store_component(value, refHolder->owner);
-            return;
-        }
-        throw runtime_error("Null reference in assign_through");   // unreachable: every factory sets a mode
+        assign_through_reference(std::move(value));
     } else if (is_cpp_bound()) {
         // can't move into a C++ variable — fall back to copy
         assign_through(value);

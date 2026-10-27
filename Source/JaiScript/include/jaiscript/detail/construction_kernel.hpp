@@ -163,6 +163,7 @@ namespace construction_kernel {
 						level_scope<Host> level_env(host, definition_env, this_value, entry.script_class.get(), entry.ctor.get(), &entry.args);
 						auto evaluated = evaluate_initializer_arguments(host, *init, level_env.scope, fields_run_code, ancestor.get(), ancestor_args);
 						if (!evaluated || host.unwinding) { return evaluated; }
+						host.read_back_parameters(level_env.scope, entry.ctor.get(), entry.args);
 					}
 					if (auto ancestor_script = std::dynamic_pointer_cast<script_class_definition>(ancestor)) {
 						auto ancestor_ctor = select_base_constructor(*ancestor_script, ancestor_args, host.eng);
@@ -217,6 +218,7 @@ namespace construction_kernel {
 				if (!initialized) { return initialized; }
 			}
 			initializer_depth.reset();
+			host.read_back_parameters(level_env.scope, it->ctor.get(), it->args);
 			auto body = host.run_constructor_body(it->ctor, definition_env, this_value, it->script_class.get(), it->args);
 			if (!body) { return body.error_value(); }
 			if (host.unwinding) { return {}; }
@@ -312,7 +314,8 @@ checked_result<script_value> initialize_members(Host& host, const std::shared_pt
                                                 const std::shared_ptr<environment>& definition_env, const strong_ptr<class_instance>& instance,
                                                 const script_value& this_value, const std::shared_ptr<function_decl>& ctor,
                                                 const std::vector<script_value>& args, std::optional<call_depth_guard>& initializer_depth,
-                                                size_t delegation_depth, std::vector<script_value>* captured_out) {
+                                                size_t delegation_depth, std::vector<script_value>* captured_out,
+                                                std::vector<script_value>* body_args_out) {
 	if (delegation_depth > k_max_constructor_delegation_depth) {
 		return raise_call_depth();   // a delegation cycle (ill-formed in C++) raises instead of recursing without end
 	}
@@ -376,12 +379,13 @@ checked_result<script_value> initialize_members(Host& host, const std::shared_pt
 					cls->get_type_id(), init_args.data(), init_args.size(), host.eng, true);
 			}
 			// the target runs whole: its own initializer list, the members, then its body
+			std::vector<script_value> target_body_args;
 			auto target_members = initialize_members(host, cls, definition_env, instance, this_value, target, init_args,
-			                                         initializer_depth, delegation_depth + 1, nullptr);
+			                                         initializer_depth, delegation_depth + 1, nullptr, &target_body_args);
 			if (!target_members || host.unwinding) { return target_members; }
 			delegated_to_this = true;
 			initializer_depth.reset();
-			auto target_body = host.run_constructor_body(target, definition_env, this_value, cls.get(), init_args);
+			auto target_body = host.run_constructor_body(target, definition_env, this_value, cls.get(), target_body_args.empty() ? init_args : target_body_args);
 			if (!target_body) { return target_body.error_value(); }
 			if (host.unwinding) { return this_value; }
 			instance->constructed_levels(static_cast<uint16_t>(cls->construction_order().size()));   // C++: the object is constructed once its target constructor finishes
@@ -411,6 +415,10 @@ checked_result<script_value> initialize_members(Host& host, const std::shared_pt
 			// (an initializer list, a base body) is followed by the stamp again
 			stamp_literal_field_initializers(*instance, *cls, handled_parent_init, host.eng);
 		}
+	}
+	if (std::vector<script_value>* body_args = body_args_out ? body_args_out : captured_out; init_env && body_args) {
+		if (body_args->empty()) { *body_args = args; }
+		host.read_back_parameters(init_env, ctor.get(), *body_args);
 	}
 	return this_value;
 }

@@ -220,7 +220,8 @@ namespace jai::detail {
 	// operator's or a value cast's result): C++ rejects built-in assignment to a member of a class prvalue, so the store
 	// raises the math temporary's text. A handle, a reference or an object something else owns (a host shared_ptr's
 	// layer) names its object; a name, member, element or conditional of lvalues (its arms read as references) names storage.
-	inline bool class_temporary_member_store(const member_expr* m, const script_value& base_raw) {
+	// held: the copies of the value the caller itself holds (the object's one count is every holder's)
+	inline bool class_temporary_member_store(const member_expr* m, const script_value& base_raw, long held = 1) {
 		const expression* base = m->object.get();
 		switch (base->get_type()) {
 			case node_type::identifier_expr: case node_type::member_expr: case node_type::this_expr: return false;
@@ -233,7 +234,7 @@ namespace jai::detail {
 		const type_info* tag = base_raw.type_info_raw();
 		if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return false; }
 		const auto& holder = base_raw.unchecked_object_handle();
-		return holder && holder->is_instance() && holder->object_use_count() == 1;
+		return holder && holder->is_instance() && holder->object_use_count() == held;
 	}
 
 	JAI_NOINLINE inline checked_result<void> class_temporary_member_error() {

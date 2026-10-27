@@ -2374,8 +2374,12 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (self.is_object()) {
             auto obj_holder = self.get_object_holder();
             if (obj_holder && obj_holder->holds_object()) {
-                long count = obj_holder->object_use_count();
-                return ctx.make_value(static_cast<script_int>(count));
+                if (obj_holder->is_instance()) {   // an instance's one count is every owner's, script handles and C++ shares alike
+                    const long transient_k =
+                        (ctx.engine_ref && ctx.engine_ref->get_backend_type() == backend_type::vm) ? 3 : 2;
+                    return ctx.make_value(static_cast<script_int>(std::max(1L, static_cast<long>(obj_holder.use_count()) - transient_k)));
+                }
+                return ctx.make_value(static_cast<script_int>(obj_holder->object_use_count()));
             }
         }
 
@@ -2631,13 +2635,12 @@ interpreter::member_target interpreter::resolve_member_target(const script_value
         if (target.instance) {
             target.class_def = target.instance->get_class_definition();
             // A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
-            // S1): re-point the handle itself, so every copy of it - and every receiver site,
-            // getters, setters, bound methods, the vm's caches - sees the layer from now on.
+            // S1): the access reads the layer through the object's slot (a handle is the wrapper itself, so it
+            // cannot be re-pointed); getters, setters, bound methods and the vm's caches see the layer the same way.
             if (target.class_def && target.class_def->wrapped_object_has_layer(*target.instance)) {
                 if (auto hooks = target.class_def->slot_hooks()) {
                     auto layer = hooks->read(target.instance->cpp_object_pointer());
                     if (layer && layer != target.instance && layer->get_engine() == engine_) {
-                        holder->hold(layer);
                         target.instance = std::move(layer);
                         target.class_def = target.instance->get_class_definition();
                     }
@@ -5288,7 +5291,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 push_value(make_value());
                 return {};
             }
-            if (detail::class_temporary_member_store(memberExpr, objectValue)) [[unlikely]] { return detail::class_temporary_member_error(); }
+            if (detail::class_temporary_member_store(memberExpr, objectValue, 2)) [[unlikely]] { return detail::class_temporary_member_error(); }   // objectValue and its dereferenced copy
 
             JAISCRIPT_TRY(assign_member_value(target_obj, memberExpr, resultValue));
             if (is_unwinding_) {
@@ -6033,7 +6036,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 push_value(make_value());
                 return {};
             }
-            if (detail::class_temporary_member_store(memberExpr, objectValue)) [[unlikely]] { return detail::class_temporary_member_error(); }
+            if (detail::class_temporary_member_store(memberExpr, objectValue, 2)) [[unlikely]] { return detail::class_temporary_member_error(); }   // objectValue and its dereferenced copy
 
             // Proven field store (internal/type_proofs_design.md I-M2): assign_member_value's field
             // branch minus the ladder (KEEP BYTE-PARALLEL with vm_backend exec_set_member's

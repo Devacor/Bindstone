@@ -73,7 +73,7 @@ sum(outs);
 		});
 
 		test("a_script_layer_every_worker_reaches_through_a_host_call", [this]() {
-			// every worker wraps the same C++ object's script layer, over and over: the layer's counts and its holder room are shared
+			// every worker wraps the same C++ object's script layer, over and over: the layer and its counts are shared
 			// a fresh object per engine: an object keeps its layer past its engine, so one object across engines tests something else
 			auto bind = [](engine& e) {
 				auto object = std::make_shared<shared_probe>();
@@ -225,12 +225,12 @@ int sum = 0;
 for (int v : out) { sum = sum + v; }
 sum;
 )JAI";
-			// two wraps of the host object are two handles; its field compares fieldwise, against itself and against a worker's copy
+			// two wraps of the host object are the one object; its field compares fieldwise, against itself and against a worker's copy
 			const std::string compare = "{ var p = probe(); var q = probe(); var r = q; Leaf mine = Leaf(); mine.label = p.leaf.label; "
 			                            "o = (p == q ? 1 : 0) + (r == p ? 2 : 0) + (p != q ? 4 : 0) + (p.leaf == q.leaf ? 8 : 0) + (mine == p.leaf ? 16 : 0) + x; }";
 			auto with = [&](const std::string& loop) { std::string p = body; p.replace(p.find("LOOP"), 4, loop); return p; };
 			const std::string expected = run(with("for (int x = 0; x < 512; ++x) { auto& o = out[x]; " + compare + " }"), 1, bind_shared);
-			check_eq(std::string("145152"), expected, "the serial loop's comparisons: each wrap of a host object is its own handle");
+			check_eq(std::string("144640"), expected, "the serial loop's comparisons: every wrap of a host object is the object");
 			for (size_t workers : { size_t(1), size_t(8) }) {
 				check_eq(expected, run(with("parallel_for (int x, auto& o : xs, out) " + compare), workers, bind_shared), "compared borrows on " + std::to_string(workers) + " workers");
 			}

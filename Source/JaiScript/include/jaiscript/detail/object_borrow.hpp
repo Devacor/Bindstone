@@ -8,7 +8,7 @@
 namespace jai::detail {
 
 // What an object borrow names (internal/parallel_design.md, shared objects): the shared instance a worker reached through a host
-// call, and the worker's own view of its C++ object (null when it holds none). parallel_object_borrow mints one per wrap; the
+// call, and the worker's own view of its C++ object (null when it holds none). parallel_object_borrow mints one per instance; the
 // worker's slot keeps it until the join swaps every escaped borrow for a handle.
 struct object_borrow_record {
     const class_instance* source = nullptr;
@@ -16,19 +16,17 @@ struct object_borrow_record {
     script_value view{std::monostate{}, nullptr};
 };
 
-// A worker's borrows (records never move: borrows point at them): a record per host wrap, as each wrap of a host object is its own
-// handle on the serial path, one per holder an object a shared object holds is reached through (its identity there), and one view
-// per shared instance
+// A worker's borrows: one record per shared instance (records never move: borrows point at them), so every wrap of one object
+// is one identity, as on the serial path
 struct object_borrows {
     std::vector<std::unique_ptr<object_borrow_record>> records;
-    std::unordered_map<const void*, const object_borrow_record*> by_holder;
-    std::unordered_map<const class_instance*, script_value> views;
-    void clear() noexcept { by_holder.clear(); views.clear(); records.clear(); }
+    std::unordered_map<const class_instance*, const object_borrow_record*> by_source;
+    void clear() noexcept { by_source.clear(); records.clear(); }
 };
 
-// The borrow a worker reads `source` through, its handle tag `tag`; `identity` names the holder the source is reached through
-// (null: a host wrap, a fresh handle). Raises when the instance is an element of the region (another worker's own object)
-script_value parallel_object_borrow(const class_instance& source, type_info_ptr tag, engine& eng, const void* identity = nullptr);
+// The borrow a worker reads `source` through, its handle tag `tag`. Raises when the instance is an element of the region (another
+// worker's own object)
+script_value parallel_object_borrow(const class_instance& source, type_info_ptr tag, engine& eng);
 // An object a shared object holds, as a worker reads it: a class instance as its own borrow, a bound C++ object as a holder of the
 // worker's own over the same object
 script_value parallel_shared_object(const script_value& object, engine& eng);

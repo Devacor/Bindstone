@@ -45,26 +45,21 @@ namespace detail {
         std::shared_ptr<class_definition> def;
         void operator()(class_instance* ptr) const noexcept;
     };
-    // The object block (internal/object_layout.md): a destructor class's pin on its definition, the room for the instance's
-    // holder, the head (the parts that still need the memory), the instance's strong_ptr control block and instance, then the
-    // cells. The instance's part and the holder's part each give their part back; the last one frees the block.
+    // The object block (internal/object_layout.md): a destructor class's pin on its definition, the head (how far the block's
+    // memory starts before it), the instance's strong_ptr control block and instance (an object value's holder itself), then the
+    // cells. The strong family's last weak reference frees the block.
     struct object_block_head {
-        std::atomic<uint32_t> parts{1};
-        uint32_t prefix = 0;   // bytes before the holder room: the definition pin of a destructor class's instance
-        static constexpr size_t holder_room = (sizeof(control_block<script_value::object_holder>) + 15) & ~size_t{15};
+        uint32_t prefix = 0;   // bytes before the head: the definition pin of a destructor class's instance
+        uint32_t reserved = 0;
         static constexpr size_t size = 8;
         static constexpr size_t pin_bytes = (sizeof(std::shared_ptr<class_definition>) + 15) & ~size_t{15};
-        std::byte* memory() noexcept { return reinterpret_cast<std::byte*>(this) - holder_room - prefix; }
+        std::byte* memory() noexcept { return reinterpret_cast<std::byte*>(this) - prefix; }
         static void release(object_block_head* head) noexcept {
-            if (head->parts.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                std::byte* memory = head->memory();
-                if (head->prefix) { reinterpret_cast<std::shared_ptr<class_definition>*>(memory)->~shared_ptr(); }
-                head->~object_block_head();
-                ::operator delete(memory);
-            }
+            std::byte* memory = head->memory();
+            if (head->prefix) { reinterpret_cast<std::shared_ptr<class_definition>*>(memory)->~shared_ptr(); }
+            head->~object_block_head();
+            ::operator delete(memory);
         }
-        std::byte* holder_slot() noexcept { return reinterpret_cast<std::byte*>(this) - holder_room; }
-        static object_block_head* of_holder_slot(std::byte* slot) noexcept { return reinterpret_cast<object_block_head*>(slot + holder_room); }
         static object_block_head* of_control_block(control_block_base* cb) noexcept {
             return reinterpret_cast<object_block_head*>(reinterpret_cast<std::byte*>(cb) - size);
         }
@@ -101,8 +96,9 @@ enum class delegation_type {
 
 class class_definition;
 
-// aligned to 8 everywhere, so its control block sits one fixed distance before it (detail::k_instance_cb_offset)
-class alignas(8) class_instance {
+// aligned to 8 everywhere, so its control block sits one fixed distance before it (detail::k_instance_cb_offset); an object value
+// points at it as its holder (script_value::object_holder at offset 0)
+class alignas(8) class_instance : public script_value::object_holder {
 public:
     // An instance in its own object block (detail::object_block_head), owned by strong_ptr; a destructor_owner arms the
     // instance's destructor chain and pins the definition until the instance dies
@@ -117,7 +113,7 @@ public:
     struct interned_name_t {};
     // a name already in the engine's interned table (a class definition's cached view): no copy, no lookup
     class_instance(interned_name_t, std::string_view interned, engine* eng)
-        : class_name_(interned), engine_(eng) {}
+        : object_holder(k_instance, interned, eng) {}
     // The slot table and cells in the instance's own allocation (class_definition::allocate_instance): `slots` table
     // entries, then `slots` cells; a slot the class gains later takes a heap table and heap cells
     struct trailing_cells {
@@ -129,15 +125,6 @@ public:
     // An instance placed in its own raw allocation (a destructor class's, allocate_instance) dies through this; the
     // allocation goes with its control block (detail::block_head_allocator)
     inline static void free_allocation(class_instance* instance) noexcept;
-    // The holder room of the instance's block (detail::object_block_head), for the first wrap to claim; null once claimed or
-    // for an instance made outside one (a worker never wraps a shared instance: it reads one through a borrow)
-    std::byte* take_embedded_holder() noexcept {
-        std::byte* slot = embedded_holder_;
-        embedded_holder_ = nullptr;
-        return slot;
-    }
-    void set_embedded_holder(std::byte* slot) noexcept { embedded_holder_ = slot; }
-
     inline ~class_instance();
 
     // Enforcing write (C++ API surface): converts to the field's declared type like '='
@@ -183,7 +170,7 @@ public:
     // Runtime-added fields (a user field can shadow a method by name)
     inline bool has_user_overflow_fields() const;
 
-    engine* get_engine() const { return engine_; }
+    engine* get_engine() const { return owner_; }
 
     // Set while a script constructor has not completed. A throw out of it destroys only the levels whose constructors
     // completed (C++ [except.ctor]): the first `constructed_levels()` of its class's construction_order()
@@ -228,7 +215,7 @@ public:
     // pre-resolved slot — writes through a held reference, materializes absent cells.
     inline void field_slot_write(uint32_t slot, script_value&& v);
 
-    std::string_view get_class_name() const { return class_name_; }
+    std::string_view get_class_name() const { return type_name_; }
 
     // Hot-reload field migration; defined out-of-line (needs class_definition + the
     // conversion kernel for declared-type retypes).
@@ -281,7 +268,7 @@ public:
 		}
 		auto holder = native_or_throw().get_object_holder();
 		return holder ? std::static_pointer_cast<T>(detail::native_cast_or_throw(
-			detail::checked_native_object(engine_, *holder, typeid(T)), engine_)) : nullptr;
+			detail::checked_native_object(owner_, *holder, typeid(T)), owner_)) : nullptr;
 	}
 
     inline bool has_cpp_object() const;
@@ -312,7 +299,8 @@ public:
     inline bool native_lookup_enabled() const;
 
 private:
-    std::string_view class_name_;   // the engine's interned text (empty for an instance built without an engine)
+    // The class name (the engine's interned text, empty for an instance built without an engine) and the engine are the
+    // holder's type_name_ and owner_
     // Tier-1 flat fields: slot-indexed per class_definition's append-only registry.
     // unique_ptr pointees NEVER move (vector growth relocates the pointers only), so
     // cached field addresses — suspended coroutines' env chains, this-capturing
@@ -450,7 +438,6 @@ private:
     inline script_value& materialize_field(uint64_t id, script_value&& v);
     inline void rehome_overflow_fields();
     class_definition* class_def_ = nullptr;
-    engine* engine_ = nullptr;
     bool script_layer_retired_ = false;
     bool seeded_from_plan_ = false;   // create_instance landed every default through the class plan
     bool construction_pending_ = false;
@@ -474,7 +461,6 @@ private:
     // and unlinking touch the instance and its two neighbours, under the region lock while a region runs
     class_instance* registry_prev_ = nullptr;
     class_instance* registry_next_ = nullptr;
-    std::byte* embedded_holder_ = nullptr;
     friend class class_definition;
 
     inline static std::shared_ptr<void> extract_cpp_object_impl(const script_value& val);

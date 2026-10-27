@@ -4545,7 +4545,7 @@ script_value* parallel_script_field(class_instance& inst, uint64_t member_id) {
 
 // === Shared objects: what a worker reaches through a host call is read through a borrow, never through its handle ===
 
-script_value parallel_object_borrow(const class_instance& source, type_info_ptr tag, engine& eng, const void* identity) {
+script_value parallel_object_borrow(const class_instance& source, type_info_ptr tag, engine& eng) {
 	parallel_engine_state& state = eng.parallel_state();
 	if (source.region_tag() != 0 && source.region_tag() == eng.parallel_region_serial()) {
 		throw runtime_error("a host call in a parallel body returned an object one of its iterations owns (an element, or an object a chunk made)");
@@ -4553,16 +4553,11 @@ script_value parallel_object_borrow(const class_instance& source, type_info_ptr 
 	const parallel_region_table::entry* entry = state.active_region ? state.active_region->find_entry(std::this_thread::get_id()) : nullptr;
 	if (!entry || !entry->borrows) { throw runtime_error("a shared object was reached outside a parallel chunk"); }
 	object_borrows& borrows = *entry->borrows;
-	if (identity) {
-		if (auto known = borrows.by_holder.find(identity); known != borrows.by_holder.end()) {
-			return script_value::make_object_borrow(known->second, std::move(tag), &eng);
-		}
-	}
-	auto fresh = std::make_unique<object_borrow_record>();
-	fresh->source = &source;
-	fresh->eng = &eng;
-	auto [view, made] = borrows.views.try_emplace(&source, std::monostate{}, &eng);
-	if (made) {
+	auto [known, fresh] = borrows.by_source.try_emplace(&source, nullptr);
+	if (fresh) {
+		auto record = std::make_unique<object_borrow_record>();
+		record->source = &source;
+		record->eng = &eng;
 		class_definition* cd = source.get_class_definition();
 		const script_value* native = source.native();
 		const auto* native_holder = native ? native->peek_object_holder() : nullptr;
@@ -4573,20 +4568,18 @@ script_value parallel_object_borrow(const class_instance& source, type_info_ptr 
 			instance->set_native_view(native_holder->holds_object()
 				? script_value::make_cpp_object(native_holder->type_name(), native_holder->type_id(), native_holder->host_object(), &eng)
 				: script_value::make_cpp_reference(native_holder->type_name(), native_holder->type_id(), native_holder->bound_object(), native_holder->lock_weak_data(), &eng));
-			view->second = script_value::make_class_object(*cd, std::move(instance), &eng);
+			record->view = script_value::make_class_object(*cd, std::move(instance), &eng);
 		}
+		known->second = record.get();
+		borrows.records.push_back(std::move(record));
 	}
-	fresh->view = view->second;
-	const object_borrow_record* record = fresh.get();
-	borrows.records.push_back(std::move(fresh));
-	if (identity) { borrows.by_holder.emplace(identity, record); }
-	return script_value::make_object_borrow(record, std::move(tag), &eng);
+	return script_value::make_object_borrow(known->second, std::move(tag), &eng);
 }
 
 script_value parallel_shared_object(const script_value& object, engine& eng) {
 	const auto* holder = object.peek_object_holder();
 	if (!holder) { return script_value(std::monostate{}, &eng); }
-	if (holder->is_instance()) { return parallel_object_borrow(*holder->unchecked_instance(), object.get_type_info(), eng, holder); }
+	if (holder->is_instance()) { return parallel_object_borrow(*holder->unchecked_instance(), object.get_type_info(), eng); }
 	if (holder->holds_object()) {
 		script_value view = script_value::make_cpp_object(holder->type_name(), holder->type_id(), holder->host_object(), &eng);
 		view.set_type_info(object.get_type_info());

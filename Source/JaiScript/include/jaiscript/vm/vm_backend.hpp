@@ -2502,6 +2502,11 @@ namespace jai::vm {
             if (!f.this_inst || f.this_gen != *layout_gen_ || f.this_inst->get_class_definition() != f.this_cd) { return nullptr; }
             return f.this_inst->field_slot_value(s - 1);
         }
+        // a member-class body's bare name past the members (chunk::this_global_uses) is the environment's while the frame's layout holds and
+        // the receiver carries no field of its own making
+        JAI_FORCEINLINE bool frame_globals_hold(const frame& f) const noexcept {
+            return f.this_inst && f.this_gen == *layout_gen_ && f.this_inst->get_class_definition() == f.this_cd && !f.this_inst->has_user_overflow_fields();
+        }
         static uint32_t this_field_slot_at(const frame& f) noexcept {
             const auto& t = f.code->this_field_slots;
             return f.ip < t.size() ? t[f.ip] : 0;
@@ -2851,6 +2856,8 @@ namespace jai::vm {
         // '=' whose store the slot's held object decides (detail::slot_value_assign): true = stored, its result pushed or the error raised
         bool held_object_store(script_value& storage, script_value& value, bool result_used, op_status& status, bool declared_var = false);
         bool store_this_field_scalar(frame& f, const vm_instruction& ins, script_value& value);
+        bool store_this_field_handle(frame& f, const vm_instruction& ins, script_value& value);
+        bool store_this_field_slot_scalar(frame& f, const vm_instruction& ins, script_value& value);
         op_status dyn_string_add(frame& f, const vm_instruction& ins, bool& landed);
         script_value* env_store_cell(frame& f, size_t cache_slot, uint64_t symbol_id);
         bool store_slot_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv);
@@ -3025,6 +3032,7 @@ namespace jai::vm {
         op_status exec_super(frame& f, const vm_instruction& ins);
         op_status exec_from_this(frame& f, const vm_instruction& ins);
         op_status exec_get_member(frame& f, const vm_instruction& ins);
+        op_status exec_get_member_this(frame& f, const vm_instruction& ins);
         op_status exec_get_static(frame& f, const vm_instruction& ins);
         op_status exec_set_member(frame& f, const vm_instruction& ins);
         op_status exec_set_static(frame& f, const vm_instruction& ins);

@@ -122,6 +122,10 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 				out << " node=" << ins.a;
 				if (ins.b != 0) { out << " base_slot=" << ins.b - 1; }
 				break;
+			case opcode::op_get_member_this:
+				out << " node=" << ins.a << " field_slot=" << (ins.c ? ins.c - 1 : 0);
+				if (ins.b < ch.symbols.size() && symbolizer) { out << " '" << symbolizer->get_string(ch.symbols[ins.b]) << "'"; }
+				break;
 			case opcode::op_get_member_path:
 				out << " node=" << ins.a << " path=" << ins.b;
 				if (ins.b < ch.member_path_protos.size()) {

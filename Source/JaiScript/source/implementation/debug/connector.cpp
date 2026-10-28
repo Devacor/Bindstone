@@ -449,12 +449,12 @@ struct debug_connector::impl {
     }
 
     void end() {
-        // Wake any parked script thread and disarm, so nothing stays blocked in the hook
-        // once the engine (and everything the hook touches) starts to die.
-        if (ctrl_ && session_active_) { ctrl_->set_enabled(false); session_active_ = false; }
         running_.store(false, std::memory_order_release);
         poke_wake();
         if (thread_.joinable()) thread_.join();
+        // Disarmed once the connector thread is gone (it owns session_active_ and could re-arm a session it was still dispatching);
+        // the disarm wakes a parked script thread, so nothing stays blocked in the hook once the engine starts to die
+        if (ctrl_ && session_active_) { ctrl_->set_enabled(false); session_active_ = false; }
         if (ctrl_) ctrl_->set_on_source_loaded(nullptr);
         started_ = false;
     }

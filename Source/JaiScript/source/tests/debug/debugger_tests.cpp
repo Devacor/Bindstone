@@ -13,6 +13,7 @@
 #include <optional>
 #include <filesystem>
 #include <fstream>
+#include <random>
 
 using namespace jai::foundry;
 
@@ -1133,6 +1134,55 @@ public:
             dbg.detach();                 // no resume() — detach must unblock it
             script.join();
             check_true(done.load());
+        });
+
+        test("a_detach_racing_a_stop_never_strands_the_script", [this]() {
+            // A session that ends while the script thread is between its stop test and its park must not leave it parked: the park
+            // used to clear the resume the detach had just requested
+            auto eng = jai::foundry::make_engine();
+            eng->execution_budget(0);
+            auto& dbg = eng->debugger();
+            std::atomic<size_t> stops{0};
+            dbg.set_on_stopped([&stops](const jai::debug::stop_info&) { ++stops; });
+            std::atomic<bool> finish{false};
+            eng->add_function("keep_going", [&finish]() { return !finish.load(); });
+            std::thread script([&] { eng->execute("while (keep_going()) { sleep(0.00001); }"); });
+            size_t stranded = 0;
+            std::mt19937 rng(7);
+            const auto give_up = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+            for (int round = 0; round < 200000 && std::chrono::steady_clock::now() < give_up; ++round) {
+                dbg.set_enabled(true);
+                dbg.request_pause();
+                const int spins = static_cast<int>(rng() % 200000);
+                for (volatile int spin = 0; spin < spins; ++spin) {}
+                dbg.set_enabled(false);
+                // stranded: paused for a whole second after the session ended (a park already under way when it ended shows
+                // briefly and is woken by the detach); settled: unpaused for a millisecond
+                using clock = std::chrono::steady_clock;
+                std::optional<clock::time_point> paused_since;
+                auto unpaused_since = clock::now();
+                for (;;) {
+                    const auto now = clock::now();
+                    if (dbg.is_paused()) {
+                        if (!paused_since) { paused_since = now; }
+                        if (now - *paused_since > std::chrono::seconds(1)) {
+                            ++stranded;
+                            dbg.resume();
+                            break;
+                        }
+                    } else {
+                        if (paused_since) { paused_since.reset(); unpaused_since = now; }
+                        if (now - unpaused_since > std::chrono::milliseconds(1)) { break; }
+                    }
+                    std::this_thread::yield();
+                }
+            }
+            finish = true;
+            dbg.set_enabled(false);
+            dbg.detach();
+            script.join();
+            check_eq(size_t(0), stranded, "a parked thread outlived the session that stopped it");
+            check_true(stops.load() > 100, "the script stopped " + std::to_string(stops.load()) + " times");
         });
 
         // ---- cost-model benchmarks (verbose runs only; non-asserting) ----

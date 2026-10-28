@@ -157,7 +157,7 @@ public:
 
 private:
     void raise_sync();
-    void park(const stop_info& si);
+    void park(const stop_info& si, uint64_t detaches_at_entry);
     bool should_stop(const ast_node* node, int depth, std::string& reason_out) const;
     bool breakpoint_hit(const std::string& file, int line) const;
     void publish_breakpoints(const std::string& file, std::vector<int> lines, bool source_path);
@@ -210,6 +210,7 @@ private:
     mutable std::mutex mtx_;
     std::condition_variable cv_;
     bool resume_requested_ = false;
+    std::atomic<uint64_t> detaches_{0};   // raised under mtx_: a stop taken before a detach never parks after it
     std::deque<std::function<void()>> commands_;
     bool in_command_ = false;   // reentrancy guard (touched only on the parked thread)
 

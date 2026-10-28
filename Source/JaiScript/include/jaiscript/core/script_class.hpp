@@ -151,6 +151,15 @@ public:
         return constructor_asts_;
     }
 
+    // The class declares the constructor now: one of its overloads or its implicit default (a reload replaces both)
+    bool declares_constructor(const function_decl* ctor) const noexcept {
+        if (ctor == implicit_default_ctor_.get()) { return true; }
+        for (const auto& declared : constructor_asts_) {
+            if (declared.get() == ctor) { return true; }
+        }
+        return false;
+    }
+
     // The constructor overloads declared under private: (or protected:), set with the class's access labels
     void set_private_constructors(std::vector<const function_decl*> ctors) { private_ctors_ = std::move(ctors); }
     bool constructor_is_private(const function_decl* ctor) const noexcept {

@@ -41,6 +41,22 @@ namespace jai::vm {
         void math_aliases(const engine* e) { engine_ = e; }
         // the declaring class of the next method body compile_callable compiles (null: not a method body)
         void member_class(const class_definition* cls) { member_class_ = cls; }
+        // A constructor's prologue (C++ [class.base.init]), compiled ahead of its body in the constructor's own frame: a delegation's
+        // target, else each base in declaration order, then the level's own field initializers; its expressions read the
+        // constructor's parameters by name (name_slots)
+        struct constructor_prologue {
+            const class_definition* level = nullptr;
+            const constructor_initializer* delegation = nullptr;
+            std::vector<chunk::ctor_step> steps;                        // one per base in declaration order (or the delegation's level)
+            std::vector<const constructor_initializer*> initializers;   // each step's initializer (null: default-constructed)
+            std::vector<std::pair<uint64_t, expression_ptr>> fields;    // the level's own field initializers, evaluated
+            bool literal_fields = false;                                // the level's chain is literal: op_ctor_literals stamps them instead
+            std::unordered_map<uint64_t, uint32_t> name_slots;
+            std::shared_ptr<ast_node> origin;                           // the constructor: where a step without arguments stands
+            bool evaluates = false;                                     // detail::prologue_evaluates
+        };
+        // the prologue the next compile_callable compiles ahead of its body (null: none)
+        void constructor_prologue_for(const constructor_prologue* prologue) { prologue_ = prologue; }
 
         // program_frame: the chunk runs in a program frame with a window (vm_backend::run_program), so its block-scoped declarations take slots
         std::shared_ptr<chunk> compile_program(const std::vector<declaration_ptr>& declarations, bool program_frame = false);
@@ -52,17 +68,11 @@ namespace jai::vm {
         std::shared_ptr<chunk> compile_standalone_expression(const expression_ptr& expr);
         std::shared_ptr<chunk> compile_standalone_declaration(const declaration_ptr& decl);
     private:
-        const std::unordered_map<uint64_t, uint32_t>* name_slots_ = nullptr;   // compile_construction's parameter names
+        const std::unordered_map<uint64_t, uint32_t>* name_slots_ = nullptr;   // a constructor prologue's parameter names
     public:
-        // A constructor level's construction chunk: one segment per initializer-list argument, then one for the level's field
-        // initializers (each value stored into this's field), run in one frame whose slots hold the constructor's parameters by
-        // name (name_slots: an identifier naming one reads its slot, as the level environment's binding shadowed it)
-        struct construction_fields {
-            const class_definition* level;
-            std::vector<std::pair<uint64_t, expression_ptr>> initializers;
-        };
-        std::shared_ptr<chunk> compile_construction(std::string_view name, const std::unordered_map<uint64_t, uint32_t>& name_slots, size_t slot_count,
-                                                    const std::vector<expression_ptr>& arguments, const std::vector<construction_fields>& fields);
+        // A class level's field initializers outside a constructor (an aggregate's, a reload's): one body over the initializer
+        // environment, each value stored into this's field
+        std::shared_ptr<chunk> compile_level_initializers(std::string_view name, const std::vector<std::pair<uint64_t, expression_ptr>>& initializers);
 
     private:
         enum class region_kind : uint8_t {
@@ -113,6 +123,8 @@ namespace jai::vm {
         const builtin_method_registries* builtins_ = nullptr;   // compile-time bi_* fill
         const engine* engine_ = nullptr;
         const class_definition* member_class_ = nullptr;
+        const constructor_prologue* prologue_ = nullptr;
+        void compile_constructor_prologue(const constructor_prologue& prologue);
         uint32_t this_field_slot_of(const identifier_expr* ident);
         bool this_global_of(const identifier_expr* ident);
         void note_this_field(size_t ip, const identifier_expr* ident);

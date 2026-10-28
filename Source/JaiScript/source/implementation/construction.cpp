@@ -31,16 +31,10 @@ void stamp_literal_field_initializers(class_instance& instance, const script_cla
 }
 
 void construction_host::open_scope(construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
-                                   script_class_definition* level, const function_decl* ctor, const std::vector<script_value>* args, bool bind_for_parameters) {
+                                   script_class_definition* level) {
 	scope.env = std::make_shared<environment>(definition_env, env_symbols);
 	scope.env->define(symbols->get_this_id(), this_value);
 	scope.env->set_access_context(level);
-	if (!ctor || !args) { return; }
-	for (size_t i = 0; i < ctor->parameters.size() && i < args->size(); ++i) {
-		const parameter& param = ctor->parameters[i];
-		if (param.symbol_id == UINT64_MAX) { param.symbol_id = symbols->intern(param.name); }
-		scope.env->define(param.symbol_id, bind_for_parameters ? argument_for_binding((*args)[i], parameter_binding(param)) : (*args)[i]);
-	}
 }
 
 checked_result<void> bind_placeless_reference_argument(engine* eng, const function_decl& ctor, size_t i, script_value& arg, bool may_prove) {
@@ -52,15 +46,6 @@ checked_result<void> bind_placeless_reference_argument(engine* eng, const functi
 		return {};
 	}
 	return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Cannot pass non-lvalue to reference parameter");
-}
-
-void construction_host::read_back_parameters(construction_scope& scope, const function_decl* ctor, std::vector<script_value>& args) {
-	if (!ctor || !scope.env) { return; }
-	for (size_t i = 0; i < ctor->parameters.size() && i < args.size(); ++i) {
-		const parameter& param = ctor->parameters[i];
-		if (param.is_reference) { continue; }
-		if (const script_value* bound = scope.env->get_own_value_ptr(param.symbol_id)) { args[i] = bound->deref(); }
-	}
 }
 
 JAI_NOINLINE std::optional<error_propagator> refuse_cdtor_call(class_instance* instance, uint64_t name_id) {

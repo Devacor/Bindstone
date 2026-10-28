@@ -12224,7 +12224,12 @@ checked_result<void> interpreter::evaluate_field_initializers(strong_ptr<class_i
     }
 
     detail::dispatch_level_scope level_dispatch(*instance, class_def.get(), class_instance::cdtor_phase::construction);   // KEEP BYTE-PARALLEL with the vm
+    // in a constructor's activation its frame is at the initializer; outside one (an aggregate, a reload) the class is a frame of its own
+    const bool in_activation = prologue_frame_ != SIZE_MAX && prologue_frame_ + 1 == call_stack_.size();
+    std::optional<construction_trace_scope> level_trace;
+    if (!in_activation) { level_trace.emplace(this, class_def->get_name(), nullptr); }
     auto initialize_field = [&](uint64_t field_id, const expression_ptr& initializer_ast) -> checked_result<void> {
+        if (in_activation) { call_stack_.back().current_node = initializer_ast.get(); } else { construction_traces_.back().node = initializer_ast.get(); }
         auto result = dispatch_expr(initializer_ast.get());
         if (!result) { return result.error_value(); }   // KEEP BYTE-PARALLEL with the vm: the initializer's own error
         script_value field_value = initializer_store_value(pop_value(), initializer_ast.get());
@@ -12274,22 +12279,60 @@ struct interpreter::construction_lender final : detail::construction_host {
     }
     ~construction_lender() { self.environment_ = std::move(entry_env); }
 
-    checked_result<script_value> evaluate(const expression_ptr& expr, const std::shared_ptr<environment>& env) override {
+    void at(const ast_node* node) {
+        if (self.prologue_frame_ != SIZE_MAX && self.prologue_frame_ + 1 == self.call_stack_.size()) { self.call_stack_.back().current_node = node; }
+    }
+
+    // an initializer-list argument, in the activation's scope and at its frame's place
+    checked_result<script_value> evaluate_in(detail::construction_scope& scope, const expression_ptr& expr) {
         struct env_restore {
             interpreter& self;
             std::shared_ptr<environment> previous;
             ~env_restore() { self.environment_ = std::move(previous); }
         } restore{self, self.environment_};
-        self.environment_ = env;
+        self.environment_ = scope.env;
+        if (!self.call_stack_.empty()) { self.call_stack_.back().current_node = expr.get(); }
         auto result = self.dispatch_expr(expr.get());
         if (!result) { return result.error_value(); }
         return self.pop_value();
     }
 
-    checked_result<script_value> run_constructor_body(const std::shared_ptr<function_decl>& ctor, const std::shared_ptr<environment>& definition_env,
-                                                      const script_value& this_value, class_definition* access, const std::vector<script_value>& args) override {
-        scoped_method_environment method_env(&self, definition_env, this_value, access);
-        return self.execute_method_ast(ctor, method_env.get(), args);
+    // A constructor's activation: the call binds its parameters, then runs `prologue` in its frame (the parameters' names cells over
+    // its slots), then its body
+    template <class Prologue>
+    checked_result<void> run_constructor(const std::shared_ptr<script_class_definition>& level, const std::shared_ptr<function_decl>& ctor,
+                                         const std::vector<script_value>& args, const std::shared_ptr<environment>& definition_env,
+                                         const script_value& this_value, Prologue&& prologue) {
+        interpreter::constructor_prologue_hook hook;
+        hook.frame = self.call_stack_.size();
+        hook.body = ctor->body.get();
+        hook.definition_env = &definition_env;
+        hook.this_value = &this_value;
+        hook.level = level.get();
+        hook.ctor = ctor.get();
+        hook.context = &prologue;
+        hook.run = &run_prologue<std::remove_reference_t<Prologue>>;
+        struct pending_restore {
+            interpreter& self;
+            interpreter::constructor_prologue_hook* saved;
+            ~pending_restore() { self.pending_prologue_ = saved; }
+        } restore{self, self.pending_prologue_};
+        self.pending_prologue_ = &hook;
+        // the method door a call takes: `this` in the frame, the method scope over the definition environment
+        script_defined_function body(ctor->name, shared_parameters_for(ctor.get()), ctor->return_type, ctor->body, nullptr, ctor->local_count);
+        body.unit = ctor->unit;
+        method_call_override method{&definition_env, &this_value, level.get()};
+        auto ran = self.call_function(body, args, &method);
+        if (!ran) { return ran.error_value(); }
+        return {};
+    }
+    template <class Prologue>
+    static checked_result<void> run_prologue(void* context, detail::construction_scope& scope) { return (*static_cast<Prologue*>(context))(scope); }
+
+    checked_result<void> construct_implicitly(const std::shared_ptr<script_class_definition>& cls, const std::shared_ptr<environment>& definition_env,
+                                              const script_value& this_value) override {
+        static const std::vector<script_value> no_arguments;
+        return detail::construct_instance_members(*this, cls, definition_env, this_value, cls->implicit_default_constructor(), no_arguments);
     }
 
     checked_result<void> evaluate_field_initializers(const strong_ptr<class_instance>& instance, const std::shared_ptr<script_class_definition>& cls,
@@ -12321,7 +12364,7 @@ struct interpreter::construction_lender final : detail::construction_host {
         }
         return {};
     }
-    checked_result<bool> initializer_place(detail::construction_scope& scope, const expression* argument, script_value& out) override {
+    checked_result<bool> initializer_place(detail::construction_scope& scope, const expression* argument, script_value& out) {
         if (!scope.env || !argument) { return false; }
         if (argument->get_type() == node_type::identifier_expr) {
             const auto* name = static_cast<const identifier_expr*>(argument);
@@ -12428,18 +12471,15 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                                                               std::shared_ptr<environment> definition_env,
                                                               const std::vector<script_value>& args, bool check_access) {
     construction_lender host(*this, &args);
-    // the initializers run before call_function owns the constructor's activation: the depth is handed back before each body
-    // call rather than counted twice
-    std::optional<detail::call_depth_guard> initializer_depth;
+    std::optional<detail::call_depth_guard> initializer_depth;   // the pick's, until the constructor's activation counts its own
     std::shared_ptr<function_decl> matching_ctor;
     std::vector<script_value> captured;
-    auto pre = detail::begin_construction(host, class_def, definition_env, args, initializer_depth, matching_ctor, captured, check_access);
+    auto pre = detail::prepare_construction(host, class_def, args, initializer_depth, matching_ctor, captured, check_access);
     if (!pre || is_unwinding_) { return pre; }
     script_value this_value = std::move(pre.value());
-    scoped_method_environment method_env(this, definition_env, this_value, class_def.get());
     initializer_depth.reset();
-    auto result = execute_method_ast(matching_ctor, method_env.get(), captured.empty() ? args : captured);
-    if (!result) { return result; }
+    auto constructed = detail::construct_instance_members(host, class_def, definition_env, this_value, matching_ctor, captured.empty() ? args : captured);
+    if (!constructed) { return constructed.error_value(); }
     if (!is_unwinding_) { detail::construction_completed(this_value); }
     return this_value;   // a constructor call yields its instance (a bare `return;` ends the body early)
 }
@@ -12736,6 +12776,31 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
         make_error_code(runtime_error_code::invalid_reference),
         "Cannot pass non-lvalue to reference parameter"
     );
+}
+
+// The prologue's scope: `this`, the class as the access context, and each parameter's name a cell over its slot, so what the
+// prologue stores to a parameter the body reads
+checked_result<void> interpreter::run_constructor_prologue(constructor_prologue_hook& hook, size_t frame_index, const script_defined_function& function) {
+    detail::construction_scope scope;
+    if (detail::prologue_evaluates(static_cast<const script_class_definition&>(*hook.level), *hook.ctor)) {
+        scope.env = std::make_shared<environment>(*hook.definition_env, env_symbolizer_);
+        scope.env->define(string_symbolizer_->get_this_id(), *hook.this_value);
+        scope.env->set_access_context(hook.level);
+        for (const auto& param : function.parameters()) {
+            if (param.slot_index == SIZE_MAX) { continue; }
+            if (script_value* slot = call_stack_[frame_index].get_local(param.slot_index)) {
+                if (param.symbol_id == UINT64_MAX) { param.symbol_id = string_symbolizer_->intern(param.name); }
+                scope.env->define(param.symbol_id, share_boxed_slot(*slot));
+            }
+        }
+    }
+    struct frame_restore {
+        size_t& at;
+        size_t saved;
+        ~frame_restore() { at = saved; }
+    } restore{prologue_frame_, prologue_frame_};
+    prologue_frame_ = frame_index;
+    return hook.run(hook.context, scope);
 }
 
 // A stamped lvalue argument's place, resolved where the argument is evaluated (detail::capture_call_argument)
@@ -13353,11 +13418,24 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         }
     }
 
+    // a constructor's activation runs its prologue (bases, then fields) in this frame, the parameters bound, ahead of its body
+    bool run_body = true;
+    if (pending_prologue_ && pending_prologue_->frame == frame_index && pending_prologue_->body == function.body.get()) [[unlikely]] {
+        constructor_prologue_hook* hook = std::exchange(pending_prologue_, nullptr);
+        auto ran = run_constructor_prologue(*hook, frame_index, function);
+        if (!ran) {
+            if (!trace_captured_) capture_stack_trace();
+            cleanup();
+            return ran.error_value();
+        }
+        run_body = !is_unwinding_;
+    }
+
     // Execute function body without creating another environment
     // (since we already created one for the function call)
     // Track which declaration index we're at (needed for coroutine yield)
     const size_t body_stack_mark = valueStack_.size();
-    for (size_t body_idx = 0; body_idx < function.body->declarations.size(); ++body_idx) {
+    for (size_t body_idx = 0; run_body && body_idx < function.body->declarations.size(); ++body_idx) {
         last_body_idx = body_idx;
         const auto& decl = function.body->declarations[body_idx];
         auto result = dispatch_decl(decl.get());
@@ -14005,6 +14083,9 @@ struct interpreter::interpreter_run_state : backend_run_state {
     unit_stamp run_unit{};
     size_t structural_equality_depth = 0;
     const expression* compound_map_target = nullptr;
+    std::vector<construction_trace_frame> construction_traces;
+    constructor_prologue_hook* pending_prologue = nullptr;
+    size_t prologue_frame = SIZE_MAX;
 };
 
 std::unique_ptr<backend_run_state> interpreter::make_run_state() {
@@ -14062,6 +14143,9 @@ void interpreter::swap_run_state(backend_run_state& a_state) noexcept {
     swap(run_unit_, s.run_unit);
     swap(structural_equality_depth_, s.structural_equality_depth);
     swap(compound_map_target_, s.compound_map_target);
+    swap(construction_traces_, s.construction_traces);
+    swap(pending_prologue_, s.pending_prologue);
+    swap(prologue_frame_, s.prologue_frame);
     sync_unit();
 }
 
@@ -14107,6 +14191,9 @@ void interpreter::reset_run_state(backend_run_state& a_state) {
     s.run_unit = {};
     s.structural_equality_depth = 0;
     s.compound_map_target = nullptr;
+    s.construction_traces.clear();
+    s.pending_prologue = nullptr;
+    s.prologue_frame = SIZE_MAX;
 }
 
 void interpreter::adopt_run_trace(backend_run_state& a_state) {
@@ -14350,14 +14437,23 @@ checked_result<void> interpreter::dispatch_expr(expression* expr) {
 
 void interpreter::capture_stack_trace() {
     captured_trace_.clear();
-    for (auto it = call_stack_.rbegin(); it != call_stack_.rend(); ++it) {
+    size_t constructions = construction_traces_.size();
+    auto levels_from = [&](size_t floor) {   // the construction levels evaluating with at least `floor` frames below them
+        while (constructions > 0 && construction_traces_[constructions - 1].depth >= floor) {
+            const construction_trace_frame& level = construction_traces_[--constructions];
+            captured_trace_.push_back(trace_frame_at(std::string(level.level), level.node ? &level.node->location : nullptr));
+        }
+    };
+    for (size_t i = call_stack_.size(); i-- > 0;) {
+        levels_from(i + 1);
         if (captured_trace_.size() >= k_stack_trace_frames) {
-            cap_stack_trace(captured_trace_, static_cast<size_t>(call_stack_.rend() - it) + 1);
+            cap_stack_trace(captured_trace_, i + constructions + 2);
             trace_captured_ = true;
             return;
         }
-        captured_trace_.push_back(call_frame_trace(*it));
+        captured_trace_.push_back(call_frame_trace(call_stack_[i]));
     }
+    levels_from(0);
     captured_trace_.push_back(trace_frame_at("<script>", top_level_node_ ? &top_level_node_->location : nullptr));
     cap_stack_trace(captured_trace_);
     trace_captured_ = true;

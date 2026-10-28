@@ -489,9 +489,19 @@ namespace jai::vm {
         std::deque<std::string> messages;                  // stable storage: checked_result keeps string_views
         std::vector<std::shared_ptr<ast_node>> nodes;      // pins referenced AST nodes alive
         std::vector<std::pair<uint64_t, const expression*>> field_inits;   // a field-init store's field and initializer (pinned in nodes)
-        // A construction chunk's segments (vm_compiler::compile_construction): each initializer-list argument by its expression, each
-        // class's field initializers by its class_definition; a segment runs from its ip to its op_halt in the level's construction frame
-        std::vector<std::pair<const void*, uint32_t>> construction_segments;
+        // A constructor's prologue steps (vm_compiler::constructor_prologue): what each op_ctor_* constructs. The chunk is rebuilt
+        // when a class is (re)defined, so the classes and declarations it names hold while it runs
+        struct ctor_step {
+            const class_definition* level = nullptr;    // the constructor's class
+            const class_definition* target = nullptr;   // the base (op_ctor_base), the level (op_ctor_delegate, op_ctor_literals)
+            uint32_t index = 0;                         // the base's place among the level's bases
+            bool named = false;                         // an initializer names it
+            bool super_without_base = false;            // super(...) in a class with no base
+            std::vector<std::shared_ptr<function_decl>> targets;   // op_ctor_delegate: the level's other constructors
+            std::shared_ptr<class_definition> level_ref;            // op_ctor_delegate: the level, for its frame
+        };
+        std::vector<ctor_step> ctor_steps;
+        bool level_initializers = false;   // vm_compiler::compile_level_initializers' body: a throwing field store is rethrown natively
         std::vector<std::unique_ptr<type_info>> owned_types;   // the inliner's spill temps' primitive types (the compiler has no engine to intern one)
         // Per ip (lazily sized, never longer than code): nodes index of the env-resolved
         // identifier_expr behind an op_load / op_store / op_binary_fused_store /

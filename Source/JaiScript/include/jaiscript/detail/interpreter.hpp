@@ -43,7 +43,7 @@ namespace jai {
     class script_class_definition;
     class class_definition;
     class class_instance;
-    namespace detail { struct namespace_store_target; struct aggregate_plan; }
+    namespace detail { struct namespace_store_target; struct aggregate_plan; struct construction_scope; }
     namespace debug { class controller; }
 
     // Forward declare interpreter for scoped_method_environment
@@ -577,7 +577,7 @@ namespace jai {
         static script_value create_bound_method(const script_value& this_obj, const script_value& method);
 
     private:
-        // Script-class construction through detail::begin_construction, then the constructor body
+        // Script-class construction: detail::prepare_construction, then the constructor's activation (its prologue, then its body)
         checked_result<script_value> construct_instance(std::shared_ptr<script_class_definition> class_def,
                                                         std::shared_ptr<environment> definition_env,
                                                         const std::vector<script_value>& args, bool check_access = true);
@@ -778,6 +778,38 @@ namespace jai {
         const ast_node* top_level_node_ = nullptr;
         void capture_stack_trace();
         static stack_frame call_frame_trace(const call_frame& frame);
+        // A construction level's initializer-list argument or field initializer under evaluation: a frame of the trace named for
+        // its class, above the `depth` call frames below it (the vm runs that code in the level's own frame)
+        struct construction_trace_frame {
+            std::string_view level;
+            const ast_node* node;
+            size_t depth;
+        };
+        std::vector<construction_trace_frame> construction_traces_;
+        // A constructor's activation (construction_lender::run_constructor): its prologue runs in the frame the call pushes at `frame`
+        // for `body`, once the parameters are bound
+        struct constructor_prologue_hook {
+            size_t frame = SIZE_MAX;
+            const block_stmt* body = nullptr;
+            const std::shared_ptr<environment>* definition_env = nullptr;
+            const script_value* this_value = nullptr;
+            class_definition* level = nullptr;
+            const function_decl* ctor = nullptr;
+            void* context = nullptr;
+            checked_result<void> (*run)(void* context, detail::construction_scope& scope) = nullptr;
+        };
+        constructor_prologue_hook* pending_prologue_ = nullptr;
+        size_t prologue_frame_ = SIZE_MAX;   // the frame running a constructor's prologue
+        checked_result<void> run_constructor_prologue(constructor_prologue_hook& hook, size_t frame_index, const script_defined_function& function);
+        struct construction_trace_scope {
+            interpreter* self;
+            construction_trace_scope(interpreter* a_self, std::string_view a_level, const ast_node* a_node) : self(a_self) {
+                self->construction_traces_.push_back({a_level, a_node, self->call_stack_.size()});
+            }
+            ~construction_trace_scope() { self->construction_traces_.pop_back(); }
+            construction_trace_scope(const construction_trace_scope&) = delete;
+            construction_trace_scope& operator=(const construction_trace_scope&) = delete;
+        };
 
         std::optional<error_propagator> run_error_;   // the runtime error that ended this run's top level
         detail::nested_failure nested_failure_;

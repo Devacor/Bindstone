@@ -306,18 +306,12 @@ namespace jai::detail {
         return {};
     }
 
-    // an initializer list's argument binds only when its constructor's body runs, after the chain's field initializers: when
-    // those may run code, every read of storage is taken, else the stamp's
+    // an initializer list's argument, as a call's: its value taken now when a later argument may write what it read (the stamp)
     template<typename Binding>
-    inline void capture_initializer_argument(engine* eng, const constructor_initializer& ci, size_t i, bool fields_run_code, script_value& v, Binding&& binding) {
-        const uint8_t kind = fields_run_code ? transient_read_marker::arg_capture_kind(ci.arguments[i].get()) : i < ci.arg_captures.size() ? ci.arg_captures[i] & transient_read_marker::arg_capture_kind_mask : 0;
+    inline void capture_initializer_argument(engine* eng, const constructor_initializer& ci, size_t i, script_value& v, Binding&& binding) {
+        const uint8_t kind = i < ci.arg_captures.size() ? ci.arg_captures[i] & transient_read_marker::arg_capture_kind_mask : 0;
         if (kind == 0 || !capture_candidate(v, kind)) return;
         capture_argument(eng, v, kind, binding());
-    }
-
-    // the construction runs code ahead of the body (an initializer list, a non-literal field initializer)
-    inline bool construction_runs_code(const script_class_definition& cls, const function_decl& ctor) {
-        return !ctor.initializers.empty() || !cls.chain_initializers_all_literal() || cls.base_needs_construction();
     }
 
     // a parameter's conversion that may run user code (a converting constructor, an object's to_int/to_float, a class element

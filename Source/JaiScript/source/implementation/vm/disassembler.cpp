@@ -153,6 +153,14 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			case opcode::op_field_init:
 				out << " field_init=" << ins.a;
 				break;
+			case opcode::op_ctor_base:
+			case opcode::op_ctor_delegate:
+				out << " step=" << ins.a << " argc=" << ins.b;
+				break;
+			case opcode::op_ctor_done:
+			case opcode::op_ctor_literals:
+				out << " step=" << ins.a;
+				break;
 			case opcode::op_null_guard:
 				out << " -> " << ins.a;
 				break;

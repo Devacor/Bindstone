@@ -42,7 +42,7 @@ public:
 
     void forge_tests() override {
 		test("reloaded_code_is_freed_once_nothing_runs_it", [this]() {
-			// a file reloaded 200 times: each version's functions, methods and lambdas die once nothing runs them (recursion and mutual
+			// a file reloaded 200 times: each version's functions, methods, constructors and lambdas die once nothing runs them (recursion and mutual
 			// calls included), memory stays flat, and a coroutine suspended in the first version keeps running its own body
 			for (auto backend : {jai::backend_type::interpreter, jai::backend_type::vm}) {
 				const std::string label = backend == jai::backend_type::vm ? "vm" : "interpreter";
@@ -57,12 +57,13 @@ public:
 					const std::string k = std::to_string(round);
 					return "int ROUND = " + k + ";\n"
 					       "class Node { int depth = 0; Node(int d) { depth = d; } int sum(int n) { if (n <= 0) { return depth; } return sum(n - 1) + 1; } int other(int n) { return n > 0 ? twice(n - 1) : " + k + "; } int twice(int n) { return other(n) * 2; } }\n"
+					       "class Root { int r = 1; Root() { r += " + k + "; } } class Leaf : Root { int l = r + 1; Leaf() { l += 1; } Leaf(int v) : this() { l += v; } }\n"
 					       "int fact(int n) { return n <= 1 ? 1 : n * fact(n - 1); }\n"
 					       "int ping(int n) { return n <= 0 ? " + k + " : pong(n - 1); }\n"
 					       "int pong(int n) { return ping(n); }\n"
 					       "auto adder = [](int a) { return a + " + k + "; };\n"
 					       "coroutine int counter() { int i = " + k + " * 1000; while (true) { yield i; i += 1; } return 0; }\n"
-					       "int drive() { Node t = Node(" + k + "); int s = 0; for (int i = 0; i < 20; i++) { s += t.sum(3) + t.other(2) + fact(5) + ping(4) + adder(i); } return s; }\n"
+					       "int drive() { Node t = Node(" + k + "); int s = 0; for (int i = 0; i < 20; i++) { s += Leaf(i).l + t.sum(3) + t.other(2) + fact(5) + ping(4) + adder(i); } return s; }\n"
 					       + std::string(round == 0 ? "var KEPT = counter(); KEPT.next();\n" : "")
 					       + "drive();\n";
 				};

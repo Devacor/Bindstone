@@ -562,6 +562,7 @@ inline const std::shared_ptr<function_decl>* class_definition::resolve_method_ov
             }
         }
         if (arity_match_count == 1 && may_cache) {
+            assert(!(engine_ && engine_->parallel_region_active()) && "a parallel worker writes the class's shared overload cache");
             overload_cache_key cache_key{name_id, argc};
             return &overload_resolution_cache_.insert_or_assign(cache_key, *best_ast).first->second;
         }

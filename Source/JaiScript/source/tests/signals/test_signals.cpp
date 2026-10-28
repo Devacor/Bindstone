@@ -1066,6 +1066,24 @@ public:
 
         // A host may destroy the engine before the emitters its script connected to: script receivers are skipped from then
         // on, host receivers keep firing, and releasing the receivers afterwards runs no script
+        test("a_function_receiver_keeps_its_engine_when_the_emitter_rearms_another", [this]() {
+            // Re-arming an emitter for another engine (a text connect, an archive load) rebinds its text receivers; a function
+            // receiver stays with the engine its function belongs to, the one its lifetime token names, so its quiet test never
+            // reads the other engine, which may be loading, on another thread or destroyed
+            int noted = 0;
+            jai::signal_emitter<void(int)> emitter;
+            auto owner = jai::foundry::make_engine();
+            owner->add_function("note", [&noted](int v) { noted += v; });
+            auto fn_receiver = emitter.connect("fn", owner->execute("[](int v) { note(v); };"));
+            {
+                auto other = jai::foundry::make_engine();
+                emitter.script_engine(other.get());
+                check_true(fn_receiver->script_engine() == owner.get(), "the function receiver keeps its own engine");
+            }
+            emitter.emit(5);
+            check_eq(5, noted, "the receiver runs on its own engine after the other engine is gone");
+        });
+
         test("script_receivers_skip_once_their_engine_is_destroyed", [this]() {
             int noted = 0;
             int host = 0;

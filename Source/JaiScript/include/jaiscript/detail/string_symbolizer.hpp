@@ -131,12 +131,12 @@ namespace jai {
 		// define, or a parent change bumps it, invalidating the vm's per-instruction
 		// env-lookup caches (keyed on {environment*, epoch}).
 		[[nodiscard]] inline std::uint64_t env_epoch() const noexcept { return env_epoch_; }
-		inline void bump_env_epoch() noexcept { ++env_epoch_; }
+		inline void bump_env_epoch() noexcept { assert(!frozen_ && "a parallel worker bumps the engine's env epoch (use its own sink)"); ++env_epoch_; }
 		// Monotonic per-engine serial source for environment generation stamps
 		// (environment::local_epoch): never repeats within an engine, so a cache entry
 		// keyed {env address, serial} cannot false-hit across env lifetimes even when
 		// the allocator recycles the address. Starts past 0 (0 = never-cacheable).
-		[[nodiscard]] inline std::uint64_t next_env_serial() noexcept { return ++env_epoch_; }
+		[[nodiscard]] inline std::uint64_t next_env_serial() noexcept { assert(!frozen_ && "a parallel worker takes the engine's env serial (use its own sink)"); return ++env_epoch_; }
 
 		// The unit whose code is running (0 = the host): a file by path or a literal by content,
 		// numbered by the engine at first execution. A program-scope variable redeclared by

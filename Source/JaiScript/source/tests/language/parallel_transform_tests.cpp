@@ -3171,6 +3171,36 @@ public:
 			}
 		});
 
+		test("constructions_with_field_initializers_on_workers_leave_the_engine_env_epoch_alone", [this]() {
+			// The engine's env epoch is not atomic: a worker's environments take their serials from its own sink (Debug asserts a
+			// frozen symbolizer's epoch never moves)
+			const std::string program = R"(
+				class Inner { int k = 2; }
+				class P { array<int> a = [1, 2]; int n = 3; Inner inner; string s = "x" + "y"; }
+				class Q : P { int m = n + 1; }
+				array<int> xs;
+				for (int i = 0; i < 2000; ++i) { xs.push(i); }
+				array<int> out;
+				for (int i = 0; i < 2000; ++i) { out.push(0); }
+				parallel_for (int x : xs) {
+					Q q;
+					out[x] = q.n + q.a.size() + q.inner.k + q.m + q.s.size() + x;
+				}
+				int total = 0;
+				for (int v : out) { total += v; }
+				total;
+			)";
+			for (bool vm : {false, true}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(*e);
+				e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				e->parallel_thread_count(8);
+				std::string got;
+				try { got = std::to_string(e->execute(program).as_int()); } catch (const std::exception& ex) { got = std::string("error ") + ex.what(); }
+				check_eq(std::to_string(2000 * (3 + 2 + 2 + 4 + 2) + 1999 * 2000 / 2), got, vm ? "vm" : "interp");
+			}
+		});
+
 		test("host_calls_with_reference_parameters_keep_their_temporaries_per_worker", [this]() {
 			// A bound call converts a const std::vector<int>& (or a const int&) argument into a temporary in the call's parameter
 			// storage; workers calling at once each keep their own (the engine-wide storage pointer was shared: one worker's

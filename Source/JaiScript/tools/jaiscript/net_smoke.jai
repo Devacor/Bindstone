@@ -69,7 +69,7 @@ function main() -> int {
 	// connecting to a dead port reports failure via signal or status
 	var lost = new NetChannel();
 	var LOSTMSG = "";
-	lost.on_disconnect.connect("down", [](var reason) { LOSTMSG = reason; });
+	lost.on_disconnect.connect("down", [&](var reason) { LOSTMSG = reason; });
 	lost.connect("127.0.0.1", 28667);
 	// windows loopback refusal takes ~2.1s of SYN retries before the stack gives up
 	for (int i = 0; i < 700 && LOSTMSG == "" && lost.status() == "connecting"; ++i) { lost.pump(); sleep(0.005); }

@@ -147,9 +147,14 @@ public:
 	const std::string& script() const { return script_callback_; }
 	bool has_script() const { return !script_callback_.empty(); }
 
+	// A script function receiver keeps the engine its function belongs to (its lifetime token names that engine)
 	void script_engine(engine* eng) {
-		script_engine_ = eng;
-		if (!script_callback_.empty()) { bind_engine(eng, eng ? engine_lifetime_token(eng) : std::weak_ptr<const void>()); }
+		if (!script_callback_.empty()) {
+			script_engine_ = eng;
+			bind_engine(eng, eng ? engine_lifetime_token(eng) : std::weak_ptr<const void>());
+		} else if (!engine_bound_) {
+			script_engine_ = eng;
+		}
 	}
 	// A script receiver (text, or a script function) runs only while its engine lives: after the engine is destroyed the
 	// receiver is skipped, and its payload is released without running script (internal/engine_lifetime.md)

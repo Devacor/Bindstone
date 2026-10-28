@@ -6191,12 +6191,26 @@ engine::import_behavior engine::get_import_behavior() const {
     return impl->import_behavior;
 }
 
-// Parameter storage for function calls (replaces thread_local)
+namespace {
+// while a region runs, each thread's bound calls nest on its own entry: workers call bound C++ at once
+JAI_NOINLINE detail::parameter_storage** region_parameter_storage_slot(detail::parallel_engine_state* state) noexcept {
+    const detail::parallel_region_table* region = state ? state->active_region : nullptr;
+    const auto* entry = region ? region->find_entry(std::this_thread::get_id()) : nullptr;
+    return entry ? &entry->call_storage : nullptr;
+}
+}
+
 detail::parameter_storage* engine::get_current_parameter_storage() const {
+    if (parallel_region_active_) [[unlikely]] {
+        if (auto** slot = region_parameter_storage_slot(impl->parallel_.get())) { return *slot; }
+    }
     return impl->current_parameter_storage;
 }
 
 void engine::set_current_parameter_storage(detail::parameter_storage* storage) {
+    if (parallel_region_active_) [[unlikely]] {
+        if (auto** slot = region_parameter_storage_slot(impl->parallel_.get())) { *slot = storage; return; }
+    }
     impl->current_parameter_storage = storage;
 }
 

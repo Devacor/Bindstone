@@ -3171,6 +3171,48 @@ public:
 			}
 		});
 
+		test("host_calls_with_reference_parameters_keep_their_temporaries_per_worker", [this]() {
+			// A bound call converts a const std::vector<int>& (or a const int&) argument into a temporary in the call's parameter
+			// storage; workers calling at once each keep their own (the engine-wide storage pointer was shared: one worker's
+			// temporary landed in another's stack frame, which destroyed it, and the pointer was left aimed at a dead frame)
+			struct summer {
+				int64_t sum(const std::vector<int64_t>& values, const int64_t& bias) const {
+					int64_t result = bias;
+					for (int64_t v : values) { result += v; }
+					return result;
+				}
+			};
+			const std::string program = R"(
+				array<int> xs;
+				for (int i = 0; i < 4000; ++i) { xs.push(i); }
+				array<int> out;
+				for (int i = 0; i < 4000; ++i) { out.push(0); }
+				for (int round = 0; round < 8; ++round) {
+					parallel_for (int x : xs) {
+						Summer s;
+						out[x] = s.sum([x, x, 1], x);
+					}
+				}
+				int total = 0;
+				for (int v : out) { total += v; }
+				total;
+			)";
+			int64_t expected = 0;
+			for (int64_t x = 0; x < 4000; ++x) { expected += 3 * x + 1; }
+			for (bool vm : {false, true}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(*e);
+				e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				dynamic_binder<summer>(*e, "Summer").constructor<>().method("sum", &summer::sum).build();
+				e->parallel_thread_count(8);
+				e->execution_budget(0);
+				std::string got;
+				try { got = std::to_string(e->execute(program).as_int()); } catch (const std::exception& ex) { got = std::string("error ") + ex.what(); }
+				check_eq(std::to_string(expected), got, std::string("reference parameters ") + (vm ? "vm" : "interp"));
+				check_true(e->get_current_parameter_storage() == nullptr, std::string("no call's storage outlives the region ") + (vm ? "vm" : "interp"));
+			}
+		});
+
 		test("host_calls_run_in_parallel_unless_marked_serial", [this]() {
 			// C++ calls are parallel unless registered serial: free functions, static methods and methods; a non-const method (or a
 			// property store) only over an object the chunk made, a const one over any object

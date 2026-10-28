@@ -311,8 +311,10 @@ inline checked_result<const std::shared_ptr<function_decl>*> script_method_dispa
                                                                                               size_t first) const {
     const size_t argc = args.size() - first;
     if (resolved_memo && resolved_memo_epoch == cls->method_epoch() && resolved_memo_argc == argc) { return resolved_memo; }
-    auto resolved = cls->resolve_method_overload_ref(name_id, args.data() + first, argc);
-    if (resolved && cls->method_arity_decides(name_id, argc) && !(eng && eng->parallel_region_active())) {
+    const bool region = eng && eng->parallel_region_active();
+    auto resolved = region ? cls->resolve_method_overload_shared(name_id, args.data() + first, argc)
+                           : cls->resolve_method_overload_ref(name_id, args.data() + first, argc);
+    if (resolved && !region && cls->method_arity_decides(name_id, argc)) {
         resolved_memo = resolved.value();
         resolved_memo_epoch = cls->method_epoch();
         resolved_memo_argc = argc;

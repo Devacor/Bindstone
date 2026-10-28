@@ -385,17 +385,18 @@ private:
     std::unordered_map<std::string_view, const enum_decl*> enums_;
     std::unordered_set<std::string_view> namespaces_;
     std::unordered_map<std::string, const variable_decl*> namespace_vars_;   // "path::name" -> its declaration (null: two spellings)
-    // Every name declared ANYWHERE in the script (any depth). Flow-insensitive safety
-    // net: execution order can make later declarations visible (nested functions,
-    // conditional paths), so "undeclared" only fires for names absent from this set
-    // AND the engine surface — typos, not ordering.
+    // Every name the program scope declares (top level and namespace bodies, any order): a function reads a global declared
+    // after it, so "undeclared" fires for names absent from this set AND the engine surface. A name a block, function, lambda
+    // or class declares is visible only in its own scope, which the walk's scopes and member lookups resolve.
     std::unordered_set<std::string_view> all_names_;
-    // function and lambda parameter names, kept apart from all_names_: a field initializer never sees a constructor's parameters
-    // (C++ [class.mem]: a default member initializer resolves in the class), so there a name only a parameter has is undeclared
-    std::unordered_set<std::string_view> parameter_names_;
-    bool in_field_initializer_ = false;
-    bool declared_anywhere(std::string_view name) const {
-        return all_names_.count(name) || (!in_field_initializer_ && parameter_names_.count(name));
+    std::unordered_set<std::string_view> namespace_names_;   // what namespace bodies declare: bare only inside a namespace
+    int collect_depth_ = 0;   // collect_names: 0 at program scope
+    bool collecting_namespace_names_ = false;
+    void collect_program_name(std::string_view name) {
+        if (collect_depth_ == 0) { (collecting_namespace_names_ ? namespace_names_ : all_names_).insert(name); }
+    }
+    bool program_or_derived_name(std::string_view name) {
+        return all_names_.count(name) || (!namespace_scopes_.empty() && namespace_names_.count(name)) || derived_class_member(name);
     }
     // names an assignment expression or a reference declaration targets, and each variable declaration's binary::layout(...)
     // initializer (null for any other initializer): a layout variable declared once and never assigned is statically known
@@ -617,6 +618,17 @@ private:
         }
         return out;
     }
+    // a bare name in a body that sees this-fields, declared by a class derived from the enclosing one: `this` may be one of those
+    bool derived_class_member(std::string_view name) {
+        if (!class_ctx_ || fn_stack_.empty() || !fn_stack_.back().sees_fields) { return false; }
+        for (const auto* table : {&classes_, &program_sclasses_}) {
+            for (const auto& [cname, sc] : *table) {
+                if (cname == class_ctx_name_ || class_relation(cname, class_ctx_name_) != 1) { continue; }
+                if (sc.fields.count(name) || sc.static_fields.count(name) || sc.methods.count(name) || sc.static_methods.count(name)) { return true; }
+            }
+        }
+        return false;
+    }
 
     // C++ [class.cdtor]: a constructor, field initializer or destructor reaches its own class's members only, so a call there to a
     // name only a derived class declares is the refusal the backends raise
@@ -697,10 +709,6 @@ private:
     void collect_class(const class_decl* cd) {
         sclass& c = classes_[cd->name];
         model_class(cd, c);
-        for (const auto& [n, _] : c.fields) { all_names_.insert(n); }
-        for (const auto& [n, _] : c.static_fields) { all_names_.insert(n); }
-        for (const auto& [n, _] : c.methods) { all_names_.insert(n); }
-        for (const auto& [n, _] : c.static_methods) { all_names_.insert(n); }
     }
 
     // The unit's own class first, then the program table (modeled once per check; a table
@@ -801,9 +809,6 @@ private:
                 case node_type::enum_decl: {
                     auto* e = static_cast<const enum_decl*>(d.get());
                     enums_[e->name] = e;
-                    for (const auto& [vname, _] : e->values) {
-                        all_names_.insert(vname);
-                    }
                     break;
                 }
                 case node_type::namespace_decl: {
@@ -3967,7 +3972,7 @@ private:
 		if (eng_.has_function(name)) { note_global_use(id->name); return ctype::make(ctype::function_k); }
 		if (eng_.has_variable(name)) { note_global_use(id->name); return engine_global_type(name); }
 		if (engine_knows_name(name)) { return {}; }
-		if (declared_anywhere(id->name)) { return {}; }
+		if (program_or_derived_name(id->name)) { return {}; }
 		if (stale_field_context()) { return {}; }   // bare old-shape field in a redefined class's method
 		undeclared(id->location, id->name);
 		return {};
@@ -4402,7 +4407,7 @@ private:
 			if (eng_.has_variable(name)) { note_global_use(id->name); return {}; }
 			if (engine_knows_name(name)) { return {}; }
 			if (!id->global_qualified && report_cdtor_call(id->name, id->location)) { return {}; }
-			if (declared_anywhere(id->name)) { return {}; }
+			if (program_or_derived_name(id->name)) { return {}; }
 			if (stale_field_context()) { return {}; }
 			undeclared(id->location, id->name);
 			return {};
@@ -4662,7 +4667,7 @@ private:
 				}
 				return done(gt);   // engine globals: never proven (S3)
 			}
-			if (eng_.has_function(name) || engine_knows_name(name) || declared_anywhere(id->name) || stale_field_context()) {
+			if (eng_.has_function(name) || engine_knows_name(name) || program_or_derived_name(id->name) || stale_field_context()) {
 				return done(rhs);
 			}
 			undeclared(id->location, id->name);
@@ -5747,9 +5752,7 @@ private:
 				if (!f->type && !f->function_spelling) { f->auto_spelled = true; }
 				if (f->initializer) {
 					const cdtor_ctx enclosing_cdtor = std::exchange(cdtor_ctx_, f->is_static ? cdtor_ctx::none : cdtor_ctx::construction);
-					const bool enclosing_field_initializer = std::exchange(in_field_initializer_, true);
 					ctype init = infer(f->initializer.get());
-					in_field_initializer_ = enclosing_field_initializer;
 					cdtor_ctx_ = enclosing_cdtor;
 					if (f->auto_spelled) { type_auto_slot(f, numeric_ternary_type(f->initializer.get(), init)); }   // an auto field: its initializer's static type
 					if ((f->type && !f->auto_spelled) || f->function_spelling) {
@@ -5808,7 +5811,7 @@ private:
                 if (hit.found || hit.unresolved) { continue; }
             }
             if (functions_.count(cap.name) || classes_.count(cap.name) || enums_.count(cap.name) ||
-                declared_anywhere(cap.name)) { continue; }
+                program_or_derived_name(cap.name)) { continue; }
             std::string name(cap.name);
             if (extra_global(name) || engine_knows_name(name)) { continue; }
             undeclared(l->location, cap.name);
@@ -5873,13 +5876,18 @@ private:
 
 };
 
-// Safety-net sweep: every declared name at any depth (see all_names_ comment).
+// Safety-net sweep: the program scope's names (see all_names_), and what the walk reads by name at any depth.
 void static_checker::collect_names(const statement* node) {
     if (!node) { return; }
+    struct nested_scope {
+        int& depth;
+        explicit nested_scope(int& a_depth) : depth(a_depth) { ++depth; }
+        ~nested_scope() { --depth; }
+    };
     switch (node->get_type()) {
         case node_type::variable_decl: {
             auto* v = static_cast<const variable_decl*>(node);
-            all_names_.insert(v->name);
+            collect_program_name(v->name);
             layout_inits_[v->name].push_back(binary_call(v->initializer.get(), "layout") ? v->initializer.get() : nullptr);
             if (v->type && v->type->base_type == script_value_type::jai_reference_type && v->initializer &&
                 v->initializer->get_type() == node_type::identifier_expr) {
@@ -5889,36 +5897,38 @@ void static_checker::collect_names(const statement* node) {
             break;
         }
         case node_type::extern_decl:
-            all_names_.insert(static_cast<const extern_decl*>(node)->name);
+            collect_program_name(static_cast<const extern_decl*>(node)->name);
             break;
         case node_type::function_decl: {
             auto* f = static_cast<const function_decl*>(node);
-            all_names_.insert(f->name);
-            for (const auto& p : f->parameters) { parameter_names_.insert(std::string_view(p.name)); }
-            if (f->body) { collect_names(f->body.get()); }
+            collect_program_name(f->name);
+            nested_scope body{collect_depth_};
+            collect_names(f->body.get());
             break;
         }
         case node_type::class_decl: {
             auto* c = static_cast<const class_decl*>(node);
-            all_names_.insert(c->name);
+            collect_program_name(c->name);
+            nested_scope members{collect_depth_};
             for (const auto& m : c->members) { collect_names(m.declaration.get()); }
             break;
         }
         case node_type::namespace_decl: {
             auto* n = static_cast<const namespace_decl*>(node);
-            all_names_.insert(n->name);
+            collect_program_name(n->name);
+            const bool enclosing = std::exchange(collecting_namespace_names_, true);
             for (const auto& d : n->declarations) { collect_names(d.get()); }
+            collecting_namespace_names_ = enclosing;
             break;
         }
         case node_type::enum_decl: {
             auto* e = static_cast<const enum_decl*>(node);
-            all_names_.insert(e->name);
-            for (const auto& [vname, _] : e->values) { all_names_.insert(vname); }
+            collect_program_name(e->name);
             break;
         }
         case node_type::destructuring_decl: {
             auto* dd = static_cast<const destructuring_decl*>(node);
-            for (const auto& [name, _] : dd->names) { all_names_.insert(name); }
+            for (const auto& [name, _] : dd->names) { collect_program_name(name); }
             if (dd->initializer) { collect_names_expr(dd->initializer.get()); }
             break;
         }
@@ -5939,11 +5949,14 @@ void static_checker::collect_names(const statement* node) {
         case node_type::statement_decl:
             collect_names(static_cast<const statement_decl*>(node)->statement.get());
             break;
-        case node_type::block_stmt:
+        case node_type::block_stmt: {
+            nested_scope block{collect_depth_};
             for (const auto& d : static_cast<const block_stmt*>(node)->declarations) { collect_names(d.get()); }
             break;
+        }
         case node_type::if_stmt: {
             auto* i = static_cast<const if_stmt*>(node);
+            nested_scope branches{collect_depth_};
             collect_names_expr(i->condition.get());
             collect_names(i->then_statement.get());
             collect_names(i->else_statement.get());
@@ -5951,12 +5964,14 @@ void static_checker::collect_names(const statement* node) {
         }
         case node_type::while_stmt: {
             auto* w = static_cast<const while_stmt*>(node);
+            nested_scope body{collect_depth_};
             collect_names_expr(w->condition.get());
             collect_names(w->body.get());
             break;
         }
         case node_type::for_stmt: {
             auto* f = static_cast<const for_stmt*>(node);
+            nested_scope loop{collect_depth_};
             collect_names(f->initializer.get());
             collect_names_expr(f->condition.get());
             collect_names_expr(f->update.get());
@@ -5965,21 +5980,21 @@ void static_checker::collect_names(const statement* node) {
         }
         case node_type::range_for_stmt: {
             auto* f = static_cast<const range_for_stmt*>(node);
-            all_names_.insert(f->variable_name);
             collect_names_expr(f->container.get());
+            nested_scope loop{collect_depth_};
             collect_names(f->body.get());
             break;
         }
         case node_type::parallel_for_stmt: {
             auto* f = static_cast<const parallel_for_stmt*>(node);
-            all_names_.insert(std::string_view(f->loop_param.name));
-            for (const auto& extra : f->extra_params) { all_names_.insert(std::string_view(extra.name)); }
             collect_names_expr(f->container.get());
+            nested_scope loop{collect_depth_};
             collect_names(f->body.get());
             break;
         }
         case node_type::try_stmt: {
             auto* t = static_cast<const try_stmt*>(node);
+            nested_scope blocks{collect_depth_};
             collect_names(t->try_block.get());
             collect_names(t->catch_block.get());
             break;
@@ -5987,6 +6002,7 @@ void static_checker::collect_names(const statement* node) {
         case node_type::switch_stmt: {
             auto* sw = static_cast<const switch_stmt*>(node);
             collect_names_expr(sw->condition.get());
+            nested_scope cases{collect_depth_};
             for (const auto& cs : sw->cases) {
                 for (const auto& st : cs->body) { collect_names(st.get()); }
             }
@@ -6008,9 +6024,10 @@ void static_checker::collect_names_expr(const expression* e) {
     switch (e->get_type()) {
         case node_type::lambda_expr: {
             auto* l = static_cast<const lambda_expr*>(e);
-            for (const auto& p : l->parameters) { parameter_names_.insert(std::string_view(p.name)); }
-            for (const auto& cap : l->captures) { if (cap.initializer) { all_names_.insert(cap.name); collect_names_expr(cap.initializer.get()); } }
+            for (const auto& cap : l->captures) { if (cap.initializer) { collect_names_expr(cap.initializer.get()); } }
+            ++collect_depth_;
             collect_names(l->body.get());
+            --collect_depth_;
             break;
         }
         case node_type::binary_expr: {

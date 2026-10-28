@@ -156,9 +156,10 @@ severity. Lambdas with a declared return type follow the same rule. Coroutines a
 yields a handle, and yield/return types aren't checked.
 
 **Identifiers** — undeclared = error, checked against: scopes, the current class's members
-(incl. inherited), top-level declarations (two-pass, so forward references work), every
-name declared ANYWHERE in the script (flow-insensitive safety net — execution order can
-make later declarations visible), the host's per-call instance variables, the top-level
+(incl. inherited) and, in a body that sees `this`, the members of a class derived from it,
+every program-scope name of the unit (top level and namespace bodies, any order, so a
+function reads a global declared after it; a namespace's names only inside a namespace),
+the host's per-call instance variables, the top-level
 names of every unit in the program (Programs below — a literal `import`/`include` never
 hides a name), `extern` declarations (Escape hatches below — a name defined outside the
 program, typed or not), and the engine's full registration surface (globals, functions,

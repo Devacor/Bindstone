@@ -2664,7 +2664,7 @@ public:
 				function loader() { include "vm_include_in_fn.jai"; return vm_included_flag; }
 				var seen = loader();
 				var after = 0;
-				try { after = vm_included_flag; } catch (e) { after = -1; }
+				[[warn_mode]] try { after = vm_included_flag; } catch (e) { after = -1; }
 				seen * 100 + after
 			)";
 			auto interp = interp_engine();

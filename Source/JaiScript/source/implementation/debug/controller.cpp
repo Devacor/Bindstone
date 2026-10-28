@@ -148,6 +148,14 @@ void controller::post_command(std::function<void()> fn) {
     cv_.notify_all();
 }
 
+bool controller::post_command_while_paused(std::function<void()> fn) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    if (!paused_.load(std::memory_order_relaxed)) { return false; }
+    commands_.push_back(std::move(fn));
+    cv_.notify_all();
+    return true;
+}
+
 void controller::detach() {
     std::lock_guard<std::mutex> lk(mtx_);
     step_mode_.store(static_cast<int>(step_mode::none), std::memory_order_relaxed);

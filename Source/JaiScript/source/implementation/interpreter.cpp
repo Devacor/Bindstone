@@ -12216,7 +12216,9 @@ checked_result<void> interpreter::evaluate_field_initializers(strong_ptr<class_i
     } scope_restore{this, environment_, member_scope_};
     environment_ = init_env;
     member_scope_ = {};
-    if (script_value* init_this = init_env->method_this_storage()) {
+    script_value* init_this = init_env->method_this_storage();
+    if (!init_this) { init_this = init_env->get_own_value_ptr(string_symbolizer_->get_this_id()); }   // a construction scope's `this`
+    if (init_this) {
         member_scope_.state = detail::member_scope_state::instance;
         member_scope_.this_storage = init_this;
         member_scope_.statics = detail::lexical_access_class(init_env.get());
@@ -12231,7 +12233,10 @@ checked_result<void> interpreter::evaluate_field_initializers(strong_ptr<class_i
     auto initialize_field = [&](uint64_t field_id, const expression_ptr& initializer_ast) -> checked_result<void> {
         if (in_activation) { call_stack_.back().current_node = initializer_ast.get(); } else { construction_traces_.back().node = initializer_ast.get(); }
         auto result = dispatch_expr(initializer_ast.get());
-        if (!result) { return result.error_value(); }   // KEEP BYTE-PARALLEL with the vm: the initializer's own error
+        if (!result) {   // KEEP BYTE-PARALLEL with the vm: the initializer's own error, the class the frame it stands in
+            if (!in_activation && !trace_captured_) { capture_stack_trace(); }
+            return result.error_value();
+        }
         script_value field_value = initializer_store_value(pop_value(), initializer_ast.get());
         instance->set_field(field_id, field_value);
         return {};
@@ -12338,7 +12343,7 @@ struct interpreter::construction_lender final : detail::construction_host {
     checked_result<void> evaluate_field_initializers(const strong_ptr<class_instance>& instance, const std::shared_ptr<script_class_definition>& cls,
                                                      detail::construction_scope& scope, bool skip_parent_recursion,
                                                      const detail::aggregate_plan* aggregate) override {
-        return self.evaluate_field_initializers(instance, cls, scope.env, skip_parent_recursion, aggregate);
+        return self.evaluate_field_initializers(instance, cls, scope.members ? scope.members : scope.env, skip_parent_recursion, aggregate);
     }
 
     checked_result<void> bind_reference_arguments(const function_decl& ctor, std::vector<script_value>& args) override {
@@ -12778,17 +12783,22 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
     );
 }
 
-// The prologue's scope: `this`, the class as the access context, and each parameter's name a cell over its slot, so what the
-// prologue stores to a parameter the body reads
+// The prologue's scopes: the field initializers' (`this` and the class as the access context), and over it the initializer list's,
+// each parameter's name a cell over its slot, so what the prologue stores to a parameter the body reads
 checked_result<void> interpreter::run_constructor_prologue(constructor_prologue_hook& hook, size_t frame_index, const script_defined_function& function) {
     detail::construction_scope scope;
     if (detail::prologue_evaluates(static_cast<const script_class_definition&>(*hook.level), *hook.ctor)) {
-        scope.env = std::make_shared<environment>(*hook.definition_env, env_symbolizer_);
-        scope.env->define(string_symbolizer_->get_this_id(), *hook.this_value);
-        scope.env->set_access_context(hook.level);
+        scope.members = std::make_shared<environment>(*hook.definition_env, env_symbolizer_);
+        scope.members->define(string_symbolizer_->get_this_id(), *hook.this_value);
+        scope.members->set_access_context(hook.level);
+        scope.env = scope.members;
         for (const auto& param : function.parameters()) {
             if (param.slot_index == SIZE_MAX) { continue; }
             if (script_value* slot = call_stack_[frame_index].get_local(param.slot_index)) {
+                if (scope.env == scope.members) {
+                    scope.env = std::make_shared<environment>(scope.members, env_symbolizer_);
+                    scope.env->set_access_context(hook.level);
+                }
                 if (param.symbol_id == UINT64_MAX) { param.symbol_id = string_symbolizer_->intern(param.name); }
                 scope.env->define(param.symbol_id, share_boxed_slot(*slot));
             }

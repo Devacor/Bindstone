@@ -1838,6 +1838,7 @@ namespace jai::vm {
         };
         // The construction machinery's state, boxed: the backend's own layout stays as it was for code that never constructs
         struct construction_state {
+            std::unordered_map<const expression*, level_initializers> single_initializers;   // run_level_initializers' `only` bodies
             std::unordered_map<const class_definition*, level_initializers> level_initializers;
             std::exception_ptr field_init_exception;   // what a field store in a level's initializer body threw, rethrown natively
         };
@@ -1846,8 +1847,10 @@ namespace jai::vm {
             if (!construction_) [[unlikely]] { construction_ = std::make_unique<construction_state>(); }
             return *construction_;
         }
+        // only: that one initializer (an aggregate's field past its last initializer), else every one of the level
         checked_result<void> run_level_initializers(class_instance& instance, script_class_definition& class_def,
-                                                    const std::shared_ptr<environment>& init_env);
+                                                    const std::shared_ptr<environment>& init_env,
+                                                    const std::pair<uint64_t, expression_ptr>* only = nullptr);
         // A fresh layer's whole starting field state for a class whose initializers are all constants (the same keys)
         struct fresh_layer_plan {
             uint64_t epoch = 0;

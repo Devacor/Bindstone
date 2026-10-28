@@ -390,6 +390,13 @@ private:
     // conditional paths), so "undeclared" only fires for names absent from this set
     // AND the engine surface — typos, not ordering.
     std::unordered_set<std::string_view> all_names_;
+    // function and lambda parameter names, kept apart from all_names_: a field initializer never sees a constructor's parameters
+    // (C++ [class.mem]: a default member initializer resolves in the class), so there a name only a parameter has is undeclared
+    std::unordered_set<std::string_view> parameter_names_;
+    bool in_field_initializer_ = false;
+    bool declared_anywhere(std::string_view name) const {
+        return all_names_.count(name) || (!in_field_initializer_ && parameter_names_.count(name));
+    }
     // names an assignment expression or a reference declaration targets, and each variable declaration's binary::layout(...)
     // initializer (null for any other initializer): a layout variable declared once and never assigned is statically known
     std::unordered_set<std::string_view> assigned_names_;
@@ -3960,7 +3967,7 @@ private:
 		if (eng_.has_function(name)) { note_global_use(id->name); return ctype::make(ctype::function_k); }
 		if (eng_.has_variable(name)) { note_global_use(id->name); return engine_global_type(name); }
 		if (engine_knows_name(name)) { return {}; }
-		if (all_names_.count(id->name)) { return {}; }
+		if (declared_anywhere(id->name)) { return {}; }
 		if (stale_field_context()) { return {}; }   // bare old-shape field in a redefined class's method
 		undeclared(id->location, id->name);
 		return {};
@@ -4395,7 +4402,7 @@ private:
 			if (eng_.has_variable(name)) { note_global_use(id->name); return {}; }
 			if (engine_knows_name(name)) { return {}; }
 			if (!id->global_qualified && report_cdtor_call(id->name, id->location)) { return {}; }
-			if (all_names_.count(id->name)) { return {}; }
+			if (declared_anywhere(id->name)) { return {}; }
 			if (stale_field_context()) { return {}; }
 			undeclared(id->location, id->name);
 			return {};
@@ -4655,7 +4662,7 @@ private:
 				}
 				return done(gt);   // engine globals: never proven (S3)
 			}
-			if (eng_.has_function(name) || engine_knows_name(name) || all_names_.count(id->name) || stale_field_context()) {
+			if (eng_.has_function(name) || engine_knows_name(name) || declared_anywhere(id->name) || stale_field_context()) {
 				return done(rhs);
 			}
 			undeclared(id->location, id->name);
@@ -5740,7 +5747,9 @@ private:
 				if (!f->type && !f->function_spelling) { f->auto_spelled = true; }
 				if (f->initializer) {
 					const cdtor_ctx enclosing_cdtor = std::exchange(cdtor_ctx_, f->is_static ? cdtor_ctx::none : cdtor_ctx::construction);
+					const bool enclosing_field_initializer = std::exchange(in_field_initializer_, true);
 					ctype init = infer(f->initializer.get());
+					in_field_initializer_ = enclosing_field_initializer;
 					cdtor_ctx_ = enclosing_cdtor;
 					if (f->auto_spelled) { type_auto_slot(f, numeric_ternary_type(f->initializer.get(), init)); }   // an auto field: its initializer's static type
 					if ((f->type && !f->auto_spelled) || f->function_spelling) {
@@ -5799,7 +5808,7 @@ private:
                 if (hit.found || hit.unresolved) { continue; }
             }
             if (functions_.count(cap.name) || classes_.count(cap.name) || enums_.count(cap.name) ||
-                all_names_.count(cap.name)) { continue; }
+                declared_anywhere(cap.name)) { continue; }
             std::string name(cap.name);
             if (extra_global(name) || engine_knows_name(name)) { continue; }
             undeclared(l->location, cap.name);
@@ -5885,7 +5894,7 @@ void static_checker::collect_names(const statement* node) {
         case node_type::function_decl: {
             auto* f = static_cast<const function_decl*>(node);
             all_names_.insert(f->name);
-            for (const auto& p : f->parameters) { all_names_.insert(std::string_view(p.name)); }
+            for (const auto& p : f->parameters) { parameter_names_.insert(std::string_view(p.name)); }
             if (f->body) { collect_names(f->body.get()); }
             break;
         }
@@ -5999,7 +6008,7 @@ void static_checker::collect_names_expr(const expression* e) {
     switch (e->get_type()) {
         case node_type::lambda_expr: {
             auto* l = static_cast<const lambda_expr*>(e);
-            for (const auto& p : l->parameters) { all_names_.insert(std::string_view(p.name)); }
+            for (const auto& p : l->parameters) { parameter_names_.insert(std::string_view(p.name)); }
             for (const auto& cap : l->captures) { if (cap.initializer) { all_names_.insert(cap.name); collect_names_expr(cap.initializer.get()); } }
             collect_names(l->body.get());
             break;

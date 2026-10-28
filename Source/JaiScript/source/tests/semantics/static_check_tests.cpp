@@ -279,6 +279,36 @@ public:
             check_eq((size_t)0, error_count(e->check("print(\"hi\");")));   // registered surface visible
         });
 
+        test("a_name_only_another_scope_declares_is_undeclared", [this]() {
+            auto e = make_engine();
+            const std::string decls =
+                "class C { int hp = 1; int heal() { return 2; } }\n"
+                "enum E { Alpha, Beta }\n"
+                "namespace ns { int nv = 3; }\n"
+                "function f(int pn) { int loc = 1; for (var rv : [1]) {} return pn + loc; }\n"
+                "var lam = [](int lp) { int ll = 2; return lp + ll; };\n"
+                "if (true) { int block_local = 4; }\n";
+            for (const char* use : {"hp", "heal()", "Alpha", "nv", "pn", "loc", "rv", "lp", "ll", "block_local"}) {
+                auto r = e->check(decls + "print(" + use + ");");
+                check_eq((size_t)1, error_count(r), std::string(use) + ": " + r.format());
+                check_true(r.format().find("use of undeclared identifier") != std::string::npos, r.format());
+            }
+            auto n = e->check("class D { int x = n; D(int n) {} }");
+            check_eq((size_t)1, error_count(n), n.format());
+            auto other = e->check("function g(int n) { return n; }\nclass D { int x = n; }");
+            check_eq((size_t)1, error_count(other), other.format());
+            auto reader = e->check("if (true) { var g = 1; }\nfunction reader() { return g; }");
+            check_eq((size_t)1, error_count(reader), reader.format());
+            // the program scope in any order, a namespace's own names inside it, and what a derived class declares from a base's bodies
+            check_eq((size_t)0, error_count(e->check("function reads() { return later_global; }\nint later_global = 2;\nreads();")));
+            check_eq((size_t)0, error_count(e->check("namespace ns2 { function nf() { return nv2; } int nv2 = 3; }\nns2::nf();")));
+            const std::string derived = "class B : A { int dfield = 10; int helper() { return 1; } }";
+            check_eq((size_t)0, error_count(e->check("class A { int go() { return helper() + dfield; } }\n" + derived)));
+            check_eq((size_t)0, error_count(e->check("class A { int go() { auto l = [this]() { return helper(); }; return l(); } }\n" + derived)));
+            auto stranger = e->check("class A { int go() { return helper(); } }\nclass Z { int helper() { return 1; } }");
+            check_eq((size_t)1, error_count(stranger), stranger.format());
+        });
+
         test("dynamic_include_keeps_undeclared_lenient_literal_does_not", [this]() {
             auto e = make_engine();
             // a dynamic path can define anything: warning severity
@@ -297,8 +327,8 @@ public:
                 "function a() { return b(); }\nfunction b() { return 41; }\na();")));
             check_eq((size_t)0, error_count(e->check(
                 "function make_it() { return Later(); }\nclass Later { int v = 7; }\nmake_it();")));
-            // later-declared locals referenced from nested function bodies stay silent
-            check_eq((size_t)0, error_count(e->check(
+            // a nested function sees no enclosing local, so a local declared after it is undeclared there
+            check_eq((size_t)1, error_count(e->check(
                 "function outer() { function inner() { return late_var; } int late_var = 5; return inner(); }")));
         });
 

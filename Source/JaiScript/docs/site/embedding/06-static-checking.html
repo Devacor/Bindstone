@@ -234,12 +234,14 @@ caught in half: Cannot return string from 'half' (declared -&gt; int)
 -1</code></pre></div>
 <h3 id="identifiers">Identifiers<a class="hlink" href="#identifiers" aria-label="link">&#8203;</a></h3>
 <p>An undeclared identifier is an error. A name counts as declared if it is in scope, a member of the current
-class (inherited included), a top-level declaration (two-pass, so forward references work), any name declared
-anywhere in the script (execution order can make later declarations visible), one of the host's per-call
-instance variables, a top-level name of any unit in the program (<a href="#programs">Programs</a>), an
+class (inherited included; inside a method or a <code>[this]</code> lambda, also a member of a class derived from
+it), a program-scope declaration of the unit (top level or a namespace body, two-pass, so a function reads a
+global declared below it), one of the host's per-call instance variables, a top-level name of any unit in the program (<a href="#programs">Programs</a>), an
 <code>extern</code> declaration (<a href="#escape-hatches">escape hatches</a>), or anything on the engine's
 registration surface (globals, functions, classes, template types, namespaces), which is visible
-because checking happens at execute time.</p>
+because checking happens at execute time. A local, parameter or loop variable is declared only in its own scope,
+and a field or method only to its class: <code>print(hp)</code> at the top level is undeclared even when a class
+declares <code>hp</code>.</p>
 <p>Only a unit that uses a <em>dynamic-path</em> <code>import(expr)</code>/<code>include(expr)</code> drops
 undeclared identifiers to warning severity: such a file can define anything. A literal import path never hides a
 name, wherever the import stands (a function body or a block included): its module joins the program instead.</p>

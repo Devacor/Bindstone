@@ -414,14 +414,14 @@ public:
                 function helper() -> string { return "program"; }
                 function reload() -> string { include "splice_fns.jai"; return helper() + " " + only_here(); }
                 string r = reload() + "|" + helper() + "|";
-                try { only_here(); r += "still"; } catch (e) { r += "gone"; }
+                [[warn_mode]] try { only_here(); r += "still"; } catch (e) { r += "gone"; }
                 r;
             )").as<std::string>());
             size_t hides = 0;
             for (const auto& d : eng->last_check_diagnostics().diagnostics) {
                 if (d.severity == check_diagnostic::level::warning &&
                     d.message.find("splice_fns.jai:1:10: function 'helper' from the include in function 'reload' is local to it and hides the program-scope 'helper' there without replacing it; import the file to replace program-scope functions") != std::string::npos) { ++hides; }
-                check_true(d.message.find("'only_here'") == std::string::npos, "a nested function hiding nothing is silent");
+                check_true(d.message.find("function 'only_here' from the include") == std::string::npos, "a nested function hiding nothing is silent");
             }
             check_eq((size_t)1, hides, "the checker warns once for the hidden program-scope function");
             std::string err;

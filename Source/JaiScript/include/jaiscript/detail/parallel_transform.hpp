@@ -50,6 +50,8 @@ namespace jai {
 
 namespace jai::detail {
 
+    class parameter_storage;
+
     // Thread -> per-worker limits table, installed on the engine only while a region's
     // workers are running (read-only during the region; built/torn down single-threaded).
     // engine::execution_limits() consults it so EVERY charge site — backends, shared
@@ -97,6 +99,8 @@ namespace jai::detail {
             const std::vector<script_value>* cursors = nullptr;
             // The shared objects this chunk reads through borrows (detail/object_borrow.hpp), swapped for handles by the join
             object_borrows* borrows = nullptr;
+            // The parameter storage of the bound call this thread is in (engine::get_current_parameter_storage while a region runs)
+            mutable parameter_storage* call_storage = nullptr;
             size_t element() const noexcept { return cursors && !cursors->empty() ? cursors->front().element_cursor_index() : SIZE_MAX; }
         };
         std::vector<entry> entries;

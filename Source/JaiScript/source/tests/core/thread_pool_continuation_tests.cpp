@@ -254,6 +254,29 @@ public:
             check(wait_for([&]() { return posted.load() == tasks && chained.load() == tasks; }, [&]() { pool.run_posted(); }), "every continuation must run");
         });
 
+        test("wait_idle_waits_for_a_task_whose_pinned_follow_up_finishes_first", [this]() {
+            // A task's submit_to counts the follow-up before a spinning target can run and uncount it: otherwise the count passes
+            // through zero while the submitting task still runs, and wait_idle returns early
+            thread_pool pool(2);
+            pool.spin_budget_ns(50'000'000);
+            size_t early = 0;
+            for (int round = 0; round < 20000; ++round) {
+                std::atomic<bool> done{false};
+                pool.submit_to(1, [&]() {
+                    pool.submit_to(0, []() {});
+                    for (volatile int spin = 0; spin < 200; ++spin) {}
+                    done.store(true);
+                });
+                pool.wait_idle();
+                if (!done.load()) {
+                    ++early;
+                    while (!done.load()) {}
+                    pool.wait_idle();
+                }
+            }
+            check_eq(size_t(0), early, "wait_idle returned while the submitting task still ran");
+        });
+
         test("destruction_finishes_an_in_flight_task_against_a_live_pool", [this]() {
             std::atomic<int> reported{0};
             std::atomic<bool> started{false};

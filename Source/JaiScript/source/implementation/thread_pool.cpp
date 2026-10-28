@@ -210,8 +210,14 @@ namespace jai {
             {
                 std::lock_guard<std::mutex> guard(mutex_);
                 if (stop_) return;
-                push_pinned(*workers_[worker], std::move(task));
+                // counted before a spinning target can run and uncount it (a pinned pop takes only the worker's lock)
                 outstanding_.fetch_add(1, std::memory_order_relaxed);
+                try {
+                    push_pinned(*workers_[worker], std::move(task));
+                } catch (...) {
+                    if (outstanding_.fetch_sub(1) == 1) { idle_cv_.notify_all(); }
+                    throw;
+                }
                 note_batch();
             }
             // Pinned work satisfies only one worker's wake predicate; notify_all so the
@@ -521,7 +527,9 @@ namespace jai {
     thread_pool::thread_pool(size_t worker_count, thread_speed speed, const detail::fault_injection* faults) :
         state_(std::make_unique<state>(worker_count, speed, faults)) {}
 
-    thread_pool::~thread_pool() = default;
+    // joined while state_ still points at the state: a task running during destruction may submit or post (libc++'s unique_ptr
+    // nulls itself before it deletes)
+    thread_pool::~thread_pool() { state_->stop_and_join(); }
 
     size_t thread_pool::worker_count() const noexcept { return state_->workers_.size(); }
 

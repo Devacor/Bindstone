@@ -155,6 +155,7 @@ void controller::detach() {
     sync_requested_.store(true);
     hot_step_or_pause_.store(true);
     resume_requested_ = true;
+    detaches_.fetch_add(1, std::memory_order_relaxed);
     cv_.notify_all();
 }
 
@@ -386,22 +387,24 @@ void controller::on_statement(const ast_node* node, int depth) {
     // An armed session's next statement applies a pending breakpoint edit, pause or detach
     if (sync_requested_.load(std::memory_order_relaxed)) [[unlikely]] { engine_->get_execution_backend()->sync_debug_hook(); }
     if (!stops_at(node)) return;
+    const uint64_t detaches = detaches_.load(std::memory_order_acquire);
     // A detach can race the cached gate; never park for a session that just ended.
     if (!enabled_.load(std::memory_order_relaxed)) return;
     std::string reason;
     if (!should_stop(node, depth, reason)) return;
     // Consume a one-shot pause so it fires exactly once.
     pending_pause_.store(0, std::memory_order_relaxed);
-    park({reason, node->location.filename, static_cast<int>(node->location.line), depth});
+    park({reason, node->location.filename, static_cast<int>(node->location.line), depth}, detaches);
 }
 
-void controller::park(const stop_info& si) {
-    current_stop_ = si;   // read by list_frames/list_locals via posted closures (this thread)
-    current_stop_depth_.store(si.depth, std::memory_order_relaxed);
+void controller::park(const stop_info& si, uint64_t detaches_at_entry) {
     {
         std::lock_guard<std::mutex> lk(mtx_);
+        if (detaches_.load(std::memory_order_relaxed) != detaches_at_entry) { return; }
         resume_requested_ = false;
     }
+    current_stop_ = si;   // read by list_frames/list_locals via posted closures (this thread)
+    current_stop_depth_.store(si.depth, std::memory_order_relaxed);
     paused_.store(true, std::memory_order_release);
     if (on_stopped_) on_stopped_(si);   // notify transport (runs on this, the script thread)
 
@@ -442,12 +445,13 @@ void controller::sleep_for(std::chrono::nanoseconds duration) {
         }
         auto* backend = engine_->get_execution_backend();
         backend->sync_debug_hook();
+        const uint64_t detaches = detaches_.load(std::memory_order_acquire);
         if (in_command_ || !enabled_.load(std::memory_order_relaxed) || !backend->is_executing()) continue;
         if (!pending_pause_.exchange(0, std::memory_order_relaxed)) continue;
         const auto remaining = until - clock::now();
         const auto frames = backend->debug_frames();
         park({"pause", frames.empty() ? std::string() : frames.front().file,
-              frames.empty() ? 0 : static_cast<int>(frames.front().line), backend->debug_depth()});
+              frames.empty() ? 0 : static_cast<int>(frames.front().line), backend->debug_depth()}, detaches);
         until = clock::now() + remaining;   // the pause does not eat into the sleep
     }
 }

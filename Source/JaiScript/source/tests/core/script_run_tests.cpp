@@ -169,6 +169,33 @@ public:
             check_eq(std::string("80"), run.result().value().to_string(), "the value" + be);
         });
 
+        test("sleeps_in_construction_suspend_the_run", [this]() {
+            // every constructor of a chain runs in the run: an initializer-list argument, a field initializer, a base's body, a
+            // delegated-to constructor and a class without a constructor each suspend it
+            run_host h;
+            const std::string be = backend_label(*h.eng);
+            script_run run = h.eng->start(R"(
+                int pause(int v) { sleep(0.1); return v; }
+                class A { int a = pause(1); A(int x) { sleep(0.1); a += x; } }
+                class B : A { int b = pause(2); B(int y) : super(pause(y)) { sleep(0.1); } B() : this(pause(3)) {} }
+                class C { int c = pause(4); }
+                class D : C {}
+                B made = B();
+                D plain = D();
+                to_string(made.a) + " " + to_string(made.b) + " " + to_string(plain.c);)");
+            int suspensions = 0;
+            while (!run.done()) {
+                check_true(run.state() == script_run::status::suspended, "each sleep suspends" + be);
+                ++suspensions;
+                h.clock.advance(0.1);
+                run.resume();
+            }
+            check_true(h.warnings.empty(), "no construction pins the run" + be + (h.warnings.empty() ? std::string() : ": " + h.warnings[0]));
+            check_true(h.clock.blocking_sleeps.empty(), "nothing blocked" + be);
+            check_eq(7, suspensions, "every sleep suspended" + be);
+            check_eq(std::string("4 2 4"), run.result().value().to_string(), "the value" + be);
+        });
+
         test("pinned_sleeps_block_and_warn_once_per_run", [this]() {
             run_host h;
             const std::string be = backend_label(*h.eng);

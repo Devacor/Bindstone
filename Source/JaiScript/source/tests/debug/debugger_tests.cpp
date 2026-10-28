@@ -637,6 +637,55 @@ public:
         }
     }
 
+    // Every stop of a construction, as frames (innermost first: name:line) and each frame's local names: a base level's
+    // initializer-list argument, field initializer and body, then the class's own
+    std::string construction_stops(jai::backend_type type) {
+        auto eng = make_backend_engine(type);
+        auto& dbg = eng->debugger();
+        stop_waiter stops(dbg);
+        dbg.set_breakpoints("<script>", {2, 7, 13});
+        dbg.set_enabled(true);
+        const std::string src =
+            "int hook(int v) {\n"                       // line 1
+            "    return v;\n"                           // line 2  (breakpoint)
+            "}\n"                                       // line 3
+            "class A {\n"                               // line 4
+            "    int a = hook(1);\n"                    // line 5
+            "    A(int x) {\n"                          // line 6
+            "        int ax = x;\n"                     // line 7  (breakpoint)
+            "    }\n"                                   // line 8
+            "}\n"                                       // line 9
+            "class B : A {\n"                           // line 10
+            "    int b = hook(2);\n"                    // line 11
+            "    B(int y) : super(hook(y + 2)) {\n"     // line 12
+            "        int by = y;\n"                     // line 13 (breakpoint)
+            "    }\n"                                   // line 14
+            "}\n"                                       // line 15
+            "B made = B(1);\n";                         // line 16
+        std::string script_error;
+        std::thread script([&] {
+            try { eng->execute(src); } catch (const std::exception& e) { script_error = e.what(); }
+        });
+        std::string result;
+        for (int stop = 0; stop < 5; ++stop) {
+            const auto at = stops.wait();
+            if (!at) { result += "<no stop>"; break; }
+            auto seen = parked_read(dbg, [&] { return read_stack(dbg); });
+            if (seen) {
+                for (size_t i = 0; i < seen->frames.size(); ++i) {
+                    result += (i ? " " : "") + seen->frames[i].name + ":" + std::to_string(seen->frames[i].line) + "(";
+                    for (size_t j = 0; j < seen->locals[i].size(); ++j) { result += (j ? "," : "") + seen->locals[i][j].name; }
+                    result += ")";
+                }
+            }
+            result += " | ";
+            dbg.resume();
+        }
+        dbg.detach();
+        script.join();
+        return result + script_error;
+    }
+
     // a reserved word naming a method or a field is a member like any other: the frame names it, its reads show in the locals
     void keyword_named_members_in_frames_and_locals(jai::backend_type type) {
         auto eng = make_backend_engine(type);
@@ -1024,6 +1073,14 @@ public:
         });
         test("vm_stack_trace_lists_every_frame_with_its_locals", [this]() {
             stack_trace_lists_every_frame_with_its_locals(jai::backend_type::vm);
+        });
+        test("a_construction_stops_in_each_level_with_its_frames", [this]() {
+            // a base level's frame stands alone above the construction's caller; the vm lists a level where its field initializers and
+            // initializer-list arguments run, without the constructor's parameters there (and no locals for hook's raw frame)
+            check_eq(std::string("hook:2(v) <script>:16() | hook:2(v) <script>:16() | A:7(x) <script>:16() | hook:2(v) <script>:16() | B:13(y) <script>:16() | "),
+                     construction_stops(jai::backend_type::interpreter), "interpreter");
+            check_eq(std::string("hook:2() B:12(y) <script>:16() | hook:2() A:5() <script>:16() | A:7(x) <script>:16() | hook:2() B:11(y) <script>:16() | B:13(y) <script>:16() | "),
+                     construction_stops(jai::backend_type::vm), "vm");
         });
         test("keyword_named_members_in_frames_and_locals", [this]() {
             keyword_named_members_in_frames_and_locals(jai::backend_type::interpreter);

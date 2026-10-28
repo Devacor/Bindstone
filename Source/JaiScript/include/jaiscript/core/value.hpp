@@ -116,6 +116,11 @@ namespace detail {
         return reinterpret_cast<control_block_base*>(reinterpret_cast<unsigned char*>(const_cast<class_instance*>(instance)) - k_instance_cb_offset);
     }
     void release_last_instance(class_instance* instance) noexcept;
+    // An instance's type name: the engine's interned text for its type id (empty without an engine or an id)
+    std::string_view instance_type_name(engine* eng, uint64_t id) noexcept;
+#ifndef NDEBUG
+    void check_instance_type_identity(engine* eng, std::string_view name, uint64_t id) noexcept;
+#endif
     inline void retain_instance(class_instance* instance) noexcept { instance_control_block(instance)->add_strong(); }
     inline void release_instance(class_instance* instance) noexcept {
         if (instance_control_block(instance)->drop_strong() == 0) { release_last_instance(instance); }
@@ -2142,9 +2147,21 @@ namespace detail {
         struct host_holder;
         struct object_holder {
         public:
-            std::string_view type_name() const noexcept { return type_name_; }
+            // an instance names its type by id alone; a host holder keeps the name, since a C++ type may have no id
+            std::string_view type_name() const noexcept {
+                return kind_ == k_instance ? detail::instance_type_name(owner_, type_id_) : static_cast<const host_holder*>(this)->type_name_;
+            }
             uint64_t type_id() const noexcept { return type_id_; }
-            void set_type(std::string_view name, uint64_t id) noexcept { type_name_ = name; type_id_ = id; }
+            void set_type(std::string_view name, uint64_t id) noexcept {
+                type_id_ = id;
+                if (kind_ != k_instance) {
+                    static_cast<host_holder*>(this)->type_name_ = name;
+                } else {
+#ifndef NDEBUG
+                    detail::check_instance_type_identity(owner_, name, id);
+#endif
+                }
+            }
             engine* owner() const noexcept { return owner_; }
             void set_owner(engine* eng) noexcept { owner_ = eng; }
             bool is_instance() const noexcept { return kind_ == k_instance; }
@@ -2185,19 +2202,19 @@ namespace detail {
             static void last_release(object_holder* holder, detail::control_block_base* cb) noexcept;
         protected:
             object_holder() = default;
-            object_holder(uint8_t kind, std::string_view name, engine* eng) noexcept : type_name_(name), owner_(eng), kind_(kind) {}
+            object_holder(uint8_t kind, engine* eng) noexcept : owner_(eng), kind_(kind) {}
             object_holder(const object_holder&) = delete;
             object_holder& operator=(const object_holder&) = delete;
             ~object_holder() = default;
 
-            std::string_view type_name_;      // the type's name: the engine's interned text or a literal (never an owned string)
-            uint64_t type_id_ = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
+            uint64_t type_id_ = UINT64_MAX;  // the type name's interned id (UINT64_MAX = not set)
             engine* owner_ = nullptr;   // the engine that made this object: copies and class lookups run against it
             uint8_t kind_ = k_host;
         };
         // A bound C++ object's holder: the object (owned, or bound by address), and the non-owning forms' anchors
         struct host_holder : object_holder {
             host_holder() = default;
+            std::string_view type_name_;   // the type's name: the engine's interned text or a literal (never an owned string)
             std::shared_ptr<void> data;
             bool is_coroutine_handle = false;
             void* bound_ptr = nullptr;

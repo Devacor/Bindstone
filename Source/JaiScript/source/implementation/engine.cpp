@@ -348,7 +348,7 @@ static int object_param_cost(
     std::optional<std::string_view> argClassName;
     if (instance) {
         argClassDef = instance->get_class_definition();
-        argClassName = instance->get_class_name();
+        if (!argClassDef) { argClassName = instance->get_class_name(); }
     } else {
         // cpp_bound / raw C++ holders carry the registered name on the holder
         auto holder = arg.get_object_holder();

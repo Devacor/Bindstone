@@ -4563,7 +4563,7 @@ script_value parallel_object_borrow(const class_instance& source, type_info_ptr 
 		const auto* native_holder = native ? native->peek_object_holder() : nullptr;
 		if (cd && native_holder && (native_holder->holds_object() || native_holder->bound_object())) {
 			// the worker's own instance and holders over the same C++ object: host members run on it, never on the shared handle
-			auto instance = class_instance::make(cd->interned_name(), &eng);
+			auto instance = class_instance::make(cd->interned_name_id(), &eng);
 			instance->set_class_definition(cd);
 			instance->set_native_view(native_holder->holds_object()
 				? script_value::make_cpp_object(native_holder->type_name(), native_holder->type_id(), native_holder->host_object(), &eng)

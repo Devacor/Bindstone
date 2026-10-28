@@ -985,6 +985,17 @@ void release_last_instance(class_instance* instance) noexcept {
     JAI_SP_CENSUS_FREED(instance);
     strong_last_release<class_instance>::run(instance, cb_from_object(instance));
 }
+
+std::string_view instance_type_name(engine* eng, uint64_t id) noexcept {
+    return eng && id != UINT64_MAX ? eng->get_symbolizer()->get_string(id) : std::string_view();
+}
+
+#ifndef NDEBUG
+void check_instance_type_identity(engine* eng, std::string_view name, uint64_t id) noexcept {
+    const bool unnamed = id == UINT64_MAX || !eng;
+    assert((unnamed ? name.empty() : eng->get_symbolizer()->get_string(id) == name) && "an instance's type id names its type name");
+}
+#endif
 }
 
 script_value script_value::make_class_object(const class_definition& cd, strong_ptr<class_instance> data, engine* eng) {

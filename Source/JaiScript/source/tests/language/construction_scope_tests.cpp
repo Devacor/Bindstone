@@ -1,7 +1,7 @@
-// A construction runs one activation per constructor, as C++ does: each base in declaration order, then the level's field
-// initializers and body. What a level's initializer-list arguments and field initializers see: `this`, its constructor's parameters
-// by name as bound, then the definition environment. The vm runs them in one frame per level with the parameters in slots, the
-// interpreter in the level's environment; every case holds both backends to one result, and to the stated value where it is fixed.
+// A construction runs one activation per constructor, as C++ does: its parameters bound, each base in declaration order, then the
+// level's field initializers and body, all in that activation. What a level's initializer-list arguments and field initializers
+// see: `this`, its constructor's parameters by name as bound, then the definition environment. Every case holds both backends to one
+// result, and to the stated value where it is fixed.
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
@@ -40,12 +40,14 @@ public:
 			     "5 8", "the class's parameters at its own level, the argument at the base");
 		});
 
-		test("an_omitted_parameter_is_absent_as_in_the_environment", [this]() {
-			both("int n = 40; class C { int x = n; C(int n = 5) {} } to_string(C().x) + \" \" + to_string(C(9).x);", "", "a defaulted parameter");
+		test("an_omitted_parameter_is_bound_to_its_default", [this]() {
+			both("int n = 40; class C { int x = n; C(int n = 5) {} } to_string(C().x) + \" \" + to_string(C(9).x);", "5 9", "a defaulted parameter");
+			both("int calls = 0; int next() { return ++calls; } class C { int x = n; C(int n = next()) { x = x * 10 + n; } } C().x * 100 + calls;", "1101",
+			     "a default evaluates once, for the whole activation");
 		});
 
-		test("a_base_level_sees_the_argument_as_it_was_passed", [this]() {
-			both("class Base { var f = x * 2; Base(float x) {} } class D : Base { D() : super(3) {} } to_string(D().f);", "", "an int argument to a float parameter");
+		test("a_base_level_sees_its_parameter_as_bound", [this]() {
+			both("class Base { var f = x * 2; Base(float x) {} } class D : Base { D() : super(3) {} } to_string(D().f);", "6.0", "an int argument to a float parameter");
 			both("class P { int a = 0; P(int x) { a = x; } } class Q : P { int b = k; Q(int k) : super(k * 10) {} } auto q = Q(2); to_string(q.a) + \" \" + to_string(q.b);",
 			     "20 2", "each level's own parameters");
 		});
@@ -129,6 +131,24 @@ public:
 			     "Cannot pass non-lvalue to reference parameter", "the class's own constructor");
 			both("int f() { return 3; } class S { S(int& x) { x = x * 2; } } class U : S { U() : super(f()) {} } string s = \"made\"; try { U(); } catch (e) { s = to_string(e); } s;",
 			     "Cannot pass non-lvalue to reference parameter", "a base level's constructor");
+		});
+
+		test("every_construction_shape_agrees_across_the_backends", [this]() {
+			const std::string note = "string log = \"\"; int note(string s, int v) { log = log + s + \";\"; return v; } ";
+			const char* shapes[] = {
+				"class P { int p = note(\"P\", 1); } class Q : P { int q = note(\"Q\", 2); } class R : Q { int r = note(\"R\", 3); } R x = R(); log + x.p + x.q + x.r;",
+				"class A { int a = 0; A(int v) { a = v; note(\"A\" + v, 0); } A() : this(7) { note(\"A()\", 0); } } class B : A { B() : super() { note(\"B\", 0); } } B x = B(); log + x.a;",
+				"class L { int l = note(\"L\", 1); } class R { int r = 0; R(int v) { r = v; note(\"R\", 0); } } class M : L, R { int m = note(\"M\", 3); M() : R(5) {} } M x = M(); log + x.l + x.r + x.m;",
+				"class V { int v = id(); int id() { return 1; } V() {} } class W : V { int w = id(); int id() override { return 2; } W() {} } W x = W(); to_string(x.v) + x.w;",
+				"class A { int a = 1; A() {} } class B : A { int b = a + 1; B() : super() {} } class C : B { int c = a + b; C() {} } C x = C(); to_string(x.a) + x.b + x.c;",
+				"class Inner { int i = note(\"I\", 4); Inner() {} } class Outer { Inner held = Inner(); int o = note(\"O\", 5); Outer() { note(\"O()\", 0); } } Outer x = Outer(); log + x.held.i + x.o;",
+				"class Base { int seen = 0; Base() { Base other = Base(1); seen = other.seen + 1; } Base(int v) { seen = v * 10; } } Base x = Base(); x.seen;",
+				"class T { int t = 0; T(int a, int b = 4) { t = a * 10 + b; } } class U : T { U(int k) : super(k) {} } U(4).t;",
+				"class S { array<int> items = [1]; S(array<int> more) { more.push(2); items.push(more.size()); } } class D : S { D(array<int> a) : super(a) { a.push(7); } } array<int> keep = [5]; D x = D(keep); to_string(x.items) + to_string(keep);",
+				"class K { var f = [this](int q) { return q + base; }; int base = 3; K() {} } K().f(4);",
+				"class N { int n = 0; N(int v) { n = v; } } class O : N { O() : super(note(\"arg\", 6)) { note(\"O\", 0); } } O x = O(); log + x.n;",
+			};
+			for (const char* shape : shapes) { both(note + shape, "", shape); }
 		});
 
 		test("an_initializer_runs_against_the_class_under_construction", [this]() {

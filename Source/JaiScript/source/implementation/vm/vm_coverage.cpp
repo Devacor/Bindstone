@@ -99,6 +99,7 @@ namespace {
 		case opcode::op_scope_push: case opcode::op_scope_pop: case opcode::op_scope_pop_n: case opcode::op_kill_slot: case opcode::op_try_push: case opcode::op_try_pop: case opcode::op_catch_end:
 		case opcode::op_throw: case opcode::op_yield:
 			return fam::scope;
+		case opcode::op_ctor_base: case opcode::op_ctor_delegate: case opcode::op_ctor_done: case opcode::op_ctor_literals: case opcode::op_ctor_scope:
 		case opcode::op_func_decl: case opcode::op_class_decl: case opcode::op_namespace_decl: case opcode::op_enum_decl: case opcode::op_extern_decl: case opcode::op_field_init:
 		case opcode::op_include: case opcode::op_import: case opcode::op_parallel_for: case opcode::op_error: case opcode::op_const_guard:
 			return fam::decl;

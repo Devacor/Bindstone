@@ -301,6 +301,11 @@ namespace {
 				if (ins.b != 0) { JAI_ENV_TRIP(ins.op); return true; }
 				break;
 			case opcode::op_field_init:   // a field initializer's store reaches this, never the env
+			case opcode::op_ctor_base:    // a constructor prologue's steps reach this and the stack, never the env
+			case opcode::op_ctor_delegate:
+			case opcode::op_ctor_done:
+			case opcode::op_ctor_literals:
+			case opcode::op_ctor_scope:
 				break;
 			case opcode::op_binary_fused_store:
 			case opcode::op_index_fused:
@@ -340,6 +345,11 @@ namespace {
 	bool method_body_env_reusable(const chunk& body) {
 		for (const auto& ins : body.code) {
 			switch (ins.op) {
+			case opcode::op_ctor_base:
+			case opcode::op_ctor_delegate:
+			case opcode::op_ctor_done:
+			case opcode::op_ctor_literals:
+			case opcode::op_ctor_scope:
 			case opcode::op_const:
 			case opcode::op_const_folded:
 			case opcode::op_null:
@@ -1006,6 +1016,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 		++capture_count;
 	}
 	if (capture_count > 0) { emit(opcode::op_bind_captures, static_cast<uint32_t>(capture_first), static_cast<uint32_t>(capture_count)); }
+	if (prologue_) { compile_constructor_prologue(*prologue_); }
 
 	for (const auto& decl : body->declarations) {
 		compile_declaration(decl, false);
@@ -1150,52 +1161,37 @@ std::shared_ptr<chunk> vm_compiler::compile_standalone_expression(const expressi
 	return result;
 }
 
-std::shared_ptr<chunk> vm_compiler::compile_construction(std::string_view name, const std::unordered_map<uint64_t, uint32_t>& name_slots, size_t slot_count,
-                                                       const std::vector<expression_ptr>& arguments, const std::vector<construction_fields>& fields) {
+std::shared_ptr<chunk> vm_compiler::compile_level_initializers(std::string_view name, const std::vector<std::pair<uint64_t, expression_ptr>>& initializers) {
 	JAI_CENSUS_F(compile_chunk, 2);
 	open_loops_.clear();
 	loop_marks_.clear();
 	auto result = std::make_shared<chunk>();
 	chunk_ = result.get();
 	chunk_->function_name = std::string(name);
-	chunk_->local_count = slot_count;
-	chunk_->first_temp_slot = slot_count;
 	chunk_->is_function_body = true;
+	chunk_->level_initializers = true;
 	loops_.clear();
 	scope_depth_ = 0;
 	current_stmt_ = nullptr;
 	temps_active_ = true;
-	temp_next_ = slot_count;
-	temp_high_ = slot_count;
+	temp_next_ = 0;
+	temp_high_ = 0;
 	temp_symbol_index_ = k_invalid_u32;
 	subscript_guards_.clear();
 	callable_ = {};
 	callable_.active = true;
-	for (const auto& [id, slot] : name_slots) { callable_.declared.insert(id); }
 	callable_body_ = nullptr;
 	frame_param_kinds_.clear();
 	frame_eligible_ = false;
 	nested_land_memo_.clear();
-	name_slots_ = &name_slots;
-	for (const auto& argument : arguments) {
-		chunk_->construction_segments.emplace_back(argument.get(), static_cast<uint32_t>(chunk_->code.size()));
-		current_stmt_ = argument.get();
-		chunk_->nodes.push_back(argument);
-		compile_expression(argument);
-		emit(opcode::op_halt);
+	for (const auto& [field_id, initializer] : initializers) {
+		current_stmt_ = initializer.get();
+		chunk_->nodes.push_back(initializer);
+		compile_expression(initializer);
+		chunk_->field_inits.emplace_back(field_id, initializer.get());
+		emit(opcode::op_field_init, static_cast<uint32_t>(chunk_->field_inits.size() - 1));
 	}
-	for (const auto& level : fields) {
-		chunk_->construction_segments.emplace_back(level.level, static_cast<uint32_t>(chunk_->code.size()));
-		for (const auto& [field_id, initializer] : level.initializers) {
-			current_stmt_ = initializer.get();
-			chunk_->nodes.push_back(initializer);
-			compile_expression(initializer);
-			chunk_->field_inits.emplace_back(field_id, initializer.get());
-			emit(opcode::op_field_init, static_cast<uint32_t>(chunk_->field_inits.size() - 1));
-		}
-		emit(opcode::op_halt);
-	}
-	name_slots_ = nullptr;
+	emit(opcode::op_halt);
 	result->needs_frame_env = reference_ || body_needs_frame_env(*result);
 	result->method_env_reusable = !reference_ && (!result->needs_frame_env || method_body_env_reusable(*result));
 	if (temp_high_ > result->local_count) { result->local_count = temp_high_; }
@@ -1203,6 +1199,64 @@ std::shared_ptr<chunk> vm_compiler::compile_construction(std::string_view name, 
 	current_stmt_ = nullptr;
 	chunk_ = nullptr;
 	return result;
+}
+
+// Each step's arguments evaluate in the constructor's frame, taken as a call's are, and its op constructs the class (a base's
+// constructor frame answering as the base); the level's own fields follow, each value stored into this's field
+void vm_compiler::compile_constructor_prologue(const constructor_prologue& prologue) {
+	name_slots_ = &prologue.name_slots;
+	if (prologue.evaluates) { emit(opcode::op_ctor_scope, static_cast<uint32_t>(prologue.name_slots.size())); }
+	const uint32_t first_step = static_cast<uint32_t>(chunk_->ctor_steps.size());
+	for (const auto& step : prologue.steps) { chunk_->ctor_steps.push_back(step); }
+	for (size_t i = 0; i < prologue.steps.size(); ++i) {
+		const uint32_t step = first_step + static_cast<uint32_t>(i);
+		const constructor_initializer* init = prologue.initializers[i];
+		uint32_t site_index = k_invalid_u32;
+		const uint32_t argc = init ? static_cast<uint32_t>(init->arguments.size()) : 0;
+		if (argc == 0 && prologue.origin) {
+			current_stmt_ = prologue.origin.get();
+			chunk_->nodes.push_back(prologue.origin);
+		}
+		if (init && !init->arguments.empty()) {
+			std::vector<uint8_t> captures;
+			detail::transient_read_marker::stamp_arg_captures(init->arguments, captures);
+			call_site site;
+			const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
+			for (size_t k = 0; k < init->arguments.size(); ++k) {
+				const auto& arg = init->arguments[k];
+				current_stmt_ = arg.get();
+				chunk_->nodes.push_back(arg);
+				record_argument_source(site, arg, init->arguments.size());
+				compile_expression(arg);
+				emit_arg_capture(captures, k, arg, step, capture_form_ctor);
+			}
+			chunk_->call_arg_zones.emplace_back(args_begin, static_cast<uint32_t>(chunk_->code.size()));
+			chunk_->call_sites.push_back(std::move(site));
+			site_index = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
+		}
+		emit(prologue.delegation ? opcode::op_ctor_delegate : opcode::op_ctor_base, step, argc, site_index);
+		emit(opcode::op_pop);
+		emit(opcode::op_ctor_done, step);
+	}
+	if (!prologue.delegation) {
+		if (prologue.literal_fields) {
+			chunk::ctor_step own;
+			own.level = prologue.level;
+			own.target = prologue.level;
+			chunk_->ctor_steps.push_back(std::move(own));
+			emit(opcode::op_ctor_literals, static_cast<uint32_t>(chunk_->ctor_steps.size() - 1));
+		} else {
+			for (const auto& [field_id, initializer] : prologue.fields) {
+				current_stmt_ = initializer.get();
+				chunk_->nodes.push_back(initializer);
+				compile_expression(initializer);
+				chunk_->field_inits.emplace_back(field_id, initializer.get());
+				emit(opcode::op_field_init, static_cast<uint32_t>(chunk_->field_inits.size() - 1));
+			}
+		}
+	}
+	current_stmt_ = nullptr;
+	name_slots_ = nullptr;
 }
 
 std::shared_ptr<chunk> vm_compiler::compile_standalone_declaration(const declaration_ptr& decl) {
@@ -8473,9 +8527,15 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 	proto.default_capture = static_cast<uint8_t>(expr->default_capture);
 
 	uint64_t this_id = symbolizer_->get_this_id();
+	// a constructor prologue's lambda (a field initializer's, parsed in the class) captures the constructor's parameters by name
+	auto prologue_slot = [&](uint64_t id, size_t slot) -> size_t {
+		if (slot != SIZE_MAX || !name_slots_) { return slot; }
+		auto named = name_slots_->find(id);
+		return named != name_slots_->end() ? named->second : slot;
+	};
 	for (const auto& cap : expr->captures) {
 		uint64_t id = cap.symbol_id != UINT64_MAX ? cap.symbol_id : symbolizer_->intern(cap.name);
-		proto.captures.push_back({id, cap.by_reference, cap.outer_slot, cap.initializer != nullptr});
+		proto.captures.push_back({id, cap.by_reference, prologue_slot(id, cap.outer_slot), cap.initializer != nullptr});
 		if (id == this_id) proto.captures_this = true;
 	}
 	for (const auto& cap : expr->captures) {
@@ -8503,10 +8563,11 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 		body_walker walker;
 		walker.symbolizer = symbolizer_;
 		walker.on_identifier = [&](identifier_expr* ident) {
-			if (ident->slot_index == SIZE_MAX) return;
+			const size_t slot = prologue_slot(ident->symbol_id, ident->slot_index);
+			if (slot == SIZE_MAX) return;
 			if (declared.count(ident->symbol_id)) return;
 			if (seen.insert(ident->symbol_id).second) {
-				proto.outer_slot_plan.emplace_back(ident->symbol_id, ident->slot_index);
+				proto.outer_slot_plan.emplace_back(ident->symbol_id, slot);
 			}
 		};
 		walker.stmt(proto.body);

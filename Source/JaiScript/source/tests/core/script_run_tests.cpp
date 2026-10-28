@@ -196,6 +196,36 @@ public:
             check_eq(std::string("4 2 4"), run.result().value().to_string(), "the value" + be);
         });
 
+        test("runs_suspended_mid_construction_interleave", [this]() {
+            // each run's constructions are its own: one suspended inside a base's constructor, its field initializer or its
+            // initializer-list argument while another constructs (and suspends) meanwhile, a throw destroying only what its own
+            // construction finished
+            run_host h;
+            const std::string be = backend_label(*h.eng);
+            h.eng->execute(R"(
+                string log = "";
+                int pause(int v) { sleep(0.1); return v; }
+                class A { int a = pause(1); A(int x) { sleep(0.1); a += x; } ~A() { log += "~A" + to_string(a); } }
+                class B : A { int b = pause(2); B(int y) : super(pause(y)) { sleep(0.1); b += y; } }
+                class Z { Z() { throw "z"; } }
+                class C : B, Z { int c = 0; C() : super(pause(5)), Z() { c = a + b; } }
+                class P { int p = 0; P() { sleep(0.1); sleep(0.1); p = 8; } ~P() { log += "~P"; } }
+                class Q : P { int q = 9; Q() : super() {} })");
+            script_run first = h.eng->start("string r = \"\"; try { C x = C(); } catch (e) { r = e; } r + \" \" + log;");
+            script_run second = h.eng->start("Q y = Q(); to_string(y.p) + \" \" + to_string(y.q);");
+            int steps = 0;
+            while ((!first.done() || !second.done()) && steps < 64) {
+                h.clock.advance(0.1);
+                if (!first.done()) { first.resume(); }
+                if (!second.done()) { second.resume(); }
+                ++steps;
+            }
+            check_true(first.state() == script_run::status::completed && second.state() == script_run::status::completed, "both completed" + be);
+            check_true(h.clock.blocking_sleeps.empty(), "nothing blocked" + be);
+            if (first.state() == script_run::status::completed) { check_eq(std::string("z ~A6"), first.result().value().to_string(), "the first" + be); }
+            if (second.state() == script_run::status::completed) { check_eq(std::string("8 9"), second.result().value().to_string(), "the second" + be); }
+        });
+
         test("pinned_sleeps_block_and_warn_once_per_run", [this]() {
             run_host h;
             const std::string be = backend_label(*h.eng);

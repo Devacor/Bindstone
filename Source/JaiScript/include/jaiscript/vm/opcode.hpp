@@ -74,7 +74,7 @@ namespace jai::vm {
         op_namespace_decl,  // a=node index (namespace_decl)
         op_enum_decl,       // a=node index (enum_decl)
         op_extern_decl,     // a=node index (extern_decl): records the name (environment::note_extern), declares nothing.
-        op_field_init,      // a=chunk::field_inits index: pops a level's field initializer value into this's field (vm_compiler::compile_field_initializers)
+        op_field_init,      // a=chunk::field_inits index: pops a level's field initializer value into this's field (a constructor's prologue, vm_compiler::compile_level_initializers)
         op_decl_keep,       // a=node index (a program-scope variable_decl written without an initializer, or an inline one); pushes bool: a same-unit re-run keeps the variable (detail::redeclaration_keeps_value), an inline one finds its variable
         op_decl_share,      // a=node index (an inline variable_decl just declared): its cell is shared (environment::share)
 
@@ -332,9 +332,15 @@ namespace jai::vm {
         op_get_member_path, // a=nodes index (the chain's outer member_expr), b=member_path_protos index: `a.b.c`, `grid[y][x].cost` read through, each inner link borrowed where it lives, the final value pushed as op_get_member pushes it
         op_switch_table,    // b=switch_tables index: an int subject jumps through the table to its case's body; anything else runs the case tests that follow. In a cell copy a=the subject's cell, c=the first of the loop's switch_targets (per case, then no match)
         op_get_member_this, // a=nodes index (member_expr), b=symbols index of its object, c=the object's this-field slot + 1: `f.x` over a member-class body's bare field f, read where the field lives; a moved layout runs the LOAD and GET_MEMBER it stands for
+        // A constructor's prologue (vm_compiler::constructor_prologue), a=chunk::ctor_steps index
+        op_ctor_base,       // b=argc, c=call site (k_invalid_u32: none): constructs the frame's base `a` from the argc arguments on top (its constructor's frame pushed in the loop, answering as the base; a host base or a default-constructed one here); pushes the call's result
+        op_ctor_delegate,   // b=argc, c=call site: the level's constructor the arguments pick, its frame pushed in the loop; pushes the call's result
+        op_ctor_done,       // the step's class is constructed: a throw from here on destroys it
+        op_ctor_literals,   // the level's literal field initializers stamped, unless nothing ran since create_instance seeded them
+        op_ctor_scope,      // a=the constructor's parameter count: a prologue that evaluates charges what the interpreter's scope for it does
     };
     inline constexpr size_t k_opcode_space = 512;   // tables indexed by opcode (the profile's histograms) are this long
-    static_assert(static_cast<size_t>(opcode::op_get_member_this) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
+    static_assert(static_cast<size_t>(opcode::op_ctor_scope) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
     static_assert(static_cast<uint32_t>(opcode::op_d_jne) < 256 && static_cast<uint32_t>(opcode::op_t_load) < 256, "a cell instruction packs a typed opcode above k_cell_op_shift in 8 bits");
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -342,6 +348,7 @@ namespace jai::vm {
     inline constexpr uint32_t capture_form_method = 2;   // the receiver below the arguments, the member from the call site
     inline constexpr uint32_t capture_form_new = 3;      // the class's constructor, looked up by name (op_new)
     inline constexpr uint32_t capture_form_opaque = 4;   // a builtin or intrinsic: the value is dereferenced
+    inline constexpr uint32_t capture_form_ctor = 5;     // a constructor prologue's base or delegation: its class's constructors (where = chunk::ctor_steps index)
     inline constexpr uint32_t capture_place_shift = 5;   // above the form: the argument's chunk node + 1 when it names a place (0 = none)
     inline constexpr uint32_t k_cell_op_shift = 24;
     inline constexpr uint32_t k_cell_index_mask = (1u << k_cell_op_shift) - 1;
@@ -707,6 +714,11 @@ namespace jai::vm {
             case opcode::op_cells_resume: return "CELLS_RESUME";
             case opcode::op_ref_target_store: return "REF_TARGET_STORE";
             case opcode::op_get_member_this: return "GET_MEMBER_THIS";
+            case opcode::op_ctor_base: return "CTOR_BASE";
+            case opcode::op_ctor_delegate: return "CTOR_DELEGATE";
+            case opcode::op_ctor_done: return "CTOR_DONE";
+            case opcode::op_ctor_literals: return "CTOR_LITERALS";
+            case opcode::op_ctor_scope: return "CTOR_SCOPE";
             case opcode::op_index_compound_operand: return "INDEX_COMPOUND_OPERAND";
             case opcode::op_halt: return "HALT";
             case opcode::op_d_add: return "D_ADD";

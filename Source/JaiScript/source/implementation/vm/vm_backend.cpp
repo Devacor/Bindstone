@@ -933,6 +933,7 @@ struct vm_backend::vm_run_state : backend_run_state {
 	const frame* debug_last_frame = nullptr;
 	const chunk* debug_last_code = nullptr;
 	size_t debug_last_depth = SIZE_MAX;
+	std::vector<ctor_context> ctor_contexts;
 };
 
 std::unique_ptr<backend_run_state> vm_backend::make_run_state() {
@@ -999,6 +1000,7 @@ void vm_backend::swap_run_state(backend_run_state& a_state) noexcept {
 	swap(debug_last_frame_, s.debug_last_frame);
 	swap(debug_last_code_, s.debug_last_code);
 	swap(debug_last_depth_, s.debug_last_depth);
+	swap(ctor_contexts_, s.ctor_contexts);
 	raw_epoch_advance();   // the other side's code ran in between: no raw call plan outlives a switch
 	sync_unit();
 	s.note_parked();
@@ -1054,6 +1056,7 @@ void vm_backend::reset_run_state(backend_run_state& a_state) {
 	s.debug_last_frame = nullptr;
 	s.debug_last_code = nullptr;
 	s.debug_last_depth = SIZE_MAX;
+	s.ctor_contexts.clear();
 	s.note_parked();
 }
 
@@ -13609,6 +13612,9 @@ op_status vm_backend::capture_arg(frame& f, const vm_instruction& ins) {
 			}
 			break;
 		}
+		case capture_form_ctor:
+			b = detail::constructor_binding(f.code->ctor_steps[ins.a].target, k);
+			break;
 		case capture_form_new: {
 			const auto* expr = static_cast<const new_expr*>(f.code->nodes[ins.a].get());
 			const type_info* t = !expr->type ? nullptr : expr->type->base_type == script_value_type::jai_shared_ptr_type ? expr->type->element_type().get() : expr->type.get();
@@ -15591,6 +15597,10 @@ op_status vm_backend::exec_field_init(frame& f, const vm_instruction& ins) {
 	auto* instance = holder && holder->is_instance() ? holder->unchecked_instance() : nullptr;
 	if (!instance) {
 		return raise_(make_error_code(runtime_error_code::this_outside_method), "'this' can only be used inside methods");
+	}
+	if (!f.code->level_initializers) {   // a constructor's prologue: a throwing store is the frame's exception
+		instance->set_field(field_id, initializer_store_value(std::move(value), initializer));
+		return {};
 	}
 	try {
 		instance->set_field(field_id, initializer_store_value(std::move(value), initializer));
@@ -19922,8 +19932,7 @@ checked_result<void> vm_backend::run_level_initializers(class_instance& instance
 			region_compile_guard = std::unique_lock<std::mutex>(engine_->parallel_compile_mutex());
 		}
 		arm_listing();
-		static const std::unordered_map<uint64_t, uint32_t> no_slots;
-		auto code = compiler_.compile_construction(class_def.interned_name(), no_slots, 0, {}, {vm_compiler::construction_fields{&class_def, compiled_initializers}});
+		auto code = compiler_.compile_level_initializers(class_def.interned_name(), compiled_initializers);
 		note_compiled(*code);
 		entry.fn = std::make_unique<script_defined_function>(class_def.interned_name(), std::vector<parameter>{}, nullptr,
 		                                                     std::make_shared<block_stmt>(compiled_initializers.empty() ? source_location{} : compiled_initializers.front().second->location, std::vector<declaration_ptr>{}), nullptr, 0);
@@ -19948,236 +19957,6 @@ checked_result<void> vm_backend::run_level_initializers(class_instance& instance
 		return call_script_function(*entry.fn, no_arguments, nullptr, nullptr, nullptr, &method);
 	}();
 	pending_site_ctx_ = pending;
-	if (construction().field_init_exception) [[unlikely]] {
-		std::exception_ptr thrown = std::move(construction().field_init_exception);
-		construction().field_init_exception = nullptr;
-		std::rethrow_exception(thrown);
-	}
-	if (!ran) { return ran.error_value(); }
-	return {};
-}
-
-// A construction chunk compiles what its frame can run alone: no closure (its captures resolve by name in the environment), no
-// yield, include or import
-static bool construction_frame_expression(const expression* e) {
-	if (!e) { return true; }
-	switch (e->get_type()) {
-		case node_type::lambda_expr: case node_type::yield_expr: case node_type::include_expr: case node_type::import_expr: return false;
-		default: break;
-	}
-	bool ok = true;
-	detail::for_each_child_expression(e, [&](const expression* child) { if (ok && !construction_frame_expression(child)) { ok = false; } });
-	return ok;
-}
-
-// The levels whose field initializers a level's frame runs: a constructor's level its own, a default-constructed base its own and
-// its bases', bases first, each once (evaluate_field_initializers' order)
-template <class F>
-static void for_each_construction_level(const script_class_definition& level, const function_decl* ctor, F&& f, const script_class_definition** seen, size_t& seen_count, int depth = 0) {
-	if (ctor) { f(level); return; }
-	if (depth > 64) { return; }
-	for (const auto& parent : level.get_parent_classes()) {
-		if (parent && parent->is_script_class()) {
-			for_each_construction_level(static_cast<const script_class_definition&>(*parent), nullptr, f, seen, seen_count, depth + 1);
-		}
-	}
-	for (size_t i = 0; i < seen_count; ++i) { if (seen[i] == &level) { return; } }
-	if (seen_count < 64) { seen[seen_count++] = &level; }
-	f(level);
-}
-
-// every expression the plan compiled, in its order (a level's fields after a null marker): the plan is current while they match
-template <class F>
-static void for_each_construction_expression(const script_class_definition& level, const function_decl* ctor, F&& f) {
-	if (ctor) {
-		for (const auto& initializer : const_cast<script_class_definition&>(level).effective_initializers(*ctor)) {
-			for (const auto& argument : initializer.arguments) { f(argument.get()); }
-		}
-	}
-	const script_class_definition* seen[64];
-	size_t seen_count = 0;
-	for_each_construction_level(level, ctor, [&](const script_class_definition& fields_level) {
-		f(nullptr);
-		for (const auto& [field_id, initializer] : fields_level.get_field_initializer_asts()) { if (initializer) { f(initializer.get()); } }
-	}, seen, seen_count);
-}
-
-const std::shared_ptr<chunk>* vm_backend::construction_chunk(const std::shared_ptr<environment>& definition_env, script_class_definition& level, const function_decl* ctor, size_t argc) {
-	if (!definition_env || (ctor && ctor->is_coroutine)) { return nullptr; }
-	const uint64_t class_epoch = engine_ ? engine_->class_definition_epoch() : 0;
-	const uint64_t unit = current_unit().id;
-	construction_memo& memo = construction().memo[((reinterpret_cast<uintptr_t>(&level) >> 4) ^ (reinterpret_cast<uintptr_t>(ctor) >> 4) ^ argc) & (k_construction_memo_size - 1)];
-	if (memo.level == &level && memo.ctor == ctor && memo.argc == argc && memo.unit == unit && memo.class_epoch == class_epoch) {
-		return memo.plan->code ? &memo.plan->code : nullptr;
-	}
-	construction_plan& plan = construction().plans[construction_key{&level, ctor, argc}];
-	memo = construction_memo{&level, ctor, argc, unit, class_epoch, &plan};
-	if (plan.unit == current_unit().id) {
-		size_t at = 0;
-		bool same = true;
-		for_each_construction_expression(level, ctor, [&](const expression* e) {
-			if (!same) { return; }
-			if (at >= plan.asts.size() || plan.asts[at] != e) { same = false; return; }
-			++at;
-		});
-		if (same && at == plan.asts.size()) { return plan.code ? &plan.code : nullptr; }
-	}
-	plan.unit = current_unit().id;
-	plan.asts.clear();
-	plan.code.reset();
-	for_each_construction_expression(level, ctor, [&](const expression* e) { plan.asts.push_back(e); });
-	std::vector<expression_ptr> arguments;
-	if (ctor) {
-		for (const auto& initializer : level.effective_initializers(*ctor)) {
-			for (const auto& argument : initializer.arguments) { arguments.push_back(argument); }
-		}
-	}
-	std::vector<vm_compiler::construction_fields> fields;
-	{
-		const script_class_definition* seen[64];
-		size_t seen_count = 0;
-		for_each_construction_level(level, ctor, [&](const script_class_definition& fields_level) {
-			vm_compiler::construction_fields entry{&fields_level, {}};
-			for (const auto& [field_id, initializer] : fields_level.get_field_initializer_asts()) {
-				if (initializer) { entry.initializers.emplace_back(field_id, initializer); }
-			}
-			fields.push_back(std::move(entry));
-		}, seen, seen_count);
-	}
-	bool eligible = true;
-	std::unordered_map<uint64_t, uint32_t> name_slots;
-	if (ctor) {
-		for (size_t i = 0; i < ctor->parameters.size() && i < argc; ++i) {
-			const parameter& param = ctor->parameters[i];
-			if (param.is_reference || param.binds_capture || param.slot_index != i) { eligible = false; break; }
-			if (param.symbol_id == UINT64_MAX) { param.symbol_id = symbolizer_->intern(param.name); }
-			name_slots.emplace(param.symbol_id, static_cast<uint32_t>(i));
-		}
-	}
-	for (const auto& argument : arguments) { if (eligible && !construction_frame_expression(argument.get())) { eligible = false; } }
-	if (ctor) {
-		// a list whose constructor may bind a T& binds the place its argument names, which the level's environment resolves
-		for (const auto& initializer : level.effective_initializers(*ctor)) {
-			if (eligible && !initializer.arguments.empty() && detail::constructors_take_references(detail::initializer_target(level, initializer))) { eligible = false; }
-		}
-	}
-	for (const auto& entry : fields) {
-		for (const auto& [field_id, initializer] : entry.initializers) { if (eligible && !construction_frame_expression(initializer.get())) { eligible = false; } }
-	}
-	if (!eligible) { return nullptr; }
-	std::unique_lock<std::mutex> region_compile_guard;   // in-region compiles serialize engine-wide (chunk_for_body)
-	if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
-		region_compile_guard = std::unique_lock<std::mutex>(engine_->parallel_compile_mutex());
-	}
-	arm_listing();
-	auto code = compiler_.compile_construction(level.interned_name(), name_slots, std::min(argc, ctor ? ctor->parameters.size() : size_t{0}), arguments, fields);
-	note_compiled(*code);
-	if (code->needs_frame_env) { return nullptr; }
-	plan.code = std::move(code);
-	return &plan.code;
-}
-
-bool vm_backend::open_construction_frame(detail::construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
-                                         script_class_definition* level, const function_decl* ctor, const std::vector<script_value>* args, bool bind_for_parameters) {
-	if (!level) { return false; }
-	const size_t argc = ctor && args ? std::min(args->size(), ctor->parameters.size()) : 0;
-	const std::shared_ptr<chunk>* plan_code = construction_chunk(definition_env, *level, ctor, argc);
-	if (!plan_code) { return false; }
-	const chunk* code = plan_code->get();
-	if (construction().frames_top == construction().frames.size()) { construction().frames.push_back(std::make_unique<construction_frame>()); }
-	construction_frame& cf = *construction().frames[construction().frames_top++];
-	cf.locals = call_frame{};
-	if (!this_box_pool_.empty()) {
-		cf.locals.this_object_ptr = std::move(this_box_pool_.back());
-		this_box_pool_.pop_back();
-	}
-	cf.locals.set_this(this_value);
-	cf.locals.scope_static = level;
-	cf.locals.function_name = level->interned_name();
-	cf.definition_env = definition_env;
-	cf.f = frame{};
-	cf.f.code = const_cast<chunk*>(code);
-	cf.f.pin = *plan_code;
-	cf.f.locals = &cf.locals;
-	cf.f.window_backed = true;
-	cf.window_base = stack_.size();
-	cf.f.window_base = cf.window_base;
-	cf.f.top_level = false;
-	stack_.fill_null_to(cf.window_base + code->local_count, engine_);
-	for (size_t i = 0; i < argc; ++i) {
-		stack_[cf.window_base + i] = bind_for_parameters ? detail::argument_for_binding((*args)[i], detail::parameter_binding(ctor->parameters[i])) : (*args)[i];
-	}
-	cf.f.window_live = static_cast<uint32_t>(argc);
-	if (engine_) { engine_->execution_limits().memory_charge_deferred((1 + argc) * (sizeof(script_value) + 64)); }   // the allowance the level environment's defines charged (environment::define)
-	scope.frame = &cf;
-	return true;
-}
-
-void vm_backend::close_construction_frame(detail::construction_scope& scope) {
-	auto* cf = static_cast<construction_frame*>(scope.frame);
-	scope.frame = nullptr;
-	if (!cf) { return; }
-	if (stack_.size() > cf->window_base) { stack_.truncate(cf->window_base); }   // the parameters die with the level, as its environment did
-	cf->f.window_live = 0;
-	if (cf->locals.this_object_ptr) {
-		{ script_value dying = std::move(*cf->locals.this_object_ptr); }
-		if (this_box_pool_.size() < 32) { this_box_pool_.push_back(std::move(cf->locals.this_object_ptr)); }
-	}
-	cf->f.pin.reset();
-	cf->definition_env.reset();
-	--construction().frames_top;
-}
-
-// One segment of the level's code in its frame, run as a top-level evaluation runs (eval_expression): no call of its own, the
-// caller's unit, the error or the unwinding as the evaluation leaves them
-checked_result<script_value> vm_backend::run_construction_segment(construction_frame& cf, const void* key, bool& found) {
-	found = false;
-	uint32_t ip = 0;
-	for (const auto& [segment, at] : cf.f.code->construction_segments) {
-		if (segment == key) { ip = at; found = true; break; }
-	}
-	if (!found) { return make_null(); }
-	std::shared_ptr<environment> saved_env = std::move(environment_);
-	environment_ = cf.definition_env;
-	bool previous_has_return = has_return_value_;
-	std::optional<script_value> previous_return = std::move(return_value_);
-	has_return_value_ = false;
-	frame& f = cf.f;
-	f.ip = ip;
-	f.stack_base = stack_.size();
-	f.unit = current_unit();
-	struct segment_restore {
-		vm_backend* self; std::shared_ptr<environment>& env; size_t stack_base; size_t pending; bool& had_return; std::optional<script_value>& previous;
-		~segment_restore() {
-			truncate_detached(self->pending_callees_, pending);
-			if (self->stack_.size() > stack_base) { self->stack_.truncate(stack_base); }
-			self->environment_ = std::move(env);
-			self->has_return_value_ = had_return;
-			self->return_value_ = std::move(previous);
-		}
-	} restore{this, saved_env, f.stack_base, pending_callees_.size(), previous_has_return, previous_return};
-	frame_guard guard(this, &f);
-	auto r = run(f);
-	if (!r) { return r.error_value(); }
-	if (stack_.size() > f.stack_base) { return std::move(stack_.back()); }
-	return make_null();
-}
-
-// the field initializers of a level and its script bases in the level's frame, bases first, as evaluate_field_initializers runs them
-checked_result<void> vm_backend::construction_frame_fields(construction_frame& cf, class_instance& instance, script_class_definition& level, bool skip_parent_recursion) {
-	const unit_stamp class_unit = level.unit();
-	unit_override_scope unit_scope(this, &class_unit);
-	if (!skip_parent_recursion) {
-		for (const auto& parent : level.get_parent_classes()) {
-			if (parent && parent->is_script_class()) {
-				auto initialized = construction_frame_fields(cf, instance, static_cast<script_class_definition&>(*parent), false);
-				if (!initialized) { return initialized; }
-			}
-		}
-	}
-	detail::dispatch_level_scope level_dispatch(instance, &level, class_instance::cdtor_phase::construction);   // KEEP BYTE-PARALLEL with the interpreter
-	bool found = false;
-	auto ran = run_construction_segment(cf, &level, found);
 	if (construction().field_init_exception) [[unlikely]] {
 		std::exception_ptr thrown = std::move(construction().field_init_exception);
 		construction().field_init_exception = nullptr;
@@ -20306,56 +20085,17 @@ struct vm_backend::construction_lender final : detail::construction_host {
 		caller_env(a_self.environment_) {
 	}
 
-	checked_result<script_value> evaluate(const expression_ptr& expr, const std::shared_ptr<environment>& env) override {
-		return self.eval_expression(expr, env);
-	}
-
-	checked_result<script_value> run_constructor_body(const std::shared_ptr<function_decl>& ctor, const std::shared_ptr<environment>& definition_env,
-	                                                  const script_value& this_value, class_definition* access, const std::vector<script_value>& args) override {
-		if (!ctor->is_coroutine && definition_env) {
-			// the body runs as a method call over the definition env with this on its frame (a pooled method scope when it needs one)
-			script_defined_function body(ctor->name, shared_parameters_for(ctor.get()), ctor->return_type, ctor->body, nullptr, ctor->local_count);
-			body.unit = ctor->unit;
-			const method_entry method{&definition_env, &this_value, access};
-			return self.call_script_function(body, args, nullptr, nullptr, nullptr, &method);
-		}
-		auto method_env = std::make_shared<environment>(definition_env, self.env_symbolizer_, this_value);
-		method_env->set_access_context(access);
-		method_env->define(self.symbolizer_->get_this_id(), this_value);
-		return self.execute_method_ast(ctor, method_env, args);
-	}
-
 	checked_result<void> evaluate_field_initializers(const strong_ptr<class_instance>& instance, const std::shared_ptr<script_class_definition>& cls,
 	                                                 detail::construction_scope& scope, bool skip_parent_recursion,
 	                                                 const detail::aggregate_plan* aggregate) override {
-		if (scope.frame && !aggregate) {
-			return self.construction_frame_fields(*static_cast<construction_frame*>(scope.frame), *instance, *cls, skip_parent_recursion);
-		}
 		return self.evaluate_field_initializers(instance, cls, scope.env, skip_parent_recursion, aggregate);
 	}
-	void open_scope(detail::construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
-	                script_class_definition* level, const function_decl* ctor, const std::vector<script_value>* args, bool bind_for_parameters) override {
-		if (self.open_construction_frame(scope, definition_env, this_value, level, ctor, args, bind_for_parameters)) { return; }
-		detail::construction_host::open_scope(scope, definition_env, this_value, level, ctor, args, bind_for_parameters);
-	}
-	void close_scope(detail::construction_scope& scope) override {
-		if (scope.frame) { self.close_construction_frame(scope); }
-	}
-	void read_back_parameters(detail::construction_scope& scope, const function_decl* ctor, std::vector<script_value>& args) override {
-		if (!scope.frame) { detail::construction_host::read_back_parameters(scope, ctor, args); return; }
-		const auto& cf = *static_cast<construction_frame*>(scope.frame);
-		for (size_t i = 0; ctor && i < ctor->parameters.size() && i < args.size() && i < cf.f.window_live; ++i) {
-			if (ctor->parameters[i].is_reference) { continue; }
-			args[i] = self.stack_[cf.window_base + i].deref();
-		}
-	}
-	checked_result<script_value> evaluate_in(detail::construction_scope& scope, const expression_ptr& expr) override {
-		if (scope.frame) {
-			bool found = false;
-			auto ran = self.run_construction_segment(*static_cast<construction_frame*>(scope.frame), expr.get(), found);
-			if (found) { return ran; }
-		}
-		return evaluate(expr, scope.env);
+	checked_result<void> construct_implicitly(const std::shared_ptr<script_class_definition>& cls, const std::shared_ptr<environment>& definition_env,
+	                                          const script_value& this_value) override {
+		static const std::vector<script_value> no_arguments;
+		auto ran = self.run_constructor_natively(cls, cls->implicit_default_constructor(), definition_env, this_value, no_arguments);
+		if (!ran) { return ran.error_value(); }
+		return {};
 	}
 	checked_result<void> bind_reference_arguments(const function_decl& ctor, std::vector<script_value>& args) override {
 		if (!site) { return {}; }
@@ -20386,22 +20126,6 @@ struct vm_backend::construction_lender final : detail::construction_host {
 		}
 		return {};
 	}
-	checked_result<bool> initializer_place(detail::construction_scope& scope, const expression* argument, script_value& out) override {
-		if (!scope.env || !argument) { return false; }   // a frame scope runs no list a T& binds (construction_chunk)
-		bool placed = false;
-		op_status status {};
-		if (argument->get_type() == node_type::identifier_expr) {
-			const auto* name = static_cast<const identifier_expr*>(argument);
-			const uint64_t id = name->symbol_id != UINT64_MAX ? name->symbol_id : self.symbolizer_->intern(name->name);
-			script_value* storage = scope.env->get_value_ptr(id);
-			if (!storage) { return false; }   // a name the level's scope does not hold (a field by its bare name) binds as its value did
-			status = self.reference_to_storage(*storage, out, placed);
-		} else {
-			status = self.bind_place_reference(argument, nullptr, scope.env, out, placed);
-		}
-		if (status == op_status::failed) { return self.pending_error_; }
-		return placed;
-	}
 	std::optional<error_propagator> pass_depth_gate() override { return self.pass_depth_gate(); }
 	std::shared_ptr<environment> current_environment() override { return self.environment_; }
 	std::shared_ptr<environment> global_environment() override { return self.engine_ ? self.engine_->get_global_environment() : self.environment_; }
@@ -20412,18 +20136,16 @@ struct vm_backend::construction_lender final : detail::construction_host {
 };
 
 checked_result<script_value> vm_backend::construct_instance_pre_body(const std::shared_ptr<script_class_definition>& class_def,
-                                                            const std::shared_ptr<environment>& definition_env,
                                                             const std::vector<script_value>& args,
                                                             std::shared_ptr<function_decl>& matching_ctor_out,
                                                             std::vector<script_value>& captured_out,
                                                             const frame* caller, bool check_access, const call_site* site) {
-	// This native phase owns the constructor depth only until a body takes over
 	construction_lender host(*this, caller, site);
 	std::optional<detail::call_depth_guard> initializer_depth;
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_c0 = __rdtsc();
 #endif
-	auto result = detail::begin_construction(host, class_def, definition_env, args, initializer_depth, matching_ctor_out, captured_out, check_access);
+	auto result = detail::prepare_construction(host, class_def, args, initializer_depth, matching_ctor_out, captured_out, check_access);
 #ifdef JAISCRIPT_VM_PROFILE
 	++profile_ctor_count_;
 	profile_ctor_cyc_[0] += __rdtsc() - prof_c0;
@@ -20431,12 +20153,284 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(const std::
 	return result;
 }
 
+// A constructor's chunk: its prologue (the delegation's target, else each base in declaration order, then the level's own
+// fields) compiled ahead of its body, every part in the constructor's frame
+chunk* vm_backend::constructor_chunk(const std::shared_ptr<script_class_definition>& level, const std::shared_ptr<function_decl>& ctor) {
+	const uint64_t class_epoch = engine_ ? engine_->class_definition_epoch() : 0;
+	ctor_chunk_entry& entry = ctor_chunks_[ctor.get()];
+	const bool same_decl = !entry.decl.owner_before(ctor) && !ctor.owner_before(entry.decl);
+	if (entry.code && same_decl && entry.unit == ctor->unit.id && entry.class_epoch == class_epoch) { return entry.code.get(); }
+	vm_compiler::constructor_prologue prologue;
+	prologue.level = level.get();
+	prologue.origin = ctor;
+	prologue.evaluates = detail::prologue_evaluates(*level, *ctor);
+	const auto& initializers = ctor->initializers;
+	const auto delegation = std::find_if(initializers.begin(), initializers.end(), [](const constructor_initializer& init) { return init.target == "this"; });
+	if (delegation != initializers.end()) {
+		prologue.delegation = &*delegation;
+		chunk::ctor_step step;
+		step.level = level.get();
+		step.target = level.get();
+		step.named = true;
+		step.level_ref = level;
+		for (const auto& candidate : level->get_constructor_asts()) { if (candidate != ctor) { step.targets.push_back(candidate); } }
+		prologue.steps.push_back(std::move(step));
+		prologue.initializers.push_back(&*delegation);
+	} else {
+		const auto& parents = level->get_parent_classes();
+		if (parents.empty() && std::any_of(initializers.begin(), initializers.end(), [](const constructor_initializer& init) { return init.target == "super"; })) {
+			chunk::ctor_step step;
+			step.level = level.get();
+			step.target = level.get();
+			step.super_without_base = true;
+			prologue.steps.push_back(std::move(step));
+			prologue.initializers.push_back(nullptr);
+		}
+		for (size_t i = 0; i < parents.size(); ++i) {
+			if (!parents[i]) { continue; }
+			const constructor_initializer* init = detail::construction_kernel::base_initializer(initializers, *level, i);
+			chunk::ctor_step step;
+			step.level = level.get();
+			step.target = parents[i].get();
+			step.index = static_cast<uint32_t>(i);
+			step.named = init != nullptr;
+			prologue.steps.push_back(std::move(step));
+			prologue.initializers.push_back(init);
+		}
+		prologue.literal_fields = level->chain_initializers_all_literal();
+		if (!prologue.literal_fields) {
+			for (const auto& [field_id, initializer] : level->get_field_initializer_asts()) {
+				if (initializer) { prologue.fields.emplace_back(field_id, initializer); }
+			}
+		}
+	}
+	for (const auto& param : ctor->parameters) {
+		if (param.symbol_id == UINT64_MAX) { param.symbol_id = symbolizer_->intern(param.name); }
+		if (param.slot_index != SIZE_MAX) { prologue.name_slots.emplace(param.symbol_id, static_cast<uint32_t>(param.slot_index)); }
+	}
+	std::unique_lock<std::mutex> region_compile_guard;   // in-region compiles serialize engine-wide (chunk_for_body)
+	if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
+		region_compile_guard = std::unique_lock<std::mutex>(engine_->parallel_compile_mutex());
+	}
+	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
+	compiler_.ir_passes(!engine_ || engine_->ir_passes());
+	arm_listing();
+	compiler_.member_class(level.get());
+	compiler_.constructor_prologue_for(&prologue);
+	auto code = compiler_.compile_callable(ctor->name, ctor->parameters, ctor->body, ctor->local_count);
+	compiler_.constructor_prologue_for(nullptr);
+	compiler_.member_class(nullptr);
+	note_compiled(*code);
+	body_chunks_.insert(code.get());
+	note_cache_insert();
+	if (entry.code) { retired_ctor_chunks_.push_back(std::move(entry.code)); }
+	entry.unit = ctor->unit.id;
+	entry.class_epoch = class_epoch;
+	entry.code = std::move(code);
+	entry.decl = ctor;
+	entry.level = level;
+	return entry.code.get();
+}
+
+// The method-door dispatcher a constructor's frame runs through (one per declaration, checked against the class and the definition
+// environment), its body slot holding the constructor's chunk
+const script_value& vm_backend::constructor_dispatch(const std::shared_ptr<script_class_definition>& level, const std::shared_ptr<function_decl>& ctor,
+                                                     const std::shared_ptr<environment>& definition_env) {
+	ctor_dispatch_entry& entry = ctor_dispatch_[ctor.get()];
+	if (entry.cls != level.get() || entry.env != definition_env.get() || !entry.method || entry.decl.owner_before(ctor) || ctor.owner_before(entry.decl)) {
+		entry.method = script_value::make_function(script_method_dispatch{engine_, level, ctor->name_id, definition_env}, engine_);
+		entry.cls = level.get();
+		entry.env = definition_env.get();
+		entry.decl = ctor;
+		entry.chunk_epoch = UINT64_MAX;
+	}
+	const uint64_t class_epoch = engine_ ? engine_->class_definition_epoch() : 0;
+	if (entry.chunk_epoch != class_epoch || entry.chunk_unit != ctor->unit.id) [[unlikely]] {
+		const auto* dispatch = entry.method->as_function().target<script_method_dispatch>();
+		constructor_chunk(level, ctor);
+		dispatch->body_cache = ctor_chunks_[ctor.get()].code;
+		dispatch->body_cache_key = ctor->body.get();
+		entry.chunk_epoch = class_epoch;
+		entry.chunk_unit = ctor->unit.id;
+	}
+	return *entry.method;
+}
+
+// A level's constructor frame, its arguments the argc values on top: answering as the level while it runs when it is a base (C++
+// [class.cdtor]), the instance answering as before once it pops
+op_status vm_backend::push_constructor_frame(frame& f, const std::shared_ptr<script_class_definition>& level, const std::shared_ptr<function_decl>& ctor,
+                                             size_t argc, const call_site* site, bool answer_as_level) {
+	ctor_context& cx = ctor_contexts_.back();
+	const script_value& method = constructor_dispatch(level, ctor, cx.definition_env);
+	const auto* dispatch = method.as_function().target<script_method_dispatch>();
+	script_value receiver = *current_this(f);
+	class_instance& instance = *cx.instance;
+	class_definition* restore = instance.get_class_definition();
+	const auto restore_phase = instance.dispatch_phase();
+	const bool dispatched = answer_as_level && restore && restore != level.get();
+	bool relaid = false;
+	if (dispatched) {
+		relaid = !level->slot_prefix_of(*restore);
+		if (relaid) { instance.relayout_fields(*restore, *level); }
+		instance.dispatch_as(level.get(), class_instance::cdtor_phase::construction);
+	}
+	auto undo = [&] {
+		if (!dispatched) { return; }
+		if (relaid) { instance.relayout_fields(*level, *restore); }
+		instance.dispatch_as(restore, restore_phase);
+	};
+	const size_t args_base = stack_.size() - argc;
+	op_status pushed;
+	try {
+		pushed = push_method_frame_sliced(f, method, *dispatch, ctor, &receiver, args_base, args_base, argc, site);
+	} catch (...) {
+		undo();
+		return call_threw(SIZE_MAX);
+	}
+	if (pushed == op_status::failed) {
+		undo();
+		return pushed;
+	}
+	if (dispatched) {
+		call_record& rec = *call_records_[call_records_top_ - 1];
+		rec.ctor_exit |= ctor_exit_dispatch;
+		rec.ctor_level = level.get();
+		rec.ctor_restore = restore;
+		rec.ctor_restore_phase = static_cast<uint8_t>(restore_phase);
+		rec.ctor_relaid = relaid;
+	}
+	return {};
+}
+
+void vm_backend::leave_constructor_frame(call_record& rec) {
+	if (rec.ctor_exit & ctor_exit_dispatch) {
+		if (class_instance* instance = rec.locals.this_object_ptr ? rec.locals.this_object_ptr->peek_class_instance() : nullptr) {
+			if (rec.ctor_relaid) { instance->relayout_fields(*rec.ctor_level, *rec.ctor_restore); }
+			instance->dispatch_as(rec.ctor_restore, static_cast<class_instance::cdtor_phase>(rec.ctor_restore_phase));
+		}
+		rec.ctor_level = nullptr;
+		rec.ctor_restore = nullptr;
+		rec.ctor_relaid = false;
+	}
+	if (rec.ctor_exit & ctor_exit_context) { ctor_contexts_.pop_back(); }
+	rec.ctor_exit = 0;
+}
+
+// The prologue's base `a`: a script base's constructor frame in the loop (the one its overloads pick, or the implicit one a base
+// without constructors runs when its fields or bases run code), a literal-only base stamped, a host base constructed here
+op_status vm_backend::exec_ctor_base(frame& f, const vm_instruction& ins) {
+	const chunk::ctor_step& step = f.code->ctor_steps[ins.a];
+	const size_t argc = ins.b;
+	const call_site* site = ins.c != k_invalid_u32 ? &f.code->call_sites[ins.c] : nullptr;
+	ctor_context& cx = ctor_contexts_.back();
+	if (step.super_without_base) {
+		return raise_(make_error_code(runtime_error_code::no_constructor_found), "Cannot call super() - class has no base class");
+	}
+	if (argc != 0) { cx.code_ran = true; }
+	const size_t args_base = stack_.size() - argc;
+	const std::shared_ptr<class_definition>& base = step.level->get_parent_classes()[step.index];
+	if (!base->is_script_class()) {
+		if (step.index > 0) {
+			stack_.truncate(args_base);
+			stack_.push_back(make_null());
+			return {};
+		}
+		cx.code_ran = true;
+		std::vector<script_value> args;
+		args.reserve(argc);
+		for (size_t i = 0; i < argc; ++i) { args.push_back(std::move(stack_[args_base + i])); }
+		stack_.truncate(args_base);
+		construction_lender host(*this, &f, site);
+		checked_result<void> made;
+		if (step.level != cx.cls) {
+			made = detail::construction_kernel::construct_host_base(host, *cx.instance, *base, args, true);
+		} else {
+			try {
+				made = detail::construction_kernel::construct_host_base(host, *cx.instance, *base, args, false);
+			} catch (const runtime_error&) {
+				made = checked_result<void>(make_error_code(runtime_error_code::constructor_failed), "Failed to call C++ parent constructor");
+			}
+		}
+		if (!made) { return raise_from(made); }
+		stack_.push_back(make_null());
+		return {};
+	}
+	auto script_base = std::static_pointer_cast<script_class_definition>(base);
+	auto chosen = detail::construction_kernel::choose_base_constructor(*step.level, *script_base, step.index, step.named, stack_.data() + args_base, argc, engine_);
+	if (!chosen) { return raise_from(chosen); }
+	std::shared_ptr<function_decl> ctor = std::move(chosen.value());
+	if (!ctor) {
+		if (script_base->chain_initializers_all_literal()) {
+			if (cx.code_ran || !cx.instance->seeded_from_plan()) { detail::stamp_literal_field_initializers(*cx.instance, *script_base, false, engine_); }
+			stack_.push_back(make_null());
+			return {};
+		}
+		ctor = script_base->implicit_default_constructor();
+	}
+	cx.code_ran = true;
+	return push_constructor_frame(f, script_base, ctor, argc, site, true);
+}
+
+// The delegated-to constructor of the frame's level: the one the arguments pick among its others, its frame in the loop
+op_status vm_backend::exec_ctor_delegate(frame& f, const vm_instruction& ins) {
+	const chunk::ctor_step& step = f.code->ctor_steps[ins.a];
+	const size_t argc = ins.b;
+	const call_site* site = ins.c != k_invalid_u32 ? &f.code->call_sites[ins.c] : nullptr;
+	ctor_contexts_.back().code_ran = true;
+	const size_t args_base = stack_.size() - argc;
+	auto picked = select_declaration(step.targets, stack_.data() + args_base, argc, step.level->get_type_id(), engine_);
+	if (!picked) { return raise_from(picked); }
+	if (!picked.value()) {
+		return raise_from(detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found), step.level->get_type_id(), stack_.data() + args_base, argc, engine_, true));
+	}
+	return push_constructor_frame(f, std::static_pointer_cast<script_class_definition>(step.level_ref), picked.value(), argc, site, false);
+}
+
+// the allowance the interpreter's prologue scope charges for its `this` and parameters (environment::define)
+op_status vm_backend::exec_ctor_scope(frame& f, const vm_instruction& ins) {
+	(void)f;
+	if (engine_) { engine_->execution_limits().memory_charge_deferred((1 + static_cast<size_t>(ins.a)) * (sizeof(script_value) + 64)); }
+	return {};
+}
+
+op_status vm_backend::exec_ctor_done(frame& f, const vm_instruction& ins) {
+	const ctor_context& cx = ctor_contexts_.back();
+	cx.instance->constructed_levels(cx.cls->constructed_through(f.code->ctor_steps[ins.a].target));
+	return {};
+}
+
+op_status vm_backend::exec_ctor_literals(frame& f, const vm_instruction& ins) {
+	const ctor_context& cx = ctor_contexts_.back();
+	if (cx.code_ran || !cx.instance->seeded_from_plan()) {
+		detail::stamp_literal_field_initializers(*cx.instance, static_cast<const script_class_definition&>(*f.code->ctor_steps[ins.a].target), true, engine_);
+	}
+	return {};
+}
+
+// The whole constructor (its prologue, then its body) as a method call over the definition environment, from outside the dispatch loop
+checked_result<script_value> vm_backend::run_constructor_natively(const std::shared_ptr<script_class_definition>& class_def, const std::shared_ptr<function_decl>& ctor,
+                                                                  const std::shared_ptr<environment>& definition_env, const script_value& this_value,
+                                                                  const std::vector<script_value>& args) {
+	ctor_contexts_.push_back(ctor_context{class_def.get(), this_value.peek_class_instance(), definition_env, false});
+	struct context_scope {
+		vm_backend& vm;
+		size_t depth;
+		~context_scope() { if (vm.ctor_contexts_.size() > depth) { vm.ctor_contexts_.resize(depth); } }
+	} scope{*this, ctor_contexts_.size() - 1};
+	script_defined_function body(ctor->name, shared_parameters_for(ctor.get()), ctor->return_type, ctor->body, nullptr, ctor->local_count);
+	body.unit = ctor->unit;
+	constructor_chunk(class_def, ctor);
+	body.backend_body_cache = ctor_chunks_[ctor.get()].code;
+	const method_entry method{&definition_env, &this_value, class_def.get()};
+	return call_script_function(body, args, nullptr, nullptr, nullptr, &method);
+}
+
 checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<script_class_definition> class_def,
                                                             std::shared_ptr<environment> definition_env,
                                                             const std::vector<script_value>& args, bool check_access) {
 	std::shared_ptr<function_decl> matching_ctor;
 	std::vector<script_value> captured;
-	auto pre = construct_instance_pre_body(class_def, definition_env, args, matching_ctor, captured, nullptr, check_access);
+	auto pre = construct_instance_pre_body(class_def, args, matching_ctor, captured, nullptr, check_access);
 	if (!pre || is_unwinding_) {
 		return pre;
 	}
@@ -20444,26 +20438,18 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_c4 = __rdtsc();
 #endif
-	auto method_env = std::make_shared<environment>(definition_env, env_symbolizer_, this_value);
-	method_env->set_access_context(class_def.get());
-	method_env->define(symbolizer_->get_this_id(), this_value);
-
-	auto result = execute_method_ast(matching_ctor, method_env, captured.empty() ? args : captured);
+	auto result = run_constructor_natively(class_def, matching_ctor, definition_env, this_value, captured.empty() ? args : captured);
 	if (result && !is_unwinding_) { detail::construction_completed(this_value); }
-
 #ifdef JAISCRIPT_VM_PROFILE
 	profile_ctor_cyc_[1] += __rdtsc() - prof_c4;
 #endif
-	return result;
+	if (!result) { return result; }
+	return this_value;
 }
 
-// In-loop constructor entry (op_new + direct ctor calls): the construction protocol
-// runs natively exactly as before, then the ctor BODY enters the dispatch loop as a
-// method-env-closured frame. push_script_frame is call_script_function's in-loop twin,
-// so explicit-return / fall-off (implicit this) / unwind semantics replicate through
-// the same machinery execute_method_ast delegated to. result_stamp = the shared_ptr
-// arm's post-call type stamp, applied at the frame completion doors
-// (call_record::ctor_result_stamp). Coroutine ctors keep the native tail verbatim.
+// In-loop constructor entry (op_new + direct ctor calls): the overload, the T& bindings and the instance natively, then the whole
+// constructor enters the dispatch loop as a method frame (its prologue's bases push frames of their own). result_stamp = the
+// shared_ptr arm's post-call type stamp, applied at the frame completion doors (call_record::ctor_result_stamp).
 op_status vm_backend::enter_constructor_in_loop(frame& f,
                                                 const std::shared_ptr<script_class_definition>& class_def,
                                                 const std::shared_ptr<environment>& definition_env,
@@ -20471,7 +20457,7 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
                                                 type_info* result_stamp, const call_site* site) {
 	std::shared_ptr<function_decl> matching_ctor;
 	std::vector<script_value> captured;
-	auto pre = construct_instance_pre_body(class_def, definition_env, call_args, matching_ctor, captured, &f, true, site);
+	auto pre = construct_instance_pre_body(class_def, call_args, matching_ctor, captured, &f, true, site);
 	const std::vector<script_value>& args = captured.empty() ? call_args : captured;
 	struct owned_scope {
 		vm_backend* vm; std::vector<script_value>* saved;
@@ -20486,46 +20472,24 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 		stack_.push_back(std::move(this_value));   // a throw ahead of the body ends the construction; dispatch unwinds
 		return {};
 	}
-	if (matching_ctor->is_coroutine) [[unlikely]] {
-		auto method_env = std::make_shared<environment>(definition_env, env_symbolizer_, this_value);
-		method_env->set_access_context(class_def.get());
-		method_env->define(symbolizer_->get_this_id(), this_value);
-		auto result = execute_method_ast(matching_ctor, method_env, args);
-		if (!result) {
-			return raise_from(result);
-		}
-		if (!is_unwinding_) { detail::construction_completed(this_value); }
-		script_value value = std::move(result.value());
-		if (result_stamp && value.type() == script_value_type::jai_object_type) {
-			value.set_type_info(type_info_ptr{result_stamp});
-		}
-		stack_.push_back(std::move(value));
-		return {};
-	}
-	// The body runs through the method door (the lazy environment when the chain is public, `this` in the record); the dispatcher
-	// is one per constructor declaration, kept by the backend and checked against the class and the definition environment
-	ctor_dispatch_entry& entry = ctor_dispatch_[matching_ctor.get()];
-	if (entry.cls != class_def.get() || entry.env != definition_env.get() || !entry.method || entry.decl.owner_before(matching_ctor) || matching_ctor.owner_before(entry.decl)) {
-		entry.method = script_value::make_function(script_method_dispatch{engine_, class_def, matching_ctor->name_id, definition_env}, engine_);
-		entry.cls = class_def.get();
-		entry.env = definition_env.get();
-		entry.decl = matching_ctor;
-	}
-	const auto* dispatch = entry.method->as_function().target<script_method_dispatch>();
+	ctor_contexts_.push_back(ctor_context{class_def.get(), this_value.peek_class_instance(), definition_env, false});
+	const script_value& method = constructor_dispatch(class_def, matching_ctor, definition_env);
+	const auto* dispatch = method.as_function().target<script_method_dispatch>();
 	op_status pushed;
 	try {
-		pushed = push_method_frame(f, *entry.method, *dispatch, matching_ctor, std::move(this_value), args, site);
+		pushed = push_method_frame(f, method, *dispatch, matching_ctor, std::move(this_value), args, site);
 	} catch (...) {
+		ctor_contexts_.pop_back();
 		return call_threw(SIZE_MAX);
 	}
 	if (pushed == op_status::failed) {
+		ctor_contexts_.pop_back();
 		return pushed;
 	}
-	if (switch_to_) {
-		call_record& rec = *call_records_[call_records_top_ - 1];
-		rec.ctor_frame = true;
-		rec.ctor_result_stamp = result_stamp;
-	}
+	call_record& rec = *call_records_[call_records_top_ - 1];
+	rec.ctor_frame = true;
+	rec.ctor_result_stamp = result_stamp;
+	rec.ctor_exit |= ctor_exit_context;
 	return {};
 }
 
@@ -21629,6 +21593,11 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_concat_store: return exec_concat_store(f, ins);
 		case opcode::op_push_fused: return exec_push_fused(f, ins);
 		case opcode::op_new: return exec_new(f, ins);
+		case opcode::op_ctor_base: return exec_ctor_base(f, ins);
+		case opcode::op_ctor_delegate: return exec_ctor_delegate(f, ins);
+		case opcode::op_ctor_done: return exec_ctor_done(f, ins);
+		case opcode::op_ctor_scope: return exec_ctor_scope(f, ins);
+		case opcode::op_ctor_literals: return exec_ctor_literals(f, ins);
 		case opcode::op_class_decl: return exec_class_decl(f, ins);
 		case opcode::op_namespace_decl: return exec_namespace_decl(f, ins);
 		case opcode::op_enum_decl: return exec_enum_decl(f, ins);
@@ -23135,6 +23104,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_concat_operands:
 			case opcode::op_concat_store:
 			case opcode::op_sleep:
+			case opcode::op_ctor_base:
+			case opcode::op_ctor_delegate:
+			case opcode::op_ctor_done:
+			case opcode::op_ctor_literals:
+			case opcode::op_ctor_scope:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or
@@ -23420,8 +23394,11 @@ void vm_backend::retire_unreachable_code() {
 		release_site_pins();   // the sites refill on their next call; a cycle through them (recursion, mutual calls) is broken here
 		raw_epoch_advance();
 	}
+	// a constructor's chunk may pin its own declaration (a step's location), so a constructor its class no longer declares retires
+	// by that rather than by its declaration expiring
 	for (auto it = ctor_dispatch_.begin(); it != ctor_dispatch_.end();) {
-		it = it->second.decl.expired() ? ctor_dispatch_.erase(it) : std::next(it);
+		const bool stale = it->second.decl.expired() || !static_cast<const script_class_definition*>(it->second.cls)->declares_constructor(it->first);
+		it = stale ? ctor_dispatch_.erase(it) : std::next(it);
 	}
 	for (auto it = method_functions_.begin(); it != method_functions_.end();) {
 		it = it->second.pin.use_count() == 1 ? method_functions_.erase(it) : std::next(it);
@@ -23452,8 +23429,32 @@ void vm_backend::retire_unreachable_code() {
 		for (const auto& defaults : code->param_default_chunks) { if (defaults) { retired.insert(defaults.get()); } }
 	};
 	std::vector<std::shared_ptr<chunk>> dying;   // freed after every raw-pointer table forgot them
+	auto only_backend_holds = [&](const std::shared_ptr<chunk>& code) {
+		const auto pins = fold_pins.find(code.get());
+		return code.use_count() == 1 + (pins == fold_pins.end() ? 0 : pins->second);
+	};
 	for (bool progress = true; progress;) {
 		progress = false;
+		for (auto it = retired_ctor_chunks_.begin(); it != retired_ctor_chunks_.end();) {
+			if (only_backend_holds(*it)) {
+				retire(*it);
+				dying.push_back(std::move(*it));
+				it = retired_ctor_chunks_.erase(it);
+				progress = true;
+			} else { ++it; }
+		}
+		for (auto it = ctor_chunks_.begin(); it != ctor_chunks_.end();) {
+			const auto level = it->second.level.lock();
+			const bool stale = it->second.decl.expired() || !level || !static_cast<const script_class_definition&>(*level).declares_constructor(it->first);
+			if (stale && (!it->second.code || only_backend_holds(it->second.code))) {
+				if (it->second.code) {
+					retire(it->second.code);
+					dying.push_back(std::move(it->second.code));
+				}
+				it = ctor_chunks_.erase(it);
+				progress = true;
+			} else { ++it; }
+		}
 		for (auto it = chunk_cache_.begin(); it != chunk_cache_.end();) {
 			if (unreachable(it->second.compiled, it->second.pin.get(), it->second.pin.use_count())) {
 				retire(it->second.compiled);
@@ -23496,7 +23497,7 @@ void vm_backend::retire_unreachable_code() {
 			dying.clear();
 		}
 	}
-	cache_size_after_retire_ = chunk_cache_.size() + expr_chunk_cache_.size() + decl_chunk_cache_.size();
+	cache_size_after_retire_ = chunk_cache_.size() + expr_chunk_cache_.size() + decl_chunk_cache_.size() + ctor_chunks_.size();
 }
 
 script_value vm_backend::execute(const std::vector<declaration_ptr>& declarations) {
@@ -24610,6 +24611,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	}
 #endif
 	rec.lean = false;
+	if (rec.ctor_exit) [[unlikely]] { leave_constructor_frame(rec); }
 	JAI_COARSE(coarse_pop_, coarse_pops_)
 #ifdef JAISCRIPT_VM_PROFILE
 	uint64_t prof_pc0 = __rdtsc();

@@ -258,7 +258,7 @@ namespace jai::vm {
         uint64_t profile_new_count_ = 0;
         uint64_t profile_new_resolve_cyc_ = 0;
         uint64_t profile_new_invoke_cyc_ = 0;
-        // construct_instance sections: [0]=everything ahead of the body (detail::begin_construction) [1]=method_env + ctor body
+        // construct_instance sections: [0]=the overload and the instance (detail::prepare_construction) [1]=the constructor's frame
         uint64_t profile_ctor_cyc_[2] = {};
         uint64_t profile_ctor_count_ = 0;
         std::map<std::string, uint64_t> profile_env_walk_names_;   // full-walk symbols by name
@@ -540,8 +540,40 @@ namespace jai::vm {
         // builders read the same palette cells thousands of times per region, and each read
         // allocated a string. Bounded; cleared when it grows past the cap.
         std::unordered_map<uint64_t, script_value> worker_borrowed_strings_;
-        struct ctor_dispatch_entry { std::optional<script_value> method; const class_definition* cls = nullptr; const environment* env = nullptr; std::weak_ptr<const function_decl> decl; };
-        std::unordered_map<const function_decl*, ctor_dispatch_entry> ctor_dispatch_;   // a constructor's method-door dispatcher (its body chunk cached on it)
+        struct ctor_dispatch_entry {
+            std::optional<script_value> method;
+            const class_definition* cls = nullptr;
+            const environment* env = nullptr;
+            std::weak_ptr<const function_decl> decl;
+            uint64_t chunk_unit = UINT64_MAX;    // the constructor chunk its body slot holds is current for this unit and class epoch
+            uint64_t chunk_epoch = UINT64_MAX;
+        };
+        std::unordered_map<const function_decl*, ctor_dispatch_entry> ctor_dispatch_;   // a constructor's method-door dispatcher (its constructor chunk cached on it)
+        // A constructor's chunk: its prologue (vm_compiler::constructor_prologue) ahead of its body, rebuilt when a class is (re)defined;
+        // a replaced chunk stays alive for the frames still running it, and retire_unreachable_code frees one its class no longer declares
+        struct ctor_chunk_entry {
+            uint64_t unit = UINT64_MAX;
+            uint64_t class_epoch = UINT64_MAX;
+            std::shared_ptr<chunk> code;
+            std::weak_ptr<const function_decl> decl;
+            std::weak_ptr<const class_definition> level;
+        };
+        std::unordered_map<const function_decl*, ctor_chunk_entry> ctor_chunks_;
+        std::vector<std::shared_ptr<chunk>> retired_ctor_chunks_;
+        chunk* constructor_chunk(const std::shared_ptr<script_class_definition>& level, const std::shared_ptr<function_decl>& ctor);
+        const script_value& constructor_dispatch(const std::shared_ptr<script_class_definition>& level, const std::shared_ptr<function_decl>& ctor,
+                                                 const std::shared_ptr<environment>& definition_env);
+        // One construction in flight (innermost last): its class, whose construction order the partial-destruction marks index, its
+        // instance and definition environment, and whether code ran since create_instance seeded the defaults
+        struct ctor_context {
+            const class_definition* cls = nullptr;
+            class_instance* instance = nullptr;
+            std::shared_ptr<environment> definition_env;
+            bool code_ran = false;
+        };
+        std::vector<ctor_context> ctor_contexts_;
+        // a constructor frame's exit: the dispatch level it set back (ctor_exit_dispatch), the construction it owns (ctor_exit_context)
+        static constexpr uint8_t ctor_exit_dispatch = 1, ctor_exit_context = 2;
         script_value worker_borrowed_string(const script_value& borrow, const script_value& index, const script_string& source);
         script_value worker_owned_string(const script_array* node, uint64_t index, const script_string& source);   // the cache by node and index
         // A worker-minted string node can be published into the parent's output by the region
@@ -959,6 +991,11 @@ namespace jai::vm {
             // fall_off_script_frame), never on unwind paths.
             type_info* ctor_result_stamp = nullptr;
             bool ctor_frame = false;   // a constructor body run through the method door: every return yields the frame's `this`
+            uint8_t ctor_exit = 0;     // ctor_exit_* the pop undoes
+            uint8_t ctor_restore_phase = 0;
+            bool ctor_relaid = false;
+            class_definition* ctor_level = nullptr;     // the level the instance answered as
+            class_definition* ctor_restore = nullptr;   // what it answered as before
             frame* caller = nullptr;                   // resume target: native entry frame or another record's f
             std::shared_ptr<environment> prev_env;
             bool env_lazy = false;
@@ -1747,16 +1784,17 @@ namespace jai::vm {
         checked_result<script_value> construct_instance(std::shared_ptr<script_class_definition> class_def,
                                                         std::shared_ptr<environment> definition_env,
                                                         const std::vector<script_value>& args, bool check_access = true);
-        // detail::begin_construction under this backend: success value = the new instance ('this'); captured_out = the
-        // arguments taken ahead of the code the construction runs before the body, when it runs any (the body binds them);
-        // caller = the frame whose class a private constructor's access is checked against (null: the current context); site = the
-        // call's site, where a T& parameter binds its place
+        // detail::prepare_construction under this backend: success value = the new instance ('this'); captured_out = the arguments
+        // with the T& parameters' places bound (empty: none); caller = the frame whose class a private constructor's access is
+        // checked against (null: the current context); site = the call's site, where a T& parameter binds its place
         checked_result<script_value> construct_instance_pre_body(const std::shared_ptr<script_class_definition>& class_def,
-                                                        const std::shared_ptr<environment>& definition_env,
                                                         const std::vector<script_value>& args,
                                                         std::shared_ptr<function_decl>& matching_ctor_out,
                                                         std::vector<script_value>& captured_out,
                                                         const frame* caller, bool check_access, const call_site* site = nullptr);
+        checked_result<script_value> run_constructor_natively(const std::shared_ptr<script_class_definition>& class_def, const std::shared_ptr<function_decl>& ctor,
+                                                              const std::shared_ptr<environment>& definition_env, const script_value& this_value,
+                                                              const std::vector<script_value>& args);
         // What the vm lends the construction kernel (detail/construction.hpp)
         struct construction_lender;
         // Construction protocol native, ctor BODY on the dispatch loop (op_new + direct
@@ -1791,72 +1829,23 @@ namespace jai::vm {
             std::vector<std::pair<uint64_t, script_value>> values;
         };
         std::unordered_map<const class_definition*, field_init_plan> field_init_plans_;
-        // A class level's field initializers as one method body over its initializer environment: the form a level runs when its
-        // construction chunk cannot (keyed by the class, rebuilt when its initializers or the unit change)
+        // A class level's field initializers as one method body over its initializer environment (an aggregate's, a reload's), keyed by
+        // the class, rebuilt when its initializers or the unit change
         struct level_initializers {
             uint64_t unit = UINT64_MAX;
             std::vector<const expression*> asts;
             std::unique_ptr<script_defined_function> fn;
         };
-        // A level's construction chunk (vm_compiler::compile_construction): its initializer-list arguments and its own field
-        // initializers (a default-constructed base: its own and its script bases'), with the constructor's first argc parameters in
-        // slots; keyed by the level, the constructor and argc, checked against the expressions it compiled. null code: the level
-        // runs in its environment
-        struct construction_key {
-            const class_definition* level;
-            const function_decl* ctor;
-            size_t argc;
-            bool operator==(const construction_key&) const = default;
-        };
-        struct construction_key_hash {
-            size_t operator()(const construction_key& k) const noexcept {
-                return std::hash<const void*>{}(k.level) ^ (std::hash<const void*>{}(k.ctor) * 31) ^ (k.argc * 0x9E3779B97F4A7C15ull);
-            }
-        };
-        struct construction_plan {
-            uint64_t unit = UINT64_MAX;
-            std::vector<const expression*> asts;
-            std::shared_ptr<chunk> code;
-        };
-        // The plans a construction opens, direct-mapped by (level, constructor, argc): a hit while no class was (re)defined and the
-        // unit holds is the plan without a map probe or a walk of its expressions (map nodes never move)
-        struct construction_memo {
-            const class_definition* level = nullptr;
-            const function_decl* ctor = nullptr;
-            size_t argc = 0;
-            uint64_t unit = UINT64_MAX;
-            uint64_t class_epoch = UINT64_MAX;
-            construction_plan* plan = nullptr;
-        };
-        static constexpr size_t k_construction_memo_size = 64;
-        // A level's construction frame, open from where its code starts to where the construction leaves it: the chunk, `this`
-        // and the parameters in a window on the value stack; frames nest as the levels do (a pool, reused)
-        struct construction_frame {
-            call_frame locals;
-            frame f;
-            std::shared_ptr<environment> definition_env;
-            size_t window_base = 0;
-        };
         // The construction machinery's state, boxed: the backend's own layout stays as it was for code that never constructs
         struct construction_state {
             std::unordered_map<const class_definition*, level_initializers> level_initializers;
-            std::unordered_map<construction_key, construction_plan, construction_key_hash> plans;
-            construction_memo memo[k_construction_memo_size];
-            std::vector<std::unique_ptr<construction_frame>> frames;
-            size_t frames_top = 0;
-            std::exception_ptr field_init_exception;   // what a field store in a construction chunk threw, rethrown natively
+            std::exception_ptr field_init_exception;   // what a field store in a level's initializer body threw, rethrown natively
         };
         std::unique_ptr<construction_state> construction_;
         construction_state& construction() {
             if (!construction_) [[unlikely]] { construction_ = std::make_unique<construction_state>(); }
             return *construction_;
         }
-        const std::shared_ptr<chunk>* construction_chunk(const std::shared_ptr<environment>& definition_env, script_class_definition& level, const function_decl* ctor, size_t argc);
-        bool open_construction_frame(detail::construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
-                                     script_class_definition* level, const function_decl* ctor, const std::vector<script_value>* args, bool bind_for_parameters);
-        void close_construction_frame(detail::construction_scope& scope);
-        checked_result<script_value> run_construction_segment(construction_frame& cf, const void* key, bool& found);
-        checked_result<void> construction_frame_fields(construction_frame& cf, class_instance& instance, script_class_definition& level, bool skip_parent_recursion);
         checked_result<void> run_level_initializers(class_instance& instance, script_class_definition& class_def,
                                                     const std::shared_ptr<environment>& init_env);
         // A fresh layer's whole starting field state for a class whose initializers are all constants (the same keys)
@@ -3038,6 +3027,14 @@ namespace jai::vm {
         bool handle_throw_unwind(frame*& fp, size_t records_base);
         op_status exec_this(frame& f, const vm_instruction& ins);
         op_status exec_field_init(frame& f, const vm_instruction& ins);
+        op_status exec_ctor_base(frame& f, const vm_instruction& ins);
+        op_status exec_ctor_delegate(frame& f, const vm_instruction& ins);
+        op_status exec_ctor_done(frame& f, const vm_instruction& ins);
+        op_status exec_ctor_literals(frame& f, const vm_instruction& ins);
+        op_status exec_ctor_scope(frame& f, const vm_instruction& ins);
+        void leave_constructor_frame(call_record& rec);
+        op_status push_constructor_frame(frame& f, const std::shared_ptr<script_class_definition>& level, const std::shared_ptr<function_decl>& ctor,
+                                         size_t argc, const call_site* site, bool answer_as_level);
         op_status exec_super(frame& f, const vm_instruction& ins);
         op_status exec_from_this(frame& f, const vm_instruction& ins);
         op_status exec_get_member(frame& f, const vm_instruction& ins);

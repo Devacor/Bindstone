@@ -1075,12 +1075,14 @@ public:
             stack_trace_lists_every_frame_with_its_locals(jai::backend_type::vm);
         });
         test("a_construction_stops_in_each_level_with_its_frames", [this]() {
-            // a base level's frame stands alone above the construction's caller; the vm lists a level where its field initializers and
-            // initializer-list arguments run, without the constructor's parameters there (and no locals for hook's raw frame)
-            check_eq(std::string("hook:2(v) <script>:16() | hook:2(v) <script>:16() | A:7(x) <script>:16() | hook:2(v) <script>:16() | B:13(y) <script>:16() | "),
-                     construction_stops(jai::backend_type::interpreter), "interpreter");
-            check_eq(std::string("hook:2() B:12(y) <script>:16() | hook:2() A:5() <script>:16() | A:7(x) <script>:16() | hook:2() B:11(y) <script>:16() | B:13(y) <script>:16() | "),
-                     construction_stops(jai::backend_type::vm), "vm");
+            // each constructor's activation is a frame with its parameters, the level answering at its argument's or field's line
+            // (the vm lists no locals for hook's raw frame)
+            const std::string levels[] = {"B:12(y) <script>:16()", "A:5(x) B:12(y) <script>:16()", "A:7(x) B:12(y) <script>:16()", "B:11(y) <script>:16()",
+                                          "B:13(y) <script>:16()"};
+            const std::string interp = std::string("hook:2(v) ") + levels[0] + " | hook:2(v) " + levels[1] + " | " + levels[2] + " | hook:2(v) " + levels[3] + " | " + levels[4] + " | ";
+            const std::string vm = std::string("hook:2() ") + levels[0] + " | hook:2() " + levels[1] + " | " + levels[2] + " | hook:2() " + levels[3] + " | " + levels[4] + " | ";
+            check_eq(interp, construction_stops(jai::backend_type::interpreter), "interpreter");
+            check_eq(vm, construction_stops(jai::backend_type::vm), "vm");
         });
         test("keyword_named_members_in_frames_and_locals", [this]() {
             keyword_named_members_in_frames_and_locals(jai::backend_type::interpreter);

@@ -12,18 +12,16 @@
 namespace jai::detail {
 	struct aggregate_plan;
 
-	// What a constructor level's initializer-list arguments and field initializers run in: `this`, the constructor's parameters
-	// by name, then the definition environment. The host opens it where the level's code starts (construction_host::open_scope):
-	// an environment (the interpreter, and a level the vm cannot run in a frame) or the host's own frame (the vm's construction
-	// frame, the parameters in its slots)
+	// What a constructor's prologue (its initializer-list arguments and field initializers) and an aggregate's initializers run in:
+	// `this`, the constructor's parameters by name, then the definition environment
 	struct construction_scope {
 		std::shared_ptr<environment> env;
-		void* frame = nullptr;
-		explicit operator bool() const noexcept { return env || frame; }
+		explicit operator bool() const noexcept { return env != nullptr; }
 	};
 
-	// What a backend lends the one construction kernel both backends run: its evaluator, its constructor-body call, its field
-	// initializers and its depth and unwinding state. The kernel's common paths call none of the hooks.
+	// What a backend lends the construction kernel: its field initializers, its depth and unwinding state, and how it constructs a
+	// class through the implicit default constructor (the interpreter's lender also runs a constructor's activation for the
+	// kernel's construct_level; the vm's prologues are compiled)
 	class construction_host {
 	public:
 		construction_host(engine* a_eng, string_symbolizer* a_symbols, string_symbolizer* a_envSymbols, int& a_callDepth, int a_depthGate, const bool& a_unwinding) :
@@ -42,25 +40,17 @@ namespace jai::detail {
 		const int depth_gate;   // a call depth at or past it asks pass_depth_gate
 		const bool& unwinding;
 
-		virtual checked_result<script_value> evaluate(const expression_ptr& expr, const std::shared_ptr<environment>& env) = 0;
-		virtual checked_result<script_value> run_constructor_body(const std::shared_ptr<function_decl>& ctor, const std::shared_ptr<environment>& definition_env,
-		                                                          const script_value& this_value, class_definition* access, const std::vector<script_value>& args) = 0;
 		virtual checked_result<void> evaluate_field_initializers(const strong_ptr<class_instance>& instance, const std::shared_ptr<script_class_definition>& cls,
 		                                                         construction_scope& scope, bool skip_parent_recursion, const aggregate_plan* aggregate) = 0;
-		// The level's scope: its access context `level`, and the constructor's first args (as the parameters' bindings take them
-		// when bind_for_parameters, else as they are); a null ctor binds none. The default is the level environment
-		virtual void open_scope(construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value,
-		                        script_class_definition* level, const function_decl* ctor, const std::vector<script_value>* args, bool bind_for_parameters);
-		virtual void close_scope(construction_scope&) {}
-		// The constructor's by-value parameters as the level's code left them, into args (C++: one activation per constructor, so what
-		// its initializer list stores to a parameter its body reads); a reference parameter already names its argument
-		virtual void read_back_parameters(construction_scope& scope, const function_decl* ctor, std::vector<script_value>& args);
-		virtual checked_result<script_value> evaluate_in(construction_scope& scope, const expression_ptr& expr) { return evaluate(expr, scope.env); }
+		// A scope: the level environment, its access context `level`
+		void open_scope(construction_scope& scope, const std::shared_ptr<environment>& definition_env, const script_value& this_value, script_class_definition* level);
+		void close_scope(construction_scope&) {}
 		// The picked constructor's T& parameters bind the call's places now, ahead of any of the construction's code (C++: the
 		// parameters bind at the call): each such argument becomes its reference. A host without the call's site leaves them
 		virtual checked_result<void> bind_reference_arguments(const function_decl& ctor, std::vector<script_value>& args) = 0;
-		// The reference to the place an initializer-list argument names in the level's scope, for a T& it may bind; false: none
-		virtual checked_result<bool> initializer_place(construction_scope& scope, const expression* argument, script_value& out) = 0;
+		// The class's implicit default constructor on the instance under construction (`this_value`): its bases, then its fields
+		virtual checked_result<void> construct_implicitly(const std::shared_ptr<script_class_definition>& cls, const std::shared_ptr<environment>& definition_env,
+		                                                  const script_value& this_value) = 0;
 		virtual std::optional<error_propagator> pass_depth_gate() = 0;
 		virtual std::shared_ptr<environment> current_environment() = 0;
 		virtual std::shared_ptr<environment> global_environment() = 0;
@@ -73,16 +63,6 @@ namespace jai::detail {
 		~construction_host() = default;
 	};
 
-	// A constructor's member initialization on an instance under construction: its bases (each constructor a level of its own, its
-	// body run there) or the whole delegated-to constructor, then the field initializers; the body is the caller's. captured_out
-	// receives the arguments the body binds when code ran ahead of it (taken first, as the parameters left them)
-	template <class Host>
-	checked_result<script_value> initialize_members(Host& host, const std::shared_ptr<script_class_definition>& cls,
-	                                                const std::shared_ptr<environment>& definition_env, const strong_ptr<class_instance>& instance,
-	                                                const script_value& this_value, const std::shared_ptr<function_decl>& ctor,
-	                                                const std::vector<script_value>& args, std::optional<call_depth_guard>& initializer_depth,
-	                                                std::vector<script_value>* captured_out);
-
 	inline bool constructor_takes_references(const function_decl& ctor) {
 		return std::any_of(ctor.parameters.begin(), ctor.parameters.end(), [](const parameter& param) { return param.is_reference; });
 	}
@@ -94,28 +74,30 @@ namespace jai::detail {
 		return std::any_of(ctors.begin(), ctors.end(), [](const std::shared_ptr<function_decl>& ctor) { return constructor_takes_references(*ctor); });
 	}
 
-	// the class an initializer constructs: the level for this(...), its first base for super(...), else the base it names
-	inline const class_definition* initializer_target(const class_definition& level, const constructor_initializer& initializer) {
-		if (initializer.target == "this") { return &level; }
-		if (initializer.target == "super") { return level.parent_ptr(); }
-		for (const auto& base : level.get_parent_classes()) {
-			if (base && initializer_names(initializer.target, base->get_name())) { return base.get(); }
+	// A constructor's prologue evaluates code (an initializer-list argument, or a field initializer the class does not stamp): it needs
+	// a scope of its own
+	inline bool prologue_evaluates(const script_class_definition& level, const function_decl& ctor) {
+		bool delegates = false;
+		for (const auto& init : ctor.initializers) {
+			if (!init.arguments.empty()) { return true; }
+			delegates = delegates || init.target == "this";
 		}
-		return nullptr;
+		if (delegates || level.chain_initializers_all_literal()) { return false; }
+		const auto& fields = level.get_field_initializer_asts();
+		return std::any_of(fields.begin(), fields.end(), [](const auto& field) { return field.second != nullptr; });
 	}
 
 	// A T& argument that names no place: a reference or a host object a T& result named binds as it is, a temporary the parameter
 	// takes (a string&, a const T&, one the body never writes through) binds as one, anything else raises
 	checked_result<void> bind_placeless_reference_argument(engine* eng, const function_decl& ctor, size_t i, script_value& arg, bool may_prove);
 
-	// Everything ahead of a constructor's body: the overload, the instance and its member initialization. Success yields the
-	// instance; the picked constructor and the arguments the body binds (when they were taken ahead of it) ride the
-	// out-parameters. Inline, so the hot pick and allocation compile in each backend's own translation unit.
+	// A construction ahead of any of its code: the overload, its T& parameters bound to the call's places (captured_out then holds
+	// the arguments) and the instance. Success yields the instance and the picked constructor rides ctor_out. Inline, so the hot pick
+	// and allocation compile in each backend's own translation unit.
 	template <class Host>
-	inline checked_result<script_value> begin_construction(Host& host, const std::shared_ptr<script_class_definition>& cls,
-	                                                       const std::shared_ptr<environment>& definition_env, const std::vector<script_value>& args,
-	                                                       std::optional<call_depth_guard>& initializer_depth, std::shared_ptr<function_decl>& ctor_out,
-	                                                       std::vector<script_value>& captured_out, bool check_access) {
+	inline checked_result<script_value> prepare_construction(Host& host, const std::shared_ptr<script_class_definition>& cls, const std::vector<script_value>& args,
+	                                                         std::optional<call_depth_guard>& initializer_depth, std::shared_ptr<function_decl>& ctor_out,
+	                                                         std::vector<script_value>& captured_out, bool check_access) {
 		if (host.call_depth >= host.depth_gate) {
 			if (auto blocked = host.pass_depth_gate()) { return *blocked; }
 		}
@@ -142,20 +124,21 @@ namespace jai::detail {
 				return access.error_value();
 			}
 		}
-		const std::vector<script_value>* argv = &args;
 		if (constructor_takes_references(*ctor)) {
 			captured_out = args;
 			if (auto bound = host.bind_reference_arguments(*ctor, captured_out); !bound) { return bound.error_value(); }
-			argv = &captured_out;
 		}
 		auto instance = cls->create_instance();
 		instance->construction_pending(true);
-		auto this_value = script_value::make_class_object(*cls, instance, host.eng);
-		auto members = initialize_members(host, cls, definition_env, instance, this_value, ctor, *argv, initializer_depth, &captured_out);
-		if (!members) { return members; }
 		ctor_out = std::move(ctor);
-		return this_value;
+		return script_value::make_class_object(*cls, instance, host.eng);
 	}
+
+	// A construction prepare_construction began, under its constructor's activation: its prologue, then its body (the interpreter's;
+	// the vm compiles the prologue into the constructor's chunk)
+	template <class Host>
+	checked_result<void> construct_instance_members(Host& host, const std::shared_ptr<script_class_definition>& cls, const std::shared_ptr<environment>& definition_env,
+	                                                const script_value& this_value, const std::shared_ptr<function_decl>& ctor, const std::vector<script_value>& args);
 
 	// A class without a constructor: a copy, aggregate initialization, or the implicit default constructor
 	template <class Host>

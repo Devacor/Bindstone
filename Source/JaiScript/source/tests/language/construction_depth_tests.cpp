@@ -33,13 +33,17 @@ public:
 
 	void forge_tests() override {
 		test("initialization_and_body_use_one_constructor_depth", [this]() {
-			for (const std::string& source : {
-				"class C { int value = 1 + 2; C() { value += 4; } } C().value;",
-				"class B { int value = 1 + 2; B() { value += 4; } } class C : B { C() : super() {} } C().value;"}) {
-				auto eng = make_engine();
-				configure(*eng, 1);
-				check_eq(script_int(7), eng->execute(source).as_int());
-			}
+			// a constructor's prologue and body are one activation; a base's constructor is a call of its own (C++)
+			auto one = make_engine();
+			configure(*one, 1);
+			check_eq(script_int(7), one->execute("class C { int value = 1 + 2; C() { value += 4; } } C().value;").as_int());
+			const std::string chain = "class B { int value = 1 + 2; B() { value += 4; } } class C : B { C() : super() {} } C().value;";
+			auto two = make_engine();
+			configure(*two, 2);
+			check_eq(script_int(7), two->execute(chain).as_int());
+			auto short_of_the_base = make_engine();
+			configure(*short_of_the_base, 1);
+			expect_depth_error(*short_of_the_base, chain);
 		});
 
 		test("implicit_constructor_field_recursion_obeys_cap", [this]() {

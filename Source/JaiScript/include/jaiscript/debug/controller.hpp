@@ -98,6 +98,8 @@ public:
     void step_into();
     void step_out();
     void post_command(std::function<void()> fn);       // run on the parked thread; wakes it
+    // post_command only while the script thread is parked, decided under the park's lock: false (fn dropped) once it has left
+    bool post_command_while_paused(std::function<void()> fn);
     void detach();                                     // force-resume + disarm (disconnect/shutdown)
     void set_on_stopped(std::function<void(const stop_info&)> cb) { on_stopped_ = std::move(cb); }
     // Whether a source-path breakpoint on `path` can bind: "<script>", or a unit the engine has

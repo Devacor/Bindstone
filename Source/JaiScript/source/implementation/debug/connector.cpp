@@ -686,8 +686,7 @@ struct debug_connector::impl {
     // A park-only request needs the parked script thread to read live engine state. If not
     // stopped, answer immediately with an error rather than silently queueing a closure.
     void post_park_only(int req_seq, const std::string& cmd, std::function<void()> reply) {
-        if (!ctrl_->is_paused()) { enqueue(make_response(req_seq, cmd, false, "", "not stopped")); return; }
-        ctrl_->post_command(std::move(reply));
+        if (!ctrl_->post_command_while_paused(std::move(reply))) { enqueue(make_response(req_seq, cmd, false, "", "not stopped")); }
     }
 
     // A frame id or variables reference: the stop's generation (mod 2048) over a 20-bit payload, a positive int32

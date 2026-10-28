@@ -1136,6 +1136,35 @@ public:
             check_true(done.load());
         });
 
+        test("a_park_only_command_after_the_resume_is_refused_not_kept_for_the_next_stop", [this]() {
+            // The paused test and the queueing are one step under the park's lock: a command posted once the script thread has
+            // left its park is refused (the connector answers "not stopped") instead of running at a later stop against it
+            auto eng = jai::foundry::make_engine();
+            auto& dbg = eng->debugger();
+            std::mutex m;
+            std::condition_variable cv;
+            int stops = 0;
+            dbg.set_on_stopped([&](const jai::debug::stop_info&) { std::lock_guard<std::mutex> lk(m); ++stops; cv.notify_all(); });
+            dbg.set_breakpoints("<script>", {1, 3});
+            dbg.set_enabled(true);
+            std::thread script([&] { eng->execute("var a = 1;\nfor (int i = 0; i < 300000; i += 1) { a += 1; }\nvar c = 3;\n"); });
+            const auto wait_stops = [&](int n) {
+                std::unique_lock<std::mutex> lk(m);
+                return cv.wait_for(lk, std::chrono::seconds(5), [&] { return stops >= n && dbg.is_paused(); });
+            };
+            check_true(wait_stops(1));
+            int ran = 0;
+            check_true(dbg.post_command_while_paused([&] { ++ran; }), "a parked thread takes the command");
+            dbg.resume();
+            while (dbg.is_paused()) { std::this_thread::yield(); }
+            const bool stale = dbg.post_command_while_paused([&] { ran += 100; });
+            check_true(wait_stops(2));
+            dbg.set_enabled(false);
+            script.join();
+            check_false(stale, "a command posted after the park ended is refused");
+            check_eq(1, ran, "only the command posted while parked ran");
+        });
+
         test("a_detach_racing_a_stop_never_strands_the_script", [this]() {
             // A session that ends while the script thread is between its stop test and its park must not leave it parked: the park
             // used to clear the resume the detach had just requested

@@ -376,6 +376,102 @@ public:
             check_eq((size_t)4, trace[3].line);
         });
 
+        test("a_throw_in_construction_code_traces_the_level_running_it", [this]() {
+            // the vm traces a field initializer or an initializer-list argument at its level's line, the interpreter at its caller's; a
+            // base level's frame stands alone above the construction's caller
+            const std::string chain =
+                "int boom(int v) {\n"
+                "    if (at == v) { throw \"boom \" + v; }\n"
+                "    return v;\n"
+                "}\n"
+                "class A {\n"
+                "    int a = boom(1);\n"
+                "    A(int x) {\n"
+                "        boom(2);\n"
+                "    }\n"
+                "}\n"
+                "class B : A {\n"
+                "    int b = boom(3);\n"
+                "    B() : super(boom(4)) {\n"
+                "        boom(5);\n"
+                "    }\n"
+                "}\n"
+                "class C : B {\n"
+                "    int c = boom(6);\n"
+                "    C() : super() {\n"
+                "        boom(7);\n"
+                "    }\n"
+                "}\n"
+                "C();\n";
+            const bool interp = make_engine()->get_backend_type() == jai::backend_type::interpreter;
+            const char* chain_interp[] = {"boom:3|<script>:24", "boom:3|A:9|<script>:24", "boom:3|<script>:24", "boom:3|<script>:24", "boom:3|B:15|<script>:24", "boom:3|<script>:24", "boom:3|C:21|<script>:24"};
+            const char* chain_vm[] = {"boom:3|A:7|<script>:24", "boom:3|A:9|<script>:24", "boom:3|B:13|<script>:24", "boom:3|B:14|<script>:24", "boom:3|B:15|<script>:24", "boom:3|C:19|<script>:24", "boom:3|C:21|<script>:24"};
+            const char* chain_vm_reference[] = {"boom:3|A:7|<script>:24", "boom:3|A:9|<script>:24", "boom:3|B:13|<script>:24", "boom:3|<script>:14", "boom:3|B:15|<script>:24", "boom:3|C:19|<script>:24", "boom:3|C:21|<script>:24"};
+            const char* const* chain_shapes = interp ? chain_interp : vm_reference_run() ? chain_vm_reference : chain_vm;
+            for (int at = 1; at <= 7; ++at) {
+                auto engine = make_engine();
+                failure_text(*engine, ("int at = " + std::to_string(at) + ";\n" + chain).c_str());
+                check_eq(std::string(chain_shapes[at - 1]), trace_shape(*engine), "a three-level chain, throw point " + std::to_string(at));
+            }
+            const std::string shapes =
+                "int boom(int v) {\n"
+                "    if (at == v) { throw \"boom \" + v; }\n"
+                "    return v;\n"
+                "}\n"
+                "class K {\n"
+                "    int k = boom(1);\n"
+                "}\n"
+                "class P {\n"
+                "    int p = boom(2);\n"
+                "}\n"
+                "class B : P {\n"
+                "    B(int x) {}\n"
+                "}\n"
+                "class D : B {\n"
+                "    D() : super(1) {}\n"
+                "}\n"
+                "class E {\n"
+                "    int e = 0;\n"
+                "    E(int v) {}\n"
+                "    E() : this(boom(3)) {}\n"
+                "}\n"
+                "class L {\n"
+                "    L(int v) {}\n"
+                "}\n"
+                "class R {\n"
+                "    R(int v) {}\n"
+                "}\n"
+                "class M : L, R {\n"
+                "    M() : L(1), R(boom(4)) {}\n"
+                "}\n"
+                "class Inner {\n"
+                "    int i = boom(5);\n"
+                "}\n"
+                "class Outer {\n"
+                "    Inner held = Inner();\n"
+                "    Outer() {}\n"
+                "}\n"
+                "int f() {\n"
+                "    if (at == 1) { K(); }\n"
+                "    if (at == 2) { D(); }\n"
+                "    if (at == 3) { E(); }\n"
+                "    if (at == 4) { M(); }\n"
+                "    if (at == 5) { Outer(); }\n"
+                "    return 0;\n"
+                "}\n"
+                "f();\n";
+            const char* other_interp[] = {"boom:3|f:40|<script>:47", "boom:3|f:41|<script>:47", "boom:3|f:42|<script>:47", "boom:3|f:43|<script>:47", "boom:3|f:44|<script>:47"};
+            const char* other_vm[] = {"boom:3|K:7|f:40|<script>:47", "boom:3|P:10|f:41|<script>:47", "boom:3|E:21|f:42|<script>:47", "boom:3|M:30|f:43|<script>:47", "boom:3|Inner:33|Outer:36|f:44|<script>:47"};
+            const char* const* other_shapes = interp ? other_interp : other_vm;
+            const char* what[] = {"a class without a constructor", "a base without a constructor under a base level", "a delegation's argument",
+                                  "a later base's argument", "a field initializer that constructs"};
+            for (int at = 1; at <= 5; ++at) {
+                auto engine = make_engine();
+                failure_text(*engine, ("int at = " + std::to_string(at) + ";\n" + shapes).c_str());
+                check_eq(std::string(other_shapes[at - 1]), trace_shape(*engine), what[at - 1]);
+            }
+        });
+
         test("top_level_throw_captures_script_frame", [this]() {
             auto engine = make_engine();
             try { engine->execute("throw \"x\";"); } catch (...) {}

@@ -1,7 +1,8 @@
 // A construction runs one activation per constructor, as C++ does: its parameters bound, each base in declaration order, then the
-// level's field initializers and body, all in that activation. What a level's initializer-list arguments and field initializers
-// see: `this`, its constructor's parameters by name as bound, then the definition environment. Every case holds both backends to one
-// result, and to the stated value where it is fixed.
+// level's field initializers and body, all in that activation. A level's initializer-list arguments see its constructor's parameters
+// by name as bound, then `this`, then the definition environment; its field initializers resolve as C++ default member initializers
+// do, in the class (`this` and the members), then the definition environment, never the parameters. Every case holds both backends
+// to one result, and to the stated value where it is fixed.
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
@@ -16,46 +17,99 @@ class construction_scope_tests : public suite {
 public:
 	construction_scope_tests() : suite("Construction Scope") {}
 
-	static std::string run(bool vm, const std::string& program) {
+	static std::string run(bool vm, const std::string& program, check_mode mode = check_mode::strict) {
 		auto e = engine::make();
 		e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+		e->static_checking(mode);
 		stdlib::register_all(*e);
 		try { return e->execute(program).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 	}
 
-	void both(const std::string& program, const std::string& expected, const std::string& what) {
-		const std::string interp = run(false, program);
-		const std::string vm = run(true, program);
+	void both(const std::string& program, const std::string& expected, const std::string& what, check_mode mode = check_mode::strict) {
+		const std::string interp = run(false, program, mode);
+		const std::string vm = run(true, program, mode);
 		check_eq(interp, vm, what + ": both backends");
 		if (!expected.empty()) { check_eq(expected, vm, what); }
-		const std::string again = run(true, program + "\n");   // a second engine compiles the chunks afresh
+		const std::string again = run(true, program + "\n", mode);   // a second engine compiles the chunks afresh
 		check_eq(vm, again, what + ": repeatable");
 	}
 
+	// the program fails its load with the checker's text, and with checking off raises `raised` on both backends
+	void refused(const std::string& program, const std::string& diagnostic, const std::string& raised, const std::string& what) {
+		for (bool vm : {false, true}) {
+			const std::string checked = run(vm, program);
+			check(checked.rfind("throw:", 0) == 0 && checked.find(diagnostic) != std::string::npos, what + ": the checker reports " + diagnostic + ", got " + checked);
+		}
+		both(program, "throw:" + raised, what + " (checking off)", check_mode::off);
+	}
+
 	void forge_tests() override {
-		test("a_field_initializer_reads_a_constructor_parameter_by_name", [this]() {
-			both("class A { int x = n + 1; A(int n) {} } A(5).x;", "6", "a parameter");
-			both("int v = 100; class B { int v = 1; int w = v; B(int v) {} } B(7).w;", "", "a parameter over a member and a global");
-			both("class C { int x = 0; C(int n) { x = n; } } class D : C { int y = n * 2; D(int n) : super(n + 1) {} } auto d = D(4); to_string(d.x) + \" \" + to_string(d.y);",
+		test("a_field_initializer_never_sees_a_constructor_parameter", [this]() {
+			// C++ [class.mem]: a default member initializer resolves in the class, then the enclosing scope
+			both("int n = 40; class C { int x = n; C(int n = 5) {} } to_string(C(7).x) + \" \" + to_string(C().x);", "40 40", "a global a parameter shadows");
+			both("int n = 40; class C { int x = n; C(int n = 5) {} } to_string(C(7).x) + \" \" + to_string(C().x);", "40 40", "a global a parameter shadows",
+			     check_mode::off);
+			both("class B { int v = 1; int w = v; B(int v) {} } B(7).w;", "1", "a member a parameter shadows");
+			both("int v = 100; class B { int v = 1; int w = v; B(int v) {} } B(7).w;", "1", "a member over a global and a parameter");
+			both("int n = 40; class P { int p = n; P(int n) {} } class D : P { D(int n) : super(n + 1) {} } D(5).p;", "40", "a base's field initializer");
+			both("class Q { int k = 3; Q() {} } class R : Q { int d = k * 2; R(int k) {} } R(9).d;", "6", "an inherited member a parameter shadows");
+			both("class T { int x = 2; int y = this.x + 1; T(int x) {} } T(50).y;", "3", "this.x");
+			both("int k = 1; class E { int b = k; E(int k) {} E() : this(10) {} } E().b;", "1", "a delegated-to constructor's parameter");
+			both("class C { int x = n; C(int n) {} } int n = 40; C(5).x;", "40", "a global declared after the class");
+			both("int n = 40; class H { int x = n; var f = null; H(int n) { f = [&]() { return n; }; } } auto h = H(5); [h.x, h.f()];", "[40, 5]",
+			     "a body that captures the parameter by reference");
+		});
+
+		test("a_field_initializer_reads_a_member_over_a_global_in_every_construction", [this]() {
+			const std::string global = "int v = 100; ";
+			both(global + "class B { int v = 1; int w = v; } B().w;", "1", "the implicit default constructor");
+			both(global + "class B { int v = 1; int w = v; } B{5}.w;", "5", "aggregate initialization");
+			both(global + "class B { int v = 1; int w = v; B() {} } B().w;", "1", "a constructor without parameters");
+			both(global + "class P { int v = 1; } class D : P { int w = v; D() : super() {} } D().w;", "1", "an inherited member");
+			both(global + "class B { int v = 1; int w = ::v; B(int v) {} } B(7).w;", "100", "::v names the global");
+		});
+
+		test("a_name_only_a_parameter_has_is_undeclared_in_a_field_initializer", [this]() {
+			refused("class A { int x = count_in + 1; A(int count_in) {} } A(5).x;", "use of undeclared identifier 'count_in'", "Undefined variable 'count_in'",
+			        "a bare read");
+			refused("class P { int p = 0; P(int v) { p = v; } } class D : P { int d = arg; D(int arg) : super(arg) {} } D(5).d;", "use of undeclared identifier 'arg'",
+			        "Undefined variable 'arg'", "the parameter the initializer list passes on");
+			refused("class F { var g = [count_in](int q) { return q + count_in; }; F(int count_in) {} } F(5).g(1);", "use of undeclared identifier 'count_in'",
+			        "Cannot capture undefined variable 'count_in'", "a lambda's capture");
+			refused("class K { var h = [=]() { return count_in; }; K(int count_in) {} } K(1).h();", "use of undeclared identifier 'count_in'",
+			        "Undefined variable 'count_in'", "a lambda's body");
+		});
+
+		test("a_lambda_in_a_field_initializer_captures_in_the_class", [this]() {
+			both("int n = 40; class F { var g = [n](int q) { return q + n; }; F(int n) {} } F(5).g(1);", "41", "a global a parameter shadows");
+			both("class G { int m = 3; var g = [this](int q) { return q + m; }; G(int m) {} } G(10).g(1);", "4", "a member a parameter shadows");
+			both("class L { var g = [](int count_in) { return count_in * 2; }; L(int count_in) {} } L(1).g(4);", "8", "the lambda's own parameter");
+		});
+
+		test("the_initializer_list_and_the_body_still_see_the_parameters", [this]() {
+			both("int n = 40; class L { int l = 0; L(int v) { l = v; } } class M : L { int x = n; int y = 0; M(int n) : super(n) { y = n; } } auto m = M(5); [m.l, m.x, m.y];",
+			     "[5, 40, 5]", "a field initializer beside the list and the body");
+			both("class C { int x = 0; C(int n) { x = n; } } class D : C { int y = 0; D(int n) : super(n + 1) { y = n * 2; } } auto d = D(4); to_string(d.x) + \" \" + to_string(d.y);",
 			     "5 8", "the class's parameters at its own level, the argument at the base");
 		});
 
 		test("an_omitted_parameter_is_bound_to_its_default", [this]() {
-			both("int n = 40; class C { int x = n; C(int n = 5) {} } to_string(C().x) + \" \" + to_string(C(9).x);", "5 9", "a defaulted parameter");
-			both("int calls = 0; int next() { return ++calls; } class C { int x = n; C(int n = next()) { x = x * 10 + n; } } C().x * 100 + calls;", "1101",
+			both("class C { int x = 0; C(int n = 5) { x = n; } } to_string(C().x) + \" \" + to_string(C(9).x);", "5 9", "a defaulted parameter");
+			both("int calls = 0; int next() { return ++calls; } class B0 { int b = 0; B0(int v) { b = v; } } "
+			     "class C : B0 { int x = 0; C(int n = next()) : super(n) { x = b * 10 + n; } } C().x * 100 + calls;", "1101",
 			     "a default evaluates once, for the whole activation");
 		});
 
 		test("a_base_level_sees_its_parameter_as_bound", [this]() {
-			both("class Base { var f = x * 2; Base(float x) {} } class D : Base { D() : super(3) {} } to_string(D().f);", "6.0", "an int argument to a float parameter");
-			both("class P { int a = 0; P(int x) { a = x; } } class Q : P { int b = k; Q(int k) : super(k * 10) {} } auto q = Q(2); to_string(q.a) + \" \" + to_string(q.b);",
+			both("class Base { var f = 0; Base(float x) { f = x * 2; } } class D : Base { D() : super(3) {} } to_string(D().f);", "6.0", "an int argument to a float parameter");
+			both("class P { int a = 0; P(int x) { a = x; } } class Q : P { int b = 0; Q(int k) : super(k * 10) { b = k; } } auto q = Q(2); to_string(q.a) + \" \" + to_string(q.b);",
 			     "20 2", "each level's own parameters");
 		});
 
 		test("delegation_and_further_bases_take_their_arguments_in_the_level", [this]() {
-			both("class E { int a = 1; int b = a + k; E(int k) {} E() : this(10) {} } E().b;", "11", "a delegated-to constructor's parameter");
+			both("class E { int a = 1; int b = 0; E(int k) { b = a + k; } E() : this(10) {} } E().b;", "11", "a delegated-to constructor's parameter");
 			both("class L { int l = 0; L(int v) { l = v; } } class R { int r = 0; R(int v) { r = v; } } "
-			     "class M : L, R { int m = p + q; M(int p, int q) : L(p), R(q * 2) {} } auto x = M(3, 4); to_string(x.l) + \" \" + to_string(x.r) + \" \" + to_string(x.m);",
+			     "class M : L, R { int m = 0; M(int p, int q) : L(p), R(q * 2) { m = p + q; } } auto x = M(3, 4); to_string(x.l) + \" \" + to_string(x.r) + \" \" + to_string(x.m);",
 			     "3 8 7", "two bases named in the list");
 		});
 
@@ -72,7 +126,7 @@ public:
 			both("class L { int l = 0; L(int v) { l = v; } } class R { int r = 0; R(int v) { r = v; } } "
 			     "class M : L, R { int m = 0; M(int p) : L(p = p + 1), R(p = p * 10) { m = p; } } auto x = M(1); [x.l, x.r, x.m];", "[2, 20, 20]",
 			     "bases in declaration order, each store seen by the next and by the body");
-			both("class B0 { B0(int v) {} } class C : B0 { int f = n; C(int n) : super(n = n + 1) {} } C(1).f;", "2", "a field initializer after the list");
+			both("class B0 { B0(int v) {} } class C : B0 { int f = 0; C(int n) : super(n = n + 1) { f = n; } } C(1).f;", "2", "the body after the list");
 		});
 
 		test("a_base_without_a_constructor_is_default_constructed_under_every_level", [this]() {
@@ -119,7 +173,8 @@ public:
 			both("int k = 1; class P { int a = 0; P(int& x) { x = x + 10; a = x; } } class Q : P { int b = 0; Q(int& r) : super(r) { r = r + 1; b = r; } } "
 			     "Q q = Q(k); [k, q.a, q.b];", "[12, 11, 12]", "a base level's parameter through super(r) from the class's own");
 			both("int m = 5; class S { S(int& x) { x = x * 2; } } class T : S { T(int v) : super(m) {} } T(0); m;", "10", "a base level's parameter bound to a global");
-			both("int n = 4; class F { int f = r * 3; F(int& r) { r = 0; } } F x = F(n); [n, x.f];", "[0, 12]", "a field initializer reads the parameter");
+			both("int n = 4; class G { int g = 0; G(int v) { g = v; } } class F : G { F(int& r) : super(r * 3) { r = 0; } } F x = F(n); [n, x.g];", "[0, 12]",
+			     "an initializer-list argument reads the parameter");
 			both("array<int> arr = [1, 2]; class D { int d = 0; D(int& r) { r = r + 1; d = r; } } D x = D(arr[1]); to_string(arr) + \" \" + x.d;", "[1, 3] 3",
 			     "an element place");
 			both("int h = 1; class D { int d = 0; D(int& r) { r = r + 1; d = r; } } shared_ptr<D> p = new D(h); [h, p.d];", "[2, 2]", "a new expression");
@@ -158,14 +213,15 @@ public:
 		});
 
 		test("an_initializer_that_raises_raises_as_before", [this]() {
-			both("class T { int x = [1, 2][n]; T(int n) {} } string r = \"made\"; try { T(7); } catch (err) { r = to_string(err); } r;", "", "an index past the end in a field initializer");
+			both("class T { int i = 7; int x = [1, 2][i]; T(int n) {} } string r = \"made\"; try { T(7); } catch (err) { r = to_string(err); } r;", "", "an index past the end in a field initializer");
 			both("function fail(int n) -> int { throw \"no \" + to_string(n); } class U { int x = 0; U(int v) { x = v; } } class V : U { V(int n) : super(fail(n)) {} } "
 			     "string r = \"made\"; try { V(4); } catch (err) { r = to_string(err); } r;", "no 4", "a throw in an initializer-list argument");
 			both("class W { int x = q; W(int n) {} } W(1).x;", "", "an unknown name in a field initializer");
 		});
 
-		test("a_closure_in_an_initializer_keeps_the_level_environment", [this]() {
-			both("class F { var g = [n](int q) { return q + n; }; F(int n) {} } F(5).g(1);", "6", "a lambda capturing a parameter");
+		test("a_closure_in_an_initializer_list_keeps_the_level_environment", [this]() {
+			both("class P { var g = null; P(var f) { g = f; } } class F : P { F(int n) : super([n](int q) { return q + n; }) {} } F(5).g(1);", "6",
+			     "a lambda capturing a parameter");
 		});
 
 		test("an_argument_is_captured_where_the_level_takes_it", [this]() {
@@ -174,7 +230,7 @@ public:
 		});
 
 		test("constructions_repeat_with_their_own_parameters", [this]() {
-			both("class S { int s = k * k; S(int k) {} } int t = 0; for (int i = 0; i < 200; ++i) { t += S(i).s; } t;", "2646700", "two hundred constructions");
+			both("class B0 { int s = 0; B0(int v) { s = v; } } class S : B0 { S(int k) : super(k * k) {} } int t = 0; for (int i = 0; i < 200; ++i) { t += S(i).s; } t;", "2646700", "two hundred constructions");
 		});
 	}
 };

@@ -12,10 +12,12 @@
 namespace jai::detail {
 	struct aggregate_plan;
 
-	// What a constructor's prologue (its initializer-list arguments and field initializers) and an aggregate's initializers run in:
-	// `this`, the constructor's parameters by name, then the definition environment
+	// What a constructor's prologue and an aggregate's initializers run in. Its initializer-list arguments: the constructor's
+	// parameters by name, `this`, then the definition environment; its field initializers (members): `this`, then the definition
+	// environment, as a C++ default member initializer never sees the parameters (null: env)
 	struct construction_scope {
 		std::shared_ptr<environment> env;
+		std::shared_ptr<environment> members;
 		explicit operator bool() const noexcept { return env != nullptr; }
 	};
 

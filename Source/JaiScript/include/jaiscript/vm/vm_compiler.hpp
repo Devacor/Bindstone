@@ -42,8 +42,8 @@ namespace jai::vm {
         // the declaring class of the next method body compile_callable compiles (null: not a method body)
         void member_class(const class_definition* cls) { member_class_ = cls; }
         // A constructor's prologue (C++ [class.base.init]), compiled ahead of its body in the constructor's own frame: a delegation's
-        // target, else each base in declaration order, then the level's own field initializers; its expressions read the
-        // constructor's parameters by name (name_slots)
+        // target, else each base in declaration order, then the level's own field initializers; its initializer-list arguments read
+        // the constructor's parameters by name (name_slots), its field initializers never do (C++ [class.mem])
         struct constructor_prologue {
             const class_definition* level = nullptr;
             const constructor_initializer* delegation = nullptr;

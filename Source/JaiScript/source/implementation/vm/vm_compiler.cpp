@@ -1246,6 +1246,8 @@ void vm_compiler::compile_constructor_prologue(const constructor_prologue& prolo
 			chunk_->ctor_steps.push_back(std::move(own));
 			emit(opcode::op_ctor_literals, static_cast<uint32_t>(chunk_->ctor_steps.size() - 1));
 		} else {
+			static const std::unordered_map<uint64_t, uint32_t> no_parameters;
+			name_slots_ = &no_parameters;   // C++ [class.mem]: a field initializer resolves in the class, never the constructor's parameters
 			for (const auto& [field_id, initializer] : prologue.fields) {
 				current_stmt_ = initializer.get();
 				chunk_->nodes.push_back(initializer);
@@ -8527,7 +8529,7 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 	proto.default_capture = static_cast<uint8_t>(expr->default_capture);
 
 	uint64_t this_id = symbolizer_->get_this_id();
-	// a constructor prologue's lambda (a field initializer's, parsed in the class) captures the constructor's parameters by name
+	// an initializer-list argument's lambda captures the constructor's parameters by name
 	auto prologue_slot = [&](uint64_t id, size_t slot) -> size_t {
 		if (slot != SIZE_MAX || !name_slots_) { return slot; }
 		auto named = name_slots_->find(id);

@@ -466,6 +466,25 @@ public:
             }
         });
 
+        test("an_aggregates_field_initializer_traces_its_class", [this]() {
+            // the fields an aggregate leaves to their initializers run in a frame of the class, as a class without a constructor does
+            const std::string aggregate =
+                "int boom(int v) {\n"
+                "    throw \"boom \" + v;\n"
+                "}\n"
+                "class K {\n"
+                "    int v = 1;\n"
+                "    int w = at == 1 ? boom(v) : [1, 2][v + 5];\n"
+                "}\n"
+                "K{4};\n";
+            const char* shapes[] = {"boom:3|K:7|<script>:9", "K:7|<script>:9"};
+            for (int at = 1; at <= 2; ++at) {
+                auto engine = make_engine();
+                failure_text(*engine, ("int at = " + std::to_string(at) + ";\n" + aggregate).c_str());
+                check_eq(std::string(shapes[at - 1]), trace_shape(*engine), at == 1 ? "a throw from a call" : "a run-time error of its own");
+            }
+        });
+
         test("top_level_throw_captures_script_frame", [this]() {
             auto engine = make_engine();
             try { engine->execute("throw \"x\";"); } catch (...) {}

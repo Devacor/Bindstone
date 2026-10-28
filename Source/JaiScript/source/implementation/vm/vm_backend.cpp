@@ -19889,7 +19889,13 @@ checked_result<void> vm_backend::evaluate_field_initializers(strong_ptr<class_in
 	};
 
 	if (aggregate) [[unlikely]] {
-		return detail::aggregate_fill_own_fields(*instance, *class_def, *aggregate, engine_, initialize_field);
+		if (!init_env) { return detail::aggregate_fill_own_fields(*instance, *class_def, *aggregate, engine_, initialize_field); }
+		// each initializer the aggregate leaves to run is the level's body over `this`, so a member outranks a global
+		return detail::aggregate_fill_own_fields(*instance, *class_def, *aggregate, engine_, [&](uint64_t field_id, const expression_ptr& initializer_ast) {
+			if (initializer_ast->get_type() == node_type::literal_expr) { return initialize_field(field_id, initializer_ast); }
+			const std::pair<uint64_t, expression_ptr> only{field_id, initializer_ast};
+			return run_level_initializers(*instance, *class_def, init_env, &only);
+		});
 	}
 	if (init_env) {
 		return run_level_initializers(*instance, *class_def, init_env);
@@ -19903,12 +19909,14 @@ checked_result<void> vm_backend::evaluate_field_initializers(strong_ptr<class_in
 	return {};
 }
 
-// The level's initializers run as one method body over init_env (its `this`, the constructor's parameters, then the definition
-// environment): the frame resolves names as the per-field evaluation did, and each value lands through op_field_init
+// The level's initializers run as one method body over init_env (its `this`, then the definition environment): the frame resolves
+// names as a method does, members before globals, and each value lands through op_field_init
 checked_result<void> vm_backend::run_level_initializers(class_instance& instance, script_class_definition& class_def,
-                                                        const std::shared_ptr<environment>& init_env) {
-	const auto& initializers = class_def.get_field_initializer_asts();
-	level_initializers& entry = construction().level_initializers[&class_def];
+                                                        const std::shared_ptr<environment>& init_env, const std::pair<uint64_t, expression_ptr>* only) {
+	const std::vector<std::pair<uint64_t, expression_ptr>> one = only ? std::vector<std::pair<uint64_t, expression_ptr>>{*only}
+	                                                                  : std::vector<std::pair<uint64_t, expression_ptr>>{};
+	const auto& initializers = only ? one : class_def.get_field_initializer_asts();
+	level_initializers& entry = only ? construction().single_initializers[only->second.get()] : construction().level_initializers[&class_def];
 	bool current = entry.fn && entry.unit == current_unit().id;
 	if (current) {
 		size_t at = 0;

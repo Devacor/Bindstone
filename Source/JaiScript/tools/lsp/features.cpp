@@ -270,7 +270,7 @@ void add_host_names(program_view& view, item_list& items) {
 			std::string n(name);
 			if (value.is_object()) {
 				auto holder = value.get_object_holder();
-				if (holder && holder->type_name == "class_definition") { continue; }
+				if (holder && holder->type_name() == "class_definition") { continue; }
 			}
 			if (eng.get_class_definition(n)) { continue; }
 			if (value.is_function()) {

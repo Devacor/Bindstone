@@ -276,10 +276,7 @@ namespace jai::detail {
 	// weak_ptr against null: equal when the handle expired (a default-constructed one included)
 	inline std::optional<bool> weak_equals_null(const script_value& left, const script_value& right) {
 		if (!((left.is_weak_ptr() && right.is_null()) || (left.is_null() && right.is_weak_ptr()))) { return std::nullopt; }
-		if (left.is_weak_ptr()) { return left.get_weak_ptr().expired(); }
-		if (right.is_weak_ptr()) { return right.get_weak_ptr().expired(); }
-		if (auto holder = right.get_object_holder()) { return holder->type_name() == "weak_ptr_holder" && !holder->holds_object(); }
-		return true;
+		return (left.is_weak_ptr() ? left : right).get_weak_ptr().expired();
 	}
 
 	// a == b through an operator==: the left operand's, then the right operand's bound reflected one, then the right operand's

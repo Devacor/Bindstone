@@ -32,7 +32,7 @@ inline script_value region_field_default(const script_value& value, engine* eng)
 
 inline size_t class_instance::trailing_bytes(uint32_t slots) noexcept { return slots * sizeof(script_value); }
 
-inline class_instance::class_instance(interned_name_t, std::string_view interned, engine* eng, const trailing_cells& trailing) : class_instance(interned_name_t{}, interned, eng) {
+inline class_instance::class_instance(interned_name_t, uint64_t type_id, engine* eng, const trailing_cells& trailing) : class_instance(interned_name_t{}, type_id, eng) {
     if (trailing.memory && trailing.slots) {
         auto* cells = reinterpret_cast<script_value*>(trailing.memory);
         for (uint32_t i = 0; i < trailing.slots; ++i) { new (cells + i) script_value(script_value::make_invalid(eng)); }
@@ -50,7 +50,7 @@ inline void class_instance::free_allocation(class_instance* instance) noexcept {
 
 namespace detail {
 static_assert(cb_storage_offset<class_instance> == k_instance_cb_offset, "object_ref finds an instance's control block a fixed distance before it");
-static_assert(sizeof(void*) != 8 || sizeof(class_instance) <= 88, "an instance's header stays within 88 bytes (internal/object_layout.md)");
+static_assert(sizeof(void*) != 8 || sizeof(class_instance) <= 72, "an instance's header stays within 72 bytes (internal/object_layout.md)");
 
 // An instance handed to its own destructor body as `this`: a dying one (its last strong reference gone, its chain running) holds
 // a count for the span that goes back without a second death; a living one (a re-class) is pinned as usual
@@ -99,7 +99,11 @@ inline void object_block::release_pinned(control_block_base* cb) noexcept {
 }
 }
 
-inline strong_ptr<class_instance> class_instance::make(std::string_view interned, engine* eng, uint32_t slots, class_definition* destructor_owner) {
+inline strong_ptr<class_instance> class_instance::make(std::string_view class_name, engine* eng) {
+    return make(eng ? eng->get_symbolizer()->intern(class_name) : UINT64_MAX, eng);
+}
+
+inline strong_ptr<class_instance> class_instance::make(uint64_t type_id, engine* eng, uint32_t slots, class_definition* destructor_owner) {
     using block_cb = detail::control_block<class_instance>;
     static_assert(sizeof(block_cb) == detail::k_instance_cb_offset + sizeof(class_instance), "the cells follow the instance");
     const size_t prefix = destructor_owner ? detail::object_block::pin_bytes : 0;
@@ -108,7 +112,7 @@ inline strong_ptr<class_instance> class_instance::make(std::string_view interned
     auto* cb = new (memory + prefix) block_cb();
     cb->dealloc_fn = destructor_owner ? &detail::object_block::release_pinned : &detail::object_block::release;
     const trailing_cells trailing{memory + prefix + sizeof(block_cb), slots};
-    auto* instance = new (cb->storage) class_instance(interned_name_t{}, interned, eng, trailing);
+    auto* instance = new (cb->storage) class_instance(interned_name_t{}, type_id, eng, trailing);
     if (destructor_owner) { instance->note_destructor_armed(); }
     return detail::adopt_pooled(instance);
 }
@@ -802,7 +806,7 @@ inline strong_ptr<class_instance> class_definition::allocate_instance() {
         dtor_memo_epoch_ = method_epoch_;
     }
     if (has_script_dtor_ && engine_ && !engine_->destructors_armed()) { engine_->note_destructors_armed(); }
-    return class_instance::make(interned_name(), engine_, field_slot_count(), has_script_dtor_ ? this : nullptr);
+    return class_instance::make(interned_name_id(), engine_, field_slot_count(), has_script_dtor_ ? this : nullptr);
 }
 
 inline strong_ptr<class_instance> class_definition::create_instance() {
@@ -3148,7 +3152,7 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
             outcome = field_migration_outcome::added;
             before = nullptr;
         }
-        owner_->record_field_migration(type_name_, field_id, outcome, before, after);
+        owner_->record_field_migration(type_name(), field_id, outcome, before, after);
     };
     // IN-PLACE per-id migration: kept fields keep their storage CELL, so script_value
     // addresses stay stable — suspended coroutines' env chains and this-capturing
@@ -3292,7 +3296,7 @@ inline strong_ptr<class_instance> class_instance::deep_copy_level(detail::deep_c
     if (class_def_ && class_def_->nocopy()) {
         throw runtime_error("Cannot copy an instance of nocopy class '" + std::string(get_class_name()) + "': hold it by reference (auto&/var&) or share it (shared_ptr)");
     }
-    auto new_instance = class_def_ ? class_def_->allocate_instance() : class_instance::make(type_name_, owner_);
+    auto new_instance = class_def_ ? class_def_->allocate_instance() : class_instance::make(type_id_, owner_);
 #ifdef JAISCRIPT_VM_COVERAGE
     census::add_weight(flat_fields_.size());
 #endif
@@ -3446,8 +3450,8 @@ inline script_value class_instance::get_method(uint64_t id, bool throw_if_missin
 }
 
 inline class_instance::class_instance(std::string_view class_name, engine* eng)
-    : object_holder(k_instance, std::string_view(), eng) {
-    if (eng) { type_name_ = eng->get_symbolizer()->intern_with_view(class_name).second; }
+    : object_holder(k_instance, eng) {
+    if (eng) { type_id_ = eng->get_symbolizer()->intern(class_name); }
 }
 
 inline class_instance::~class_instance() {

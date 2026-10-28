@@ -16201,7 +16201,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 				script_value class_var = std::move(class_var_result.value());
 				if (class_var.is_object()) {
 					auto objHolder = class_var.get_object_holder();
-					if (objHolder && objHolder->type_name() == "class_definition") {
+					if (objHolder && objHolder->type_id() == class_definition_type_id_) {
 						fallback_class = std::static_pointer_cast<class_definition>(objHolder->host_object());
 					}
 				}
@@ -16322,7 +16322,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 	}
 
 	auto objHolder = class_var.get_object_holder();
-	if (!objHolder || objHolder->type_name() != "class_definition") {
+	if (!objHolder || objHolder->type_id() != class_definition_type_id_) {
 		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 

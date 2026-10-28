@@ -8004,7 +8004,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                     script_value class_var = std::move(class_var_result.value());
                     if (class_var.is_object()) {
                         auto objHolder = class_var.get_object_holder();
-                        if (objHolder && objHolder->type_name() == "class_definition") {
+                        if (objHolder && objHolder->type_id() == class_definition_type_id_) {
                             fallback_class = std::static_pointer_cast<class_definition>(objHolder->host_object());
                         }
                     }
@@ -8143,7 +8143,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
 
         // Extract the class definition
         auto objHolder = class_var.get_object_holder();
-        if (!objHolder || objHolder->type_name() != "class_definition") {
+        if (!objHolder || objHolder->type_id() != class_definition_type_id_) {
             // Not a valid class
             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }

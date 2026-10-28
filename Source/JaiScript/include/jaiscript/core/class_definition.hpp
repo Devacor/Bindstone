@@ -91,8 +91,9 @@ class alignas(8) class_instance : public script_value::object_holder {
 public:
     // An instance in its own object block (detail::object_block), owned by strong_ptr; a destructor_owner arms the
     // instance's destructor chain and pins the definition until the instance dies
-    inline static strong_ptr<class_instance> make(std::string_view interned, engine* eng, uint32_t slots = 0,
+    inline static strong_ptr<class_instance> make(uint64_t type_id, engine* eng, uint32_t slots = 0,
                                                   class_definition* destructor_owner = nullptr);
+    inline static strong_ptr<class_instance> make(std::string_view class_name, engine* eng);
     // This instance's own handle (std::enable_shared_from_this's shared_from_this): empty while it dies
     strong_ptr<class_instance> strong_from_this() noexcept { return detail::strong_from_object(this); }
     weaker_ptr<class_instance> weak_from_this() noexcept { return detail::weak_from_object(this); }
@@ -100,9 +101,8 @@ public:
     weaker_ptr<class_instance> weak_from_this() const noexcept { return const_cast<class_instance*>(this)->weak_from_this(); }
     inline class_instance(std::string_view class_name, engine* eng = nullptr);
     struct interned_name_t {};
-    // a name already in the engine's interned table (a class definition's cached view): no copy, no lookup
-    class_instance(interned_name_t, std::string_view interned, engine* eng)
-        : object_holder(k_instance, interned, eng) {}
+    // a name already in the engine's interned table (a class definition's cached id): no lookup
+    class_instance(interned_name_t, uint64_t type_id, engine* eng) : object_holder(k_instance, eng) { type_id_ = type_id; }
     // The slot table and cells in the instance's own allocation (class_definition::allocate_instance): `slots` table
     // entries, then `slots` cells; a slot the class gains later takes a heap table and heap cells
     struct trailing_cells {
@@ -110,7 +110,7 @@ public:
         uint32_t slots = 0;
     };
     inline static size_t trailing_bytes(uint32_t slots) noexcept;
-    inline class_instance(interned_name_t, std::string_view interned, engine* eng, const trailing_cells& trailing);
+    inline class_instance(interned_name_t, uint64_t type_id, engine* eng, const trailing_cells& trailing);
     // An instance placed in its own raw allocation (a destructor class's, allocate_instance) dies through this; the
     // allocation goes with its control block (detail::block_head_allocator)
     inline static void free_allocation(class_instance* instance) noexcept;
@@ -204,7 +204,7 @@ public:
     // pre-resolved slot — writes through a held reference, materializes absent cells.
     inline void field_slot_write(uint32_t slot, script_value&& v);
 
-    std::string_view get_class_name() const { return type_name_; }
+    std::string_view get_class_name() const { return type_name(); }
 
     // Hot-reload field migration; defined out-of-line (needs class_definition + the
     // conversion kernel for declared-type retypes).
@@ -288,8 +288,8 @@ public:
     inline bool native_lookup_enabled() const;
 
 private:
-    // The class name (the engine's interned text, empty for an instance built without an engine) and the engine are the
-    // holder's type_name_ and owner_
+    // The class name (the engine's interned text for the holder's type_id_, empty for an instance built without an engine)
+    // and the engine are the holder's
     // Tier-1 flat fields: slot-indexed per class_definition's append-only registry.
     // unique_ptr pointees NEVER move (vector growth relocates the pointers only), so
     // cached field addresses — suspended coroutines' env chains, this-capturing

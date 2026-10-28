@@ -18,14 +18,16 @@ frees the block. Every handle of the object, a script value's, a `strong_ptr<cla
 `shared_ptr` over it alike, is one count on the one control block: two wraps of one C++ object are the same object, and
 `use_count()` counts every owner.
 
-`object_holder` carries what every object value reads without knowing which kind it holds: the type's name and id, the engine,
-and the kind. Its accessors switch on the kind; a host holder's C++ object, bound address and anchors sit in `host_holder`.
+`object_holder` carries what every object value reads without knowing which kind it holds: the type's id, the engine and the
+kind. Its accessors switch on the kind. An instance's type name is the engine's interned text for its id (`get_string`, an index
+the symbolizer answers while a parallel region has it frozen); a host holder keeps its own name beside the id, since a C++ type
+may have none, and its C++ object, bound address and anchors sit in `host_holder` too.
 `object_holder::last_release` ends either kind: an instance dies through its destructor chain, a host holder goes back to its
 pool.
 
 ## The header
 
-`class_instance` is at most 88 bytes on a 64-bit host (static_assert in `detail/class_runtime.hpp`). The holder part (40
+`class_instance` is at most 72 bytes on a 64-bit host (static_assert in `detail/class_runtime.hpp`). The holder part (24
 bytes) comes first; the class pointer and the slot table's one word come last, and the trailing cells start where that word
 ends. While the table is implicit the word is the cell count with its low bit set, so slot i's cell sits a fixed distance past
 the instance and a field read follows no pointer from the instance to it; a materialized table is a heap block (size, capacity,

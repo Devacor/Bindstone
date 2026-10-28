@@ -186,8 +186,14 @@ public:
             "}\n"
             "auto out = run();\n";
         std::string script_error;
-        std::thread script([&] {
+        std::string out;
+        std::promise<void> detached;
+        std::thread script([&, detached_future = detached.get_future()] {
             try { eng->execute(src); } catch (const std::exception& e) { script_error = e.what(); }
+            // the engine dies on the thread that parsed it: a canary build tags its literals to that thread
+            detached_future.wait();
+            out = eng->get_variable("out").to_string();
+            eng.reset();
         });
         std::string seen = "no stop";
         if (const auto hit = stops.wait()) {
@@ -206,8 +212,9 @@ public:
             dbg.resume();
         }
         dbg.detach();
+        detached.set_value();
         script.join();
-        return seen + " | " + script_error + " | " + eng->get_variable("out").to_string();
+        return seen + " | " + script_error + " | " + out;
     }
 
     void frame_locals_at_breakpoint(jai::backend_type type) {

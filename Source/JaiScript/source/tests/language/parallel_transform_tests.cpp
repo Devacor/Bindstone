@@ -4442,6 +4442,32 @@ public:
 			}
 		});
 
+		test("a_type_shape_missed_by_the_barrier_fails_before_it_interns", [this]() {
+			// A worker building a type the barrier did not pre-warm must fail before it inserts its name: the insert would move the
+			// symbol tables the other workers read
+			auto e = make_engine();
+			type_info* nested = e->get_type_info_int();
+			for (int depth = 0; depth < 4; ++depth) { nested = e->get_type_info_array(nested); }
+			auto* symbols = e->get_symbolizer();
+			const size_t interned = symbols->size();
+			symbols->set_frozen(true);
+			std::vector<std::string> errors;
+			const auto attempt = [&](const auto& build) {
+				try { build(); errors.push_back("no error"); } catch (const std::exception& ex) { errors.push_back(ex.what()); }
+			};
+			attempt([&]() { (void)e->get_type_info_array(nested); });
+			attempt([&]() { (void)e->get_type_info_map(nested, nested); });
+			attempt([&]() { (void)e->get_type_info_weak_ptr(nested); });
+			attempt([&]() { (void)e->get_type_info_function(nested, {nested, nested}); });
+			const size_t after = symbols->size();
+			symbols->set_frozen(false);
+			for (const std::string& error : errors) {
+				check_eq(std::string("parallel_transform: type shape was not pre-warmed at the region barrier (internal) - please report this body shape"), error);
+			}
+			check_eq(interned, after, "nothing was interned while frozen");
+			check_true(e->get_type_info_array(nested) != nullptr, "the shape interns once the region is over");
+		});
+
 		test("activation_restores_an_already_frozen_symbolizer", [this]() {
 			for (bool inject : {false, true}) {
 				auto fixture = prepare(0, true);

@@ -3,6 +3,22 @@
 
 namespace jai {
 
+namespace {
+[[noreturn]] JAI_NOINLINE void throw_type_shape_not_prewarmed() {
+    throw runtime_error("parallel_transform: type shape was not pre-warmed at the region barrier (internal) - please report this body shape");
+}
+
+// While a parallel region runs the symbolizer is frozen: a worker's type name must already be interned (an insert would move
+// the tables the other workers read)
+uint64_t type_name_id(string_symbolizer& symbolizer, const std::string& name) {
+    if (symbolizer.frozen()) [[unlikely]] {
+        if (auto id = symbolizer.find(name)) { return *id; }
+        throw_type_shape_not_prewarmed();
+    }
+    return symbolizer.intern(name);
+}
+}
+
 std::string type_info::canonical_name() const {
     switch (base_type) {
         case script_value_type::jai_int_type: return is_byte_element() ? type_name : "int";
@@ -80,7 +96,7 @@ type_info type_info::make_int(string_symbolizer& symbolizer) {
     info.type_name = "int";
     info.native_size = sizeof(script_int);
     info.is_signed = true;
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -88,63 +104,63 @@ type_info type_info::make_float(string_symbolizer& symbolizer) {
     type_info info(script_value_type::jai_float_type);
     info.type_name = "float";
     info.native_size = sizeof(script_float);
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
 type_info type_info::make_string(string_symbolizer& symbolizer) {
     type_info info(script_value_type::jai_string_type);
     info.type_name = "string";
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
 type_info type_info::make_utf8_string(string_symbolizer& symbolizer) {
     type_info info(script_value_type::jai_utf8_string_type);
     info.type_name = "utf8_string";
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
 type_info type_info::make_math(string_symbolizer& symbolizer, script_value_type kind) {
     type_info info(kind);
     info.type_name = math_type_name(kind);
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
 type_info type_info::make_bool(string_symbolizer& symbolizer) {
     type_info info(script_value_type::jai_bool_type);
     info.type_name = "bool";
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
 type_info type_info::make_char(string_symbolizer& symbolizer) {
     type_info info(script_value_type::jai_char_type);
     info.type_name = "char";
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
 type_info type_info::make_void(string_symbolizer& symbolizer) {
     type_info info(script_value_type::jai_null_type);
     info.type_name = "void";
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
 type_info type_info::make_any(string_symbolizer& symbolizer) {
     type_info info(script_value_type::jai_any_type);
     info.type_name = "any";
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
 type_info type_info::make_invalid(string_symbolizer& symbolizer) {
     type_info info(script_value_type::jai_invalid_type);
     info.type_name = "invalid";
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -152,7 +168,7 @@ type_info type_info::make_int8(string_symbolizer& symbolizer) {
     auto info = make_int(symbolizer);
     info.type_name = "int8";
     info.native_size = 1;
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -160,7 +176,7 @@ type_info type_info::make_int16(string_symbolizer& symbolizer) {
     auto info = make_int(symbolizer);
     info.type_name = "int16";
     info.native_size = 2;
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -168,7 +184,7 @@ type_info type_info::make_int32(string_symbolizer& symbolizer) {
     auto info = make_int(symbolizer);
     info.type_name = "int32";
     info.native_size = 4;
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -177,7 +193,7 @@ type_info type_info::make_uint8(string_symbolizer& symbolizer) {
     info.type_name = "uint8";
     info.native_size = 1;
     info.is_signed = false;
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -186,7 +202,7 @@ type_info type_info::make_uint16(string_symbolizer& symbolizer) {
     info.type_name = "uint16";
     info.native_size = 2;
     info.is_signed = false;
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -195,7 +211,7 @@ type_info type_info::make_uint32(string_symbolizer& symbolizer) {
     info.type_name = "uint32";
     info.native_size = 4;
     info.is_signed = false;
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -204,7 +220,7 @@ type_info type_info::make_uint64(string_symbolizer& symbolizer) {
     info.type_name = "uint64";
     info.native_size = 8;
     info.is_signed = false;
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -212,7 +228,7 @@ type_info type_info::make_float32(string_symbolizer& symbolizer) {
     auto info = make_float(symbolizer);
     info.type_name = "float32";
     info.native_size = 4;
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -220,7 +236,7 @@ type_info type_info::make_array(string_symbolizer& symbolizer, type_info_ptr ele
     type_info info(script_value_type::jai_array_type);
     info.type_name = "array";
     info.type_params.push_back(element_type);
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -229,13 +245,13 @@ type_info type_info::make_map(string_symbolizer& symbolizer, type_info_ptr keyTy
     info.type_name = "map";
     info.type_params.push_back(keyType);
     info.type_params.push_back(valueType);
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
 type_info type_info::make_object(string_symbolizer& symbolizer, std::string_view className) {
     type_info info(script_value_type::jai_object_type, className);
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -243,7 +259,7 @@ type_info type_info::make_weak_ptr(string_symbolizer& symbolizer, type_info_ptr 
     type_info info(script_value_type::jai_weak_ptr_type);
     info.type_params.push_back(pointee_type);
     info.type_name = "weak_ptr";  // Keep generic name for lookups
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -252,28 +268,28 @@ type_info type_info::make_shared_ptr(string_symbolizer& symbolizer, type_info_pt
     info.type_params.push_back(pointee_type);
     // Use inner type's name for canonical name (matches parser behavior)
     info.type_name = pointee_type ? pointee_type->type_name : "shared_ptr";
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
 type_info type_info::make_reference(string_symbolizer& symbolizer, type_info_ptr referenced_type) {
     type_info info(script_value_type::jai_reference_type);
     info.type_params.push_back(referenced_type);
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
 type_info type_info::make_cpp_bound(string_symbolizer& symbolizer, type_info_ptr bound_type) {
     type_info info(script_value_type::jai_cpp_bound_type);
     info.type_params.push_back(bound_type);
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
 type_info type_info::make_callable(string_symbolizer& symbolizer) {
     type_info info(script_value_type::jai_function_type);
     info.type_name = "function";
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -281,7 +297,7 @@ type_info type_info::make_function(string_symbolizer& symbolizer, type_info_ptr 
     type_info info(script_value_type::jai_function_type);
     info.type_params.push_back(return_type);
     info.type_params.insert(info.type_params.end(), arg_types.begin(), arg_types.end());
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
@@ -289,14 +305,14 @@ type_info type_info::make_native_int(string_symbolizer& symbolizer, size_t nativ
     auto info = make_int(symbolizer);
     info.native_size = native_size;
     info.is_signed = is_signed;
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 
 type_info type_info::make_native_float(string_symbolizer& symbolizer, size_t native_size) {
     auto info = make_float(symbolizer);
     info.native_size = native_size;
-    info.id = symbolizer.intern(info.canonical_name());
+    info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }
 

@@ -4397,7 +4397,9 @@ type_info* engine::get_type_info_map(type_info* key_type, type_info* value_type)
 
 type_info* engine::get_type_info_object(const std::string& class_name) {
     // Use composite key for fast lookup
-    uint64_t class_name_id = impl->string_symbolizer_.intern(class_name);
+    const auto known = impl->string_symbolizer_.find(class_name);
+    if (!known) { impl->deny_type_intern_in_region(); }
+    const uint64_t class_name_id = known ? *known : impl->string_symbolizer_.intern(class_name);
     implementation::type_key key{script_value_type::jai_object_type, class_name_id, 0};
 
     if (auto* found = impl->find_type(key)) { return found; }

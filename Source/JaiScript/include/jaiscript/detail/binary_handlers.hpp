@@ -792,6 +792,68 @@ namespace jai::detail {
 		return method_val.is_function() ? h.bound_method(v, method_val) : h.make_null();
 	}
 
+	// a op b and a op= b on any operands (a compound names its index in compound): the bitwise operators' kernel, numbers through the
+	// scalar kernels, string + through the host's concat, math values, and an object's operator; "Left/Right operand must be numeric"
+	// otherwise
+	template <class Host>
+	checked_result<script_value> evaluate_arithmetic(Host& h, const script_value& left_in, token_type op, const script_value& right_in, int compound) {
+		// a compound through a subscript (m["k"] -= dt) evaluates its target to a reference
+		const script_value& left = left_in.deref();
+		const script_value& right = right_in.deref();
+		const size_t li = left.raw_storage_index();
+		const size_t ri = right.raw_storage_index();
+		if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+			return evaluate_arithmetic(h, li == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, op,
+			                           ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right, compound);
+		}
+		// &= |= ^= <<= >>=: an operand that is not an integer (a char promotes) takes the compound's text
+		if (bitwise_token(op)) [[unlikely]] {
+			const auto integral = [](size_t idx) { return idx == script_value::TYPEID_INT || idx == script_value::TYPEID_CHAR; };
+			if (compound >= 0 && (!integral(li) || !integral(ri))) {
+				if (auto custom = object_compound_operand(h, left, op, right)) { return std::move(*custom); }
+				return compound_mismatch(static_cast<size_t>(compound), left, right, h.engine());
+			}
+			const operator_ids& ids = h.ids();
+			switch (op) {
+				case token_type::ampersand: return binary_bitwise<bit_op::bit_and>(h, ids.ampersand, left, right);
+				case token_type::pipe: return binary_bitwise<bit_op::bit_or>(h, ids.pipe, left, right);
+				case token_type::caret: return binary_bitwise<bit_op::bit_xor>(h, ids.caret, left, right);
+				case token_type::left_shift: return binary_bitwise<bit_op::shift_left>(h, ids.left_shift, left, right);
+				default: return binary_bitwise<bit_op::shift_right>(h, ids.right_shift, left, right);
+			}
+		}
+		if (utf8_operands(li, ri)) [[unlikely]] {
+			return utf8_rewrapped(evaluate_arithmetic(h, utf8_unwrapped(left, h.engine()), op, utf8_unwrapped(right, h.engine()), compound), h.engine());
+		}
+		if (char_operands_promote(li, ri)) [[unlikely]] {
+			return evaluate_arithmetic(h, char_promoted(left, h.engine()), op, char_promoted(right, h.engine()), compound);
+		}
+		if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) { return h.concat(left, right); }
+		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+			if (!scalar_arith_op(op)) { return checked_result<script_value>(make_error_code(runtime_error_code::unknown_operator), "Unknown arithmetic operator"); }
+			script_int out;
+			if (const auto fault = int_arith(op, left.unchecked_as_int(), right.unchecked_as_int(), out); fault != scalar_fault::none) {
+				return scalar_fault_error<checked_result<script_value>>(op, fault);
+			}
+			return h.make_int(out);
+		}
+		const bool left_numeric = numeric_storage(li);
+		if (!left_numeric || !numeric_storage(ri)) {
+			if (math::owns_arithmetic(li, ri)) [[unlikely]] { return math::binary(math::bop_of(op), left, right, h.engine()); }
+			if (compound >= 0) {
+				if (auto custom = object_compound_operand(h, left, op, right)) { return std::move(*custom); }
+				return compound_mismatch(static_cast<size_t>(compound), left, right, h.engine());
+			}
+			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), left_numeric ? "Right operand must be numeric" : "Left operand must be numeric");
+		}
+		if (!scalar_arith_op(op)) { return checked_result<script_value>(make_error_code(runtime_error_code::unknown_operator), "Unknown arithmetic operator"); }
+		script_float out;
+		if (const auto fault = float_arith(op, as_script_float(left, li), as_script_float(right, ri), out); fault != scalar_fault::none) {
+			return scalar_fault_error<checked_result<script_value>>(op, fault);
+		}
+		return h.make_float(out);
+	}
+
 }
 
 #endif

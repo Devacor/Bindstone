@@ -78,6 +78,10 @@ struct interpreter::binary_host {
     execution_backend& backend() noexcept { return in; }
 };
 
+checked_result<script_value> interpreter::evaluate_arithmetic(const script_value& left, token_type op, const script_value& right, int compound) {
+    binary_host h{*this};
+    return detail::evaluate_arithmetic(h, left, op, right, compound);
+}
 std::optional<checked_result<script_value>> interpreter::object_compound_operand(const script_value& left, token_type op, const script_value& right) {
     binary_host h{*this};
     return detail::object_compound_operand(h, left, op, right);

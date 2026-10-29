@@ -125,9 +125,6 @@ namespace {
 	inline checked_result<void> vm_int_overflow_v(const char* msg) {
 		return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
 	}
-	inline checked_result<script_value> vm_int_overflow_sv(const char* msg) {
-		return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
-	}
 
 	// Element compatibility/conversion live in the shared kernel
 	// (detail/container_enforce.hpp, used verbatim by both backends and the field
@@ -2562,120 +2559,9 @@ checked_result<script_value> vm_backend::binary_general(token_type op, const scr
 	return handle_binary_op(op, left, right);
 }
 
-checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in, int compound) {
-	const script_value& left = left_in.deref();
-	const script_value& right = right_in.deref();
-
-	const size_t li = left.raw_storage_index();
-	const size_t ri = right.raw_storage_index();
-
-	// S8: bound operands normalize to detached temps (byte-parallel with interpreter::evaluate_arithmetic)
-	if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-		return evaluate_arithmetic(li == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, op,
-		                           ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right, compound);
-
-	// &= |= ^= <<= >>=: the binary operator's kernel; an operand that is not an integer (a char promotes) takes the
-	// compound's text (KEEP BYTE-PARALLEL with interpreter::evaluate_arithmetic)
-	if (detail::bitwise_token(op)) [[unlikely]] {
-		const auto integral = [](size_t idx) { return idx == script_value::TYPEID_INT || idx == script_value::TYPEID_CHAR; };
-		if (compound >= 0 && (!integral(li) || !integral(ri))) {
-			if (auto custom = object_compound_operand(left, op, right)) { return std::move(*custom); }
-			return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_);
-		}
-		return handle_binary_op(op, left, right);
-	}
-
-	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
-	if (detail::utf8_operands(li, ri)) [[unlikely]]
-		return detail::utf8_rewrapped(evaluate_arithmetic(detail::utf8_unwrapped(left, engine_), op, detail::utf8_unwrapped(right, engine_), compound), engine_);
-	if (detail::char_operands_promote(li, ri)) [[unlikely]]
-		return evaluate_arithmetic(detail::char_promoted(left, engine_), op, detail::char_promoted(right, engine_), compound);
-
-	if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
-		auto joined = concat_text(left, right);
-		if (!joined) { return joined.error_value(); }
-		// engine::memory_cap chokepoint: deny the concat result before it exists
-		if (!limits_->memory_charge(sizeof(script_value) + joined.value().size())) [[unlikely]] {
-			return detail::raise_memory_cap(*limits_);
-		}
-		return script_value(std::move(joined.value()), engine_);
-	}
-
-	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-		script_int leftInt = left.unchecked_as_int();
-		script_int rightInt = right.unchecked_as_int();
-		script_int rr;
-		switch (op) {
-			case token_type::plus:
-				if (!ints::try_add(leftInt, rightInt, rr)) return vm_int_overflow_sv("Integer overflow in '+'");
-				return script_value(rr, engine_);
-			case token_type::minus:
-				if (!ints::try_sub(leftInt, rightInt, rr)) return vm_int_overflow_sv("Integer overflow in '-'");
-				return script_value(rr, engine_);
-			case token_type::star:
-				if (!ints::try_mul(leftInt, rightInt, rr)) return vm_int_overflow_sv("Integer overflow in '*'");
-				return script_value(rr, engine_);
-			case token_type::slash:
-				if (rightInt == 0) {
-					return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
-				}
-				if (!ints::try_div(leftInt, rightInt, rr)) return vm_int_overflow_sv("Integer overflow in '/'");
-				return script_value(rr, engine_);
-			case token_type::percent:
-				if (rightInt == 0) {
-					return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
-				}
-				return script_value(ints::mod(leftInt, rightInt), engine_);
-			default:
-				return checked_result<script_value>(make_error_code(runtime_error_code::unknown_operator), "Unknown arithmetic operator");
-		}
-	}
-
-	script_float leftNum, rightNum;
-	if (li == script_value::TYPEID_INT) {
-		leftNum = static_cast<script_float>(left.unchecked_as_int());
-	} else if (li == script_value::TYPEID_FLOAT) {
-		leftNum = left.unchecked_as_float();
-	} else {
-		if (detail::math::owns_arithmetic(li, ri)) [[unlikely]]
-			return detail::math::binary(detail::math::bop_of(op), left, right, engine_);
-		if (compound >= 0) {
-			if (auto custom = object_compound_operand(left, op, right)) { return std::move(*custom); }
-			return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_);
-		}
-		return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), "Left operand must be numeric");
-	}
-	if (ri == script_value::TYPEID_INT) {
-		rightNum = static_cast<script_float>(right.unchecked_as_int());
-	} else if (ri == script_value::TYPEID_FLOAT) {
-		rightNum = right.unchecked_as_float();
-	} else {
-		if (detail::math::owns_arithmetic(li, ri)) [[unlikely]]
-			return detail::math::binary(detail::math::bop_of(op), left, right, engine_);
-		if (compound >= 0) {
-			if (auto custom = object_compound_operand(left, op, right)) { return std::move(*custom); }
-			return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_);
-		}
-		return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), "Right operand must be numeric");
-	}
-
-	switch (op) {
-		case token_type::plus: return script_value(leftNum + rightNum, engine_);
-		case token_type::minus: return script_value(leftNum - rightNum, engine_);
-		case token_type::star: return script_value(leftNum * rightNum, engine_);
-		case token_type::slash:
-			if (rightNum == 0.0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
-			}
-			return script_value(leftNum / rightNum, engine_);
-		case token_type::percent:
-			if (rightNum == 0.0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
-			}
-			return script_value(std::fmod(leftNum, rightNum), engine_);
-		default:
-			return checked_result<script_value>(make_error_code(runtime_error_code::unknown_operator), "Unknown arithmetic operator");
-	}
+checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value& left, token_type op, const script_value& right, int compound) {
+	binary_host h{*this};
+	return detail::evaluate_arithmetic(h, left, op, right, compound);
 }
 
 // ============================================================

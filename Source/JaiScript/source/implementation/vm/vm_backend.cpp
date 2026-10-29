@@ -6437,55 +6437,44 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 	}
 
 	if (left.is_map()) {
-		try {
-			auto& map = const_cast<script_map&>(left.as_map());
+		auto& map = const_cast<script_map&>(left.as_map());
 
-			if (lvalue_shape && lvalue_write) {
-				// Auto-insert so the assignment has somewhere to write through
-				script_value key = right;
-				// Declared key type: keys never coerce, checked BEFORE the auto-insert
-				if (auto map_tag = left.get_type_info()) {
-					if (type_info_ptr key_type = map_tag->key_type();
-					    key_type && key_type->base_type != script_value_type::jai_any_type &&
-					    key.deref().type() != key_type->base_type) {
-						return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key.deref(), key_type));
-					}
-				}
-				const size_t prior_map_size = map.size();
-				script_value& value_ref = map[key];
-				// engine::memory_cap: count NEW-entry growth (raised at the next back-edge)
-				if (map.size() != prior_map_size) {
-					limits_->memory_charge_deferred(2 * sizeof(script_value) + (key.is_string() ? key.unchecked_as_string().size() : 0));
-				}
-				auto map_type_info = left.get_type_info();
-				type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
-				// Map-entry mode: pins the map + re-resolves by key (temporaries/erase safe)
-				script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, &value_ref, engine_, value_type);
-				stack_.push_back(std::move(ref_value));
-			} else if (lvalue_shape && !transient_read) {
-				// Read: reference the existing entry, never insert
-				auto it = map.find(right);
-				if (it != map.end()) {
-					script_value& value_ref = const_cast<script_value&>(it->second);
-					auto map_type_info = left.get_type_info();
-					type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
-					stack_.push_back(script_value::make_map_entry_reference(left.get_map_storage(), right, &value_ref, engine_, value_type));
-				} else {
-					stack_.push_back(make_null());
-				}
-			} else {
-				if (const script_map::value_type* hit = map.lookup(right)) {
-					script_value val = hit->second;
-					stack_.push_back(std::move(val));
-				} else {
-					stack_.push_back(make_null());
+		if (lvalue_shape && lvalue_write) {
+			// Auto-insert so the assignment has somewhere to write through
+			script_value key = right;
+			// Declared key type: keys never coerce, checked BEFORE the auto-insert
+			if (auto map_tag = left.get_type_info()) {
+				if (type_info_ptr key_type = map_tag->key_type();
+				    key_type && key_type->base_type != script_value_type::jai_any_type &&
+				    key.deref().type() != key_type->base_type) {
+					return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key.deref(), key_type));
 				}
 			}
-		} catch (...) {
-			const auto& map = left.as_map();
+			const size_t prior_map_size = map.size();
+			script_value& value_ref = map[key];
+			// engine::memory_cap: count NEW-entry growth (raised at the next back-edge)
+			if (map.size() != prior_map_size) {
+				limits_->memory_charge_deferred(2 * sizeof(script_value) + (key.is_string() ? key.unchecked_as_string().size() : 0));
+			}
+			auto map_type_info = left.get_type_info();
+			type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
+			// Map-entry mode: pins the map + re-resolves by key (temporaries/erase safe)
+			script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, &value_ref, engine_, value_type);
+			stack_.push_back(std::move(ref_value));
+		} else if (lvalue_shape && !transient_read) {
+			// Read: reference the existing entry, never insert
 			auto it = map.find(right);
 			if (it != map.end()) {
-				script_value val = it->second;
+				script_value& value_ref = const_cast<script_value&>(it->second);
+				auto map_type_info = left.get_type_info();
+				type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
+				stack_.push_back(script_value::make_map_entry_reference(left.get_map_storage(), right, &value_ref, engine_, value_type));
+			} else {
+				stack_.push_back(make_null());
+			}
+		} else {
+			if (const script_map::value_type* hit = map.lookup(right)) {
+				script_value val = hit->second;
 				stack_.push_back(std::move(val));
 			} else {
 				stack_.push_back(make_null());

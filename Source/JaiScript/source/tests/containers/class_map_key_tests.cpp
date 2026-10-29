@@ -116,6 +116,29 @@ public:
 			check_eq((int64_t)1, e->execute("m.size()").as_int());
 		});
 
+		// a key operator that throws once propagates its first throw: the subscript never retries into a copy that loses the write
+		test("a_key_operator_that_throws_once_raises_and_a_retried_store_lands", [this]() {
+			auto e = make_engine();
+			stdlib::register_all(e);
+			e->execute(R"(
+				int calls = 0;
+				bool armed = false;
+				class T { int v = 0; T(int a) { v = a; } bool operator<(T o) { calls += 1; if (armed) { armed = false; throw "boom"; } return v < o.v; } }
+				var m = {};
+				m[T(1)] = 1;
+				armed = true;
+				calls = 0;
+				string caught = "";
+				try { m[T(2)] = 2; } catch (err) { caught = err; }
+				int failing_calls = calls;
+				m[T(2)] = 2;
+			)");
+			check_eq(std::string("boom"), e->execute("caught").as<std::string>());
+			check_eq((int64_t)1, e->execute("failing_calls").as_int(), "the comparator ran once for the failing store");
+			check_eq((int64_t)2, e->execute("m.size()").as_int(), "the store after the throw lands");
+			check_eq((int64_t)2, e->execute("m[T(2)]").as_int());
+		});
+
 		test("erasing_the_current_class_key_inside_a_range_for_continues_after_it", [this]() {
 			auto e = make_engine();
 			stdlib::register_all(e);

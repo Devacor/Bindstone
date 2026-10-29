@@ -11,7 +11,10 @@
 #include <sstream>
 #include <string>
 
+#include <jaiscript/testing/unattended.hpp>
+
 int main(int argc, char** argv) {
+	jai::foundry::route_faults_to_stderr();
 	std::string backend = "vm";
 	std::string script;
 	for (int i = 1; i < argc; ++i) {

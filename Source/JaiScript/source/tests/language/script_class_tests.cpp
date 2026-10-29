@@ -569,6 +569,62 @@ public:
             check_eq(std::string("deep:6|deep:6|deep:6|deep:6|<script>:1"), shape, "the frames of the escaping throw");
         });
 
+        test("the_call_instructions_enter_lean_frames_on_every_shape", [this]() {
+            // a polymorphic site over three classes, a reference receiver, bare sibling calls with and without arguments, a free
+            // function called with none, a throw through those frames, a method redefined between calls and while one runs, the
+            // depth limit through method and sibling frames, and the budget over a loop of calls
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            jai::engine* raw = e.get();
+            e->add_function("redefine", [raw]() { raw->execute("class Sq : Shape { override int area() { return side * side * 100; } }"); });
+            auto r = e->execute(R"(
+                int seven() { return 7; }
+                class Shape { int side = 2; int area() { return 0; } int twice() { return area() * 2; } int scaled(int k) { return area() * k; }
+                    int probe() { return seven() + twice(); } int sink(int k) { if (k == 0) { throw "sink " + side; } return sink(k - 1); } }
+                class Sq : Shape { override int area() { return side * side; } }
+                class Tri : Shape { override int area() { return side * side / 2; } }
+                class Hex : Shape { override int area() { return side * side * 3; } }
+                int sweep(array<Shape>& all) {
+                    int s = 0;
+                    for (int i = 0; i < 12; ++i) {
+                        Shape& r = all[i % 3];
+                        s += all[i % 3].area() + r.twice() + r.scaled(i) + r.probe();
+                    }
+                    return s;
+                }
+                array<Shape> all = [Sq(), Tri(), Hex()];
+                int before = sweep(all);
+                string caught = "";
+                try { all[1].sink(3); } catch (x) { caught = "" + x; }
+                class Run { int go(Shape& s) { int a = s.area(); redefine(); return a * 1000 + s.area(); } }
+                int mid = Run().go(all[0]);
+                return "" + before + " " + caught + " " + mid + " " + sweep(all) + " " + seven();
+            )");
+            check_eq(std::string("872 sink 2 4400 15920 7"), r.to_string(), "the results through every lane");
+            std::string shape;
+            try { e->execute("Shape t = Tri(); t.sink(2);"); }
+            catch (const std::exception&) {
+                for (const auto& fr : e->last_stack_trace()) { shape += (shape.empty() ? "" : "|") + fr.function + ":" + std::to_string(fr.line); }
+            }
+            check_eq(std::string("sink:4|sink:4|sink:4|<script>:1"), shape, "the frames of the escaping throw");
+            e->max_call_depth(jai::backend_type::vm, 200);
+            e->max_call_depth(jai::backend_type::interpreter, 200);
+            auto deep = e->execute(R"(
+                class Deep { int down(int k) { return k == 0 ? 0 : down(k - 1) + 1; } int bare() { return again(); } int again() { return bare(); } }
+                string a = "";
+                string b = "";
+                try { Deep().down(1000); } catch (x) { a = "" + x; }
+                try { Deep().bare(); } catch (x) { b = "" + x; }
+                return a + " | " + b + " | " + Deep().down(50);
+            )");
+            check_eq(std::string("Maximum recursion depth exceeded - possible infinite recursion | Maximum recursion depth exceeded - possible infinite recursion | 50"),
+                deep.to_string(),
+                "the depth limit through method and sibling frames");
+            e->execution_budget(0.05);
+            check_throws([&]() { e->execute("class Spin { int n = 0; void bump() { n = n + 1; } int get() { return n; } } Spin s = Spin(); while (true) { s.bump(); s.get(); }"); });
+            check_eq((int64_t)4, e->execute("2 + 2").as_int());
+        });
+
         test("a_method_calls_result_lands_in_its_consumers_operand", [this]() {
             // method results as arithmetic operands: int and float returns into typed locals, a var return of another kind through a
             // subclass, a mutating method between two reads of the same receiver (left to right), builtin calls on both sides of one binary,

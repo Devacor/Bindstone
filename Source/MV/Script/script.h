@@ -14,8 +14,7 @@ namespace jai {
 namespace MV {
 	class Services;
 
-	// One place for engine policy: VM backend (env MV_SCRIPT_INTERPRETER=1 forces the
-	// tree-walking interpreter for parity debugging), stdlib, Services-bound registrars,
+	// One place for engine policy: the VM backend, stdlib, Services-bound registrars,
 	// script-error logging via MV::error and a memory cap. Every script loads through the strict
 	// checker (debug builds also surface its warnings through Script::eval as MV::warning), so a
 	// typed mistake fails the load and -verifyassets reports it as that script's [FAIL].

@@ -57,9 +57,10 @@ Configurations (x64):
   `Builds\Windows\x64\Shipping\`). It is what ships, and Bindstone performance numbers (arena sim, pathfinding bench,
   frame timing) are measured on it.
 - MutedVision compiles JaiScript's `Source\JaiScript\source\implementation\**\*.cpp` as separate translation units
-  through one wildcard item, so a JaiScript edit recompiles one file. `source\jaiscript.cpp` is the one-file build for
-  other hosts and is not part of the Windows build; JaiScript's CMake configure fails when it, the files on disk and
-  `JAISCRIPT_SOURCES` disagree. Any other new `.cpp` goes into the right `.vcxitems` (see `VSProjects/AGENTS.md`).
+  through one wildcard item, so a JaiScript edit recompiles one file. The tree-walking interpreter
+  (`source\interpreter\`) is JaiScript's parity oracle and stays out of every Bindstone build: the engine runs the VM.
+  `source\jaiscript.cpp` is the one-file build for other hosts and is not part of the Windows build; JaiScript's CMake
+  configure fails when it, the files on disk and `JAISCRIPT_SOURCES`/`JAISCRIPT_INTERPRETER_SOURCES` disagree. Any other new `.cpp` goes into the right `.vcxitems` (see `VSProjects/AGENTS.md`).
 
 ### Game gates
 
@@ -87,8 +88,7 @@ The JaiScript CMake configurations are separate from the Bindstone ones and unaf
 Script debugging is on by default (localhost only, free until a session attaches). Each process listens for VS Code on
 127.0.0.1: Client 52472 / LobbyServer 52473 / GameServer 52474 (extra engines in a process take the next free port in
 +10 steps; the bound port is logged at startup). Attach: install `Source/JaiScript/tools/vscode-jaiscript`, F5 →
-"Attach to JaiScript" with that port. Both backends debug identically; `MV_SCRIPT_INTERPRETER=1` forces the
-interpreter. Opt out: `--no-script-debug` (client) or `MV_SCRIPT_NO_DEBUG=1`. `MV_SCRIPT_HOT_RELOAD=1` re-evaluates
+"Attach to JaiScript" with that port. Opt out: `--no-script-debug` (client) or `MV_SCRIPT_NO_DEBUG=1`. `MV_SCRIPT_HOT_RELOAD=1` re-evaluates
 gameplay `.script` files when they change. Wiring: `MV::makeScriptEngine` (`Source/Game/Script/script.cpp`), knobs in
 `Source/MV/Script/script.h`.
 

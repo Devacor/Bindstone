@@ -44,6 +44,13 @@ That builds everything: the library, the test suite, the differential fuzzer, th
 language server, the three example games and the embedding quickstart's host
 (`embed_quickstart`). Binaries land in `build/bin/`, the library in `build/lib/`.
 
+The library comes in two links over one set of compiled files. `jaiscript` is the VM alone: every host,
+the example games, the quickstart, the language server and `jai_spider` link it. `jaiscript_interpreter`
+adds the tree-walking interpreter (`source/interpreter/`), the reference the VM is checked against; only the
+programs that compare the backends link it: the test suite, the fuzzer and the runner, whose
+`--backend=interp` runs every documentation sample on both. In a program without it,
+`set_backend(backend_type::interpreter)` throws.
+
 `CMakePresets.json` names the same two trees: `cmake --preset release` / `cmake --build --preset release`
 configure and build `build/`, and `debug` does the same in `build-debug/`. Visual Studio's Open Folder lists the
 `x64-*` presets, which build under `out/build/<name>/`.
@@ -54,6 +61,7 @@ Building everything takes a while; usually you want one or two things.
 
 ```bash
 cmake --build build --target jaiscript          # the library alone
+cmake --build build --target jaiscript_interpreter   # the library plus the interpreter
 cmake --build build --target jaiscript_tests    # the Foundry test suite
 cmake --build build --target jaiscript_runner   # the runner/REPL — the binary is `jaiscript`
 cmake --build build --target jaiscript_fuzz     # the differential fuzzer
@@ -114,6 +122,7 @@ ON when JaiScript is the top-level project and OFF when it is added to another p
 | `JAISCRIPT_BUILD_RUNNER` | top-level | The standalone runner / REPL (`jaiscript_runner`, binary `jaiscript`) |
 | `JAISCRIPT_BUILD_LSP` | top-level | The language server `jaiscript_lsp` the VS Code extension launches |
 | `JAISCRIPT_BUILD_EXAMPLES` | top-level | `jai_gloom`, `jai_crawler`, `jai_demoreel`, and in a top-level build `embed_quickstart` (the embedding quickstart's host) |
+| `JAISCRIPT_INTERPRETER` | top-level | `jaiscript_interpreter`, the library plus the tree-walking interpreter, which the suite, the fuzzer and the runner link. OFF: they link `jaiscript`, and the interpreter is not compiled at all |
 | `JAISCRIPT_INSTALL` | top-level | The install rules and the `JaiScript` CMake package (`find_package(JaiScript)`) |
 | `JAISCRIPT_ENABLE_DEBUGGER` | ON | Compiles the DAP-over-TCP debug listener. Turn it OFF for shipping or mobile builds and no socket code is compiled in at all |
 | `JAISCRIPT_ENABLE_BENCHMARKS` | OFF | Adds the performance suites to `jaiscript_tests` (see below) |
@@ -194,6 +203,7 @@ JaiScript/
 │   ├── stdlib/  signals/  properties/  serialization/  testing/
 ├── source/
 │   ├── implementation/     Library .cpp files
+│   ├── interpreter/        The tree-walking interpreter (jaiscript_interpreter only)
 │   └── tests/              Foundry suites, and the differential fuzzer under fuzz/
 ├── tools/
 │   ├── jaiscript/          The runner / REPL

@@ -28,6 +28,7 @@ endforeach()
 
 set(JAISCRIPT_BUILD_EXAMPLES ON)   # the ports link the games' shared hosts
 set(JAISCRIPT_BUILD_RUNNER ON)
+set(JAISCRIPT_INTERPRETER ON)      # the runner's --backend=interp rows and the JaiDOOM frame oracle compare backends
 set(JAISCRIPT_BUILD_TESTS OFF)
 set(JAISCRIPT_BUILD_LSP OFF)
 set(JAISCRIPT_INSTALL OFF)

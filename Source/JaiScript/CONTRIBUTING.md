@@ -224,8 +224,9 @@ Ubuntu 24.04 — and each of the six builds runs:
 - `jaiscript_tests` and `jaiscript_tests --backend=vm`
 - a 300-program differential-fuzz run (`jaiscript_fuzz --isolate`)
 - the example hash gates: GLOOM and GRUBWELL (and, in Release, demoreel and Gator Quest) must
-  reproduce their reference hashes on both backends
-- the embedding quickstart's host (`embed_quickstart`), whose checks must all hold on both backends
+  reproduce their reference hashes; the C++ hosts link the library without the interpreter and run the VM, and
+  Gator Quest runs on both backends through the runner
+- the embedding quickstart's host (`embed_quickstart`), whose checks must all hold
 - the language server's protocol tests (`tools/lsp/tests/lsp_test.py`: golden fixtures and the
   Gator Quest checks, plus its edit-latency budget in Release)
 

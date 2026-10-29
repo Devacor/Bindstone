@@ -2,7 +2,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
-#include <jaiscript/detail/interpreter.hpp>  // For string_symbolizer
+#include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>
 

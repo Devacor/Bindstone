@@ -48,7 +48,7 @@ add_executable(jaiscript_tests
 )
 
 # Link against JaiScript library
-target_link_libraries(jaiscript_tests PRIVATE jaiscript)
+target_link_libraries(jaiscript_tests PRIVATE ${JAISCRIPT_VERIFIER_LIBRARY})
 
 # JAISCRIPT_TESTS_SOURCE_ROOT: the JaiScript folder, so corpus tests find examples/ from any working directory
 get_filename_component(JAISCRIPT_TESTS_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
@@ -144,7 +144,7 @@ target_sources(jaiscript_tests PRIVATE
 add_executable(jaiscript_fuzz
     fuzz/fuzz_main.cpp
 )
-target_link_libraries(jaiscript_fuzz PRIVATE jaiscript)
+target_link_libraries(jaiscript_fuzz PRIVATE ${JAISCRIPT_VERIFIER_LIBRARY})
 target_include_directories(jaiscript_fuzz PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 if(MSVC)
     target_compile_options(jaiscript_fuzz PRIVATE /W3)

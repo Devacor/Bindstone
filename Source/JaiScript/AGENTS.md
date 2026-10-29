@@ -27,6 +27,12 @@ links take seconds, and MSVC's freed-memory fill turns a dangling reference into
 optimizer-dependent bugs show up only there. Other targets: `jaiscript` (library), `jaiscript_runner` (binary
 `jaiscript`), `jaiscript_fuzz`, `jaiscript_lsp`, `jai_gloom`, `jai_crawler`, `jai_demoreel`.
 
+The interpreter (`source/interpreter/`) is compiled only into the programs that compare the backends: they link
+`jaiscript_interpreter` (option `JAISCRIPT_INTERPRETER`), which is `jaiscript` plus the interpreter. That is the suite,
+the fuzzer and the runner (verify_site runs every sample on both backends through it); every other program, Bindstone
+included, links `jaiscript`, where `set_backend(backend_type::interpreter)` throws. Code both backends use (the builtin
+method registries in `builtin_methods.cpp`, include resolution) never lives in the interpreter's files.
+
 ## Test
 
 ```bash
@@ -160,6 +166,7 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
 include/jaiscript/  core/ (value, engine, dynamic_binder, class_definition)  detail/ (lexer, parser, AST, shared kernels)
                     vm/ (opcodes, compiler, backend, disassembler)  stdlib/  signals/  properties/  serialization/  testing/
 source/implementation/   library .cpp files (one TU each)       source/tests/   Foundry suites, fuzz/
+source/interpreter/      the tree-walking interpreter (jaiscript_interpreter only)
 tools/   jaiscript (runner), lsp, vscode-jaiscript, ci/gates.sh
 examples/   GLOOM, GRUBWELL (crawler), demoreel, Gator Quest, JaiDOOM, embed_quickstart
 docs/    BUILD.md, site/ (the specification), site_tools/

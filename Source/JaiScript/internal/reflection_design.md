@@ -425,7 +425,7 @@ check. Same story made `construct` cheap (env lookup + call).
 |---|---|---|
 | `include/jaiscript/stdlib/reflection.hpp` (new) | the 12 builtins + shared helpers (member resolution reusing the setter-first dispatch shape from stdlib/json.hpp:463-518) | 450-600 |
 | `include/jaiscript/core/class_definition.hpp` | `field_order_` vector + accessor; replace in `store_field_defaults` | ~20 |
-| `source/implementation/interpreter.cpp` | append to `field_order_` in the class-decl builder (~:9784) | ~5 |
+| `source/interpreter/interpreter.cpp` | append to `field_order_` in the class-decl builder (~:9784) | ~5 |
 | `source/implementation/vm/vm_backend.cpp` | twin of the above (~:6900) — same commit | ~5 |
 | `include/jaiscript/core/execution_backend.hpp` | `virtual const class_definition* current_access_context() const` | ~3 |
 | interpreter.hpp / vm_backend.hpp | the two overrides (`env->find_access_context()`) | ~8 |

@@ -91,8 +91,9 @@ double len = e->execute("Vec2(3, 4).length()").as_float();   // 5.0
 One knob is worth knowing on day one:
 
 ```cpp
-e->set_backend(jai::backend_type::interpreter);   // tree-walking interpreter instead of the
-                                                  // VM; must come before the first execute
+e->set_backend(jai::backend_type::interpreter);   // tree-walking interpreter instead of the VM; must come
+                                                  // before the first execute, in a program that links
+                                                  // jaiscript_interpreter
 ```
 
 The embedding guide covers the rest: binding inheritance and operators, `shared_ptr` handles,

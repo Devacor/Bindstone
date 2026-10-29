@@ -41,7 +41,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 #include &lt;jaiscript/stdlib/stdlib.hpp&gt;
 
 auto eng = jai::engine::make();                 // shared_ptr&lt;engine&gt;
-// eng-&gt;set_backend(jai::backend_type::interpreter);   // optional: tree-walking interpreter (before first execute)
+// eng-&gt;set_backend(jai::backend_type::interpreter);   // optional: tree-walking interpreter (before first execute; link jaiscript_interpreter)
 jai::stdlib::register_all(eng);                 // formatted print, format, to_string, type_of, to_json, ...
 jai::script_value r = eng-&gt;execute(&quot;2 + 2&quot;);
 int v = r.as_int();                             // 4</code></pre></div>

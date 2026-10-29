@@ -119,7 +119,7 @@ public:
 	virtual std::string program_name() const = 0;       // "jai_gloom", "gloom_lua", ...
 	virtual std::string language() const = 0;           // "JaiScript", "Lua/sol2", ...
 	// Backends --smoke runs (in order) and --backend accepts. Single-runtime
-	// ports return one name; JaiScript returns {"interpreter", "vm"}.
+	// ports return one name, as JaiScript does ({"vm"}).
 	virtual std::vector<std::string> backends() const = 0;
 	virtual std::string default_backend() const { return backends().back(); }
 	virtual std::string normalize_backend(const std::string& b) const { return b; }

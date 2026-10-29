@@ -39,7 +39,6 @@
 #include <jaiscript/detail/thread_pool_access.hpp>
 #include <jaiscript/detail/ref_param_writes.hpp>
 #include <jaiscript/detail/lvalue_shape.hpp>
-#include <jaiscript/detail/interpreter.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/lexer.hpp>
@@ -94,7 +93,6 @@ namespace jai::detail {
 		execution_limits limits;
 		std::unique_ptr<execution_backend> backend;
 		vm::vm_backend* vm = nullptr;                     // set when the engine backend is the vm
-		interpreter* interp = nullptr;            // set otherwise
 		script_callable fn_payload;
 		// parallel_for: the per-worker chunk-loop wrapper (k_parallel_chunk_source bound to this
 		// worker's root_env) and the cursor holder its advance intrinsic re-points
@@ -2936,12 +2934,7 @@ namespace {
 		slot.pending_script_layers.clear();
 		slot.borrows.clear();
 		slot.deferred_releases.clear();
-		if (slot.vm) {
-			slot.vm->configure_parallel_worker(slot.root_env, slot.env_epoch_sink.get(), &slot.limits, budget);
-		} else {
-			slot.interp->configure_parallel_worker(slot.root_env, slot.env_epoch_sink.get(),
-			                                                          &slot.limits, budget);
-		}
+		slot.backend->configure_parallel_worker(slot.root_env, slot.env_epoch_sink.get(), &slot.limits, budget);
 		for (const auto& [name_id, name] : slot.host_functions) {
 			script_value copy = parallel_host_copy(eng, slot, name_id, name);
 			if (slot.vm) { slot.vm->adopt_math_alias(name_id, copy); }
@@ -3316,18 +3309,13 @@ namespace {
 
 		if (use_vm) {
 			auto backend = std::make_unique<vm::vm_backend>(eng.get_symbolizer(), ctx->root_env);
-			backend->set_engine_reference(&eng);
-			backend->configure_parallel_worker(ctx->root_env, ctx->env_epoch_sink.get(), &ctx->limits, budget);
 			ctx->vm = backend.get();
 			ctx->backend = std::move(backend);
 		} else {
-			auto backend = std::make_unique<interpreter>(eng.get_symbolizer(), ctx->root_env);
-			backend->set_engine_reference(&eng);
-			backend->configure_parallel_worker(ctx->root_env, ctx->env_epoch_sink.get(),
-			                                                      &ctx->limits, budget);
-			ctx->interp = backend.get();
-			ctx->backend = std::move(backend);
+			ctx->backend = detail::make_interpreter_backend(eng.get_symbolizer(), ctx->root_env);
 		}
+		ctx->backend->set_engine_reference(&eng);
+		ctx->backend->configure_parallel_worker(ctx->root_env, ctx->env_epoch_sink.get(), &ctx->limits, budget);
 
 		// Provisioning fingerprint for reuse decisions on later calls
 		ctx->fingerprint_use_vm = use_vm;

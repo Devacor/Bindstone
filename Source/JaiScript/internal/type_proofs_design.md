@@ -313,7 +313,7 @@ Every hook runs after `run_ast_marking_passes` (the parse tail, the jaibite load
 Cost: one checker walk per unique source per surface epoch; `type_proofs(false)`
 clears the stamps.
 
-## 5. Interpreter — `source/implementation/interpreter.cpp`
+## 5. Interpreter — `source/interpreter/interpreter.cpp`
 
 Includes `detail/type_proofs.hpp`. Each site: guard → fast statements → **identical fall-through
 to the unproven code** (the proven branch sits in front of the exact call it skips). The snippets

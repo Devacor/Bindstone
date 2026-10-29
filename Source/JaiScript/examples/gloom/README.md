@@ -67,7 +67,7 @@ binary.
 ```bash
 jai_gloom.exe                        # seed 666, VM backend, quad pixels
 jai_gloom.exe --pix sext             # the full doom-cli look (font permitting)
-jai_gloom.exe --backend interpreter --seed 7
+jai_gloom.exe --seed 7
 jai_gloom.exe --workers 0            # serial script loop instead of parallel_transform
 jai_gloom.exe --bench 300            # autopilot plays while you read ms/frame numbers
 ```
@@ -154,12 +154,12 @@ any `--workers`).
 Measured (min of 3 interleaved runs, quad, seed 666, 300 ticks, `--smoke`
 headless ms/tick, on a loaded development machine; every row hash-identical):
 
-| workers (quad) | VM ms/tick | interp ms/tick |
-|---|---|---|
-| 0 (serial script loops) | 45.3 | 58.3 |
-| 1 | 37.3 | 45.4 |
-| 4 | 35.3 | 40.5 |
-| 8 | 33.0 | 37.3 |
+| workers (quad) | VM ms/tick |
+|---|---|
+| 0 (serial script loops) | 45.3 |
+| 1 | 37.3 |
+| 4 | 35.3 |
+| 8 | 33.0 |
 
 Treat ±10% as machine noise: measure on a quiet machine, or measure twice. The
 [performance guide](../../docs/site/embedding/11-performance.html) covers
@@ -186,13 +186,12 @@ the STATE_HASH reference checkpoints hold (3000 ticks → 4080154357, seed 7 →
 
 ## Determinism
 
-`--smoke` runs the seeded autopilot headless for N ticks on BOTH backends and
-compares a per-tick FNV `STATE_HASH` (player, enemies, particles, rng state) AND
-a hash of every rendered frame string — sim determinism and frame *byte* parity,
-interpreter vs VM, at any worker count:
+`--smoke` runs the seeded autopilot headless for N ticks on the VM and reports a
+per-tick FNV `STATE_HASH` (player, enemies, particles, rng state) AND a hash of
+every rendered frame string; both hold at any worker count:
 
 ```bash
-jai_gloom.exe --smoke --ticks 6000            # both backends, parity table
+jai_gloom.exe --smoke --ticks 6000
 jai_gloom.exe --smoke --ticks 6000 --workers 8
 ```
 

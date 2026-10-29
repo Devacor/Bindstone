@@ -1321,7 +1321,7 @@ namespace jai {
         void configure_parallel_worker(std::shared_ptr<environment> root_env,
                                        string_symbolizer* env_epoch_sink,
                                        detail::execution_limits* worker_limits,
-                                       std::chrono::nanoseconds budget) {
+                                       std::chrono::nanoseconds budget) override {
             environment_ = std::move(root_env);
             env_symbolizer_ = env_epoch_sink;
             limits_ = worker_limits;

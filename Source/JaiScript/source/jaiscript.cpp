@@ -1,4 +1,5 @@
-// Single compilation unit for JaiScript: every file source/CMakeLists.txt builds, for hosts that add one file.
+// Single compilation unit for JaiScript: every file source/CMakeLists.txt builds, for hosts that add one file. Defining
+// JAISCRIPT_INTERPRETER adds the tree-walking interpreter (the parity verifiers' backend) in place of its empty seam.
 // connector.cpp stays first: it includes winsock2 before anything can drag in windows.h.
 #include "implementation/debug/connector.cpp"
 
@@ -11,14 +12,18 @@
 #include "implementation/engine.cpp"
 #include "implementation/lexer.cpp"
 #include "implementation/parser.cpp"
-#include "implementation/interpreter.cpp"
+#include "implementation/builtin_methods.cpp"
+#ifdef JAISCRIPT_INTERPRETER
+#include "interpreter/interpreter.cpp"
+#include "interpreter/interpreter_dispatch.cpp"
+#endif
+#include "implementation/no_interpreter.cpp"
 #include "implementation/properties.cpp"
 #include "implementation/runtime_errors.cpp"
 #include "implementation/conversion_registry.cpp"
 #include "implementation/class_registry.cpp"
 #include "implementation/construction.cpp"
 #include "implementation/parse_errors.cpp"
-#include "implementation/interpreter_dispatch.cpp"
 #include "implementation/type_checker.cpp"
 #include "implementation/aggregate_lowering.cpp"
 #include "implementation/schema_binding.cpp"

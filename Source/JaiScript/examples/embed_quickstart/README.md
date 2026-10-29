@@ -20,7 +20,6 @@ section writes `live/rules.jai` under the working directory, which is why it run
 
 | flag | what it does |
 |---|---|
-| `--interp` | run the scripts on the tree-walking interpreter instead of the bytecode VM |
 | `--debug` | also listen for VS Code (DAP) on 127.0.0.1:52472 |
 | `--debug-wait` | listen, then wait for Enter before running `game.jai` |
 

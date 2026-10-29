@@ -11,12 +11,9 @@ labyrinth and the classics. The C++ host (`demoreel_host.cpp`) is a
 thin shell: a VT console, a monotonic clock, non-blocking keys, a seeded rng
 class, and the frame pump. Everything you see is script.
 
-The reel is also an engine showcase: it keeps **two live engines** warm — one
-tree-walking interpreter, one bytecode VM — running the same scripts, and lets you
-flip between them mid-run. It doubles as a parity test: in `--smoke` mode both
-backends must produce **byte-identical** frame streams. Six scenes trace their
-rows across every core with `parallel_transform`, and the streams stay
-byte-identical anyway.
+The reel doubles as a determinism test: `--smoke` hashes the whole frame stream
+against a reference. Six scenes trace their rows across every core with
+`parallel_transform`, and the stream stays byte-identical anyway.
 
 ## How a frame is drawn
 
@@ -94,17 +91,16 @@ through the runner's `play_sound`.
 Verified: the 1700-frame smoke reel produces the same stream hash and
 byte-identical dumped frames under `--backend=vm` and `--backend=interp`.
 Not ported from the C++ host: the VT escape filter / xterm-256 rewrite /
-row-diff (frames present whole), TAB dual-engine swap, and `r` hot reload.
+row-diff (frames present whole) and `r` hot reload.
 
 ## Run
 
 ```
-jai_demoreel                     # the reel, VM backend active, 30 fps pacing
-jai_demoreel --backend interp    # start on the interpreter instead
-jai_demoreel --smoke             # headless: both backends, frame-hash parity + perf
+jai_demoreel                     # the reel, 30 fps pacing
+jai_demoreel --smoke             # headless: frame-stream hash + perf
 jai_demoreel --smoke --frames N  # smoke frame budget (default 1700)
 jai_demoreel --capture I         # print scene I as plain text (ANSI stripped: half blocks and spaces)
-jai_demoreel --reload-test       # headless hot-reload + backend-swap self-test
+jai_demoreel --reload-test       # headless hot-reload self-test
 jai_demoreel --precompiled       # boot from demoreel.jaibite (saved on first run)
 ```
 
@@ -112,16 +108,14 @@ Keys while running:
 
 | key | action |
 | --- | ------ |
-| `TAB` | swap live backend (interpreter <-> VM); scene state re-synced, stateful scenes replay up to 3 sim-seconds |
-| `r` | hot-reload every `scenes/*.jai` from disk into BOTH engines |
+| `r` | hot-reload every `scenes/*.jai` from disk |
 | `h` | toggle the HUD (scene, ACTIVE BACKEND, frame ms, fps, pixel size) |
 | `f` | freeze the clock (render keeps running) |
 | `n` / `p` / space / arrows | next / previous scene |
 | `1`..`9`, `0` | jump straight to a scene (`0` = scene 17, the finale) |
 | `q` / `ESC` | quit |
 
-The HUD shows the active backend and its frame cost, plus the last measured cost
-of the other backend — press TAB and watch the ms number move.
+The HUD shows the backend and its frame cost.
 
 ## The scenes
 
@@ -187,9 +181,9 @@ the interpreter each stays under 26 ms (mean 15.7 ms).
 - Parity: frame streams **byte-identical** across backends over 1,700 frames,
   every one of the seventeen scene entries: shim stream hash `4219879756` on
   both. The C++ host's `--smoke` hash is FNV-1a 64 over the same frames:
-  `006d304a70772e5f` on both backends (the host's HUD
+  `006d304a70772e5f` (the host's HUD
   is off in smoke, so its frames are the shim's bytes).
-- `--reload-test` re-executes every scene file into both engines. The
+- `--reload-test` re-executes every scene file into the engine. The
   presenter's globals live in `util.jai`, so a reload resets them and the reel
   re-binds them on the next frame; a reload mid-transition cancels the
   transition (the live scene rebuilds), so no scene reads a reset buffer.
@@ -249,19 +243,20 @@ plus the console write), split out so you can see which side you're bound on.
    `pal.gradient` call), or the field frequencies in `render`.
 3. Press `r` in the console window.
 
-Both engines re-execute every scene file (hot reload with instance migration) and
+The engine re-executes every scene file (hot reload with instance migration) and
 the current scene rebuilds — the change appears without restarting. `main.jai` is
 deliberately never reloaded: it owns the persistent globals.
 
 ## Determinism / parity
 
-`--smoke` runs N frames headless at a fixed dt on the interpreter, then the VM,
-FNV-1a-hashing every returned frame; the hashes must match. All scene randomness
+`--smoke` runs N frames headless at a fixed dt, FNV-1a-hashing every returned
+frame; `--expect H` fails the run unless the stream hash is H. All scene randomness
 goes through the host's seeded xorshift `Rng` class (the presentation-only hashes
 are integer arithmetic on pixel coordinates), and `parallel_transform` returns
-rows in order, so a one-pixel divergence between backends fails the run. Env
+rows in order, so the hash holds at every worker count. The backends' parity runs
+on the standalone runner (`--backend=vm` and `--backend=interp` above). Env
 helpers: `DEMOREEL_SMOKE_FULLDUR=1` (full interactive scene durations),
-`DEMOREEL_DUMP_FRAME=N` (write frame N of each backend to a file for
+`DEMOREEL_DUMP_FRAME=N` (write frame N to a file for
 diffing), `DEMOREEL_TRACE=1` (per-frame progress for crash localization).
 Deliberately NOT part of the main test suite.
 
@@ -269,8 +264,7 @@ Deliberately NOT part of the main test suite.
 
 `engine->jaibite()` parses the concatenated scene source once; `--precompiled`
 saves the parsed AST as `demoreel.jaibite` on first boot and loads it afterwards
-(the .jaibite saved by the interpreter engine loads into the VM engine —
-`jaibite_load` re-interns symbols per engine, so one file serves both backends).
+(`jaibite_load` re-interns symbols per engine, so one file serves every engine).
 
 ## Captures
 

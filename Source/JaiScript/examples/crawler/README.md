@@ -74,9 +74,8 @@ cmake --build build --config Debug --target jai_crawler     # --dev iteration
 
 **Play the Release exe** — the view casts a ray per column and shades every pixel
 of four panes per keypress and fills six text boxes (at the default size a
-64x40-pixel forward view and three 32x20 ones: about 2 ms on the VM, 13 ms on the
-interpreter in Release; the forward view alone is 1 ms and 5.5 ms; Debug is far
-slower). The exe prefers
+64x40-pixel forward view and three 32x20 ones: about 2 ms on the VM in Release;
+the forward view alone is 1 ms; Debug is far slower). The exe prefers
 the *source* `scripts/` dir (so `--dev` hot reload edits the files you have open);
 a `crawler_scripts/` copy sits next to the binary for distribution.
 `--time` prints a key-to-frame latency report on exit.
@@ -85,7 +84,7 @@ a `crawler_scripts/` copy sits next to the binary for distribution.
 
 ```bash
 jai_crawler.exe                     # new run, seed 1337, VM backend
-jai_crawler.exe --seed 7 --backend interpreter
+jai_crawler.exe --seed 7
 jai_crawler.exe --load              # continue a saved run
 jai_crawler.exe --dev               # 'R' re-imports scripts mid-game (hot reload)
 jai_crawler.exe --god               # tourist mode (visit Vexadrach, stay alive)
@@ -301,13 +300,12 @@ boxes stay live (with the forward view alone at 64x20 it fills the view exactly)
 a body that must turn before it can walk: BFS to the goal, rotate until the nose
 lines up, step, bump-attack what blocks, skill down corridors, sip when scared.
 (The pilot never opens the map, so map-mode absolute movement is not on
-this path.) The FNV-fold `STATE_HASH`, which folds the facing too, must match
-across backends for a given seed:
+this path.) The FNV-fold `STATE_HASH`, which folds the facing too, is the run's
+fingerprint for a given seed; the backends' parity runs on the runner shim below:
 
 ```bash
-jai_crawler.exe --smoke --seed 99 --turns 1500 --backend vm
-jai_crawler.exe --smoke --seed 99 --turns 1500 --backend interpreter
-# STATE_HASH must match between the two runs
+jai_crawler.exe --smoke --seed 99 --turns 1500
+# STATE_HASH: 3849293868
 ```
 
 Verified: seeds 99 / 7 / 1337 / 4242 hash-identical across

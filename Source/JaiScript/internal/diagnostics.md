@@ -143,7 +143,7 @@ context, so both backends name the method alone (byte parity).
 
 Other texts in this family (builtin arity texts are their own consistent shape):
 `push() takes exactly one argument`, `size() takes no arguments`, ... (`{name}() takes ...`,
-~90 texts in `interpreter.cpp`'s builtin registry, shared by both backends),
+~90 texts in the builtin registry (`builtin_methods.cpp`), shared by both backends),
 `math::pow expects 2 arguments` (`math_intrinsics.hpp`), `weak_from_this() takes no arguments`,
 `Constructor parameter count mismatch`,
 `No constructor found for class 'C'` (the class has no constructor at all - a different fact),
@@ -382,7 +382,7 @@ argument(s), got 1`, `no overload of 'binary::reader.seek' accepts these argumen
 | `Failed to open import file: creature.jai` | an `import` whose path no rung finds (the path as written), or a loaded module whose file disappeared (its resolved path; raised once, then the module waits for the file) |
 
 Both are catchable. The shared resolver is
-`resolve_include_path` (`interpreter.cpp`), whose `for_import` flag picks the form.
+`resolve_include_path` (`engine.cpp`), whose `for_import` flag picks the form.
 
 ## Host file reads
 

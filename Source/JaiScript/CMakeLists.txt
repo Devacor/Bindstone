@@ -44,6 +44,7 @@ endif()
 
 # Options. Tools, tests and examples build by default only when JaiScript is the top-level project.
 option(JAISCRIPT_BUILD_TESTS "Build JaiScript test suite" ${JAISCRIPT_IS_TOP_LEVEL})
+option(JAISCRIPT_INTERPRETER "Build jaiscript_interpreter, the library plus the tree-walking interpreter the parity verifiers (tests, fuzzer, runner) link" ${JAISCRIPT_IS_TOP_LEVEL})
 option(JAISCRIPT_INSTALL "Generate the install rules and the JaiScript CMake package" ${JAISCRIPT_IS_TOP_LEVEL})
 option(JAISCRIPT_LTCG "Whole-program optimization for MSVC Release builds (/GL, /LTCG)" ${JAISCRIPT_IS_TOP_LEVEL})
 option(JAISCRIPT_ENABLE_BENCHMARKS "Enable performance benchmark tests" OFF)
@@ -110,6 +111,12 @@ endif()
 
 # JaiScript Library
 add_subdirectory(source)
+# The parity verifiers run programs on both backends; every other program links jaiscript, which has no interpreter
+if(TARGET jaiscript_interpreter)
+    set(JAISCRIPT_VERIFIER_LIBRARY jaiscript_interpreter)
+else()
+    set(JAISCRIPT_VERIFIER_LIBRARY jaiscript)
+endif()
 
 # Tests (Foundry test suite)
 if(JAISCRIPT_BUILD_TESTS)
@@ -169,7 +176,11 @@ if(JAISCRIPT_INSTALL)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
     set(JAISCRIPT_CMAKE_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/JaiScript)
-    install(TARGETS jaiscript EXPORT JaiScriptTargets
+    set(jaiscript_installed jaiscript)
+    if(TARGET jaiscript_interpreter)
+        list(APPEND jaiscript_installed jaiscript_interpreter)
+    endif()
+    install(TARGETS ${jaiscript_installed} EXPORT JaiScriptTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

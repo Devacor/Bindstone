@@ -49,11 +49,10 @@ inline std::vector<run_config> configs() {
 	return out;
 }
 
-inline std::shared_ptr<engine> make(const run_config& c, check_mode mode) {
+inline std::shared_ptr<engine> make(const run_config& c) {
 	auto e = engine::make();
 	e->set_backend(c.vm ? backend_type::vm : backend_type::interpreter);
 	stdlib::register_all(*e);
-	e->static_checking(mode);
 	if (!c.proofs) { e->type_proofs(false); }
 	if (!c.passes) { e->ir_passes(false); }
 	if (!c.alias) { e->parameter_alias(false); e->local_alias(false); }
@@ -73,11 +72,12 @@ class robustness_oracle_tests : public suite {
 public:
 	robustness_oracle_tests() : suite("Robustness Oracles") {}
 
-	void expect(const std::string& label, const std::string& src, const std::string& expected, check_mode mode = check_mode::strict) {
+	// warn_region: the run time's verdict, the unit under [[warn_mode]]
+	void expect(const std::string& label, const std::string& src, const std::string& expected, bool warn_region = false) {
 		for (const auto& c : robustness::configs()) {
-			auto e = robustness::make(c, mode);
+			auto e = robustness::make(c);
 			std::string got;
-			try { got = robustness::render(e->execute(src)); }
+			try { got = robustness::render(e->execute(warn_region ? "[[warn_mode]]; " + src : src)); }
 			catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 			check_eq(expected, got, label + " [" + c.label + "]");
 		}
@@ -102,7 +102,7 @@ public:
 private:
 	// strict load verdict: "" when the program loads, else the static check's text
 	static std::string strict_load_error(const std::string& src) {
-		auto e = robustness::make(robustness::configs()[0], check_mode::strict);
+		auto e = robustness::make(robustness::configs()[0]);
 		try { e->execute(src); } catch (const std::exception& ex) { return ex.what(); }
 		return "";
 	}
@@ -161,7 +161,7 @@ private:
 			)";
 			expect("string to bool among rivals", rivals,
 			       "No overload of 'm' takes (string)|No constructor of 'E' takes (string)|Cannot pass string to parameter 'v' of 'f' (declared int)",
-			       check_mode::off);
+			       true);
 			const std::string verdict = strict_load_error(rivals);
 			check_true(verdict.find("no overload of 'm' matches this call") != std::string::npos, "strict rejects m(string): " + verdict);
 			check_true(verdict.find("no overload of 'E' matches this call") != std::string::npos, "strict rejects E(string): " + verdict);
@@ -184,7 +184,7 @@ private:
 					return out;
 				}
 				run();
-			)", "boolboolpairpair|No overload of 'm' takes (string)", check_mode::off);
+			)", "boolboolpairpair|No overload of 'm' takes (string)", true);
 		});
 		test("a_var_parameter_takes_what_only_a_loose_row_would_convert", [this]() {
 			expect("var ahead of loose rows", R"(
@@ -276,8 +276,8 @@ private:
 		test("an_uncaught_error_reads_its_text_without_a_category_suffix", [this]() {
 			for (const auto& c : robustness::configs()) {
 				auto uncaught = [&](const std::string& src) {
-					auto e = robustness::make(c, check_mode::off);
-					try { e->execute(src); } catch (const std::exception& ex) { return std::string(ex.what()); }
+					auto e = robustness::make(c);
+					try { e->execute("[[warn_mode]]; " + src); } catch (const std::exception& ex) { return std::string(ex.what()); }
 					return std::string("no error");
 				};
 				const std::string label = std::string(" [") + c.label + "]";
@@ -346,7 +346,7 @@ private:
 					return out;
 				}
 				run();
-			)", "false,0,BB|true,4|2|6,5|true,7", check_mode::warn);
+			)", "false,0,BB|true,4|2|6,5|true,7", true);
 		});
 		test("a_thrown_object_reads_as_its_to_string", [this]() {
 			expect("thrown object text", R"(
@@ -358,7 +358,7 @@ private:
 				out;
 			)", "oops 7|oops 7|7|inner");
 			for (const auto& c : robustness::configs()) {
-				auto e = robustness::make(c, check_mode::strict);
+				auto e = robustness::make(c);
 				std::string what;
 				try { e->execute("class Oops { string to_string() { return \"oops\"; } } throw Oops();"); } catch (const std::exception& ex) { what = ex.what(); }
 				check_eq(std::string("oops"), what, std::string("uncaught [") + c.label + "]");
@@ -402,15 +402,15 @@ private:
 			check_eq(std::string(""), strict_load_error("int f() { return later(1); }\nint later(int x) { return x; }\nf();\n"), "a body may call further down");
 			check_eq(std::string(""), strict_load_error("int later(int x) { return x; }\nlater(2);\n"), "declared first");
 			expect("warn keeps the run-time text", "string out = \"\"; try { later(2); } catch (e) { out = e; } int later(int x) { return x; } out;",
-			       "Undefined variable 'later'", check_mode::warn);
+			       "Undefined variable 'later'", true);
 		});
 		test("a_host_overload_miss_names_the_function_and_the_arguments", [this]() {
 			for (const auto& c : robustness::configs()) {
-				auto e = robustness::make(c, check_mode::off);
+				auto e = robustness::make(c);
 				e->add_function("h", [](double a) -> double { return a; });
 				e->add_function("h", [](double a, double b) -> double { return a + b; });
 				std::string got;
-				try { got = robustness::render(e->execute("string m = \"\"; var s = \"x\"; try { h(s); } catch (err) { m = err; } m")); }
+				try { got = robustness::render(e->execute("[[warn_mode]]; string m = \"\"; var s = \"x\"; try { h(s); } catch (err) { m = err; } m")); }
 				catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(std::string("No overload of 'h' takes (string)"), got, std::string("host miss [") + c.label + "]");
 			}
@@ -507,7 +507,7 @@ private:
 			for (const auto& r : rows) {
 				const std::string src = prelude + "string f() {\n" + r.setup + "\nT x = " + r.src + ";\n" + r.attack +
 					"\nreturn \"\" + x.v + x.a.size();\n}\nf();";
-				expect(std::string("alias ") + r.name, src, "11", check_mode::warn);
+				expect(std::string("alias ") + r.name, src, "11", true);
 			}
 		});
 	}
@@ -524,7 +524,7 @@ private:
 				std::filesystem::create_directories(dir);
 				auto write = [&](const char* name, const std::string& text) { std::ofstream(dir / name, std::ios::binary) << text; };
 				auto path = [&](const char* name) { return (dir / name).generic_string(); };
-				auto e = robustness::make(c, check_mode::strict);
+				auto e = robustness::make(c);
 				e->import_recheck_interval(0);
 				std::string log;
 				e->add_function("note", [&log](std::string t) { log += t; });
@@ -596,7 +596,7 @@ private:
 					return out;
 				}
 				run();
-			)", "1,3,2,2,3|1,6,7,1|3,5,1,6|1,2,5", check_mode::warn);
+			)", "1,3,2,2,3|1,6,7,1|3,5,1,6|1,2,5", true);
 		});
 	}
 
@@ -703,7 +703,7 @@ private:
 			for (const auto& c : robustness::configs()) {
 				std::weak_ptr<robustness_probe_host> token;
 				{
-					auto e = robustness::make(c, check_mode::strict);
+					auto e = robustness::make(c);
 					dynamic_binder<robustness_probe_host>(*e, "RobustnessProbeHost").method("get", &robustness_probe_host::get).build();
 					e->add_function("token", [&token]() { auto t = std::make_shared<robustness_probe_host>(); token = t; return t; });
 					e->execute(R"(
@@ -744,7 +744,7 @@ private:
 				std::weak_ptr<class_definition> host, binary, script;
 				std::weak_ptr<conversions::conversion_registry> registry;
 				{
-					auto e = robustness::make(c, check_mode::strict);
+					auto e = robustness::make(c);
 					dynamic_binder<robustness_probe_host>(*e, "RobustnessProbeHost").method("get", &robustness_probe_host::get).build();
 					e->execute(R"(
 						class Q { int v = 1; Q() {} int twice() { return v * 2; } static int s = 3; }
@@ -772,7 +772,7 @@ private:
 				{
 					auto token = std::make_shared<int>(0);
 					state = token;
-					auto e = robustness::make(c, check_mode::strict);
+					auto e = robustness::make(c);
 					e->add_function("touch", [token]() -> script_int { return ++*token; });
 					token.reset();
 					e->execute("function rec(int n) -> int { touch(); return n <= 0 ? 0 : 1 + rec(n - 1); } int r = rec(4);");

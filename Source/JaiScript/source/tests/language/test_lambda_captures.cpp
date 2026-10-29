@@ -249,16 +249,15 @@ public:
         // so a same-named global never wins over a local, a parameter or a field. Every row
         // runs on both backends and pins byte parity; each shape also runs WITHOUT the global
         // (the control that was always green).
-        auto run_both = [](const std::string& src, bool unchecked = false) {
+        auto run_both = [](const std::string& src, bool warn_region = false) {
             std::string out[2];
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
-                if (unchecked) { e->static_checking(check_mode::off); }
                 jai::stdlib::register_all(e);
-                try { out[idx] = e->execute(src).to_string(); }
+                try { out[idx] = e->execute(warn_region ? "[[warn_mode]]; " + src : src).to_string(); }
                 catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
                 ++idx;
             }
@@ -412,7 +411,7 @@ public:
         });
 
         test("explicit_capture_of_undefined_name_text_parity", [this, run_both]() {
-            // Static checking off: the runtime text is the one under test
+            // A warn region: the runtime text is the one under test
             auto [i_out, v_out] = run_both("auto l = [&nosuch]() { return 1; }; l()", true);
             check_true(i_out.find("Cannot capture undefined variable 'nosuch'") != std::string::npos, i_out);
             check_eq(i_out, v_out, "byte-identical across backends");

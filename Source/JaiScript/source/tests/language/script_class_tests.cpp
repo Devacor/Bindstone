@@ -1402,8 +1402,7 @@ public:
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-                e->static_checking(check_mode::warn);   // the runtime raise (strict rejects S::counter at load)
-                outputs[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
+                outputs[use_vm ? 1 : 0] = e->execute(std::string("[[warn_mode]]; ") + src).as<std::string>();   // the runtime raise (strict rejects S::counter at load)
             }
             check_eq(expected, outputs[0], "interp statics/ref access");
             check_eq(outputs[0], outputs[1], "statics/ref access parity");

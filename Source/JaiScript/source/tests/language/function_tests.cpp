@@ -1187,7 +1187,6 @@ public:
 
         test("top_level_overloads_do_not_warn", [&, this]() {
             auto engine = make_engine();
-            engine->static_checking(jai::check_mode::warn);
             check_eq(int64_t(21), engine->execute(
                 "function f(a) { return 1; } function f(a, b) { return 2; } f(0, 0) * 10 + f(0);").as_int());
             check_eq(size_t(0), duplicate_warnings(*engine));
@@ -1195,14 +1194,12 @@ public:
 
         test("duplicate_warning_spans_definition_forms", [&, this]() {
             auto engine = make_engine();
-            engine->static_checking(jai::check_mode::warn);
             engine->execute("int f(int a) { return 1; } coroutine function f() { yield 1; } 1;");
             check_eq(size_t(1), duplicate_warnings(*engine));
         });
 
         test("duplicate_warning_silent_for_legit_overloads", [&, this]() {
             auto engine = make_engine();
-            engine->static_checking(jai::check_mode::warn);
             engine->execute(
                 "namespace n { int f() { return 1; } int f(int a) { return 2; } }"
                 "class K { int m(a) { return 1; } int m(a, b) { return 2; } } n::f();");
@@ -1211,7 +1208,6 @@ public:
 
         test("duplicate_warning_silent_across_executes", [&, this]() {
             auto engine = make_engine();
-            engine->static_checking(jai::check_mode::warn);
             engine->execute("function f(a) { return 1; } f(0);");
             engine->execute("function f(a) { return 2; } f(0);");   // hot-reload shape
             check_eq(size_t(0), duplicate_warnings(*engine));
@@ -1225,7 +1221,6 @@ public:
 
             auto engine = make_engine();
             engine->add_include_path(dir.string());
-            engine->static_checking(jai::check_mode::warn);
             // file defines f once; this unit includes it TWICE and defines its own f
             // once - all composition, zero textual duplicates, zero warnings
             auto r = engine->execute(
@@ -1238,7 +1233,6 @@ public:
 
         test("duplicate_warning_never_blocks_strict_mode", [&, this]() {
             auto engine = make_engine();
-            engine->static_checking(jai::check_mode::strict);
             check_eq(int64_t(1), engine->execute(
                 "coroutine function f() { yield 1; } function f(a) { return 1; } f(0);").as_int());
             check_eq(size_t(1), duplicate_warnings(*engine));
@@ -1471,24 +1465,22 @@ public:
 
         test("an_ambiguous_overload_call_raises", [this, error_of]() {
             auto engine = make_engine();
-            engine->static_checking(jai::check_mode::off);   // the run-time verdict
             engine->execute("void g(int a, float b) { } void g(float a, int b) { }");
-            const std::string free_err = error_of([&] { engine->execute("g(1, 1);"); });
+            const std::string free_err = error_of([&] { engine->execute("[[warn_mode]]; g(1, 1);"); });   // the run-time verdict
             check_true(free_err.find("mbiguous") != std::string::npos, "free: " + free_err);
             engine->execute("namespace n { void g(int a, float b) { } void g(float a, int b) { } }");
-            const std::string ns_err = error_of([&] { engine->execute("n::g(1, 1);"); });
+            const std::string ns_err = error_of([&] { engine->execute("[[warn_mode]]; n::g(1, 1);"); });
             check_true(ns_err.find("mbiguous") != std::string::npos, "namespace: " + ns_err);
             engine->execute("class K { K() { } K(int a, float b) { } K(float a, int b) { } void g(int a, float b) { } void g(float a, int b) { } }");
-            const std::string method_err = error_of([&] { engine->execute("K().g(1, 1);"); });
+            const std::string method_err = error_of([&] { engine->execute("[[warn_mode]]; K().g(1, 1);"); });
             check_true(method_err.find("mbiguous") != std::string::npos, "method: " + method_err);
-            const std::string ctor_err = error_of([&] { engine->execute("K(1, 1);"); });
+            const std::string ctor_err = error_of([&] { engine->execute("[[warn_mode]]; K(1, 1);"); });
             check_true(ctor_err.find("mbiguous") != std::string::npos, "constructor: " + ctor_err);
             check_eq(int64_t(1), engine->execute("int h(int a, float b) { return 1; } int h(float a, int b) { return 2; } h(1, 2.5);").as_int(), "a better match is no tie");
         });
 
         test("an_ambiguous_overload_call_is_a_load_error_under_strict", [this, error_of]() {
             auto engine = make_engine();
-            engine->static_checking(jai::check_mode::strict);
             const std::string err = error_of([&] { engine->execute("int ran = 0; void g(int a, float b) { } void g(float a, int b) { } ran = 1; g(1, 1);"); });
             check_true(err.find("mbiguous") != std::string::npos, err);
             check_true(!engine->get_global_environment()->get_value_ptr(engine->get_symbolizer()->intern("ran")), "nothing ran");
@@ -1498,12 +1490,11 @@ public:
 
         test("an_overload_differing_only_by_reference_is_an_error", [this, error_of]() {
             const std::string tail = " only by reference; overloads must differ in parameter types or count";
-            for (auto mode : {jai::check_mode::off, jai::check_mode::strict}) {
-                const std::string label = mode == jai::check_mode::off ? "run time: " : "load: ";
+            for (bool warn_region : {true, false}) {
+                const std::string label = warn_region ? "run time: " : "load: ";
                 auto run = [&](const std::string& src) {
                     auto engine = make_engine();
-                    engine->static_checking(mode);
-                    return error_of([&] { engine->execute(src); });
+                    return error_of([&] { engine->execute(warn_region ? "[[warn_mode]]; " + src : src); });
                 };
                 const std::string free_err = run("void f(var& x) { } void f(var x) { } 1;");
                 check_true(free_err.find("'f(var x)' differs from 'f(var& x)' (line 1)" + tail) != std::string::npos, label + "free: " + free_err);
@@ -1571,9 +1562,8 @@ public:
                 var o = new O();
                 mix(o.x, "s") * 10 + mix(o.x, 5);
             )").as_int(), "a reference and a type difference coexist");
-            engine->static_checking(jai::check_mode::off);
-            engine->execute("int h(var& a, int b) { return 1; } int h(var a, float b) { return 2; }");
-            const std::string tie = error_of([&] { engine->execute("var v = 1; h(v, true);"); });
+            engine->execute("[[warn_mode]]; int h(var& a, int b) { return 1; } int h(var a, float b) { return 2; }");
+            const std::string tie = error_of([&] { engine->execute("[[warn_mode]]; var v = 1; h(v, true);"); });
             check_true(tie.find("Ambiguous call to 'h'") != std::string::npos, "a call that ties another way stays ambiguous: " + tie);
 
             const auto dir = jai::foundry::test_temp_directory() / "jai_refonly_reload";

@@ -299,30 +299,24 @@ namespace jai {
         uint64_t registration_fingerprint() const;
 
         // === STATIC TYPE CHECKING (docs/site/embedding/06-static-checking.html) ===
-        // strict (the default): any error-severity diagnostic makes execute()/jaibite
-        //       creation/load throw static_check_error BEFORE anything runs; what() is the
-        //       full accumulated, location-sorted, deduplicated listing with source + carets.
-        //       A typed -> typed mismatch is therefore a load error; only a var-sourced
-        //       value can still fail at runtime, where try/catch sees it.
-        // warn: diagnostics collected at parse-cache-entry creation, retrievable via
-        //       last_check_diagnostics(); execution proceeds with the runtime's own errors.
-        // off: zero behavior change (one branch per parse-cache entry).
-        // Checks are amortized once per unique source (cached beside the parse) and
-        // re-run when the registration surface changes.
-        void static_checking(check_mode mode);
-        check_mode static_checking() const;
+        // Every load is checked: an error-severity diagnostic makes execute()/jaibite
+        // creation/load throw static_check_error BEFORE anything runs; what() is the full
+        // accumulated, location-sorted, deduplicated listing with source + carets. A typed ->
+        // typed mismatch is therefore a load error; only a var-sourced value can still fail at
+        // runtime, where try/catch sees it. A [[warn_mode]] region reports its errors as
+        // warnings and loads. Checks are amortized once per unique source (cached beside the
+        // parse) and re-run when the registration surface changes.
 
-        // Parse (cached) + check, independent of the current mode — tooling entry point.
+        // Parse (cached) + check, without running or gating — tooling entry point.
         // Throws parse_error if the source doesn't parse (checking is post-parse).
         check_report check(const std::string& scriptContent);
 
-        // Diagnostics from the most recent checked execute()/jaibite path (warn/strict).
+        // Diagnostics from the most recent checked execute()/jaibite path.
         const check_report& last_check_diagnostics() const;
 
         // === PARSE-TIME TYPE PROOFS (internal/type_proofs_design.md) ===
-        // On by default. The checker's proof pass runs in EVERY check mode (one walk per
-        // unique source per surface epoch, cached beside the parse; diagnostics are still
-        // collected only under warn/strict) and stamps same-type / field proofs onto AST
+        // On by default. The checker's proof pass runs beside the diagnostics walk (one walk per
+        // unique source per surface epoch, cached beside the parse) and stamps same-type / field proofs onto AST
         // nodes; both backends consume them behind total runtime guards, so results never
         // depend on this switch. Off: fresh entries stay unproven and already-stamped cached
         // entries are stripped at their next execute (jaibites likewise at their next
@@ -1293,7 +1287,7 @@ namespace jai {
         void report_script_error(const std::string& a_message, std::error_code a_code = {});
 
         // Advisory diagnostics that are NOT errors (e.g. a class method shadowing a builtin
-        // handle method). Always-on, independent of static_checking().
+        // handle method). Always-on, independent of the static checker.
         // Default sink is std::cerr ("[jaiscript] warning: ..."); the host app / tests
         // install their own handler to capture. Execution always proceeds.
         void set_script_warning_handler(std::function<void(const std::string&)> a_handler);

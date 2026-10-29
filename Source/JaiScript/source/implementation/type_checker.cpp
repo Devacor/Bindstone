@@ -655,8 +655,7 @@ private:
         if (!seen_.insert(std::move(key)).second) {
             return;
         }
-        diags_.push_back({severity, loc.line, loc.column, std::move(message), related_line, related_column,
-                          mode == check_mode_attr_strict});
+        diags_.push_back({severity, loc.line, loc.column, std::move(message), related_line, related_column});
     }
 
     void undeclared(const source_location& loc, std::string_view name) {

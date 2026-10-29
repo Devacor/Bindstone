@@ -3,6 +3,9 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/jaibite.hpp>
+#include <jaiscript/detail/ast_serializer.hpp>
+#include <jaiscript/detail/lexer.hpp>
+#include <jaiscript/detail/parser.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
 namespace jai::foundry::tests {
@@ -19,6 +22,17 @@ public:
 	}
 
 private:
+	// the bytes of a bite no checker has seen (parsed and serialized directly), for a loader to check
+	static std::vector<uint8_t> unstamped_bite_bytes(engine& a_engine, const std::string& a_source) {
+		const auto templates = a_engine.get_registered_template_types();
+		lexer lex(a_source, a_engine.get_symbolizer());
+		auto tokens = lex.tokenize();
+		parser syntax(tokens, a_engine.get_symbolizer(), &a_engine, templates);
+		auto declarations = syntax.parse();
+		check_true(bool(declarations), "fixture must parse: " + a_source);
+		return detail::serialize_jaibite(declarations.value(), *a_engine.get_symbolizer(), a_engine.registration_fingerprint());
+	}
+
 	void rules_456_and_controls() {
 		test("control_bool_any", [this]() {
 			auto engine = make_engine();
@@ -246,13 +260,12 @@ private:
 				}
 			}
 			auto eng = make_engine();
-			eng->static_checking(check_mode::off);
 			check_eq(std::string("Cannot initialize 'r' (declared int&) with string"),
-			         eng->execute("string s = \"s\"; var c = \"\"; try { int& r = s; } catch (e) { c = e; } c;").as_string());   // a reference must reference: the binding raises
+			         eng->execute("[[warn_mode]]; string s = \"s\"; var c = \"\"; try { int& r = s; } catch (e) { c = e; } c;").as_string());   // a reference must reference: the binding raises
 			check_eq(std::string("Cannot initialize 'f' (declared function) with int"),
-			         eng->execute("var c = \"\"; try { function f = 42; } catch (e) { c = e; } c;").as_string());   // a function slot takes a callable or null (std::function's rule)
+			         eng->execute("[[warn_mode]]; var c = \"\"; try { function f = 42; } catch (e) { c = e; } c;").as_string());   // a function slot takes a callable or null (std::function's rule)
 			check_eq(script_int{1}, eng->execute(
-				"class A {} class B {} shared_ptr<B> owner = new B(); weak_ptr<B> wb = owner; weak_ptr<A> wa = wb; 1;").as_int());
+				"[[warn_mode]]; class A {} class B {} shared_ptr<B> owner = new B(); weak_ptr<B> wb = owner; weak_ptr<A> wa = wb; 1;").as_int());
 		});
 
 		test("rules_456_valid_runtime_boundaries", [this]() {
@@ -298,8 +311,7 @@ private:
 				"class C { static function f = null; } C::f = 42;"
 			}) {
 				auto author = make_engine();
-				author->static_checking(check_mode::off);
-				auto bytes = author->jaibite(source).save_bytes();
+				auto bytes = unstamped_bite_bytes(*author, source);
 				auto loader = make_engine();
 				bool rejected = false;
 				try { auto bite = loader->jaibite_load_bytes(bytes); }
@@ -973,8 +985,7 @@ private:
 				"array<int> a = [1e30];"
 			}) {
 				auto author = make_engine();
-				author->static_checking(check_mode::off);
-				auto bytes = author->jaibite(source).save_bytes();
+				auto bytes = unstamped_bite_bytes(*author, source);
 				auto loader = make_engine();
 				bool rejected = false;
 				try { auto bite = loader->jaibite_load_bytes(bytes); }

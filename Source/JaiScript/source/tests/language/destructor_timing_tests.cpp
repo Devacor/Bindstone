@@ -859,16 +859,15 @@ public:
                 {"class M : A, C { M() : C(), C() {} }", "Class 'M' constructs base 'C' twice"},
             };
             for (const auto& [program, text] : cases) {
-                for (check_mode mode : {check_mode::strict, check_mode::off}) {
+                for (bool warn_region : {false, true}) {
                     auto eng = make_engine();
-                    eng->static_checking(mode);
                     std::string got;
                     try {
-                        eng->execute(prelude + program);
+                        eng->execute((warn_region ? "[[warn_mode]]; " : "") + prelude + program);
                     } catch (const std::exception& e) {
                         got = e.what();
                     }
-                    check_true(got.find(text) != std::string::npos, (mode == check_mode::strict ? "strict: " : "checking off: ") + program + " -> " + got);
+                    check_true(got.find(text) != std::string::npos, (warn_region ? "a warn region: " : "strict: ") + program + " -> " + got);
                 }
             }
         });
@@ -886,43 +885,38 @@ public:
         });
 
         test("an_override_of_a_later_base_s_method_is_an_override", [this]() {
-            for (check_mode mode : {check_mode::strict, check_mode::off}) {
-                auto eng = make_engine();
-                eng->static_checking(mode);
-                std::string got;
-                try {
-                    got = eng->execute(R"(
-                        class A { int a = 0; }
-                        class C { string who() { return "c"; } string only() { return "o"; } }
-                        class D : A, C { string who() override { return "d"; } }
-                        D d; d.who() + d.only();
-                    )").as_string();
-                } catch (const std::exception& e) {
-                    got = std::string("threw: ") + e.what();
-                }
-                check_eq(std::string("do"), got, mode == check_mode::strict ? "strict" : "checking off");
+            auto eng = make_engine();
+            std::string got;
+            try {
+                got = eng->execute(R"(
+                    class A { int a = 0; }
+                    class C { string who() { return "c"; } string only() { return "o"; } }
+                    class D : A, C { string who() override { return "d"; } }
+                    D d; d.who() + d.only();
+                )").as_string();
+            } catch (const std::exception& e) {
+                got = std::string("threw: ") + e.what();
             }
+            check_eq(std::string("do"), got);
         });
 
         test("a_diamond_is_refused_at_load_and_at_declaration", [this]() {
             const std::string diamond = "class A { int a = 0; } class B : A { } class C : A { } class D : B, C { }";
             const std::string text = "Class 'D' inherits 'A' through both 'B' and 'C' (diamond inheritance is not supported)";
-            for (check_mode mode : {check_mode::strict, check_mode::off}) {
+            for (bool warn_region : {false, true}) {
                 auto eng = make_engine();
-                eng->static_checking(mode);
                 std::string got;
                 try {
-                    eng->execute(diamond);
+                    eng->execute(warn_region ? "[[warn_mode]]; " + diamond : diamond);
                 } catch (const std::exception& e) {
                     got = e.what();
                 }
-                check_true(got.find(text) != std::string::npos, (mode == check_mode::strict ? "strict: " : "checking off: ") + got);
+                check_true(got.find(text) != std::string::npos, (warn_region ? "a warn region: " : "strict: ") + got);
             }
             auto eng = make_engine();
-            eng->static_checking(check_mode::off);
             std::string direct;
             try {
-                eng->execute("class A { int a = 0; } class B : A { } class D : A, B { }");
+                eng->execute("[[warn_mode]]; class A { int a = 0; } class B : A { } class D : A, B { }");
             } catch (const std::exception& e) {
                 direct = e.what();
             }
@@ -975,10 +969,9 @@ public:
 
             std::string reported;
             auto eng = make_engine();
-            eng->static_checking(check_mode::off);
             eng->set_script_error_handler([&reported](const std::string& message) { if (reported.empty()) { reported = message; } });
             try {
-                eng->execute("class Worse { ~Worse() { nowhere(); } }\nfunction h() -> void {\n    Worse w;\n}\nh();\n");
+                eng->execute("[[warn_mode]]; class Worse { ~Worse() { nowhere(); } }\nfunction h() -> void {\n    Worse w;\n}\nh();\n");
             } catch (const std::exception& e) {
                 reported = e.what();
             }
@@ -992,9 +985,8 @@ public:
                 std::string got;
                 auto eng = make_engine();
                 jai::stdlib::register_all(eng);
-                eng->static_checking(check_mode::off);
                 try {
-                    got = eng->execute(program).as_string();
+                    got = eng->execute("[[warn_mode]]; " + program).as_string();
                 } catch (const std::exception& e) {
                     got = std::string("threw: ") + e.what();
                 }

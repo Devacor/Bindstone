@@ -101,8 +101,7 @@ print(c.settings["level"]);               // the hook read the removed field</co
 its <em>runtime</em> value, and the new initializer only applies to instances built after the reload. The new
 <code>settings</code> field took its initializer, then the hook filled it from the field that no longer
 exists.</p>
-<div class="callout"><p><strong>Why the <code>[[warn_mode]]</code>.</strong> Static checking is strict by
-default, and <code>this.flags</code> is not a member of the class you just declared. The checker does open
+<div class="callout"><p><strong>Why the <code>[[warn_mode]]</code>.</strong> Static checking is strict, and <code>this.flags</code> is not a member of the class you just declared. The checker does open
 old shapes for a redefinition: when the engine <em>already holds</em> the previous <code>Config</code> at
 check time (the two-execute host flow above), a reloaded class may read the fields still live in it. But
 a fresh engine has no previous shape, and neither does this program: both includes belong to one unit, which

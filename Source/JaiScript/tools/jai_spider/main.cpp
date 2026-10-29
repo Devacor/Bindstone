@@ -58,7 +58,6 @@ struct options {
 	int port = 8080;
 	std::string root;
 	std::string backend = "vm";
-	std::string check = "strict";
 	double budget = 30.0;
 	spider_host::http_limits limits;
 	bool allow_shutdown = false;
@@ -87,8 +86,6 @@ void print_usage() {
 		"  --timeout S         seconds a request may take to arrive and a response to leave (default 30)\n"
 		"  --budget S          execution budget per request in seconds (default 30; 0 = unlimited)\n"
 		"  --backend vm|interp execution backend (default vm)\n"
-		"  --check strict|warn|off\n"
-		"                      static checker mode (default strict)\n"
 		"  --allow-shutdown    POST /__spider/shutdown from this machine stops the server\n"
 		"  --quiet             no request log\n"
 		"  --version / --help\n"
@@ -129,7 +126,6 @@ int parse_args(int argc, char** argv, options& opt) {
 			else if (is_flag("--host")) { opt.host = value_of("--host"); }
 			else if (is_flag("--root")) { opt.root = value_of("--root"); }
 			else if (is_flag("--backend")) { opt.backend = value_of("--backend"); }
-			else if (is_flag("--check")) { opt.check = value_of("--check"); }
 			else if (is_flag("--budget")) { opt.budget = std::stod(value_of("--budget")); }
 			else if (is_flag("--timeout")) { opt.limits.timeout_seconds = std::stod(value_of("--timeout")); }
 			else if (is_flag("--max-body")) {
@@ -163,10 +159,6 @@ int parse_args(int argc, char** argv, options& opt) {
 	}
 	if (opt.backend != "vm" && opt.backend != "interp") {
 		std::fprintf(stderr, "jai_spider: unknown backend: %s (use vm or interp)\n", opt.backend.c_str());
-		return 2;
-	}
-	if (opt.check != "strict" && opt.check != "warn" && opt.check != "off") {
-		std::fprintf(stderr, "jai_spider: unknown check mode: %s (use strict, warn or off)\n", opt.check.c_str());
 		return 2;
 	}
 	if (opt.port < 0 || opt.port > 65535) {
@@ -272,7 +264,6 @@ public:
 		}
 		eng_ = jai::engine::make();
 		eng_->set_backend(opt_.backend == "interp" ? jai::backend_type::interpreter : jai::backend_type::vm);
-		eng_->static_checking(opt_.check == "off" ? jai::check_mode::off : opt_.check == "warn" ? jai::check_mode::warn : jai::check_mode::strict);
 		eng_->execution_budget(opt_.budget);
 		eng_->import_recheck_interval(0);   // every request asks whether a module changed: a save applies to the next request
 		jai::stdlib::register_all(eng_);

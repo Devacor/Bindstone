@@ -63,7 +63,7 @@ interned symbol IDs that are specific to the engine that parsed it. To move a sc
 path relocates every symbol into the loading engine. Everything else about bites is convenience;
 this rule is the contract.</li>
 <li><strong>A bite in hand has already passed the front end.</strong> Parse errors throw at
-<code>jaibite()</code> creation, and so do static-check errors. Checking is strict by default, so
+<code>jaibite()</code> creation, and so do static-check errors. Checking is strict, so
 <code>jaibite()</code> throws <code>jai::static_check_error</code> at creation exactly like
 <code>execute()</code> does (<a href="06-static-checking.html">Static Checking</a>). Runtime errors throw
 at <code>execute()</code>.</li>
@@ -159,35 +159,32 @@ plain global function registrations (with an arity-class marker), classes, and t
 <code>save_bytes()</code> stamps it into the header; <code>jaibite_load*</code> compares it against the
 loading engine and sets <code>bite.registration_mismatch()</code> on difference.</p>
 <p>The flag itself is advisory; what a mismatch costs is a fresh check. The bite&#x27;s checked-clean
-stamp is trusted only under a matching fingerprint (below), so under strict checking (the default) a
-mismatched bite is re-checked against the loading engine at load, and a name the loading engine does
-not have fails there, before anything runs. Under <code>warn</code> or <code>off</code> the bite loads
-and runs, and the error surfaces at <code>execute()</code> only if the script actually touches the
-missing registration:</p>
+stamp is trusted only under a matching fingerprint (below), so a mismatched bite is re-checked against
+the loading engine at load, and a name the loading engine does not have fails there, before anything runs.
+A bite whose source put that use in a <code>[[warn_mode]]</code> region loads and runs, and the error surfaces
+at <code>execute()</code> only if the script actually touches the missing registration:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// compiled and run against the library
 auto bare = jai::engine::make();                  // no host_bonus registered
 jai::stdlib::register_all(bare);
 bare-&gt;execute(&quot;var acc = 0;&quot;);
-bare-&gt;jaibite_load_bytes(bytes);                  // strict: throws jai::static_check_error
+bare-&gt;jaibite_load_bytes(bytes);                  // throws jai::static_check_error
 // static check failed:
 // &lt;script&gt;:1:7: error: use of undeclared identifier &#x27;host_bonus&#x27;
 
-bare-&gt;static_checking(jai::check_mode::warn);
-auto risky = bare-&gt;jaibite_load_bytes(bytes);
+auto risky = bare-&gt;jaibite_load_bytes(warn_region_bytes);   // the same source, saved as &quot;[[warn_mode]]; ...&quot;
 risky.registration_mismatch();                    // true
 risky.execute();                                  // throws &quot;Undefined variable &#x27;host_bonus&#x27;&quot;</code></pre></div>
 <h2 id="checked-clean-stamp-static-checking-integration">Checked-clean stamp (static checking integration)<a class="hlink" href="#checked-clean-stamp-static-checking-integration" aria-label="link">&#8203;</a></h2>
-<p>Checking is on by default, so this applies to every bite you make unless you opted down. Under
-<strong>strict</strong>, <code>jaibite()</code> throws <code>jai::static_check_error</code> at creation, the
-same gate <code>execute()</code> passes through. Under <strong>warn</strong> the report rides the bite
-instead (see <a href="06-static-checking.html">Static Checking</a>):</p>
+<p>Checking is always on, so this applies to every bite you make. An error makes <code>jaibite()</code> throw
+<code>jai::static_check_error</code> at creation, the same gate <code>execute()</code> passes through, and the
+report rides the bite (see <a href="06-static-checking.html">Static Checking</a>):</p>
 <ul><li><code>bite.checked_clean()</code>: checked, no error-severity diagnostics.</li><li><code>bite.check_diagnostics()</code>: the <code>check_report</code>.</li><li><code>save()</code> stamps a checked-clean bit beside the fingerprint, so a bake step&#x27;s strict
 check travels with the file.</li><li>On load the stamp is <strong>trusted only when the registration fingerprint matches</strong> the
 saving engine and the stamp names this library's checker revision (a newer checker has rules an older stamp never ran); otherwise the bite loads unchecked and is re-checked against the loading engine&#x27;s
-surface on the strict/warn path (strict throws at load on errors).</li><li>A bite is checked <strong>once</strong>. Registrations arriving later don&#x27;t re-trigger;
+surface (an error throws at load).</li><li>A bite is checked <strong>once</strong>. Registrations arriving later don&#x27;t re-trigger;
 re-create the bite to re-check. Parse-time type proofs (fast-path annotations the checker stamps on the
 AST, nothing you configure; see <a href="06-static-checking.html#proofs">Static Checking, Proofs</a>) are
-independent of the stamp: a loaded bite re-derives them, in every mode.</li>
+independent of the stamp: a loaded bite re-derives them.</li>
 <li id="the-stamp-is-per-file">The stamp is <strong>per file, not per program</strong>. A leaf that checked clean inside one program
 (<a href="06-static-checking.html#programs">its names declared by a sibling unit</a>) loads from its stamped
 cache without a re-check when a <em>different</em> program reaches it, so a name that program never

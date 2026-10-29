@@ -407,12 +407,12 @@ as `auto` and types it again at load). The rules for an implementation:
 - Only a proof pass decides (stamping or clearing, never a diagnostics walk or a per-call instance-variable
   check), and both proof modes see the same program (`program_global` answers in either), so proofs on and off
   decide alike.
-- The first proof pass of every unit runs in every mode (`script_cache_entry::autos_typed`, `jaibite::autos_typed_`),
+- The first proof pass of every unit runs before anything else of it (`script_cache_entry::autos_typed`, `jaibite::autos_typed_`),
   before either backend compiles or runs the unit; `auto_typed` then freezes the decision, so a later re-stamp
   (a surface epoch move, a deferred class defined by an import mid-run) never re-types a declaration under a
   running unit or a compiled chunk.
 
-Suite `Spec Conformance` (`auto_static_type`) pins it, both backends, proofs on and off, every check mode.
+Suite `Spec Conformance` (`auto_static_type`) pins it, both backends, proofs on and off, strict and in a warn region.
 
 ## 15. Collection transforms preserve observable copy behavior
 

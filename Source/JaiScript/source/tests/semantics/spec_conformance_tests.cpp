@@ -74,16 +74,19 @@ inline std::vector<run_config> configs() {
 	return out;
 }
 
-inline std::shared_ptr<engine> make(const run_config& c, check_mode mode = check_mode::strict) {
+inline std::shared_ptr<engine> make(const run_config& c) {
 	auto e = engine::make();
 	e->set_backend(c.vm ? backend_type::vm : backend_type::interpreter);
 	stdlib::register_all(*e);
-	e->static_checking(mode);
 	if (!c.proofs) { e->type_proofs(false); }
 	if (!c.passes) { e->ir_passes(false); }
 	if (c.miss) { e->cells_miss_every(c.miss); }
 	return e;
 }
+
+// A program the checker rejects, run for its run-time behavior: a [[warn_mode]] unit reports its errors as warnings and loads.
+// The prefix shares the first line, so every line number stays.
+inline std::string in_warn_region(const std::string& src) { return "[[warn_mode]]; " + src; }
 
 inline std::string render(const script_value& v) {
 	if (v.is_string()) { return v.as_string(); }
@@ -107,10 +110,11 @@ class spec_conformance_tests : public suite {
 public:
 	spec_conformance_tests() : suite("Spec Conformance") {}
 
-	void every_config(const std::string& label, const std::string& expected, const std::function<std::string(engine&)>& body,
-	                  check_mode mode = check_mode::strict) {
+	static constexpr bool warn_region = true;
+
+	void every_config(const std::string& label, const std::string& expected, const std::function<std::string(engine&)>& body) {
 		for (const auto& c : spec::configs()) {
-			auto e = spec::make(c, mode);
+			auto e = spec::make(c);
 			std::string got;
 			try { got = body(*e); }
 			catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
@@ -118,8 +122,9 @@ public:
 		}
 	}
 
-	void expect(const std::string& label, const std::string& src, const std::string& expected, check_mode mode = check_mode::strict) {
-		every_config(label, expected, [&](engine& e) { return spec::render(e.execute(src)); }, mode);
+	void expect(const std::string& label, const std::string& src, const std::string& expected, bool lax = false) {
+		const std::string unit = lax ? spec::in_warn_region(src) : src;
+		every_config(label, expected, [&](engine& e) { return spec::render(e.execute(unit)); });
 	}
 
 	void forge_tests() override {
@@ -283,7 +288,7 @@ public:
 					std::to_string(duplicate.find("ambiguous") != std::string::npos);
 			});
 			auto raised = [](engine& e, const std::string& src) {
-				try { e.execute(src); } catch (const std::exception& ex) { return std::string(ex.what()); }
+				try { e.execute(spec::in_warn_region(src)); } catch (const std::exception& ex) { return std::string(ex.what()); }
 				return std::string("ran");
 			};
 			every_config("the run time raises the same verdicts", "Method 'f' redefines 'B::f': mark it 'override'|"
@@ -294,7 +299,7 @@ public:
 					raised(e, "int g(int a) { return 1; }\nint g(int a) { return 2; }") + "|" +
 					raised(e, "class K { int m(int a) { return 1; } int m(int a) { return 2; } }") + "|" +
 					raised(e, "class S { static int s(int a) { return 1; } static int s(int a) { return 2; } }");
-			}, check_mode::off);
+			});
 			every_config("another execute redefines (hot reload)", "2|2", [&](engine& e) {
 				e.execute("int g(int a) { return 1; }\nclass K { int m(int a) { return 1; } }");
 				e.execute("int g(int a) { return 2; }\nclass K { int m(int a) { return 2; } }");
@@ -312,19 +317,19 @@ public:
 				string t(function f) { string r = "stored"; try { f(); } catch (e) { r = e; } return r; }
 				t([]() { w.x = 4; }) + "|" + t([]() { v.x = 4; }) + "|" + t([]() { nothing().x = 4; }) + "|" + t([]() { w.x += 4; });
 			)", "Cannot assign to 'x' on null ('w' is null)|Cannot assign to 'x' on null ('v' is null)|"
-			    "Cannot assign to 'x' on null ('nothing(...)' returned null)|Cannot access 'x' on null ('w' is null)", check_mode::off);
+			    "Cannot assign to 'x' on null ('nothing(...)' returned null)|Cannot access 'x' on null ('w' is null)", warn_region);
 			expect("namespace members", R"(
 				namespace ns { int x = 1; }
 				string t(function f) { string r = "stored"; try { f(); } catch (e) { r = e; } return r; }
 				t([]() { math::pi = 3.0; }) + "|" + t([]() { ns::y = 3; }) + "|" + t([]() { math::PI = 3.0; });
-			)", "Undefined variable 'math::pi'|Undefined variable 'ns::y'|Cannot assign to 'PI': it is read-only", check_mode::off);
+			)", "Undefined variable 'math::pi'|Undefined variable 'ns::y'|Cannot assign to 'PI': it is read-only", warn_region);
 			expect("vector constructors", R"(
 				string t(function f) { string r = "built"; try { f(); } catch (e) { r = e; } return r; }
 				t([]() { math::vec3(5); }) + "|" + t([]() { math::vec3(math::vec2(1, 2)); }) + "|" + t([]() { math::vec4(math::vec2(1, 2), 3); }) + "|" +
 					t([]() { math::color(5); }) + "|" + t([]() { math::vec2("a", 1); });
 			)", "math::vec3 expects one vector of 3 components|math::vec3 expects one vector of 3 components|"
 			    "math::vec4 expects a narrower vector followed by scalars that complete 4 components|math::color expects one color|"
-			    "math::vec2 expects numeric components", check_mode::off);
+			    "math::vec2 expects numeric components", warn_region);
 			every_config("spellings from other languages", "1|1|1", [&](engine& e) {
 				auto parse_error_of = [&](const std::string& src) {
 					try { e.execute(src); } catch (const std::exception& ex) { return std::string(ex.what()); }
@@ -516,7 +521,7 @@ public:
 				shared_ptr<A> base = new D(); bool rejected = false;
 				try { derived(base); } catch (e) { rejected = true; }
 				to_string(identity(empty) == null) + "|" + to_string(rejected);
-			)", "true|true", check_mode::off);
+			)", "true|true", warn_region);
 		});
 		test("typed_class_element_aliases_keep_admission_and_store_constraints", [this]() {
 			expect("incompatible class at a later binding", R"(
@@ -953,7 +958,7 @@ private:
 				function bump(var c) { c.x += 10; }
 				for (var v : [h]) { bump(v); }
 				"" + h.x;
-			)", "17", check_mode::off);
+			)", "17", warn_region);
 		});
 		// A var loop variable takes a typed container element as var x = element; would: its value keeps the element type
 		// while the slot stays a var (the loop stamped it a plain var, and a row of array<array<int>> took a string)
@@ -1083,7 +1088,7 @@ private:
 				string mixed = "bound";
 				try { int& m = PICK ? G : 5; m = 0; } catch (e) { mixed = "refused"; }
 				run(true) + " | " + run(false) + " | " + G + "," + H + " " + mixed;
-			)", "113,2,7,2,9,0 | 1,113,1,7,0,9 | 30,40 refused", check_mode::off);
+			)", "113,2,7,2,9,0 | 1,113,1,7,0,9 | 30,40 refused", warn_region);
 		});
 		// A member arm may name no storage (an enumerator, a computed property): passed by value the conditional yields its value, and a
 		// reference binds only the arm that names storage (the arm raised Cannot take reference of non-lvalue expression in cast<T&>)
@@ -1099,7 +1104,7 @@ private:
 				try { set9(flag ? p.twice : p.v); out += " bound"; } catch (e) { out += " refused"; }
 				set9(!flag ? p.twice : p.v);
 				out + " " + p.v;
-			)", "16 refused 9", check_mode::off);
+			)", "16 refused 9", warn_region);
 		});
 		// A range-for variable may be spelled with any type, template types included (shared_ptr<C>, weak_ptr<C>, array<int>,
 		// map<string, int>, const and & forms): the loop parsed them as a for(;;) initializer
@@ -1347,7 +1352,7 @@ private:
 				string o = "";
 				try { gone(); } catch (x) { o = x; }
 				o;
-			)", "Undefined variable 'err'", check_mode::warn);
+			)", "Undefined variable 'err'", warn_region);
 		});
 		test("a_catch_variable_is_captured_and_survives_yields", [this]() {
 			expect("catch capture", R"(
@@ -1671,8 +1676,7 @@ private:
 				e.execute("var g = 1;");
 				auto other = engine::make();
 				other->set_backend(e.get_backend_type());
-				other->static_checking(check_mode::off);
-				return other->execute("var r = \"\"; try { r = \"\" + g; } catch (x) { r = x; } r;").as_string();
+				return other->execute(spec::in_warn_region("var r = \"\"; try { r = \"\" + g; } catch (x) { r = x; } r;")).as_string();
 			});
 		});
 	}
@@ -1726,7 +1730,7 @@ private:
 				string r = "";
 				try { var& p = fv(); r = "bound"; } catch (e) { r = e.starts_with("Cannot take reference of non-lvalue expression") ? "raised" : e; }
 				r;
-			)", "raised", check_mode::warn);
+			)", "raised", warn_region);
 		});
 	}
 
@@ -1844,7 +1848,7 @@ private:
 				try { var q = true ? throw "neg4" : 1; } catch (e) { r += "|" + e; }
 				try { int s = 1 + (false ? 1 : throw "neg5"); } catch (e) { r += "|" + e; }
 				r + "|" + g(2);
-			)", "neg|neg3|neg4|neg5|2", check_mode::warn);
+			)", "neg|neg3|neg4|neg5|2", warn_region);
 		});
 		test("a_native_exception_in_a_call_argument_converts_in_the_calling_frame", [this]() {
 			every_config("native arg", "own:n", [](engine& e) {
@@ -1876,114 +1880,114 @@ private:
 	}
 
 	// internal/diagnostics.md: the texts a script catch sees, one per row; `setup` runs first, the failing statement in a try
-	struct diag_row { const char* label; const char* setup; const char* failing; const char* expected; check_mode mode; };
+	struct diag_row { const char* label; const char* setup; const char* failing; const char* expected; bool lax = false; };
 	void expect_texts(const std::vector<diag_row>& rows) {
 		for (const auto& r : rows) {
 			const std::string src = std::string(r.setup) + "\nstring __r = \"no error\";\ntry { " + r.failing + " } catch (__e) { __r = __e; }\n__r;";
-			expect(r.label, src, r.expected, r.mode);
+			expect(r.label, src, r.expected, r.lax);
 		}
 	}
 
 	void diagnostic_texts() {
 		test("family_a_null_receiver_texts", [this]() {
 			expect_texts({
-				{"call result access", "function f() { return null; }", "var z = f().x;", "Cannot access 'x' on null ('f(...)' returned null)", check_mode::off},
-				{"call result call", "function f() { return null; }", "f().go();", "Cannot call 'go' on null ('f(...)' returned null)", check_mode::off},
-				{"unnamed access", "var a = [null];", "var z = a[0].x;", "Cannot access 'x' on null", check_mode::off},
-				{"unnamed ternary access", "var a = [null];", "var z = (true ? a[0] : a[0]).x;", "Cannot access 'x' on null", check_mode::off},
-				{"unnamed call", "var a = [null];", "a[0].go();", "Cannot call 'go' on null", check_mode::off},
-				{"named call", "var v8 = null;", "v8.push(1);", "Cannot call 'push' on null ('v8' is null)", check_mode::off},
-				{"named access", "var v8 = null;", "var z = v8.x;", "Cannot access 'x' on null ('v8' is null)", check_mode::off},
+				{"call result access", "function f() { return null; }", "var z = f().x;", "Cannot access 'x' on null ('f(...)' returned null)", warn_region},
+				{"call result call", "function f() { return null; }", "f().go();", "Cannot call 'go' on null ('f(...)' returned null)", warn_region},
+				{"unnamed access", "var a = [null];", "var z = a[0].x;", "Cannot access 'x' on null", warn_region},
+				{"unnamed ternary access", "var a = [null];", "var z = (true ? a[0] : a[0]).x;", "Cannot access 'x' on null", warn_region},
+				{"unnamed call", "var a = [null];", "a[0].go();", "Cannot call 'go' on null", warn_region},
+				{"named call", "var v8 = null;", "v8.push(1);", "Cannot call 'push' on null ('v8' is null)", warn_region},
+				{"named access", "var v8 = null;", "var z = v8.x;", "Cannot access 'x' on null ('v8' is null)", warn_region},
 			});
 		});
 		test("family_b_no_member_and_not_a_function_texts", [this]() {
 			expect_texts({
-				{"coroutine handle", "coroutine int g() { yield 1; } var h = g();", "var z = h.nosuch;", "coroutine_handle has no member 'nosuch'", check_mode::off},
-				{"string", "var s = \"s\";", "s.foo();", "string has no member 'foo'", check_mode::off},
-				{"array", "var a = [1];", "a.foo();", "array has no member 'foo'", check_mode::off},
-				{"map", "var m = {\"a\": 1};", "m.foo();", "map has no member or key 'foo'", check_mode::off},
-				{"object", "class Vec2 { int y = 0; } var v = Vec2();", "v.nosuch();", "Vec2 has no member 'nosuch'", check_mode::off},
-				{"int", "var i = 1;", "var z = i.nosuch;", "int has no member 'nosuch'", check_mode::off},
-				{"super", "class Base { int b = 1; } class D : Base { var f() { return super::x(); } }", "var z = D().f();", "parent class Base has no member 'x'", check_mode::off},
-				{"static", "class C { static int s = 0; }", "var z = C::nope;", "class C has no static member 'nope'", check_mode::off},
-				{"call an instance", "class Vec2 { int y = 0; } var v = Vec2();", "v();", "Cannot call 'v': it is a Vec2, not a function", check_mode::off},
-				{"call a string", "var s = \"x\";", "s();", "Cannot call 's': it is a string, not a function", check_mode::off},
-				{"call an int member", "class H { int x = 1; } var h = H();", "h.x(1);", "Cannot call 'x': it is an int, not a function", check_mode::off},
-				{"call null", "var f = null;", "f();", "Cannot call 'f': it is null, not a function", check_mode::off},
-				{"call a computed null", "var fs = [null];", "fs[0]();", "Cannot call null: it is not a function", check_mode::off},
-				{"call a computed int", "var fs = [5];", "fs[0](1);", "Cannot call a value of type int: it is not a function", check_mode::off},
+				{"coroutine handle", "coroutine int g() { yield 1; } var h = g();", "var z = h.nosuch;", "coroutine_handle has no member 'nosuch'", warn_region},
+				{"string", "var s = \"s\";", "s.foo();", "string has no member 'foo'", warn_region},
+				{"array", "var a = [1];", "a.foo();", "array has no member 'foo'", warn_region},
+				{"map", "var m = {\"a\": 1};", "m.foo();", "map has no member or key 'foo'", warn_region},
+				{"object", "class Vec2 { int y = 0; } var v = Vec2();", "v.nosuch();", "Vec2 has no member 'nosuch'", warn_region},
+				{"int", "var i = 1;", "var z = i.nosuch;", "int has no member 'nosuch'", warn_region},
+				{"super", "class Base { int b = 1; } class D : Base { var f() { return super::x(); } }", "var z = D().f();", "parent class Base has no member 'x'", warn_region},
+				{"static", "class C { static int s = 0; }", "var z = C::nope;", "class C has no static member 'nope'", warn_region},
+				{"call an instance", "class Vec2 { int y = 0; } var v = Vec2();", "v();", "Cannot call 'v': it is a Vec2, not a function", warn_region},
+				{"call a string", "var s = \"x\";", "s();", "Cannot call 's': it is a string, not a function", warn_region},
+				{"call an int member", "class H { int x = 1; } var h = H();", "h.x(1);", "Cannot call 'x': it is an int, not a function", warn_region},
+				{"call null", "var f = null;", "f();", "Cannot call 'f': it is null, not a function", warn_region},
+				{"call a computed null", "var fs = [null];", "fs[0]();", "Cannot call null: it is not a function", warn_region},
+				{"call a computed int", "var fs = [5];", "fs[0](1);", "Cannot call a value of type int: it is not a function", warn_region},
 			});
 		});
 		test("family_c_arity_and_overload_texts", [this]() {
 			expect_texts({
-				{"method arity", "class V { int dot(int a) { return a; } }", "V().dot();", "'dot' expects 1 argument, got 0", check_mode::off},
-				{"function arity", "function fib(int n) { return n; }", "fib(1, 2);", "'fib' expects 1 argument, got 2", check_mode::off},
-				{"lambda arity", "var l = [](int a) { return a; };", "l();", "lambda expects 1 argument, got 0", check_mode::off},
-				{"overload list", "class V { int dot(int a) { return a; } int dot(int a, int b) { return a + b; } }", "V().dot(V(), null, [1], {\"k\": 1});", "No overload of 'dot' takes (V, null, array, map)", check_mode::off},
-				{"overload list cap", "class M { int m(int a) { return a; } int m(int a, int b) { return b; } }", "M().m(1, 2, 3, 4, 5, 6, 7);", "No overload of 'm' takes (int, int, int, int, int, int, ...)", check_mode::off},
-				{"namespace overloads", "namespace ns { function f(int a, int b) { return 1; } function f(string s) { return 2; } }", "ns::f(1, 2, 3);", "No overload of 'f' takes (int, int, int)", check_mode::off},
-				{"constructor overloads", "class Vec2 { Vec2(int x) {} Vec2(int x, int y) {} }", "Vec2(\"s\", 1, 2);", "No constructor of 'Vec2' takes (string, int, int)", check_mode::off},
-				{"direct super", "class Base { Base(int x) {} } class D : Base { D() : super(\"s\", 2) {} }", "D();", "No constructor of 'Base' takes (string, int)", check_mode::off},
-				{"ancestor initializer", "class A { A(int x) {} } class B : A { B(int y) : super(\"s\", 1) {} } class C : B { C() : super(1) {} }", "C();", "No constructor of 'A' takes (string, int)", check_mode::off},
-				{"delegation", "class Vec2 { Vec2(int x) {} Vec2() : this(\"s\", 1) {} }", "Vec2();", "No constructor of 'Vec2' takes (string, int)", check_mode::off},
-				{"builtin push", "var a = [];", "a.push();", "push() takes exactly one argument", check_mode::off},
-				{"builtin size", "var a = [];", "a.size(1);", "size() takes no arguments", check_mode::off},
-				{"math math::pow", "", "math::pow(2);", "math::pow expects 2 arguments", check_mode::off},
+				{"method arity", "class V { int dot(int a) { return a; } }", "V().dot();", "'dot' expects 1 argument, got 0", warn_region},
+				{"function arity", "function fib(int n) { return n; }", "fib(1, 2);", "'fib' expects 1 argument, got 2", warn_region},
+				{"lambda arity", "var l = [](int a) { return a; };", "l();", "lambda expects 1 argument, got 0", warn_region},
+				{"overload list", "class V { int dot(int a) { return a; } int dot(int a, int b) { return a + b; } }", "V().dot(V(), null, [1], {\"k\": 1});", "No overload of 'dot' takes (V, null, array, map)", warn_region},
+				{"overload list cap", "class M { int m(int a) { return a; } int m(int a, int b) { return b; } }", "M().m(1, 2, 3, 4, 5, 6, 7);", "No overload of 'm' takes (int, int, int, int, int, int, ...)", warn_region},
+				{"namespace overloads", "namespace ns { function f(int a, int b) { return 1; } function f(string s) { return 2; } }", "ns::f(1, 2, 3);", "No overload of 'f' takes (int, int, int)", warn_region},
+				{"constructor overloads", "class Vec2 { Vec2(int x) {} Vec2(int x, int y) {} }", "Vec2(\"s\", 1, 2);", "No constructor of 'Vec2' takes (string, int, int)", warn_region},
+				{"direct super", "class Base { Base(int x) {} } class D : Base { D() : super(\"s\", 2) {} }", "D();", "No constructor of 'Base' takes (string, int)", warn_region},
+				{"ancestor initializer", "class A { A(int x) {} } class B : A { B(int y) : super(\"s\", 1) {} } class C : B { C() : super(1) {} }", "C();", "No constructor of 'A' takes (string, int)", warn_region},
+				{"delegation", "class Vec2 { Vec2(int x) {} Vec2() : this(\"s\", 1) {} }", "Vec2();", "No constructor of 'Vec2' takes (string, int)", warn_region},
+				{"builtin push", "var a = [];", "a.push();", "push() takes exactly one argument", warn_region},
+				{"builtin size", "var a = [];", "a.size(1);", "size() takes no arguments", warn_region},
+				{"math math::pow", "", "math::pow(2);", "math::pow expects 2 arguments", warn_region},
 			});
 		});
 		test("family_d_typed_boundary_texts", [this]() {
 			expect_texts({
-				{"lambda parameter", "var l = [](int n) { return n; }; var s = \"x\";", "l(s);", "Cannot pass string to parameter 'n' of lambda (declared int)", check_mode::strict},
-				{"function parameter", "function fib(int n) { return n; } var s = \"x\";", "fib(s);", "Cannot pass string to parameter 'n' of 'fib' (declared int)", check_mode::strict},
-				{"typed return", "function f() -> int { var s = \"x\"; return s; }", "f();", "Cannot return string from 'f' (declared -> int)", check_mode::strict},
-				{"assignment", "int x = 0; var s = \"s\";", "x = s;", "Cannot assign string to 'x' (declared int)", check_mode::strict},
-				{"declaration", "var s = \"s\";", "int x = s;", "Cannot initialize 'x' (declared int) with string", check_mode::strict},
-				{"field", "class Vec2 { int s = 0; } var v = Vec2(); var str = \"q\";", "v.s = str;", "Cannot assign string to field 's' of Vec2 (declared int)", check_mode::strict},
-				{"static", "class C { static int s = 0; } var str = \"q\";", "C::s = str;", "Cannot assign string to static 's' of C (declared int)", check_mode::strict},
-				{"class into class", "class A { int a = 0; } class B { int b = 0; } A x = A(); var b = B();", "x = b;", "Cannot assign B to 'x' (declared A)", check_mode::strict},
-				{"weak handle declaration", "class Foo { int v = 0; } var f = Foo();", "weak_ptr<Foo> w = f;", "Cannot initialize 'w' (declared weak_ptr<Foo>) with Foo", check_mode::off},
-				{"weak handle assignment", "class Foo { int v = 0; } var f = Foo(); weak_ptr<Foo> w;", "w = f;", "Cannot assign Foo to 'w' (declared weak_ptr<Foo>)", check_mode::off},
-				{"shared handle assignment", "class Foo { int v = 0; } shared_ptr<Foo> p = new Foo(); var s = \"x\";", "p = s;", "Cannot assign string to 'p' (declared shared_ptr<Foo>)", check_mode::off},
-				{"class conversion", "class A { A(int x) {} } class B { int b = 0; } function f(A a) { return 1; } var b = B();", "f(b);", "Cannot convert B to A (no suitable single-argument constructor)", check_mode::off},
+				{"lambda parameter", "var l = [](int n) { return n; }; var s = \"x\";", "l(s);", "Cannot pass string to parameter 'n' of lambda (declared int)"},
+				{"function parameter", "function fib(int n) { return n; } var s = \"x\";", "fib(s);", "Cannot pass string to parameter 'n' of 'fib' (declared int)"},
+				{"typed return", "function f() -> int { var s = \"x\"; return s; }", "f();", "Cannot return string from 'f' (declared -> int)"},
+				{"assignment", "int x = 0; var s = \"s\";", "x = s;", "Cannot assign string to 'x' (declared int)"},
+				{"declaration", "var s = \"s\";", "int x = s;", "Cannot initialize 'x' (declared int) with string"},
+				{"field", "class Vec2 { int s = 0; } var v = Vec2(); var str = \"q\";", "v.s = str;", "Cannot assign string to field 's' of Vec2 (declared int)"},
+				{"static", "class C { static int s = 0; } var str = \"q\";", "C::s = str;", "Cannot assign string to static 's' of C (declared int)"},
+				{"class into class", "class A { int a = 0; } class B { int b = 0; } A x = A(); var b = B();", "x = b;", "Cannot assign B to 'x' (declared A)"},
+				{"weak handle declaration", "class Foo { int v = 0; } var f = Foo();", "weak_ptr<Foo> w = f;", "Cannot initialize 'w' (declared weak_ptr<Foo>) with Foo", warn_region},
+				{"weak handle assignment", "class Foo { int v = 0; } var f = Foo(); weak_ptr<Foo> w;", "w = f;", "Cannot assign Foo to 'w' (declared weak_ptr<Foo>)", warn_region},
+				{"shared handle assignment", "class Foo { int v = 0; } shared_ptr<Foo> p = new Foo(); var s = \"x\";", "p = s;", "Cannot assign string to 'p' (declared shared_ptr<Foo>)", warn_region},
+				{"class conversion", "class A { A(int x) {} } class B { int b = 0; } function f(A a) { return 1; } var b = B();", "f(b);", "Cannot convert B to A (no suitable single-argument constructor)", warn_region},
 			});
 		});
 		test("checked_float_to_int_texts_leave_the_destination_unwritten", [this]() {
 			const std::string text = "Cannot convert float to integer: non-finite or out of range";
 			expect_texts({
-				{"assignment", "var f = 1e100; int x = 0;", "x = f;", text.c_str(), check_mode::strict},
-				{"itrunc", "var f = 1e100;", "var z = math::itrunc(f);", text.c_str(), check_mode::strict},
-				{"ifloor", "var f = -1e100;", "var z = math::ifloor(f);", text.c_str(), check_mode::strict},
-				{"cast", "var f = 1e100;", "var z = cast<int>(f);", text.c_str(), check_mode::strict},
+				{"assignment", "var f = 1e100; int x = 0;", "x = f;", text.c_str()},
+				{"itrunc", "var f = 1e100;", "var z = math::itrunc(f);", text.c_str()},
+				{"ifloor", "var f = -1e100;", "var z = math::ifloor(f);", text.c_str()},
+				{"cast", "var f = 1e100;", "var z = cast<int>(f);", text.c_str()},
 			});
 			expect("unwritten", "var f = 1e100; int x = 7; try { x = f; } catch (e) { } \"\" + x;", "7");
 		});
 		test("untouched_family_texts", [this]() {
 			expect_texts({
-				{"class not found", "", "var z = Nope::x;", "Class 'Nope' not found", check_mode::off},
-				{"integer overflow in division", "var a = -9223372036854775807 - 1; var b = -1;", "var z = a / b;", "Integer overflow in '/'", check_mode::off},
-				{"invalid plus", "var m = {}; var a = [1];", "var z = a + m;", "Invalid operands for + operator", check_mode::off},
-				{"unary minus", "var s = \"x\";", "var z = -s;", "Unary minus requires numeric operand", check_mode::off},
-				{"array index type", "var a = [1];", "var z = a[\"k\"];", "Array index must be an integer", check_mode::off},
-				{"subscript on int", "var n = 5;", "var z = n[0];", "Subscript can only be used on arrays, maps, or types with [] operator", check_mode::off},
-				{"pop empty", "var a = [];", "a.pop();", "Cannot pop from empty array", check_mode::off},
-				{"front empty", "var a = [];", "var z = a.front();", "Cannot get front of empty array", check_mode::off},
-				{"sort comparator", "var a = [2, 1];", "a.sort(5);", "sort() comparator must be a function", check_mode::off},
-				{"pad_left fill", "var s = \"x\";", "var z = s.pad_left(3, \"\");", "pad_left() padding character cannot be empty", check_mode::off},
-				{"to_int base", "var s = \"1\";", "var z = s.to_int(0, 1);", "to_int() base must be 0 or between 2 and 36", check_mode::off},
-				{"code", "var s = \"\";", "var z = s.code();", "code() needs a string of exactly one UTF-8 character", check_mode::off},
-				{"partition", "var s = \"a\";", "var z = s.partition(\"\");", "partition() separator cannot be empty", check_mode::off},
-				{"split count", "var s = \"a\";", "var z = s.split(\",\", \"x\");", "split() second argument must be an integer", check_mode::off},
-				{"from_code", "", "var z = string::from_code(-1);", "string::from_code expects a Unicode code point (0 to 0x10FFFF, no surrogate)", check_mode::off},
-				{"join", "", "var z = string::join([1]);", "string::join expects an array of strings", check_mode::off},
-				{"repeat", "", "var z = string::repeat(\"a\", -1);", "string::repeat count cannot be negative", check_mode::off},
-				{"namespace pad_left", "", "var z = string::pad_left(\"a\", 3, \"\");", "string::pad_left fill must be a char or a non-empty string", check_mode::off},
-				{"unknown namespace member", "", "var z = string::zzz_nope;", "Undefined variable 'string::zzz_nope'", check_mode::off},
-				{"super without base", "class A { A() : super() {} }", "var z = A();", "Cannot call super() - class has no base class", check_mode::off},
-				{"iterate int", "", "for (auto x : 5) { }", "Cannot iterate int: not an array, map, string or coroutine", check_mode::off},
-				{"iterate null", "var n = null;", "for (auto x : n) { }", "Cannot iterate null: not an array, map, string or coroutine", check_mode::off},
-				{"auto array homogeneity", "var s = \"x\";", "auto a = [1, 2, 3, s];", "Array 'auto' requires homogeneous elements - type mismatch at index 3", check_mode::off},
-				{"reference uninitialized", "", "int& r;", "Reference variable must be initialized", check_mode::off},
-				{"this at top level", "", "var z = this;", "'this' can only be used inside methods", check_mode::off},
+				{"class not found", "", "var z = Nope::x;", "Class 'Nope' not found", warn_region},
+				{"integer overflow in division", "var a = -9223372036854775807 - 1; var b = -1;", "var z = a / b;", "Integer overflow in '/'", warn_region},
+				{"invalid plus", "var m = {}; var a = [1];", "var z = a + m;", "Invalid operands for + operator", warn_region},
+				{"unary minus", "var s = \"x\";", "var z = -s;", "Unary minus requires numeric operand", warn_region},
+				{"array index type", "var a = [1];", "var z = a[\"k\"];", "Array index must be an integer", warn_region},
+				{"subscript on int", "var n = 5;", "var z = n[0];", "Subscript can only be used on arrays, maps, or types with [] operator", warn_region},
+				{"pop empty", "var a = [];", "a.pop();", "Cannot pop from empty array", warn_region},
+				{"front empty", "var a = [];", "var z = a.front();", "Cannot get front of empty array", warn_region},
+				{"sort comparator", "var a = [2, 1];", "a.sort(5);", "sort() comparator must be a function", warn_region},
+				{"pad_left fill", "var s = \"x\";", "var z = s.pad_left(3, \"\");", "pad_left() padding character cannot be empty", warn_region},
+				{"to_int base", "var s = \"1\";", "var z = s.to_int(0, 1);", "to_int() base must be 0 or between 2 and 36", warn_region},
+				{"code", "var s = \"\";", "var z = s.code();", "code() needs a string of exactly one UTF-8 character", warn_region},
+				{"partition", "var s = \"a\";", "var z = s.partition(\"\");", "partition() separator cannot be empty", warn_region},
+				{"split count", "var s = \"a\";", "var z = s.split(\",\", \"x\");", "split() second argument must be an integer", warn_region},
+				{"from_code", "", "var z = string::from_code(-1);", "string::from_code expects a Unicode code point (0 to 0x10FFFF, no surrogate)", warn_region},
+				{"join", "", "var z = string::join([1]);", "string::join expects an array of strings", warn_region},
+				{"repeat", "", "var z = string::repeat(\"a\", -1);", "string::repeat count cannot be negative", warn_region},
+				{"namespace pad_left", "", "var z = string::pad_left(\"a\", 3, \"\");", "string::pad_left fill must be a char or a non-empty string", warn_region},
+				{"unknown namespace member", "", "var z = string::zzz_nope;", "Undefined variable 'string::zzz_nope'", warn_region},
+				{"super without base", "class A { A() : super() {} }", "var z = A();", "Cannot call super() - class has no base class", warn_region},
+				{"iterate int", "", "for (auto x : 5) { }", "Cannot iterate int: not an array, map, string or coroutine", warn_region},
+				{"iterate null", "var n = null;", "for (auto x : n) { }", "Cannot iterate null: not an array, map, string or coroutine", warn_region},
+				{"auto array homogeneity", "var s = \"x\";", "auto a = [1, 2, 3, s];", "Array 'auto' requires homogeneous elements - type mismatch at index 3", warn_region},
+				{"reference uninitialized", "", "int& r;", "Reference variable must be initialized", warn_region},
+				{"this at top level", "", "var z = this;", "'this' can only be used inside methods", warn_region},
 			});
 		});
 		test("host_configuration_and_uncaught_suffix_texts", [this]() {
@@ -1991,12 +1995,11 @@ private:
 				std::string out;
 				try { e.max_call_depth(backend_type::interpreter, 0); out += "accepted"; } catch (const std::exception& ex) { out += ex.what(); }
 				out += "|";
-				e.static_checking(check_mode::off);
 				// not a tail call: a VM self tail call reuses its frame and runs into the budget instead (docs/site/reference/index.html "Run-time errors")
 				e.execution_budget(0);
-				try { e.execute("function r() { return r() + 1; } r();"); out += "no error"; } catch (const std::exception& ex) { out += ex.what(); }
+				try { e.execute(spec::in_warn_region("function r() { return r() + 1; } r();")); out += "no error"; } catch (const std::exception& ex) { out += ex.what(); }
 				out += "|";
-				try { e.execute("var v8 = null; v8.x;"); out += "no error"; } catch (const std::exception& ex) { out += ex.what(); }
+				try { e.execute(spec::in_warn_region("var v8 = null; v8.x;")); out += "no error"; } catch (const std::exception& ex) { out += ex.what(); }
 				return out;
 			});
 		});
@@ -2057,13 +2060,13 @@ private:
 			const char* div = "Division by zero";
 			const std::string KH = std::string(K) + "class H { K m = K(2); } H h = H();";
 			expect_texts({
-				{"operator+", K, "K k3 = k + 1;", div, check_mode::strict},
-				{"operator<", K, "bool b = k < k2;", div, check_mode::strict},
-				{"operator==", K, "bool b = k == k2;", div, check_mode::strict},
-				{"operator!= through ==", K, "bool b = k != k2;", div, check_mode::strict},
-				{"compound on a global", K, "k += 1;", div, check_mode::strict},
-				{"compound on a local", K, "function f() { K a = K(4); a += 1; } f();", div, check_mode::strict},
-				{"compound on a field", KH.c_str(), "h.m += 1;", div, check_mode::strict},
+				{"operator+", K, "K k3 = k + 1;", div},
+				{"operator<", K, "bool b = k < k2;", div},
+				{"operator==", K, "bool b = k == k2;", div},
+				{"operator!= through ==", K, "bool b = k != k2;", div},
+				{"compound on a global", K, "k += 1;", div},
+				{"compound on a local", K, "function f() { K a = K(4); a += 1; } f();", div},
+				{"compound on a field", KH.c_str(), "h.m += 1;", div},
 			});
 		});
 		test("to_bool_and_to_string_errors_propagate", [this]() {
@@ -2075,19 +2078,19 @@ private:
 			)";
 			const char* div = "Division by zero";
 			expect_texts({
-				{"if (q)", Q, "if (q) { int w = 1; }", div, check_mode::strict},
-				{"!q", Q, "bool b = !q;", div, check_mode::strict},
-				{"q ? :", Q, "int w = q ? 1 : 2;", div, check_mode::strict},
-				{"bool slot", Q, "bool b = q;", div, check_mode::strict},
-				{"string + object", Q, "string s = \"x\" + ts;", div, check_mode::strict},
-				{"object + string", Q, "string s = ts + \"x\";", div, check_mode::strict},
+				{"if (q)", Q, "if (q) { int w = 1; }", div},
+				{"!q", Q, "bool b = !q;", div},
+				{"q ? :", Q, "int w = q ? 1 : 2;", div},
+				{"bool slot", Q, "bool b = q;", div},
+				{"string + object", Q, "string s = \"x\" + ts;", div},
+				{"object + string", Q, "string s = ts + \"x\";", div},
 			});
 		});
 		test("a_user_operator_assign_error_propagates_with_its_own_text", [this]() {
 			const char* A2 = "class A2 { int v = 1; function operator=(int x) -> A2 { int z = 0; v = x / z; return this; } } A2 g = A2();";
 			expect_texts({
-				{"operator= on a global", A2, "g = 5;", "Division by zero", check_mode::strict},
-				{"operator= on a local", A2, "function f() { A2 a = A2(); a = 5; } f();", "Division by zero", check_mode::strict},
+				{"operator= on a global", A2, "g = 5;", "Division by zero"},
+				{"operator= on a local", A2, "function f() { A2 a = A2(); a = 5; } f();", "Division by zero"},
 			});
 		});
 		// A save reads a field's storage and a load writes it, so no accessor the script declares runs during either (an
@@ -2097,7 +2100,7 @@ private:
 				class L { int v = 1; void post_load(int version) { int z = 0; v = v / z; } }
 			)";
 			expect_texts({
-				{"from_json post_load", H, "var o = from_json(\"{\\\"$type\\\":\\\"L\\\",\\\"$val\\\":{\\\"v\\\":3}}\");", "Division by zero", check_mode::strict},
+				{"from_json post_load", H, "var o = from_json(\"{\\\"$type\\\":\\\"L\\\",\\\"$val\\\":{\\\"v\\\":3}}\");", "Division by zero"},
 			});
 			expect("hooks that succeed", R"(
 				class L2 { int v = 1; void post_load(int version) { v = v + 10 * version; } }
@@ -2200,16 +2203,16 @@ private:
 				t([]() { array<K> ks = [K(3), K(1)]; ks.sort(); return "sorted"; }) + "|" +
 				t([]() { var a = [[3], [1]]; a.sort(); return "sorted"; }) + "|" +
 				t([]() { var a = [3, "a", 1.5, true]; a.sort(); return to_json(a); });
-			)", "123|123|Invalid operands for < operator|sorted|Invalid operands for < operator", check_mode::warn);
+			)", "123|123|Invalid operands for < operator|sorted|Invalid operands for < operator", warn_region);
 		});
 		test("predicate_and_parallel_body_errors_propagate", [this]() {
 			const char* div = "Division by zero";
 			expect_texts({
-				{"array filter", "", "var b = array::filter([1, 2], [](var x) { int z = 0; return x / z > 0; });", div, check_mode::warn},
-				{"array remove_if", "var a = [1, 2];", "a.remove_if([](var x) { int z = 0; return x / z > 0; });", div, check_mode::warn},
-				{"map filter", "var m = {\"a\": 1};", "var r = m.filter([](var k, var v) { int z = 0; return v / z > 0; });", div, check_mode::warn},
-				{"map remove_if", "var m = {\"a\": 1};", "m.remove_if([](var k, var v) { int z = 0; return v / z > 0; });", div, check_mode::warn},
-				{"parallel_for body", "array<int> xs = [1, 2, 3, 4];", "parallel_for (auto& x : xs) { int z = 0; x = x / z; }", div, check_mode::strict},
+				{"array filter", "", "var b = array::filter([1, 2], [](var x) { int z = 0; return x / z > 0; });", div, warn_region},
+				{"array remove_if", "var a = [1, 2];", "a.remove_if([](var x) { int z = 0; return x / z > 0; });", div, warn_region},
+				{"map filter", "var m = {\"a\": 1};", "var r = m.filter([](var k, var v) { int z = 0; return v / z > 0; });", div, warn_region},
+				{"map remove_if", "var m = {\"a\": 1};", "m.remove_if([](var k, var v) { int z = 0; return v / z > 0; });", div, warn_region},
+				{"parallel_for body", "array<int> xs = [1, 2, 3, 4];", "parallel_for (auto& x : xs) { int z = 0; x = x / z; }", div},
 			});
 		});
 	}
@@ -2261,8 +2264,8 @@ private:
 		});
 		test("an_element_store_runs_an_operator_that_takes_the_value", [this, OK]() {
 			expect_texts({
-				{"array element", OK, "array<OK2> xs = [OK2()]; xs[0] = 5; __r = to_string(xs[0].v);", "50", check_mode::warn},
-				{"array element no overload takes", OK, "array<OK2> xs = [OK2()]; var s = \"s\"; xs[0] = s;", "Cannot assign 'string' to element of type 'OK2'", check_mode::warn},
+				{"array element", OK, "array<OK2> xs = [OK2()]; xs[0] = 5; __r = to_string(xs[0].v);", "50", warn_region},
+				{"array element no overload takes", OK, "array<OK2> xs = [OK2()]; var s = \"s\"; xs[0] = s;", "Cannot assign 'string' to element of type 'OK2'", warn_region},
 			});
 		});
 	}
@@ -2272,21 +2275,20 @@ private:
 	void textless_errors() {
 		test("a_compound_error_on_a_variable_has_a_text", [this]() {
 			expect_texts({
-				{"local /= 0", "", "function f() { int x = 5; int z = 0; x /= z; } f();", "Division by zero", check_mode::warn},
-				{"global /= 0", "int gx = 5; int gz = 0;", "gx /= gz;", "Division by zero", check_mode::warn},
-				{"local -= string", "", "function f() { int x = 5; var s = \"s\"; x -= s; } f();", "Cannot apply '-=' to int and string", check_mode::warn},
-				{"string += int", "", "function f() { string s = \"a\"; s += 5; } f();", "Cannot apply '+=' to string and int", check_mode::warn},
-				{"bool += int", "", "function f() { bool b = true; b += 1; } f();", "Cannot apply '+=' to bool and int", check_mode::warn},
+				{"local /= 0", "", "function f() { int x = 5; int z = 0; x /= z; } f();", "Division by zero", warn_region},
+				{"global /= 0", "int gx = 5; int gz = 0;", "gx /= gz;", "Division by zero", warn_region},
+				{"local -= string", "", "function f() { int x = 5; var s = \"s\"; x -= s; } f();", "Cannot apply '-=' to int and string", warn_region},
+				{"string += int", "", "function f() { string s = \"a\"; s += 5; } f();", "Cannot apply '+=' to string and int", warn_region},
+				{"bool += int", "", "function f() { bool b = true; b += 1; } f();", "Cannot apply '+=' to bool and int", warn_region},
 			});
 		});
 		test("the_catch_text_matches_the_uncaught_text", [this]() {
 			every_config("host text", "Cannot apply '+=' to string and int|Cannot apply '+=' to string and int", [](engine& e) {
-				e.static_checking(check_mode::warn);
-				const std::string caught = e.execute("string r = \"\"; function f() { string s = \"a\"; s += 5; } try { f(); } catch (x) { r = x; } r;").as_string();
+				const std::string caught = e.execute(spec::in_warn_region("string r = \"\"; function f() { string s = \"a\"; s += 5; } try { f(); } catch (x) { r = x; } r;")).as_string();
 				std::string uncaught;
-				try { e.execute("f();"); } catch (const std::exception& ex) { uncaught = ex.what(); }
+				try { e.execute(spec::in_warn_region("f();")); } catch (const std::exception& ex) { uncaught = ex.what(); }
 				return caught + "|" + uncaught.substr(0, caught.size());
-			}, check_mode::warn);
+			});
 		});
 	}
 
@@ -2365,8 +2367,7 @@ private:
 				t([]() { var s = 1.5; s &= 1; return s; }) + "|" +
 				t([]() { int x = 1; x <<= 64; return x; }) + "|" +
 				t([]() { var w = [1.5]; w[0] |= 1; return w[0]; });
-			)", "22|15 16 4|4 3 3 1|6|Cannot apply '&=' to float and int|Shift amount must be between 0 and 63|Cannot apply '|=' to float and int",
-			   check_mode::warn);
+			)", "22|15 16 4|4 3 3 1|6|Cannot apply '&=' to float and int|Shift amount must be between 0 and 63|Cannot apply '|=' to float and int", warn_region);
 			every_config("checker", "1|0", [](engine& e) {
 				auto bad = e.check("float f = 1.5; f &= 1;");
 				auto ok = e.check("int x = 6; x &= 3; char c = 'a'; int y = 1; y |= c;");
@@ -2379,15 +2380,14 @@ private:
 	void instance_variable_overlays() {
 		test("an_instance_variable_overlay_lives_for_one_execution", [this]() {
 			every_config("overlay", "5|1|raised|raised|5", [](engine& e) {
-				e.static_checking(check_mode::off);
 				e.add_global("G", script_value(script_int(1), &e));
 				instance_variables five{{"G", script_value(script_int(5), &e)}};
 				std::string out = std::to_string(e.execute("G", five).as_int());
 				out += "|" + std::to_string(e.execute("G").as_int());
 				instance_variables n0{{"n", script_value(script_int(0), &e)}};
 				e.execute("var temp = 1;", n0);
-				try { e.execute("temp"); out += "|visible"; } catch (const std::exception&) { out += "|raised"; }
-				try { e.execute("n"); out += "|visible"; } catch (const std::exception&) { out += "|raised"; }
+				try { e.execute(spec::in_warn_region("temp")); out += "|visible"; } catch (const std::exception&) { out += "|raised"; }
+				try { e.execute(spec::in_warn_region("n")); out += "|visible"; } catch (const std::exception&) { out += "|raised"; }
 				instance_variables n5{{"n", script_value(script_int(5), &e)}};
 				out += "|" + std::to_string(e.execute("function f8() { return n; } f8()", n5).as_int());
 				return out;
@@ -2407,8 +2407,7 @@ private:
 			every_config("bare engine", "Undefined variable 'read_file'", [](engine& e) {
 				auto bare = engine::make();
 				bare->set_backend(e.get_backend_type());
-				bare->static_checking(check_mode::off);
-				return bare->execute("var r = \"\"; try { read_file(\"x\"); } catch (e) { r = e; } r;").as_string();
+				return bare->execute(spec::in_warn_region("var r = \"\"; try { read_file(\"x\"); } catch (e) { r = e; } r;")).as_string();
 			});
 		});
 		test("a_spliced_include_keeps_its_declarations_in_the_function_and_a_computed_include_sees_globals", [this]() {
@@ -2418,9 +2417,8 @@ private:
 			std::ofstream(dir / "reads_g.jai") << "G * 2;\n";
 			every_config("includes", "2|Undefined variable 'twice'|8", [&](engine& e) {
 				e.add_include_path(dir.string());
-				e.static_checking(check_mode::off);
 				std::string out = std::to_string(e.execute("function run(int x) { include \"twice.jai\"; return twice(x); } run(1);").as_int());
-				out += "|" + e.execute("var r = \"\"; try { twice(3); } catch (err) { r = err; } r;").as_string();
+				out += "|" + e.execute(spec::in_warn_region("var r = \"\"; try { twice(3); } catch (err) { r = err; } r;")).as_string();
 				out += "|" + std::to_string(e.execute("var G = 4; function run2() { var p = \"reads_g.jai\"; return include(p); } run2();").as_int());
 				return out;
 			});
@@ -2549,7 +2547,7 @@ private:
 				(t([]() { Probe a = Probe(); var b = a + 5; }) != "none" ? "operand raised" : "operand accepted") + "|" + p.v;
 			)";
 			every_config("native boundary", "negative v|negative v:1|negative v|lv too big|getter failed|poke zero|negative v|negative scale|operand raised|1",
-				[&](engine& e) { spec::bind_boundary_probe(e); return spec::render(e.execute(src)); }, check_mode::off);
+				[&](engine& e) { spec::bind_boundary_probe(e); return spec::render(e.execute(spec::in_warn_region(src))); });
 		});
 		test("a_host_script_exception_is_catchable_with_its_message", [this]() {
 			every_config("host script_exception", "Random failure!", [](engine& e) {
@@ -2619,7 +2617,7 @@ private:
 				t([]() { return Purse().other(Wallet()); }) + t([]() { return Purse().sibling(Clip()); }) +
 				t([]() { return Purse().statics(); }) + t([]() { return Purse().prot_synonym(); }) +
 				t([]() { return Wallet().own_other(Purse()); });
-			)", "42,9,43,43,14,50,43,42,43,42,42,42,5,4,42,", check_mode::off);
+			)", "42,9,43,43,14,50,43,42,43,42,42,42,5,4,42,", warn_region);
 		});
 		test("outside_the_family_every_spelling_raises_the_one_private_text", [this, W]() {
 			expect("outside", std::string(W) + R"(
@@ -2628,7 +2626,7 @@ private:
 				t([]() { return Wallet().hidden(); }) + t([]() { return Wallet::vault; }) + t([]() { return Wallet().prot; }) +
 				t([]() { return Thief().steal(Wallet()); }) + t([]() { var v = Purse(); return v.secret; }) +
 				t([]() { return Tipper().peek_sub(); });
-			)", "S,S,S,S,H,V,P,S,S,Cannot access private member 'tip' of class 'Tipper',", check_mode::off);
+			)", "S,S,S,S,H,V,P,S,S,Cannot access private member 'tip' of class 'Tipper',", warn_region);
 		});
 		test("the_strict_checker_reports_an_outside_access_at_load_with_the_runtime_text", [this]() {
 			every_config("checker", "1:Cannot access private member 'secret' of class 'Wallet'|0|0|0|1:Cannot access private member 'prot' of class 'Wallet'|"
@@ -2658,8 +2656,7 @@ private:
 				std::string out;
 				try { e.execute(src); out = "loaded"; } catch (const std::exception&) { out = "raised"; }
 				out += "|" + std::to_string(e.execute("ran").as_int());
-				e.static_checking(check_mode::warn);
-				out += "|" + e.execute(src + "string r = \"\"; try { peek(Wallet()); } catch (x) { r = x == \"Cannot access private member 'secret' of class 'Wallet'\" ? \"S\" : x; } r;").as_string();
+				out += "|" + e.execute(spec::in_warn_region(src) + "string r = \"\"; try { peek(Wallet()); } catch (x) { r = x == \"Cannot access private member 'secret' of class 'Wallet'\" ? \"S\" : x; } r;").as_string();
 				return out;
 			});
 		});
@@ -2745,7 +2742,7 @@ private:
 				t([]() { return Token::make(5).value; }) + t([]() { return Token::make(1).twin().value; }) +
 				t([]() { return Special().value; }) + t([]() { return Special().peer().value; }) + t([]() { return Kid().value; }) +
 				t([]() { return Mixed(4).n; }) + t([]() { return Money::of(250).cents; });
-			)", "5,2,7,3,-1,4,250,", check_mode::off);
+			)", "5,2,7,3,-1,4,250,", warn_region);
 		});
 		test("outside_the_family_every_direct_construction_spelling_raises_the_private_constructor_text", [this, K]() {
 			expect("outside", std::string(K) + R"(
@@ -2754,7 +2751,7 @@ private:
 				t([]() { return Stranger().grab().value; }) + t([]() { return reflect::construct("Token", 1).value; }) +
 				t([]() { return reflect::construct_shared("Token", 1).value; }) + t([]() { return Mixed("x").n; }) +
 				t([]() { Money m = 5; return m.cents; });
-			)", "X,X,X,X,X,1,1,M,Y,", check_mode::off);   // reflect::construct reaches private constructors by design
+			)", "X,X,X,X,X,1,1,M,Y,", warn_region);   // reflect::construct reaches private constructors by design
 		});
 		// a load reconstitutes the state whatever the constructors' access, and a class no constructor builds without
 		// arguments is created without one (its field initializers, then the archive's fields)
@@ -2772,7 +2769,7 @@ private:
 			    "{\"$type\":\"SavedChild\",\"$val\":{\"n\":6,\"name\":\"late\"}} {\"$type\":\"SavedChild\",\"$val\":{\"n\":6,\"name\":\"late\"}}|"
 			    "{\"$type\":\"OnlyArgs\",\"$val\":{\"value\":7,\"tag\":\"made\"}} {\"$type\":\"OnlyArgs\",\"$val\":{\"value\":7,\"tag\":\"made\"}}|"
 			    "{\"$type\":\"Shown\",\"$val\":{\"hp\":9,\"dmg\":5}} {\"$type\":\"Shown\",\"$val\":{\"hp\":9,\"dmg\":5}}|"
-			    "Cannot access private constructor of class 'Saved',", check_mode::off);
+			    "Cannot access private constructor of class 'Saved',", warn_region);
 		});
 		test("the_strict_checker_reports_an_outside_private_construction_at_load_with_the_runtime_text", [this]() {
 			every_config("checker", "1:Cannot access private constructor of class 'Token'|0|0|1:Cannot access private constructor of class 'Token'|"
@@ -2872,7 +2869,7 @@ private:
 				t([]() { obj().f += ++K; }) + "|" + t([]() { hh.g += ++K; }) + "|" +
 				t([]() { O::s += (K = 3); LOG += "" + O::s; }) + "|" + t([]() { ns::x += (K = 4); LOG += "" + ns::x; }) + "|" +
 				field() + "|" + O().self_add();
-			)", "t1|g1s1|4|5|20|20", check_mode::warn);
+			)", "t1|g1s1|4|5|20|20", warn_region);
 		});
 		test("a_right_side_error_comes_before_the_targets", [this]() {
 			expect("member error order", R"(
@@ -2880,7 +2877,7 @@ private:
 				namespace ns { int x = 1; }
 				function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = e; } return r; }
 				t([]() { var nv = null; nv.f += bad(); }) + "|" + t([]() { ns::missing += bad(); }) + "|" + t([]() { var nv = null; nv.f += 1; });
-			)", "rhs|rhs|Cannot access 'f' on null ('nv' is null)", check_mode::off);
+			)", "rhs|rhs|Cannot access 'f' on null ('nv' is null)", warn_region);
 		});
 	}
 
@@ -2898,7 +2895,7 @@ private:
 				function index_write() -> string { array<int> a = [1, 2, 3]; int i = 0; a[i] += (i = 2); return "" + a[0] + a[2]; }
 				t([]() { A[idx()] += ++K; }) + "|" + t([]() { A[idx()] = ++K; }) + "|" + t([]() { M[key()] += ++K; }) + "|" +
 				self_write() + "|" + index_write();
-			)", "j1|j1|k1|20|15", check_mode::warn);
+			)", "j1|j1|k1|20|15", warn_region);
 		});
 		test("a_right_side_error_comes_before_the_subscripts", [this]() {
 			expect("subscript error order", R"(
@@ -2908,7 +2905,7 @@ private:
 				array<int> A = [1, 2, 3];
 				function t(function f) -> string { string r = "none"; LOG = ""; try { f(); } catch (e) { r = e; } return r + LOG; }
 				t([]() { var na = null; na[idx()] += bad(); }) + "|" + t([]() { A[5] += bad(); }) + "|" + t([]() { A[5] += 1; });
-			)", "rhs|rhs|Array index 5 out of bounds for array of size 3", check_mode::off);
+			)", "rhs|rhs|Array index 5 out of bounds for array of size 3", warn_region);
 		});
 	}
 
@@ -2930,9 +2927,8 @@ private:
 				type_of(x) + ":" + x + "|" + type_of(y) + ":" + y + "|" + type_of(z) + ":" + z + "|" + type_of(w) + ":" + w + "|" + type_of(m) + ":" + m;
 			)";
 			const std::string want = "string:s|float:2.5|string:t|float:1.5|float:2.5";
-			expect("auto from var", src, want, check_mode::warn);
-			expect("auto from var (strict)", src, want, check_mode::strict);
-			expect("auto from var (checks off)", src, want, check_mode::off);
+			expect("auto from var (warn region)", src, want, warn_region);
+			expect("auto from var (strict)", src, want);
 		});
 		test("an_auto_from_a_known_static_type_keeps_that_type", [this]() {
 			const char* src = R"(
@@ -2945,8 +2941,7 @@ private:
 				function t(function g) -> string { string r = "none"; try { g(); } catch (err) { r = err; } return r; }
 				type_of(n) + ":" + n + "|" + type_of(e) + ":" + e + "|" + s + "|" + t([]() { auto q = P(); var o = 5; q = o; });
 			)";
-			expect("auto from known", src, "int:1|int:2|b5|Cannot assign int to 'q' (declared P)", check_mode::warn);
-			expect("auto from known (checks off)", src, "int:1|int:2|b5|Cannot assign int to 'q' (declared P)", check_mode::off);
+			expect("auto from known", src, "int:1|int:2|b5|Cannot assign int to 'q' (declared P)", warn_region);
 		});
 		test("an_auto_in_a_counted_loop_follows_the_static_type_on_every_lane", [this]() {
 			expect("auto in loops", R"(
@@ -2966,16 +2961,16 @@ private:
 					return total;
 				}
 				from_var() + "|" + from_ints() + "|" + sum_var();
-			)", "1.5 2.5 3.5 |1 2 3 |6.75", check_mode::warn);
+			)", "1.5 2.5 3.5 |1 2 3 |6.75", warn_region);
 		});
 		test("a_jaibite_keeps_the_auto_spelling_and_types_it_again_at_load", [this]() {
 			every_config("auto through jaibite", "string:s|int:1", [](engine& e) {
-				auto bite = e.jaibite("var arr = [1]; auto x = arr[0]; x = \"s\"; auto n = 5; n = 1.5; type_of(x) + \":\" + x + \"|\" + type_of(n) + \":\" + n;");
+				auto bite = e.jaibite(spec::in_warn_region("var arr = [1]; auto x = arr[0]; x = \"s\"; auto n = 5; n = 1.5; type_of(x) + \":\" + x + \"|\" + type_of(n) + \":\" + n;"));
 				std::string first = spec::render(e.execute(bite));
 				auto loaded = e.jaibite_load_bytes(bite.save_bytes());
 				std::string second = spec::render(e.execute(loaded));
 				return first == second ? first : first + " vs " + second;
-			}, check_mode::warn);
+			});
 		});
 	}
 
@@ -2988,7 +2983,7 @@ private:
 				weak_ptr<Foo> w = sp;
 				auto h = (w = sp);
 				type_of(h);
-			)", "weak_ptr", check_mode::warn);
+			)", "weak_ptr", warn_region);
 		});
 		test("f3_a_store_takes_its_right_sides_value_before_the_target", [this]() {
 			// C++17: the right operand of every assignment operator, its value included, before the target
@@ -3001,7 +2996,7 @@ private:
 				b[1] = 2; a[0] = 0;
 				a[g()] += b[1];
 				s + " " + a[0];
-			)", "2 2", check_mode::warn);
+			)", "2 2", warn_region);
 		});
 		test("f4_a_container_literal_reads_its_elements_left_to_right", [this]() {
 			expect("literal order", R"(
@@ -3010,7 +3005,7 @@ private:
 				var o = O();
 				function f() { var r = [A[0], o + 1]; return r[0]; }
 				"" + f();
-			)", "1", check_mode::warn);
+			)", "1", warn_region);
 		});
 		test("f5_a_user_operator_assign_runs_at_every_store_into_a_bare_field", [this]() {
 			expect("operator= in a method loop", R"(
@@ -3020,7 +3015,7 @@ private:
 				var h = H();
 				h.set_many();
 				"" + assigns + " " + h.f.v;
-			)", "4 3", check_mode::warn);
+			)", "4 3", warn_region);
 		});
 		test("f7_an_argument_ahead_of_a_class_operator_takes_its_value_when_evaluated", [this]() {
 			// invariant 13: a later argument that runs user code does not change an earlier by-value argument
@@ -3030,7 +3025,7 @@ private:
 				var o = O();
 				function sz(var a, int b) { return a.size() + b; }
 				"" + sz(G, o + 1);
-			)", "2", check_mode::warn);
+			)", "2", warn_region);
 		});
 	}
 
@@ -3047,7 +3042,7 @@ private:
 				string r3 = to_string(a[0] = 4.9);
 				var r4 = id(C::s = 5.9);
 				type_of(r1) + ":" + r1 + " " + type_of(r2) + ":" + r2 + " " + r3 + " " + type_of(r4) + ":" + r4;
-			)", "int:3 int:3 4 int:5", check_mode::warn);
+			)", "int:3 int:3 4 int:5", warn_region);
 		});
 		test("f2_a_handle_store_yields_a_value", [this]() {
 			expect("handle store value", R"(
@@ -3059,7 +3054,7 @@ private:
 				shared_ptr<Foo> s2 = Foo();
 				auto r3 = (s2 = null);
 				"" + (r1 == null) + " " + (r2 != null) + " " + (r3 == null);
-			)", "true true true", check_mode::warn);
+			)", "true true true", warn_region);
 		});
 		test("f6_a_coroutine_whose_body_threw_is_completed", [this]() {
 			// a native exception escaping the body fails the handle like a script throw; the resumer's state comes back
@@ -3073,7 +3068,7 @@ private:
 				try { throw "outer"; } catch (e) { out += " / " + e; }
 				out;
 			)", "Bare throw with no active exception thrown.|Cannot resume a completed coroutine / boom|Cannot resume a completed coroutine / "
-			    "Bare throw with no active exception thrown.|Cannot resume a completed coroutine / outer", check_mode::warn);
+			    "Bare throw with no active exception thrown.|Cannot resume a completed coroutine / outer", warn_region);
 		});
 		test("f8_a_by_value_parameter_does_not_see_user_code_write_its_argument", [this]() {
 			// a by-value parameter holds a copy: user code the callee runs (a method on another local, a getter of the
@@ -3103,7 +3098,7 @@ private:
 				G.n = 1; s += " " + i1(G);
 				G.n = 1; s += " " + i2(G);
 				s;
-			)", "1 1 31 31 1 1", check_mode::warn);
+			)", "1 1 31 31 1 1", warn_region);
 		});
 	}
 
@@ -3249,7 +3244,7 @@ private:
 				out += "|ret:" + t([]() { ret_down(); }) + t([]() { ret_up(); });
 				out;
 			)";
-			expect("handle admission", src, "down:-------|var_d:+++++++|var_e:-------|cast:+++++++|up:+++++++|keep:---|ret:-+", check_mode::off);
+			expect("handle admission", src, "down:-------|var_d:+++++++|var_e:-------|cast:+++++++|up:+++++++|keep:---|ret:-+", warn_region);
 		});
 		test("a_shared_ptr_declaration_and_assignment_admit_the_same_handles", [this]() {
 			// at program scope as in a function: a statically Base-typed handle holding a Derived enters shared_ptr<Derived> by
@@ -3266,7 +3261,7 @@ private:
 				try { shared_ptr<D> g3 = gv; out += "+"; } catch (e) { out += "-"; }
 				try { g2 = gv; out += "+"; } catch (e) { out += "-"; }
 				out;
-			)", "--++", check_mode::off);
+			)", "--++", warn_region);
 		});
 		test("a_handle_admission_rejection_names_the_class_it_judged", [this]() {
 			expect("handle texts", R"(
@@ -3281,7 +3276,7 @@ private:
 				t([]() { shared_ptr<B> s = new D(); GD = s; }) + "|" +
 				t([]() { var s = new E(); H h = H(); h.d = s; });
 			)", "Cannot initialize shared_ptr<D> with B: type must match or be a subclass|Cannot assign B to 'd' (declared shared_ptr<D>)|"
-			    "Cannot assign shared_ptr<B> to shared_ptr<D>|Cannot assign E to field 'd' of H (declared shared_ptr<D>)", check_mode::off);
+			    "Cannot assign shared_ptr<B> to shared_ptr<D>|Cannot assign E to field 'd' of H (declared shared_ptr<D>)", warn_region);
 		});
 		test("the_checker_reports_a_static_downcast_or_an_unrelated_handle_at_load", [this]() {
 			// strict: a load error at every site (a shared_ptr<T> namespace variable store included); warn: the unit loads, the runtime raises
@@ -3306,10 +3301,10 @@ private:
 			for (const auto& r : rows) {
 				every_config(r.label, std::to_string(r.errors), [&](engine& e) { return std::to_string(e.check(P + r.src).error_count()); });
 			}
-			every_config("warn loads", "loaded|-", [&](engine& e) {
-				return e.execute(P + "function f() { shared_ptr<B> s = new D(); ns::nd = s; }"
-				                     " string r = \"loaded|\"; try { f(); r += \"+\"; } catch (ex) { r += \"-\"; } r;").as_string();
-			}, check_mode::warn);
+			every_config("a warn region loads", "loaded|-", [&](engine& e) {
+				return e.execute(spec::in_warn_region(P + "function f() { shared_ptr<B> s = new D(); ns::nd = s; }"
+				                     " string r = \"loaded|\"; try { f(); r += \"+\"; } catch (ex) { r += \"-\"; } r;")).as_string();
+			});
 		});
 	}
 
@@ -3343,8 +3338,8 @@ private:
 				every_config(r.label, r.expected, [&](engine& e) {
 					e.max_call_depth(backend_type::interpreter, 256);
 					e.max_call_depth(backend_type::vm, 256);
-					return spec::render(e.execute(r.src));
-				}, check_mode::off);
+					return spec::render(e.execute(spec::in_warn_region(r.src)));
+				});
 			}
 		});
 	}
@@ -3362,7 +3357,7 @@ private:
 				function g() -> int { throw; return 1; }
 				function h() -> string { string s = "none"; try { g(); } catch (e) { s = "caller:" + e; } return s; }
 				r + "|" + f() + "|" + h();
-			)", "top:Bare throw with no active exception thrown.|own:Bare throw with no active exception thrown.|caller:Bare throw with no active exception thrown.", check_mode::warn);
+			)", "top:Bare throw with no active exception thrown.|own:Bare throw with no active exception thrown.|caller:Bare throw with no active exception thrown.", warn_region);
 		});
 		test("a_native_exception_is_caught_by_the_running_functions_own_try", [this]() {
 			// docs/site/guide/05-control-flow.html "try / catch / throw": a store through a property reference whose host setter refuses raises natively inside the
@@ -3375,7 +3370,7 @@ private:
 				f() + "|" + top + "|" + h();
 			)";
 			every_config("own try", "own:lv too big:1|top:lv too big|caller:lv too big",
-				[&](engine& e) { spec::bind_boundary_probe(e); return spec::render(e.execute(src)); }, check_mode::off);
+				[&](engine& e) { spec::bind_boundary_probe(e); return spec::render(e.execute(spec::in_warn_region(src))); });
 		});
 		switch_equality();
 		membership_equality();
@@ -3432,7 +3427,7 @@ private:
 				string loops = "";
 				for (int i = 0; i < V(3); i += 1) { loops += to_string(i); }
 				rev + "|" + fwd + "|" + loops + "|" + t([]() { return 5 < S(1); }) + "|" + t([]() { Plain p; return p < V(1); }) + "|" + t([]() { return 5 <=> S(1); });
-			)", "true true false true -1 1 0|true 2|012|Invalid operands for < operator|Invalid operands for < operator|Invalid operands for <=> operator", check_mode::warn);
+			)", "true true false true -1 1 0|true 2|012|Invalid operands for < operator|Invalid operands for < operator|Invalid operands for <=> operator", warn_region);
 		});
 		test("equality_comes_from_spaceship_when_no_operator_equal_is_declared", [this]() {
 			// == and != come from <=> ((a <=> b) == 0) for a class value whose chain declares <=> and no
@@ -3454,7 +3449,7 @@ private:
 				array<var> xs = [Z(13), Z(24)]; array<var> ys = [Z(3), Z(4)];
 				string nested = "" + (xs == ys) + " " + (xs != ys);
 				z + "|" + declared + "|" + reversed + "|" + plain + "|" + nested;
-			)", "true false false true false true|false true|true false true false false|true false|true false", check_mode::warn);
+			)", "true false false true false true|false true|true false true false false|true false|true false", warn_region);
 		});
 	}
 
@@ -3485,7 +3480,7 @@ private:
 				array<var> mix = [Money(300), 100, Money(200)]; mix.sort();
 				string sorted = "" + ms[0].cents + ms[1].cents + ms[2].cents + " " + (mix[0] == 100) + " " + (mix[1] == 200) + " " + (mix[2] == 300);
 				money + "|" + tagged + "|" + plain + "|" + strict + "|" + nulls + "|" + found + "|" + sorted;
-			)", "true true false false false true true true true 0 -1|true false true false true|false false|false false Invalid operands for < operator Invalid operands for < operator|false true -1 false false|true 2|100200300 true true true", check_mode::warn);
+			)", "true true false false false true true true true 0 -1|true false true false true|false false|false false Invalid operands for < operator Invalid operands for < operator|false true -1 false false|true 2|100200300 true true true", warn_region);
 		});
 	}
 
@@ -3499,7 +3494,7 @@ private:
 				every_config(std::string("class in body: ") + src, "rejected", [&](engine& e) {
 					try { e.execute(src); return std::string("loaded"); }
 					catch (const std::exception& ex) { const std::string what = ex.what(); return what.find(text) != std::string::npos ? std::string("rejected") : what; }
-				}, check_mode::off);
+				});
 			}
 			expect("program scope stands", "class L { int q = 3; } function f() -> int { L l; return l.q; } f();", "<3>");
 		});
@@ -3535,7 +3530,7 @@ private:
 			             "err:method boom|err:static boom|ok:<1>|err:co boom|<42>", [&](engine& e) {
 				e.import_recheck_interval(0);
 				std::ofstream(mod) << "function reloaded_value() -> int { return 1; }\n";
-				e.execute(prog);
+				e.execute(spec::in_warn_region(prog));
 				auto call = [&](const std::string& name, const std::string& key) -> std::string {
 					try {
 						auto r = e.get_variable(name).as_function()({});
@@ -3559,14 +3554,14 @@ private:
 					} catch (const std::exception& ex) { out += route("throw", ex.what(), "co boom") + "|"; }
 				}
 				return out + spec::render(e.execute("40 + 2"));
-			}, check_mode::warn);
+			});
 		});
 		test("a_throwing_host_call_throws_for_every_failure", [=, this]() {
 			every_config("throwing routes", "throw:out of bounds|throw:boom|throw:Failed to open import file: no_such_module_for_host_routes.jai|ok|throw:reloaded|"
 			             "throw:method boom|throw:static boom|exec throw:boom|exec throw:Failed to open import file: no_such_module_for_host_routes.jai|null:empty|<42>", [&](engine& e) {
 				e.import_recheck_interval(0);
 				std::ofstream(mod) << "function reloaded_value() -> int { return 1; }\n";
-				e.execute(prog);
+				e.execute(spec::in_warn_region(prog));
 				std::string out;
 				for (const auto& [name, key] : calls) {
 					auto fn = convert_script_function<int64_t()>(e.get_variable(name));
@@ -3582,7 +3577,7 @@ private:
 				auto none = convert_script_function<void()>(script_value(std::monostate{}, &e));
 				out += none ? "null:callable|" : "null:empty|";
 				return out + spec::render(e.execute("40 + 2"));
-			}, check_mode::warn);
+			});
 		});
 		// A script_value crosses a callback's parameters and result as itself, as make_value hands one back unchanged
 		test("a_callback_passes_script_values_through", [this]() {
@@ -3628,73 +3623,77 @@ private:
 		test("a_reference_to_a_host_bound_int_stores_through_to_cpp", [this]() {
 			int64_t hp = 0;
 			every_config("int", "5 42,42 43 44 45 145 7 3 9 2 11 same 11", [&](engine& e) {
+				auto lax = [&e](const std::string& src) { return e.execute(spec::in_warn_region(src)); };
 				hp = 10;
 				e.add_global_ref("hp", hp);
 				std::string out;
-				e.execute("auto& r = hp; r = 5;"); out += std::to_string(hp);
-				hp = 42; out += " " + spec::render(e.execute("\"\" + hp + \",\" + r;"));
-				e.execute("r += 1;"); out += " " + std::to_string(hp);
-				e.execute("++r;"); out += " " + std::to_string(hp);
-				e.execute("r++;"); out += " " + std::to_string(hp);
-				e.execute("function bump(int& x) { x += 100; } bump(hp);"); out += " " + std::to_string(hp);
-				e.execute("hp = 7;"); out += " " + std::to_string(hp);
-				e.execute("function set3(int& x) { x = 3; } set3(r);"); out += " " + std::to_string(hp);
-				hp = 9; out += " " + spec::render(e.execute("to_string(r);"));
-				e.execute("int& typed = hp; typed = 2.9;"); out += " " + std::to_string(hp);
-				e.execute("function local_ref() { auto& lr = hp; lr = 11; } local_ref();"); out += " " + std::to_string(hp);
-				out += " " + spec::render(e.execute(R"(
+				lax("auto& r = hp; r = 5;"); out += std::to_string(hp);
+				hp = 42; out += " " + spec::render(lax("\"\" + hp + \",\" + r;"));
+				lax("r += 1;"); out += " " + std::to_string(hp);
+				lax("++r;"); out += " " + std::to_string(hp);
+				lax("r++;"); out += " " + std::to_string(hp);
+				lax("function bump(int& x) { x += 100; } bump(hp);"); out += " " + std::to_string(hp);
+				lax("hp = 7;"); out += " " + std::to_string(hp);
+				lax("function set3(int& x) { x = 3; } set3(r);"); out += " " + std::to_string(hp);
+				hp = 9; out += " " + spec::render(lax("to_string(r);"));
+				lax("int& typed = hp; typed = 2.9;"); out += " " + std::to_string(hp);
+				lax("function local_ref() { auto& lr = hp; lr = 11; } local_ref();"); out += " " + std::to_string(hp);
+				out += " " + spec::render(lax(R"(
 					string a = ""; try { hp = "x"; } catch (err) { a = err; }
 					string b = ""; try { r = "x"; } catch (err) { b = err; }
 					a == b ? "same" : a + " vs " + b;
 				)"));
 				return out + " " + std::to_string(hp);
-			}, check_mode::warn);
+			});
 		});
 		test("a_reference_to_a_host_bound_float_stores_through_to_cpp", [this]() {
 			double speed = 0;
 			float scale = 0;
 			every_config("float", "5.000000 1.25 0.625 0.750000 2.000000", [&](engine& e) {
+				auto lax = [&e](const std::string& src) { return e.execute(spec::in_warn_region(src)); };
 				speed = 0; scale = 0;
 				e.add_global_ref("speed", speed);
 				e.add_global_ref("scale", scale);
 				std::string out;
-				e.execute("auto& s = speed; s = 2.5; s *= 2;"); out += std::to_string(speed);
-				speed = 1.25; out += " " + spec::render(e.execute("to_string(s);"));
-				e.execute("function half(float& x) { x /= 2; } half(speed);"); out += " " + spec::render(e.execute("to_string(speed);"));
-				e.execute("auto& k = scale; k = 0.5; k += 0.25;"); out += " " + std::to_string(scale);
-				e.execute("half(k); k = k * 4 + 0.5;"); out += " " + std::to_string(scale);
+				lax("auto& s = speed; s = 2.5; s *= 2;"); out += std::to_string(speed);
+				speed = 1.25; out += " " + spec::render(lax("to_string(s);"));
+				lax("function half(float& x) { x /= 2; } half(speed);"); out += " " + spec::render(lax("to_string(speed);"));
+				lax("auto& k = scale; k = 0.5; k += 0.25;"); out += " " + std::to_string(scale);
+				lax("half(k); k = k * 4 + 0.5;"); out += " " + std::to_string(scale);
 				return out;
-			}, check_mode::warn);
+			});
 		});
 		test("a_reference_to_a_host_bound_string_stores_through_to_cpp", [this]() {
 			std::string name;
 			every_config("string", "abc zz zz! zz!! zz!!? set", [&](engine& e) {
+				auto lax = [&e](const std::string& src) { return e.execute(spec::in_warn_region(src)); };
 				name = "";
 				e.add_global_ref("name", name);
 				std::string out;
-				e.execute("auto& n = name; n = \"ab\"; n += \"c\";"); out += name;
-				name = "zz"; out += " " + spec::render(e.execute("n;"));
-				e.execute("function shout(string& t) { t += \"!\"; } shout(name);"); out += " " + name;
-				e.execute("shout(n);"); out += " " + name;
-				e.execute("string& sn = name; sn += \"?\";"); out += " " + name;
-				name = "set"; out += " " + spec::render(e.execute("name;"));
+				lax("auto& n = name; n = \"ab\"; n += \"c\";"); out += name;
+				name = "zz"; out += " " + spec::render(lax("n;"));
+				lax("function shout(string& t) { t += \"!\"; } shout(name);"); out += " " + name;
+				lax("shout(n);"); out += " " + name;
+				lax("string& sn = name; sn += \"?\";"); out += " " + name;
+				name = "set"; out += " " + spec::render(lax("name;"));
 				return out;
-			}, check_mode::warn);
+			});
 		});
 		test("a_reference_to_a_bound_class_field_stores_through_to_cpp", [this]() {
 			ref_player player;
 			every_config("class field", "6 106 8 xy 9", [&](engine& e) {
+				auto lax = [&e](const std::string& src) { return e.execute(spec::in_warn_region(src)); };
 				player = ref_player{};
 				dynamic_binder<ref_player>(e, "RefPlayer").property("hp", &ref_player::hp).property("tag", &ref_player::tag).build();
 				e.add_global_ref("player", player);
 				std::string out;
-				e.execute("auto& h = player.hp; h = 5; h += 1;"); out += std::to_string(player.hp);
-				e.execute("function bump(int& x) { x += 100; } bump(player.hp);"); out += " " + std::to_string(player.hp);
-				e.execute("auto& pl = player; pl.hp = 8;"); out += " " + std::to_string(player.hp);
-				e.execute("auto& t = player.tag; t = \"x\"; t += \"y\";"); out += " " + player.tag;
-				player.hp = 9; out += " " + spec::render(e.execute("to_string(h);"));
+				lax("auto& h = player.hp; h = 5; h += 1;"); out += std::to_string(player.hp);
+				lax("function bump(int& x) { x += 100; } bump(player.hp);"); out += " " + std::to_string(player.hp);
+				lax("auto& pl = player; pl.hp = 8;"); out += " " + std::to_string(player.hp);
+				lax("auto& t = player.tag; t = \"x\"; t += \"y\";"); out += " " + player.tag;
+				player.hp = 9; out += " " + spec::render(lax("to_string(h);"));
 				return out;
-			}, check_mode::warn);
+			});
 		});
 	}
 
@@ -3744,7 +3743,7 @@ private:
 				class H : F { H(int x) : super(x) {} }
 				F f = F(1); var nul = null;
 				"" + (E(1) != E(2)) + " " + (E(1) == E(2)) + " " + (F(1) != F(1)) + " " + (F(1) == F(1)) + " " + (H(1) != H(2)) + " " + (f != nul) + " " + (f != 5);
-			)", "false true true true true true true", check_mode::warn);
+			)", "false true true true true true true", warn_region);
 		});
 		test("a_spaceship_rewrite_raises_what_the_operator_raises", [this]() {
 			// the operator's own error or throw is the comparison's; a result that is no number leaves the invalid-operands text;
@@ -3754,7 +3753,7 @@ private:
 				class S { int n = 0; S(int x) { n = x; } string operator<=>(S o) { return "x"; } }
 				function t(function fn) -> string { string r = ""; try { r = "" + fn(); } catch (e) { r = e; } return r; }
 				t([]() { return T(1) < T(0); }) + "|" + t([]() { return T(1) < T(2); }) + "|" + t([]() { return S(1) < S(2); }) + "|" + t([]() { return 1 < T(2); });
-			)", "zero|true|Invalid operands for < operator|Invalid operands for < operator", check_mode::warn);
+			)", "zero|true|Invalid operands for < operator|Invalid operands for < operator", warn_region);
 		});
 	}
 
@@ -3787,7 +3786,7 @@ private:
 				string mk = "" + m[math::NAN_VALUE] + " " + m.size();
 				typed + "|" + dyn + "|" + mixed + "|" + br + "|" + sp + "|" + arr + "|" + mk;
 			)", "falsetruefalsefalsefalsefalsefalsefalse|falsetruefalsefalsefalse|falsefalsetruefalse|bde3|"
-			    "1/-1|falsetruefalse|8 1", check_mode::warn);
+			    "1/-1|falsetruefalse|8 1", warn_region);
 		});
 	}
 
@@ -3810,7 +3809,7 @@ private:
 				string e1 = t([]() { O o; o.f = "x"; return 1; });
 				string e2 = t([]() { O o; auto& r = o.f; r = "x"; return 1; });
 				plain + "|" + compound + "|" + (e1 == e2 ? "same text" : e1 + " vs " + e2);
-			)", "match|match 3|same text", check_mode::warn);
+			)", "match|match 3|same text", warn_region);
 		});
 	}
 
@@ -3834,7 +3833,7 @@ private:
 				    t([]() { C k; var f = reflect::bind(k, "hidden"); return 1; });
 			)", "2 7 1 1 3|reflect::bind takes a class instance, a handle or a host object; the methods of array run on the value: wrap the call in a lambda ([&]() { ... })|"
 			    "reflect::bind takes a class instance, a handle or a host object; the methods of string run on the value: wrap the call in a lambda ([&]() { ... })|"
-			    "reflect::bind: 'C' has no method 'nope'|1", check_mode::warn);
+			    "reflect::bind: 'C' has no method 'nope'|1", warn_region);
 		});
 	}
 
@@ -3868,7 +3867,7 @@ private:
 			    "'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")|"
 			    "'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")|"
 			    "'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")|"
-			    "'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")", check_mode::off);
+			    "'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")", warn_region);
 			every_config("bare method value at load", "rejected", [&](engine& e) {
 				try {
 					e.execute("class Player { void heal() {} function get() { return heal; } }");
@@ -3920,7 +3919,7 @@ private:
 			    "'push' is a method of array; call it with a.push() or wrap the call in a lambda|"
 			    "'to_upper' is a method of string; call it with s.to_upper() or wrap the call in a lambda|"
 			    "'clear' is a method of map; call it with m.clear() or wrap the call in a lambda|"
-			    "'next' is a method of coroutine; call it with c.next() or wrap the call in a lambda", check_mode::off);
+			    "'next' is a method of coroutine; call it with c.next() or wrap the call in a lambda", warn_region);
 			every_config("method value at load", "rejected", [&](engine& e) {
 				try {
 					e.execute("class Player { void heal() {} } Player player; var f = player.heal;");
@@ -3971,7 +3970,7 @@ private:
 				direct + "|" + comp + "|" + inherited + "|" + mixed + "|" + builtin;
 			)";
 			every_config("script operators", "2 4 13 13 48 3 1 -12 112 -13 7|2 2 6 5 10 2|2 -12 -13|2|1 2 -4 4 2.5 true -1",
-				[&](engine& e) { spec::bind_boundary_probe(e); return spec::render(e.execute(src)); }, check_mode::strict);
+				[&](engine& e) { spec::bind_boundary_probe(e); return spec::render(e.execute(src)); });
 		});
 		test("an_operator_the_class_does_not_declare_keeps_the_builtin_text", [this]() {
 			// a unary operator the class lacks (only the binary form declared) raises the builtin operand text; && || stay short-circuit
@@ -3979,7 +3978,7 @@ private:
 				class V { int n = 1; V operator-(V o) { return V(); } }
 				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
 				t([]() { V v; var w = -v; return 1; }) + "|" + t([]() { V v; var w = ~v; return 1; }) + "|" + t([]() { V v; var w = v % 2; return 1; });
-			)", "Unary minus requires numeric operand|Bitwise NOT requires integer operand|Invalid operands for % operator", check_mode::off);
+			)", "Unary minus requires numeric operand|Bitwise NOT requires integer operand|Invalid operands for % operator", warn_region);
 		});
 		test("a_class_cannot_declare_operator_bang_and_not_reads_to_bool", [this]() {
 			// Like C++ with an operator bool, !v and if (v) go through the one contextual conversion:
@@ -4038,7 +4037,7 @@ private:
 				run();
 			)";
 			every_config("callable objects", "6 8 hi! 3 11 103 22 1004 8 1 2",
-				[&](engine& e) { return spec::render(e.execute(src)); }, check_mode::strict);
+				[&](engine& e) { return spec::render(e.execute(src)); });
 		});
 		test("a_class_without_operator_call_keeps_the_not_callable_text", [this]() {
 			// a function slot takes a function or null (the one conversion table): a callable object passes through a lambda
@@ -4048,7 +4047,7 @@ private:
 				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
 				function apply(function f, int x) -> int { return f(x); }
 				t([]() { Plain p; return p(1); }) + "|" + t([]() { F f; return apply([f](int x) { return f(x); }, 3); });
-			)", "Cannot call 'p': it is a Plain, not a function|6", check_mode::strict);
+			)", "Cannot call 'p': it is a Plain, not a function|6");
 			// the table's function row takes a function or null: the strict checker refuses an instance at a function declaration
 			every_config("function slot", "rejected", [&](engine& e) {
 				try {
@@ -4062,7 +4061,7 @@ private:
 					const std::string what = ex.what();
 					return what.find("cannot initialize 'g' declared 'function' with 'F'") != std::string::npos ? std::string("rejected") : what;
 				}
-			}, check_mode::strict);
+			});
 		});
 	}
 
@@ -4098,7 +4097,7 @@ private:
 			    "Cannot apply '+=' to string and int|Cannot apply '+=' to string and int|Cannot apply '+=' to string and int|"
 			    "Cannot apply '+=' to int and string|Cannot apply '+=' to string and int|"
 			    "Modulo by zero|Modulo by zero|Division by zero|Division by zero|Modulo by zero|Division by zero|Division by zero|"
-			    "Modulo by zero|Modulo by zero", check_mode::warn);
+			    "Modulo by zero|Modulo by zero", warn_region);
 		});
 	}
 
@@ -4115,7 +4114,7 @@ private:
 				var a = [7];
 				R r = R(a, 0); F f = F(2); D d = D(); C c = C(); B v = B("s");
 				"" + r.got + " " + f.which + " " + d.which + " " + c.which + " " + v.which;
-			)", "7 float int int var", check_mode::warn);
+			)", "7 float int int var", warn_region);
 		});
 	}
 
@@ -4134,8 +4133,7 @@ private:
 				t([]() { G = "g"; G = a; array<int> c = G; c.push(3); return "" + c.size() + " " + G.size(); }) + "|" +
 				t([]() { var e = []; e.push("x"); e.push(1); return e.size(); }) + "|" +
 				t([]() { var v = a; var& r = v; r = "via ref"; return r; });
-			)", "Cannot push 'string' to array<int>|2 1 int:2|int:5|Cannot push 'string' to array<int>|Cannot push 'string' to array<int>|2 1|2|via ref",
-			   check_mode::warn);
+			)", "Cannot push 'string' to array<int>|2 1 int:2|int:5|Cannot push 'string' to array<int>|Cannot push 'string' to array<int>|2 1|2|via ref", warn_region);
 		});
 	}
 
@@ -4168,7 +4166,7 @@ private:
 				B b = D(); B c = b; array<B> xs = [D()];
 				function by_value(B p) -> string { return type_of(p); }
 				type_of(b) + " " + type_of(c) + " " + type_of(cast<B>(D())) + " " + cast<D&>(b).d + " " + type_of(xs[0]) + " " + by_value(D());
-			)", "D D D 2 D D", check_mode::warn);
+			)", "D D D 2 D D", warn_region);
 		});
 	}
 
@@ -4183,7 +4181,7 @@ private:
 				type_of(b.grade) + ":" + b.grade + "|" + b.slots[3] + "," + b.slots[10] + "|" + b.counts['q'] + "|" + b.none.size() + "|" +
 				b.loose[1] + b.loose["k"] + "|" + type_of(from_json("{\"$char\": 300}")) + "|" + type_of(from_json("{\"$map\": [1]}")) + "|" +
 				type_of(from_json("{\"$map\": [[1, 2]], \"x\": 1}"));
-			)", "{\"$char\":122}|{\"$map\":[[1,\"a\"],[2,\"b\"]]}|{\"s\":{\"$char\":99}}|char:z|sword,bow|2|0|x2|map|map|map", check_mode::warn);
+			)", "{\"$char\":122}|{\"$map\":[[1,\"a\"],[2,\"b\"]]}|{\"s\":{\"$char\":99}}|char:z|sword,bow|2|0|x2|map|map|map", warn_region);
 		});
 	}
 
@@ -4199,7 +4197,7 @@ private:
 				t([]() { C c; var s = "s"; c.n = s; return c.n; }) + "|" +
 				t([]() { C c; c.v = 2.5; c.v = "t"; return type_of(c.v) + ":" + c.v; }) + "|" +
 				t([]() { C c; return type_of(c.f) + ":" + c.f; });
-			)", "int:2|Cannot assign string to field 'n' of C (declared int)|string:t|float:1.0", check_mode::warn);
+			)", "int:2|Cannot assign string to field 'n' of C (declared int)|string:t|float:1.0", warn_region);
 		});
 	}
 
@@ -4213,7 +4211,7 @@ private:
 				t([]() { auto x = FLAG ? 2.5 : 1; x = 3; return type_of(x) + ":" + x; }) + "|" +
 				t([]() { auto x = FLAG ? 1 : 2.5; var s = "s"; x = s; return x; }) + "|" +
 				t([]() { auto y = FLAG ? 1 : "s"; y = 2.5; return type_of(y); });
-			)", "float:1.0|float:3.0|Cannot assign string to 'x' (declared float)|float", check_mode::warn);
+			)", "float:1.0|float:3.0|Cannot assign string to 'x' (declared float)|float", warn_region);
 			every_config("no warning for the numeric pair", "0|1", [](engine& e) {
 				auto numeric = e.check("var F = true; auto x = F ? 1 : 2.5;");
 				auto mixed = e.check("var F = true; auto y = F ? 1 : \"s\";");
@@ -4232,7 +4230,7 @@ private:
 				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = e; } return r; }
 				t([]() { var x = from_json("{\"$type\": \"R\", \"$val\": {\"v\": 3}}"); return "loaded"; }) + "|" +
 				t([]() { var x = from_json("{\"$type\": \"Ok\", \"$val\": {\"v\": 3}}"); return type_of(x) + ":" + x.v; });
-			)", "no R|Ok:3", check_mode::warn);
+			)", "no R|Ok:3", warn_region);
 		});
 	}
 
@@ -4250,7 +4248,7 @@ private:
 				t([]() { var a = [1, 2]; string s = ""; for (auto x : a) { x = "s"; s += x; } return s; }) + "|" +
 				t([]() { array<int> b = [1]; string s = ""; for (auto x : b) { x = 2.9; s += type_of(x) + ":" + x; } return s; });
 			)", "int:1 int:2 |string:1 string:2 |Cannot initialize 'v' (declared int) with string|Cannot initialize 'v' (declared int) with float|"
-			    "14|ss|int:2", check_mode::warn);
+			    "14|ss|int:2", warn_region);
 			every_config("checker", "1|0", [](engine& e) {
 				auto bad = e.check("array<float> a = [1.5]; for (int& v : a) { }");
 				auto ok = e.check("array<int> a = [1]; for (int& v : a) { } array<float> f = [1.5]; for (int v : f) { }");
@@ -4269,7 +4267,7 @@ private:
 				t([]() { string x = "a"; var& r = x; r = 5; return type_of(x) + ":" + x; }) + "|" +
 				t([]() { var x = 1; var& r = x; r = "free"; return type_of(x); }) + "|" +
 				t([]() { int u = 1; set37(u); return type_of(u) + ":" + u; });
-			)", "Cannot assign string to 'r' (declared int&)|int:2|string:5|string|int:3", check_mode::warn);
+			)", "Cannot assign string to 'r' (declared int&)|int:2|string:5|string|int:3", warn_region);
 		});
 		test("a_store_through_a_reference_copies_like_the_variables_own_store", [this]() {
 			// value semantics hold through the reference: the typed variable takes a copy, never the source's node
@@ -4278,7 +4276,7 @@ private:
 				function fill(var& r) { r = src; r[0] = 5; }
 				fill(dst);
 				"" + src[0] + " " + dst[0] + " " + dst.size();
-			)", "1 5 2", check_mode::warn);
+			)", "1 5 2", warn_region);
 		});
 	}
 
@@ -4296,7 +4294,7 @@ private:
 				string second = "" + S::s + " " + ns::x;
 				function decls() -> string { var& a = S::s; int& b = ns::x; a = 40; b = 41; return "" + S::s + " " + ns::x; }
 				first + "|" + second + "|" + decls();
-			)", "21 11 ab|15 16|40 41", check_mode::warn);
+			)", "21 11 ab|15 16|40 41", warn_region);
 		});
 	}
 
@@ -4311,7 +4309,7 @@ private:
 				var vi = 1; var vf = 1.5;
 				t([]() { set(vf); return vf; }) + "|" + t([]() { set(vi); return vi; }) + "|" + t([]() { B b = B(); seta(b); return b.v; }) + "|" +
 				t([]() { var x = 5; any(x); return x; }) + "|" + t([]() { var s = "x"; seta(s); return 1; });
-			)", "Cannot pass float to parameter 'a' of 'set' (declared int&)|7|9|s|Cannot pass string to parameter 'r' of 'seta' (declared A&)", check_mode::warn);
+			)", "Cannot pass float to parameter 'a' of 'set' (declared int&)|7|9|s|Cannot pass string to parameter 'r' of 'seta' (declared A&)", warn_region);
 			every_config("checker", "1|0", [](engine& e) {
 				auto bad = e.check("function set(int& a) { a = 7; } float u = 1.5; set(u);");
 				auto ok = e.check("function set(int& a) { a = 7; } int n = 1; set(n); var v = 2.5; set(v);");
@@ -4328,7 +4326,7 @@ private:
 				function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = e; } return r; }
 				var one = 1; var two = "s";
 				t([]() { var b = Bare(one, two); });
-			)", "Too many initializers for 'Bare': it has 1 field, got 2", check_mode::warn);
+			)", "Too many initializers for 'Bare': it has 1 field, got 2", warn_region);
 			every_config("checker text", "too many initializers for 'Bare': it has 1 field, got 2", [](engine& e) {
 				auto r = e.check("class Bare { int v = 1; } var b = Bare(1, \"s\");");
 				for (const auto& d : r.diagnostics) { if (d.message.find("initializers") != std::string::npos) { return d.message; } }
@@ -4339,7 +4337,7 @@ private:
 				function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = e; } return r; }
 				var one = 1; var two = "s";
 				t([]() { var b = Hidden(one, two); });
-			)", "No constructor of 'Hidden' takes (int, string)", check_mode::warn);
+			)", "No constructor of 'Hidden' takes (int, string)", warn_region);
 			every_config("checker text, not an aggregate", "no constructor of 'Hidden' takes (int, string)", [](engine& e) {
 				auto r = e.check("class Hidden { private: int v = 1; } var b = Hidden(1, \"s\");");
 				for (const auto& d : r.diagnostics) { if (d.message.find("constructor") != std::string::npos) { return d.message; } }
@@ -4357,7 +4355,7 @@ private:
 				var v = [1, "two", 3.0];
 				t([]() { array::slice(a, 0, 2).push("x"); return 1; }) + "|" + t([]() { array<int> sl = array::slice(a, 1, 3); return sl.size(); }) + "|" +
 				t([]() { array::slice(s, 0, 1).push(5); return 1; }) + "|" + t([]() { var sl = array::slice(v, 0, 2); sl.push("ok"); return sl.size(); });
-			)", "raised:Cannot push 'string' to array<int>|2|raised:Cannot push 'int' to array<string>|3", check_mode::warn);
+			)", "raised:Cannot push 'string' to array<int>|2|raised:Cannot push 'int' to array<string>|3", warn_region);
 		});
 	}
 
@@ -4372,7 +4370,7 @@ private:
 				map<int, int> counts = {}; for (int x : [3, 1, 3, 3]) { counts[x] += 1; }
 				"" + mi["k"] + mi["j"] + mi["q"] + mi.size() + "|" + mf["k"] + "|" + ms["k"] + "|" + counts[3] + counts[1] + counts.size() + "|" +
 				t([]() { var m = {}; m["k"] += 1; return m.size(); }) + "|" + t([]() { map<string, int> m = {}; m[5] += 1; return m.size(); });
-			)", "51-23|1.5|s|312|raised:Cannot apply '+=' to null and int|raised:Cannot use 'int' as a key of type 'string'", check_mode::warn);
+			)", "51-23|1.5|s|312|raised:Cannot apply '+=' to null and int|raised:Cannot use 'int' as a key of type 'string'", warn_region);
 		});
 		test("a_compound_on_a_missing_key_of_a_temporary_typed_map_meets_the_rvalue_target", [this]() {
 			// the default enters the temporary, the compound applies, and the store finds no lvalue
@@ -4383,7 +4381,7 @@ private:
 				t([]() { fresh()["k"] += 1; }) + "|" + t([]() { fresh()["k"]++; }) + "|" + t([]() { held()["k"] += 1; }) + "|" +
 				t([]() { fresh()[5] += 1; });
 			)", "raised:Cannot assign to rvalue expression|raised:Cannot assign to rvalue expression|raised:Cannot assign to rvalue expression|"
-			    "raised:Cannot use 'int' as a key of type 'string'", check_mode::off);
+			    "raised:Cannot use 'int' as a key of type 'string'", warn_region);
 		});
 	}
 
@@ -4395,7 +4393,7 @@ private:
 				float nan = math::INF - math::INF; var n = {}; n[nan] = 1; n[nan] = 2;
 				var pz = {}; pz[0.0] = 1; var nz = {}; nz[-0.0] = 1;
 				"" + m.size() + m[0.0] + m[-0.0] + "|" + t.size() + t[0.0] + "|" + n.size() + "|" + m.has(-0.0) + (pz == nz);
-			)", "122|16|1|truetrue", check_mode::warn);
+			)", "122|16|1|truetrue", warn_region);
 		});
 	}
 
@@ -4409,7 +4407,7 @@ private:
 				function t(function f) -> string { string r = "none"; try { r = f(); } catch (e) { r = "raised:" + e; } return r; }
 				to_string(T()) + "|" + (to_string(T()) == ("" + T()) ? "same" : "differs") + "|" + t([]() { return to_string(Bad()); }) + "|" +
 				t([]() { return to_string(Thrower()); }) + "|" + to_string(5) + to_string("s");
-			)", "t3|same|raised:Division by zero|raised:nope|5s", check_mode::warn);
+			)", "t3|same|raised:Division by zero|raised:nope|5s", warn_region);
 		});
 	}
 
@@ -4417,20 +4415,20 @@ private:
 		test("a_script_callback_behind_a_host_function_propagates_its_error", [this]() {
 			every_config("host callback", "raised:Division by zero|raised:boom|7", [](engine& e) {
 				e.add_function("apply", [](script_value cb) -> script_int { return convert_script_function<script_int(script_int)>(cb)(3); });
-				return spec::render(e.execute(R"(
+				return spec::render(e.execute(spec::in_warn_region(R"(
 					function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = "raised:" + e; } return r; }
 					t([]() { return apply([](int x) { int z = 0; return x / z; }); }) + "|" +
 					t([]() { return apply([](int x) { throw "boom"; return x; }); }) + "|" + apply([](int x) { return x + 4; });
-				)"));
-			}, check_mode::warn);
+				)")));
+			});
 		});
 		test("a_host_calling_a_script_callback_sees_the_error_as_an_exception", [this]() {
 			every_config("host sees", "threw:Division by zero", [](engine& e) {
-				e.execute("var cb = [](int x) { int z = 0; return x / z; };");
+				e.execute(spec::in_warn_region("var cb = [](int x) { int z = 0; return x / z; };"));
 				auto f = convert_script_function<int(int)>(e.get_variable("cb"));
 				try { (void)f(3); return std::string("no throw"); }
 				catch (const std::exception& ex) { return std::string("threw:") + ex.what(); }
-			}, check_mode::warn);
+			});
 		});
 	}
 
@@ -4447,7 +4445,7 @@ private:
 				C c = C();
 				var inc = c.keep(); inc(); inc();
 				"" + C().by_this() + C().bare() + C().later() + c.v;
-			)", "8943", check_mode::warn);
+			)", "8943", warn_region);
 		});
 	}
 
@@ -4464,7 +4462,7 @@ private:
 				t([]() { map<string, int> m = {"k": 1}; m["k"] /= s; }) + "|" + t([]() { var m = {"k": 1.5}; m["k"] -= s; });
 			)", "Cannot apply '-=' to int and string|Cannot apply '-=' to int and string|Cannot apply '*=' to int and string|"
 			    "Cannot apply '-=' to int and string|Cannot apply '%=' to int and string|Cannot apply '/=' to int and string|"
-			    "Cannot apply '-=' to float and string", check_mode::warn);
+			    "Cannot apply '-=' to float and string", warn_region);
 		});
 	}
 
@@ -4482,7 +4480,7 @@ private:
 				           nums.index_of(2.5) + nums.contains(1.0) + nums.index_of([1, 2]) + ints.index_of(4.0) + ints.contains(5);
 				string t = "none"; try { [B()].contains(B()); } catch (e) { t = "raised:" + e; }
 				r + "|" + t;
-			)", "true1false|true|1true31false|raised:cmp", check_mode::warn);
+			)", "true1false|true|1true31false|raised:cmp", warn_region);
 		});
 	}
 
@@ -4498,7 +4496,7 @@ private:
 				string r = pick(1) + pick(1.0) + pick("s") + pick(2) + "|" + inst(E(2)) + inst(E(3)) + memberwise(P());
 				string t = "none"; try { switch (B()) { case B(): t = "hit"; } } catch (e) { t = "raised:" + e; }
 				r + "|" + t;
-			)", "oneonesnone|E2noneP|raised:cmp", check_mode::warn);
+			)", "oneonesnone|E2noneP|raised:cmp", warn_region);
 		});
 	}
 

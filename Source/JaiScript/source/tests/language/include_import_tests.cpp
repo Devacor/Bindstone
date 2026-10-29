@@ -1545,10 +1545,8 @@ public:
             called.clear();
             try { eng->execute("hot_reload_migrate({});"); } catch (const std::exception& e) { called = e.what(); }
             check_false(called.empty(), "still not callable after a reload");
-            eng->static_checking(check_mode::off);
-            called = eng->execute("var m = \"\";\ntry { hot_reload_migrate({}); } catch (e) { m = e; }\nm;").to_string();
+            called = eng->execute("[[warn_mode]]; var m = \"\";\ntry { hot_reload_migrate({}); } catch (e) { m = e; }\nm;").to_string();
             check_true(called.find("hot_reload_migrate") != std::string::npos, "at run time too: " + called);
-            eng->static_checking(check_mode::strict);
 
             write("rh_mod.jai",
                 "int rh_version() { return 3; }\n"

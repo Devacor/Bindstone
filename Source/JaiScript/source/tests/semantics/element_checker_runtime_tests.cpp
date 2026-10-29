@@ -278,10 +278,9 @@ print("RAN");)element"},
 				auto eng = make_engine();
 				jai::stdlib::register_all(*eng);
 				const auto report = eng->check(source);
-				eng->static_checking(jai::check_mode::off);
 				bool runtime_succeeded = false;
 				try {
-					(void)eng->execute(source);
+					(void)eng->execute("[[warn_mode]]; " + source);   // run past the checker's verdict: the runtime is the oracle
 					runtime_succeeded = true;
 				} catch (const std::exception&) {
 					// Dynamic or value-dependent failures may remain runtime checks.

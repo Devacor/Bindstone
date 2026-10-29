@@ -343,8 +343,8 @@ stamps them. A sibling of an older version re-parses.
 ## 8. Diagnostics
 
 Every run-time error is `type_mismatch`, in the read-only family (internal/diagnostics.md family B, section "Const"). The
-checker reports the same fact at load, lowercase, with the declaration as the related location (`(declared at 3:1)`); warn
-mode reports it as a warning. A stamped node raises its text when it is reached, before any part of it runs (the right side
+checker reports the same fact at load, lowercase, with the declaration as the related location (`(declared at 3:1)`); a
+`[[warn_mode]]` region reports it as a warning. A stamped node raises its text when it is reached, before any part of it runs (the right side
 of an assignment included), so the error is the same whichever operand would have failed first.
 
 | case | run time | checker |
@@ -383,8 +383,8 @@ call, cast, declaration, return and range-for nodes):
   reported; the run time decides.
 - none: no const is reached, or a handle ends it.
 
-The walk runs in every check mode, the stamp pass included, so the verdict is on the node under strict, warn and off alike
-and the backends never depend on the diagnostics.
+The stamp pass runs on every unit, so the verdict is on the node whether the diagnostics gate or a `[[warn_mode]]` region
+demotes them, and the backends never depend on the diagnostics.
 
 ### 9.2 Run time
 

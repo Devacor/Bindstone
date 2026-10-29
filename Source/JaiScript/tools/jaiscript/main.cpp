@@ -116,11 +116,11 @@ struct options {
 	std::string backend = "vm";
 	uint32_t miss_every = 0;               // --miss-every=<n>: the miss injection lever (a build with JAISCRIPT_MISS_INJECTION)
 	size_t workers = 0;                    // --workers=<n>: the parallel regions' worker count (0: the engine's own)
-	std::string check = "strict";          // static checker mode (the engine default); warn = load anyway, report
 	double budget = 0.0;                   // seconds per execute; 0 = unlimited (runner default —
 	                                       // the ENGINE default is 5.0s, deliberately overridden:
 	                                       // long-running scripts are the user's business here)
 	bool watch = false;
+	bool warnings = false;                 // --warnings: list a clean load's warnings on stderr before it runs
 	bool time_runs = false;
 	bool debug = true;                     // DAP listener on by default (localhost, free until attach)
 	bool param_alias = true;               // engine::parameter_alias (--no-param-alias: every by-value parameter clones)
@@ -204,9 +204,6 @@ void print_usage() {
 		"                        the vm with every optimization off, engine::vm_reference_mode)\n"
 		"  --miss-every=<n>      the vm misses at every nth plain cell instruction (a build with JAISCRIPT_MISS_INJECTION; the flush at every position)\n"
 		"  --workers=<n>         the worker count of parallel_for, parallel_transform and parallel_reduce (default: the engine's own)\n"
-		"  --check=strict|warn|off\n"
-		"                        static checker mode (default strict: typed mistakes and undeclared\n"
-		"                        names fail the load; warn loads anyway and prints them; off skips)\n"
 		"  --disasm=<file>       write every chunk the VM compiles, disassembled with its regions' IR, to <file>\n"
 		"  --manifest=<file>     write the same chunks' semantic manifests (every field, exact constant bits) to <file>\n"
 		"  --coverage=<file>     write the vm's execution-coverage census (cells / typed / general, the reasons and their\n"
@@ -215,6 +212,8 @@ void print_usage() {
 		"                        error (default 0 = unlimited - infinite loops are your business;\n"
 		"                        the embedded-engine default of 5.0s is deliberately lifted here)\n"
 		"  --time                print wall time for each run\n"
+		"  --warnings            list the static checker's warnings on stderr before a script runs (errors\n"
+		"                        always fail the load and print)\n"
 		"  --benchmark-main=N    execute file as warm-up, then call its repeatable main() N times\n"
 		"  --no-debug            do not stand up the DAP debug listener\n"
 		"  --no-param-alias      bind every by-value parameter with a clone (the read-only elision off)\n"
@@ -289,6 +288,7 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		}
 		else if (a == "--watch") { opt.watch = true; }
 		else if (a == "--time") { opt.time_runs = true; }
+		else if (a == "--warnings") { opt.warnings = true; }
 		else if (a == "--no-debug") { opt.debug = false; }
 		else if (a == "--no-param-alias") { opt.param_alias = false; }
 		else if (a == "--no-local-alias") { opt.local_alias = false; }
@@ -300,7 +300,6 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a.rfind("--backend", 0) == 0) { opt.backend = value_of("--backend"); }
 		else if (a.rfind("--workers", 0) == 0) { opt.workers = static_cast<size_t>(std::stoul(value_of("--workers"))); }
 		else if (a.rfind("--miss-every", 0) == 0) { opt.miss_every = static_cast<uint32_t>(std::stoul(value_of("--miss-every"))); }
-		else if (a.rfind("--check", 0) == 0) { opt.check = value_of("--check"); }
 		else if (a.rfind("--disasm", 0) == 0) { opt.disasm = value_of("--disasm"); }
 		else if (a.rfind("--manifest", 0) == 0) { opt.manifest = value_of("--manifest"); }
 		else if (a.rfind("--coverage", 0) == 0) { opt.coverage = value_of("--coverage"); }
@@ -330,10 +329,6 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 	if (opt.backend == "interpreter") { opt.backend = "interp"; }
 	if (opt.backend != "vm" && opt.backend != "interp" && opt.backend != "vm-reference") {
 		std::fprintf(stderr, "%s\n", con.red("unknown backend: " + opt.backend + " (use vm, interp or vm-reference)").c_str());
-		return 2;
-	}
-	if (opt.check != "strict" && opt.check != "warn" && opt.check != "off") {
-		std::fprintf(stderr, "%s\n", con.red("unknown check mode: " + opt.check + " (use strict, warn or off)").c_str());
 		return 2;
 	}
 	if (opt.watch && opt.script.empty()) {
@@ -1039,7 +1034,6 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 		if (!jai::engine::miss_injection_available()) { std::fprintf(stderr, "--miss-every: this build carries no miss injection (configure with -DJAISCRIPT_MISS_INJECTION=ON)\n"); std::exit(2); }
 		eng->cells_miss_every(opt.miss_every);
 	}
-	eng->static_checking(opt.check == "off" ? jai::check_mode::off : opt.check == "warn" ? jai::check_mode::warn : jai::check_mode::strict);
 	eng->execution_budget(opt.budget);
 	eng->parameter_alias(opt.param_alias);
 	eng->local_alias(opt.local_alias);
@@ -1148,18 +1142,6 @@ int result_to_exit_code(const jai::script_value& result) {
 	return result.is_int() ? static_cast<int>(result.as_int()) : 0;
 }
 
-// Warn mode lists the checker's findings on stderr and runs anyway (strict raises them from the execute).
-void report_warn_mode_findings(jai::engine& eng, const std::string& content, const std::string& name) {
-	if (eng.static_checking() != jai::check_mode::warn) { return; }
-	try {
-		jai::check_report report = eng.check(content);
-		if (!report.diagnostics.empty()) {
-			std::fprintf(stderr, "jaiscript: static check (warn mode, running anyway):\n%s", report.format(content, name).c_str());
-		}
-	} catch (const std::exception&) {
-	}
-}
-
 // Scripts run as suspendable runs: a sleep hands control back here, and the loop waits on the engine's clock until the run is due
 jai::script_value finish_run(jai::engine& eng, jai::script_run run) {
 	while (!run.done()) {
@@ -1175,22 +1157,33 @@ jai::script_value finish_run(jai::engine& eng, jai::script_run run) {
 // execute_file_source keeps the file-path attribution (stack traces, debugger breakpoints)
 // while letting the host strip a UTF-8 BOM — Notepad's default, PowerShell's Set-Content —
 // which the lexer would otherwise reject as "Unexpected character".
-jai::script_value execute_script_file(jai::engine& eng, const fs::path& abs) {
+// A load that fails prints its whole listing as the error; one that passes lists only its warnings, here, before it runs.
+void print_check_warnings(jai::engine& eng, const std::string& content, const std::string& name) {
+	try {
+		jai::check_report report = eng.check(content);
+		if (!report.diagnostics.empty() && !report.has_errors()) {
+			std::fprintf(stderr, "jaiscript: static check warnings:\n%s", report.format(content, name).c_str());
+		}
+	} catch (const std::exception&) {
+	}
+}
+
+jai::script_value execute_script_file(jai::engine& eng, const fs::path& abs, bool print_warnings = false) {
 	std::string content = slurp_file(abs.string());
 	if (content.rfind("\xEF\xBB\xBF", 0) == 0) { content.erase(0, 3); }
-	report_warn_mode_findings(eng, content, abs.filename().string());
+	if (print_warnings) { print_check_warnings(eng, content, abs.filename().string()); }
 	return finish_run(eng, eng.start_file_source(abs.string(), content));
 }
 
 // Runs each -e source in order in `eng` (include/import resolve from the working directory); the first error stops the
 // run, and the last source's result gives the exit code as a file's does.
-run_result run_sources_in_engine(jai::engine& eng, const std::vector<std::string>& sources) {
+run_result run_sources_in_engine(jai::engine& eng, const std::vector<std::string>& sources, bool print_warnings = false) {
 	run_result r;
 	eng.add_include_path(fs::current_path().string());
 	auto start = std::chrono::steady_clock::now();
 	try {
 		for (const std::string& source : sources) {
-			report_warn_mode_findings(eng, source, "<script>");
+			if (print_warnings) { print_check_warnings(eng, source, "<script>"); }
 			r.exit_code = result_to_exit_code(eng.execute(source));
 		}
 	} catch (const std::exception& ex) {
@@ -1204,14 +1197,14 @@ run_result run_sources_in_engine(jai::engine& eng, const std::vector<std::string
 }
 
 // Runs `path` in `eng` with include/import resolving from the script's own directory.
-run_result run_file_in_engine(jai::engine& eng, const std::string& path) {
+run_result run_file_in_engine(jai::engine& eng, const std::string& path, bool print_warnings = false) {
 	run_result r;
 	std::error_code ec;
 	fs::path abs = fs::absolute(path, ec);
 	eng.add_include_path(abs.parent_path().string());
 	auto start = std::chrono::steady_clock::now();
 	try {
-		jai::script_value result = execute_script_file(eng, abs);
+		jai::script_value result = execute_script_file(eng, abs, print_warnings);
 		r.exit_code = result_to_exit_code(result);
 	} catch (const std::exception& ex) {
 		r.ok = false;
@@ -1238,7 +1231,7 @@ int run_file_mode(const options& opt, const console_state& con) {
 	if (!debug_note.str().empty()) { std::fputs(debug_note.str().c_str(), stderr); }
 
 	if (opt.benchmark_main > 0) { std::cout << "JAI_BENCHMARK_PHASE warmup\n"; }
-	run_result r = opt.sources.empty() ? run_file_in_engine(*eng, opt.script) : run_sources_in_engine(*eng, opt.sources);
+	run_result r = opt.sources.empty() ? run_file_in_engine(*eng, opt.script, opt.warnings) : run_sources_in_engine(*eng, opt.sources, opt.warnings);
 	if (r.ok && r.exit_code == 0 && opt.benchmark_main > 0) {
 		for (int repetition = 1; repetition <= opt.benchmark_main; ++repetition) {
 			std::cout << "JAI_BENCHMARK_PHASE measured " << repetition << "\n";
@@ -1691,11 +1684,11 @@ int run_selftest(const console_state& con) {
 	}
 
 	{ // -e: several sources in order, one engine, combined with the other flags; the last result is the exit code
-		const char* argv[] = {"jaiscript", "-e", "int base = 40;", "--backend=interp", "-e", "print(\"e ran\"); base + 2", "--check=warn", "--workers=2"};
+		const char* argv[] = {"jaiscript", "-e", "int base = 40;", "--backend=interp", "-e", "print(\"e ran\"); base + 2", "--workers=2"};
 		options parsed;
 		int parse_exit = parse_args(static_cast<int>(std::size(argv)), const_cast<char**>(argv), parsed, con);
 		expect(parse_exit == -1 && parsed.sources.size() == 2 && parsed.script.empty(), "-e: each flag adds a source, no script file");
-		expect(parsed.backend == "interp" && parsed.check == "warn" && parsed.workers == 2, "-e: combines with --backend, --check and --workers");
+		expect(parsed.backend == "interp" && parsed.workers == 2, "-e: combines with --backend and --workers");
 		parsed.debug = false;
 		auto eng = make_runner_engine(parsed, nullptr);
 		std::ostringstream captured;
@@ -2003,7 +1996,6 @@ int run_selftest(const console_state& con) {
 // The language server (tools/lsp) checks scripts against the runner's exact host surface.
 std::shared_ptr<jai::engine> jaiscript_runner_host_engine() {
 	options opt;
-	opt.check = "off";
 	opt.debug = false;
 	return make_runner_engine(opt, nullptr);
 }

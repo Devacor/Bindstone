@@ -44,10 +44,8 @@ namespace MV {
 		}
 
 #ifdef _DEBUG
-		// Warn-mode lint (see makeScriptEngine): check() is parse-cached, so this is
-		// amortized once per unique source.
+		// The checker's warnings (errors fail the execute): check() is parse-cached, so this is amortized once per unique source.
 		void logCheckDiagnostics(jai::engine& a_engine, const std::string& a_scriptIdentifier, const std::string& a_scriptContents) {
-			if (a_engine.static_checking() == jai::check_mode::off) { return; }
 			try {
 				auto report = a_engine.check(a_scriptContents);
 				if (!report.diagnostics.empty()) {
@@ -132,7 +130,6 @@ namespace MV {
 		std::error_code ignored;
 		engine->jaibite_cache_directory(playerCachePath() + "ScriptCache", std::filesystem::current_path(ignored).string());
 #endif
-		engine->static_checking(jai::check_mode::warn);   // engine default is strict; the live client stays at warn (-verifyassets runs the same scripts strict)
 		engine->set_script_error_handler([raw = engine.get()](const std::string& a_message) {
 			auto trace = raw->format_stack_trace();
 			MV::error("Script callback failed: ", a_message, trace.empty() ? "" : "\n", trace);

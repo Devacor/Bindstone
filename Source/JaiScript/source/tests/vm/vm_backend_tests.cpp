@@ -1507,9 +1507,8 @@ public:
 				auto e = jai::engine::make();
 				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_true(e->check(src).has_errors(), "strict rejects the referent at load");
-				e->static_checking(jai::check_mode::off);
 				check_eq(std::string("Cannot return reference to 'float' from a function returning 'int&'"),
-				         e->execute(src).as<std::string>());
+				         e->execute(std::string("[[warn_mode]]; ") + src).as<std::string>());
 			}
 		});
 
@@ -1898,15 +1897,13 @@ public:
 				for (const char* c : cases) {
 					auto e = jai::engine::make();
 					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-					e->static_checking(jai::check_mode::warn);   // the checker reports f(5) at load; the RUNTIME text is under test
-					auto msg = e->execute(std::string(setup) + c).as<std::string>();
+					auto msg = e->execute(std::string("[[warn_mode]]; ") + setup + c).as<std::string>();   // the checker reports f(5) at load; the RUNTIME text is under test
 					check_true(msg.find("Cannot pass non-lvalue to reference parameter") != std::string::npos,
 						std::string("non-lvalue arg keeps the exact error: ") + c + " got: " + msg);
 				}
 				{   // a method passed as a value is the method-value error, ahead of the reference binding
 					auto e = jai::engine::make();
 					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-					e->static_checking(jai::check_mode::warn);
 					auto msg = e->execute(std::string(setup) + "try { f(arr.size); } catch (e) { msg = e; } msg;").as<std::string>();
 					check_eq(std::string("'size' is a method of array; call it with arr.size() or wrap the call in a lambda"), msg);
 				}
@@ -2681,23 +2678,23 @@ public:
 		// Tier-1 reference args x coroutines x deep recursion: dual-backend differentials
 		// (parity is checked as interp == vm; absolute values pin sanctioned semantics)
 
-		auto run_both_backends_in = [](jai::check_mode mode, const char* src, size_t interpreter_depth = 0) {
+		// warn_region: the program opens a [[warn_mode]] region on its first line (the checker reports, the load proceeds)
+		auto run_both_backends_in = [](bool warn_region, const char* src, size_t interpreter_depth = 0) {
 			std::string out[2];
 			int idx = 0;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
 				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				e->execution_budget(0);
-				e->static_checking(mode);
 				if (interpreter_depth != 0) { e->max_call_depth(jai::backend_type::interpreter, interpreter_depth); }
-				try { out[idx] = e->execute(src).to_string(); }
+				try { out[idx] = e->execute(std::string(warn_region ? "[[warn_mode]]; " : "") + src).to_string(); }
 				catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
 				++idx;
 			}
 			return std::make_pair(out[0], out[1]);
 		};
 		auto run_both_backends = [run_both_backends_in](const char* src, size_t interpreter_depth = 0) {
-			return run_both_backends_in(jai::check_mode::strict, src, interpreter_depth);
+			return run_both_backends_in(false, src, interpreter_depth);
 		};
 
 		test("tier1_field_ref_call_inside_coroutine_body", [this, run_both_backends]() {
@@ -2926,9 +2923,8 @@ public:
 				e->max_call_depth(jai::backend_type::interpreter, 1000);
 				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				e->execution_budget(0);
-				e->static_checking(jai::check_mode::off);
 				e->execute(
-					"function plain(int d) -> int { if (d == 0) { int s = 0; for (int k = 0; k < 10; ++k) { try { s += nope; } catch (e) { s += 1; } } return s; } return plain(d - 1); }\n"
+					"[[warn_mode]]; function plain(int d) -> int { if (d == 0) { int s = 0; for (int k = 0; k < 10; ++k) { try { s += nope; } catch (e) { s += 1; } } return s; } return plain(d - 1); }\n"
 					"function framed(int d) -> int { auto keep = [&]() -> int { return d; }; if (d == 0) { int s = 0; for (int k = 0; k < 10; ++k) { try { s += nope; } catch (e) { s += 1; } } return s + keep() * 0; } return framed(d - 1); }");
 				const uint64_t before = e->get_symbolizer()->env_hops();
 				auto result = e->execute(std::string(fn) + "(" + std::to_string(depth) + ");");
@@ -3309,7 +3305,7 @@ public:
 		// Tier 3(c): a throw during callee setup (default-arg eval / param conversion)
 		// restores the caller environment - script keeps running and sees caller locals.
 		// The literal NC-into-int argument is a strict load error, so the strict probe
-		// sources the object from a var and the literal form runs under warn.
+		// sources the object from a var and the literal form runs in a [[warn_mode]] region.
 		test("tier3_env_restored_after_throwing_bind", [this, run_both_backends, run_both_backends_in]() {
 			const char* src = R"(
 				class NC { int z = 0; }
@@ -3339,7 +3335,7 @@ public:
 				keep = keep + 1;
 				msg + ":" + keep;
 			)";
-			auto [w_out, wv_out] = run_both_backends_in(jai::check_mode::warn, literal);
+			auto [w_out, wv_out] = run_both_backends_in(true, literal);
 			check_eq(std::string("caught+caught2:42"), w_out, "warn: literal mismatch throws at bind and restores");
 			check_eq(w_out, wv_out, "warn throwing-bind parity");
 			auto [s_out, sv_out] = run_both_backends(literal);
@@ -3555,7 +3551,6 @@ public:
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
 				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				e->static_checking(jai::check_mode::warn);
 				try {
 					e->execute("function f(auto n) -> int { return n + 1; }\nvar call_f(var x) { return f(x); }\nvar a = 0;\nfor (var i = 0; i < 3; i += 1) { a = call_f(a); }");
 					e->execute("function f(auto n) -> string { return \"s\" + n; }");
@@ -3949,26 +3944,24 @@ public:
 				  "to_string(use()) + \" \" + pick(2) + pick(-1) + \" 568 int\";" },
 			};
 			const std::string expected[] = { "0.0 568 int", "0.0 568 int", "1 posneg 568 int" };
+			// fuzz-reduced units, not statically clean (program 1's fn4 can fall off its end): each opens a [[warn_mode]] region
 			for (size_t pi = 0; pi < 3; ++pi) {
-				for (auto mode : {jai::check_mode::warn, jai::check_mode::off}) {
-					std::string out[2];
-					int idx = 0;
-					for (bool use_vm : {false, true}) {
-						auto e = jai::engine::make();
-						e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-						e->execution_budget(0);
-						e->static_checking(mode);
-						stdlib::register_all(*e);
-						try {
-							e->execute(programs[pi][0]);
-							out[idx] = e->execute(programs[pi][1]).to_string();
-						} catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
-						++idx;
-					}
-					const std::string label = "program " + std::to_string(pi) + (mode == jai::check_mode::warn ? " warn" : " off");
-					check_eq(expected[pi], out[0], "interpreter, " + label);
-					check_eq(out[0], out[1], "parity, " + label);
+				std::string out[2];
+				int idx = 0;
+				for (bool use_vm : {false, true}) {
+					auto e = jai::engine::make();
+					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					e->execution_budget(0);
+					stdlib::register_all(*e);
+					try {
+						e->execute(std::string("[[warn_mode]]; ") + programs[pi][0]);
+						out[idx] = e->execute(std::string("[[warn_mode]]; ") + programs[pi][1]).to_string();
+					} catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+					++idx;
 				}
+				const std::string label = "program " + std::to_string(pi);
+				check_eq(expected[pi], out[0], "interpreter, " + label);
+				check_eq(out[0], out[1], "parity, " + label);
 			}
 		});
 
@@ -4126,7 +4119,6 @@ public:
 				auto e = jai::engine::make();
 				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				e->execution_budget(0);
-				e->static_checking(jai::check_mode::warn);
 				stdlib::register_all(*e);
 				try { return e->execute(program).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
 			};
@@ -4598,35 +4590,35 @@ public:
 		test("global_qualified_missing_global_error_parity", [this, run_both_backends_in]() {
 			// A ::name with no global never falls back to a same-named member or local:
 			// the undefined-variable text is identical on both backends for every consumer
-			auto [i1, v1] = run_both_backends_in(jai::check_mode::off, R"(
+			auto [i1, v1] = run_both_backends_in(true, R"(
 				class W { int nothere = 5; int a() { return ::nothere; } }
 				auto w = W();
 				w.a();
 			)");
 			check_eq(i1, v1, "return ::missing error parity");
 			check_true(i1.find("Undefined variable 'nothere'") != std::string::npos, "return ::missing raises (got: " + i1 + ")");
-			auto [i2, v2] = run_both_backends_in(jai::check_mode::off, R"(
+			auto [i2, v2] = run_both_backends_in(true, R"(
 				class W { int nothere = 5; int a() { return ::nothere + 1; } }
 				auto w = W();
 				w.a();
 			)");
 			check_eq(i2, v2, "fused ::missing operand error parity");
 			check_true(i2.find("Undefined variable 'nothere'") != std::string::npos, "fused ::missing raises (got: " + i2 + ")");
-			auto [i3, v3] = run_both_backends_in(jai::check_mode::off, R"(
+			auto [i3, v3] = run_both_backends_in(true, R"(
 				class W { int nothere = 5; int a() { auto& r = ::nothere; return r; } }
 				auto w = W();
 				w.a();
 			)");
 			check_eq(i3, v3, "ref-decl ::missing error parity");
 			check_true(i3.find("Cannot take reference of undefined variable") != std::string::npos, "ref-decl ::missing raises (got: " + i3 + ")");
-			auto [i4, v4] = run_both_backends_in(jai::check_mode::off, R"(
+			auto [i4, v4] = run_both_backends_in(true, R"(
 				class W { int nothere = 5; int a() { auto& r = cast<int&>(::nothere); return r; } }
 				auto w = W();
 				w.a();
 			)");
 			check_eq(i4, v4, "cast<T&> ::missing error parity");
 			check_true(i4.find("Cannot take reference of undefined variable") != std::string::npos, "cast<T&> ::missing raises (got: " + i4 + ")");
-			auto [i5, v5] = run_both_backends_in(jai::check_mode::off, R"(
+			auto [i5, v5] = run_both_backends_in(true, R"(
 				auto& g() { int nothere = 1; return ::nothere; }
 				g();
 			)");
@@ -4640,8 +4632,8 @@ public:
 
 		test("callee_first_missing_fn_error_before_args", [this, run_both_backends, run_both_backends_in]() {
 			// An undefined callee errors BEFORE argument side effects run. Strict (the
-			// default) rejects the undeclared name at load; the runtime ordering runs under
-			// warn and, under strict, through a null callable held in a var.
+			// default) rejects the undeclared name at load; the runtime ordering runs in
+			// a [[warn_mode]] region and, under strict, through a null callable held in a var.
 			const char* src = R"(
 				var ran = false;
 				function side() -> auto { ran = true; return 1; }
@@ -4649,7 +4641,7 @@ public:
 				try { undefined_callee(side()); } catch (e) { msg = "caught"; }
 				"" + msg + ":" + ran;
 			)";
-			auto [i1, v1] = run_both_backends_in(jai::check_mode::warn, src);
+			auto [i1, v1] = run_both_backends_in(true, src);
 			check_eq(std::string("caught:false"), i1, "interp: missing callee beats arg side effects");
 			check_eq(i1, v1, "missing-callee ordering parity");
 			auto [s1, sv1] = run_both_backends(src);

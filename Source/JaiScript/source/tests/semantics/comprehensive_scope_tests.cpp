@@ -794,8 +794,7 @@ public:
             try { make_stdlib_engine()->execute(src); } catch (const std::exception& ex) { load = ex.what(); }
             check_true(load.find("'flavor' expects 0 argument(s), got 1") != std::string::npos, "the checker sees the member hide the global: " + load);
             auto e = make_stdlib_engine();
-            e->static_checking(jai::check_mode::off);
-            e->execute(src);
+            e->execute(std::string("[[warn_mode]]; ") + src);
             check_throws([&]() { e->execute("cup.sip();"); });
             check_eq(std::string("member"), e->execute("cup.flavor()").as<std::string>());
             check_eq(std::string("global"), e->execute("flavor(1)").as<std::string>());

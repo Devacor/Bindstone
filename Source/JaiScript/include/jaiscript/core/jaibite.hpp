@@ -48,13 +48,12 @@ namespace jai {
         // not touch the missing registrations); errors surface at execute() if it does.
         bool registration_mismatch() const { return registration_mismatch_; }
 
-        // Static-check state (internal/static_checking.md). A bite created or executed under
-        // warn/strict carries its diagnostics; checked_clean() means it was checked and
-        // has no error-severity diagnostics. save() stamps that flag beside the
-        // registration fingerprint; jaibite_load trusts the stamp only when the
-        // fingerprint matches, otherwise the bite loads unchecked and is re-checked on
-        // first strict/warn use (a bite is checked ONCE — later registrations don't
-        // re-trigger; re-create the bite to re-check).
+        // Static-check state (internal/static_checking.md). A created or executed bite
+        // carries its diagnostics; checked_clean() means it was checked and has no
+        // error-severity diagnostics. save() stamps that flag beside the registration
+        // fingerprint; jaibite_load trusts the stamp only when the fingerprint matches,
+        // otherwise the bite loads unchecked and is re-checked on first use (a bite is
+        // checked ONCE — later registrations don't re-trigger; re-create the bite to re-check).
         bool checked_clean() const { return check_state_ == check_state::clean; }
         const check_report& check_diagnostics() const { return check_report_; }
 
@@ -72,7 +71,7 @@ namespace jai {
         check_state check_state_ = check_state::unchecked;
         check_report check_report_;
         uint64_t proof_epoch_ = UINT64_MAX;   // UINT64_MAX = nodes carry no proofs
-        bool autos_typed_ = false;   // the first proof pass types the auto slots, in every mode
+        bool autos_typed_ = false;   // the first proof pass types the auto slots
         uint32_t unit_ = 0;   // shadowing unit, numbered at the first execute
         std::shared_ptr<void> lowering_;   // detail::aggregate_lowering_state (engine::aggregate_lowering)
         declaration_ptr reload_hook_;      // the source's hot_reload_migrate, kept off the program and saved with it; a bite runs no hook

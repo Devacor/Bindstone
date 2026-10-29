@@ -48,9 +48,8 @@ oracle-&gt;execute(script).as_int();                       // 5050 — same answ
 <div class="callout"><p><strong>From the command line, the backend is a flag.</strong> The standalone runner starts on the <em>VM</em>, as an engine does:</p>
 <div class="codeblock cb-plain"><pre><code class="lang-plain">--backend=vm|interp|vm-reference   execution backend (default vm; interp = tree-walking interpreter; vm-reference =
                         the vm with every optimization off, engine::vm_reference_mode)
---check=strict|warn|off   static checker mode (default strict)
 --budget=N            execution budget in seconds per execute (default 0 = unlimited)</code></pre></div>
-<p>Static checking is <code>strict</code> in both places (see <a href="06-static-checking.html">Static Checking</a>) and the backend is the VM in both, so a script that behaves one way under <code>jaiscript file.jai</code> and another inside your host differs in what the host registers or sets; <code>--backend=interp</code> runs it on the interpreter to compare against the reference. The runner also lifts the engine&#x27;s 5&nbsp;second execution budget to unlimited; pass <code>--budget=N</code> to put one back.</p></div>
+<p>Static checking is strict in both places (see <a href="06-static-checking.html">Static Checking</a>) and the backend is the VM in both, so a script that behaves one way under <code>jaiscript file.jai</code> and another inside your host differs in what the host registers or sets; <code>--backend=interp</code> runs it on the interpreter to compare against the reference. The runner also lifts the engine&#x27;s 5&nbsp;second execution budget to unlimited; pass <code>--budget=N</code> to put one back.</p></div>
 <p>Backend construction is lazy. Creating an engine or setting the type costs nothing until a script actually runs.</p>
 <h2 id="the-parity-contract">The parity contract<a class="hlink" href="#the-parity-contract" aria-label="link">&#8203;</a></h2>
 <p>The two backends are held to <strong>byte-for-byte behavioral parity, including error text</strong>. This is not aspirational; it is machinery:</p>

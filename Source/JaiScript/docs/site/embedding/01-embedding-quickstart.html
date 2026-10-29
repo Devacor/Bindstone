@@ -161,7 +161,7 @@ std::cout &lt;&lt; &quot;the engine carries on: &quot; &lt;&lt; eng-&gt;execute(
 script threw: out of mana
 risky(0) failed: Division by zero
 the engine carries on: 42</code></pre></div>
-<p>Checking is strict by default, so a mistake the checker can see is reported before a single statement runs, with every error in the file listed. <a href="17-host-api.html#error-surfaces">Error surfaces</a> lists the exception types and which calls throw, and <a href="06-static-checking.html">Static Checking</a> covers names your host injects at run time.</p>
+<p>Checking is strict, so a mistake the checker can see is reported before a single statement runs, with every error in the file listed. <a href="17-host-api.html#error-surfaces">Error surfaces</a> lists the exception types and which calls throw, and <a href="06-static-checking.html">Static Checking</a> covers names your host injects at run time.</p>
 <h2 id="where-next">Where to go next<a class="hlink" href="#where-next" aria-label="link">&#8203;</a></h2>
 <ul>
 <li><a href="17-host-api.html">Host API in depth</a>: functions and direct entries, live bindings to C++ variables and their write-through rules, reading script state back, per-execution variables and the time source.</li>

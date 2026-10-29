@@ -24,9 +24,6 @@ namespace jai::fuzz {
 	                                             bool param_alias = true) {
 		auto result = engine::make();
 		result->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
-		// Semantic errors in generator programs are irrelevant to structural loading.
-		// Off still exercises the ordinary loader's marking and proof walks.
-		result->static_checking(check_mode::off);
 		result->type_proofs(proofs);
 		result->parameter_alias(param_alias);
 		result->local_alias(param_alias);
@@ -47,14 +44,19 @@ namespace jai::fuzz {
 			program p = generate_program(result.source_seed, max_depth);
 			if (p.segments.empty()) continue;
 			auto author = mutation_engine(false, proofs, param_alias);
+			// Semantic errors in generator programs are irrelevant to structural loading: the unit's [[warn_mode]] region is
+			// serialized with it, so the loader's check walks every bite and a mutant keeps the region unless a mutation hits it
+			const std::string source = k_warn_region_prefix + p.segments.front();
 			try {
-				auto bite = author->jaibite(p.segments.front());
+				auto bite = author->jaibite(source);
 				if (!bite.valid()) continue;
 				result.original = bite.save_bytes();
-				result.source = p.segments.front();
+				result.source = source;
 				break;
 			} catch (const jai::parse_error&) {
 				// Generator parse rejection, not a loader verdict.
+			} catch (const jai::static_check_error&) {
+				// A load error the region does not demote: not a loader verdict either.
 			}
 		}
 		if (result.original.empty()) {
@@ -136,6 +138,8 @@ namespace jai::fuzz {
 			auto bite = host->jaibite_load_bytes(bytes);
 			if (require_stable_bytes) result.stable_bytes = bite.save_bytes() == bytes;
 			result.accepted = true;
+		} catch (const jai::static_check_error& error) {
+			result.loader_error = error.what();   // a mutation that removed or changed the [[warn_mode]] region: the checker's verdict
 		} catch (const jai::runtime_error& error) {
 			result.loader_error = error.what();
 			if (result.loader_error.rfind("jaibite: ", 0) != 0) {

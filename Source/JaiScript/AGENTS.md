@@ -165,9 +165,9 @@ examples/   GLOOM, GRUBWELL (crawler), demoreel, Gator Quest, JaiDOOM, embed_qui
 docs/    BUILD.md, site/ (the specification), site_tools/
 ```
 
-Pipeline: lexer → parser (recursive descent, AST) → the static checker (strict by default; it also stamps type proofs
-both backends consume behind runtime guards) → one `execution_backend`: `jai::vm` or the interpreter, chosen per engine
-with `set_backend` before the first execute. Builtin container and string methods live in one registry both backends
+Pipeline: lexer → parser (recursive descent, AST) → the static checker (always strict, `[[warn_mode]]` the per-region
+opt-out; it also stamps type proofs both backends consume behind runtime guards) → one `execution_backend`: `jai::vm` or
+the interpreter, chosen per engine with `set_backend` before the first execute. Builtin container and string methods live in one registry both backends
 share. `script_value` is a 16-byte type-erased value with `strong_ptr`-wrapped heavy types; `clone()` is a deep copy,
 copying is shallow. Interned symbol IDs are engine-bound: never share or serialize them across engines.
 

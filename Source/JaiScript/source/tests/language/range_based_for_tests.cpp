@@ -85,9 +85,8 @@ public:
             stdlib::register_all(engine);
             // `kv.first = ...` is a strict load error (Map Tests :: map_key_read_only_static_battery);
             // this pins the runtime backstop: the store lands on the pair's copy, never the key
-            engine->static_checking(check_mode::off);
             
-            auto result = engine->execute(R"(
+            auto result = engine->execute(R"([[warn_mode]];
                 auto test_map = {"key1": 100, "key2": 200};
                 auto original_keys = "";
                 for (auto kv : test_map) {

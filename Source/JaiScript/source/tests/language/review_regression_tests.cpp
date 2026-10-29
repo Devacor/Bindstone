@@ -112,7 +112,6 @@ public:
                 auto e = engine::make();
                 e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 jai::stdlib::register_all(*e);
-                e->static_checking(check_mode::off);
                 const std::string label = vm ? "vm" : "interp";
                 auto run = [&](const char* body) {
                     std::string src = std::string(R"(
@@ -125,7 +124,7 @@ public:
                         try { )") + body + R"( } catch (err) { msg = err; }
                         return to_string(got) + "|" + to_string(calls) + "|" + msg;
                     )";
-                    try { return e->execute(src).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+                    try { return e->execute("[[warn_mode]]; " + src).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
                 };
                 check_eq(std::string("22|1|"), run("function probe() -> int { var data = [3]; var& value = data[0]; data.pop(); value += restore_array(data); return value; } got = probe();"), label + " a removed array element restored by the right side");
                 check_eq(std::string("22|1|"), run("function probe() -> int { var data = {\"key\": 3}; var& value = data[\"key\"]; data.erase(\"key\"); value += restore_map(data); return value; } got = probe();"), label + " a removed map entry restored by the right side");
@@ -143,10 +142,9 @@ public:
                 auto e = engine::make();
                 e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 jai::stdlib::register_all(*e);
-                e->static_checking(check_mode::off);
                 const std::string label = vm ? "vm" : "interp";
                 auto run = [&](const char* src) {
-                    try { return e->execute(src).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+                    try { return e->execute(std::string("[[warn_mode]]; ") + src).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
                 };
                 check_eq(std::string("Reference to a removed array element|finished"),
                          run(R"(string msg = ""; try { var data = [3]; var& value = data[0]; data.pop(); value += 2; } catch (err) { msg = err; } return msg + "|finished";)"),
@@ -170,7 +168,6 @@ public:
                 auto e = engine::make();
                 e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 jai::stdlib::register_all(*e);
-                e->static_checking(check_mode::off);
                 const std::string label = vm ? "vm" : "interp";
                 auto run = [&](const char* body) {
                     std::string src = std::string(R"(
@@ -182,7 +179,7 @@ public:
                         try { )") + body + R"( } catch (err) { msg = err; }
                         return to_string(calls) + "|" + msg;
                     )";
-                    return e->execute(src).as_string();
+                    return e->execute("[[warn_mode]]; " + src).as_string();
                 };
                 check_eq(std::string("0|C has no member 'missing'"), run("var x = v.missing + touch();"), label + " arithmetic, left raises");
                 check_eq(std::string("0|C has no member 'missing'"), run("var x = v.missing + C::nope;"), label + " arithmetic, both would raise: the left wins");
@@ -979,9 +976,8 @@ public:
         // by-value result raises naming the callee (strict reports a statically known one at load); a throw in either wins
         test("assignment_to_a_by_value_call_result_raises_after_the_call", [this]() {
             auto e = make_engine();
-            e->static_checking(check_mode::off);
             stdlib::register_all(*e);
-            auto r = e->execute(R"(
+            auto r = e->execute(R"([[warn_mode]]; 
                 var cnt = 0;
                 function bump() { cnt++; return 5; }
                 function thrower() { throw "boom"; }
@@ -1000,8 +996,8 @@ public:
         });
         test("fuzz_typed_fn_falls_off_end_returns_null", [this]() {
             auto e = make_engine();
-            e->static_checking(check_mode::warn);   // strict rejects the missing return at load
-            auto r = e->execute(R"(
+            // strict rejects the missing return at load: the program opens a [[warn_mode]] region
+            auto r = e->execute(R"([[warn_mode]]; 
                 function f(int p) -> string { int g = 0; while (++g < 4) {} }
                 f(1);
             )");
@@ -1126,27 +1122,26 @@ public:
         // interpreter, so `v1 += v1` blamed the lhs while the vm (C++17 order: rhs
         // first) blamed the rhs load. The "(no 'this' in scope)" decoration itself is
         // symmetric on both backends and stays. Strict (the default) rejects the
-        // undeclared name at load, so the runtime ordering is pinned under warn. ----
+        // undeclared name at load, so the runtime ordering is pinned in a [[warn_mode]] region. ----
         test("fuzz_compound_undef_eval_order_parity", [this]() {
-            auto run_both = [](const char* src, check_mode mode) {
+            auto run_both = [](const char* src, bool warn_region) {
                 std::string msg[2];
                 int idx = 0;
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
                     e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-                    e->static_checking(mode);
-                    try { e->execute(src); }
+                    try { e->execute(std::string(warn_region ? "[[warn_mode]]; " : "") + src); }
                     catch (const std::exception& ex) { msg[idx] = ex.what(); }
                     ++idx;
                 }
                 return std::make_pair(msg[0], msg[1]);
             };
             auto expect_both = [&](const char* src, const std::string& needle, const std::string& what) {
-                auto [i_msg, v_msg] = run_both(src, check_mode::warn);
+                auto [i_msg, v_msg] = run_both(src, true);
                 check_eq(i_msg, v_msg, what + " error text is byte-identical across backends");
                 check_true(i_msg.find(needle) != std::string::npos,
                     what + " blames the right name (got: " + i_msg + ")");
-                auto [i_strict, v_strict] = run_both(src, check_mode::strict);
+                auto [i_strict, v_strict] = run_both(src, false);
                 check_eq(i_strict, v_strict, what + " strict listing is byte-identical across backends");
                 check_true(i_strict.find("static check failed") == 0 &&
                     i_strict.find("use of undeclared identifier 'v1'") != std::string::npos,
@@ -1261,9 +1256,8 @@ public:
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
                     e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-                    e->static_checking(check_mode::off);
                     jai::stdlib::register_all(e);
-                    try { out[idx] = e->execute(src).to_string(); }
+                    try { out[idx] = e->execute(std::string("[[warn_mode]]; ") + src).to_string(); }
                     catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
                     ++idx;
                 }
@@ -1388,8 +1382,7 @@ public:
             auto strict = make_engine();
             check_throws<static_check_error>([&]() { strict->execute(src); });
             auto e = make_engine();
-            e->static_checking(check_mode::warn);
-            check_eq(std::string("xc"), e->execute(src).as_string());
+            check_eq(std::string("xc"), e->execute(std::string("[[warn_mode]]; ") + src).as_string());
             // strict admits the same ordering through a typed target: the rhs call runs,
             // then the var-sourced string fails the int store
             auto typed = make_engine();
@@ -1705,15 +1698,15 @@ public:
         // text: `n.nosuch` on an int/float/bool/char/function receiver reads
         // `int has no member 'nosuch'` (both backends raised an EMPTY text). Each program
         // logs argument side effects into `log` and returns `log + "|" + caught`. ----
-        auto run_order_both = [](const char* src, check_mode mode) {
+        // warn_region: the program opens a [[warn_mode]] region on its first line (the checker reports, the load proceeds)
+        auto run_order_both = [](const char* src, bool warn_region) {
             std::string out[2];
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-                e->static_checking(mode);
                 try {
-                    auto r = e->execute(src);
+                    auto r = e->execute(std::string(warn_region ? "[[warn_mode]]; " : "") + src);
                     out[idx] = r.is_string() ? r.as_string() : std::string("<non-string>");
                 } catch (const std::exception& ex) { out[idx] = std::string("what:") + ex.what(); }
                 ++idx;
@@ -1721,8 +1714,8 @@ public:
             return std::make_pair(out[0], out[1]);
         };
         auto expect_order = [this, run_order_both](const char* src, const std::string& expected,
-                                                   const std::string& what, check_mode mode) {
-            auto [i, v] = run_order_both(src, mode);
+                                                   const std::string& what, bool warn_region) {
+            auto [i, v] = run_order_both(src, warn_region);
             check_eq(expected, i, what + " (interpreter)");
             check_eq(i, v, what + " parity");
             return i;
@@ -1733,18 +1726,18 @@ public:
                 var v8 = null; var caught = "";
                 try { v8.push(side()); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|Cannot call 'push' on null ('v8' is null)", "null receiver beats arg side effects", check_mode::strict);
+            )").c_str(), "|Cannot call 'push' on null ('v8' is null)", "null receiver beats arg side effects", false);
             // the fuzz shape (seed 132479): the callee's null error names the CALLEE member
             auto [i, v] = run_order_both(R"(
                 auto v7 = [4611686018427387904, 5]; auto v8 = v7.reverse(); v8.push(v8.length());
-            )", check_mode::strict);
+            )", false);
             check_eq(i, v, "uncaught null-receiver what() parity");
             check_true(i.find("Cannot call 'push' on null ('v8' is null)") != std::string::npos,
                 "the callee member is blamed, not the argument's (got: " + i + ")");
             expect_order((std::string(side_prelude) + R"(
                 var v8 = null; var r = v8?.push(side());
                 log + "|" + (r == null);
-            )").c_str(), "|true", "null-safe call skips the arguments", check_mode::strict);
+            )").c_str(), "|true", "null-safe call skips the arguments", false);
         });
         test("scalar_receiver_unknown_member_text", [this, expect_order, run_order_both, side_prelude]() {
             const std::pair<const char*, const char*> receivers[] = {
@@ -1756,14 +1749,14 @@ public:
                     "try { n.nosuch(side()); } catch (e) { caught = e; }\n"
                     "log + \"|\" + caught;";
                 expect_order(src.c_str(), std::string("|") + type_name + " has no member 'nosuch'",
-                    std::string("scalar receiver ") + type_name, check_mode::strict);
+                    std::string("scalar receiver ") + type_name, false);
             }
             expect_order(R"(
                 var n = 5; var caught = "";
                 try { var z = n.nosuch; } catch (e) { caught = e; }
                 caught;
-            )", "int has no member 'nosuch'", "scalar member read", check_mode::strict);
-            auto [i, v] = run_order_both("var n = 5; n.nosuch(1);", check_mode::strict);
+            )", "int has no member 'nosuch'", "scalar member read", false);
+            auto [i, v] = run_order_both("var n = 5; n.nosuch(1);", false);
             check_eq(i, v, "uncaught scalar-member what() parity");
             check_true(i.find("int has no member 'nosuch'") != std::string::npos,
                 "uncaught scalar-member text (got: " + i + ")");
@@ -1772,23 +1765,23 @@ public:
                 var s = "abc"; var caught = "";
                 try { s.nosuch(side()); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|string has no member 'nosuch'", "string receiver", check_mode::strict);
+            )").c_str(), "|string has no member 'nosuch'", "string receiver", false);
             expect_order((std::string(side_prelude) + R"(
                 var a = [1]; var caught = "";
                 try { a.nosuch(side()); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|array has no member 'nosuch'", "array receiver", check_mode::strict);
+            )").c_str(), "|array has no member 'nosuch'", "array receiver", false);
             expect_order((std::string(side_prelude) + R"(
                 var m = {"k": 1}; var caught = "";
                 try { m.nosuch(side()); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|map has no member or key 'nosuch'", "map receiver", check_mode::strict);
+            )").c_str(), "|map has no member or key 'nosuch'", "map receiver", false);
             expect_order((std::string(side_prelude) + R"(
                 class W { int x = 0; }
                 shared_ptr<W> o = W(); weak_ptr<W> w = o; var caught = "";
                 try { w.nosuch(side()); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|weak_ptr has no member 'nosuch'", "weak_ptr receiver", check_mode::warn);
+            )").c_str(), "|weak_ptr has no member 'nosuch'", "weak_ptr receiver", true);
         });
         test("object_receiver_lookup_before_args", [this, expect_order, side_prelude]() {
             const std::string cls = std::string(side_prelude) + R"(
@@ -1803,22 +1796,22 @@ public:
             expect_order((cls + R"(
                 try { obj.nosuch(side()); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|O has no member 'nosuch'", "unknown member beats arg side effects", check_mode::warn);
+            )").c_str(), "|O has no member 'nosuch'", "unknown member beats arg side effects", true);
             // a plain field is not callable: the check fires before the arguments
             expect_order((cls + R"(
                 try { obj.x(side()); } catch (e) { caught = "c:" + e; }
                 log + "|" + caught;
-            )").c_str(), "|c:Cannot call 'x': it is an int, not a function", "field shadow not-callable beats arg side effects", check_mode::warn);
+            )").c_str(), "|c:Cannot call 'x': it is an int, not a function", "field shadow not-callable beats arg side effects", true);
             expect_order((cls + R"(
                 obj.lam = [](int a) { return a * 2; };
                 var r = obj.lam(side());
                 log + "|" + r;
-            )").c_str(), "A|2", "callable field still calls once", check_mode::warn);
+            )").c_str(), "A|2", "callable field still calls once", true);
             // overload resolution needs the argument values: stays post-args
             expect_order((cls + R"(
                 var r1 = obj.f(side()); var r2 = obj.f(side(), 2);
                 log + "|" + r1 + ":" + r2;
-            )").c_str(), "AA|1:3", "multi-overload method resolves post-args", check_mode::warn);
+            )").c_str(), "AA|1:3", "multi-overload method resolves post-args", true);
         });
         test("nested_callee_lookup_order", [this, expect_order, side_prelude]() {
             const std::string cls = std::string(side_prelude) + R"(
@@ -1831,17 +1824,17 @@ public:
                 var a = A(); var b = null;
                 try { a.f(b.g(c.h())); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|Cannot call 'g' on null ('b' is null)", "inner null receiver beats the innermost call", check_mode::warn);
+            )").c_str(), "|Cannot call 'g' on null ('b' is null)", "inner null receiver beats the innermost call", true);
             expect_order((cls + R"(
                 var a = null; var b = null;
                 try { a.f(b.g(c.h())); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|Cannot call 'f' on null ('a' is null)", "outer null receiver beats everything", check_mode::warn);
+            )").c_str(), "|Cannot call 'f' on null ('a' is null)", "outer null receiver beats everything", true);
             expect_order((cls + R"(
                 var a = A2(); var b = null;
                 try { a.f(b.g(c.h())); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|A2 has no member 'f'", "outer unknown member beats the inner null", check_mode::warn);
+            )").c_str(), "|A2 has no member 'f'", "outer unknown member beats the inner null", true);
         });
         test("trivial_args_unchanged", [this, expect_order, side_prelude]() {
             expect_order(R"(
@@ -1852,7 +1845,7 @@ public:
                     return "" + obj.f(1, local, "abc") + ":" + arr.length();
                 }
                 run();
-            )", "6:2", "slot-local / literal arguments", check_mode::strict);
+            )", "6:2", "slot-local / literal arguments", false);
             expect_order((std::string(side_prelude) + R"(
                 var v8 = null; var n = 5;
                 var c1 = ""; var c2 = ""; var c3 = ""; var c4 = "";
@@ -1862,24 +1855,24 @@ public:
                 try { n.nosuch(side()); } catch (e) { c4 = e; }
                 log + "|" + (c1 == c2) + ":" + (c3 == c4) + "|" + c1 + "|" + c3;
             )").c_str(), "|true:true|Cannot call 'push' on null ('v8' is null)|int has no member 'nosuch'",
-                "probed and unprobed shapes raise the same texts", check_mode::strict);
+                "probed and unprobed shapes raise the same texts", false);
         });
         test("computed_callee_callable_check_before_args", [this, expect_order, side_prelude]() {
             expect_order((std::string(side_prelude) + R"(
                 var arr = [1]; var caught = "none";
                 try { arr[0](side()); } catch (e) { caught = "c:" + e; }
                 log + "|" + caught;
-            )").c_str(), "|c:Cannot call a value of type int: it is not a function", "non-callable element beats arg side effects", check_mode::strict);
+            )").c_str(), "|c:Cannot call a value of type int: it is not a function", "non-callable element beats arg side effects", false);
             expect_order((std::string(side_prelude) + R"(
                 var fs = [[](int a) -> int { return a * 2; }];
                 var r = fs[0](side());
                 log + "|" + r;
-            )").c_str(), "A|2", "callable element still calls", check_mode::strict);
+            )").c_str(), "A|2", "callable element still calls", false);
             expect_order((std::string(side_prelude) + R"(
                 function mk() -> auto { return [](int a) -> int { return a + 100; }; }
                 var r = mk()(side());
                 log + "|" + r;
-            )").c_str(), "A|101", "call-result callee still calls", check_mode::strict);
+            )").c_str(), "A|101", "call-result callee still calls", false);
         });
         test("operator_overloads_unaffected", [this, expect_order, run_order_both]() {
             expect_order(R"(
@@ -1893,7 +1886,7 @@ public:
                 var a = V(1);
                 var r = a + make();
                 log + "|" + r.v;
-            )", "M+|3", "operator overload call", check_mode::strict);
+            )", "M+|3", "operator overload call", false);
             auto [i, v] = run_order_both(R"(
                 var log = "";
                 class V { int v = 0; V(int x) { v = x; } function operator+(V o) -> V { return V(v + o.v); } }
@@ -1901,7 +1894,7 @@ public:
                 var n = null; var caught = "none";
                 try { var q = n + make(); } catch (e) { caught = "c"; }
                 log + "|" + caught;
-            )", check_mode::strict);
+            )", false);
             check_eq(i, v, "null left operand parity");
         });
         test("coroutine_calls_unaffected", [this, expect_order, side_prelude]() {
@@ -1922,13 +1915,13 @@ public:
                 var acc2 = Acc(); var between = acc2.add(2 + 3);
                 var final = h.next();
                 "" + first + ":" + between + ":" + final + ":" + h.done();
-            )", "1:5:5:true", "method calls around a yield", check_mode::strict);
+            )", "1:5:5:true", "method calls around a yield", false);
             expect_order((std::string(side_prelude) + R"(
                 coroutine int gen() { yield 1; return 2; }
                 var h = gen(); h.next(); h.next();
                 string message = ""; try { h.done(side()); } catch (e) { message = e; }
                 log + "|" + message;
-            )").c_str(), "A|done() takes no arguments", "handle arguments are evaluated before arity rejection", check_mode::strict);
+            )").c_str(), "A|done() takes no arguments", "handle arguments are evaluated before arity rejection", false);
         });
 
         // ---- Compound member assignment evaluates its receiver ONCE (C++ `a.b op= c`
@@ -1954,11 +1947,11 @@ public:
                 pk().v /= 2; string s4 = log + ":" + ("" + shared.v);
                 pk().v %= 4;
                 s1 + "|" + s2 + "|" + s3 + "|" + s4 + "|" + log + ":" + ("" + shared.v);
-            )").c_str(), "A:15|AA:13|AAA:39|AAAA:19|AAAAA:3", "call receiver runs once per compound", check_mode::strict);
+            )").c_str(), "A:15|AA:13|AAA:39|AAAA:19|AAAAA:3", "call receiver runs once per compound", false);
             expect_order((std::string(recv_prelude) + R"(
                 var r = (pk().v += 5);
                 log + ":" + ("" + r) + ":" + ("" + shared.v);
-            )").c_str(), "A:15:15", "expression-position compound", check_mode::strict);
+            )").c_str(), "A:15:15", "expression-position compound", false);
         });
         test("member_incdec_receiver_once", [this, expect_order, recv_prelude]() {
             expect_order((std::string(recv_prelude) + R"(
@@ -1971,7 +1964,7 @@ public:
                 int t = pk().v--;
                 int u = --pk().v;
                 s1 + "|" + s2 + "|" + s3 + "|" + s4 + "|" + log + ":" + ("" + r) + ":" + ("" + q) + ":" + ("" + t) + ":" + ("" + u) + ":" + ("" + shared.v);
-            )").c_str(), "A:11|AA:12|AAA:11|AAAA:10|AAAAAAAA:10:12:12:10:10", "++/-- pre and post on a call receiver", check_mode::strict);
+            )").c_str(), "A:11|AA:12|AAA:11|AAAA:10|AAAAAAAA:10:12:12:10:10", "++/-- pre and post on a call receiver", false);
         });
         test("member_compound_receiver_once_index_and_key", [this, expect_order]() {
             expect_order(R"(
@@ -1990,7 +1983,7 @@ public:
                 mp[key("e")].v++;
                 vm[key("f")].v -= 3;
                 log + "|" + ("" + arr[1].v) + ":" + ("" + varr[1].v) + ":" + ("" + mp["k"].v) + ":" + ("" + vm["k"].v);
-            )", "abcdef|12:11:12:7", "index / key receivers run once", check_mode::strict);
+            )", "abcdef|12:11:12:7", "index / key receivers run once", false);
         });
         test("member_compound_receiver_once_nested", [this, expect_order]() {
             expect_order(R"(
@@ -2007,7 +2000,7 @@ public:
                 h.getb().cc.c += 3; string s3 = log + ":" + ("" + h.a.bb.cc.c);
                 --h.getb().cc.c; string s4 = log + ":" + ("" + h.a.bb.cc.c);
                 s1 + "|" + s2 + "|" + s3 + "|" + s4;
-            )", "A:2|AA:3|AAB:4|AABB:3", "every level of a nested chain runs once", check_mode::strict);
+            )", "A:2|AA:3|AAB:4|AABB:3", "every level of a nested chain runs once", false);
         });
         test("member_compound_receiver_once_operator_overload", [this, expect_order]() {
             expect_order(R"(
@@ -2019,7 +2012,7 @@ public:
                 gh().v += V(4); string s1 = log + ":" + ("" + hh.v.x);
                 var r = (gh().v += V(1));
                 s1 + "|" + log + ":" + ("" + r.x) + ":" + ("" + hh.v.x);
-            )", "H+:5|H+H+:6:6", "operator+ compound evaluates the receiver once", check_mode::strict);
+            )", "H+:5|H+H+:6:6", "operator+ compound evaluates the receiver once", false);
         });
         test("member_compound_receiver_once_hybrid", [this]() {
             for (bool use_vm : {false, true}) {
@@ -2049,8 +2042,7 @@ public:
                 auto e = make_engine();
                 jai::stdlib::register_all(*e);
                 e->type_proofs(proofs);
-                e->static_checking(check_mode::off);
-                auto caught = [&](const std::string& src) { return e->execute("var m = \"none\";\n" + src + "\nm;").to_string(); };
+                auto caught = [&](const std::string& src) { return e->execute("[[warn_mode]]; var m = \"none\";\n" + src + "\nm;").to_string(); };
                 check_eq(std::string("Cannot apply '+=' to string and int"), caught("string s = \"x\"; try { s += 5; } catch (err) { m = err; }"));
                 check_eq(std::string("Cannot apply '+=' to string and int"), caught("string z = \"\"; try { z += to_char(1) + to_char(2); } catch (err) { m = err; }"));
                 check_eq(std::string("Cannot apply '-=' to string and string"), caught("string s = \"x\"; try { s -= \"a\"; } catch (err) { m = err; }"));
@@ -2069,7 +2061,7 @@ public:
                 check_eq(std::string("Cannot apply '--' to bool"), caught("array<bool> flags = [true]; try { flags[0]--; } catch (err) { m = err; }"));
                 check_eq(std::string("Cannot apply '++' to string"), caught("class D2 { string s = \"\"; void bump() { s++; } } D2 d = D2(); try { d.bump(); } catch (err) { m = err; }"));
                 std::string what;
-                try { e->execute("string u = \"x\"; u += 5;"); } catch (const std::exception& ex) { what = ex.what(); }
+                try { e->execute("[[warn_mode]]; string u = \"x\"; u += 5;"); } catch (const std::exception& ex) { what = ex.what(); }
                 check_eq(std::string("Cannot apply '+=' to string and int"), what);
             }
         });
@@ -2083,11 +2075,9 @@ public:
             sandbox->disable(jai::filesystem);
             check_eq(std::string("Insufficient privilege: filesystem."), what_of(sandbox, "extern x; import(\"nowhere.jai\");"));
             auto e = make_engine();
-            e->static_checking(check_mode::warn);
-            check_eq(std::string("Undefined variable 'undefined_thing'"), what_of(e, "undefined_thing + 1;"));
-            check_eq(std::string("Cannot apply '+=' to string and int"), what_of(e, "string u = \"x\"; u += 5;"),
+            check_eq(std::string("Undefined variable 'undefined_thing'"), what_of(e, "[[warn_mode]]; undefined_thing + 1;"));
+            check_eq(std::string("Cannot apply '+=' to string and int"), what_of(e, "[[warn_mode]]; string u = \"x\"; u += 5;"),
                 "the text alone");
-            e->static_checking(check_mode::strict);
             e->execution_budget(0.05);
             const std::string budget = what_of(e, "while (true) { }");
             e->execution_budget(5.0);
@@ -2111,20 +2101,20 @@ public:
                 string caught = "";
                 try { pk().v += boom(); } catch (e) { caught = e; }
                 log + "|" + caught + ":" + ("" + shared.v);
-            )").c_str(), "R|boom:10", "C++17: the rhs before the receiver; an rhs raise evaluates no target", check_mode::strict);
+            )").c_str(), "R|boom:10", "C++17: the rhs before the receiver; an rhs raise evaluates no target", false);
             expect_order((std::string(recv_prelude) + R"(
                 var n = null;
                 var& gn() { log += "N"; return n; }
                 string caught = "";
                 try { gn().v += 1; } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "N|Cannot access 'v' on null ('gn(...)' returned null)", "null receiver: named call-result text, once", check_mode::strict);
+            )").c_str(), "N|Cannot access 'v' on null ('gn(...)' returned null)", "null receiver: named call-result text, once", false);
             expect_order((std::string(recv_prelude) + R"(
                 int gi() { log += "I"; return 5; }
                 string caught = "";
                 try { gi().v += 1; } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "I|int has no member 'v'", "scalar receiver: once", check_mode::strict);
+            )").c_str(), "I|int has no member 'v'", "scalar receiver: once", false);
             expect_order((std::string(recv_prelude) + R"(
                 class S { string s = "a"; }
                 S so = S();
@@ -2132,12 +2122,12 @@ public:
                 string caught = "none";
                 try { gs().s++; } catch (e) { caught = "raised"; }
                 log + "|" + caught + ":" + so.s;
-            )").c_str(), "S|raised:a", "++ gate on a string member: the receiver still runs once (the vm used to run it twice)", check_mode::off);   // the checker rejects ++ on a string at load; the RUNTIME order is under test
+            )").c_str(), "S|raised:a", "++ gate on a string member: the receiver still runs once (the vm used to run it twice)", true);   // the checker rejects ++ on a string at load; the RUNTIME order is under test
             expect_order((std::string(recv_prelude) + R"(
                 string caught = "none";
                 try { pk().v += "s"; } catch (e) { caught = e; }
                 log + "|" + caught + ":" + ("" + shared.v);
-            )").c_str(), "A|Cannot apply '+=' to int and string:10", "operand mismatch after the receiver ran once", check_mode::off);   // the checker rejects int += string at load; the RUNTIME text is under test
+            )").c_str(), "A|Cannot apply '+=' to int and string:10", "operand mismatch after the receiver ran once", true);   // the checker rejects int += string at load; the RUNTIME text is under test
         });
         test("subscript_compound_rvalue_base_once", [this, expect_order]() {
             expect_order(R"(
@@ -2150,7 +2140,7 @@ public:
                 try { [1, 2][0] += 1; } catch (e) { c3 = e; }
                 log + "|" + c1 + "|" + c2 + "|" + c3 + "|" + ("" + arr[1]);
             )", "AA|Cannot assign to rvalue expression|Cannot assign to rvalue expression|Cannot assign to rvalue expression|2",
-                "an rvalue subscript base runs once and raises the vm's text", check_mode::strict);
+                "an rvalue subscript base runs once and raises the vm's text", false);
         });
         test("subscript_compound_string_base_text", [this, expect_order]() {
             // Pinned alignment (interpreter -> vm): the index runs once per compound store; a non-text
@@ -2164,7 +2154,7 @@ public:
                 try { s[idx()] += "x"; } catch (e) { c2 = e; }
                 log + "|" + c1 + "|" + c2 + "|" + s;
             )", "II|Cannot assign int to a string character (it takes a char or a string)||axbc",
-                "a string subscript compound runs the index once", check_mode::strict);
+                "a string subscript compound runs the index once", false);
         });
         test("map_compound_missing_key_starts_from_the_default", [this, expect_order]() {
             // A typed-value map's missing key takes the value type's default before the compound (C++
@@ -2181,7 +2171,7 @@ public:
                 try { mi[key()] += 1; } catch (e) { c3 = e; }
                 log + "|" + c1 + "|" + c2 + "|" + c3 + "|" + ("" + m.size()) + ("" + ms.size()) + ("" + mi.size());
             )", "KKK|Cannot apply '+=' to null and string|||011",   // a text operand never stringifies null (one '+=' table)
-                "a typed-value map's missing key starts from the default; a var-valued map's compound raises", check_mode::strict);
+                "a typed-value map's missing key starts from the default; a var-valued map's compound raises", false);
             expect_order(R"(
                 var log = "";
                 string key() { log += "K"; return "k"; }
@@ -2189,14 +2179,14 @@ public:
                 var ms = {"k": "a"};
                 m[key()] += 5; m[key()]++; ms[key()] += "b";
                 log + "|" + ("" + m["k"]) + ms["k"];
-            )", "KKK|7ab", "present keys keep working", check_mode::strict);
+            )", "KKK|7ab", "present keys keep working", false);
         });
         test("static_compound_unchanged", [this, expect_order]() {
             expect_order(R"(
                 class Cnt { static int n = 0; }
                 Cnt::n += 5; Cnt::n++; ++Cnt::n; Cnt::n -= 1;
                 ("" + Cnt::n);
-            )", "6", "static compounds carry no receiver", check_mode::strict);
+            )", "6", "static compounds carry no receiver", false);
         });
 
         // ---- hybrid methods: a bare C++ property name reads/writes through the binder
@@ -2353,9 +2343,8 @@ public:
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-                e->static_checking(check_mode::off);   // the undef row is a RUNTIME text
                 bind_hybrid_probe(*e);
-                e->execute(R"(
+                e->execute(R"([[warn_mode]]; 
                     class W : HybridProbe {
                         W() : super() {}
                         void bad() { value = "str"; }
@@ -2368,22 +2357,22 @@ public:
                     W w = W(); w.value = 5;
                 )");
                 bool threw = false;
-                try { e->execute("w.bad();"); } catch (const std::exception& ex) { threw = true; bare_msg[idx] = ex.what(); }
+                try { e->execute("[[warn_mode]]; w.bad();"); } catch (const std::exception& ex) { threw = true; bare_msg[idx] = ex.what(); }
                 check_true(threw, "a mistyped bare store raises");
                 threw = false;
-                try { e->execute("w.bad_this();"); } catch (const std::exception& ex) { threw = true; this_msg[idx] = ex.what(); }
+                try { e->execute("[[warn_mode]]; w.bad_this();"); } catch (const std::exception& ex) { threw = true; this_msg[idx] = ex.what(); }
                 check_true(threw, "a mistyped this. store raises");
-                check_eq((int64_t)5, e->execute("w.value").as_int(), "a rejected store leaves the member alone");
-                check_eq((int64_t)105, e->execute("w.ro_read()").as_int(), "bare read of a getter-only property");
+                check_eq((int64_t)5, e->execute("[[warn_mode]]; w.value").as_int(), "a rejected store leaves the member alone");
+                check_eq((int64_t)105, e->execute("[[warn_mode]]; w.ro_read()").as_int(), "bare read of a getter-only property");
                 std::string ro_bare, ro_this;
-                try { e->execute("w.ro_store();"); } catch (const std::exception& ex) { ro_bare = ex.what(); }
-                try { e->execute("w.ro_store_this();"); } catch (const std::exception& ex) { ro_this = ex.what(); }
+                try { e->execute("[[warn_mode]]; w.ro_store();"); } catch (const std::exception& ex) { ro_bare = ex.what(); }
+                try { e->execute("[[warn_mode]]; w.ro_store_this();"); } catch (const std::exception& ex) { ro_this = ex.what(); }
                 check_eq(std::string("Cannot assign to 'ro': it is read-only"), ro_bare, "a bare store to a getter-only property raises");
                 check_eq(ro_bare, ro_this, "the this. spelling raises the same text");
-                check_eq((int64_t)105, e->execute("w.ro_read()").as_int(), "the getter still reads after the rejected stores");
-                check_eq((int64_t)5, e->execute("w.value").as_int());
+                check_eq((int64_t)105, e->execute("[[warn_mode]]; w.ro_read()").as_int(), "the getter still reads after the rejected stores");
+                check_eq((int64_t)5, e->execute("[[warn_mode]]; w.value").as_int());
                 threw = false;
-                try { e->execute("w.undef();"); } catch (const std::exception& ex) { threw = true; undef_msg[idx] = ex.what(); }
+                try { e->execute("[[warn_mode]]; w.undef();"); } catch (const std::exception& ex) { threw = true; undef_msg[idx] = ex.what(); }
                 check_true(threw);
                 check_true(undef_msg[idx].find("Undefined variable 'zzz_nope'") != std::string::npos, undef_msg[idx]);
                 ++idx;
@@ -2569,9 +2558,8 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = propref_engine(use_vm);
-                e->static_checking(check_mode::off);   // the checker catches these at load; the RUNTIME texts are under test
                 stdlib::register_all(*e);
-                e->execute(R"(
+                e->execute(R"([[warn_mode]]; 
                     void by_ref(int& p) { p = 1; }
                     void by_ref_any(var& p) { p = 1; }
                     string caught(function f) { try { f(); } catch (e) { return e; } return "no error"; }
@@ -2609,19 +2597,19 @@ public:
                 };
                 const std::string tag = use_vm ? "vm: " : "interp: ";
                 for (const char* row : rows) {
-                    std::string got = e->execute(row).as_string();
+                    std::string got = e->execute(std::string("[[warn_mode]]; ") + row).as_string();
                     out.push_back(got);
                     const std::string want = std::string(row).find("sig") != std::string::npos
                         ? "Cannot assign to 'sig': it is read-only" : ro_text;
                     check_eq(want, got, tag + row);
                 }
-                check_eq((int64_t)105, e->execute("w.ro_read()").as_int(), tag + "the getter still reads");
-                check_eq((int64_t)105, e->execute("w.ro").as_int());
-                check_eq((int64_t)107, e->execute("h.ro").as_int());
+                check_eq((int64_t)105, e->execute("[[warn_mode]]; w.ro_read()").as_int(), tag + "the getter still reads");
+                check_eq((int64_t)105, e->execute("[[warn_mode]]; w.ro").as_int());
+                check_eq((int64_t)107, e->execute("[[warn_mode]]; h.ro").as_int());
                 check_eq((int64_t)5, probe_of(*e, "w")->value, tag + "the C++ member is untouched");
                 check_eq((int64_t)7, probe_of(*e, "h")->value);
                 // a property WITH a setter still stores on every spelling
-                e->execute(R"(
+                e->execute(R"([[warn_mode]]; 
                     class V : HybridProbe {
                         V() : super() {}
                         void go() { value = 8; lam = 3; auto& q = value; q += 1; this.value += 1; value++; }
@@ -2631,7 +2619,7 @@ public:
                 check_eq((int64_t)21, probe_of(*e, "v")->value, tag + "writable properties store");
                 check_eq((int64_t)4, probe_of(*e, "v")->lam_backing);
                 // a script _set_ro override in the chain wins over the rejection
-                e->execute(R"(
+                e->execute(R"([[warn_mode]]; 
                     class O : HybridProbe {
                         int stored = 0;
                         O() : super() {}
@@ -2640,11 +2628,11 @@ public:
                     }
                     O o = O(); o.go();
                 )");
-                check_eq((int64_t)101, e->execute("o.stored").as_int(), tag + "a script _set_ro override takes the stores (compound reads the C++ getter)");
-                check_eq((int64_t)40, e->execute("o.ro = 40; o.stored").as_int());
-                check_eq((int64_t)102, e->execute("o.ro += 2; o.stored").as_int());
+                check_eq((int64_t)101, e->execute("[[warn_mode]]; o.stored").as_int(), tag + "a script _set_ro override takes the stores (compound reads the C++ getter)");
+                check_eq((int64_t)40, e->execute("[[warn_mode]]; o.ro = 40; o.stored").as_int());
+                check_eq((int64_t)102, e->execute("[[warn_mode]]; o.ro += 2; o.stored").as_int());
                 // a same-named script field shadows the property
-                e->execute(R"(
+                e->execute(R"([[warn_mode]]; 
                     class S : HybridProbe {
                         int ro = 1;
                         S() : super() {}
@@ -2652,7 +2640,7 @@ public:
                     }
                     S s = S(); s.go(); s.ro += 10;
                 )");
-                check_eq((int64_t)14, e->execute("s.ro").as_int(), tag + "a shadowing script field takes the stores");
+                check_eq((int64_t)14, e->execute("[[warn_mode]]; s.ro").as_int(), tag + "a shadowing script field takes the stores");
                 ++idx;
             }
             check_eq(texts[0].size(), texts[1].size());
@@ -2762,8 +2750,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = propref_engine(use_vm);
-                e->static_checking(check_mode::off);   // runtime texts under test
-                e->execute(R"(
+                e->execute(R"([[warn_mode]]; 
                     void by_ref_str(string& s) { s = "z"; }
                     class W : HybridProbe {
                         W() : super() {}
@@ -2774,13 +2761,13 @@ public:
                     }
                     W w = W(); w.value = 5;
                 )");
-                ref_msg[idx] = caught(*e, "w.bad();");
-                direct_msg[idx] = caught(*e, "w.bad_direct();");
+                ref_msg[idx] = caught(*e, "[[warn_mode]]; w.bad();");
+                direct_msg[idx] = caught(*e, "[[warn_mode]]; w.bad_direct();");
                 check_true(!ref_msg[idx].empty(), "a mistyped store through the reference raises");
                 check_eq((int64_t)5, probe_of(*e, "w")->value, "and leaves the member alone");
-                narrow_ref[idx] = caught(*e, "w.narrow_ref();");
+                narrow_ref[idx] = caught(*e, "[[warn_mode]]; w.narrow_ref();");
                 check_eq((int32_t)(5000000000LL), probe_of(*e, "w")->narrow);
-                narrow_direct[idx] = caught(*e, "w.narrow_direct();");
+                narrow_direct[idx] = caught(*e, "[[warn_mode]]; w.narrow_direct();");
                 ++idx;
             }
             check_eq(ref_msg[0], ref_msg[1], "mistyped-store text is byte-identical across backends");
@@ -2806,8 +2793,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = propref_engine(use_vm);
-                e->static_checking(check_mode::off);
-                e->execute(R"(
+                e->execute(R"([[warn_mode]]; 
                     void by_ref(int& p) { p = 1; }
                     class W : HybridProbe {
                         W() : super() {}
@@ -2816,8 +2802,8 @@ public:
                     }
                     W w = W();
                 )");
-                decl_msg[idx] = caught(*e, "w.decl();");
-                arg_msg[idx] = caught(*e, "w.arg();");
+                decl_msg[idx] = caught(*e, "[[warn_mode]]; w.decl();");
+                arg_msg[idx] = caught(*e, "[[warn_mode]]; w.arg();");
                 check_true(decl_msg[idx].find("'doubled' is a method of W; call it with doubled() or bind it with reflect::bind(this, \"doubled\")") != std::string::npos, decl_msg[idx]);   // a reference to a method is the method-value violation
                 check_true(arg_msg[idx].find("'doubled' is a method of W; call it with doubled() or bind it with reflect::bind(this, \"doubled\")") != std::string::npos, arg_msg[idx]);   // a method handed to a reference is a method read without a call
                 ++idx;
@@ -2830,13 +2816,12 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = propref_engine(use_vm);
-                e->static_checking(check_mode::off);
-                e->execute(R"(
+                e->execute(R"([[warn_mode]]; 
                     void by_ref(int& p) { p = 1; }
                     HybridProbe n = null;
                 )");
-                arg_msg[idx] = caught(*e, "by_ref(n.value);");
-                decl_msg[idx] = caught(*e, "auto& r = n.value;");
+                arg_msg[idx] = caught(*e, "[[warn_mode]]; by_ref(n.value);");
+                decl_msg[idx] = caught(*e, "[[warn_mode]]; auto& r = n.value;");
                 check_true(!arg_msg[idx].empty() && !decl_msg[idx].empty(), "null receivers still raise");
                 ++idx;
             }
@@ -2920,8 +2905,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = propref_engine(use_vm);
-                e->static_checking(check_mode::off);
-                e->execute(R"(
+                e->execute(R"([[warn_mode]]; 
                     void by_ref(int& p) { p += 1; }
                     class W : HybridProbe {
                         W() : super() {}
@@ -2934,14 +2918,14 @@ public:
                     W w = W(); w.value = 1;
                 )");
                 auto cpp = probe_of(*e, "w");
-                e->execute("w.lam_arg();");
+                e->execute("[[warn_mode]]; w.lam_arg();");
                 check_eq((int64_t)2, cpp->value, "ref arg inside a bare lambda binds the member");
-                e->execute("w.lam_decl();");
+                e->execute("[[warn_mode]]; w.lam_decl();");
                 check_eq((int64_t)3, cpp->value, "ref decl inside a bare lambda binds the member");
-                e->execute("w.cast_ref();");
+                e->execute("[[warn_mode]]; w.cast_ref();");
                 check_eq((int64_t)40, cpp->value, "cast<int&> binds the member");
-                ex_ref[idx] = caught(*e, "w.ex_ref()");
-                ex_val[idx] = caught(*e, "w.ex_val()");
+                ex_ref[idx] = caught(*e, "[[warn_mode]]; w.ex_ref()");
+                ex_val[idx] = caught(*e, "[[warn_mode]]; w.ex_val()");
                 check_true(ex_ref[idx].find("Cannot capture undefined variable 'value'") != std::string::npos, ex_ref[idx]);
                 check_true(ex_val[idx].find("Cannot capture undefined variable 'value'") != std::string::npos, ex_val[idx]);
                 ++idx;
@@ -2983,8 +2967,7 @@ public:
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-                e->static_checking(check_mode::off);   // strict rejects these at load; the RUNTIME text is under test
-                e->execute(R"(
+                e->execute(R"([[warn_mode]]; 
                     void f() {}
                     void g(int a, int b) {}
                     var pick() { return f; }
@@ -2994,7 +2977,7 @@ public:
                     string r = "ok";
                 )");
                 for (int i = 0; i < 12; ++i) {
-                    texts[idx][i] = e->execute(std::string("r = \"ok\"; try { ") + calls[i] + "; } catch (err) { r = err; } r").as_string();
+                    texts[idx][i] = e->execute(std::string("[[warn_mode]]; r = \"ok\"; try { ") + calls[i] + "; } catch (err) { r = err; } r").as_string();
                     check_eq(std::string(expected[i / 4]), texts[idx][i], calls[i]);
                     check_eq(std::string::npos, texts[idx][i].find("this"), calls[i]);
                     check_eq(std::string::npos, texts[idx][i].find("class_definition"), calls[i]);
@@ -3020,8 +3003,7 @@ public:
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-                e->static_checking(check_mode::off);
-                e->execute(R"(
+                e->execute(R"([[warn_mode]]; 
                     void h(int a, int b = 2) {}
                     var sh = h;
                     var lam = [](int a) { return a; };
@@ -3029,7 +3011,7 @@ public:
                     string r = "ok";
                 )");
                 for (int i = 0; i < 9; ++i) {
-                    texts[idx][i] = e->execute(std::string("r = \"ok\"; try { ") + rows[i].call + "; } catch (err) { r = err; } r").as_string();
+                    texts[idx][i] = e->execute(std::string("[[warn_mode]]; r = \"ok\"; try { ") + rows[i].call + "; } catch (err) { r = err; } r").as_string();
                     check_eq(std::string(rows[i].text), texts[idx][i], rows[i].call);
                 }
                 ++idx;
@@ -3040,10 +3022,9 @@ public:
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-                e->static_checking(check_mode::off);
                 bool threw = false;
                 std::string msg;
-                try { e->execute("void f() {} f(1);"); } catch (const std::exception& ex) { threw = true; msg = ex.what(); }
+                try { e->execute("[[warn_mode]]; void f() {} f(1);"); } catch (const std::exception& ex) { threw = true; msg = ex.what(); }
                 check_true(threw);
                 check_eq((size_t)0, msg.find("'f' expects 0 arguments, got 1"), msg);
             }
@@ -3152,8 +3133,7 @@ public:
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
                     e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-                    e->static_checking(check_mode::off);
-                    try { out[idx] = e->execute(src).to_string(); }
+                    try { out[idx] = e->execute("[[warn_mode]]; " + src).to_string(); }
                     catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
                     ++idx;
                 }
@@ -3199,9 +3179,8 @@ public:
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
                     e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-                    e->static_checking(check_mode::off);   // the after-the-block rows are RUNTIME texts
                     jai::stdlib::register_all(e);
-                    try { out[idx] = e->execute(src).to_string(); }
+                    try { out[idx] = e->execute("[[warn_mode]]; " + src).to_string(); }
                     catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
                     ++idx;
                 }

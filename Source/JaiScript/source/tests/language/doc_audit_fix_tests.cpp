@@ -22,11 +22,10 @@ class doc_audit_fix_tests : public suite {
 public:
     doc_audit_fix_tests() : suite("Doc Audit Fixes") {}
 
-    static std::shared_ptr<engine> fresh(bool use_vm, check_mode mode) {
+    static std::shared_ptr<engine> fresh(bool use_vm) {
         auto e = engine::make();
         e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
         e->execution_budget(0);
-        e->static_checking(mode);
         stdlib::register_all(e);
         return e;
     }
@@ -36,12 +35,15 @@ public:
         catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
     }
 
+    // the run time's verdict (a [[warn_mode]] region over the whole unit), or the program as the strict checker loads it
+    enum class load { warn_region, strict };
+
     // Both backends, byte-identical, then the expected text
-    void expect(const std::string& src, const std::string& expected, const std::string& what, check_mode mode = check_mode::off) {
+    void expect(const std::string& src, const std::string& expected, const std::string& what, load how = load::warn_region) {
         std::string out[2];
         for (int i = 0; i < 2; ++i) {
-            auto e = fresh(i == 1, mode);
-            out[i] = outcome(*e, src);
+            auto e = fresh(i == 1);
+            out[i] = outcome(*e, how == load::warn_region ? "[[warn_mode]]; " + src : src);
         }
         check_eq(out[0], out[1], what + " (backends agree)");
         check_eq(expected, out[0], what);
@@ -50,7 +52,7 @@ public:
     // A strict load error carrying the text, on both backends
     void expect_load_error(const std::string& src, const std::string& text, const std::string& what) {
         for (bool use_vm : {false, true}) {
-            auto e = fresh(use_vm, check_mode::strict);
+            auto e = fresh(use_vm);
             std::string message;
             try { e->execute(src); message = "(loaded)"; }
             catch (const static_check_error& ex) { message = ex.what(); }
@@ -89,7 +91,7 @@ public:
                 auto& state = *static_cast<probe_state*>(raw);
                 try {
                     {
-                        auto e = fresh(true, check_mode::off);
+                        auto e = fresh(true);
                         std::string& out = state.results[1];
                         out += outcome(*e, "int f(int n) { if (n == 0) { return 0; } return 1 + f(n - 1); } f(200);") + "|";
                         out += outcome(*e, "f(255);") + "|";
@@ -99,7 +101,7 @@ public:
                         out += outcome(*e, "40 + 2;");
                     }
                     {
-                        auto e = fresh(false, check_mode::off);
+                        auto e = fresh(false);
                         std::string& out = state.results[0];
                         const std::string uncaught = outcome(*e, "int f(int n) { if (n == 0) { return 0; } return 1 + f(n - 1); } f(255);");
                         out += uncaught.substr(0, uncaught.find('\n')) + "|";
@@ -126,7 +128,7 @@ public:
 #endif
 
         test("the_interpreter_cap_raises_the_depth_text_without_a_category_suffix", [this]() {
-            auto e = fresh(false, check_mode::off);
+            auto e = fresh(false);
             const std::string uncaught = outcome(*e, "int f(int n) { if (n == 0) { return 0; } return 1 + f(n - 1); } f(256);");
             check_eq(std::string("ERROR: Maximum recursion depth exceeded - possible infinite recursion"), uncaught.substr(0, uncaught.find('\n')));
             check_eq(std::string("255"), outcome(*e, "f(255);"));
@@ -147,7 +149,7 @@ public:
             expect(defs + " R r; r[1] = 5; r[2] += 10; to_string(r.v[0]) + to_string(r.v[1]) + to_string(r.v[2]);", "1513", "a reference-returning operator[] stores");
             expect_load_error(defs + " G g; g[1] = 5;", "cannot assign to a call result: 'operator[]' returns by value", "strict, a plain store");
             expect_load_error(defs + " G g; g[1] += 5;", "cannot assign to a call result: 'operator[]' returns by value", "strict, a compound store");
-            expect(defs + " R r; r[1] = 5; to_string(r[1]);", "5", "strict admits a reference-returning operator[]", check_mode::strict);
+            expect(defs + " R r; r[1] = 5; to_string(r[1]);", "5", "strict admits a reference-returning operator[]", load::strict);
         });
 
         test("a_class_static_read_with_a_dot_says_to_use_scope_resolution", [this]() {
@@ -171,7 +173,7 @@ public:
             expect("enum Dir { n, s } int read() { return Dir::s; } read();", "1", "a function reads a program-scope enum");
             expect("enum Dir { n, s } var out = \"\"; try { var x = Dir::zz; } catch (e) { out += e; } out;",
                    "No value 'zz' in enum 'Dir'", "a missing value");
-            expect("enum Dir { n, s } to_string(Dir::s);", "1", "strict admits a scoped enum value", check_mode::strict);
+            expect("enum Dir { n, s } to_string(Dir::s);", "1", "strict admits a scoped enum value", load::strict);
             expect_load_error("enum Dir { n, s } var x = Dir::zz;", "no value 'zz' in enum 'Dir'", "strict, a missing value");
         });
 
@@ -199,10 +201,10 @@ public:
                               "error: no", "constructors at load");
             // a program's free functions of one name are an overload set too
             expect("int f(int a) { return 1; } int f(bool b) { return 2; } var out = \"\"; try { f(\"s\"); } catch (e) { out += e; } out;",
-                   "No overload of 'f' takes (string)", "free functions at run time", check_mode::off);
-            expect("void h(bool b) { } bool k = \"s\"; h(\"s\"); k;", "true", "a lone bool slot takes a string's truthiness", check_mode::strict);
+                   "No overload of 'f' takes (string)", "free functions at run time", load::warn_region);
+            expect("void h(bool b) { } bool k = \"s\"; h(\"s\"); k;", "true", "a lone bool slot takes a string's truthiness", load::strict);
             expect("class M { int m(int a) { return 1; } int m(bool b) { return 2; } } to_string(M().m(true)) + to_string(M().m(3));", "21",
-                   "exact overloads still pick", check_mode::strict);
+                   "exact overloads still pick", load::strict);
         });
 
         test("a_builtin_method_read_without_a_call_is_a_load_error", [this]() {
@@ -213,17 +215,17 @@ public:
             expect_load_error("map<string, int> m = {\"a\": 1}; var f = m.clear;",
                               "'clear' is a method of map; call it with m.clear() or wrap the call in a lambda", "a map");
             expect("array<int> a = [1]; a.push(2); string s = \"ab\"; to_string(a.size()) + to_string(s.size());", "22",
-                   "calls stay admitted", check_mode::strict);
-            expect("map<string, int> m = {\"key\": 4}; m.key;", "4", "a map key that names no method reads", check_mode::strict);
+                   "calls stay admitted", load::strict);
+            expect("map<string, int> m = {\"key\": 4}; m.key;", "4", "a map key that names no method reads", load::strict);
         });
 
         test("a_using_name_redeclared_spells_its_qualified_name", [this]() {
             expect("namespace g { int a = 1; } using g::a; int a = 2;",
                    "ERROR: Parse error: <script>:1:44: 'a' names g::a by a using declaration; a variable cannot be declared with that name",
-                   "a variable");
+                   "a variable", load::strict);
             expect("namespace g { namespace h { int b = 1; } } using g::h::b; int b = 2;",
                    "ERROR: Parse error: <script>:1:63: 'b' names g::h::b by a using declaration; a variable cannot be declared with that name",
-                   "a nested namespace");
+                   "a nested namespace", load::strict);
         });
 
         test("checker_and_reference_texts", [this]() {
@@ -247,7 +249,7 @@ public:
 
         test("the_step_budget_ends_a_host_entry_without_the_clock", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = fresh(use_vm, check_mode::off);
+                auto e = fresh(use_vm);
                 e->execution_step_budget(4);
                 check_eq(uint64_t(4), e->execution_step_budget());
                 const std::string looped = outcome(*e, "int n = 0; try { while (true) { n++; } } catch (e) { n = -1; } n;");

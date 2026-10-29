@@ -451,16 +451,16 @@ public:
         // is the string copy-on-write gate (internal/invariants.md 11): whatever the checker
         // cannot see mutates a copy and the map is never touched. Every row runs on both
         // backends and pins byte-identical output.
-        auto both_mode = [](const char* src, check_mode mode) {
+        auto both_mode = [](const char* src, bool warn_region) {
             std::string out[2];
             int idx = 0;
+            const std::string program = (warn_region ? std::string("[[warn_mode]]; ") : std::string()) + src;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
-                e->static_checking(mode);
                 jai::stdlib::register_all(e);
-                try { out[idx] = e->execute(src).to_string(); }
+                try { out[idx] = e->execute(program).to_string(); }
                 catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
                 ++idx;
             }
@@ -470,13 +470,13 @@ public:
         test("map_key_read_only_static_battery", [this, both_mode]() {
             const std::string text = "map keys are read-only";   // the operand spelling follows the pair variable (kv.first, p.first)
             auto rejected = [&](const char* src, const char* what) {
-                auto [i_out, v_out] = both_mode(src, check_mode::strict);
+                auto [i_out, v_out] = both_mode(src, false);
                 check_eq(i_out, v_out, std::string("backend parity: ") + what);
                 check(i_out.find("ERROR: static check failed") == 0, std::string("load error: ") + what + " (got: " + i_out + ")");
                 check(i_out.find("cannot mutate ") != std::string::npos && i_out.find(text) != std::string::npos, std::string("text: ") + what + " (got: " + i_out + ")");
             };
             auto accepted = [&](const char* src, const std::string& expected, const char* what) {
-                auto [i_out, v_out] = both_mode(src, check_mode::strict);
+                auto [i_out, v_out] = both_mode(src, false);
                 check_eq(expected, i_out, std::string("interp: ") + what);
                 check_eq(expected, v_out, std::string("vm: ") + what);
             };
@@ -497,7 +497,7 @@ public:
             // Alias spellings: a mutable alias of a key has no C++ equivalent (const Key) - the
             // fix is always the copy, which is copy-on-write at runtime
             auto rejected_alias = [&](const char* src, const char* what) {
-                auto [i_out, v_out] = both_mode(src, check_mode::strict);
+                auto [i_out, v_out] = both_mode(src, false);
                 check_eq(i_out, v_out, std::string("backend parity: ") + what);
                 check(i_out.find("ERROR: static check failed") == 0, std::string("load error: ") + what + " (got: " + i_out + ")");
                 check(i_out.find("cannot alias ") != std::string::npos &&
@@ -533,7 +533,7 @@ public:
 
         test("map_key_immutable_battery", [this, both_mode]() {
             auto row = [&](const char* src, const std::string& expected, const char* what) {
-                auto [i_out, v_out] = both_mode(src, check_mode::off);
+                auto [i_out, v_out] = both_mode(src, true);
                 check_eq(expected, i_out, std::string("interp: ") + what);
                 check_eq(expected, v_out, std::string("vm: ") + what);
             };
@@ -632,7 +632,7 @@ for (auto [k, v] : d) { ds += to_string(k) + ","; }
 log += " | " + to_string(calls) + " " + ds;
 log;
 )JAI";
-            auto [i_out, v_out] = both_mode(src, check_mode::strict);
+            auto [i_out, v_out] = both_mode(src, false);
             check_eq(std::string("true 1334 1334 | 1:4,3:2,2.5:5,a:3,b:1,c:7,true:6, | 01235678911 | 42 3001 | 2 | 5 5,4,2,6,3, | "
                                  "true {\"x\":[1,2],\"y\":2,\"z\":1} {\"x\":[1,2],\"y\":2,\"z\":1} | 349 349 | 19 0,2,4,8,10,12,14,16,18,500,"), i_out, "interpreter");
             check_eq(i_out, v_out, "backend parity");
@@ -657,7 +657,7 @@ m.erase("abcdefgh");
 out += " " + to_string(m.has("abcdefgh")) + " " + to_string(m[utf8_string("abcdefgh")]);
 out;
 )JAI";
-            auto [i_out, v_out] = both_mode(src, check_mode::strict);
+            auto [i_out, v_out] = both_mode(src, false);
             check_eq(std::string("12 0 1 2 3 4 5 6 7 8 9 100 101 9 4 false true false 101"), i_out, "interpreter");
             check_eq(i_out, v_out, "backend parity");
         });
@@ -729,7 +729,7 @@ int s = 0; for (int i = 90; i < 170; ++i) { if (m.has(i)) { s += m.get(i, 0); } 
 out += " " + to_string(s) + " " + to_string(m[2]) + " " + to_string(m.size());
 out;
 )JAI";
-            auto [i_out, v_out] = both_mode(src, check_mode::warn);
+            auto [i_out, v_out] = both_mode(src, true);
             check_eq(std::string("intfloatcharboolstringneg 15540 null 66"), i_out, "interpreter");
             check_eq(i_out, v_out, "backend parity");
         });
@@ -765,7 +765,7 @@ for (int x : xs) { total += x; }
 out += " " + to_string(total) + " " + to_string(table["k1"]);
 out;
 )JAI";
-            auto [i_out, v_out] = both_mode(src, check_mode::strict);
+            auto [i_out, v_out] = both_mode(src, false);
             check_eq(std::string("13 -1 100 2 6 1 7 2 1616 22"), i_out, "interpreter");
             check_eq(i_out, v_out, "backend parity");
             for (bool use_vm : {false, true}) {
@@ -930,7 +930,7 @@ var copy = lump; copy[1028] = -1;
 out += " " + keys + " " + to_string(n) + " " + to_string(s) + " " + to_string(lump[1028]) + " " + to_string(copy[1028]) + " " + to_json(lump).size();
 out;
 )JAI";
-            auto [i_out, v_out] = both_mode(src, check_mode::warn);
+            auto [i_out, v_out] = both_mode(src, true);
             check_eq(i_out, v_out, "backend parity");
             check_true(i_out.find("ERROR") == std::string::npos, "runs: " + i_out);
             check_eq(std::string("0 1 float text kept again false -1 -5,1028,1030,1032,1034,1036,1030.0,1030,true, 429 22878 1 -1 1338"), i_out, "pinned output");

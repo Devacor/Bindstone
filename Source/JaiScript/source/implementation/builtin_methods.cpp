@@ -2386,6 +2386,31 @@ void warn_shadowed_handle_builtins(engine& eng, const class_definition& def) {
     }
 }
 
+script_value same_as_method(const script_value& self, engine* eng) {
+    script_function same_as = [eng, captured = self](const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "same_as() takes exactly 1 argument");
+        }
+        script_value self_val = captured.deref();
+        script_value other_val = args[0].deref();
+        // two aliases of one bound C++ value are the same
+        if (self_val.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] { self_val = self_val.bound_decoded_temp(); }
+        if (other_val.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] { other_val = other_val.bound_decoded_temp(); }
+        if (self_val.is_null() || other_val.is_null()) { return script_value(self_val.is_null() && other_val.is_null(), eng); }
+        const size_t index = self_val.raw_storage_index();
+        if (index != other_val.raw_storage_index()) { return script_value(false, eng); }
+        switch (index) {
+            case script_value::TYPEID_INT: return script_value(self_val.unchecked_as_int() == other_val.unchecked_as_int(), eng);
+            case script_value::TYPEID_FLOAT: return script_value(self_val.unchecked_as_float() == other_val.unchecked_as_float(), eng);
+            case script_value::TYPEID_BOOL: return script_value(self_val.unchecked_as_bool() == other_val.unchecked_as_bool(), eng);
+            case script_value::TYPEID_STRING: return script_value(self_val.unchecked_as_string() == other_val.unchecked_as_string(), eng);
+            case script_value::TYPEID_OBJECT: return script_value(self_val.get_object_holder().get() == other_val.get_object_holder().get(), eng);
+            default: return script_value(false, eng);
+        }
+    };
+    return script_value::make_function(std::move(same_as), eng);
+}
+
 } // namespace detail
 
 } // namespace jai

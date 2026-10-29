@@ -166,6 +166,10 @@ namespace jai {
         // (independent of static checking), parity-by-construction. Defined in interpreter.cpp.
         void warn_shadowed_handle_builtins(engine& eng, const class_definition& def);
 
+        // v.same_as(other) bound to v: one argument; nulls, scalars and strings compare by value (a bound value decoded),
+        // objects by identity, anything else is false. Both backends mint it.
+        script_value same_as_method(const script_value& self, engine* eng);
+
         // Builtin args are BY-VALUE. A subscript read in argument position mints an
         // owner-pinned element/map-entry reference (transient_read.hpp leaves call args
         // unmarked so ref params can bind), and script/native parameter binding derefs

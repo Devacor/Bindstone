@@ -1501,81 +1501,68 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
         } else if (left.is_map()) {
             // For maps, we need to handle both assignment and read access
             // Try to get a mutable reference if possible
-            try {
-                auto& map = const_cast<script_map&>(left.as_map());
+            auto& map = const_cast<script_map&>(left.as_map());
 
-                const bool is_lvalue = detail::subscript_base_is_lvalue(is_lvalue_shaped_expr(expr->left.get()), left_raw);
+            const bool is_lvalue = detail::subscript_base_is_lvalue(is_lvalue_shaped_expr(expr->left.get()), left_raw);
 
-                // Transient map read: copy branch below (never inserts, never mints)
-                const bool transient_read = expr->transient_element_read && !want_lvalue_write && !has_custom_binary_ops_;
+            // Transient map read: copy branch below (never inserts, never mints)
+            const bool transient_read = expr->transient_element_read && !want_lvalue_write && !has_custom_binary_ops_;
 
-                // A compound's own target on a typed-value map inserts the value type's default first, on a temporary too
-                // (C++ operator[]; KEEP BYTE-PARALLEL with vm_backend::exec_index_compound_fused)
-                if (expr == compound_map_target_ && !(is_lvalue && want_lvalue_write)) {
-                    auto map_tag = left.get_type_info();
-                    type_info_ptr key_type = map_tag ? map_tag->key_type() : nullptr;
-                    if (key_type && key_type->base_type != script_value_type::jai_any_type && right.deref().type() != key_type->base_type) {
-                        return detail::element_type_error(string_symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", right.deref(), key_type);
-                    }
-                    (void)detail::map_compound_insert_default(left, right, engine_);
+            // A compound's own target on a typed-value map inserts the value type's default first, on a temporary too
+            // (C++ operator[]; KEEP BYTE-PARALLEL with vm_backend::exec_index_compound_fused)
+            if (expr == compound_map_target_ && !(is_lvalue && want_lvalue_write)) {
+                auto map_tag = left.get_type_info();
+                type_info_ptr key_type = map_tag ? map_tag->key_type() : nullptr;
+                if (key_type && key_type->base_type != script_value_type::jai_any_type && right.deref().type() != key_type->base_type) {
+                    return detail::element_type_error(string_symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", right.deref(), key_type);
                 }
-                if (is_lvalue && want_lvalue_write) {
-                    // Assignment target (m[k] = v): auto-insert a slot so the
-                    // assignment has somewhere to write through. The key is COPIED into
-                    // the map; an engine-less key (a raw AST literal reaching here via the
-                    // binary fast path) would poison the whole map for clone().
-                    script_value key = right;
-                    // Declared key type: keys never coerce, so the
-                    // check runs BEFORE the auto-insert (KEEP BYTE-PARALLEL with the vm)
-                    if (auto map_tag = left.get_type_info()) {
-                        if (type_info_ptr key_type = map_tag->key_type();
-                            key_type && key_type->base_type != script_value_type::jai_any_type &&
-                            key.deref().type() != key_type->base_type) {
-                            return detail::element_type_error(string_symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key.deref(), key_type);
-                        }
+                (void)detail::map_compound_insert_default(left, right, engine_);
+            }
+            if (is_lvalue && want_lvalue_write) {
+                // Assignment target (m[k] = v): auto-insert a slot so the
+                // assignment has somewhere to write through. The key is COPIED into
+                // the map; an engine-less key (a raw AST literal reaching here via the
+                // binary fast path) would poison the whole map for clone().
+                script_value key = right;
+                // Declared key type: keys never coerce, so the
+                // check runs BEFORE the auto-insert (KEEP BYTE-PARALLEL with the vm)
+                if (auto map_tag = left.get_type_info()) {
+                    if (type_info_ptr key_type = map_tag->key_type();
+                        key_type && key_type->base_type != script_value_type::jai_any_type &&
+                        key.deref().type() != key_type->base_type) {
+                        return detail::element_type_error(string_symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key.deref(), key_type);
                     }
-                    const size_t prior_map_size = map.size();
-                    script_value& value_ref = map[key];
-                    // engine::memory_cap: count NEW-entry growth (raised at the next back-edge)
-                    if (map.size() != prior_map_size) {
-                        limits_->memory_charge_deferred(2 * sizeof(script_value) + (key.is_string() ? key.unchecked_as_string().size() : 0));
-                    }
+                }
+                const size_t prior_map_size = map.size();
+                script_value& value_ref = map[key];
+                // engine::memory_cap: count NEW-entry growth (raised at the next back-edge)
+                if (map.size() != prior_map_size) {
+                    limits_->memory_charge_deferred(2 * sizeof(script_value) + (key.is_string() ? key.unchecked_as_string().size() : 0));
+                }
 
-                    // Get value type constraint from the map's type_info for validation on assignment
+                // Get value type constraint from the map's type_info for validation on assignment
+                auto map_type_info = left.get_type_info();
+                type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
+                // Map-entry mode: pins the map + re-resolves by key (temporaries/erase safe)
+                script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, &value_ref, engine_, value_type);
+                push_value(std::move(ref_value));
+            } else if (is_lvalue && !transient_read) {
+                // lvalue-shaped but a READ (e.g. x = m[k], or the inner m[k]
+                // of m[k][i] / m[k].field): return a reference to the EXISTING
+                // entry so nested in-place mutation still works, but NEVER
+                // insert a missing key: reading must not grow the map.
+                auto it = map.find(right);
+                if (it != map.end()) {
+                    script_value& value_ref = const_cast<script_value&>(it->second);
                     auto map_type_info = left.get_type_info();
                     type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
-                    // Map-entry mode: pins the map + re-resolves by key (temporaries/erase safe)
-                    script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, &value_ref, engine_, value_type);
-                    push_value(std::move(ref_value));
-                } else if (is_lvalue && !transient_read) {
-                    // lvalue-shaped but a READ (e.g. x = m[k], or the inner m[k]
-                    // of m[k][i] / m[k].field): return a reference to the EXISTING
-                    // entry so nested in-place mutation still works, but NEVER
-                    // insert a missing key: reading must not grow the map.
-                    auto it = map.find(right);
-                    if (it != map.end()) {
-                        script_value& value_ref = const_cast<script_value&>(it->second);
-                        auto map_type_info = left.get_type_info();
-                        type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
-                        push_value(script_value::make_map_entry_reference(left.get_map_storage(), right, &value_ref, engine_, value_type));
-                    } else {
-                        // Missing key on a read: yield null WITHOUT inserting.
-                        push_value(script_value(std::monostate{}, engine_));
-                    }
+                    push_value(script_value::make_map_entry_reference(left.get_map_storage(), right, &value_ref, engine_, value_type));
                 } else {
-                    // This is a true temporary (e.g., function return), read-only access
-                    auto it = map.find(right);
-                    if (it != map.end()) {
-                        // Ensure the value has an engine ref before pushing
-                        script_value val = it->second;
-                        push_value(std::move(val));
-                    } else {
-                        push_value(script_value(std::monostate{}, engine_));
-                    }
+                    // Missing key on a read: yield null WITHOUT inserting.
+                    push_value(script_value(std::monostate{}, engine_));
                 }
-            } catch (...) {
-                // Fallback for any edge cases
-                const auto& map = left.as_map();
+            } else {
+                // This is a true temporary (e.g., function return), read-only access
                 auto it = map.find(right);
                 if (it != map.end()) {
                     // Ensure the value has an engine ref before pushing

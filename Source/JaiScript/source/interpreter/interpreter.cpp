@@ -6013,71 +6013,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     // cached the first engine's id and broke same_as on every later engine).
     if (expr->member_id == same_as_id_) {
 	    if (!as_callee) { return method_value_error(expr, objectValue, false); }
-        // Create a bound same_as method for this value
-        script_function same_as_method = [this, capturedValue = objectValue](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-            if (args.size() != 1) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "same_as() takes exactly 1 argument");
-            }
-
-            const script_value& other_raw = args[0];
-
-            // Deref both values to follow reference chains to the root object
-            script_value self_val = capturedValue.deref();
-            script_value other_val = const_cast<script_value&>(other_raw).deref();
-
-            // S8: bound values decode-compare like the old shadow indices (two aliases of one
-            // C++ int stay same_as-true). KEEP BYTE-PARALLEL with the VM same_as lambda.
-            if (self_val.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-                self_val = self_val.bound_decoded_temp();
-            if (other_val.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-                other_val = other_val.bound_decoded_temp();
-
-            // Both null -> same
-            if (self_val.is_null() && other_val.is_null()) {
-                return make_value(true);
-            }
-
-            // One null, one not -> not same
-            if (self_val.is_null() || other_val.is_null()) {
-                return make_value(false);
-            }
-
-            // Fast path: compare raw type indices first
-            auto self_idx = self_val.raw_storage_index();
-            auto other_idx = other_val.raw_storage_index();
-
-            // Different types -> not same
-            if (self_idx != other_idx) {
-                return make_value(false);
-            }
-
-            // Same type: compare values based on type
-            switch (self_idx) {
-                case script_value::TYPEID_INT:
-                    return make_value(self_val.unchecked_as_int() == other_val.unchecked_as_int());
-                case script_value::TYPEID_FLOAT:
-                    return make_value(self_val.unchecked_as_float() == other_val.unchecked_as_float());
-                case script_value::TYPEID_BOOL:
-                    return make_value(self_val.unchecked_as_bool() == other_val.unchecked_as_bool());
-                case script_value::TYPEID_STRING:
-                    return make_value(self_val.unchecked_as_string() == other_val.unchecked_as_string());
-                case script_value::TYPEID_OBJECT:
-                    break; // Fall through to pointer comparison below
-                default:
-                    // Other types (arrays, maps, functions, etc.) - not same unless same object
-                    return make_value(false);
-            }
-
-            // For objects: pointer identity comparison
-            auto self_holder = self_val.get_object_holder();
-            auto other_holder = other_val.get_object_holder();
-
-            // Compare the underlying object_holder pointers (pointer identity)
-            bool same = (self_holder.get() == other_holder.get());
-            return make_value(same);
-        };
-
-        push_value(script_value::make_function(same_as_method, engine_));
+        push_value(detail::same_as_method(objectValue, engine_));
         return {};
     }
 

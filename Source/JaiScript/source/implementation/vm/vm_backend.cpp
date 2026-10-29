@@ -15544,56 +15544,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 
 	if (expr->member_id == same_as_id_) {
 		if (!as_callee) { return raise_method_value(expr, objectValue, false); }
-		engine* eng = engine_;
-		script_function same_as_method = [eng, capturedValue = objectValue](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-			if (args.size() != 1) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "same_as() takes exactly 1 argument");
-			}
-
-			const script_value& other_raw = args[0];
-			script_value self_val = capturedValue.deref();
-			script_value other_val = const_cast<script_value&>(other_raw).deref();
-
-			// S8: bound values decode-compare like the old shadow indices (two aliases of one
-			// C++ int stay same_as-true). KEEP BYTE-PARALLEL with the interpreter same_as lambda.
-			if (self_val.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-				self_val = self_val.bound_decoded_temp();
-			if (other_val.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-				other_val = other_val.bound_decoded_temp();
-
-			if (self_val.is_null() && other_val.is_null()) {
-				return script_value(true, eng);
-			}
-			if (self_val.is_null() || other_val.is_null()) {
-				return script_value(false, eng);
-			}
-
-			auto self_idx = self_val.raw_storage_index();
-			auto other_idx = other_val.raw_storage_index();
-			if (self_idx != other_idx) {
-				return script_value(false, eng);
-			}
-
-			switch (self_idx) {
-				case script_value::TYPEID_INT:
-					return script_value(self_val.unchecked_as_int() == other_val.unchecked_as_int(), eng);
-				case script_value::TYPEID_FLOAT:
-					return script_value(self_val.unchecked_as_float() == other_val.unchecked_as_float(), eng);
-				case script_value::TYPEID_BOOL:
-					return script_value(self_val.unchecked_as_bool() == other_val.unchecked_as_bool(), eng);
-				case script_value::TYPEID_STRING:
-					return script_value(self_val.unchecked_as_string() == other_val.unchecked_as_string(), eng);
-				case script_value::TYPEID_OBJECT:
-					break;
-				default:
-					return script_value(false, eng);
-			}
-
-			auto self_holder = self_val.get_object_holder();
-			auto other_holder = other_val.get_object_holder();
-			return script_value(self_holder.get() == other_holder.get(), eng);
-		};
-		out = script_value::make_function(same_as_method, engine_);
+		out = detail::same_as_method(objectValue, engine_);
 		return {};
 	}
 

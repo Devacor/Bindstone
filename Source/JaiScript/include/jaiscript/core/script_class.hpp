@@ -474,12 +474,8 @@ inline bool class_definition::has_static_method_with_arity(uint64_t name_id, siz
 
     // Check C++ method arities
     auto arity_it = static_method_arities_.find(name_id);
-    if (arity_it != static_method_arities_.end()) {
-        for (size_t cpp_arity : arity_it->second) {
-            if (cpp_arity == arity) {
-                return true;
-            }
-        }
+    if (arity_it != static_method_arities_.end() && arity_it->second == arity) {
+        return true;
     }
 
     return false;

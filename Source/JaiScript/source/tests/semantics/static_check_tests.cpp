@@ -486,11 +486,11 @@ public:
             check_true(has_diag(r, dlevel::error, "'Gate::twice' expects 1 argument(s), got 0"), r.format());
             check_eq((size_t)1, error_count(e->check("Gate::twice(1, 2);")));
             check_eq((size_t)0, error_count(e->check("Gate::twice(4);")));
-            // an overloaded static: an error only when no overload takes the count
-            check_eq((size_t)0, error_count(e->check("Gate::pick(1); Gate::pick(1, 2);")));
-            auto ov = e->check("Gate::pick();");
-            check_eq((size_t)1, error_count(ov));
-            check_true(has_diag(ov, dlevel::error, "'Gate::pick' expects 1 or 2 argument(s), got 0"), ov.format());
+            // a second binding of a static name replaces the first, so the checker holds calls to the live one
+            check_eq((size_t)0, error_count(e->check("Gate::pick(1);")));
+            auto replaced = e->check("Gate::pick(1, 2);");
+            check_eq((size_t)1, error_count(replaced));
+            check_true(has_diag(replaced, dlevel::error, "'Gate::pick' expects 1 argument(s), got 2"), replaced.format());
             // a binding of unknown arity takes any count
             check_eq((size_t)0, error_count(e->check("Gate::any(); Gate::any(1, 2, 3);")));
             for (bool use_vm : {false, true}) {
@@ -506,7 +506,23 @@ public:
                 check_true(has_diag(w, dlevel::warning, "'Gate::twice' expects 1 argument(s), got 0"), w.format());
                 check_eq(std::string("Static method expects 1 argument, got 0"),
                          s->execute("[[warn_mode]]; var m = \"\"; try { Gate::twice(); } catch (err) { m = err; } m;").to_string());
+                check_eq((int64_t)5, s->execute("Gate::pick(5)").as_int(), "the run time calls the later binding");
+                check_eq(std::string("Static method expects 1 argument, got 2"),
+                         s->execute("[[warn_mode]]; var m = \"\"; try { Gate::pick(1, 2); } catch (err) { m = err; } m;").to_string());
             }
+        });
+
+        test("builtin_method_arity_counts_one_argument_in_the_singular", [this]() {
+            auto e = make_engine();
+            auto one = e->check("array<int> a = [1];\na.contains();");
+            check_eq((size_t)1, error_count(one));
+            check_true(has_diag(one, dlevel::error, "'contains' on 'array<int>' expects 1 argument, got 0"), one.format());
+            auto two = e->check("string s = \"ab\";\ns.replace(\"a\");");
+            check_eq((size_t)1, error_count(two));
+            check_true(has_diag(two, dlevel::error, "'replace' on 'string' expects 2 arguments, got 1"), two.format());
+            auto range = e->check("array<int> a = [1];\na.join(\",\", \"x\");");
+            check_eq((size_t)1, error_count(range));
+            check_true(has_diag(range, dlevel::error, "'join' on 'array<int>' expects 0 to 1 arguments, got 2"), range.format());
         });
 
         test("read_only_property_store_is_a_check_error", [this]() {

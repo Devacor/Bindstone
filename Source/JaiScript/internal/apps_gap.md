@@ -67,27 +67,36 @@ ordinary code over containers stays general.
   `var` temp (the callee's own body reads them as this-field operands), `::name` reads through `get_global_environment()` (a
   `shared_ptr` copy and a hash lookup, uncached), and the result through a general `DECL_VAR`. A method graft pays off only once
   its clone compiles as tight as the method's own body.
+- **Handle counts without the switch measure nothing.** On a 64-bit host every strong alternative keeps its object at one
+  control-block offset, so a copy can increment and a release that is not the last can decrement without the storage-kind switch.
+  The call kernel, Richards and DeltaBlue moved within the noise (+1.2%, +1.7%, -1.6% median): the switch's indirect jump is not
+  where the count traffic costs.
+- **The lean call record's bookkeeping measures nothing.** Writing what every lean entry of one body writes alike once per record
+  (return type and conversion, the declaration's pin, name, unit and frame flags), and inlining `enter_frame`, `reset_call` and the
+  unit sync, moved the call kernel 1.7% and Richards not at all. A call costs about 40 ns spread over its push, its pop, the return's
+  conversion check and landing, the receiver's count and two dispatches; no single step dominates.
 
 ## Levers, by expected value
 
-1. **Method grafts as tight as the method.** Under the guard's exact receiver class the body's fields are known slots: read them as
-   this-field operands of the receiver (no temp copy for a field or `this` receiver), keep the callee's typed lowering, land a
-   scalar result in a typed temp, and resolve program-scope reads through the environment cache. Then widen eligibility (bare
-   method calls on `this`, field receivers, handle results outside closed loops). Richards' five setters and predicates are a
-   measured 10%; DeltaBlue's `input()`/`output()` are 5M of its 8M calls.
-2. **The call protocol.** A lean method frame writes dozens of record fields, four container sizes (three of them a division by a
-   non-power-of-two element size), the receiver through an out-of-line `operator=`, `reset_call` out of line, and checks the
-   receiver's layout again (`bind_member_layout`) after the site's inline cache checked its class. A record that keeps what every
-   lean entry of one body writes alike, as raw frames do, is the shape that removes most of it.
-3. **Zero-argument calls in one instruction.** `LOAD r; CALL_METHOD 0` and `PROBE_CALLEE; CALL_FROM_SCRATCH 0` have nothing between
-   the receiver or callee and the call, so one instruction can resolve and enter: a dispatch and a pending-callee push and pop per
-   call (internal/call_site_identity.md, "Eliding the probe").
-4. **Builtin calls that run no user code as block operations.** `map.contains(k)` and `m[k]` with an int or string key, `a.size()`,
-   `a.push(v)` of a scalar: a cell loop can take them as boundary operations, guarded on the receiver's kind.
-5. **Handle counts without the switch.** The strong handle alternatives can share one count offset in their control blocks (a
-   static assertion per build); a copy is then one increment and a release one decrement, the switch left to the last release.
-6. **A flat main switch.** One-level dispatch for the main switch (the hot-op replicas already are), and a call or return that
-   continues at the callee's first instruction without re-entering the loop head.
+1. **Method grafts as tight as the method.** Under the guard's exact receiver class the body's fields are known slots. The tight form
+   needs a typed operand for "field s of the instance in slot r" that the typed rows and the cell translation read (today a receiver
+   field is a `MEMBER_TEMP` over a `var` temp), re-validated after any call the body keeps, and a typed temp for a scalar result.
+   A bare method call on `this` needs none of it: the caller's frame holds the same receiver, so the clone can keep the body's bare
+   names and compile them as the caller's this-field and this-global operands, guarded by the receiver class resolving the method to
+   the grafted body and by the two classes resolving each bare name alike. DeltaBlue's `input()`/`output()` then need handle results
+   (outside closed loops, every return proven, no destructor in the program) and a graft in a store's target
+   (`output().value = ...`, refused today as "a call in a store's target").
+2. **Builtin calls that run no user code inside cell loops.** Builtin methods carry no effect facts: none records that `contains`
+   or `[]` with an int or string key, `size()` or a scalar `push` cannot run user code. With those facts a cell loop could take such a
+   call as an operation (a door into the builtin, guarded on the receiver's kind); a boundary operation is not enough, since the hot
+   case is a condition (`if (!buckets.contains(key)) continue;`) and boundaries take whole statements only.
+3. **Fewer instructions per call.** The receiver load, the probe and the call, the return and its landing are separate dispatches
+   through the two-level main switch. `LOAD r; CALL_METHOD 0` and `PROBE_CALLEE; CALL_FROM_SCRATCH 0` have nothing between the
+   receiver or callee and the call (internal/call_site_identity.md, "Eliding the probe"); a call or return that continues at its
+   target without re-entering the loop head saves the frame reload.
+4. **Reference containers typed for proofs.** A reference's referent can change kind through another name, so a reference is
+   dynamic to the checker; a tentative type from its declaration, which every consumer already guards, would let `a.size()`,
+   element reads and builtin calls through `array<T>&` and `map<K, V>&` parameters take the typed paths.
 
 Spatial's remaining gap is memory: an entity is a control block, a 72-byte header and four cells over three lines, and a
 neighbour visit touches the slot, the header and the cells. Flat storage for typed-field classes is the lever there.

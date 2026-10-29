@@ -44,7 +44,7 @@ endif()
 
 # Options. Tools, tests and examples build by default only when JaiScript is the top-level project.
 option(JAISCRIPT_BUILD_TESTS "Build JaiScript test suite" ${JAISCRIPT_IS_TOP_LEVEL})
-option(JAISCRIPT_INTERPRETER "Build jaiscript_interpreter, the library plus the tree-walking interpreter the parity verifiers (tests, fuzzer, runner) link" ${JAISCRIPT_IS_TOP_LEVEL})
+option(JAISCRIPT_INTERPRETER "Build jaiscript_interpreter, the library plus the tree-walking interpreter the parity verifiers (tests, fuzzer, runner, jai_spider) link" ${JAISCRIPT_IS_TOP_LEVEL})
 option(JAISCRIPT_INSTALL "Generate the install rules and the JaiScript CMake package" ${JAISCRIPT_IS_TOP_LEVEL})
 option(JAISCRIPT_LTCG "Whole-program optimization for MSVC Release builds (/GL, /LTCG)" ${JAISCRIPT_IS_TOP_LEVEL})
 option(JAISCRIPT_ENABLE_BENCHMARKS "Enable performance benchmark tests" OFF)

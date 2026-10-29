@@ -15,7 +15,7 @@ else()
 endif()
 
 add_executable(jai_spider main.cpp)
-target_link_libraries(jai_spider PRIVATE jaiscript jai_spider_sqlite)
+target_link_libraries(jai_spider PRIVATE ${JAISCRIPT_VERIFIER_LIBRARY} jai_spider_sqlite)
 target_compile_definitions(jai_spider PRIVATE JAI_SPIDER_SOURCE_LIBRARY_DIR="${CMAKE_CURRENT_SOURCE_DIR}/lib")
 # spider:: (../jaiscript/http_transport.hpp): WinHTTP on Windows; sockets elsewhere, HTTPS through OpenSSL when found
 if(WIN32)

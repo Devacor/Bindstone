@@ -195,12 +195,12 @@ namespace {
 			out << pre << "member_store_protos " << ch.member_store_protos.size() << "\n";
 			for (size_t i = 0; i < ch.member_store_protos.size(); ++i) {
 				const member_store_proto& p = ch.member_store_protos[i];
-				out << pre << " " << i << " node=" << u(p.node) << " proof=" << p.proof << " base=" << u(p.base) << " value=" << operand(ch, p.value) << "\n";
+				out << pre << " " << i << " node=" << u(p.node) << " base=" << u(p.base) << " value=" << operand(ch, p.value) << "\n";
 			}
 			out << pre << "velem_protos " << ch.velem_protos.size() << "\n";
 			for (size_t i = 0; i < ch.velem_protos.size(); ++i) {
 				const velem_proto& p = ch.velem_protos[i];
-				out << pre << " " << i << " sub=" << operand(ch, p.sub) << " node=" << u(p.node) << " proof=" << p.proof << " kind=" << p.kind << " compound=" << b(p.compound) << " comp=";
+				out << pre << " " << i << " sub=" << operand(ch, p.sub) << " node=" << u(p.node) << " kind=" << p.kind << " compound=" << b(p.compound) << " comp=";
 				for (int8_t c : p.comp) { out << static_cast<int>(c) << ","; }
 				out << " value=" << operand(ch, p.value) << "\n";
 			}

@@ -12,7 +12,6 @@
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/member_scope.hpp>
-#include <jaiscript/detail/type_proofs.hpp>
 #include <jaiscript/detail/return_conv.hpp>
 #include <jaiscript/detail/parallel_schedule.hpp>
 #include <jaiscript/detail/null_member_diagnostic.hpp>
@@ -1916,17 +1915,8 @@ namespace jai::vm {
         // null when the instruction has none
         const identifier_expr* ident_node_at(const frame& f) const {
             const chunk& code = *f.code;
-            if (code.ident_nodes.size() <= f.ip) { return nullptr; }
-            return ident_node_of(code, code.ident_nodes[f.ip]);
-        }
-        static const identifier_expr* ident_node_of(const chunk& code, uint32_t node) {
-            return node == k_invalid_u32 ? nullptr : static_cast<const identifier_expr*>(code.nodes[node].get());
-        }
-        // Proven-field receiver for a bare identifier in an instance-method frame: main
-        // engine only (workers keep their deref-on-read walls), never a static frame
-        bool bare_field_proof_frame(const frame& f) const {
-            return cached_global_env_ && f.locals && f.locals->scope_this &&
-                   frame_scope_state(f) == detail::member_scope_state::instance;
+            if (code.ident_nodes.size() <= f.ip || code.ident_nodes[f.ip] == k_invalid_u32) { return nullptr; }
+            return static_cast<const identifier_expr*>(code.nodes[code.ident_nodes[f.ip]].get());
         }
         bool frame_scope_active(const frame& f) const {
             const auto s = frame_scope_state(f);
@@ -2003,21 +1993,12 @@ namespace jai::vm {
         // floor, then fields/statics, then (post-member-miss) the per-site cache and
         // the definition/global chain. A member METHOD answers nullptr - it shadows,
         // and only value/callee sites mint.
-        script_value* member_scope_env_lookup(frame& f, uint64_t symbol_id, size_t cache_slot,
-                                              const identifier_expr* idn = nullptr) {
+        script_value* member_scope_env_lookup(frame& f, uint64_t symbol_id, size_t cache_slot) {
             if (lazy_method_frame(f)) {
                 if (script_value* ic_field = this_field_ic_probe(f, cache_slot, symbol_id)) { return ic_field; }
             }
             if (script_value* own = detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, symbol_id)) {
                 return own;
-            }
-            // V-I1 (pointer form): the proven field cell IS the probe's value_ptr; a miss
-            // (class/epoch/absent cell) runs the probe, which materializes as today
-            if (idn && idn->proven_class && bare_field_proof_frame(f)) {
-                if (script_value* cell = detail::proven_field_cell(*f.locals->scope_this, idn->proven_class,
-                                                                   idn->proven_epoch, idn->proven_slot, nullptr)) {
-                    return cell;
-                }
             }
             if (script_value* ic_field = this_field_ic_probe(f, cache_slot, symbol_id)) {
                 return ic_field;   // the walk-miss proof covers the own scopes; a field is the probe's first rung
@@ -2281,7 +2262,7 @@ namespace jai::vm {
         // The field-write landing op_set_member and op_member_compound share: the proven
         // field write, then the write-side site IC (member_ic at ins_index). nullopt = the
         // general assign_member ladder runs; a value is the landed store's status.
-        std::optional<op_status> member_field_write_fast(frame& f, size_t ins_index, uint32_t proof, member_expr* member,
+        std::optional<op_status> member_field_write_fast(frame& f, size_t ins_index, member_expr* member,
                                                          const script_value& dereferenced, const script_value& value);
         op_status store_static_target(frame& f, member_expr* member, const script_value& result, script_value* stored_out = nullptr);
         // ns::x = v / op= / ++ on a namespace variable's cell, and a namespace's variable declaration run in its scope
@@ -2543,7 +2524,7 @@ namespace jai::vm {
         op_status exec_velem_load(frame& f, const vm_instruction& ins);
         op_status exec_velem_store(frame& f, const vm_instruction& ins);
         op_status exec_set_member_value(frame& f, const vm_instruction& ins);   // `base.member = operand;` in statement position: the store kernel, no result
-        op_status store_member(frame& f, size_t ins_index, uint32_t node, uint32_t proof, script_value&& object_value, script_value&& value, bool want_result);   // SET_MEMBER's kernel: the fast lane, the ladder, the result when asked
+        op_status store_member(frame& f, size_t ins_index, uint32_t node, script_value&& object_value, script_value&& value, bool want_result);   // SET_MEMBER's kernel: the fast lane, the ladder, the result when asked
         op_status assign_math_component(frame& f, uint32_t node, script_value& base, member_expr* member, const script_value& value, script_value& out);   // `base.x = v` on a math value
         op_status exec_cells_cfor_back(frame& f, const vm_instruction& ins);   // a counted loop's back edge: the general step and compare, then the block entry
         op_status cells_counted_head_entry(frame& f, uint32_t li);             // a counted loop's entry at its CFOR_PREP after the first compare
@@ -2834,7 +2815,7 @@ namespace jai::vm {
         // custom-getter shadow / no field slot)
         uint32_t member_read_slot_probe(class_definition* cd, member_expr* expr);
         const script_value* site_field(const chunk& code, const script_value& objd, member_expr* expr, size_t site, script_value& host_value);
-        const script_value* site_field_of_holder(const chunk& code, script_value::object_holder* holder, member_expr* expr, size_t site);
+        const script_value* site_field_of_holder(const chunk& code, script_value::object_holder* holder, size_t site);
         // a negative member_ic row on a bound C++ class: the member's in-place lane when the ladder would reach its accessors
         void fill_host_member_hit(class_definition* cd, const class_instance* inst, uint64_t member_id, const script_value& receiver,
                                   chunk::member_ic_entry& entry);

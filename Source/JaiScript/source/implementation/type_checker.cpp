@@ -2054,60 +2054,6 @@ private:
                !fn_stack_.back().is_static_method && !fn_stack_.back().in_ctor_initializers && !has_includes_;
     }
 
-    struct field_proof { class_definition* cd; uint32_t slot; uint64_t epoch; type_info* declared; bool write_ok; };
-    static constexpr std::string_view k_no_proof_names[] = {"same_as", "reset", "use_count", "unique", "cpp_ref_count"};
-
-    // Chain closed = every ancestor is a script class visible to the engine, none carries a C++ base.
-    bool script_chain_closed(const class_definition& cd, int depth = 0) {
-        if (depth > 32 || !cd.is_script_class() || cd.find_cpp_base_class() || cd.extended_ever()) { return false; }
-        for (const auto& p : cd.get_parent_classes()) {
-            if (!p || !script_chain_closed(*p, depth + 1)) { return false; }
-        }
-        return true;
-    }
-
-    std::optional<field_proof> resolve_field_proof(std::string_view cls, std::string_view member, const member_hit& hit) {
-        if (!stamping() || !hit.found || hit.methods) { return std::nullopt; }
-        if (hit.field && hit.field->is_static) { return std::nullopt; }                 // statics live in class storage
-        for (auto n : k_no_proof_names) { if (member == n) { return std::nullopt; } }   // builtin-shadow names
-        auto def = engine_class(cls);                                                   // null on a same-unit class's FIRST check
-        if (!def || def->chain_has_nonpublic() || !script_chain_closed(*def)) { return std::nullopt; }
-        const uint64_t id = eng_.symbolize(member);
-        if (!def->get_method(id, false).is_invalid()) { return std::nullopt; }         // method with the field's name: ladder decides
-        if (def->find_field_declaring_class(id) == nullptr) { return std::nullopt; }
-        const uint32_t slot = def->field_slot(id);
-        if (slot == class_definition::k_no_field_slot) { return std::nullopt; }
-        const uint64_t getter_id = eng_.get_symbolizer()->get_getter_id_with_view(id).first;
-        const uint64_t setter_id = eng_.get_symbolizer()->get_setter_id_with_view(id).first;
-        if (def->user_accessor(getter_id) || def->user_accessor(setter_id)) { return std::nullopt; }   // a user _get_/_set_ in the chain owns the member: off the lanes, reads and writes
-        type_info* declared = def->get_field_declared_type(id).get();
-        if (hit.field && hit.field->type.get() != declared) { return std::nullopt; }   // class also declared in THIS unit: spellings must agree (interned pointers)
-        bool write_ok = true;
-        if (declared) {
-            switch (declared->base_type) {
-                case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
-                case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_object_type:
-                case script_value_type::jai_any_type: break;
-                default: write_ok = false;   // array/map/shared_ptr/weak_ptr/reference/function fields: reads only
-            }
-        }
-        return field_proof{def.get(), slot, def->field_shape_epoch(), declared, write_ok};
-    }
-
-    template <class N> void stamp_field(N* n, const std::optional<field_proof>& p) {
-        stamp(n->proven_class, p ? p->cd : nullptr, static_cast<class_definition*>(nullptr));
-        stamp(n->proven_slot, p ? p->slot : uint32_t(UINT32_MAX), uint32_t(UINT32_MAX));
-        stamp(n->proven_epoch, p ? p->epoch : uint64_t(0), uint64_t(0));
-        stamp(n->proven_field_type, p ? p->declared : nullptr, static_cast<type_info*>(nullptr));
-        stamp(n->proven_field_write, p ? p->write_ok : false, false);
-        if (p && stamping()) { ++counts_.members; }
-    }
-
-    // Field store: plain `=` whose RHS static type IS the field's declared type.
-    bool field_store_same_type(const std::optional<field_proof>& p, token_type op, const ctype& rhs) {
-        return op == token_type::equal && p && p->declared && same_type(ctype_from_type_info(p->declared), rhs);
-    }
-
     // a scalar (int, float, bool) as its base type, an array of scalars as jai_array_type | the element's base type << 8, else 0
     static uint16_t certain_kind(const type_info* t) {
         if (!t || t->is_reference()) return 0;
@@ -3910,16 +3856,14 @@ private:
 
     bool bare_this_field_ = false;
     ctype infer_identifier(identifier_expr* id) {
-        std::optional<field_proof> fp;
         bare_this_field_ = false;
-        ctype t = infer_identifier_impl(id, fp);
-        stamp_field(id, fp);
+        ctype t = infer_identifier_impl(id);
         stamp(id->this_field, bare_this_field_, false);
         if (extended_names_.count(id->name)) { return {}; }
         return t;
     }
 
-	ctype infer_identifier_impl(identifier_expr* id, std::optional<field_proof>& fp) {
+	ctype infer_identifier_impl(identifier_expr* id) {
 		size_t scope_index = 0;
 		if (var_entry* local = find_named(id, &scope_index)) {
 			if (scope_index == 0) { note_global_use(id->name); }   // top-level var read
@@ -3945,7 +3889,6 @@ private:
 					return {};
 				}
 				if (access_denied(hit, id->name, id->location)) { return {}; }
-				if (bare_field_context()) { fp = resolve_field_proof(class_ctx_name_, id->name, hit); }
 				if (hit.methods) {
 					if (!hit.methods->empty() && !hit.methods->front()->is_static && bare_field_context()) {   // a method is called or bound, never read bare
 						diag(diag_level::error, id->location, detail::bare_method_value_text(id->name, class_ctx_name_));
@@ -4043,20 +3986,16 @@ private:
     }
 
     ctype infer_member(member_expr* m, bool writing, const variable_decl** typed_field_out = nullptr,
-                       ctype* recv_out = nullptr, member_hit* hit_out = nullptr,
-                       std::optional<field_proof>* proof_out = nullptr) {
-        std::optional<field_proof> fp;
+                       ctype* recv_out = nullptr, member_hit* hit_out = nullptr) {
         ctype recv;
-        ctype t = infer_member_impl(m, writing, typed_field_out, &recv, hit_out, fp);
+        ctype t = infer_member_impl(m, writing, typed_field_out, &recv, hit_out);
         if (recv_out) { *recv_out = recv; }
-        stamp_field(m, fp);
         stamp(m->enum_constant, !writing && enum_value_read(m, recv, t), false);
-        if (proof_out) { *proof_out = fp; }
         return t;
     }
 
 	ctype infer_member_impl(member_expr* m, bool writing, const variable_decl** typed_field_out,
-							ctype* recv_out, member_hit* hit_out, std::optional<field_proof>& fp) {
+							ctype* recv_out, member_hit* hit_out) {
 		if (m->is_static && binary_width_token(m)) { return object_of("binary::width"); }
 		if (m->is_static && namespace_path_receiver(m)) { return {}; }
 		ctype recv = infer(m->object.get());
@@ -4080,8 +4019,7 @@ private:
 		}
 		if (recv.is_unknown() && !m->is_static) {
 			if (const ctype held = referent_receiver(m->object.get()); held.kind == ctype::object_k) {
-				std::optional<field_proof> unused;
-				infer_class_member(m, held, writing, typed_field_out, hit_out, unused);
+				infer_class_member(m, held, writing, typed_field_out, hit_out);
 				if (recv_out) { *recv_out = held; }
 			}
 		}
@@ -4095,13 +4033,12 @@ private:
 			if (!writing && !recv.tentative && !m->is_static) { builtin_method_value(recv, m); }
 			return {};   // builtin methods / map keys / dynamic: lenient
 		}
-		return infer_class_member(m, recv, writing, typed_field_out, hit_out, fp);
+		return infer_class_member(m, recv, writing, typed_field_out, hit_out);
 	}
 
-	// A member of a class, an enum or a class used as a value; a reference's referent (diagnostic_only) is checked alike and seeds
-	// no field proof
+	// A member of a class, an enum or a class used as a value; a reference's referent (diagnostic_only) is checked alike
 	ctype infer_class_member(member_expr* m, const ctype& recv, bool writing, const variable_decl** typed_field_out,
-							 member_hit* hit_out, std::optional<field_proof>& fp) {
+							 member_hit* hit_out) {
 		if (extended_members_.count(m->member)) { return {}; }
 		if (class_dot_receiver(m, recv)) { return {}; }
 		if (recv.kind == ctype::enum_ref_k) {
@@ -4123,10 +4060,6 @@ private:
 		if (!want_static && chain_has_user_accessor(cls, m->member)) { return accessor_read_type(cls, m->member); }   // a user _get_/_set_ answers: known member, typed only by a single declared getter, never a proof
 		if (hit.found) {
 			if (typed_field_out && hit.field && (hit.field->type || hit.field->function_spelling)) { *typed_field_out = hit.field; }
-			if (recv.kind == ctype::object_k && !recv.diagnostic_only && !m->null_safe && !m->is_static &&
-				m->object->get_type() != node_type::super_expr) {
-				fp = resolve_field_proof(cls, m->member, hit);
-			}
 			if (hit.methods) {
 				if (!writing && !want_static) {   // a method is called or bound, never read bare
 					diag(diag_level::error, m->location, detail::method_value_text(m->member, cls, detail::method_value_receiver(m), false));
@@ -4610,9 +4543,8 @@ private:
 		expression* target = a->target.get();
 		if (target->get_type() == node_type::identifier_expr) {
 			auto* id = static_cast<identifier_expr*>(target);
-			std::optional<field_proof> fp;
 			bool this_field = false;
-			auto done = [&](ctype t) { stamp_field(id, fp); stamp(id->this_field, this_field, false); return t; };
+			auto done = [&](ctype t) { stamp(id->this_field, this_field, false); return t; };
 			size_t scope_index = 0;
 			if (var_entry* local = find_named(id, &scope_index)) {
 				if (scope_index == 0) { note_global_use(id->name); }   // top-level var write
@@ -4629,9 +4561,7 @@ private:
 				if (hit.found) {
 					if (access_denied(hit, id->name, id->location)) { return done({}); }
 					if (hit.read_only) { read_only_store(a->location, id->name); return done({}); }
-					if (bare_field_context()) { fp = resolve_field_proof(class_ctx_name_, id->name, hit); }
 					if (hit.field && !hit.field->is_static && !hit.methods && bare_field_context() && !chain_has_user_accessor(class_ctx_name_, id->name)) { this_field = true; }
-					if (field_store_same_type(fp, a->op.type, rhs)) { store_proof = proof_same_type; }
 					if (hit.field && (hit.field->type || hit.field->function_spelling)) {
 						ctype ft = member_type(hit);
 						if (!ft.is_unknown()) {
@@ -4674,7 +4604,6 @@ private:
 		}
 		if (target->get_type() == node_type::member_expr) {
 			const variable_decl* typed_field = nullptr;
-			std::optional<field_proof> fp;
 			member_hit hit;
 			auto* m = static_cast<member_expr*>(target);
 			if (std::string_view pair_name = map_key_operand(m); !pair_name.empty()) {
@@ -4682,7 +4611,7 @@ private:
 				return rhs;
 			}
 			ctype recv;
-			const ctype read_type = infer_member(m, /*writing=*/true, &typed_field, &recv, &hit, &fp);
+			const ctype read_type = infer_member(m, /*writing=*/true, &typed_field, &recv, &hit);
 			// a shared_ptr<T> namespace variable admits a handle by its static pointee at load; other namespace stores
 			// stay run-time checks under strict (spec: a_typed_namespace_store_is_checked_at_run_time_under_strict)
 			std::string qualified;
@@ -4705,7 +4634,6 @@ private:
 				read_only_store(a->location, m->member);
 				return rhs;
 			}
-			if (field_store_same_type(fp, a->op.type, rhs)) { store_proof = proof_same_type; }
 			if (typed_field && (typed_field->type || typed_field->function_spelling)) {
 				ctype ft = member_type(hit);
 				if (!ft.is_unknown()) {

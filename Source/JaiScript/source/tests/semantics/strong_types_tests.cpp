@@ -3372,20 +3372,19 @@ public:
                 "  int tick(int d) { hp = hp - d; this.hp = this.hp + 1; x = x * 2.0; tag = tag + \"!\"; alive = !alive; c = 'b'; return hp; } }\n"
                 "P p = P(); int r = p.tick(3); r = r + p.tick(1); p.hp = r;\n"
                 "to_string(r) + \":\" + to_string(p.hp) + \":\" + type_of(p.hp) + \":\" + p.tag";
-            const std::string use = "r = p.tick(2); p.hp = r; p.tag = \"t\"; to_string(p.hp) + \":\" + p.tag";
+            const std::string use = "{ int k = 0; k = 2; r = p.tick(k); } p.hp = r; p.tag = \"t\"; to_string(p.hp) + \":\" + p.tag";
             const std::string bad = "p.hp = \"x\"; p.hp";
             for (int pass = 0; pass < 3; ++pass) {
                 check_eq(outcome(*off, unit), outcome(*on, unit), "unit pass " + std::to_string(pass));
             }
             const proof_stats st = on->last_proof_stats();
-            check_ge(st.members, (uint32_t)8, "field proofs on the hp/x/tag/alive/c sites");
-            check_ge(st.stores, (uint32_t)5, "same-type stores");
+            check_ge(st.stores, (uint32_t)1, "same-type local stores");
             check_ge(st.decls, (uint32_t)2, "same-type decls");
             check_ge(st.calls, (uint32_t)1, "statically resolved method calls");
             check_ge(st.args, (uint32_t)1, "int argument into an int parameter");
             check_ge(st.returns, (uint32_t)1, "int returned from an int method");
             const proof_stats none = off->last_proof_stats();
-            check_eq((uint32_t)0, none.members + none.stores + none.decls + none.calls + none.args + none.returns, "the twin stamps nothing");
+            check_eq((uint32_t)0, none.stores + none.decls + none.calls + none.args + none.returns, "the twin stamps nothing");
             for (int pass = 0; pass < 3; ++pass) {
                 const std::string got = outcome(*on, use);
                 check_eq(outcome(*off, use), got, "use pass " + std::to_string(pass));
@@ -3396,10 +3395,10 @@ public:
             }
             on->type_proofs(false);
             check_eq(outcome(*off, use), outcome(*on, use), "switched off mid-run");
-            check_eq((uint32_t)0, on->last_proof_stats().members, "stripped at the next execute");
+            check_eq((uint32_t)0, on->last_proof_stats().stores, "stripped at the next execute");
             on->type_proofs(true);
             check_eq(outcome(*off, use), outcome(*on, use), "switched back on");
-            check_ge(on->last_proof_stats().members, (uint32_t)1, "re-stamped at the next execute");
+            check_ge(on->last_proof_stats().stores, (uint32_t)1, "re-stamped at the next execute");
         });
 
         // ===== USER ACCESSORS ON MEMBER ACCESS =====
@@ -3490,16 +3489,6 @@ public:
                 "probe(q, c, cc)";
             // by-value class parameters copy the instance, so every probe sees fresh receivers
             check_proof_run(thrice_then(unit, "probe(q, c, cc)"), "1310:1210:130:30:42:4:3", "typed receivers with user accessors: all four lanes agree");
-            // an accessor-bearing field never carries a field proof; a sibling plain field still does
-            auto members_after_two = [](const std::string& src) {
-                auto e = jai::foundry::make_engine();
-                e->execute(src);
-                e->execute(src);
-                return e->last_proof_stats().members;
-            };
-            check_eq((uint32_t)0, members_after_two("class Q { int b = 1; int _get_b() { return 7; } } int probe(Q q) { return q.b; } Q q = Q(); probe(q)"), "user getter: member site refused");
-            check_eq((uint32_t)1, members_after_two("class Q { int b = 1; int plain = 2; int _get_b() { return 7; } } int probe(Q q) { return q.b + q.plain; } Q q = Q(); probe(q)"), "only the plain sibling proves");
-            check_eq((uint32_t)1, members_after_two("class Q { int b = 1; int plain = 2; void _set_b(int v) { } } int probe(Q q) { q.b = 3; return q.b + q.plain; } Q q = Q(); probe(q)"), "user setter: read and write sites refused, the sibling proves");
         });
 
         test("accessor_hot_reload_adds_and_removes", [this]() {

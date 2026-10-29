@@ -2564,7 +2564,7 @@ bool vm_compiler::try_emit_text_builder_member(const std::shared_ptr<member_expr
 	compile_expression(member->object);
 	const uint32_t node = add_node(member);
 	note_component_base(node, member.get());
-	emit(opcode::op_concat_store, node, assign->static_store_proof, concat_store_member << concat_store_mode_shift);
+	emit(opcode::op_concat_store, node, 0, concat_store_member << concat_store_mode_shift);
 	return true;
 }
 
@@ -2720,7 +2720,6 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 				velem_proto p;
 				velem_proto_for(assign->target, p);
 				note_component_base(p.node, member.get());
-				p.proof = assign->static_store_proof;
 				p.compound = compound;
 				if (compound) {
 					p.kind = compound_kind_for(op);
@@ -2749,11 +2748,11 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 						// the value is on the stack: the general store over the element consumes it (value first)
 						compile_expression(member->object);
 						if (!compound) {
-							emit(opcode::op_set_member, p.node, p.proof);
+							emit(opcode::op_set_member, p.node);
 						} else {
 							emit(opcode::op_dup);
 							emit(opcode::op_get_member, add_node(member));
-							emit(opcode::op_member_compound, p.node, p.proof, p.kind | compound_flag_value_first);
+							emit(opcode::op_member_compound, p.node, 0, p.kind | compound_flag_value_first);
 						}
 						emit(opcode::op_pop);
 						return true;
@@ -2774,7 +2773,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 			const uint32_t base_slot = member->is_static ? k_invalid_u32 : member_base_slot(member);
 			if (base_slot != k_invalid_u32 && base_slot < k_typed_slot_mask) {
 				const expression_ptr& value = assign->value;
-				member_store_proto mp; mp.node = add_node(assign->target); mp.proof = assign->static_store_proof; mp.base = base_slot;
+				member_store_proto mp; mp.node = add_node(assign->target); mp.base = base_slot;
 				note_component_base(mp.node, member);
 				bool value_operand = false;
 				if (value->get_type() == node_type::literal_expr || (value->get_type() == node_type::identifier_expr && identifier_slot_operand(static_cast<identifier_expr*>(value.get())) != k_invalid_u32)) {
@@ -2795,7 +2794,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 						value_operand = true;
 					} else {
 						// the value is on the stack: the general store consumes it
-						emit(opcode::op_set_member_fused, mp.node, mp.proof, base_slot);
+						emit(opcode::op_set_member_fused, mp.node, 0, base_slot);
 						emit(opcode::op_pop);
 						return true;
 					}
@@ -7822,12 +7821,12 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 				if (base_slot != k_invalid_u32) {
 					const uint32_t node = add_node(member);
 					note_component_base(node, member.get());
-					emit(opcode::op_set_member_fused, node, expr->static_store_proof, base_slot);   // the base from its slot: no LOAD dispatch
+					emit(opcode::op_set_member_fused, node, 0, base_slot);   // the base from its slot: no LOAD dispatch
 				} else {
 					compile_expression(member->object);
 					const uint32_t node = add_node(member);
 					note_component_base(node, member.get());
-					emit(opcode::op_set_member, node, expr->static_store_proof);
+					emit(opcode::op_set_member, node);
 				}
 			}
 		} else {
@@ -7851,7 +7850,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			if (value_first) kind |= compound_flag_value_first;
 			const uint32_t node = add_node(member);
 			note_component_base(node, member.get());
-			emit(opcode::op_member_compound, node, expr->static_store_proof, kind);
+			emit(opcode::op_member_compound, node, 0, kind);
 		}
 		return;
 	}

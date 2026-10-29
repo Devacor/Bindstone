@@ -202,15 +202,6 @@ namespace jai {
         // declared type governs a store through it): the storage index a value of T's kind has, 0xFF when
         // every store runs T's table (detail::declared_ref_kind), and T in declared_ref
         uint8_t declared_ref_kind = 0;
-        // Field proof (bare this-field read/write inside a method): the receiver's certain class
-        // object, its flat field slot, the field_shape_epoch at stamp time, the declared type and
-        // whether a write may bypass the accessor ladder. Raw pointers like mcache_*: script
-        // class_definitions are engine-lifetime and hot reload reuses the object.
-        mutable class_definition* proven_class = nullptr;
-        mutable uint32_t proven_slot = UINT32_MAX;
-        mutable uint64_t proven_epoch = 0;
-        mutable type_info* proven_field_type = nullptr;
-        mutable bool proven_field_write = false;
         mutable bool this_field = false;   // a bare name in a method the checker resolved to a field of the class chain (declared, no user accessor): the method graft's `recv.name`
         type_info* declared_ref = nullptr;
 
@@ -379,12 +370,6 @@ namespace jai {
         bool null_safe = false;  // true for ?. null-safe member access
 
         mutable method_site_cache mcache;   // interpreter obj.method() call sites
-        // Field proof (see identifier_expr::proven_class)
-        mutable class_definition* proven_class = nullptr;
-        mutable uint32_t proven_slot = UINT32_MAX;
-        mutable uint64_t proven_epoch = 0;
-        mutable type_info* proven_field_type = nullptr;
-        mutable bool proven_field_write = false;
 
         // math:: intrinsic resolution cache (static access `math::<fn>`): 255 = not yet
         // resolved, 254 = resolved-not-an-intrinsic, else detail::math_fn. Name-based,

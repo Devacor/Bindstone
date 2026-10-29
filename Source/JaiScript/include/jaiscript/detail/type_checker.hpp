@@ -82,7 +82,6 @@ namespace jai {
         uint32_t decls = 0;     // variable_decl::static_init_proof
         uint32_t args = 0;      // call_expr::static_arg_proofs entries == proof_same_type
         uint32_t returns = 0;   // return_stmt::static_return_proof
-        uint32_t members = 0;   // member_expr / identifier_expr field proofs
         uint32_t deferred = 0;  // program-table classes the walk met before the engine defined them: the unit's proofs re-stamp after the next import
         uint32_t calls = 0;     // call_expr nodes with a proven callee body
     };

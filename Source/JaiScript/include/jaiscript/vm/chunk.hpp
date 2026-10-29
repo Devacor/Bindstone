@@ -72,17 +72,16 @@ namespace jai::vm {
     // op_push_fused: `recv.push(v);` with an identifier receiver and a slotted-identifier or
     // literal value; site is the call_site the unfused sequence would have used (the replay
     // path and its argument metadata)
-    // `base.member = value;` in statement position (op_set_member_value): the member node, the assignment's static store proof, the
-    // base's frame slot and the value as an operand (an identifier, a literal, or the temp a computed value lands in)
+    // `base.member = value;` in statement position (op_set_member_value): the member node, the base's frame slot and the value as an
+    // operand (an identifier, a literal, or the temp a computed value lands in)
     struct member_store_proto {
         uint32_t node = k_invalid_u32;
-        uint32_t proof = 0;
         uint32_t base = k_invalid_u32;
         fused_operand value;
     };
     // `a[i].x` (op_velem_load) and `a[i].x op= v;` (op_velem_store) where the checker proved `a` a math vector buffer, `a` a frame
     // slot and `i` a frame slot or an int literal: the subscript as a one-level fused operand, the member node, the component each
-    // vector kind names (-1 none, indexed by kind - v2) and, for a store, the compound kind and flags, the store proof and the value
+    // vector kind names (-1 none, indexed by kind - v2) and, for a store, the compound kind and flags and the value
     // op_get_member_path: the chain's links, the outer member first; a subscript link reads its index from a frame slot or a constant
     // and replays as op_index under its flags, a member link names its member_expr through the chain
     struct member_path_proto {
@@ -97,7 +96,6 @@ namespace jai::vm {
     struct velem_proto {
         fused_operand sub;
         uint32_t node = k_invalid_u32;
-        uint32_t proof = 0;
         uint32_t kind = 0;
         bool compound = false;
         int8_t comp[6] = {-1, -1, -1, -1, -1, -1};

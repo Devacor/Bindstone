@@ -20,6 +20,60 @@ public:
 		// The native callback changes the operator table while this same script frame
 		// is active. The next typed operation must observe the new operator, including
 		// when a future region keeps scalar temporaries unboxed around calls.
+		// A host-registered global <, ==, % or <=> over numbers, typed or raw, reaches every numeric lane (int and float
+		// locals, typed slots, var operands, loop conditions, top-level code) on every backend as the interpreter reads it
+		test("a_global_numeric_comparison_or_modulo_operator_reaches_every_lane", [this]() {
+			const std::string script =
+				"function shapes(int a, int b, var x, var y) {\n"
+				"    int m = a % b; var dm = x % y; bool l = a < b; bool e = a == b; var dl = x < y; var de = x == y;\n"
+				"    float fa = a; float fb = b; bool fl = fa < fb; var s = a <=> b; int loops = 0;\n"
+				"    for (int i = 0; i < 3; i++) { loops++; }\n"
+				"    int w = 0; while (w < 2 && loops < 9) { w++; loops++; }\n"
+				"    if (a == b) { loops += 100; }\n"
+				"    return to_string(m) + \",\" + to_string(dm) + \",\" + to_string(l) + to_string(e) + to_string(dl) + to_string(de) + to_string(fl) + \",\" + to_string(s) + \",\" + to_string(loops);\n"
+				"}\n"
+				"int ta = 7; int tb = 3; int tm = ta % tb; bool tl = ta < tb;\n"
+				"shapes(7, 3, 7, 3) + \"|\" + shapes(2, 2, 2, 2) + \"|\" + to_string(tm) + to_string(tl);\n";
+			auto run = [&](backend_type type, bool reference, bool raw) {
+				auto eng = engine::make();
+				eng->set_backend(type);
+				eng->vm_reference_mode(reference);
+				jai::stdlib::register_all(*eng);
+				engine* raw_engine = eng.get();
+				if (raw) {
+					auto num = [](const script_value& v) { return v.deref().is_int() ? static_cast<double>(v.deref().as_int()) : v.deref().as_float(); };
+					eng->add_functionWithArity("<", [raw_engine, num](const std::vector<script_value>& a) -> checked_result<script_value> {
+						return script_value(num(a[0]) > num(a[1]), raw_engine);
+					}, 2);
+					eng->add_functionWithArity("==", [raw_engine, num](const std::vector<script_value>& a) -> checked_result<script_value> {
+						return script_value(num(a[0]) != num(a[1]), raw_engine);
+					}, 2);
+					eng->add_functionWithArity("%", [raw_engine, num](const std::vector<script_value>& a) -> checked_result<script_value> {
+						return script_value(static_cast<script_int>(num(a[0]) + num(a[1])) + 1000, raw_engine);
+					}, 2);
+					eng->add_functionWithArity("<=>", [raw_engine](const std::vector<script_value>&) -> checked_result<script_value> {
+						return script_value(static_cast<script_int>(77), raw_engine);
+					}, 2);
+				} else {
+					eng->add_function("<", [](script_int a, script_int b) { return a > b; });
+					eng->add_function("==", [](script_int a, script_int b) { return a != b; });
+					eng->add_function("%", [](script_int a, script_int b) { return a + b + 1000; });
+					eng->add_function("<=>", [](script_int, script_int) { return static_cast<script_int>(77); });
+				}
+				try {
+					auto result = eng->execute(script);
+					return result.is_string() ? result.as_string() : std::string("<not a string>");
+				} catch (const std::exception& e) {
+					return std::string("threw: ") + e.what();
+				}
+			};
+			for (bool raw : {false, true}) {
+				const std::string oracle = run(backend_type::interpreter, false, raw);
+				check_true(oracle.find("1010") != std::string::npos, oracle);
+				check_eq(oracle, run(backend_type::vm, false, raw), raw ? "raw vm" : "typed vm");
+				check_eq(oracle, run(backend_type::vm, true, raw), raw ? "raw vm-reference" : "typed vm-reference");
+			}
+		});
 		test("registered_mid_function_before_next_typed_operation", [this]() {
 			for (bool proofs : {true, false}) {
 				for (bool temporary : {false, true}) {

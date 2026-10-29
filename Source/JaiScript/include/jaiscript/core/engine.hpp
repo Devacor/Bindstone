@@ -831,13 +831,6 @@ namespace jai {
             
             std::vector<param_type_info> paramTypes = extract_parameter_types_with_info<Func>();
 
-            // Auto-detect numeric operator overrides and set flag
-            if (arity == 2 && isNumericOperator(name)) {
-                if (hasNumericOperands(paramTypes)) {
-                    set_has_custom_numeric_operators(true);
-                }
-            }
-
             // Check if this should be registered as an overload
             if (has_function(name)) {
                 // Automatically convert to overloaded function with type info
@@ -854,26 +847,6 @@ namespace jai {
         }
 
     private:
-        // Helper methods for numeric operator detection
-        bool isNumericOperator(const std::string& name) const {
-            return name == "+" || name == "-" || name == "*" || name == "/" || name == "%" ||
-                   name == "<" || name == ">" || name == "<=" || name == ">=" || 
-                   name == "==" || name == "!=" || name == "<=>";
-        }
-        
-        bool hasNumericOperands(const std::vector<param_type_info>& paramTypes) const {
-            if (paramTypes.size() != 2) return false;
-
-            auto isNumericType = [](script_value_type t) {
-                return t == script_value_type::jai_int_type ||
-                       t == script_value_type::jai_float_type ||
-                       t == script_value_type::jai_char_type ||
-                       t == script_value_type::jai_bool_type;
-            };
-            
-            return isNumericType(paramTypes[0].base_type) && isNumericType(paramTypes[1].base_type);
-        }
-        
         template <typename R>
         static constexpr script_value_type host_result_kind() {
             using D = std::decay_t<R>;

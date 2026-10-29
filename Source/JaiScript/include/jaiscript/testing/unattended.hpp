@@ -3,6 +3,7 @@
 // Include it last: it brings in windows.h, which must follow any winsock2.h.
 
 #if defined(_WIN32)
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -35,22 +36,20 @@ inline void abort_on_invalid_parameter(const wchar_t*, const wchar_t*, const wch
     std::fputs("invalid parameter passed to a C runtime function\n", stderr);
     std::abort();
 }
-#endif
 
-[[noreturn]] inline void print_uncaught_exception_and_abort() {
+// SIGABRT handling is process-wide where set_terminate is per thread, so a worker's uncaught exception is named too
+inline void print_live_exception_on_abort(int) {
     if (auto pending = std::current_exception()) {
         try {
             std::rethrow_exception(pending);
         } catch (const std::exception& e) {
-            std::fprintf(stderr, "terminate: uncaught exception: %s\n", e.what());
+            std::fprintf(stderr, "\nabort while an exception is live: %s\n", e.what());
         } catch (...) {
-            std::fputs("terminate: uncaught exception of a non-standard type\n", stderr);
+            std::fputs("\nabort while an exception of a non-standard type is live\n", stderr);
         }
-    } else {
-        std::fputs("terminate called\n", stderr);
     }
-    std::abort();
 }
+#endif
 
 } // namespace unattended_detail
 #endif
@@ -60,9 +59,9 @@ inline void route_faults_to_stderr() {
     if (IsDebuggerPresent()) {
         return;   // a developer at a debugger wants the break, not a printout
     }
-    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
-    std::set_terminate(&unattended_detail::print_uncaught_exception_and_abort);
+    SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
 #if defined(_MSC_VER)
+    std::signal(SIGABRT, &unattended_detail::print_live_exception_on_abort);
     _set_error_mode(_OUT_TO_STDERR);
     _set_abort_behavior(0, _CALL_REPORTFAULT);
     _set_invalid_parameter_handler(&unattended_detail::abort_on_invalid_parameter);

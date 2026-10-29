@@ -7,6 +7,7 @@
 #include <atomic>
 #include <csignal>
 #include <cstddef>
+#include <cstring>
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -209,9 +210,15 @@ struct report_text {
 };
 
 #if defined(_WIN32)
+constexpr DWORD k_msvc_cxx_exception_code = 0xE06D7363;
+
 wchar_t g_dump_directory[MAX_PATH];
-wchar_t g_dump_path[MAX_PATH];
-char g_dump_path_text[MAX_PATH * 3];
+wchar_t g_dump_stem[MAX_PATH];
+const char* g_dump_skipped_reason = nullptr;
+report_text g_crash_line;   // static storage: an overflowed stack has room for the write and little else
+std::atomic<bool> g_dump_thread_started{false};
+LPTOP_LEVEL_EXCEPTION_FILTER g_previous_unhandled_exception_filter = nullptr;
+void (*g_previous_abort_handler)(int) = SIG_DFL;
 
 struct crash_context {
     DWORD code;
@@ -219,37 +226,105 @@ struct crash_context {
     DWORD thread_id;
 };
 
-void write_to_stderr(const report_text& text) {
+void write_to_stderr(const char* bytes, std::size_t length) {
     DWORD written = 0;
-    WriteFile(GetStdHandle(STD_ERROR_HANDLE), text.bytes, static_cast<DWORD>(text.length), &written, nullptr);
+    WriteFile(GetStdHandle(STD_ERROR_HANDLE), bytes, static_cast<DWORD>(length), &written, nullptr);
 }
 
-DWORD WINAPI write_crash_report(void* context_pointer) {
-    const auto& context = *static_cast<crash_context*>(context_pointer);
+void write_to_stderr(const report_text& text) {
+    write_to_stderr(text.bytes, text.length);
+}
+
+void create_directory_and_parents(const wchar_t* directory) {
+    wchar_t prefix[MAX_PATH];
+    std::size_t length = 0;
+    for (; directory[length] != 0 && length + 1 < MAX_PATH; ++length) {
+        if ((directory[length] == L'\\' || directory[length] == L'/') && length > 0) {
+            prefix[length] = 0;
+            CreateDirectoryW(prefix, nullptr);
+        }
+        prefix[length] = directory[length];
+    }
+    prefix[length] = 0;
+    CreateDirectoryW(prefix, nullptr);
+}
+
+void report_dump_outcome(const char* outcome, const wchar_t* path, const char* failed_call, DWORD error) {
     report_text text;
-    text.append("\n*** crash 0x");
-    text.append_number(context.code, 16);
-    text.append(" while running ");
-    text.append_running_test();
+    text.append(outcome);
+    char path_text[MAX_PATH * 3];
+    if (WideCharToMultiByte(CP_UTF8, 0, path, -1, path_text, sizeof(path_text), nullptr, nullptr) > 0) {
+        text.append(path_text);
+    }
+    if (failed_call) {
+        text.append(" (");
+        text.append(failed_call);
+        text.append(" error 0x");
+        text.append_number(error, 16);
+        text.append(")");
+    }
     text.append("\n");
     write_to_stderr(text);
-    if (g_dump_path[0] != 0) {
-        CreateDirectoryW(g_dump_directory, nullptr);
-        HANDLE file = CreateFileW(g_dump_path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        MINIDUMP_EXCEPTION_INFORMATION exception_information{context.thread_id, context.exception, FALSE};
-        const bool dumped = file != INVALID_HANDLE_VALUE && MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file,
-            static_cast<MINIDUMP_TYPE>(MiniDumpWithThreadInfo | MiniDumpWithIndirectlyReferencedMemory),
-            context.exception ? &exception_information : nullptr, nullptr, nullptr);
-        if (file != INVALID_HANDLE_VALUE) {
-            CloseHandle(file);
+}
+
+DWORD WINAPI write_minidump(void* context_pointer) {
+    g_dump_thread_started.store(true);
+    const auto& context = *static_cast<crash_context*>(context_pointer);
+    wchar_t path[MAX_PATH];
+    HANDLE file = INVALID_HANDLE_VALUE;
+    for (unsigned attempt = 0; file == INVALID_HANDLE_VALUE && attempt < 100; ++attempt) {
+        const unsigned long process_id = GetCurrentProcessId();
+        const int length = attempt == 0
+            ? std::swprintf(path, MAX_PATH, L"%ls\\%ls_%lu.dmp", g_dump_directory, g_dump_stem, process_id)
+            : std::swprintf(path, MAX_PATH, L"%ls\\%ls_%lu_%u.dmp", g_dump_directory, g_dump_stem, process_id, attempt);
+        if (length < 0) {
+            const char reason[] = "*** minidump skipped: the dump path in JAI_CRASH_DUMP_DIR would exceed MAX_PATH\n";
+            write_to_stderr(reason, sizeof(reason) - 1);
+            return 0;
         }
-        report_text dump_text;
-        dump_text.append(dumped ? "*** minidump written: " : "*** minidump failed: ");
-        dump_text.append(g_dump_path_text);
-        dump_text.append("\n");
-        write_to_stderr(dump_text);
+        if (attempt == 0) {
+            create_directory_and_parents(g_dump_directory);
+        }
+        file = CreateFileW(path, GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        const DWORD create_error = file == INVALID_HANDLE_VALUE ? GetLastError() : 0;
+        if (file == INVALID_HANDLE_VALUE && create_error != ERROR_FILE_EXISTS) {
+            report_dump_outcome("*** minidump failed: ", path, "CreateFileW", create_error);
+            return 0;
+        }
     }
+    if (file == INVALID_HANDLE_VALUE) {
+        report_dump_outcome("*** minidump failed: ", path, "CreateFileW", ERROR_FILE_EXISTS);
+        return 0;
+    }
+    MINIDUMP_EXCEPTION_INFORMATION exception_information{context.thread_id, context.exception, FALSE};
+    const bool dumped = MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file,
+        static_cast<MINIDUMP_TYPE>(MiniDumpWithThreadInfo | MiniDumpWithIndirectlyReferencedMemory),
+        context.exception ? &exception_information : nullptr, nullptr, nullptr);
+    const DWORD dump_error = dumped ? 0 : GetLastError();
+    CloseHandle(file);
+    report_dump_outcome(dumped ? "*** minidump written: " : "*** minidump failed: ", path, dumped ? nullptr : "MiniDumpWriteDump",
+        dump_error);
     return 0;
+}
+
+void write_dump_on_fresh_thread(crash_context& context) {
+    HANDLE dumper = CreateThread(nullptr, 0, &write_minidump, &context, 0, nullptr);
+    if (!dumper) {
+        write_minidump(&context);
+        return;
+    }
+    // a new thread cannot start while the crashing one holds the loader or heap lock
+    const ULONGLONG start_deadline = GetTickCount64() + 3000;
+    while (!g_dump_thread_started.load() && GetTickCount64() < start_deadline) {
+        Sleep(10);
+    }
+    if (g_dump_thread_started.load()) {
+        WaitForSingleObject(dumper, 60000);
+    } else {
+        const char reason[] = "*** minidump skipped: its thread could not start (the crash holds the loader or heap lock)\n";
+        write_to_stderr(reason, sizeof(reason) - 1);
+    }
+    CloseHandle(dumper);
 }
 
 void report_crash(DWORD code, EXCEPTION_POINTERS* exception) {
@@ -257,23 +332,37 @@ void report_crash(DWORD code, EXCEPTION_POINTERS* exception) {
     if (reported.exchange(true)) {
         Sleep(INFINITE);   // the first crash reports and ends the process
     }
-    crash_context context{code, exception, GetCurrentThreadId()};
-    // a fresh thread has the stack an overflowed one lacks, and a bounded wait cannot wedge the run
-    if (HANDLE reporter = CreateThread(nullptr, 0, &write_crash_report, &context, 0, nullptr)) {
-        WaitForSingleObject(reporter, 60000);
-        CloseHandle(reporter);
-    } else {
-        write_crash_report(&context);
+    // the line goes out on the crashing thread: no allocation, no lock, almost no stack
+    g_crash_line.append("\n*** crash 0x");
+    g_crash_line.append_number(code, 16);
+    g_crash_line.append(" while running ");
+    g_crash_line.append_running_test();
+    g_crash_line.append("\n");
+    write_to_stderr(g_crash_line);
+    if (g_dump_skipped_reason) {
+        const char prefix[] = "*** minidump skipped: ";
+        write_to_stderr(prefix, sizeof(prefix) - 1);
+        write_to_stderr(g_dump_skipped_reason, std::strlen(g_dump_skipped_reason));
+    } else if (g_dump_directory[0] != 0) {
+        crash_context context{code, exception, GetCurrentThreadId()};
+        write_dump_on_fresh_thread(context);   // a fresh thread has the stack an overflowed one lacks
     }
 }
 
 LONG WINAPI report_unhandled_exception(EXCEPTION_POINTERS* exception) {
-    report_crash(exception->ExceptionRecord->ExceptionCode, exception);
-    TerminateProcess(GetCurrentProcess(), exception->ExceptionRecord->ExceptionCode);
+    const DWORD code = exception->ExceptionRecord->ExceptionCode;
+    if (code == k_msvc_cxx_exception_code && g_previous_unhandled_exception_filter) {
+        g_previous_unhandled_exception_filter(exception);   // the CRT's filter sends an escaped C++ exception to std::terminate
+    }
+    report_crash(code, exception);
+    TerminateProcess(GetCurrentProcess(), code);
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
-void report_abort(int) {
+void report_abort(int signal_number) {
+    if (g_previous_abort_handler != SIG_DFL && g_previous_abort_handler != SIG_IGN && g_previous_abort_handler != SIG_ERR) {
+        g_previous_abort_handler(signal_number);
+    }
 #if defined(_MSC_VER) && !defined(NDEBUG)
     print_native_backtrace();
 #endif
@@ -282,28 +371,33 @@ void report_abort(int) {
 
 void install() {
     const DWORD directory_length = GetEnvironmentVariableW(L"JAI_CRASH_DUMP_DIR", g_dump_directory, MAX_PATH);
-    if (directory_length > 0 && directory_length < MAX_PATH) {
+    if (directory_length >= MAX_PATH) {
+        g_dump_directory[0] = 0;
+        g_dump_skipped_reason = "JAI_CRASH_DUMP_DIR is longer than MAX_PATH\n";
+    } else if (directory_length > 0) {
+        DWORD length = directory_length;
+        while (length > 1 && (g_dump_directory[length - 1] == L'\\' || g_dump_directory[length - 1] == L'/')) {
+            g_dump_directory[--length] = 0;
+        }
         wchar_t executable[MAX_PATH];
         const DWORD executable_length = GetModuleFileNameW(nullptr, executable, MAX_PATH);
-        wchar_t* stem = executable;
+        const wchar_t* stem = L"crash";
         if (executable_length > 0 && executable_length < MAX_PATH) {
+            wchar_t* name = executable;
             if (wchar_t* separator = std::wcsrchr(executable, L'\\')) {
-                stem = separator + 1;
+                name = separator + 1;
             }
-            if (wchar_t* extension = std::wcsrchr(stem, L'.')) {
+            if (wchar_t* extension = std::wcsrchr(name, L'.')) {
                 *extension = 0;
             }
-        } else {
-            executable[0] = 0;
+            if (name[0] != 0) {
+                stem = name;
+            }
         }
-        if (std::swprintf(g_dump_path, MAX_PATH, L"%ls\\%ls_%lu.dmp", g_dump_directory, stem[0] ? stem : L"crash",
-                static_cast<unsigned long>(GetCurrentProcessId())) < 0) {
-            g_dump_path[0] = 0;
-        }
-        WideCharToMultiByte(CP_UTF8, 0, g_dump_path, -1, g_dump_path_text, sizeof(g_dump_path_text), nullptr, nullptr);
+        lstrcpynW(g_dump_stem, stem, MAX_PATH);
     }
-    SetUnhandledExceptionFilter(&report_unhandled_exception);
-    signal(SIGABRT, &report_abort);
+    g_previous_unhandled_exception_filter = SetUnhandledExceptionFilter(&report_unhandled_exception);
+    g_previous_abort_handler = signal(SIGABRT, &report_abort);
 }
 #else
 alignas(16) char g_alternate_stack[1 << 16];

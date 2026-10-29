@@ -56,10 +56,10 @@ ordinary code over containers stays general.
 
 ## What was measured
 
-- **A range-for over an unproven container is a block.** A variable declared `int`, `float` or `bool` takes a cell of its declared
-  kind; an element of any other kind misses at the landing onto the general `ITER_NEXT`, which converts it. Spatial's neighbour loop
-  closes (4-7% faster on a loaded machine, interleaved; the loop is memory-bound). No game script declares a scalar range-for variable
-  (JaiDOOM's and Gator Quest's manifests hold the same chunks).
+- **A range-for over an unproven container as a block saves nothing.** A variable declared `int`, `float` or `bool` can take a cell
+  of its declared kind, an element of any other kind missing at the landing onto the general `ITER_NEXT`, which converts it. Spatial's
+  neighbour loop then closes into a block and measures 1.002x on an idle machine (7 interleaved rounds, noise 1.016): the loop is
+  memory-bound, so the cells have nothing to save. The change is not in the VM.
 - **Wider method grafts lose.** Grafting `current_tcb.is_held_or_suspended()` and the `mark_as_*` setters (a bare-field receiver
   read into a temp, the body's program-scope constants read as `::name` under the receiver-class guard) compiled and kept every
   result, and made Richards 10-20% slower. The same five methods inlined by hand in the source make it 10.6% faster. The graft's

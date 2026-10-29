@@ -3739,6 +3739,18 @@ std::string engine::jaibite_cache_path(const std::string& sourcePath) const {
     return impl->jaibite_cache_file(sourcePath).string();
 }
 
+// A binary operator a host registers over numbers, or untyped (it may take numbers): the numeric fast lanes must consult it
+static bool numeric_operator_takes_numbers(std::string_view name, size_t arity, const std::vector<param_type_info>& params) {
+    static constexpr std::string_view k_numeric_operators[] = {"+", "-", "*", "/", "%", "<", ">", "<=", ">=", "==", "!=", "<=>"};
+    if (arity != 2 || std::find(std::begin(k_numeric_operators), std::end(k_numeric_operators), name) == std::end(k_numeric_operators)) { return false; }
+    auto takes_number = [](const param_type_info& p) {
+        const script_value_type t = p.base_type;
+        return t == script_value_type::jai_int_type || t == script_value_type::jai_float_type || t == script_value_type::jai_char_type ||
+               t == script_value_type::jai_bool_type || t == script_value_type::jai_null_type || t == script_value_type::jai_any_type;
+    };
+    return params.empty() || (params.size() == 2 && takes_number(params[0]) && takes_number(params[1]));
+}
+
 void engine::add_global(const std::string& name, script_value value, bool is_serializable) {
     if (!owns_value(value)) { value = import_value(value); }
     if (is_const_global(name)) { throw runtime_error("Cannot assign to '" + name + "': it is read-only"); }   // internal/const.md
@@ -3746,6 +3758,7 @@ void engine::add_global(const std::string& name, script_value value, bool is_ser
     // Intern the name and get a stable string_view for tracking
     uint64_t id = impl->string_symbolizer_.intern(name);
     if (value.is_function()) { impl->host_function_names_.insert(name); }
+    if (value.is_function() && numeric_operator_takes_numbers(name, 2, {})) { set_has_custom_numeric_operators(true); }
     if (impl->library_registration_depth_ > 0 && value.is_function() && !detail::parallel_pure_function(name)) { impl->serial_functions_.insert(name); }
     impl->global_environment_->define(id, std::move(value));
     ++impl->definition_epoch_;
@@ -3878,6 +3891,7 @@ engine::library_registration::~library_registration() { --eng.impl->library_regi
 
 void engine::register_overload_impl(const std::string& name, size_t arity, script_function func,
                                     const std::vector<param_type_info>& paramTypes, bool createSetOnFirst) {
+    if (numeric_operator_takes_numbers(name, arity, paramTypes)) { set_has_custom_numeric_operators(true); }
     impl->host_function_names_.insert(name);
     if (impl->library_registration_depth_ > 0 && !detail::parallel_pure_function(name)) { impl->serial_functions_.insert(name); }
     ++impl->check_surface_epoch_;   // the static checker can see registered functions

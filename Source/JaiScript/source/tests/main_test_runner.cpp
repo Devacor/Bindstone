@@ -4,19 +4,27 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/execution_backend.hpp>
-#if defined(_MSC_VER) && !defined(NDEBUG)
 #include <atomic>
-#include <crtdbg.h>
 #include <csignal>
+#include <cstddef>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <dbghelp.h>
+#include <cwchar>
+#if defined(_MSC_VER)
 #pragma comment(lib, "dbghelp.lib")
+#endif
+#else
+#include <unistd.h>
 #endif
 #include <iostream>
 #include <string>
 #include <chrono>
 #include <sstream>
+#include <jaiscript/testing/unattended.hpp>
 
 namespace jai::foundry {
 
@@ -24,6 +32,13 @@ namespace {
     // a host linked without the interpreter (mv_tests) defaults to the vm
     jai::backend_type g_test_backend = jai::detail::interpreter_compiled() ? jai::backend_type::interpreter : jai::backend_type::vm;
     bool g_test_vm_reference = false;   // --backend=vm-reference: the vm in engine::vm_reference_mode
+    std::atomic<const char*> g_running_suite{nullptr};
+    std::atomic<const char*> g_running_test{nullptr};
+}
+
+void note_running_test(const char* suite_name, const char* test_name) {
+    g_running_suite.store(suite_name, std::memory_order_relaxed);
+    g_running_test.store(test_name, std::memory_order_relaxed);
 }
 
 std::shared_ptr<jai::engine> make_engine() {
@@ -154,20 +169,180 @@ static void print_native_backtrace() {
 }
 #endif
 
+// A crash names the running test even without --verbose (which hides the run's streams); the text is built without
+// allocating, so a corrupt heap still reports
+namespace crash_report {
+
+struct report_text {
+    char bytes[1024];
+    std::size_t length = 0;
+
+    void append(const char* text) {
+        for (; text && *text && length < sizeof(bytes); ++text) {
+            bytes[length++] = *text;
+        }
+    }
+
+    void append_number(unsigned long long value, unsigned base) {
+        char digits[24];
+        int count = 0;
+        do {
+            digits[count++] = "0123456789ABCDEF"[value % base];
+            value /= base;
+        } while (value != 0);
+        while (count > 0 && length < sizeof(bytes)) {
+            bytes[length++] = digits[--count];
+        }
+    }
+
+    void append_running_test() {
+        const char* suite_name = jai::foundry::g_running_suite.load(std::memory_order_relaxed);
+        const char* test_name = jai::foundry::g_running_test.load(std::memory_order_relaxed);
+        if (!suite_name) {
+            append("no test (outside the suites)");
+            return;
+        }
+        append(suite_name);
+        append(" :: ");
+        append(test_name);
+    }
+};
+
+#if defined(_WIN32)
+wchar_t g_dump_directory[MAX_PATH];
+wchar_t g_dump_path[MAX_PATH];
+char g_dump_path_text[MAX_PATH * 3];
+
+struct crash_context {
+    DWORD code;
+    EXCEPTION_POINTERS* exception;
+    DWORD thread_id;
+};
+
+void write_to_stderr(const report_text& text) {
+    DWORD written = 0;
+    WriteFile(GetStdHandle(STD_ERROR_HANDLE), text.bytes, static_cast<DWORD>(text.length), &written, nullptr);
+}
+
+DWORD WINAPI write_crash_report(void* context_pointer) {
+    const auto& context = *static_cast<crash_context*>(context_pointer);
+    report_text text;
+    text.append("\n*** crash 0x");
+    text.append_number(context.code, 16);
+    text.append(" while running ");
+    text.append_running_test();
+    text.append("\n");
+    write_to_stderr(text);
+    if (g_dump_path[0] != 0) {
+        CreateDirectoryW(g_dump_directory, nullptr);
+        HANDLE file = CreateFileW(g_dump_path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        MINIDUMP_EXCEPTION_INFORMATION exception_information{context.thread_id, context.exception, FALSE};
+        const bool dumped = file != INVALID_HANDLE_VALUE && MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file,
+            static_cast<MINIDUMP_TYPE>(MiniDumpWithThreadInfo | MiniDumpWithIndirectlyReferencedMemory),
+            context.exception ? &exception_information : nullptr, nullptr, nullptr);
+        if (file != INVALID_HANDLE_VALUE) {
+            CloseHandle(file);
+        }
+        report_text dump_text;
+        dump_text.append(dumped ? "*** minidump written: " : "*** minidump failed: ");
+        dump_text.append(g_dump_path_text);
+        dump_text.append("\n");
+        write_to_stderr(dump_text);
+    }
+    return 0;
+}
+
+void report_crash(DWORD code, EXCEPTION_POINTERS* exception) {
+    static std::atomic<bool> reported{false};
+    if (reported.exchange(true)) {
+        Sleep(INFINITE);   // the first crash reports and ends the process
+    }
+    crash_context context{code, exception, GetCurrentThreadId()};
+    // a fresh thread has the stack an overflowed one lacks, and a bounded wait cannot wedge the run
+    if (HANDLE reporter = CreateThread(nullptr, 0, &write_crash_report, &context, 0, nullptr)) {
+        WaitForSingleObject(reporter, 60000);
+        CloseHandle(reporter);
+    } else {
+        write_crash_report(&context);
+    }
+}
+
+LONG WINAPI report_unhandled_exception(EXCEPTION_POINTERS* exception) {
+    report_crash(exception->ExceptionRecord->ExceptionCode, exception);
+    TerminateProcess(GetCurrentProcess(), exception->ExceptionRecord->ExceptionCode);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+void report_abort(int) {
+#if defined(_MSC_VER) && !defined(NDEBUG)
+    print_native_backtrace();
+#endif
+    report_crash(3, nullptr);   // the CRT exits with 3 once the handler returns
+}
+
+void install() {
+    const DWORD directory_length = GetEnvironmentVariableW(L"JAI_CRASH_DUMP_DIR", g_dump_directory, MAX_PATH);
+    if (directory_length > 0 && directory_length < MAX_PATH) {
+        wchar_t executable[MAX_PATH];
+        const DWORD executable_length = GetModuleFileNameW(nullptr, executable, MAX_PATH);
+        wchar_t* stem = executable;
+        if (executable_length > 0 && executable_length < MAX_PATH) {
+            if (wchar_t* separator = std::wcsrchr(executable, L'\\')) {
+                stem = separator + 1;
+            }
+            if (wchar_t* extension = std::wcsrchr(stem, L'.')) {
+                *extension = 0;
+            }
+        } else {
+            executable[0] = 0;
+        }
+        if (std::swprintf(g_dump_path, MAX_PATH, L"%ls\\%ls_%lu.dmp", g_dump_directory, stem[0] ? stem : L"crash",
+                static_cast<unsigned long>(GetCurrentProcessId())) < 0) {
+            g_dump_path[0] = 0;
+        }
+        WideCharToMultiByte(CP_UTF8, 0, g_dump_path, -1, g_dump_path_text, sizeof(g_dump_path_text), nullptr, nullptr);
+    }
+    SetUnhandledExceptionFilter(&report_unhandled_exception);
+    signal(SIGABRT, &report_abort);
+}
+#else
+alignas(16) char g_alternate_stack[1 << 16];
+
+void report_crash_signal(int signal_number) {
+    report_text text;
+    text.append("\n*** crash signal ");
+    text.append_number(static_cast<unsigned long long>(signal_number), 10);
+    text.append(" while running ");
+    text.append_running_test();
+    text.append("\n");
+    const ssize_t written = write(STDERR_FILENO, text.bytes, text.length);
+    (void)written;
+    raise(signal_number);   // SA_RESETHAND restored the default action: the process dies of this signal
+}
+
+void install() {
+    stack_t alternate_stack{};
+    alternate_stack.ss_sp = g_alternate_stack;
+    alternate_stack.ss_size = sizeof(g_alternate_stack);
+    sigaltstack(&alternate_stack, nullptr);   // a main-thread stack overflow still reports
+    struct sigaction action{};
+    action.sa_handler = &report_crash_signal;
+    action.sa_flags = SA_RESETHAND | SA_NODEFER | SA_ONSTACK;
+    sigemptyset(&action.sa_mask);
+    for (int signal_number : {SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT}) {
+        sigaction(signal_number, &action, nullptr);
+    }
+}
+#endif
+
+} // namespace crash_report
+
 int main(int argc, char** argv) {
     using namespace jai::foundry;
 
+    route_faults_to_stderr();
+    crash_report::install();
 #if defined(_MSC_VER) && !defined(NDEBUG)
-    // CRT asserts print to stderr and abort instead of hanging the run on a dialog
-    // (a Debug assert in a headless/CI invocation was an invisible wedge)
-    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
-    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
-    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
-    _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
-    // Direct abort() calls must reach the SIGABRT handler below, not Watson fast-fail
-    _set_abort_behavior(0, _CALL_REPORTFAULT);
-    // Symbolized native stack on abort: an assert in a headless run names its call path
-    signal(SIGABRT, [](int) { print_native_backtrace(); });
     // An access violation names its call path too (the first one prints, the process then
     // dies as it would have)
     AddVectoredExceptionHandler(1, [](PEXCEPTION_POINTERS info) -> LONG {

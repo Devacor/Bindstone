@@ -726,6 +726,28 @@ public:
             runMatrix(true);
         });
 
+        test("implicit_numeric_conversions_read_a_bound_value", [this]() {
+            // operator int/int64_t/double/float are as<T>(): a bound value decodes its C++ memory (they read the payload union before)
+            auto eng = jai::foundry::make_engine();
+            int64_t wide = 7;
+            int narrow = -3;
+            double real = 2.5;
+            float single = 1.25f;
+            const script_value bound_wide = script_value::make_cpp_bound(&wide, eng.get());
+            const script_value bound_narrow = script_value::make_cpp_bound(&narrow, eng.get());
+            const script_value bound_real = script_value::make_cpp_bound(&real, eng.get());
+            const script_value bound_single = script_value::make_cpp_bound(&single, eng.get());
+            check_eq(7, static_cast<int>(bound_wide), "bound int64 as int");
+            check_eq((int64_t)7, static_cast<int64_t>(bound_wide), "bound int64 as int64");
+            check_eq(7.0, static_cast<double>(bound_wide), "bound int64 as double");
+            check_eq(-3, static_cast<int>(bound_narrow), "bound int as int");
+            check_eq(2.5, static_cast<double>(bound_real), "bound double as double");
+            check_eq(1.25f, static_cast<float>(bound_single), "bound float as float");
+            std::string text;
+            try { (void)static_cast<int>(script_value(std::string("x"), eng.get())); } catch (const jai::runtime_error& e) { text = e.what(); }
+            check_true(text.find("not an integer or float") != std::string::npos, text);
+        });
+
         test("a_host_store_through_a_typed_element_reference_converts_like_a_script_store", [this]() {
             auto eng = jai::foundry::make_engine();
             jai::stdlib::register_all(*eng);

@@ -2064,50 +2064,13 @@ namespace detail {
         // null under this value's tag word: its stamp, or the engine-made flag
         script_value tagged_null() const noexcept;
 
-        // Implicit conversion operators for common C++ types
-        // These enable natural overload resolution in C++ function calls
-        operator int() const {
-            const script_value& val = deref();
-            if (val.type() == script_value_type::jai_int_type) {
-                auto int_val = val.storage_.get<script_int>();
-                if (int_val < std::numeric_limits<int>::min() || 
-                    int_val > std::numeric_limits<int>::max()) {
-                    throw runtime_error("script_int value out of range for int");
-                }
-                return static_cast<int>(int_val);
-            }
-            throw runtime_error("script_value is not an integer");
-        }
-        
-        operator int64_t() const {
-            const script_value& val = deref();
-            if (val.type() == script_value_type::jai_int_type) {
-                return val.storage_.get<script_int>();
-            }
-            throw runtime_error("script_value is not an integer");
-        }
-        
-        operator double() const {
-            const script_value& val = deref();
-            if (val.type() == script_value_type::jai_float_type) {
-                return val.storage_.get<script_float>();
-            } else if (val.type() == script_value_type::jai_int_type) {
-                return static_cast<double>(val.storage_.get<script_int>());
-            }
-            throw runtime_error("script_value is not a numeric type");
-        }
-        
-        operator float() const {
-            const script_value& val = deref();
-            if (val.type() == script_value_type::jai_float_type) {
-                return static_cast<float>(val.storage_.get<script_float>());
-            } else if (val.type() == script_value_type::jai_int_type) {
-                return static_cast<float>(val.storage_.get<script_int>());
-            }
-            throw runtime_error("script_value is not a numeric type");
-        }
-        
-        
+        // Implicit conversions for common C++ types (natural overload resolution in C++ calls): as<T>()'s extraction, a bound
+        // value's included
+        operator int() const { return as<int>(); }
+        operator int64_t() const { return as<int64_t>(); }
+        operator double() const { return as<double>(); }
+        operator float() const { return as<float>(); }
+
     private:
         // The storage's tag word (internal/value16_design.md): the declared type (512-aligned, so the low 9 bits hold the
         // index and the flag) or zero; k_outlived marks a held value whose engine is gone

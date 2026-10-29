@@ -34,9 +34,9 @@ void interpreter::init_dispatch_table() {
 
 struct interpreter::binary_host {
     interpreter& in;
-    script_value make_int(script_int v) const noexcept { return in.make_int_fast(v); }
-    script_value make_float(script_float v) const noexcept { return in.make_float_fast(v); }
-    script_value make_bool(bool v) const noexcept { return in.make_bool_fast(v); }
+    script_value make_int(script_int v) const noexcept { return in.make_value(v); }
+    script_value make_float(script_float v) const noexcept { return in.make_value(v); }
+    script_value make_bool(bool v) const noexcept { return in.make_value(v); }
     jai::engine* engine() const noexcept { return in.engine_; }
     checked_result<script_value> concat(const script_value& l, const script_value& r) { return in.concat_with_methods(l, r); }
     std::optional<checked_result<script_value>> object_arithmetic(const script_value& l, const script_value& r, uint64_t id) { return in.object_arithmetic_via_method(l, r, id); }

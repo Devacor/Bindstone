@@ -447,7 +447,7 @@ std::optional<checked_result<script_value>> interpreter::object_spaceship_revers
         if (is_unwinding_) { return std::nullopt; }
         return checked_result<script_value>(result.error_value());
     }
-    if (auto sign = reversed_spaceship_sign(result.value())) { return checked_result<script_value>(make_int_fast(*sign)); }
+    if (auto sign = reversed_spaceship_sign(result.value())) { return checked_result<script_value>(make_value(*sign)); }
     return std::nullopt;
 }
 
@@ -11672,7 +11672,7 @@ checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
 
     for (size_t i = 0; i < decl->values.size(); ++i) {
         auto key = script_value(std::string(decl->values[i].first), engine_);
-        map_ref[std::move(key)] = make_int_fast(static_cast<script_int>(i));
+        map_ref[std::move(key)] = make_value(static_cast<script_int>(i));
     }
 
     environment_->define(decl->name_id, std::move(enum_map));

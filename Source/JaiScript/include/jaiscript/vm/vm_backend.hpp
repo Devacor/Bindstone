@@ -1434,9 +1434,7 @@ namespace jai::vm {
         // Shared return epilogue (classification switch + pop + result push); the
         // return superinstructions feed it a result they resolved without the stack
         // round trip. KEEP the exact order: convert while the callee frame is live.
-        // mode = op_return.b: 0 plain; 1 = the return site's static_return_proof (V-R1: the
-        // deref-only route is taken only when detail::same_type_payload confirms the
-        // conversion is the identity); return_mode_converted = already converted at an
+        // mode = op_return.b: 0 plain; return_mode_converted = already converted at an
         // in-region return site (op_return_convert), landed as is
         op_status return_with_result(frame*& fp, script_value result, uint32_t mode = 0);
         op_status return_with_conversion(frame*& fp, script_value result, uint32_t mode);
@@ -1506,21 +1504,10 @@ namespace jai::vm {
                                              const std::shared_ptr<environment>& caller_env,
                                              const call_site* site, frame* caller_frame,
                                              chunk* caller_code,
-                                             const uint8_t* arg_proofs,
                                              const script_defined_function* alias_fn,
                                              unit_stamp caller_unit,   // a by-reference argument resolves under the caller's unit
                                              size_t first_param = 0, bool later_taken = false,   // a resumed bind (the arguments after a user-code conversion taken)
                                              const statement* callee_body = nullptr);   // a method's body (a function's is alias_fn's): a temporary may bind a reference parameter it never writes through
-        // V-C1: the call site's per-argument same_type proofs, valid only when the site's
-        // call_expr was proven against THIS callee body with THIS arity (null otherwise)
-        const uint8_t* site_arg_proofs(const call_site* site, const chunk* caller_code,
-                                       const std::shared_ptr<block_stmt>& body, size_t nparams, size_t argc) const {
-            if (!site || !caller_code || site->call_node == k_invalid_u32 || argc != nparams) { return nullptr; }
-            const auto* ce = static_cast<const call_expr*>(caller_code->nodes[site->call_node].get());
-            if (ce->proven_callee_body != body.get() || ce->static_arg_proofs.size() != nparams) { return nullptr; }
-            if (ce->proven_callee_body_owner.owner_before(body) || body.owner_before(ce->proven_callee_body_owner)) { return nullptr; }   // a recycled address: another body's proofs
-            return ce->static_arg_proofs.data();
-        }
         // Ref-param bind against the caller's variable storage: shares an existing
         // reference holder (cells alias), or boxes the value on demand (cell) when the
         // variable predates its escape mark
@@ -1548,7 +1535,7 @@ namespace jai::vm {
         checked_result<script_value> convert_return_value(script_value result, const type_info_ptr& return_type,
                                                           std::string_view callee = {});
         checked_result<script_value> convert_return_at_site(script_value result, const type_info_ptr& return_type,
-                                                            return_conv conv, bool proven, std::string_view callee = {});
+                                                            return_conv conv, std::string_view callee = {});
 
         void capture_stack_trace();
         static size_t graft_frames_at(const chunk& code, size_t ip, const ast_node** node, std::vector<stack_frame>& out);

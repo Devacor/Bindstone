@@ -3,11 +3,9 @@
 #ifndef __JAISCRIPT_DETAIL_TYPE_PROOFS_HPP__
 #define __JAISCRIPT_DETAIL_TYPE_PROOFS_HPP__
 
-// Runtime guards for parse-time type proofs (internal/type_proofs_design.md). A proof selects a
-// lane; these TOTAL guards make the lane sound: TRUE only when the skipped conversion is
-// provably the identity on the value actually in hand, or when the class object, its
-// field-shape epoch and a present cell all match. Guard failure = the existing code runs.
-// Both backends call these verbatim - never re-implement them inline.
+// The VM's identity guard for typed stores, declarations, arguments and returns
+// (internal/type_proofs_design.md): TRUE only when the skipped conversion is provably the
+// identity on the value actually in hand. Guard failure = the conversion runs.
 
 #include <jaiscript/core/value.hpp>
 #include <cstdint>

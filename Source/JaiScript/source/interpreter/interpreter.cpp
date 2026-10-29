@@ -43,7 +43,6 @@
 #include <jaiscript/detail/container_enforce.hpp> // typed-container boundary kernel (vm parity)
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_borrow_subscript_read (captured reads)
 #include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
-#include <jaiscript/detail/type_proofs.hpp>   // parse-time type proof guards (vm parity)
 #include <jaiscript/detail/typed_slot.hpp>   // the one typed-slot conversion table (vm parity)
 #include <jaiscript/detail/range_for_diagnostic.hpp>   // range-for texts (vm parity)
 #include <jaiscript/detail/map_entry_binding.hpp>
@@ -3076,9 +3075,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         // Slot locals enforce their locked type like the environment path does
                         // (same-type fast guard keeps the hot store path call-free)
                         type_info_ptr slot_type = storage->get_type_info();
-                        const bool proven_identity = expr->static_store_proof == proof_same_type && slot_type &&
-                                                     detail::same_type_payload(value, slot_type.get());
-                        if (detail::slot_value_assign_candidate(*storage) && !proven_identity && (!slot_type || slot_type->base_type != script_value_type::jai_object_type)) {
+                        if (detail::slot_value_assign_candidate(*storage) && (!slot_type || slot_type->base_type != script_value_type::jai_object_type)) {
                             const type_info* held_tag = storage->type_info_raw();
                             const bool declared_var = held_tag && held_tag->base_type == script_value_type::jai_shared_ptr_type && !held_tag->dynamic_pointee &&
                                                       identifier->names_var_decl;
@@ -3103,7 +3100,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                 return {};
                             }
                         }
-                        if (!proven_identity && slot_type && (slot_type->base_type != value.type() ||
+                        if (slot_type && (slot_type->base_type != value.type() ||
                                           slot_type->base_type == script_value_type::jai_object_type ||
                                           slot_type->base_type == script_value_type::jai_array_type ||
                                           slot_type->base_type == script_value_type::jai_map_type ||
@@ -3325,16 +3322,11 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         }
                     }
 
-                    // Enforce type compatibility (a proven store whose payload guard holds is
-                    // the identity - internal/type_proofs_design.md I-S2)
-                    if (!(expr->static_store_proof == proof_same_type && target_type &&
-                          detail::same_type_payload(value, target_type.get()))) {
-                        auto enforced = enforce_type_compatibility(std::move(value), target_type, identifier->name);
-                        if (!enforced) {
-                            return enforced.error_value();
-                        }
-                        value = std::move(enforced.value());
+                    auto enforced = enforce_type_compatibility(std::move(value), target_type, identifier->name);
+                    if (!enforced) {
+                        return enforced.error_value();
                     }
+                    value = std::move(enforced.value());
 
                     // Handle first assignment for uninitialized auto variables
                     if (!target_type) {
@@ -4272,8 +4264,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             // type a uniform literal inferred for auto / array<auto>
             // Typed declarations convert their initializer exactly like assignment does
             // (int d = 4.7 truncates instead of storing a mistagged float payload)
-            if (decl->initializer && !(decl->static_init_proof == proof_same_type &&
-                                       detail::same_type_payload(value, effective_decl_type.get()))) {
+            if (decl->initializer) {
                 auto enforced = enforce_type_compatibility(std::move(value), effective_decl_type, decl->name, detail::slot_kind::declaration);
                 if (!enforced) {
                     return enforced.error_value();
@@ -5219,7 +5210,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         direct_ast->local_count);
                     script_func.unit = direct_ast->unit;
                     method_call_override mctx{&def_env, &objectValue, cls_pin.get()};
-                    detail::call_site_context ctx{&expr->arguments, expr, &arguments};
+                    detail::call_site_context ctx{&expr->arguments, &arguments};
                     const detail::call_site_context* saved_ctx = pending_call_ctx_;
                     pending_call_ctx_ = expr->arguments.empty() ? saved_ctx : &ctx;
                     std::optional<checked_result<script_value>> callOutcome;
@@ -5351,7 +5342,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
     const script_function& func = *callee_func;
     const bool direct_script_call = callee_thunk && callee_thunk->eng == engine_ &&
         callee_thunk->payload.kind == script_callable::kind_type::function && callee_thunk->payload.fn;
-    detail::call_site_context ctx{&expr->arguments, expr, &arguments};
+    detail::call_site_context ctx{&expr->arguments, &arguments};
     const detail::call_site_context* saved_ctx = pending_call_ctx_;
     pending_call_ctx_ = expr->arguments.empty() ? saved_ctx : &ctx;
     std::optional<checked_result<script_value>> callOutcome;
@@ -7004,7 +6995,7 @@ template<bool Replaying>
 checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_point* rs) {
     // A new expression is a call boundary too: preserve its source expressions for reference parameters.
     auto invoke_constructor = [&](const script_function& function, const std::vector<script_value>& args) {
-        detail::call_site_context ctx{&expr->arguments, nullptr, &args};
+        detail::call_site_context ctx{&expr->arguments, &args};
         struct restore_context {
             const detail::call_site_context*& slot;
             const detail::call_site_context* previous;
@@ -8717,10 +8708,8 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
                 if (out->is_reference()) {
                     *out = out->deref();
                 }
-                // A storage-matching primitive or a proven same-type payload is the identity (I-R1)
-                if (!detail::return_conv_identity(conv, *out) &&
-                    !(stmt->value && stmt->static_return_proof == proof_same_type &&
-                      detail::same_type_payload(*out, fn->return_type.get()))) {
+                // A storage-matching primitive is the identity
+                if (!detail::return_conv_identity(conv, *out)) {
                     auto converted = try_convert_for_parameter(*out, fn->return_type,
                         detail::slot_site{detail::slot_kind::return_value, {}, fn->name});
                     if (!converted) {
@@ -10518,14 +10507,6 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         call_ctx = nullptr;   // a callback a builtin or a host makes with its own arguments
     }
 
-    // Parse-time argument proofs belong to the ONE callee the site resolved to: body
-    // identity is the callee check (internal/type_proofs_design.md I-C1)
-    const uint8_t* arg_proofs = nullptr;
-    if (call_ctx && call_ctx->site && call_ctx->site->proven_callee_body == function.body.get() && !call_ctx->site->proven_callee_body_owner.owner_before(function.body) && !function.body.owner_before(call_ctx->site->proven_callee_body_owner) &&
-        call_ctx->site->static_arg_proofs.size() == function.parameters().size() &&
-        args.size() == function.parameters().size()) {
-        arg_proofs = call_ctx->site->static_arg_proofs.data();
-    }
 
     if (args.size() != function.parameters().size() && !arity_accepts(function.parameters(), args.size())) {
         return detail::arity_error(function.name, function.parameters().size(), args.size(), arity_count_ids_, *string_symbolizer_);
@@ -10838,40 +10819,26 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
             // Non-reference parameter - try to convert the argument to the parameter type if needed
             // (cleanup before propagating: an early return here would leak the callee frame/env)
-            script_value converted_arg = make_value();
-            const bool untyped_param = !param.type || param.type->base_type == script_value_type::jai_any_type;
-            bool proven_identity = arg_proofs && arg_proofs[i] == proof_same_type;
-            if (proven_identity && param.type) {
-                const script_value& probe = arg.deref();   // try_convert_for_parameter's own deref order
-                proven_identity = untyped_param || detail::same_type_payload(probe, param.type.get());
-            }
-            if (proven_identity) {
-                // try_convert_for_parameter's identity returns: the arg itself, the derefed arg
-                // for exact-name objects (I-C1)
-                converted_arg = (!untyped_param && param.type->base_type == script_value_type::jai_object_type)
-                                ? script_value(arg.deref()) : script_value(arg);
-            } else {
-                if (argv == &args && i + 1 < args.size() && detail::binding_may_run_code(arg, param.type.get()) &&
-                    (detail::later_capture_candidate(i + 1, args.size(), [&](size_t j) -> const script_value& { return args[j]; }) ||
-                     later_place_argument(function, call_ctx, i + 1, args))) [[unlikely]] {
-                    held_args = args;
-                    for (size_t j = i + 1; j < held_args.size(); ++j) {
-                        detail::capture_argument(engine_, held_args[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(function.parameters(), j));
-                    }
-                    if (auto placed = bind_later_places(function, call_ctx, i + 1, held_args, frame_index, previousEnv, caller_unit); !placed) {
-                        cleanup();
-                        return placed.error_value();
-                    }
-                    argv = &held_args;
+            if (argv == &args && i + 1 < args.size() && detail::binding_may_run_code(arg, param.type.get()) &&
+                (detail::later_capture_candidate(i + 1, args.size(), [&](size_t j) -> const script_value& { return args[j]; }) ||
+                 later_place_argument(function, call_ctx, i + 1, args))) [[unlikely]] {
+                held_args = args;
+                for (size_t j = i + 1; j < held_args.size(); ++j) {
+                    detail::capture_argument(engine_, held_args[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(function.parameters(), j));
                 }
-                auto convert_result = try_convert_for_parameter(arg, param.type,
-                    detail::slot_site{detail::slot_kind::parameter, param.name, function.name, param.is_reference});
-                if (!convert_result) {
+                if (auto placed = bind_later_places(function, call_ctx, i + 1, held_args, frame_index, previousEnv, caller_unit); !placed) {
                     cleanup();
-                    return convert_result.error_value();
+                    return placed.error_value();
                 }
-                converted_arg = std::move(convert_result.value());
+                argv = &held_args;
             }
+            auto convert_result = try_convert_for_parameter(arg, param.type,
+                detail::slot_site{detail::slot_kind::parameter, param.name, function.name, param.is_reference});
+            if (!convert_result) {
+                cleanup();
+                return convert_result.error_value();
+            }
+            script_value converted_arg = std::move(convert_result.value());
 
             // Decide between value semantics (clone) or reference semantics (share).
             // Element-read args arrive as reference wrappers - probe the referent

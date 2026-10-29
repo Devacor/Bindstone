@@ -3379,12 +3379,10 @@ public:
             }
             const proof_stats st = on->last_proof_stats();
             check_ge(st.stores, (uint32_t)1, "same-type local stores");
-            check_ge(st.decls, (uint32_t)2, "same-type decls");
-            check_ge(st.calls, (uint32_t)1, "statically resolved method calls");
             check_ge(st.args, (uint32_t)1, "int argument into an int parameter");
             check_ge(st.returns, (uint32_t)1, "int returned from an int method");
             const proof_stats none = off->last_proof_stats();
-            check_eq((uint32_t)0, none.stores + none.decls + none.calls + none.args + none.returns, "the twin stamps nothing");
+            check_eq((uint32_t)0, none.stores + none.args + none.returns, "the twin stamps nothing");
             for (int pass = 0; pass < 3; ++pass) {
                 const std::string got = outcome(*on, use);
                 check_eq(outcome(*off, use), got, "use pass " + std::to_string(pass));

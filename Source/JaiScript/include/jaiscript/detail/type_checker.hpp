@@ -79,11 +79,9 @@ namespace jai {
     // proof, by kind. Independent of diagnostics; all zero after a clearing pass.
     struct proof_stats {
         uint32_t stores = 0;    // assignment_expr::static_store_proof
-        uint32_t decls = 0;     // variable_decl::static_init_proof
         uint32_t args = 0;      // call_expr::static_arg_proofs entries == proof_same_type
         uint32_t returns = 0;   // return_stmt::static_return_proof
         uint32_t deferred = 0;  // program-table classes the walk met before the engine defined them: the unit's proofs re-stamp after the next import
-        uint32_t calls = 0;     // call_expr nodes with a proven callee body
     };
 
     // A tool's view of the walk (tools/lsp): every expression's inferred static type, in the

@@ -1094,9 +1094,7 @@ public:
                 "r";
             check_eq((int64_t)4, e->execute(src).as_int());
             const proof_stats& st = e->last_proof_stats();
-            check_ge(st.decls, (uint32_t)6, "typed decls with same-type initializers");
             check_ge(st.stores, (uint32_t)5, "same-type stores");
-            check_eq((uint32_t)1, st.calls, "one statically resolved callee");
             check_eq((uint32_t)1, st.args, "int argument into int parameter");
             check_eq((uint32_t)1, st.returns, "int expression returned from int function");
             check_eq((size_t)0, e->last_check_diagnostics().diagnostics.size());
@@ -1106,7 +1104,7 @@ public:
             off->type_proofs(false);
             check_eq((int64_t)4, off->execute(src).as_int());
             const proof_stats& none = off->last_proof_stats();
-            check_eq((uint32_t)0, none.decls + none.stores + none.calls + none.args + none.returns);
+            check_eq((uint32_t)0, none.stores + none.args + none.returns);
         });
 
         test("proofs_not_stamped_from_uncertain_types", [this]() {
@@ -1125,9 +1123,7 @@ public:
             e->execute(src);
             const proof_stats& st = e->last_proof_stats();
             check_eq((uint32_t)1, st.stores, "only `cp = Foo()` (object same_type) proves");
-            check_eq((uint32_t)2, st.decls, "only `int q = 0` and `Foo cp = Foo()` prove");
-            check_eq((uint32_t)0, st.calls, "defaulted/by-ref callees are never proven");
-            check_eq((uint32_t)0, st.args);
+            check_eq((uint32_t)0, st.args, "defaulted/by-ref callees are never proven");
         });
 
         test("proofs_off_strips_cached_entry_and_on_restamps", [this]() {
@@ -1136,11 +1132,10 @@ public:
             const std::string src = "int a = 1; a = 2; a";
             check_eq((int64_t)2, e->execute(src).as_int());
             check_ge(e->last_proof_stats().stores, (uint32_t)1);
-            check_ge(e->last_proof_stats().decls, (uint32_t)1);
             // switching off re-runs the cached entry in clear mode at its next execute
             e->type_proofs(false);
             check_eq((int64_t)2, e->execute(src).as_int());
-            check_eq((uint32_t)0, e->last_proof_stats().stores + e->last_proof_stats().decls);
+            check_eq((uint32_t)0, e->last_proof_stats().stores);
             // and back on re-stamps
             e->type_proofs(true);
             check_eq((int64_t)2, e->execute(src).as_int());
@@ -1154,9 +1149,8 @@ public:
                 "class Pt { int x = 1; float y = 2.0;\n"
                 "  int bump(int d) { x = x + d; this.y = this.y * 2.0; return x; } }\n"
                 "Pt p = Pt(); p.bump(3); p.x";
-            // first execute: same_type decl/arg/return proofs stamp
+            // first execute: same_type arg/return proofs stamp
             check_eq((int64_t)4, e->execute(src).as_int());
-            check_ge(e->last_proof_stats().decls, (uint32_t)1);
             check_ge(e->last_proof_stats().args, (uint32_t)1);
             check_ge(e->last_proof_stats().returns, (uint32_t)1);
             const uint64_t epoch_after_first = shape_epoch(*e, "Pt");
@@ -1164,21 +1158,21 @@ public:
             // Its class_decl then runs as the FIRST redefinition, which is a full-path
             // reload (the structural key stores lazily): shape epoch and surface move once more
             check_eq((int64_t)4, e->execute(src).as_int());
-            check_ge(e->last_proof_stats().decls, (uint32_t)1, "re-checked");
+            check_ge(e->last_proof_stats().returns, (uint32_t)1, "re-checked");
             check_ne(epoch_after_first, shape_epoch(*e, "Pt"));
             const uint64_t epoch_after_second = shape_epoch(*e, "Pt");
             // third execute: re-checks (surface moved), its reload is identical -> epoch holds
             check_eq((int64_t)4, e->execute(src).as_int());
-            check_ge(e->last_proof_stats().decls, (uint32_t)1, "re-checked");
+            check_ge(e->last_proof_stats().returns, (uint32_t)1, "re-checked");
             check_eq(epoch_after_second, shape_epoch(*e, "Pt"));
             const uint64_t epoch_after_third = shape_epoch(*e, "Pt");
             // from here on: identical reloads move nothing (no re-check, shape epoch holds)
             e->execute("1 + 1");
             check_eq((int64_t)4, e->execute(src).as_int());
-            check_eq((uint32_t)0, e->last_proof_stats().decls, "identical reload must not re-check");
+            check_eq((uint32_t)0, e->last_proof_stats().returns, "identical reload must not re-check");
             check_eq(epoch_after_third, shape_epoch(*e, "Pt"));
             check_eq((int64_t)4, e->execute(src).as_int());
-            check_eq((uint32_t)0, e->last_proof_stats().decls);
+            check_eq((uint32_t)0, e->last_proof_stats().returns);
             check_eq(epoch_after_third, shape_epoch(*e, "Pt"));
             // non-identical reload (field retype) moves the shape epoch and the surface:
             // the original entry re-checks at its next execute
@@ -1187,7 +1181,7 @@ public:
             check_ne(epoch_after_third, shape_epoch(*e, "Pt"));
             e->execute("1 + 1");
             e->execute(src);
-            check_ge(e->last_proof_stats().decls, (uint32_t)1, "re-checked after the shape change");
+            check_ge(e->last_proof_stats().returns, (uint32_t)1, "re-checked after the shape change");
         });
 
         test("accessor_members_known_with_unknown_type", [this]() {
@@ -1224,24 +1218,24 @@ public:
         test("proof_jaibite_paths_restamp", [this]() {
             if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto e = make_engine();
-            auto bite = e->jaibite("int a = 5; int b = a; b");
-            check_eq((uint32_t)2, e->last_proof_stats().decls, "proof pass at creation");
+            auto bite = e->jaibite("int a = 5; int b = 0; b = a; b");
+            check_eq((uint32_t)1, e->last_proof_stats().stores, "proof pass at creation");
             check_true(bite.checked_clean());
             auto loaded = e->jaibite_load_bytes(bite.save_bytes());
-            check_eq((uint32_t)2, e->last_proof_stats().decls, "re-derived at load, never serialized");
+            check_eq((uint32_t)1, e->last_proof_stats().stores, "re-derived at load, never serialized");
             check_true(loaded.checked_clean());
             check_eq((int64_t)5, loaded.execute().as_int());
             e->type_proofs(false);
             check_eq((int64_t)5, loaded.execute().as_int());
-            check_eq((uint32_t)0, e->last_proof_stats().decls, "next execute clears the bite's stamps");
+            check_eq((uint32_t)0, e->last_proof_stats().stores, "next execute clears the bite's stamps");
             e->type_proofs(true);
             // a trusted-clean load keeps its empty report and still stamps
-            auto clean = e->jaibite("int q = 1; int w = q; w");
+            auto clean = e->jaibite("int q = 1; int w = 0; w = q; w");
             check_true(clean.checked_clean());
             auto trusted = e->jaibite_load_bytes(clean.save_bytes());
             check_true(trusted.checked_clean());
             check_eq((size_t)0, trusted.check_diagnostics().diagnostics.size());
-            check_eq((uint32_t)2, e->last_proof_stats().decls);
+            check_eq((uint32_t)1, e->last_proof_stats().stores);
             check_eq((int64_t)1, trusted.execute().as_int());
         });
 
@@ -1573,11 +1567,11 @@ public:
                 "class S { int x = 1; } class T : S { int t = 2; } class H { S p = null; }\n"
                 "auto h = H(); h.p = T();\n";
             auto e = make_engine();
-            check_eq((int64_t)2, e->execute(prelude + "T tv = cast<T>(h.p); tv.t").as_int());
-            check_ge(e->last_proof_stats().decls, (uint32_t)1, "T tv = cast<T>(h.p) proves same_type");
+            check_eq((int64_t)2, e->execute(prelude + "T tv = T(); tv = cast<T>(h.p); tv.t").as_int());
+            check_ge(e->last_proof_stats().stores, (uint32_t)1, "tv = cast<T>(h.p) proves same_type");
             auto r = make_engine();
-            check_eq((int64_t)2, r->execute(prelude + "auto& tr = cast<T&>(h.p); tr.t").as_int());
-            check_eq((uint32_t)0, r->last_proof_stats().decls, "a reference never proves");
+            check_eq((int64_t)2, r->execute(prelude + "T tv = T(); tv = cast<T&>(h.p); tv.t").as_int());
+            check_eq((uint32_t)0, r->last_proof_stats().stores, "a reference never proves");
         });
 
         // cast<C>(h) on a handle or reference operand deep-copies (C++ value semantics - the
@@ -2147,9 +2141,8 @@ public:
             auto e = program_engine(dir);
             e->execute("import \"typed_unit.jai\";\n");
             const proof_stats& st = e->last_proof_stats();
-            check_ge(st.decls, (uint32_t)2, "the unit's typed decls prove");
             check_ge(st.stores, (uint32_t)1, "the unit's same-type store proves");
-            check_eq((uint32_t)1, st.calls, "the unit's single-overload call is proven");
+            check_eq((uint32_t)1, st.args, "the unit's single-overload call proves its argument");
             check_eq((int64_t)4, e->execute("r").as_int());
             std::filesystem::remove_all(dir);
         });
@@ -2280,22 +2273,17 @@ public:
             }
             // last_proof_stats() is the last unit checked: pf_b.jai. Its FIRST check knows A only
             // through the program table - nothing proves. The same two classes in one unit prove
-            // the decl and the return on their first check.
+            // the return on their first check.
             auto e = program_engine(dir);
             check_eq((size_t)0, error_count(e->check(root)));
-            const proof_stats first = e->last_proof_stats();
-            check_eq((uint32_t)0, first.decls, "cross-unit first check: no decl proof");
-            check_eq((uint32_t)0, first.returns, "cross-unit first check: no return proof");
+            check_eq((uint32_t)0, e->last_proof_stats().returns, "cross-unit first check: no return proof");
             auto one = make_engine();
             check_eq((size_t)0, error_count(one->check("class A { int hp = 3; }\nclass B : A { int tick() { int x = hp; return hp; } }\nB().tick()")));
-            check_ge(one->last_proof_stats().decls, (uint32_t)1, "same-unit first check proves the decl");
             check_ge(one->last_proof_stats().returns, (uint32_t)1, "same-unit first check proves the return");
             // once the units have run, the re-check sees registered classes: proofs land like a same-unit second check
             check_eq((int64_t)3, e->execute(root).as_int());
             check_eq((int64_t)3, e->execute(root).as_int());
-            const proof_stats later = e->last_proof_stats();
-            check_ge(later.decls, (uint32_t)1, "registered: decl proof");
-            check_ge(later.returns, (uint32_t)1, "registered: return proof");
+            check_ge(e->last_proof_stats().returns, (uint32_t)1, "registered: return proof");
             std::filesystem::remove_all(dir);
         });
 
@@ -2674,12 +2662,12 @@ public:
             check_eq((size_t)0, error_count(e->check(cls + "v.name.zzz();")), "a builtin method on the typed result stays lenient");
             std::string what = outcome(*e, "[[warn_mode]]; " + cls + "int n = v.name; n");
             check_true(what.find("ERROR Cannot initialize") == 0, "the runtime keeps its rejection (got: " + what + ")");
-            // never a proof source: the plain-field twin proves one more decl than the getter-typed read
+            // never a proof source: the plain-field twin proves one more store than the getter-typed read
             auto plain = make_engine();
-            check_eq((size_t)0, error_count(plain->check("class F { int hp = 5; } F f = F(); int x = f.hp; int y = 5; x + y")));
+            check_eq((size_t)0, error_count(plain->check("class F { int hp = 5; } F f = F(); int x = 0; x = f.hp; int y = 0; y = 5; x + y")));
             auto acc = make_engine();
-            check_eq((size_t)0, error_count(acc->check("class V { int hp_ = 5; int _get_hp() { return hp_; } } V v = V(); int x = v.hp; int y = 5; x + y")));
-            check_eq(plain->last_proof_stats().decls, acc->last_proof_stats().decls + 1, "the getter-typed decl is not proven");
+            check_eq((size_t)0, error_count(acc->check("class V { int hp_ = 5; int _get_hp() { return hp_; } } V v = V(); int x = 0; x = v.hp; int y = 0; y = 5; x + y")));
+            check_eq(plain->last_proof_stats().stores, acc->last_proof_stats().stores + 1, "the getter-typed store is not proven");
         });
 
         // ...and exactly one declared user setter checks the store.
@@ -2757,7 +2745,6 @@ public:
             const std::string root = "import \"ac_a.jai\";\nimport \"ac_b.jai\";\nread_hp(A())";
             auto e = program_engine(dir);
             check_eq((size_t)0, error_count(e->check(root)));
-            check_eq((uint32_t)0, e->last_proof_stats().decls, "cross-unit first check: no decl proof from an accessor read");
             check_eq((int64_t)4, e->execute(root).as_int());
             check_eq((int64_t)4, e->execute(root).as_int());
             std::filesystem::remove_all(dir);
@@ -2948,7 +2935,7 @@ public:
             plain->execute(open);
             check_eq((int64_t)4, plain->execute(open).as_int());
             check_eq(plain->last_proof_stats().stores, e->last_proof_stats().stores, "a T& receiver proves what a var& receiver does");
-            check_eq(plain->last_proof_stats().calls, e->last_proof_stats().calls);
+            check_eq(plain->last_proof_stats().args, e->last_proof_stats().args);
         });
 
         // ------------------------------------------------------------ comparisons with no comparison

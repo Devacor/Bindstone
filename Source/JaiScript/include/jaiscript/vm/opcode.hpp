@@ -44,8 +44,8 @@ namespace jai::vm {
         op_loop_back,       // a=target; execution-budget check on the back edge
 
         op_call,            // a=argc, b=call site index; pops args+callee, pushes result
-        op_return,          // a=has value (pops it), b=return mode: return_stmt::static_return_proof
-                            // or return_mode_converted (converted at an in-region return site),
+        op_return,          // a=has value (pops it), b=return mode: 0, or return_mode_converted
+                            // (converted at an in-region return site),
                             // c=detail::return_operand_* class of the operand (0 = nothing to
                             // materialize: ref return, no value, or already done by op_return_convert)
         op_implicit_return, // pops value into the program result (deref'd)
@@ -109,7 +109,7 @@ namespace jai::vm {
 
         op_return_ident,    // a=slot, b=symbol index, c=load flags: fused `return <ident>;`
                             // (LOAD+RETURN; resolution mirrors op_load via fused_ident_value)
-        op_return_binary,   // a=token_type, b=operand shape, c=static_return_proof: fused `return <a op b>;`
+        op_return_binary,   // a=token_type, b=operand shape: fused `return <a op b>;`
                             // (BINARY+RETURN; pops two, computes like op_binary, returns)
 
         op_inline_guard,    // a = inline site, b = the fallback ip: the site's name binds the site's function, or the fallback runs the original statement (internal/typed_regions_design.md, Inlined leaves)
@@ -193,7 +193,7 @@ namespace jai::vm {
         op_const_guard,     // a=node index: a node whose const verdict the run time decides (detail::const_guard; internal/const.md)
         op_const_folded,    // a=const index, b=the fold site (vm_backend::fold_sites_): a scoped const read (C::K, ns::x, E::v) the first
                             // execution resolved, then constants[a] (patched or rewritten back when the const's declaration runs again)
-        op_return_convert,  // a=return_stmt::static_return_proof: in-region `return` (a try/catch is
+        op_return_convert,  // in-region `return` (a try/catch is
                             // open) converts the stack top against the frame's declared return
                             // type HERE, inside this frame's try records; the op_return after the
                             // region exits lands it as return_mode_converted. b=detail::return_operand_*
@@ -368,10 +368,7 @@ namespace jai::vm {
     inline constexpr uint32_t load_flag_type_ctor = 1;   // name begins with weak_ptr</shared_ptr<
     inline constexpr uint32_t load_flag_global_only = 2; // ::name - resolve in the GLOBAL env only
                                                          // (locals/captures/member scope all skipped)
-    inline constexpr uint32_t load_flag_return_proven = 4; // op_return_ident only: return_stmt::static_return_proof
-                                                         // (frozen at compile; return_with_result's payload guard keeps it sound)
-
-    // op_return b: 0 plain, 1 = return_stmt::static_return_proof, return_mode_converted = the value
+    // op_return b: 0 plain, return_mode_converted = the value
     // was already converted at its in-region return site (op_return_convert)
     inline constexpr uint32_t return_mode_converted = 2;
 

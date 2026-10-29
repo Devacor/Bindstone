@@ -7,6 +7,9 @@
 #   JAI_BUILD_JOBS                   parallel build jobs (default 4)
 #   JAI_CI_LOG_DIR                   where build and check logs go (default jaiscript-ci-<checkout id> in the system temp
 #                                    directory: one folder per checkout, so worktrees running checks at once keep their logs apart)
+#   JAI_GATE_TIMEOUT                 seconds a gate may run before its watchdog (jai_gate_run, tools/ci/jai_gate_run.cpp)
+#                                    writes minidumps of its processes to <log dir>/dumps and kills them (default 2700; 0:
+#                                    none); JAI_WATCHDOG names the watchdog (default: from either build; empty: none)
 #   VSDEVCMD                         on Windows, the VsDevCmd.bat a build runs under when cl is not on PATH (default: the
 #                                    latest Visual Studio vswhere reports)
 
@@ -87,7 +90,7 @@ jai_build() {
 		jai_cmake "$log" -S "$JAI_ROOT" -B "$dir" -G Ninja "-DCMAKE_BUILD_TYPE=$type" "${extra[@]+"${extra[@]}"}" || { jai_build_failed "$cfg" "$log"; return 1; }
 	fi
 	local targets=() t
-	for t in "$@"; do targets+=(--target "$t"); done
+	for t in "$@" jai_gate_run; do targets+=(--target "$t"); done
 	jai_cmake "$log" --build "$dir" "${targets[@]}" -j "${JAI_BUILD_JOBS:-4}" || { jai_build_failed "$cfg" "$log"; return 1; }
 	echo "built $cfg: $*"
 }
@@ -97,18 +100,32 @@ jai_build_failed() {
 	grep -E "error C[0-9]+|error LNK|error:|ninja: error|CMake Error" "$2" | head -6 | cut -c1-220
 }
 
-# jai_gates <debug|release> <gate>...: tools/ci/gates.sh against that build, its output in a log; prints one line per gate
-# (JAI_GATE_LOG_TAG names a side-by-side run's log apart, so a rerun alone never overwrites the red one)
+# jai_watchdog: finds the watchdog once (the shells a run starts inherit it); without one the gates run unwrapped
+jai_watchdog() {
+	[ -n "${JAI_WATCHDOG+set}" ] && return 0
+	local exe
+	JAI_WATCHDOG=""
+	for exe in "$JAI_RELEASE_DIR/bin/jai_gate_run" "$JAI_DEBUG_DIR/bin/jai_gate_run"; do
+		[ -f "$exe" ] || [ -f "$exe.exe" ] && { JAI_WATCHDOG="$exe"; break; }
+	done
+	export JAI_WATCHDOG
+	[ -n "$JAI_WATCHDOG" ] || echo "no jai_gate_run in either build: the gates run without a watchdog"
+}
+
+# jai_gates <debug|release> <gate>...: tools/ci/gates.sh against that build under the watchdog, its output in a log; prints
+# one line per gate (JAI_GATE_LOG_TAG names a side-by-side run's log apart, so a rerun alone never overwrites the red one)
 jai_gates() {
-	local cfg="$1" log
+	local cfg="$1" log watch=()
 	shift
+	jai_watchdog
+	[ -z "$JAI_WATCHDOG" ] || watch=("$JAI_WATCHDOG" "--timeout=${JAI_GATE_TIMEOUT:-2700}" "--dump-dir=$JAI_CI_LOG_DIR/dumps" --)
 	log="$JAI_CI_LOG_DIR/gates_${cfg}_$(echo "$*" | tr ' ' '_')${JAI_TEST_SHARD:+_shard${JAI_TEST_SHARD%%/*}}${JAI_GATE_LOG_TAG:-}.log"
-	if BIN="$(jai_dir_of "$cfg")/bin" bash "$JAI_ROOT/tools/ci/gates.sh" "$@" > "$log" 2>&1; then
+	if BIN="$(jai_dir_of "$cfg")/bin" "${watch[@]+"${watch[@]}"}" "$BASH" "$JAI_ROOT/tools/ci/gates.sh" "$@" > "$log" 2>&1; then
 		echo "green: $* ($cfg)"
 		return 0
 	fi
 	echo "red: $* ($cfg; log: $log)"
-	grep -aE "::error::|^  x |Failed tests|FAIL" "$log" | head -8 | cut -c1-220
+	grep -aE "::error::|^  x |Failed tests|FAIL|^watchdog: .* exceeded" "$log" | head -8 | cut -c1-220
 	return 1
 }
 

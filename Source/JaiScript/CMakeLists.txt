@@ -171,6 +171,15 @@ if(JAISCRIPT_BUILD_LSP)
 endif()
 # --- end jaiscript_lsp ---
 
+# --- jai_gate_run (tools/ci): the watchdog tools/ci/ci_lib.sh runs every gate under; it links nothing of the library ---
+if(JAISCRIPT_IS_TOP_LEVEL)
+    add_executable(jai_gate_run tools/ci/jai_gate_run.cpp)
+    if(WIN32)
+        target_link_libraries(jai_gate_run PRIVATE dbghelp)
+    endif()
+endif()
+# --- end jai_gate_run ---
+
 # --- install + package: find_package(JaiScript) and JaiScript::jaiscript ---
 if(JAISCRIPT_INSTALL)
     include(GNUInstallDirs)

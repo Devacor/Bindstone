@@ -265,7 +265,7 @@ spelling and through any receiver of that family. An access outside the family w
 the checker resolves - a receiver whose static class is certain (`w.secret` with `Wallet w`,
 `Wallet::vault`, `this`/bare names inside an unrelated class's method, a free function, top-level
 code) - is the error `Cannot access private member 'secret' of class 'Wallet'`, the runtime's
-text, and the member's field proof is withheld. A `var` receiver stays lenient and raises the
+text. A `var` receiver stays lenient and raises the
 same text when it runs.
 
 **Const** (internal/const.md) — a `const` declaration, a `const T&` / `const T` parameter, a const loop variable or structured
@@ -306,7 +306,7 @@ that escapes whole into a container or a by-value parameter loses the marker.
 **References** — a reference local, parameter or range-for variable (and an `auto` range-for variable over class elements)
 keeps its referent's class or typed container in `var_entry::referent`; `referent_receiver` follows it through fields and
 elements. Member diagnostics read it exactly as a value receiver's class (no member, method values, arity and arguments, field
-and accessor stores, read-only properties), while the receiver keeps the proof pass's view: unknown, so no field proof, call
+and accessor stores, read-only properties), while the receiver keeps the proof pass's view: unknown, so no call
 proof, store proof or result type changes, and a reference's own reads and stores stay as before. `var&` and `auto&` over an
 unknown value have no referent.
 
@@ -561,16 +561,15 @@ to runtime; the declarations around them still receive their applicable checks:
 
 The same walk that produces diagnostics also produces **proofs**: annotations on AST nodes
 saying "the conversion this site would run is the identity" (`assignment_expr::
-static_store_proof`, `variable_decl::static_init_proof`, `call_expr::static_arg_proofs` +
-`proven_callee_body`, `return_stmt::static_return_proof`) or "this receiver's field lives in
-slot N of class object C at field-shape epoch E" (`member_expr` / `identifier_expr`
-`proven_class`/`proven_slot`/`proven_epoch`/`proven_field_type`/`proven_field_write`).
-`binary_expr::static_operand_class` is an annotation only. Both backends consume proofs
-behind TOTAL runtime guards (`detail/type_proofs.hpp`: `same_type_payload`,
-`proven_field_instance`/`proven_field_cell`): a proof selects a lane, the guard makes the
-lane sound, and a guard miss runs the existing code byte for byte. There is therefore no
-program whose value, printed output, error text or `type_of` differs between
-`engine::type_proofs(true)` (the default) and `type_proofs(false)`.
+static_store_proof`, `call_expr::static_arg_proofs`, `return_stmt::static_return_proof`), the
+one same-script callee a call resolves to (`call_expr::proven_callee_decl`,
+`proven_method_decl`), and the static class of a binary's operands
+(`binary_expr::static_operand_class`). The VM's compiler reads them: the store proof admits the
+typed store lowering, the argument and return proofs and the resolved callee admit the
+inliner, the operand class picks the typed row. Every lane they select keeps a TOTAL runtime
+guard, and a guard miss runs the existing code byte for byte; the interpreter reads none of
+them. There is therefore no program whose value, printed output, error text or `type_of`
+differs between `engine::type_proofs(true)` (the default) and `type_proofs(false)`.
 
 **Certain types** — a proof is stamped only from a certain static type on BOTH sides: a
 concrete `int`/`float`/`bool`/`char`/`string`, or a class known to the checker (in-script or
@@ -583,54 +582,29 @@ includes, callable variables, mixed ternaries, `this`/`super`. The certain set i
 complement of the lenient rows, so the false-positive contract above doubles as the
 proof-soundness contract.
 
-**Field proofs** need a class object: the receiver's certain class must be registered with
-the engine, its whole chain script-only (no C++ base, never `extend`ed), all-public, and the
-member a declared instance field with the synthesized accessors (no custom `_get_`/`_set_`,
-no method of the same name, not a static, not a shared_ptr builtin name,
-not a global-tier name). Bare-name field proofs additionally require a method/ctor body or a
-`[this]` lambda (not a static method, not a `: super(...)` argument list, no includes). A unit
-that declares its own classes gets its field proofs on its SECOND check: registration moves
-the surface, the cached entry re-checks, and identical reloads afterwards keep the stamps.
-Writes are proven only for scalar/string/object/`var` fields.
-
 **Calls** are proven only against exactly one same-script overload with exact arity — no
-defaults in play, no reference parameters, not a coroutine, no includes — and the stamp
-names the callee's body so a different function bound to the same name at runtime simply
-misses.
+defaults in play, not a coroutine — and a reference parameter takes no argument proof.
 
-**Hot reload** — every field proof carries `class_definition::field_shape_epoch()`, which
-moves on field-set, declared-type, parent-chain, access-label and accessor changes (and on
-every non-identical reload) but NOT on an identical reload. A retyped field therefore
-misses its proof and converts or resets through the existing migration/enforcement paths;
-a proof never produces an error the unproven path would not. Class registration and
-non-identical redefinition also move the checker's surface epoch, so cached entries
-re-stamp at their next execute.
+**Hot reload** — class registration and non-identical redefinition move the checker's
+surface epoch, so cached entries re-stamp at their next execute; a proof never produces an
+error the unproven path would not.
 
 **Switch** — `engine::type_proofs(bool)`, default on. Off: the pass does not run for fresh
 entries, and cached entries/jaibites already carrying proofs are stripped at their next
 execute, so an engine toggled off behaves as one that never stamped proofs. `engine::last_proof_stats()`
-counts the stamps of the most recent pass (stores/decls/args/returns/members/calls) for tests.
+counts the stamps of the most recent pass (stores/args/returns, and the deferred classes) for tests.
 Proofs are never serialized: a loaded jaibite re-derives them like the parser marking passes.
 
-**Bytecode carriers** — the vm reads decl, call, member and bare-identifier proofs off the
-AST node at execution time (a chunk pins the nodes it consumes, so a re-stamp reaches code
-compiled earlier), while store and return proofs ride instruction flags that freeze when
-the chunk compiles. A store/return proof that appears on a later re-check therefore
-benefits only chunks compiled afterwards; a proof that disappears leaves a bit the guard
-turns into a plain skip. Method bodies compile at their first call, so a class whose unit
-is executed before its methods run carries its field-store proofs in bytecode; a unit that
-defines and immediately calls its own class compiles those bodies before its second check
-and keeps the node-borne read/write lanes only.
+**Bytecode carriers** — store proofs ride `op_store`'s `store_flag_same_type`, which freezes
+when the chunk compiles; a store proof that appears on a later re-check benefits only chunks
+compiled afterwards. The inliner reads the call and return proofs off the AST when it grafts.
 
 **Not proven** — conversions (int→float widening, bool/string coercions, null→object,
 derived→base, ctor conversions), containers and typed maps, compound assignment and the
-`++`/`--` desugars, `store_through` references, static fields, `super.f`, `?.` receivers,
-engine globals, hybrid (C++-base) and `extend`ed classes, transparent
-wrappers, callable locals, engine functions, `new_expr`, coroutine callees, defaulted or
-by-reference parameters, worker (parallel) frames, and `binary_expr::static_operand_class`
-(annotation only). All of these run the existing code with proofs on or off. A return proof
-is consumed at the `return` statement itself on both backends (the in-region conversion op
-and every completion door alike), always behind the payload guard.
+`++`/`--` desugars, `store_through` references, field stores, static fields, `super.f`, `?.`
+receivers, engine globals, hybrid (C++-base) and `extend`ed classes, transparent wrappers,
+callable locals, engine functions, `new_expr`, coroutine callees, defaulted parameters and
+worker (parallel) frames. All of these run the existing code with proofs on or off.
 
 **Typed references prove their elements.** An element read through a reference declared as a typed container (a parameter
 `array<int>& tp` or a local `array<int>& row = rows[i];`) is a proof source for the element kind, as the alias of a typed global
@@ -650,9 +624,9 @@ proof_differential_gate` runs 200 generator seeds on {interpreter, vm} × {proof
 (fresh engines, identical registrations) and requires identical segment results, printed
 output, error text and liveness per backend; `strong_types_tests.cpp::proof_*` batteries run
 every certain kind through stores/decls/args/returns/field reads+writes on the same four
-lanes and pin the values, with `last_proof_stats()` proving the lanes are reachable;
-`hot_reload_correctness_tests.cpp::proof_*` arm field proofs and then retype, drop, hide,
-re-parent, hybridize or `extend` the class against a `type_proofs(false)` twin; and
+lanes and pin the values, with `last_proof_stats()` proving the stamps land;
+`hot_reload_correctness_tests.cpp::proof_*` store and read typed fields and then retype, drop,
+hide, re-parent, hybridize or `extend` the class against a `type_proofs(false)` twin; and
 `jaiscript_fuzz --no-proofs` (plus the fuzz smoke suite's no-proofs band) keeps the
 interpreter-vs-vm differential green in both proof states.
 

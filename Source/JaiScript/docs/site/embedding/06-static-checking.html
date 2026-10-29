@@ -497,17 +497,16 @@ were already broken.</p>
 
 <h2 id="proofs">Proofs: the same walk, put to work<a class="hlink" href="#proofs" aria-label="link">&#8203;</a></h2>
 <p>The walk that produces diagnostics also stamps <strong>proofs</strong> on the AST: annotations saying
-"the conversion this store, declaration, argument or return would run is the identity", or "this receiver's
-field lives in slot N of class C at field-shape epoch E". Both backends consume them behind total runtime
-guards: a proof selects a fast lane, the guard makes the lane sound, and a guard miss runs the ordinary code
-byte for byte. Certainty is the complement of the precision map, so the false-positive contract doubles as the
-proof-soundness contract.</p>
+"the conversion this store, argument or return would run is the identity", and the static class of a binary's
+operands. The VM's compiler reads them to choose its typed lowerings and what it may inline; every lane they
+select keeps a total runtime guard, and a guard miss runs the ordinary code byte for byte. Certainty is the
+complement of the precision map, so the false-positive contract doubles as the proof-soundness contract.</p>
 <p>What that means for you: nothing. There is no program whose value, printed output, error text or
 <code>type_of</code> differs between <code>engine::type_proofs(true)</code> (the default) and
 <code>type_proofs(false)</code>; toggling it off strips cached stamps at their next execute.
 <code>engine::last_proof_stats()</code> counts the stamps of the most recent pass for tests. Proofs are never
 serialized into a bite (a loaded bite re-derives them), and a hot reload that changes a class's
-shape moves its epoch so stale proofs simply miss (<a href="07-hot-reload.html#interaction-with-the-rest-of-the-engine">Hot
+shape re-stamps the entries that read it at their next execute (<a href="07-hot-reload.html#interaction-with-the-rest-of-the-engine">Hot
 Reload</a>).</p>
 
 <h2 id="jaibite-stamping">jaibite stamping<a class="hlink" href="#jaibite-stamping" aria-label="link">&#8203;</a></h2>

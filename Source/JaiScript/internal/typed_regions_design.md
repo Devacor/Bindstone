@@ -588,11 +588,11 @@ frame), an environment value and a local of any other declared type take no stri
 A reference alias of a declared typed container (`var& pix = PIX;` with `PIX` an `array<int>`) carries the
 container's type for element reads: the checker keeps it a reference for diagnostics and marks the element
 kind a proof source, and a subscript node carries that kind in its operand class, so the compiler's temps land
-the proven kind for store values, nested indexes and binaries the checker could not class on their own. The parser's typed-store classification (`assignment_expr::typed_store_provable`, guarded at runtime
-like every proof) knows program-level `array<int>` and `array<float>` declarations by symbol and reference
-aliases of typed containers, so `acc = acc + G[idx]` and `acc = acc + pix[i]` are parse-proven typed stores and
-such loops close as cell blocks. A typed value parameter classifies the same way (`vfx = vfx + dvfx` with both
-declared `int` is a parse-proven typed store), so a loop over a function's own parameters closes too. An index expression that itself contains an element read
+the proven kind for store values, nested indexes and binaries the checker could not class on their own. The checker
+types program-level `array<int>` and `array<float>` declarations and reference aliases of typed containers the same way,
+so `acc = acc + G[idx]` and `acc = acc + pix[i]` are same-type stores the typed store lowering takes, and such loops close
+as cell blocks. A typed value parameter types the same way (`vfx = vfx + dvfx` with both declared `int`), so a loop over a
+function's own parameters closes too. An index expression that itself contains an element read
 only a temp can carry (`palcm[pcm + tp[base + iv]]`) lands that read in a temp first, left before right, when its
 partner cannot raise ahead of it (a slot, a literal or another such read); the outer read then fuses with direct
 operands and takes the `T_LOAD` row when the index binary's class is proven. A hoisted read keeps the

@@ -373,7 +373,7 @@ inline void class_definition::replace_field_declared_types(std::unordered_map<ui
         }
     }
     field_declared_types_ = std::move(new_types);
-    if (changed) { bump_field_shape_epoch(); }   // declared type changed => epoch moved (proof guards)
+    if (changed) { bump_field_shape_epoch(); }   // declared type changed => epoch moved
     if (changed && mark_changes) {
         declared_types_dirty_ = true;
     }

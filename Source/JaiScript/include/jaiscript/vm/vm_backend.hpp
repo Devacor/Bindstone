@@ -893,7 +893,7 @@ namespace jai::vm {
         // Every frame enters through here (record, raw and session entries, method and tail-call pushes, fibers and native entries through
         // frame_guard): it joins frames_, and its function's captures bind into its slots (a raw-entered frame's slots are its cells until
         // build_raw_window builds its window).
-        void enter_frame(frame& f, const script_defined_function* function = nullptr) {
+        JAI_FORCEINLINE void enter_frame(frame& f, const script_defined_function* function = nullptr) {
             frames_.push_back(&f);
             bind_frame_captures(f, function);
         }
@@ -997,7 +997,7 @@ namespace jai::vm {
             frame* caller = nullptr;                   // resume target: native entry frame or another record's f
             std::shared_ptr<environment> prev_env;
             bool env_lazy = false;
-            bool lean = false;   // pushed by push_lean_method_frame: its exit is the lean pop's
+            bool lean = false;   // pushed by push_lean_method_frame or push_plain_frame on an untouched environment: its exit is pop_lean_frame
             // Lazy no-closure frames never touch environment_ (nothing saved,
             // nothing restored) — the biggest per-call env cost on the fib path gone
             bool env_untouched = false;
@@ -2456,12 +2456,27 @@ namespace jai::vm {
         bool inline_method_verdict(const chunk::inline_site& site, const class_definition* cd);
         bool comparison_free(const script_value& v);
         const uint64_t* layout_gen_ = nullptr;   // engine::layout_generation
-        void bind_member_layout(frame& f, const chunk& body);
+        void bind_member_layout(frame& f, const chunk& body, class_instance* receiver = nullptr);
         bool member_layout_same(const chunk& body, const class_definition* cd);
         bool member_layout_verdict(const chunk& body, const class_definition* cd);
         bool park_frame_sibling(frame& f, const call_site& site);
-        uint8_t push_lean_method_frame(frame& caller, const script_method_dispatch& dispatch, const std::shared_ptr<function_decl>& ast,
-                                       script_value* receiver_owned, size_t frame_base, size_t args_base, size_t argc);
+        frame* push_lean_method_frame(frame& caller, const script_method_dispatch& dispatch, const std::shared_ptr<function_decl>& ast,
+                                      script_value& receiver, class_instance* inst, size_t frame_base, size_t args_base, size_t argc);
+        bool lean_method_site(const chunk& code, const call_site& site) const;
+        void pop_lean_frame(call_record& rec);
+        // a lean frame pops through pop_lean_frame (a profiled build accounts every pop through the general one)
+        static bool pops_lean(const call_record& rec) noexcept {
+#ifdef JAISCRIPT_VM_PROFILE
+            (void)rec;
+            return false;
+#else
+            return rec.lean && !rec.locals.boxed_cells;
+#endif
+        }
+        // the call instructions' lanes into a lean frame: the frame pushed, or null when the instruction's general path runs
+        frame* enter_lean_method_call(frame& f, const vm_instruction& ins);
+        frame* enter_lean_sibling_call(frame& f, const vm_instruction& ins);
+        frame* enter_probed_call(frame& f, const vm_instruction& ins);
         // a member-class body's bare field at slot + 1 `s`: the receiver's cell, while the frame's layout holds (no class anywhere
         // changed methods or field shape, the receiver still has its class); null sends the read to the general ladder
         JAI_FORCEINLINE script_value* frame_this_field(const frame& f, uint32_t s) const noexcept {

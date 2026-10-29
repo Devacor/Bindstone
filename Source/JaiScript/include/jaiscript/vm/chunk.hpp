@@ -172,6 +172,7 @@ namespace jai::vm {
         mutable std::shared_ptr<function_decl> mic_resolved;
         mutable bool mic_static = false;
         mutable bool mic_field_free = false;   // no field in the class chain is named like the method
+        mutable uint8_t mic_lean = 0;   // the site's own conditions for the lean lane (vm_backend::lean_method_site): 1 hold, 2 not, 0 not asked
         // the classes a polymorphic method site met before the one above, each under the same (class identity, method_epoch) rule
         struct mic_entry {
             const class_definition* cd = nullptr;

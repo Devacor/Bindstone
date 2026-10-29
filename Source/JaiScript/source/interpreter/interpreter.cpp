@@ -5,7 +5,6 @@
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/detail/interpreter.hpp>
-#include <jaiscript/detail/host_member_access.hpp>
 #include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <jaiscript/detail/uniquely_held.hpp>
 #include <jaiscript/detail/release_machine.hpp>
@@ -1184,17 +1183,6 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
             push_value(own->deref());
             return checked_result<void>();
         }
-        // a C++ member of the method's receiver reached in place (detail/host_member_access.hpp), the row filled below
-        if (member_scope_.state == detail::member_scope_state::instance && member_scope_.this_storage) {
-            if (class_instance* self = detail::host_this_instance(*member_scope_.this_storage)) {
-                const detail::host_member_lane* lane = nullptr;
-                if (void* address = host_member_row_hit(expr, self->get_class_definition(), self, lane);
-                    address && detail::host_member_serves(*lane, address)) {
-                    push_value(lane->read(address, engine_));
-                    return checked_result<void>();
-                }
-            }
-        }
         auto member = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
                                                  member_scope_.statics, expr->symbol_id, /*want_methods*/ true);
         if (member) {
@@ -1207,13 +1195,6 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
                     push_value(std::move(member.method_value));   // static method: unbound callable
                 }
             } else if (member.what == detail::member_probe_hit::kind::cpp_property) {
-                const detail::host_member_lane* lane = nullptr;
-                if (void* address = host_member_cached(expr, expr->symbol_id, member.instance->get_class_definition(), member.instance,
-                                                       *member_scope_.this_storage, lane);
-                    address && detail::host_member_serves(*lane, address)) {
-                    push_value(lane->read(address, engine_));
-                    return checked_result<void>();
-                }
                 auto read = detail::read_bare_cpp_property(*member_scope_.this_storage, member.instance,
                                                            member.method_value, member.getter_id, expr->symbol_id);
                 if (!read) {
@@ -1957,35 +1938,6 @@ checked_result<script_value> interpreter::assign_math_component(script_value& ba
         detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()}, environment_.get(), engine_, string_symbolizer_);
 }
 
-// a bound C++ member reached in place (detail/host_member_access.hpp): the row fills once per node, class and method epoch
-void* interpreter::host_member_cached(const void* node, uint64_t member_id, class_definition* cd, class_instance* inst,
-                                      const script_value& receiver, const detail::host_member_lane*& lane) {
-    host_member_row& row = host_member_rows_[(reinterpret_cast<uintptr_t>(node) >> 4) & 127];
-    if (row.node != node || row.cd != cd || row.epoch != cd->method_epoch()) {
-        row.node = node;
-        row.cd = cd;
-        row.epoch = cd->method_epoch();
-        if (member_id == UINT64_MAX || !detail::host_member_fill(cd, inst, member_id, receiver, engine_, row.hit)) {
-            row.hit = detail::host_member_hit{};
-        }
-    }
-    if (!row.hit.lane) {
-        return nullptr;
-    }
-    lane = row.hit.lane;
-    return detail::host_member_address(inst, row.hit);
-}
-
-void* interpreter::host_member_row_hit(const void* node, const class_definition* cd, const class_instance* inst,
-                                       const detail::host_member_lane*& lane) {
-    const host_member_row& row = host_member_rows_[(reinterpret_cast<uintptr_t>(node) >> 4) & 127];
-    if (row.node != node || row.cd != cd || !row.hit.lane || row.epoch != cd->method_epoch()) {
-        return nullptr;
-    }
-    lane = row.hit.lane;
-    return detail::host_member_address(inst, row.hit);
-}
-
 checked_result<void> interpreter::assign_member_value(const script_value& objectValue, member_expr* memberExpr, const script_value& value) {
     // Worker direct-field store (parallel_for v1): the setter probe below COPIES a
     // shared method value (cross-worker count race); a backing field's enforce+set is
@@ -2032,13 +1984,6 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     auto [setter_id, _] = string_symbolizer_->get_setter_id_with_view(member_id);
     script_value setter = target.user_accessor(setter_id);   // a synthesized setter takes the field rung
     if (!setter.is_null() && !setter.is_invalid() && setter.is_function()) {
-        if (target.instance) {
-            const detail::host_member_lane* lane = nullptr;
-            if (void* address = host_member_cached(memberExpr, memberExpr->member_id, target.class_def, target.instance.get(), objectValue, lane);
-                address && lane->write && lane->write(address, value)) {
-                return {};
-            }
-        }
         const script_function& func = setter.as_function();
         std::vector<script_value> args = {objectValue, clone_for_assignment(value)};
         auto result = call_value(func, args);
@@ -6276,14 +6221,6 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             }
             script_value getter = target.user_accessor(getter_id);
             if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) {
-                if (target.instance) {
-                    const detail::host_member_lane* lane = nullptr;
-                    if (void* address = host_member_cached(expr, expr->member_id, target.class_def, target.instance.get(), objectValue, lane);
-                        address && detail::host_member_serves(*lane, address)) {
-                        push_value(lane->read(address, engine_));
-                        return {};
-                    }
-                }
                 // The shared read (retired-layer report, receiver pin): the bare-name
                 // rung of detail/member_scope.hpp runs the identical kernel
                 auto result = detail::read_cpp_property(objectValue, target.class_def, target.instance.get(),

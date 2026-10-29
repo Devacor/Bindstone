@@ -21,6 +21,7 @@
 #include "operator_table.hpp"
 #include "value_text.hpp"
 #include "truthiness.hpp"
+#include "operator_ids.hpp"
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/core/execution_backend.hpp>
@@ -825,42 +826,23 @@ namespace jai {
         bool member_callee_lookup_ = false;   // visit_call_expr -> visit_member_expr: the member is being called (null-receiver text)
         script_value* chain_root_hold_ = nullptr;   // a read chain's outer link -> its inner links: where the innermost leaves the chain's root (held until the outer read completes)
 
-        // Cached symbol IDs for operator overloading (initialized in constructor)
-        uint64_t op_plus_id_;
-        uint64_t op_minus_id_;
-        uint64_t op_star_id_;
-        uint64_t op_slash_id_;
-        uint64_t op_percent_id_;
-        uint64_t op_less_id_;
-        uint64_t op_less_equal_id_;
-        uint64_t op_greater_id_;
-        uint64_t op_greater_equal_id_;
-        uint64_t op_equal_equal_id_;
-        uint64_t op_bang_equal_id_;
-        uint64_t op_spaceship_id_;
-        uint64_t op_ampersand_id_;
-        uint64_t op_pipe_id_;
-        uint64_t op_caret_id_;
-        uint64_t op_left_shift_id_;
-        uint64_t op_right_shift_id_;
-        uint64_t op_tilde_id_ = 0;   // "~" (a class's operator~)
-        uint64_t op_call_id_ = 0;    // "()" (a class's operator(), consulted only where a call would raise not callable)
+        detail::operator_ids ops_;
         uint64_t subscript_op_id_;  // "[]"
         uint64_t assign_operator_id_;  // "=" for class assignment operator overload
 
         // a compound assignment's operator method (`&=` -> operator&); 0 for none
         uint64_t compound_op_symbol(token_type assign_op) const noexcept {
             switch (assign_op) {
-                case token_type::plus_equal: return op_plus_id_;
-                case token_type::minus_equal: return op_minus_id_;
-                case token_type::star_equal: return op_star_id_;
-                case token_type::slash_equal: return op_slash_id_;
-                case token_type::percent_equal: return op_percent_id_;
-                case token_type::ampersand_equal: return op_ampersand_id_;
-                case token_type::pipe_equal: return op_pipe_id_;
-                case token_type::caret_equal: return op_caret_id_;
-                case token_type::left_shift_equal: return op_left_shift_id_;
-                case token_type::right_shift_equal: return op_right_shift_id_;
+                case token_type::plus_equal: return ops_.plus;
+                case token_type::minus_equal: return ops_.minus;
+                case token_type::star_equal: return ops_.star;
+                case token_type::slash_equal: return ops_.slash;
+                case token_type::percent_equal: return ops_.percent;
+                case token_type::ampersand_equal: return ops_.ampersand;
+                case token_type::pipe_equal: return ops_.pipe;
+                case token_type::caret_equal: return ops_.caret;
+                case token_type::left_shift_equal: return ops_.left_shift;
+                case token_type::right_shift_equal: return ops_.right_shift;
                 default: return 0;
             }
         }
@@ -1070,14 +1052,6 @@ namespace jai {
         // User operator methods (==, <, <=, >, >=, + - * / %): nullopt when the operand defines none (or the method's result
         // does not answer the question), else the method's result or the runtime error it raised
         bool object_defines_custom_equality(const script_value& v) const;
-        std::optional<checked_result<bool>> object_equality_via_method(const script_value& left, const script_value& right);
-        std::optional<checked_result<bool>> object_inequality_via_method(const script_value& left, const script_value& right);
-        std::optional<checked_result<bool>> object_comparison_reversed_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
-        std::optional<checked_result<script_value>> object_spaceship_reversed_via_method(const script_value& left, const script_value& right);
-        std::optional<checked_result<bool>> object_spaceship_equality_via_method(const script_value& left, const script_value& right);
-        std::optional<checked_result<bool>> object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
-        std::optional<checked_result<script_value>> object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
-        std::optional<checked_result<script_value>> object_reflected_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
         std::optional<checked_result<script_value>> object_compound_via_method(const script_value& target, const script_value& right, uint64_t op_symbol_id);
         std::optional<checked_result<script_value>> object_compound_operand(const script_value& left, token_type op, const script_value& right);
         std::optional<checked_result<script_value>> object_unary_via_method(const script_value& operand, token_type op);   // a class's unary - + ~

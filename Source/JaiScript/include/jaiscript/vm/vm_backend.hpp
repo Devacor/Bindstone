@@ -17,6 +17,7 @@
 #include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <jaiscript/detail/arity_diagnostic.hpp>
 #include <jaiscript/detail/slot_site.hpp>
+#include <jaiscript/detail/operator_ids.hpp>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -1273,25 +1274,21 @@ namespace jai::vm {
         detail::execution_limits local_limits_;
         detail::execution_limits* limits_ = &local_limits_;
 
-        uint64_t op_plus_id_ = 0, op_minus_id_ = 0, op_star_id_ = 0, op_slash_id_ = 0, op_percent_id_ = 0;
-        uint64_t op_less_id_ = 0, op_less_equal_id_ = 0, op_greater_id_ = 0, op_greater_equal_id_ = 0;
-        uint64_t op_equal_equal_id_ = 0, op_bang_equal_id_ = 0, op_spaceship_id_ = 0;
-        uint64_t op_ampersand_id_ = 0, op_pipe_id_ = 0, op_caret_id_ = 0, op_left_shift_id_ = 0, op_right_shift_id_ = 0;
-        uint64_t op_tilde_id_ = 0, op_call_id_ = 0;
+        detail::operator_ids ops_;
 
         // a compound kind's operator method (compound_and -> operator&)
         uint64_t compound_kind_symbol(uint32_t kind) const noexcept {
             switch (kind & compound_kind_mask) {
-                case compound_minus: return op_minus_id_;
-                case compound_star: return op_star_id_;
-                case compound_slash: return op_slash_id_;
-                case compound_percent: return op_percent_id_;
-                case compound_and: return op_ampersand_id_;
-                case compound_or: return op_pipe_id_;
-                case compound_xor: return op_caret_id_;
-                case compound_shl: return op_left_shift_id_;
-                case compound_shr: return op_right_shift_id_;
-                default: return op_plus_id_;
+                case compound_minus: return ops_.minus;
+                case compound_star: return ops_.star;
+                case compound_slash: return ops_.slash;
+                case compound_percent: return ops_.percent;
+                case compound_and: return ops_.ampersand;
+                case compound_or: return ops_.pipe;
+                case compound_xor: return ops_.caret;
+                case compound_shl: return ops_.left_shift;
+                case compound_shr: return ops_.right_shift;
+                default: return ops_.plus;
             }
         }
         uint64_t this_id_ = 0;
@@ -1596,14 +1593,6 @@ namespace jai::vm {
         }
         bool object_defines_custom_equality(const script_value& v) const;
         // user operator methods: nullopt when the operand defines none, else the method's result or the runtime error it raised
-        std::optional<checked_result<bool>> object_equality_via_method(const script_value& left, const script_value& right);
-        std::optional<checked_result<bool>> object_inequality_via_method(const script_value& left, const script_value& right);
-        std::optional<checked_result<bool>> object_comparison_reversed_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
-        std::optional<checked_result<script_value>> object_spaceship_reversed_via_method(const script_value& left, const script_value& right);
-        std::optional<checked_result<bool>> object_spaceship_equality_via_method(const script_value& left, const script_value& right);
-        std::optional<checked_result<bool>> object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
-        std::optional<checked_result<script_value>> object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
-        std::optional<checked_result<script_value>> object_reflected_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
         std::optional<checked_result<script_value>> object_compound_via_method(const script_value& target, const script_value& right, uint64_t op_symbol_id);
         std::optional<checked_result<script_value>> object_compound_operand(const script_value& left, token_type op, const script_value& right);
         std::optional<checked_result<script_value>> object_unary_via_method(const script_value& operand, token_type op);   // a class's unary - + ~

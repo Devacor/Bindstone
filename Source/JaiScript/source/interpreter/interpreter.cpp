@@ -292,7 +292,7 @@ bool interpreter::object_to_bool_via_method(const script_value& value) {
 // Returns: nullopt if no custom equality method, true/false if method found and returned valid result
 bool interpreter::object_defines_custom_equality(const script_value& v) const {
     const class_definition* cd = detail::operand_instance_class(v);
-    return cd && (cd->defines_method(eq_method_id_) || cd->defines_method(op_spaceship_id_));
+    return cd && (cd->defines_method(eq_method_id_) || cd->defines_method(ops_.spaceship));
 }
 
 // The language's <: honor the global override before builtin/class ordering.
@@ -349,334 +349,6 @@ checked_result<bool> interpreter::language_equal(const script_value& left, const
     auto equal = handle_equal(l, r);
     if (!equal) { return equal.error_value(); }
     return is_truthy(equal.value());
-}
-
-std::optional<checked_result<bool>> interpreter::object_equality_via_method(const script_value& left, const script_value& right) {
-    // a worker whose region did not pin the class's == leaves it to handle_equal, which raises the verdict
-    if (parallel_worker_ && !worker_operators_pinned(left, { eq_method_id_, op_spaceship_id_ })) [[unlikely]] { return std::nullopt; }
-    auto target = resolve_member_target(left);
-    if (!target) {
-        return std::nullopt;
-    }
-
-    // Look for "==" method - used by both script classes (operator==) and dynamic_binder
-    auto eq_id = eq_method_id_;
-    auto method_val = operator_value(target, eq_id);
-    if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
-        // Check if this is a transparent wrapper - if so, unwrap and retry
-        if (target.class_def && target.class_def->is_transparent_wrapper()) {
-            script_value mutable_left = left;  // Need mutable copy for unwrap
-            script_value unwrapped = target.class_def->unwrap(mutable_left);
-            if (!unwrapped.is_null()) {
-                return object_equality_via_method(unwrapped, right);
-            }
-        }
-        return std::nullopt;  // No == method - use default reference comparison
-    }
-    if (!equality_operator_candidate(target.class_def, eq_method_id_, op_spaceship_id_, right)) { return std::nullopt; }
-
-    auto result = operator_call(left, method_val, eq_id, { right });
-    // the method's runtime error is the comparison's (a script throw in flight keeps travelling on its own)
-    if (!result && !is_unwinding_) { return checked_result<bool>(result.error_value()); }
-    if (result.has_value() && result.value().is_bool()) {
-        return checked_result<bool>(result.value().unchecked_as_bool());
-    }
-    // Method didn't return a valid bool - fall back to reference comparison
-    return std::nullopt;
-}
-
-// A declared operator!= wins over !(a == b) (C++20), asked where operator== would be: a class
-// instance against a value of its class, or any value one of its != overloads takes when the chain declares <=>.
-// KEEP BYTE-PARALLEL with vm_backend::object_inequality_via_method
-std::optional<checked_result<bool>> interpreter::object_inequality_via_method(const script_value& left, const script_value& right) {
-    if (parallel_worker_ && !worker_operators_pinned(left, { op_bang_equal_id_ })) [[unlikely]] {
-        if (!right.is_null()) {
-            return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-        }
-        return std::nullopt;
-    }
-    if (!left.is_object() || right.is_null()) { return std::nullopt; }
-    auto target = resolve_member_target(left);
-    if (!target) { return std::nullopt; }
-    script_value method_val = operator_value(target, op_bang_equal_id_);
-    if (!method_val.is_function()) { return std::nullopt; }
-    if (!equality_operator_candidate(target.class_def, op_bang_equal_id_, op_spaceship_id_, right)) {
-        return std::nullopt;
-    }
-    auto result = operator_call(left, method_val, op_bang_equal_id_, { right });
-    if (!result) {
-        if (is_unwinding_) { return checked_result<bool>(false); }
-        return checked_result<bool>(result.error_value());
-    }
-    if (result.value().is_bool()) { return checked_result<bool>(result.value().unchecked_as_bool()); }
-    return std::nullopt;
-}
-
-// The right operand's <=> where the left operand has no operator: 5 < v is (v <=> 5) > 0, a
-// candidate only when its parameter takes the left operand. KEEP BYTE-PARALLEL with the vm twins below
-std::optional<checked_result<bool>> interpreter::object_comparison_reversed_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-    if (parallel_worker_ && !worker_operators_pinned(right, { op_spaceship_id_ })) [[unlikely]] {
-        return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-    }
-    auto target = resolve_member_target(right);
-    if (!target || !binary_operator_accepts(target.class_def, op_spaceship_id_, left)) { return std::nullopt; }
-    script_value method_val = operator_value(target, op_spaceship_id_);
-    if (!method_val.is_function()) { return std::nullopt; }
-    auto result = operator_call(right, method_val, op_spaceship_id_, { left });
-    if (!result) {
-        if (is_unwinding_) { return std::nullopt; }
-        return checked_result<bool>(result.error_value());
-    }
-    const token_type op = op_symbol_id == op_less_id_ ? token_type::less : op_symbol_id == op_less_equal_id_ ? token_type::less_equal
-                        : op_symbol_id == op_greater_id_ ? token_type::greater : token_type::greater_equal;
-    if (auto answer = spaceship_rewritten(reversed_comparison(op), result.value())) { return checked_result<bool>(*answer); }
-    return std::nullopt;
-}
-
-std::optional<checked_result<script_value>> interpreter::object_spaceship_reversed_via_method(const script_value& left, const script_value& right) {
-    if (parallel_worker_ && !worker_operators_pinned(right, { op_spaceship_id_ })) [[unlikely]] {
-        return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-    }
-    auto target = resolve_member_target(right);
-    if (!target || !binary_operator_accepts(target.class_def, op_spaceship_id_, left)) { return std::nullopt; }
-    script_value method_val = operator_value(target, op_spaceship_id_);
-    if (!method_val.is_function()) { return std::nullopt; }
-    auto result = operator_call(right, method_val, op_spaceship_id_, { left });
-    if (!result) {
-        if (is_unwinding_) { return std::nullopt; }
-        return checked_result<script_value>(result.error_value());
-    }
-    if (auto sign = reversed_spaceship_sign(result.value())) { return checked_result<script_value>(make_value(*sign)); }
-    return std::nullopt;
-}
-
-// <=> drives ==: an operand whose chain declares <=> answers a == b, the left operand first, then the
-// right one: its operator== when an overload takes the other operand, else its <=> as (a <=> b) == 0 when one does; any other
-// operand, a class without <=> included, keeps its own == (memberwise between values of one class, false otherwise)
-std::optional<checked_result<bool>> interpreter::object_spaceship_equality_via_method(const script_value& left, const script_value& right) {
-    if (left.is_null() || right.is_null()) { return std::nullopt; }
-    const auto call = [this](const script_value& self, const script_value& method_val, const script_value& arg, bool spaceship) -> std::optional<checked_result<bool>> {
-        auto result = operator_call(self, method_val, spaceship ? op_spaceship_id_ : eq_method_id_, { arg });
-        if (!result) {
-            if (is_unwinding_) { return checked_result<bool>(false); }
-            return checked_result<bool>(result.error_value());
-        }
-        const script_value& r = result.value().deref();
-        if (!spaceship) { return r.is_bool() ? std::optional<checked_result<bool>>(checked_result<bool>(r.unchecked_as_bool())) : std::nullopt; }
-        if (r.is_int()) { return checked_result<bool>(r.as_int() == 0); }
-        if (r.is_float()) { return checked_result<bool>(r.as_float() == 0.0); }
-        return std::nullopt;
-    };
-    const auto side = [&](const script_value& self, const script_value& other) -> std::optional<checked_result<bool>> {
-        if (!self.is_object()) { return std::nullopt; }
-        auto target = resolve_member_target(self);
-        if (!target) { return std::nullopt; }
-        if (parallel_worker_ && !worker_operators_pinned(self, { op_spaceship_id_, eq_method_id_ })) [[unlikely]] {
-            if (!self.is_object() || !detail::instance_declares_operator(self, op_spaceship_id_)) { return std::nullopt; }
-            return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-        }
-        script_value spaceship = operator_value(target, op_spaceship_id_);
-        if (!spaceship.is_function()) { return std::nullopt; }
-        if (script_value eq = operator_value(target, eq_method_id_); eq.is_function() && binary_operator_accepts(target.class_def, eq_method_id_, other)) {
-            return call(self, eq, other, false);
-        }
-        if (binary_operator_accepts(target.class_def, op_spaceship_id_, other)) { return call(self, spaceship, other, true); }
-        return std::nullopt;
-    };
-    if (auto answer = side(left, right)) { return answer; }
-    return side(right, left);
-}
-
-// Generic helper for comparison operators (<, <=, >, >=) via custom methods
-std::optional<checked_result<bool>> interpreter::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-    if (parallel_worker_ && !worker_operators_pinned(left, { op_symbol_id, op_spaceship_id_ })) [[unlikely]] {
-        if (detail::instance_declares_operator(left, op_symbol_id)) {
-            return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-        }
-        return std::nullopt;
-    }
-    auto target = resolve_member_target(left);
-    if (!target) {
-        return std::nullopt;
-    }
-
-    // Look for the operator method by symbol ID
-    auto method_val = operator_value(target, op_symbol_id);
-    const bool declared = method_val.is_function();
-    const bool host_refuses = declared && host_operator_dispatch(method_val) && !host_operator_accepts(method_val, right);
-    // an explicit operator no overload of which takes the operand yields to a <=> that does (C++20: that candidate is not viable)
-    if (!declared || host_refuses || (operator_value(target, op_spaceship_id_).is_function() && !binary_operator_accepts(target.class_def, op_symbol_id, right))) {
-        if (script_value spaceship = operator_value(target, op_spaceship_id_); spaceship.is_function() && binary_operator_accepts(target.class_def, op_spaceship_id_, right)) {
-            auto result = operator_call(left, spaceship, op_spaceship_id_, { right });
-            if (!result) {
-                if (is_unwinding_) { return std::nullopt; }
-                return checked_result<bool>(result.error_value());
-            }
-            const token_type op = op_symbol_id == op_less_id_ ? token_type::less : op_symbol_id == op_less_equal_id_ ? token_type::less_equal
-                                : op_symbol_id == op_greater_id_ ? token_type::greater : token_type::greater_equal;
-            if (auto answer = spaceship_rewritten(op, result.value())) { return checked_result<bool>(*answer); }
-            return std::nullopt;
-        }
-        // Check if this is a transparent wrapper - if so, unwrap and retry
-        if (target.class_def && target.class_def->is_transparent_wrapper()) {
-            script_value mutable_left = left;  // Need mutable copy for unwrap
-            script_value unwrapped = target.class_def->unwrap(mutable_left);
-            if (!unwrapped.is_null()) {
-                return object_comparison_via_method(unwrapped, right, op_symbol_id);
-            }
-        }
-        if (!declared || host_refuses) { return std::nullopt; }  // No custom method - use default comparison
-    }
-
-    auto result = operator_call(left, method_val, op_symbol_id, { right });
-    if (!result && !is_unwinding_) { return checked_result<bool>(result.error_value()); }
-    if (result.has_value() && result.value().is_bool()) {
-        return checked_result<bool>(result.value().unchecked_as_bool());
-    }
-    return std::nullopt;
-}
-
-// A compound whose target or operand is an object (an element's, a reference's, a map value's): the target class's compound
-// or binary operator, else the operand's reflected one; nullopt keeps the compound's text. KEEP BYTE-PARALLEL with vm_backend
-std::optional<checked_result<script_value>> interpreter::object_compound_operand(const script_value& left, token_type op, const script_value& right) {
-    uint64_t id = 0;
-    switch (op) {
-        case token_type::plus: id = op_plus_id_; break;
-        case token_type::minus: id = op_minus_id_; break;
-        case token_type::star: id = op_star_id_; break;
-        case token_type::slash: id = op_slash_id_; break;
-        case token_type::percent: id = op_percent_id_; break;
-        case token_type::ampersand: id = op_ampersand_id_; break;
-        case token_type::pipe: id = op_pipe_id_; break;
-        case token_type::caret: id = op_caret_id_; break;
-        case token_type::left_shift: id = op_left_shift_id_; break;
-        case token_type::right_shift: id = op_right_shift_id_; break;
-        default: return std::nullopt;
-    }
-    if (left.is_object()) {
-        if (auto custom = object_compound_via_method(left, right, id)) { return custom; }
-    }
-    if (right.is_object()) { return object_reflected_via_method(left, right, id); }
-    return std::nullopt;
-}
-
-// a op= b on an object: a bound compound operator (C++'s operator+=) that takes b changes a in place and the expression is a;
-// without one it is a = a op b through the binary operator. KEEP BYTE-PARALLEL with vm_backend::object_compound_via_method
-std::optional<checked_result<script_value>> interpreter::object_compound_via_method(const script_value& target, const script_value& right, uint64_t op_symbol_id) {
-    if (const uint64_t compound_id = engine_->compound_operator_id(op_symbol_id)) {
-        if (parallel_worker_ && !worker_operators_pinned(target, { compound_id })) [[unlikely]] {
-            return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-        }
-        if (auto owner = resolve_member_target(target)) {
-            script_value method_val = operator_value(owner, compound_id);
-            if (method_val.is_function() && host_operator_accepts(method_val, right)) {
-                auto result = operator_call(target, method_val, compound_id, { right });
-                if (!result) {
-                    if (is_unwinding_) { return checked_result<script_value>(script_value(std::monostate{}, engine_)); }
-                    return checked_result<script_value>(result.error_value());
-                }
-                return checked_result<script_value>(target.deref());
-            }
-        }
-    }
-    return object_arithmetic_via_method(target, right, op_symbol_id);
-}
-
-// The right operand's bound reflected operator taking the left one (C++'s free op(L, const R&)), for a left operand whose
-// own operator does not answer. KEEP BYTE-PARALLEL with vm_backend::object_reflected_via_method
-std::optional<checked_result<script_value>> interpreter::object_reflected_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-    if (!right.deref().is_object()) { return std::nullopt; }
-    const uint64_t reflected_id = engine_->reflected_operator_id(op_symbol_id);
-    if (!reflected_id) { return std::nullopt; }
-    if (parallel_worker_ && !worker_operators_pinned(right, { reflected_id })) [[unlikely]] {
-        return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-    }
-    auto target = resolve_member_target(right);
-    if (!target) { return std::nullopt; }
-    script_value method_val = operator_value(target, reflected_id);
-    if (!method_val.is_function() || !host_operator_accepts(method_val, left)) { return std::nullopt; }
-    auto result = operator_call(right, method_val, reflected_id, { left });
-    if (!result) {
-        if (is_unwinding_) { return checked_result<script_value>(script_value(std::monostate{}, engine_)); }
-        return checked_result<script_value>(result.error_value());
-    }
-    return checked_result<script_value>(std::move(result.value()));
-}
-
-// Generic helper for arithmetic operators (+, -, *, /, %) via custom methods
-std::optional<checked_result<script_value>> interpreter::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-    // a worker dispatches a class operator through its region pin; one the class declares that the region could not pin raises the
-    // verdict, never the builtin meaning
-    if (parallel_worker_ && !worker_operators_pinned(left, { op_symbol_id })) [[unlikely]] {
-        return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-    }
-    auto target = resolve_member_target(left);
-    if (!target) {
-        return std::nullopt;
-    }
-
-    // Look for the operator method by symbol ID
-    auto method_val = operator_value(target, op_symbol_id);
-    if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
-        // Check if this is a transparent wrapper - if so, unwrap and retry
-        if (target.class_def && target.class_def->is_transparent_wrapper()) {
-            script_value mutable_left = left;  // Need mutable copy for unwrap
-            script_value unwrapped = target.class_def->unwrap(mutable_left);
-            if (!unwrapped.is_null()) {
-                return object_arithmetic_via_method(unwrapped, right, op_symbol_id);
-            }
-        }
-        return std::nullopt;  // No custom method - use default arithmetic
-    }
-
-    if (host_operator_dispatch(method_val) && !host_operator_accepts(method_val, right)) { return std::nullopt; }
-    auto result = operator_call(left, method_val, op_symbol_id, { right });
-    if (!result && !is_unwinding_) { return checked_result<script_value>(result.error_value()); }
-    if (result.has_value()) {
-        return checked_result<script_value>(std::move(result.value()));
-    }
-    return std::nullopt;
-}
-
-// A class's unary operator: the chain's overload taking no argument, called on the operand; nullopt
-// when the class declares none (the builtin meaning and text follow). KEEP BYTE-PARALLEL with vm_backend::object_unary_via_method
-std::optional<checked_result<script_value>> interpreter::object_unary_via_method(const script_value& operand, token_type op) {
-    const uint64_t id = op == token_type::minus ? op_minus_id_ : op == token_type::plus ? op_plus_id_ : op_tilde_id_;
-    if (parallel_worker_ && !worker_operators_pinned(operand, { id })) [[unlikely]] {
-        if (declares_unary_operator(detail::operand_instance_class(operand), id)) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-        }
-        return std::nullopt;
-    }
-    auto target = resolve_member_target(operand);
-    if (!target || !declares_unary_operator(target.class_def, id)) { return std::nullopt; }
-    script_value method_val = operator_value(target, id);
-    if (!method_val.is_function()) { return std::nullopt; }
-    auto result = operator_call(operand, method_val, id, {});
-    if (!result) {
-        if (is_unwinding_) { return checked_result<script_value>(make_value()); }
-        return checked_result<script_value>(result.error_value());
-    }
-    return checked_result<script_value>(std::move(result.value()));
-}
-
-// A callable object: only a call that would raise not callable asks for it, so ordinary calls never
-// pay for it. KEEP BYTE-PARALLEL with vm_backend::call_operator_of
-script_value interpreter::call_operator_of(const script_value& callee) {
-    const script_value& v = callee.deref();
-    if (v.type() != script_value_type::jai_object_type && v.type() != script_value_type::jai_shared_ptr_type) { return make_value(); }
-    if (parallel_worker_) [[unlikely]] {
-        // a worker calls the region's pin of operator() on this backend (KEEP BYTE-PARALLEL with the vm)
-        const detail::parallel_method_pin* pin = worker_operator_pin(v, op_call_id_);
-        if (!pin) { return make_value(); }
-        return script_value::make_function(script_function([backend = this, pin, receiver = v, id = op_call_id_, eng = engine_](const std::vector<script_value>& args) {
-            return detail::call_parallel_operator_pin(*backend, *pin, id, receiver, args, eng);
-        }), engine_);
-    }
-    auto target = resolve_member_target(v);
-    if (!target) { return make_value(); }
-    script_value method_val = target.method(op_call_id_);
-    return method_val.is_function() ? create_bound_method(v, method_val) : make_value();
 }
 
 interpreter::interpreter()
@@ -738,26 +410,7 @@ void interpreter::initialize() {
     base_type_ids_.intern(*string_symbolizer_);
     arity_count_ids_.intern(*string_symbolizer_);
 
-    // Initialize cached operator symbol IDs for fast operator overload lookup
-    op_plus_id_ = string_symbolizer_->intern("+");
-    op_minus_id_ = string_symbolizer_->intern("-");
-    op_star_id_ = string_symbolizer_->intern("*");
-    op_slash_id_ = string_symbolizer_->intern("/");
-    op_percent_id_ = string_symbolizer_->intern("%");
-    op_less_id_ = string_symbolizer_->intern("<");
-    op_less_equal_id_ = string_symbolizer_->intern("<=");
-    op_greater_id_ = string_symbolizer_->intern(">");
-    op_greater_equal_id_ = string_symbolizer_->intern(">=");
-    op_equal_equal_id_ = string_symbolizer_->intern("==");
-    op_bang_equal_id_ = string_symbolizer_->intern("!=");
-    op_spaceship_id_ = string_symbolizer_->intern("<=>");
-    op_ampersand_id_ = string_symbolizer_->intern("&");
-    op_pipe_id_ = string_symbolizer_->intern("|");
-    op_caret_id_ = string_symbolizer_->intern("^");
-    op_left_shift_id_ = string_symbolizer_->intern("<<");
-    op_right_shift_id_ = string_symbolizer_->intern(">>");
-    op_tilde_id_ = string_symbolizer_->intern("~");
-    op_call_id_ = string_symbolizer_->intern("()");
+    ops_.intern(*string_symbolizer_);
     subscript_op_id_ = string_symbolizer_->intern("[]");
     assign_operator_id_ = string_symbolizer_->intern("=");
 
@@ -1386,23 +1039,23 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
     // Check for custom operator functions first using cached symbol IDs (eliminates string construction)
     uint64_t op_symbol_id = 0;
     switch (expr->op.type) {
-        case token_type::plus: op_symbol_id = op_plus_id_; break;
-        case token_type::minus: op_symbol_id = op_minus_id_; break;
-        case token_type::star: op_symbol_id = op_star_id_; break;
-        case token_type::slash: op_symbol_id = op_slash_id_; break;
-        case token_type::percent: op_symbol_id = op_percent_id_; break;
-        case token_type::less: op_symbol_id = op_less_id_; break;
-        case token_type::less_equal: op_symbol_id = op_less_equal_id_; break;
-        case token_type::greater: op_symbol_id = op_greater_id_; break;
-        case token_type::greater_equal: op_symbol_id = op_greater_equal_id_; break;
-        case token_type::equal_equal: op_symbol_id = op_equal_equal_id_; break;
-        case token_type::bang_equal: op_symbol_id = op_bang_equal_id_; break;
-        case token_type::spaceship: op_symbol_id = op_spaceship_id_; break;
-        case token_type::ampersand: op_symbol_id = op_ampersand_id_; break;
-        case token_type::pipe: op_symbol_id = op_pipe_id_; break;
-        case token_type::caret: op_symbol_id = op_caret_id_; break;
-        case token_type::left_shift: op_symbol_id = op_left_shift_id_; break;
-        case token_type::right_shift: op_symbol_id = op_right_shift_id_; break;
+        case token_type::plus: op_symbol_id = ops_.plus; break;
+        case token_type::minus: op_symbol_id = ops_.minus; break;
+        case token_type::star: op_symbol_id = ops_.star; break;
+        case token_type::slash: op_symbol_id = ops_.slash; break;
+        case token_type::percent: op_symbol_id = ops_.percent; break;
+        case token_type::less: op_symbol_id = ops_.less; break;
+        case token_type::less_equal: op_symbol_id = ops_.less_equal; break;
+        case token_type::greater: op_symbol_id = ops_.greater; break;
+        case token_type::greater_equal: op_symbol_id = ops_.greater_equal; break;
+        case token_type::equal_equal: op_symbol_id = ops_.equal_equal; break;
+        case token_type::bang_equal: op_symbol_id = ops_.bang_equal; break;
+        case token_type::spaceship: op_symbol_id = ops_.spaceship; break;
+        case token_type::ampersand: op_symbol_id = ops_.ampersand; break;
+        case token_type::pipe: op_symbol_id = ops_.pipe; break;
+        case token_type::caret: op_symbol_id = ops_.caret; break;
+        case token_type::left_shift: op_symbol_id = ops_.left_shift; break;
+        case token_type::right_shift: op_symbol_id = ops_.right_shift; break;
         default: break;
     }
 

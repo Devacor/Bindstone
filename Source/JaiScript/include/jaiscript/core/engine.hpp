@@ -671,6 +671,24 @@ namespace jai {
         // The host entry running now (an execute, execute_file or host call into script, with everything it runs): one execute
         // context. A definition in another context, or in a re-run of its unit, redefines instead of conflicting
         uint64_t host_entry_generation() const noexcept;
+        // Debug builds: the thread running the engine's outermost execution. An instance may die only there, on a thread of
+        // the region it runs, or while the engine is idle (Release records nothing and answers true)
+        bool debug_enter_execution() noexcept;   // true when this call became the outermost
+        void debug_leave_execution() noexcept;
+        bool debug_releases_here() const noexcept;
+        class debug_execution_scope {
+        public:
+#ifndef NDEBUG
+            explicit debug_execution_scope(engine& a_engine) noexcept : engine_(a_engine.debug_enter_execution() ? &a_engine : nullptr) {}
+            ~debug_execution_scope() { if (engine_) { engine_->debug_leave_execution(); } }
+            debug_execution_scope(const debug_execution_scope&) = delete;
+            debug_execution_scope& operator=(const debug_execution_scope&) = delete;
+        private:
+            engine* engine_;
+#else
+            explicit debug_execution_scope(engine&) noexcept {}
+#endif
+        };
         bool unit_rerun(unit_stamp unit) const;
         void note_execute_elapsed_use();
 

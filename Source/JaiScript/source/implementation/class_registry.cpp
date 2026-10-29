@@ -376,6 +376,13 @@ void class_instance::release_orphan_fields() noexcept {
 namespace detail {
 
 void strong_last_release<class_instance>::run(class_instance* object, control_block_base* cb) noexcept {
+#ifndef NDEBUG
+    // An instance's death runs its destructors, the class's registry and the release machine on the engine: dropping the
+    // last handle on another thread while the engine runs is a race (a value belongs to its engine's thread)
+    if (const class_definition* def = object->get_class_definition(); def && def->get_engine()) {
+        assert(def->get_engine()->debug_releases_here() && "a script instance died on another thread while its engine runs");
+    }
+#endif
     if (std::shared_ptr<class_definition>* pin = object_block::definition_pin(cb); pin && *pin) {
         instance_deleter{std::move(*pin)}(object);
         return;

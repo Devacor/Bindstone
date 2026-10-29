@@ -10,6 +10,7 @@
 #   JAI_GATE_TIMEOUT                 seconds a gate may run before its watchdog (jai_gate_run, tools/ci/jai_gate_run.cpp)
 #                                    writes minidumps of its processes to <log dir>/dumps and kills them (default 1800; 0:
 #                                    none); JAI_WATCHDOG names the watchdog (default: from either build; empty: none)
+#                                    Values passed through the watchdog get MSYS path conversion (/W4 arrives as C:/.../W4)
 #   VSDEVCMD                         on Windows, the VsDevCmd.bat a build runs under when cl is not on PATH (default: the
 #                                    latest Visual Studio vswhere reports)
 
@@ -112,15 +113,23 @@ jai_watchdog() {
 	[ -n "$JAI_WATCHDOG" ] || echo "no jai_gate_run in either build: the gates run without a watchdog"
 }
 
+# jai_watched <program> <args...>: the program under the watchdog when jai_watchdog found one, else as is
+jai_watched() {
+	if [ -n "$JAI_WATCHDOG" ]; then
+		"$JAI_WATCHDOG" "--timeout=${JAI_GATE_TIMEOUT:-1800}" "--dump-dir=$JAI_CI_LOG_DIR/dumps" -- "$@"
+	else
+		"$@"
+	fi
+}
+
 # jai_gates <debug|release> <gate>...: tools/ci/gates.sh against that build under the watchdog, its output in a log; prints
 # one line per gate (JAI_GATE_LOG_TAG names a side-by-side run's log apart, so a rerun alone never overwrites the red one)
 jai_gates() {
-	local cfg="$1" log watch=()
+	local cfg="$1" log
 	shift
 	jai_watchdog
-	[ -z "$JAI_WATCHDOG" ] || watch=("$JAI_WATCHDOG" "--timeout=${JAI_GATE_TIMEOUT:-1800}" "--dump-dir=$JAI_CI_LOG_DIR/dumps" --)
 	log="$JAI_CI_LOG_DIR/gates_${cfg}_$(echo "$*" | tr ' ' '_')${JAI_TEST_SHARD:+_shard${JAI_TEST_SHARD%%/*}}${JAI_GATE_LOG_TAG:-}.log"
-	if BIN="$(jai_dir_of "$cfg")/bin" "${watch[@]+"${watch[@]}"}" "$BASH" "$JAI_ROOT/tools/ci/gates.sh" "$@" > "$log" 2>&1; then
+	if BIN="$(jai_dir_of "$cfg")/bin" jai_watched "$BASH" "$JAI_ROOT/tools/ci/gates.sh" "$@" > "$log" 2>&1; then
 		echo "green: $* ($cfg)"
 		return 0
 	fi

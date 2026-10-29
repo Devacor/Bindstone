@@ -192,7 +192,7 @@ for check in $CHECKS; do
 	case "$check" in
 		verify-site)
 			runner="$JAI_RELEASE_DIR/bin/jaiscript"
-			if (cd "$JAI_ROOT" && "$(jai_python)" docs/site_tools/verify_site.py --runner "$runner") > "$JAI_CI_LOG_DIR/verify_site.log" 2>&1; then
+			if (cd "$JAI_ROOT" && jai_watched "$(command -v "$(jai_python)")" docs/site_tools/verify_site.py --runner "$runner") > "$JAI_CI_LOG_DIR/verify_site.log" 2>&1; then
 				echo "green: verify_site"
 			else
 				echo "red: verify_site (log: $JAI_CI_LOG_DIR/verify_site.log)"

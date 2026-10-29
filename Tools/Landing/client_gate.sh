@@ -40,12 +40,13 @@ if [ "$rc" != 0 ] || [ "$errs" != 0 ]; then echo "CLIENT GATE FAILED (the client
 [ "$BUILD_ONLY" = 1 ] && { echo "CLIENT GATE DONE (build only)"; exit 0; }
 
 cd "$REPO" || exit 1
-./Builds/Windows/x64/Release/Bindstone.exe -verifyassets --no-script-debug > "$LOG_DIR/${LABEL}_verify.txt" 2>&1
+jai_watchdog
+jai_watched ./Builds/Windows/x64/Release/Bindstone.exe -verifyassets --no-script-debug > "$LOG_DIR/${LABEL}_verify.txt" 2>&1
 rc=$?
 echo "verifyassets exit=$rc $(grep -aE '\[verify\]' "$LOG_DIR/${LABEL}_verify.txt" | tail -n 1 | cut -c1-140)"
 [ "$rc" = 0 ] || { echo "CLIENT GATE FAILED (verifyassets)"; exit 1; }
 if [ "$LOGINSHOT" = 1 ]; then
-	./Builds/Windows/x64/Release/Bindstone.exe -loginshot 60 --no-script-debug > "$LOG_DIR/${LABEL}_loginshot.txt" 2>&1
+	jai_watched ./Builds/Windows/x64/Release/Bindstone.exe -loginshot 60 --no-script-debug > "$LOG_DIR/${LABEL}_loginshot.txt" 2>&1
 	rc=$?
 	echo "loginshot exit=$rc"
 	[ "$rc" = 0 ] || { echo "CLIENT GATE FAILED (loginshot)"; exit 1; }

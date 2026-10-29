@@ -438,8 +438,9 @@ namespace jai {
     };
 
     // Node-cached shared parameter storage (function_decl / lambda_expr): built on the
-    // first mint, shared by every later function value from the same node. Lazy fill is
-    // single-threaded by construction (parallel bodies reject nested declarations).
+    // first mint, shared by every later function value from the same node. A parallel region
+    // never fills it: its admission pre-mints every body a worker can call, a class's implicit
+    // default constructor mints with the class, and parallel bodies reject nested declarations.
     template<typename NodeT>
     inline const std::shared_ptr<const std::vector<parameter>>& shared_parameters_for(const NodeT* node) {
         if (!node->shared_params_cache) {

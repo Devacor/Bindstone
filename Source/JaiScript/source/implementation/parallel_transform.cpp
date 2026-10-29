@@ -3491,14 +3491,12 @@ namespace {
 	}
 
 	// The memos a construction fills, filled before the region freezes: the class's own and each script level's literal-chain
-	// verdict and implicit default constructor
+	// verdict
 	void prime_construction_memos(class_definition& cls) {
 		cls.prime_region_memos();
 		for (const class_definition* level : cls.construction_order()) {
 			if (!level || !level->is_script_class()) { continue; }
-			auto* script_level = static_cast<script_class_definition*>(const_cast<class_definition*>(level));
-			(void)script_level->chain_initializers_all_literal();
-			if (script_level->base_needs_construction()) { (void)script_level->implicit_default_constructor(); }
+			(void)static_cast<const script_class_definition*>(level)->chain_initializers_all_literal();
 		}
 	}
 

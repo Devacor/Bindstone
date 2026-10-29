@@ -945,10 +945,9 @@ namespace jai {
         // Interpreter lifetime is managed by engine, so engine will always outlive interpreter
         engine* engine_ = nullptr;
 
-        // Step-debugger controller (engine-owned). Atomic because the transport thread
-        // may attach/detach while this thread is running — but it is NOT read per
-        // statement: sync_debug_hook (below) mirrors it into the plain gate at the debug
-        // sync points only (no atomics on the statement path).
+        // Step-debugger controller (engine-owned), wired by the first engine::debugger() call, which runs before the script
+        // thread starts or on it; read only at the debug sync points, where sync_debug_hook (below) mirrors it into the plain
+        // gate (attach and detach reach this thread through the controller's own state).
         std::atomic<debug::controller*> debugger_{nullptr};
 
         // Script-thread cached statement-hook gate: non-null only while a debug session

@@ -302,26 +302,6 @@ namespace jai {
         bool operator==(const proof_global& o) const noexcept { return symbol == o.symbol && kind == o.kind && type == o.type; }
     };
 
-    // Monomorphic method-dispatch inline cache (interpreter method call sites: obj.method() on member_expr, a bare
-    // sibling call on call_expr). Valid iff cls matches the receiver's class identity AND epoch matches the class's
-    // method_epoch() (bumped on any method/access/parent change, incl. hot reload, propagated to derived).
-    // dispatch/decl point into storage the class pins (methods_ payload / method_overloads_ entry); every replacement
-    // of either bumps the epoch first, and script class_definitions are engine-lifetime (dispatcher cycle), so a
-    // matching identity is never a recycled address. Raw pointers on purpose: a shared_ptr<function_decl> here would
-    // cycle (method body AST -> this node -> method decl).
-    struct method_site_cache {
-        static constexpr uint8_t access_checked = 1;   // access check needed
-        static constexpr uint8_t sp_builtin = 2;       // the member is an sp-builtin name
-        static constexpr uint8_t field_free = 4;       // no field in the class chain is named like the method
-        const void* cls = nullptr;
-        uint64_t epoch = 0;
-        const void* dispatch = nullptr;   // script_method_dispatch* into methods_ payload (sibling: null = no script method of the name)
-        void* decl = nullptr;             // function_decl* (the lone overload)
-        uint8_t sig[8] = {};              // expected raw storage index per arg; 0xFF = any
-        uint8_t argc = 0xFF;              // 0xFF = no signature: the call resolves its overload
-        uint8_t flags = 0;
-    };
-
     // Function call expression
     class call_expr : public expression {
     public:
@@ -341,7 +321,6 @@ namespace jai {
         mutable uint8_t builtin_receiver = 0;   // the checker proved the method receiver: 1 string, 2 array, 3 map (0 unproven)   // the one free script function a plain identifier callee resolves to (exact arity, a body, not a coroutine; reference parameters allowed): the inliner's identity
         mutable uint8_t builtin_receiver_open = 0;   // unproven, yet no class: the receiver may be a string, array or map (the vm picks the builtin by its kind)
         std::vector<uint8_t> arg_captures;   // per argument, the capture its value needs before a later argument runs (detail::arg_capture_kind); empty = none
-        mutable method_site_cache sibling_cache;   // interpreter: a bare call of a method of this frame's receiver
         // a method that writes its receiver called on a const, or a const passed to a writing reference parameter
         mutable const_site const_check;
         // regex(pattern[, flags]) with literal texts while `regex` names the engine's constructor: the pattern compiled at load
@@ -361,8 +340,6 @@ namespace jai {
         bool is_arrow;  // true for ->, false for .
         bool is_static; // true for ::, false for . or ->
         bool null_safe = false;  // true for ?. null-safe member access
-
-        mutable method_site_cache mcache;   // interpreter obj.method() call sites
 
         // math:: intrinsic resolution cache (static access `math::<fn>`): 255 = not yet
         // resolved, 254 = resolved-not-an-intrinsic, else detail::math_fn. Name-based,

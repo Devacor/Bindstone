@@ -3698,15 +3698,13 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 					return {};
 				}
 			}
-			// Parse-proven typed store: an IDENTICAL interned type tag (raw pointer
-			// compare - int/float tags are engine-canonical) makes enforcement a
-			// provable no-op, and a plain int/float payload makes the assignment
-			// kernel a plain copy. Guarded at runtime, so a mis-stamp just falls
-			// through. (KEEP BYTE-PARALLEL with interpreter::visit_assignment_expr.)
-			if (ins.c & store_flag_type_provable) {
+			// An int/float over a held payload of its own storage under the IDENTICAL interned tag (int/float tags are
+			// engine-canonical): enforcement is a no-op and the assignment kernel a plain copy (a held object, which a var
+			// store may assign in place, never takes this lane)
+			{
 				const size_t vi = value.raw_storage_index();
-				if ((vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT) &&
-				    storage->get_type_info().get() == value.get_type_info().get()) {
+				if ((vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT) && storage->raw_storage_index() == vi &&
+				    storage->type_info_raw() == value.type_info_raw()) {
 #ifdef JAISCRIPT_VM_PROFILE
 					++profile_store_paths_[0];
 					profile_store_last_path_ = 1;
@@ -3717,7 +3715,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 				}
 			}
 #ifdef JAISCRIPT_VM_PROFILE
-			++profile_store_paths_[(ins.c & store_flag_type_provable) ? 4 : 3];
+			++profile_store_paths_[3];
 			++profile_builtin_direct_names_[std::string("st:") + std::string(symbolizer_->get_string(sym))];
 			profile_store_last_path_ = 2;
 #endif

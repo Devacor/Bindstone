@@ -605,7 +605,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto t = clone_expr(a->target, c); auto v = clone_expr(a->value, c);
 		if (!c.ok) return nullptr;
 		auto n = c.make<assignment_expr>(a->location, t, a->op, v);
-		n->typed_store_provable = a->typed_store_provable; n->static_store_proof = a->static_store_proof; n->static_operand_class = a->static_operand_class;
+		n->static_store_proof = a->static_store_proof; n->static_operand_class = a->static_operand_class;
 		n->postfix_old_result = a->postfix_old_result; n->incdec_desugar = a->incdec_desugar;
 		if (c.stamps && a->target->get_type() == node_type::identifier_expr) {
 			const script_value_type tk = stamp_kind(a->target.get(), c), vk = stamp_kind(a->value.get(), c);
@@ -613,7 +613,6 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 			const size_t ts = static_cast<const identifier_expr*>(a->target.get())->slot_index;
 			if (a->op.type == token_type::equal && tk != script_value_type::jai_null_type && tk == vk && n->static_store_proof == proof_none && ts < c.slot_types.size() && scalar_type(c.slot_types[ts])) {
 				n->static_store_proof = proof_same_type;   // a declared scalar slot storing its own kind
-				if (tk != script_value_type::jai_bool_type) { n->typed_store_provable = true; }
 			}
 		}
 		return n;

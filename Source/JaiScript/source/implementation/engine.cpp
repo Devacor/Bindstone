@@ -1956,7 +1956,7 @@ struct engine::implementation {
             uint32_t flags = 0;
             auto declarations = detail::deserialize_jaibite(bytes.data(), bytes.size(), &self, savedFingerprint, &flags, nullptr, sourcePath);
             // jaibite carries structure, not the parser-pass flags (ref-escape,
-            // value-decl naming, typed-store proofs, transient reads) — re-derive
+            // value-decl naming, transient reads) — re-derive
             // them exactly like the parse tail does
             if (detail::run_ast_marking_passes(declarations, &string_symbolizer_)) { entry_stamps = true; }
             auto hook = take_reload_hook(declarations);

@@ -4232,9 +4232,8 @@ public:
     }
 };
 
-// Typed-slot store proof (assignment_expr::typed_store_provable + store_flag_type_provable):
-// provably-matching int/float stores skip enforcement in both backends; everything these
-// tests pin is the OLD behavior that must survive the skip.
+// The VM's int/float slot store lane (a payload of the slot's own storage and interned tag skips
+// enforcement): everything these tests pin is the behavior that must survive the skip.
 class typed_store_proof_tests : public suite {
 public:
     typed_store_proof_tests() : suite("Typed Store Proof") {}

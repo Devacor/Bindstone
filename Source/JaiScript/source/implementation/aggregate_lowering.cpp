@@ -624,10 +624,8 @@ private:
 		d->slot_index = c.comp_slot[k];
 		return d;
 	}
-	declaration_ptr store(expression_ptr target, expression_ptr value, const source_location& loc, bool component = true) {
-		auto a = std::make_shared<assignment_expr>(loc, std::move(target), op_token(token_type::equal, loc), std::move(value));
-		a->typed_store_provable = component;
-		return std::make_shared<expression_decl>(loc, std::move(a));
+	declaration_ptr store(expression_ptr target, expression_ptr value, const source_location& loc) {
+		return std::make_shared<expression_decl>(loc, std::make_shared<assignment_expr>(loc, std::move(target), op_token(token_type::equal, loc), std::move(value)));
 	}
 	// a fresh temporary slot declared with `init` into `out`; the identifier reading it
 	expression_ptr temp(bool integral, expression_ptr init, std::vector<declaration_ptr>& out, const source_location& loc) {
@@ -1878,7 +1876,7 @@ private:
 		for (auto& d : staged) out.push_back(std::move(d));
 		expression_ptr t[4];
 		for (size_t k = 0; k < n; ++k) t[k] = temp(math::integral(self.kind), conv.c[k], out, loc);
-		for (size_t k = 0; k < n; ++k) out.push_back(store(component_target(k), t[k], loc, false));
+		for (size_t k = 0; k < n; ++k) out.push_back(store(component_target(k), t[k], loc));
 		return true;
 	}
 
@@ -1929,7 +1927,7 @@ private:
 			}
 			// the source slot's typed store carries the conversion and its texts; the components unpack after it
 			c.needs_box = true;
-			if (compound) out.push_back(store(source_ident(c, loc), rebox_cand(c, loc), loc, false));
+			if (compound) out.push_back(store(source_ident(c, loc), rebox_cand(c, loc), loc));
 			{
 				std::vector<declaration_ptr> prelude2;
 				stmt_ctx ctx2;
@@ -1965,7 +1963,7 @@ private:
 				// the right side stores first (C++17): run the source slot's compound store on a rebuilt value
 				c.needs_box = true;
 				stmt_ctx ctx;
-				out.push_back(store(source_ident(c, loc), rebox_cand(c, loc), loc, false));
+				out.push_back(store(source_ident(c, loc), rebox_cand(c, loc), loc));
 				auto copy = std::make_shared<assignment_expr>(*a);
 				auto mc = std::make_shared<member_expr>(*m);
 				mc->object = source_ident(c, loc);

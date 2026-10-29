@@ -10,7 +10,9 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #ifdef _WIN32
@@ -19,6 +21,8 @@
 #endif
 #include <windows.h>
 #include <dbghelp.h>
+#include <fcntl.h>
+#include <io.h>
 #include <shellapi.h>
 #include <tlhelp32.h>
 #else
@@ -85,12 +89,19 @@ std::string utf8_of(const std::wstring& a_text) {
 	return result;
 }
 
+// an MSYS child (bash) re-reads its command line with shell rules: outside quotes only these characters mean themselves,
+// and inside quotes it halves every doubled backslash, so a plain word goes bare and anything else goes quoted
+bool plain_argument(const std::wstring& a_arg) {
+	return !a_arg.empty() && a_arg.find_first_not_of(L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-./\\:,=+%") ==
+		std::wstring::npos;
+}
+
 // the quoting CommandLineToArgvW and the CRT undo: backslashes double only where a quote follows them
 void append_quoted_argument(std::wstring& a_line, const std::wstring& a_arg) {
 	if (!a_line.empty()) {
 		a_line += L' ';
 	}
-	if (!a_arg.empty() && a_arg.find_first_of(L" \t\n\v\"") == std::wstring::npos) {
+	if (plain_argument(a_arg)) {
 		a_line += a_arg;
 		return;
 	}
@@ -137,7 +148,12 @@ DWORD job_active_processes(HANDLE a_job) {
 }
 
 void dump_job_processes(HANDLE a_job, const std::wstring& a_dump_dir) {
-	CreateDirectoryW(a_dump_dir.c_str(), nullptr);
+	std::error_code created;
+	std::filesystem::create_directories(a_dump_dir, created);
+	if (created) {
+		std::fprintf(stderr, "watchdog: no minidumps: cannot create %s (%s)\n", utf8_of(a_dump_dir).c_str(), created.message().c_str());
+		return;
+	}
 	std::wstring written_names;
 	for (DWORD pid : job_process_ids(a_job)) {
 		HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
@@ -155,14 +171,18 @@ void dump_job_processes(HANDLE a_job, const std::wstring& a_dump_dir) {
 		std::wstring name = stem + L"_" + std::to_wstring(pid) + L".dmp";
 		std::wstring path = a_dump_dir + L"\\" + name;
 		HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-		if (file != INVALID_HANDLE_VALUE) {
+		if (file == INVALID_HANDLE_VALUE) {
+			std::fprintf(stderr, "watchdog: no minidump of %lu: cannot create %s (%lu)\n", pid, utf8_of(path).c_str(), GetLastError());
+		} else {
 			auto type = static_cast<MINIDUMP_TYPE>(MiniDumpWithThreadInfo | MiniDumpWithIndirectlyReferencedMemory | MiniDumpWithUnloadedModules);
 			bool written = MiniDumpWriteDump(process, pid, file, type, nullptr, nullptr, nullptr) != FALSE;
+			DWORD dump_error = written ? 0 : GetLastError();
 			CloseHandle(file);
 			if (written) {
 				written_names += L" " + name;
 			} else {
 				DeleteFileW(path.c_str());
+				std::fprintf(stderr, "watchdog: no minidump of %lu: MiniDumpWriteDump failed (0x%lX)\n", pid, dump_error);
 			}
 		}
 		CloseHandle(process);
@@ -290,6 +310,7 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
 	(void)argc;
 	(void)argv;
+	_setmode(_fileno(stderr), _O_BINARY);   // LF lines, like the logs they land in
 	int count = 0;
 	wchar_t** wide = CommandLineToArgvW(GetCommandLineW(), &count);
 	std::vector<std::wstring> args(wide, wide + count);
@@ -309,6 +330,7 @@ int main(int argc, char** argv) {
 		plain.push_back(arg.data());
 	}
 	plain.push_back(nullptr);
+	// no --foreground: with it timeout(1) kills only the program at the timeout, never the processes it started
 	if (options.timeout_seconds > 0) {
 		std::string seconds = std::to_string(options.timeout_seconds);
 		std::vector<char*> timed {const_cast<char*>("timeout"), const_cast<char*>("-k"), const_cast<char*>("10"), seconds.data()};

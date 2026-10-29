@@ -46,17 +46,13 @@ namespace jai {
 		// Intern or fetch an existing ID. No string allocation on hit.
 		// Marked const because interning doesn't change observable state - it just ensures
 		// a string has an ID. Uses mutable internal storage.
-		[[nodiscard]] id_type intern(std::string_view sv) const noexcept {
+		[[nodiscard]] id_type intern(std::string_view sv) const {
 			JAI_CENSUS(sym_intern);
 			if (auto it = index_.find(sv); it != index_.end())
 				return it->second;
 
-			// Parallel-region tripwire: workers may only ever HIT (reads). A miss while
-			// frozen means the pre-warm set missed a shape - fix the warm pass.
-#ifndef NDEBUG
-			if (frozen_) { std::fprintf(stderr, "[string_symbolizer] frozen miss: '%.*s'\n", (int)sv.size(), sv.data()); }
-#endif
-			assert(!frozen_ && "string_symbolizer: intern miss during a parallel region");
+			// While a parallel region runs its threads only read the tables: a miss means the barrier missed a shape
+			if (frozen_) [[unlikely]] { throw_frozen_miss(sv); }
 
 			// Copy once into deque (stable address), then map a string_view to it (no second copy).
 			auto& stored = storage_.emplace_back(sv);
@@ -71,15 +67,12 @@ namespace jai {
 
 		// Intern and return both the ID and the interned string_view in one call.
 		// Avoids needing a separate get_string() lookup.
-		[[nodiscard]] std::pair<id_type, std::string_view> intern_with_view(std::string_view sv) const noexcept {
+		[[nodiscard]] std::pair<id_type, std::string_view> intern_with_view(std::string_view sv) const {
 			JAI_CENSUS(sym_intern);
 			if (auto it = index_.find(sv); it != index_.end())
 				return { it->second, ids_[it->second] };
 
-#ifndef NDEBUG
-			if (frozen_) { std::fprintf(stderr, "[string_symbolizer] frozen miss: '%.*s'\n", (int)sv.size(), sv.data()); }
-#endif
-			assert(!frozen_ && "string_symbolizer: intern miss during a parallel region");
+			if (frozen_) [[unlikely]] { throw_frozen_miss(sv); }
 
 			auto& stored = storage_.emplace_back(sv);
 			const std::string_view key{ stored.data(), stored.size() };
@@ -149,9 +142,8 @@ namespace jai {
 		[[nodiscard]] inline std::uint32_t shadow_count() const noexcept { return shadow_count_; }
 		inline void note_shadow() noexcept { ++shadow_count_; }
 
-		// Debug tripwire for parallel regions: while frozen, an intern MISS asserts (the
-		// pre-warm pass at the region barrier must make every worker intern a HIT). Reads
-		// are unaffected; zero cost on the hit path.
+		// Frozen while a parallel region runs: an intern MISS throws (the barrier must make every worker intern a hit);
+		// zero cost on the hit path.
 		inline void set_frozen(bool frozen) noexcept { frozen_ = frozen; }
 		inline bool frozen() const noexcept { return frozen_; }
 		// Steps environment lookups took up a parent chain (counted by Debug builds only, never while frozen): tests read it
@@ -161,14 +153,11 @@ namespace jai {
 
 		// Get/create getter ID for a member - caches to avoid repeated concatenation.
 		// Returns both ID and interned string_view for the "_get_<member>" name.
-		[[nodiscard]] std::pair<id_type, std::string_view> get_getter_id_with_view(id_type member_id) const noexcept {
+		[[nodiscard]] std::pair<id_type, std::string_view> get_getter_id_with_view(id_type member_id) const {
 			if (auto it = getter_cache_.find(member_id); it != getter_cache_.end())
 				return { it->second, ids_[it->second] };
 
-			#ifndef NDEBUG
-			if (frozen_) { const std::string_view miss_name = get_string(member_id); std::fprintf(stderr, "[string_symbolizer] frozen miss: '%.*s'\n", (int)miss_name.size(), miss_name.data()); }
-#endif
-			assert(!frozen_ && "string_symbolizer: getter-id miss during a parallel region");
+			if (frozen_) [[unlikely]] { return frozen_prefixed("_get_", member_id); }   // a region reads, never fills, the cache
 			std::string getter_name = "_get_" + std::string(get_string(member_id));
 			auto [id, view] = intern_with_view(getter_name);
 			getter_cache_[member_id] = id;
@@ -177,14 +166,11 @@ namespace jai {
 
 		// Get/create setter ID for a member - caches to avoid repeated concatenation.
 		// Returns both ID and interned string_view for the "_set_<member>" name.
-		[[nodiscard]] std::pair<id_type, std::string_view> get_setter_id_with_view(id_type member_id) const noexcept {
+		[[nodiscard]] std::pair<id_type, std::string_view> get_setter_id_with_view(id_type member_id) const {
 			if (auto it = setter_cache_.find(member_id); it != setter_cache_.end())
 				return { it->second, ids_[it->second] };
 
-			#ifndef NDEBUG
-			if (frozen_) { const std::string_view miss_name = get_string(member_id); std::fprintf(stderr, "[string_symbolizer] frozen miss: '%.*s'\n", (int)miss_name.size(), miss_name.data()); }
-#endif
-			assert(!frozen_ && "string_symbolizer: setter-id miss during a parallel region");
+			if (frozen_) [[unlikely]] { return frozen_prefixed("_set_", member_id); }   // a region reads, never fills, the cache
 			std::string setter_name = "_set_" + std::string(get_string(member_id));
 			auto [id, view] = intern_with_view(setter_name);
 			setter_cache_[member_id] = id;
@@ -193,14 +179,11 @@ namespace jai {
 
 		// Get/create class variable ID - caches to avoid repeated "__class_" + name concatenation.
 		// Returns both ID and interned string_view for the "__class_<name>" variable name.
-		[[nodiscard]] std::pair<id_type, std::string_view> get_class_var_id_with_view(id_type class_name_id) const noexcept {
+		[[nodiscard]] std::pair<id_type, std::string_view> get_class_var_id_with_view(id_type class_name_id) const {
 			if (auto it = class_var_cache_.find(class_name_id); it != class_var_cache_.end())
 				return { it->second, ids_[it->second] };
 
-			#ifndef NDEBUG
-			if (frozen_) { const std::string_view miss_name = get_string(class_name_id); std::fprintf(stderr, "[string_symbolizer] frozen miss: '%.*s'\n", (int)miss_name.size(), miss_name.data()); }
-#endif
-			assert(!frozen_ && "string_symbolizer: class-var-id miss during a parallel region");
+			if (frozen_) [[unlikely]] { return frozen_prefixed("__class_", class_name_id); }   // a region reads, never fills, the cache
 			std::string class_var_name = "__class_" + std::string(get_string(class_name_id));
 			auto [id, view] = intern_with_view(class_var_name);
 			class_var_cache_[class_name_id] = id;
@@ -208,6 +191,12 @@ namespace jai {
 		}
 
 	private:
+		[[noreturn]] JAI_NOINLINE static void throw_frozen_miss(std::string_view name);   // engine.cpp
+		JAI_NOINLINE std::pair<id_type, std::string_view> frozen_prefixed(std::string_view prefix, id_type base_id) const {
+			const std::string name = std::string(prefix) + std::string(get_string(base_id));
+			if (auto it = index_.find(std::string_view(name)); it != index_.end()) { return { it->second, ids_[it->second] }; }
+			throw_frozen_miss(name);
+		}
 		JAI_NOINLINE std::string_view parked_text(id_type id) const noexcept {
 			const id_type seq = id & ~k_parked_bit;
 			if (parked_.empty()) { return k_parked_expired; }

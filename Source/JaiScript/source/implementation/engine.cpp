@@ -2905,6 +2905,10 @@ void held_value::throw_outlived() {
     throw runtime_error("Value outlived its engine.");
 }
 
+void string_symbolizer::throw_frozen_miss(std::string_view name) {
+    throw runtime_error("parallel_transform: name '" + std::string(name) + "' was not pre-warmed at the region barrier (internal) - please report this body shape");
+}
+
 void engine::register_held(held_value* held) {
     std::scoped_lock lock(impl->held_lock);
     held->previous_ = nullptr;

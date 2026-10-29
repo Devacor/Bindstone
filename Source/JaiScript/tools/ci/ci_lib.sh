@@ -98,10 +98,11 @@ jai_build_failed() {
 }
 
 # jai_gates <debug|release> <gate>...: tools/ci/gates.sh against that build, its output in a log; prints one line per gate
+# (JAI_GATE_LOG_TAG names a side-by-side run's log apart, so a rerun alone never overwrites the red one)
 jai_gates() {
 	local cfg="$1" log
 	shift
-	log="$JAI_CI_LOG_DIR/gates_${cfg}_$(echo "$*" | tr ' ' '_')${JAI_TEST_SHARD:+_shard${JAI_TEST_SHARD%%/*}}.log"
+	log="$JAI_CI_LOG_DIR/gates_${cfg}_$(echo "$*" | tr ' ' '_')${JAI_TEST_SHARD:+_shard${JAI_TEST_SHARD%%/*}}${JAI_GATE_LOG_TAG:-}.log"
 	if BIN="$(jai_dir_of "$cfg")/bin" bash "$JAI_ROOT/tools/ci/gates.sh" "$@" > "$log" 2>&1; then
 		echo "green: $* ($cfg)"
 		return 0
@@ -123,7 +124,7 @@ jai_gates_side_by_side() {
 	for gate in "$@"; do
 		tmp="$JAI_CI_LOG_DIR/tmp_${cfg}_$gate"
 		mkdir -p "$tmp"
-		TEMP="$tmp" TMP="$tmp" TMPDIR="$tmp" jai_gates "$cfg" "$gate" > "$JAI_CI_LOG_DIR/gate_${cfg}_$gate.line" 2>&1 &
+		TEMP="$tmp" TMP="$tmp" TMPDIR="$tmp" JAI_GATE_LOG_TAG=_side jai_gates "$cfg" "$gate" > "$JAI_CI_LOG_DIR/gate_${cfg}_$gate.line" 2>&1 &
 		pids+=($!)
 	done
 	for gate in "${pids[@]}"; do wait "$gate" || true; done
@@ -132,6 +133,7 @@ jai_gates_side_by_side() {
 			cat "$JAI_CI_LOG_DIR/gate_${cfg}_$gate.line"
 		else
 			echo "rerunning $gate alone (the side-by-side run was red)"
+			sed 's/^/  side by side: /' "$JAI_CI_LOG_DIR/gate_${cfg}_$gate.line"
 			jai_gates "$cfg" "$gate" || JAI_RED="$JAI_RED $gate"
 		fi
 	done
@@ -159,7 +161,7 @@ jai_debug_suites() {
 		for ((shard = 0; shard < shards; shard++)); do
 			dir="$JAI_CI_LOG_DIR/tmp_${be}_$shard"
 			mkdir -p "$dir"
-			TEMP="$dir" TMP="$dir" TMPDIR="$dir" JAI_TEST_SHARD="$shard/$shards" jai_gates debug "tests-$be" > "$JAI_CI_LOG_DIR/suite_${be}_$shard.line" &
+			TEMP="$dir" TMP="$dir" TMPDIR="$dir" JAI_TEST_SHARD="$shard/$shards" JAI_GATE_LOG_TAG=_side jai_gates debug "tests-$be" > "$JAI_CI_LOG_DIR/suite_${be}_$shard.line" &
 			pids+=($!)
 		done
 	done
@@ -175,6 +177,7 @@ jai_debug_suites() {
 		fi
 		for shard in $red; do
 			echo "rerunning the $be suites' shard $shard/$shards alone (the side-by-side run was red)"
+			sed 's/^/  side by side: /' "$JAI_CI_LOG_DIR/suite_${be}_$shard.line"
 			dir="$JAI_CI_LOG_DIR/tmp_${be}_$shard"
 			TEMP="$dir" TMP="$dir" TMPDIR="$dir" JAI_TEST_SHARD="$shard/$shards" jai_gates debug "tests-$be" || rc=1
 		done

@@ -565,9 +565,9 @@ namespace jai {
         void record_field_migration(std::string_view class_name, uint64_t field_id, field_migration_outcome outcome,
                                     const script_value* before, const script_value* after);
 
-        // Serializes IN-REGION chunk compiles engine-wide (unsafe-mode method dispatch
-        // lazily compiles on worker threads; compilation copies AST literal strong_ptrs
-        // whose counts are non-atomic). Never taken outside an active parallel region.
+        // Serializes IN-REGION chunk compiles engine-wide (a constructor lazily compiles on worker
+        // threads; compilation copies AST literal strong_ptrs whose counts are non-atomic).
+        // Never taken outside an active parallel region.
         // unique_ptr: the engine is movable, a mutex is not.
         std::mutex& parallel_compile_mutex() { return *parallel_compile_mutex_; }
 

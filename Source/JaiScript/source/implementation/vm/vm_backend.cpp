@@ -129,33 +129,6 @@ namespace {
 		return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
 	}
 
-	// Twin-parity zero-divisor check for cpp-bound operands: index 14 skips the raw-index
-	// gates of exec_binary_fused, which would move a bound-zero divisor's
-	// error from the fast-path surface onto the handlers' bare "Division by zero". Each shape
-	// passes the exact (op x type-pair) coverage of its own inline zero checks so bound
-	// operands keep the plain twin's error surface. Byte-parallel with interpreter.cpp's copy.
-	struct bound_zero_divisor_error { runtime_error_code code; const char* text; };
-	inline std::optional<bound_zero_divisor_error> bound_fastpath_zero_divisor(
-			token_type op, const script_value& left, const script_value& right,
-			bool float_div_covered, bool float_mod_covered) {
-		if (op != token_type::slash && op != token_type::percent) return std::nullopt;
-		if (left.is_int() && right.is_int()) {
-			if (right.unchecked_as_int() != 0) return std::nullopt;
-			return op == token_type::slash
-				? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero"}
-				: bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero"};
-		}
-		if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
-			if (!(op == token_type::slash ? float_div_covered : float_mod_covered)) return std::nullopt;
-			const script_float rf = right.is_int() ? static_cast<script_float>(right.unchecked_as_int()) : right.unchecked_as_float();
-			if (rf != 0.0) return std::nullopt;
-			return op == token_type::slash
-				? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero"}
-				: bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero"};
-		}
-		return std::nullopt;
-	}
-
 	// Element compatibility/conversion live in the shared kernel
 	// (detail/container_enforce.hpp, used verbatim by both backends and the field
 	// kernel). These forwards keep the historical local names.
@@ -918,7 +891,6 @@ struct vm_backend::vm_run_state : backend_run_state {
 	std::vector<std::vector<script_value>> cell_lists;
 	std::vector<script_value> shared_cells;
 	std::vector<size_t> shared_cell_bases;
-	bool probe_callee_resolving = false;
 	error_propagator pending_error{};
 	std::deque<std::vector<script_value>> builtin_arg_pool;
 	size_t builtin_arg_depth = 0;
@@ -985,7 +957,6 @@ void vm_backend::swap_run_state(backend_run_state& a_state) noexcept {
 	swap(cell_lists_, s.cell_lists);
 	swap(shared_cells_, s.shared_cells);
 	swap(shared_cell_bases_, s.shared_cell_bases);
-	swap(probe_callee_resolving_, s.probe_callee_resolving);
 	swap(pending_error_, s.pending_error);
 	swap(builtin_arg_pool_, s.builtin_arg_pool);
 	swap(builtin_arg_depth_, s.builtin_arg_depth);
@@ -1044,7 +1015,6 @@ void vm_backend::reset_run_state(backend_run_state& a_state) {
 	s.owned_args = nullptr;
 	s.shared_cells.clear();
 	s.shared_cell_bases.clear();
-	s.probe_callee_resolving = false;
 	s.pending_error = {};
 	s.builtin_arg_depth = 0;
 	s.host_site_calls = 0;
@@ -2416,21 +2386,6 @@ void vm_backend::exec_map(frame& f, const vm_instruction& ins) {
 	stack_.push_back(std::move(mapValue));
 }
 
-script_value* vm_backend::resolve_local_or_env(frame& f, uint32_t slot, uint64_t symbol_id) {
-	if (slot != k_invalid_u32 && has_slots(f)) {
-		if (auto* ptr = frame_slot(f, slot)) {
-			return ptr;
-		}
-	}
-	if (f.locals && !f.top_level) {
-		ensure_frame_member_scope(f, environment_.get());
-		if (frame_scope_active(f)) {
-			return member_scope_env_lookup(f, symbol_id, SIZE_MAX);
-		}
-	}
-	return environment_->get_value_ptr(symbol_id);
-}
-
 script_value* vm_backend::string_receiver_cell(frame& f, const call_site& site, const identifier_expr* ident) {
 	if (ident->global_qualified) {
 		return engine_->get_global_environment()->get_value_ptr(site.receiver_symbol);
@@ -2462,10 +2417,6 @@ script_value vm_backend::string_element_pin(frame& f, script_value& base_raw, ui
 	return make_null();
 }
 
-// resolve_local_or_env with the env path memoized per instruction (slot 2*ip); the
-// get_value_ptr tail still runs when the storage prefix misses (this/static fallbacks).
-// Member scopes consult the cache only PAST the member rungs (a cached global cell
-// must never outrank a same-named member).
 // The constructor a `shared_ptr<T>` / `weak_ptr<T>` name calls: the name before its '<', the two the compiler flags interned once
 uint64_t vm_backend::type_ctor_base_symbol(uint64_t sym) {
 	const std::string_view name = symbolizer_->get_string(sym);
@@ -2480,7 +2431,10 @@ uint64_t vm_backend::type_ctor_base_symbol(uint64_t sym) {
 	return symbolizer_->intern(std::string(name.substr(0, name.find('<'))));
 }
 
-script_value* vm_backend::resolve_local_or_env_cached(frame& f, uint32_t slot, uint64_t symbol_id) {
+// a frame slot, else the member scope, else the environment; cache_slot memoizes the env path (SIZE_MAX: uncached), and the
+// get_value_ptr tail still runs when the storage prefix misses (this/static fallbacks). Member scopes consult the cache only
+// PAST the member rungs (a cached global cell must never outrank a same-named member).
+script_value* vm_backend::resolve_local_or_env(frame& f, uint32_t slot, uint64_t symbol_id, size_t cache_slot) {
 	if (slot != k_invalid_u32 && has_slots(f)) {
 		if (auto* ptr = frame_slot(f, slot)) {
 			return ptr;
@@ -2489,11 +2443,13 @@ script_value* vm_backend::resolve_local_or_env_cached(frame& f, uint32_t slot, u
 	if (f.locals && !f.top_level) {
 		ensure_frame_member_scope(f, environment_.get());
 		if (frame_scope_active(f)) {
-			return member_scope_env_lookup(f, symbol_id, f.ip * 3 + 2);
+			return member_scope_env_lookup(f, symbol_id, cache_slot);
 		}
 	}
-	if (script_value* cached = env_lookup_cached(f, f.ip * 3 + 2, symbol_id)) {
-		return cached;
+	if (cache_slot != SIZE_MAX) {
+		if (script_value* cached = env_lookup_cached(f, cache_slot, symbol_id)) {
+			return cached;
+		}
 	}
 	return environment_->get_value_ptr(symbol_id);
 }
@@ -3231,21 +3187,21 @@ op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
 #endif
 }
 
+fused_operand vm_backend::ident_operand_at(const frame& f, const vm_instruction& ins) noexcept {
+	fused_operand result;
+	result.slot = ins.a;
+	result.symbol = ins.b;
+	result.load_flags = ins.c;
+	result.this_slot = this_field_slot_at(f);
+	result.this_global = !result.this_slot && f.ip < f.code->this_global_ips.size() && f.code->this_global_ips[f.ip] == ins.b + 1;
+	return result;
+}
+
 op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 	if (f.ip + 1 < f.code->code.size()) { ++profile_load_next_[static_cast<size_t>(f.code->code[f.ip + 1].op)]; }
 #endif
-	const uint64_t sym = f.code->symbols[ins.b];
-	if (ins.c & load_flag_global_only) {
-		// ::name - GLOBAL env only (locals, captures, member scope all skipped)
-		if (script_value* g = engine_->get_global_environment()->get_value_ptr(sym)) {
-			stack_.push_back(g->deref());
-			return {};
-		}
-		return raise_(make_error_code(runtime_error_code::undefined_variable),
-			environment_->undefined_text(sym), sym);
-	}
-	if (ins.a != k_invalid_u32 && has_slots(f)) {
+	if (ins.a != k_invalid_u32 && !(ins.c & load_flag_global_only) && has_slots(f)) {
 		if (auto* local = frame_slot(f, ins.a)) {
 			// a live typed element's snapshot straight from its buffer (no scratch view refresh then copy); a removed element and every
 			// other reference mode dereference as before
@@ -3261,151 +3217,21 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 			return {};
 		}
 	}
-	if (ins.c & load_flag_type_ctor) {
-		// nullable-pointer probe: same ladder as get(), the
-		// miss is a null instead of a fat error result nobody reads
-		if (script_value* ctor = environment_->get_value_ptr(type_ctor_base_symbol(sym));
-		    ctor && ctor->is_function()) {
-			stack_.push_back(*ctor);
+	if (const uint32_t this_slot = f.this_inst ? this_field_slot_at(f) : 0) {   // a member body's bare field: the hot rung, ahead of the operand build
+		if (script_value* cell = frame_this_field(f, this_slot)) {
+			stack_.push_back(*cell);
 			return {};
 		}
 	}
-	if (f.this_inst) {
-		if (const uint32_t this_slot = this_field_slot_at(f)) {
-			if (script_value* cell = frame_this_field(f, this_slot)) {
-				stack_.push_back(*cell);
-				return {};
-			}
-		} else if (f.ip < f.code->this_global_ips.size() && f.code->this_global_ips[f.ip] == ins.b + 1 && frame_globals_hold(f)) {
-			if (script_value* cached = env_lookup_cached(f, f.ip * 3, sym)) {   // the member ladder's miss, settled by the frame's layout
-				stack_.push_back(cached->deref());
-				return {};
-			}
-		}
+	std::optional<script_value> scratch;
+	const script_value* resolved = fused_ident_value(f, ident_operand_at(f, ins), scratch, f.ip * 3);
+	if (!resolved) { return op_status::failed; }
+	if (scratch && resolved == &*scratch) {
+		stack_.push_back(std::move(*scratch));
+	} else {
+		stack_.push_back(*resolved);
 	}
-	// This-field IC: serial-guarded walk-miss proof, checked BEFORE the env cache — the
-	// push copy is byte-identical to the armed fallback below (see fused_ident_value's
-	// twin for the ordering argument)
-	if (script_value* ic_field = this_field_ic_probe(f, f.ip * 3, sym)) {
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_env_resolve_[8];
-#endif
-		stack_.push_back(*ic_field);
-		return {};
-	}
-	// Member scope (detail/member_scope.hpp): C++ unqualified-lookup order - own
-	// scopes, then the class's members (fields minting the same copy the old tail
-	// pushed, methods minting the same bound thunk), then the cache/chain. The
-	// this-field IC above stays sound: its serial-guarded walk-miss proof covers
-	// the own-scope phase too. Non-scope frames keep the original ladder untouched.
-	if (f.locals && !f.top_level) {
-		ensure_frame_member_scope(f, environment_.get());
-		if (frame_scope_active(f)) {
-			if (script_value* own = detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) {
-				stack_.push_back(own->deref());
-				return {};
-			}
-			const bool member_missed = member_miss_proven(f, f.ip * 3, sym);
-			if (script_value read = make_null(); !member_missed && bare_host_read(f, f.ip * 3, read)) {
-				stack_.push_back(std::move(read));
-				return {};
-			}
-			auto member = member_missed ? detail::member_probe_hit{} : detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
-			                                         f.locals->scope_static, sym, /*want_methods*/ true);
-			if (!member && !member_missed) { member_miss_arm(f, f.ip * 3, sym); }
-			if (member) {
-				VM_TRY(detail::bare_member_access(member, sym, frame_access_context(f)));
-				if (member.what == detail::member_probe_hit::kind::method) {
-					if (member.instance && f.locals->scope_this) {
-						return raise_bare_method_value(sym, *f.locals->scope_this);   // an op_load is never a callee (identifier callees probe)
-					} else {
-						stack_.push_back(std::move(member.method_value));
-					}
-					return {};
-				}
-				if (member.what == detail::member_probe_hit::kind::cpp_property) {
-					if (script_value lane_read = make_null(); bare_host_fill_read(f, f.ip * 3, sym, member.instance, lane_read)) {
-						stack_.push_back(std::move(lane_read));
-						return {};
-					}
-					auto read = detail::read_bare_cpp_property(*f.locals->scope_this, member.instance,
-					                                           member.method_value, member.getter_id, sym);
-					if (!read) {
-						return raise_from(read);
-					}
-					stack_.push_back(std::move(read.value()));
-					return {};
-				}
-				if (member.what == detail::member_probe_hit::kind::field && member.instance) {
-					this_field_ic_arm(f, f.ip * 3, member.instance, sym);
-				}
-				stack_.push_back(*member.value_ptr);
-				return {};
-			}
-			if (script_value* cached = env_lookup_cached(f, f.ip * 3, sym)) {
-				stack_.push_back(cached->deref());
-				return {};
-			}
-			if (script_value* beyond = f.locals->scope_floor
-			        ? f.locals->scope_floor->get_value_ptr(sym)
-			        : environment_->get_value_ptr(sym)) {
-				stack_.push_back(beyond->deref());
-				return {};
-			}
-			return raise_(make_error_code(runtime_error_code::undefined_variable),
-				environment_->undefined_text(sym), sym);
-		}
-	}
-	if (script_value* cached = env_lookup_cached(f, f.ip * 3, sym)) {
-		stack_.push_back(cached->deref());
-		return {};
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	++profile_env_resolve_[5];
-	++profile_env_walk_names_[std::string(symbolizer_->get_string(sym))];
-#endif
-	// get_value_ptr IS get_ref's exact resolution ladder minus the error wrapper
-	if (script_value* env_val = environment_->get_value_ptr(sym)) {
-		stack_.push_back(env_val->deref());
-		return {};
-	}
-	if (script_value* this_ptr = current_this(f)) {
-		script_value& this_val = *this_ptr;
-		if (this_val.is_object()) {
-			strong_ptr<class_instance> instance = this_val.get_class_instance();
-			if (instance) {
-				// A hybrid's C++ property reads through its getter (never a placeholder cell)
-				if (uint64_t getter_id = detail::cpp_property_getter_id(instance.get(), sym)) {
-					auto read = detail::read_bare_cpp_property(this_val, instance.get(),
-					                                           instance->get_method(getter_id, false), getter_id, sym);
-					if (!read) {
-						return raise_from(read);
-					}
-					stack_.push_back(std::move(read.value()));
-					return {};
-				}
-				if (instance->has_field(sym)) {
-					this_field_ic_arm(f, f.ip * 3, instance.get(), sym);
-#ifdef JAISCRIPT_VM_PROFILE
-					++profile_env_resolve_[9];
-#endif
-					stack_.push_back(instance->get_field(sym));
-					return {};
-				}
-				script_value method = instance->get_method(sym, false);
-				if (!method.is_invalid()) {
-					stack_.push_back(make_bound_method_thunk(this_val, std::move(method)));
-					return {};
-				}
-				if (class_definition* owner = detail::bare_static_owner(frame_declaring_class(f), instance->get_class_definition(), sym)) {
-					stack_.push_back(owner->get_static_field(sym));
-					return {};
-				}
-			}
-		}
-	}
-	return raise_(make_error_code(runtime_error_code::undefined_variable),
-		environment_->undefined_text(sym), sym);
+	return {};
 }
 
 op_status vm_backend::exec_store(frame& f, const vm_instruction& ins) {
@@ -4183,6 +4009,105 @@ JAI_NOINLINE op_status vm_backend::compound_append_string(script_value& slot, co
 	return {};
 }
 
+// A member's or an implicit this field's compound arithmetic past the text-append lanes, over operands a bound alias has
+// already decoded (KEEP BYTE-PARALLEL with interpreter::member_compound_result)
+op_status vm_backend::member_compound_arith(uint32_t kind, bool text_append, const script_value& currentValue,
+                                            const script_value& rightValue, script_value& result) {
+	const size_t ci = currentValue.raw_storage_index();
+	const size_t ri = rightValue.raw_storage_index();
+	if (text_append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the interpreter)
+		VM_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
+	} else if (detail::math::owns_arithmetic(ci, ri)) [[unlikely]] {   // a math field or component operand takes the math rows (KEEP BYTE-PARALLEL with the interpreter's member compound)
+		const detail::math::bop op = kind == compound_minus ? detail::math::bop::sub : kind == compound_star ? detail::math::bop::mul
+		                           : kind == compound_slash ? detail::math::bop::div : kind == compound_percent ? detail::math::bop::mod
+		                           : detail::math::bop::add;
+		auto math_result = detail::math::binary(op, currentValue, rightValue, engine_);
+		if (!math_result) {
+			return raise_from(math_result);
+		}
+		result = std::move(math_result.value());
+	} else
+	switch (kind) {
+		case compound_plus: {
+			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+				script_int rr;
+				if (!ints::try_add(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '+='"));
+				result = script_value(rr, engine_);
+			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
+			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+				script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
+				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
+				result = script_value(cf + rf, engine_);
+			} else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
+				// engine::memory_cap chokepoint: deny the concat result before it exists
+				if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_as_string().size() + rightValue.unchecked_as_string().size())) [[unlikely]] {
+					return raise_from(detail::raise_memory_cap(*limits_));
+				}
+				result = script_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string(), engine_);
+			} else if (detail::utf8_operands(ci, ri) && currentValue.is_text() && rightValue.is_text()) {
+				if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_text().size() + rightValue.unchecked_text().size())) [[unlikely]] {
+					return raise_from(detail::raise_memory_cap(*limits_));
+				}
+				result = script_value::make_utf8(currentValue.unchecked_text() + rightValue.unchecked_text(), engine_);
+			} else {
+				return raise_from(detail::compound_mismatch(0, currentValue, rightValue, engine_));
+			}
+			break;
+		}
+		case compound_minus: {
+			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+				script_int rr;
+				if (!ints::try_sub(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '-='"));
+				result = script_value(rr, engine_);
+			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
+			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+				script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
+				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
+				result = script_value(cf - rf, engine_);
+			} else {
+				return raise_from(detail::compound_mismatch(1, currentValue, rightValue, engine_));
+			}
+			break;
+		}
+		case compound_star: {
+			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+				script_int rr;
+				if (!ints::try_mul(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '*='"));
+				result = script_value(rr, engine_);
+			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
+			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+				script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
+				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
+				result = script_value(cf * rf, engine_);
+			} else {
+				return raise_from(detail::compound_mismatch(2, currentValue, rightValue, engine_));
+			}
+			break;
+		}
+		case compound_slash: {
+			// the local's semantics: int / int divides as integers (C++), a zero divisor and the operand text come from the kernel
+			VM_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
+			break;
+		}
+		case compound_percent: {
+			if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
+				return raise_(make_error_code(runtime_error_code::modulo_by_zero),
+					"Modulo by zero");
+			}
+			VM_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
+			break;
+		}
+		default:
+			if (!compound_kind_bitwise(kind)) {
+				return raise_(make_error_code(runtime_error_code::unsupported_operation),
+					"Unsupported compound assignment operator");
+			}
+			VM_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, compound_kind_token(kind), rightValue, detail::compound_index(compound_kind_token(kind))));
+			break;
+	}
+	return {};
+}
+
 JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_instruction& ins) {
 	const uint64_t sym = f.code->symbols[ins.a];
 	const uint32_t kind = ins.c & compound_kind_mask;
@@ -4193,7 +4118,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 
 	script_value* varPtr = (ins.c & compound_flag_global_only)
 		? engine_->get_global_environment()->get_value_ptr(sym)
-		: resolve_local_or_env_cached(f, ins.b, sym);
+		: resolve_local_or_env(f, ins.b, sym, f.ip * 3 + 2);
 	if (varPtr) {
 		uint8_t declared_kind = 0;
 		// Constrained element/field ref (Tier 1 bind): route through the shared helper
@@ -4618,75 +4543,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 			return {};
 		}
 	}
-	if (text_pair == detail::compound_text::append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the interpreter)
-		VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
-	} else
-	switch (kind) {
-		case compound_plus:
-			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-				script_int rr;
-				if (!ints::try_add(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '+='"));
-				resultValue = script_value(rr, engine_);
-			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-				script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-				resultValue = script_value(cf + rf, engine_);
-			} else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-				// engine::memory_cap chokepoint: deny the concat result before it exists
-				if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_as_string().size() + rightValue.unchecked_as_string().size())) [[unlikely]] {
-					return raise_from(detail::raise_memory_cap(*limits_));
-				}
-				resultValue = script_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string(), engine_);
-			} else {
-				return raise_from(detail::compound_mismatch(0, currentValue, rightValue, engine_));
-			}
-			break;
-		case compound_minus:
-			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-				script_int rr;
-				if (!ints::try_sub(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '-='"));
-				resultValue = script_value(rr, engine_);
-			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-				script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-				resultValue = script_value(cf - rf, engine_);
-			} else {
-				return raise_from(detail::compound_mismatch(1, currentValue, rightValue, engine_));
-			}
-			break;
-		case compound_star:
-			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-				script_int rr;
-				if (!ints::try_mul(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '*='"));
-				resultValue = script_value(rr, engine_);
-			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-				script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-				resultValue = script_value(cf * rf, engine_);
-			} else {
-				return raise_from(detail::compound_mismatch(2, currentValue, rightValue, engine_));
-			}
-			break;
-		case compound_slash: {
-			// the local's semantics: int / int divides as integers (C++), a zero divisor and the operand text come from the kernel
-			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
-			break;
-		}
-		case compound_percent: {
-			if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-				return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
-			}
-			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
-			break;
-		}
-		default:
-			if (!compound_kind_bitwise(kind)) { return raise_(make_error_code(runtime_error_code::unknown_operator)); }
-			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, compound_kind_token(kind), rightValue, detail::compound_index(compound_kind_token(kind))));
-			break;
-	}
+	VM_TRY(member_compound_arith(kind, text_pair == detail::compound_text::append, currentValue, rightValue, resultValue));
 
 	// Store the enforced (declared-type converted) value; the expression result stays the
 	// promoted value, matching member/element compound semantics
@@ -4710,7 +4567,7 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 
 	script_value* varPtr = (ins.c & incdec_flag_global_only)
 		? engine_->get_global_environment()->get_value_ptr(sym)
-		: resolve_local_or_env_cached(f, ins.b, sym);
+		: resolve_local_or_env(f, ins.b, sym, f.ip * 3 + 2);
 	if (varPtr) {
 		// Scratch-backed ref (typed element, C++ property): deref hands back the holder
 		// scratch - the in-place mutation below must commit it (buffer store / setter)
@@ -4972,54 +4829,9 @@ JAI_FORCEINLINE bool vm_backend::stack_numeric_rows(script_value& l, const scrip
 }
 
 op_status vm_backend::exec_binary(frame& f, const vm_instruction& ins) {
-	// two numbers on the stack with no operator to consult: the fused kernel's numeric rows, the result over the left operand
-	if (!has_custom_numeric_ops_ && !(operator_table_ && operator_table_->any()) && stack_.size() >= 2) {
-		script_value& l = stack_[stack_.size() - 2];
-		const script_value& r = stack_.back();
-		const size_t li = l.raw_storage_index(), ri = r.raw_storage_index();
-		const token_type op = static_cast<token_type>(ins.a);
-		bool done = true;
-		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-			const script_int a = l.unchecked_as_int(), b = r.unchecked_as_int();
-			script_int v;
-			switch (op) {
-			case token_type::plus: done = ints::try_add(a, b, v); if (done) { l = script_value(v, engine_); } break;
-			case token_type::minus: done = ints::try_sub(a, b, v); if (done) { l = script_value(v, engine_); } break;
-			case token_type::star: done = ints::try_mul(a, b, v); if (done) { l = script_value(v, engine_); } break;
-			case token_type::slash: done = b != 0 && ints::try_div(a, b, v); if (done) { l = script_value(v, engine_); } break;
-			case token_type::percent: done = b != 0; if (done) { l = script_value(ints::mod(a, b), engine_); } break;
-			case token_type::less: l = script_value(a < b, engine_); break;
-			case token_type::less_equal: l = script_value(a <= b, engine_); break;
-			case token_type::greater: l = script_value(a > b, engine_); break;
-			case token_type::greater_equal: l = script_value(a >= b, engine_); break;
-			case token_type::equal_equal: l = script_value(a == b, engine_); break;
-			case token_type::bang_equal: l = script_value(a != b, engine_); break;
-			default: done = false; break;
-			}
-		} else if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) && (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-			const script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(l.unchecked_as_int()) : l.unchecked_as_float();
-			const script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(r.unchecked_as_int()) : r.unchecked_as_float();
-			switch (op) {
-			case token_type::plus: l = script_value(a + b, engine_); break;
-			case token_type::minus: l = script_value(a - b, engine_); break;
-			case token_type::star: l = script_value(a * b, engine_); break;
-			case token_type::slash: done = b != 0.0; if (done) { l = script_value(a / b, engine_); } break;
-			case token_type::percent: done = b != 0.0; if (done) { l = script_value(std::fmod(a, b), engine_); } break;
-			case token_type::less: l = script_value(a < b, engine_); break;
-			case token_type::less_equal: l = script_value(a <= b, engine_); break;
-			case token_type::greater: l = script_value(a > b, engine_); break;
-			case token_type::greater_equal: l = script_value(a >= b, engine_); break;
-			case token_type::equal_equal: l = script_value(a == b, engine_); break;
-			case token_type::bang_equal: l = script_value(a != b, engine_); break;
-			default: done = false; break;
-			}
-		} else {
-			done = false;
-		}
-		if (done) {
-			stack_.pop_back();
-			return {};
-		}
+	if (!has_custom_numeric_ops_ && !(operator_table_ && operator_table_->any()) && stack_numeric_rows(stack_[stack_.size() - 2], stack_.back(), static_cast<token_type>(ins.a))) {
+		stack_.pop_back();
+		return {};
 	}
 	script_value right_raw = std::move(stack_.back());
 	stack_.pop_back();
@@ -5046,7 +4858,7 @@ static JAI_FORCEINLINE script_value& binding_value(script_value& v, bool* observ
 
 const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand& operand,
                                                   std::optional<script_value>& scratch,
-                                                  size_t cache_slot, bool* observed) {
+                                                  size_t cache_slot, bool* observed, bool resolving_callee) {
 	const uint64_t sym = f.code->symbols[operand.symbol];
 	if (operand.load_flags & load_flag_global_only) {
 		// ::name - GLOBAL env only (KEEP BYTE-PARALLEL with exec_load's door)
@@ -5116,7 +4928,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 				}
 				if (member.what == detail::member_probe_hit::kind::method) {
 					if (member.instance && f.locals->scope_this) {
-						if (!probe_callee_resolving_) {
+						if (!resolving_callee) {
 							(void)raise_bare_method_value(sym, *f.locals->scope_this);
 							return nullptr;
 						}
@@ -5155,7 +4967,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 			        : environment_->get_value_ptr(sym)) {
 				return &binding_value(*beyond, observed);
 			}
-			if (probe_callee_resolving_ && f.locals->scope_this) {   // KEEP BYTE-PARALLEL with interpreter::visit_identifier_expr
+			if (resolving_callee && f.locals->scope_this) {   // KEEP BYTE-PARALLEL with interpreter::visit_identifier_expr
 				if (auto refused = detail::refuse_cdtor_call(f.locals->scope_this->get_class_instance().get(), sym)) {
 					(void)raise_from(*refused);
 					return nullptr;
@@ -5212,7 +5024,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 					scratch.emplace(owner->get_static_field(sym));
 					return &scratch.value();
 				}
-				if (probe_callee_resolving_) {
+				if (resolving_callee) {
 					if (auto refused = detail::refuse_cdtor_call(instance.get(), sym)) {
 						(void)raise_from(*refused);
 						return nullptr;
@@ -5331,7 +5143,7 @@ static const script_array* ref_element_table(const script_value& v) noexcept {
 // a call's result into a compiler temp (an expression consumes the call as an operand): the value as the call left it, a
 // reference included, which the consumer dereferences as it would a slot's
 op_status vm_backend::exec_call_temp(frame& f, const vm_instruction& ins) {
-	if (stack_.empty()) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "call temp: empty stack"); }
+	assert(!stack_.empty());
 	frame_slot_set(f, ins.a, std::move(stack_.back()));
 	stack_.pop_back();
 	return {};
@@ -5373,7 +5185,7 @@ op_status vm_backend::exec_math_temp(frame& f, const vm_instruction& ins) {
 			if (!v) return op_status::failed;
 		}
 	} else {
-		if (stack_.empty()) [[unlikely]] { return raise_(make_error_code(runtime_error_code::unsupported_operation), "math:: intrinsic without an argument (internal)"); }
+		assert(!stack_.empty());
 		popped = std::move(stack_.back());
 		stack_.pop_back();
 		v = &popped;
@@ -5469,9 +5281,7 @@ int vm_backend::math_alias_verdict(frame& f, const call_site& site, uint8_t fn, 
 		}
 	}
 	std::optional<script_value> scratch;
-	probe_callee_resolving_ = true;
-	const script_value* resolved = fused_ident_value(f, site.callee, scratch, cache_slot);
-	probe_callee_resolving_ = false;
+	const script_value* resolved = fused_ident_value(f, site.callee, scratch, cache_slot, nullptr, true);
 	if (!resolved) return -1;
 	if (identity && resolved->raw_storage_index() == script_value::TYPEID_FUNCTION && &resolved->unchecked_as_function() == identity) return 1;
 	return park_callee(f, site, 1, *resolved) == op_status::failed ? -1 : 0;
@@ -5480,9 +5290,7 @@ int vm_backend::math_alias_verdict(frame& f, const call_site& site, uint8_t fn, 
 op_status vm_backend::exec_regex_constant(frame& f, const vm_instruction& ins) {
 	const call_site& site = f.code->call_sites[ins.a];
 	std::optional<script_value> scratch;
-	probe_callee_resolving_ = true;
-	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3);
-	probe_callee_resolving_ = false;
+	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3, nullptr, true);
 	if (!resolved) return op_status::failed;
 	const chunk::regex_constant& rc = f.code->regex_constants[ins.b];
 	script_value made(std::monostate{}, engine_);
@@ -5532,7 +5340,7 @@ op_status vm_backend::exec_math_alias(frame& f, const vm_instruction& ins) {
 		}
 		v = &v->deref();
 	} else {
-		if (stack_.empty()) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "math alias without an argument (internal)"); }
+		assert(!stack_.empty());
 		arg = std::move(stack_.back());
 		stack_.pop_back();
 		v = &arg;
@@ -5789,7 +5597,7 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 		}
 	}
 
-	// the string, bound and general rows run out of line: the hot rows above keep no string temporary and no cookie in their frame
+	// the string and general rows run out of line: the hot rows above keep no string temporary and no cookie in their frame
 	std::optional<script_value> out;
 	if (binary_fused_tail(p, op, lp, rp, out) == op_status::failed) return op_status::failed;
 	if (out) { sink(std::move(*out)); }
@@ -5807,17 +5615,9 @@ op_status vm_backend::fused_string_add(const script_value& l, const script_value
 
 JAI_NOINLINE op_status vm_backend::binary_fused_tail(const fused_binary_proto& p, token_type op, const script_value* lp, const script_value* rp,
                                                      std::optional<script_value>& out) {
-	if (!has_custom_numeric_ops_ && is_numeric_binary_op(op)) {
-		const size_t li = lp->raw_storage_index();
-		const size_t ri = rp->raw_storage_index();
-		if (op == token_type::plus && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-			return fused_string_add(*lp, *rp, out);
-		} else if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
-			// twin parity: bound operands keep this fused shape's zero-divisor error surface
-			if (auto z = bound_fastpath_zero_divisor(op, *lp, *rp, true, true)) {
-				return raise_(make_error_code(z->code), z->text);
-			}
-		}
+	if (op == token_type::plus && !has_custom_numeric_ops_ && lp->raw_storage_index() == script_value::TYPEID_STRING &&
+	    rp->raw_storage_index() == script_value::TYPEID_STRING) {
+		return fused_string_add(*lp, *rp, out);
 	}
 	// Fallback: snapshot ident/const operands (isolation from mutation by nested calls;
 	// constant templates get their engine ref, exactly as op_const would have).
@@ -6464,7 +6264,7 @@ bool vm_backend::resolve_cfor_int_operand(frame& f, const fused_operand& operand
 	script_value* resolved = resolve_local_or_env(f, operand.slot, f.code->symbols[operand.symbol]);
 	if (!resolved) return false;
 	script_value& target = resolved->deref();
-	if (target.raw_storage_index() != script_value::TYPEID_INT || target.is_cpp_bound()) return false;
+	if (target.raw_storage_index() != script_value::TYPEID_INT) return false;
 	ptr = &target.unchecked_as_int_ref();
 	return true;
 }
@@ -6481,7 +6281,7 @@ op_status vm_backend::exec_cfor_prep(frame& f, const vm_instruction& ins) {
 		script_value* varPtr = resolve_local_or_env(f, p.var.slot, f.code->symbols[p.var.symbol]);
 		if (varPtr) {
 			script_value& target = varPtr->deref();
-			if (target.raw_storage_index() == script_value::TYPEID_INT && !target.is_cpp_bound()) {
+			if (target.raw_storage_index() == script_value::TYPEID_INT) {
 				st.var = &target;
 			} else {
 				fast = false;
@@ -6514,9 +6314,7 @@ op_status vm_backend::exec_cfor_prep(frame& f, const vm_instruction& ins) {
 
 op_status vm_backend::exec_cfor_back(frame& f, const vm_instruction& ins) {
 	const counted_for_proto& p = f.code->counted_for_protos[ins.a];
-	if (cfor_states_.empty()) {
-		return raise_(make_error_code(runtime_error_code::internal_error), "counted-for state stack underflow");
-	}
+	assert(!cfor_states_.empty());
 	counted_for_state& st = cfor_states_.back();
 
 	if (execution_limit_exhausted()) [[unlikely]] {
@@ -7147,6 +6945,117 @@ op_status vm_backend::raw_int_arith(token_type op, script_int a, script_int b,
 	}
 }
 
+// The fused index operand of a subscript read or store: a raw int folded from a pure int binary (and its left-spine chain), a
+// computed or resolved value, or the boxed tail's unfused stack ([pending,] container, accumulator, one op_binary per remaining
+// step) left for the caller's real op_index / op_index_store; a mid-op unwind leaves the unfused pair's stack and settles
+JAI_FORCEINLINE op_status vm_backend::resolve_fused_index_operand(frame& f, const fused_index_proto& p, const script_value*& container_ptr,
+                                                                  const script_value* pending, fused_index_operand& out) {
+	if (p.index_binary != k_invalid_u32) {
+		// Provably-pure shapes (raw numeric idents/lits, no custom numeric ops) run
+		// no user code, so the container POINTER stays valid
+		// across the compute. Int arithmetic short-circuits to a RAW index — no
+		// script_value is born at all; error spellings replicate binary_fused_compute's
+		// int row verbatim. Everything else snapshots the container first — exactly
+		// the copy the unfused LOAD paid — keeping container-before-index order.
+		const fused_binary_proto& bp = f.code->fused_binary_protos[p.index_binary];
+		const token_type bop = static_cast<token_type>(bp.op);
+		bool pure = false;
+		if (!has_custom_numeric_ops_ && is_numeric_binary_op(bop)) {
+			const script_value* pl = fused_cmp_operand(f, bp.left, f.ip * 3);
+			const script_value* pr = pl ? fused_cmp_operand(f, bp.right, f.ip * 3 + 1) : nullptr;
+			if (pr) {
+				const size_t li = pl->raw_storage_index(), ri = pr->raw_storage_index();
+				pure = (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+				       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT);
+				if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+					VM_TRY(raw_int_arith(bop, pl->unchecked_as_int(), pr->unchecked_as_int(), out.raw, out.have_raw));
+				}
+			}
+		}
+		// Left-spine chain: fold raw while rights stay int (fused_ident_value runs no
+		// user code, so the container pointer holds); the first non-int right hands
+		// off to the boxed tail below at the exact accumulator position.
+		const auto& chain = p.index_chain_ext;
+		size_t chain_pos = 0;
+		if (out.have_raw && !chain.empty()) {
+			std::optional<script_value> rscratch;
+			while (chain_pos < chain.size()) {
+				const fused_binary_proto& sp = f.code->fused_binary_protos[chain[chain_pos]];
+				const script_value* rp2;
+				if (sp.right.const_index != k_invalid_u32) {
+					rp2 = &f.code->constants[sp.right.const_index];
+				} else {
+					rscratch.reset();
+					const script_value* resolved = fused_ident_value(f, sp.right, rscratch, SIZE_MAX);
+					if (!resolved) return op_status::failed;
+					rp2 = resolved;
+				}
+				if (rp2->raw_storage_index() != script_value::TYPEID_INT) break;
+				bool step_handled = false;
+				VM_TRY(raw_int_arith(static_cast<token_type>(sp.op), out.raw, rp2->unchecked_as_int(), out.raw, step_handled));
+				if (!step_handled) break;   // compiler emits arith-only; defensive
+				++chain_pos;
+			}
+		}
+		if (!out.have_raw) {
+			if (!pure) {
+				out.container_snapshot.emplace(*container_ptr);
+				container_ptr = &*out.container_snapshot;
+			}
+			VM_TRY(binary_fused_compute(f, p.index_binary,
+			                            [&](script_value&& v) { out.computed.emplace(std::move(v)); }));
+			if (is_unwinding_) [[unlikely]] {
+				// pair parity: [the pending value,] LOAD's container copy and BINARY_FUSED's result (when its sink ran) stay
+				// pushed, the index op never runs
+				if (pending) { stack_.push_back(*pending); }
+				stack_.push_back(*container_ptr);
+				if (out.computed) {
+					stack_.push_back(std::move(*out.computed));
+				}
+				out.outcome = fused_index_operand::settled;
+				return {};
+			}
+			out.index = &*out.computed;
+		}
+		if (chain_pos < chain.size() || (!chain.empty() && !out.have_raw)) {
+			// Boxed chain tail: the verbatim unfused stack sequence from the accumulator
+			// — container copy (its push IS the pin), accumulator, then one op_binary
+			// per remaining step, finished by the caller's real index op. Remaining steps can
+			// run user code (object operands / overloads); everything they see matches the
+			// unfused twin because it IS the unfused twin.
+			if (pending) { stack_.push_back(*pending); }
+			if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.container.const_index)); }
+			else { stack_.push_back(*container_ptr); }
+			if (out.computed) { stack_.push_back(std::move(*out.computed)); }
+			else { stack_.push_back(script_value(out.raw, engine_)); }
+			for (size_t i = chain_pos; i < chain.size(); ++i) {
+				const fused_binary_proto& sp = f.code->fused_binary_protos[chain[i]];
+				if (sp.right.const_index != k_invalid_u32) {
+					stack_.push_back(materialize_constant(*f.code, sp.right.const_index));
+				} else {
+					std::optional<script_value> rs;
+					const script_value* resolved = fused_ident_value(f, sp.right, rs, SIZE_MAX);
+					if (!resolved) return op_status::failed;
+					stack_.push_back(*resolved);
+				}
+				const vm_instruction bin_ins{opcode::op_binary, static_cast<uint32_t>(sp.op), binary_shape_none, 0};
+				VM_TRY(exec_binary(f, bin_ins));
+				if (is_unwinding_) [[unlikely]] {
+					out.outcome = fused_index_operand::settled;   // pair parity: the partial stack stands, dispatch unwinds
+					return {};
+				}
+			}
+			out.outcome = fused_index_operand::boxed;
+		}
+	} else if (p.index.const_index != k_invalid_u32) {
+		out.index = &f.code->constants[p.index.const_index];
+	} else {
+		out.index = fused_ident_value(f, p.index, out.index_scratch, f.ip * 3 + 1);
+		if (!out.index) return op_status::failed;
+	}
+	return {};
+}
+
 // The ONE fused subscript read, sink-templated (op_index_fused pushes; the decl variant
 // lands in the declared slot — parity by construction, same shape as
 // binary_fused_compute). Container+index resolve as operands (slot in-place reads - no
@@ -7158,7 +7067,7 @@ template <bool SinkIsStack, typename Sink>
 op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink&& sink, uint32_t extra_flags) {
 	const uint32_t flags = ins.b | extra_flags;
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
-	std::optional<script_value> cscratch, mscratch, iscratch;
+	std::optional<script_value> cscratch, mscratch;
 	const script_value* container_ptr;
 	if (p.container.const_index != k_invalid_u32) {
 		container_ptr = &f.code->constants[p.container.const_index];
@@ -7192,125 +7101,25 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 			}
 		}
 	}
-	const script_value* index_ptr = nullptr;
-	std::optional<script_value> computed_index, csnap;
-	bool have_raw_index = false;
-	script_int raw_index = 0;
-	if (p.index_binary != k_invalid_u32) {
-		// Provably-pure shapes (raw numeric idents/lits, no custom numeric ops) run
-		// no user code, so the container POINTER stays valid
-		// across the compute. Int arithmetic short-circuits to a RAW index — no
-		// script_value is born at all; error spellings replicate binary_fused_compute's
-		// int row verbatim. Everything else snapshots the container first — exactly
-		// the copy the unfused LOAD paid — keeping container-before-index order.
-		const fused_binary_proto& bp = f.code->fused_binary_protos[p.index_binary];
-		const token_type bop = static_cast<token_type>(bp.op);
-		bool pure = false;
-		if (!has_custom_numeric_ops_ && is_numeric_binary_op(bop)) {
-			const script_value* pl = fused_cmp_operand(f, bp.left, f.ip * 3);
-			const script_value* pr = pl ? fused_cmp_operand(f, bp.right, f.ip * 3 + 1) : nullptr;
-			if (pr) {
-				const size_t li = pl->raw_storage_index(), ri = pr->raw_storage_index();
-				pure = (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-				       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT);
-				if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-					VM_TRY(raw_int_arith(bop, pl->unchecked_as_int(), pr->unchecked_as_int(),
-					                     raw_index, have_raw_index));
-#ifdef JAISCRIPT_VM_PROFILE
-					if (have_raw_index) { ++profile_index_read_paths_[6]; }
-#endif
-				}
-			}
+	fused_index_operand idx;
+	VM_TRY(resolve_fused_index_operand(f, p, container_ptr, nullptr, idx));
+	if (idx.outcome == fused_index_operand::settled) { return {}; }
+	if (idx.outcome == fused_index_operand::boxed) {
+		const vm_instruction index_ins{opcode::op_index, flags, 0, 0};
+		if constexpr (SinkIsStack) {
+			return exec_index(f, index_ins);
+		} else {
+			VM_TRY(exec_index(f, index_ins));
+			if (is_unwinding_) [[unlikely]] { return {}; }   // pushed result stands (pair parity)
+			script_value replayed = std::move(stack_.back());
+			stack_.pop_back();
+			sink(std::move(replayed));
+			return {};
 		}
-		// Left-spine chain: fold raw while rights stay int (fused_ident_value runs no
-		// user code, so the container pointer holds); the first non-int right hands
-		// off to the boxed tail below at the exact accumulator position.
-		const auto& chain = p.index_chain_ext;
-		size_t chain_pos = 0;
-		if (have_raw_index && !chain.empty()) {
-			std::optional<script_value> rscratch;
-			while (chain_pos < chain.size()) {
-				const fused_binary_proto& sp = f.code->fused_binary_protos[chain[chain_pos]];
-				const script_value* rp2;
-				if (sp.right.const_index != k_invalid_u32) {
-					rp2 = &f.code->constants[sp.right.const_index];
-				} else {
-					rscratch.reset();
-					const script_value* resolved = fused_ident_value(f, sp.right, rscratch, SIZE_MAX);
-					if (!resolved) return op_status::failed;
-					rp2 = resolved;
-				}
-				if (rp2->raw_storage_index() != script_value::TYPEID_INT) break;
-				bool step_handled = false;
-				VM_TRY(raw_int_arith(static_cast<token_type>(sp.op), raw_index,
-				                     rp2->unchecked_as_int(), raw_index, step_handled));
-				if (!step_handled) break;   // compiler emits arith-only; defensive
-				++chain_pos;
-			}
-		}
-		if (!have_raw_index) {
-			if (!pure) {
-				csnap.emplace(*container_ptr);
-				container_ptr = &*csnap;
-			}
-			VM_TRY(binary_fused_compute(f, p.index_binary,
-			                            [&](script_value&& v) { computed_index.emplace(std::move(v)); }));
-			if (is_unwinding_) [[unlikely]] {
-				// pair parity: LOAD's container copy and BINARY_FUSED's result (when its
-				// sink ran) stay pushed, INDEX never runs
-				stack_.push_back(*container_ptr);
-				if (computed_index) {
-					stack_.push_back(std::move(*computed_index));
-				}
-				return {};
-			}
-			index_ptr = &*computed_index;
-		}
-		if (chain_pos < chain.size() || (!chain.empty() && !have_raw_index)) {
-			// Boxed chain tail: the verbatim unfused stack sequence from the accumulator
-			// — container copy (its push IS the pin), accumulator, then one op_binary
-			// per remaining step, finished by the real op_index. Remaining steps can run
-			// user code (object operands / overloads); everything they see matches the
-			// unfused twin because it IS the unfused twin.
-			if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.container.const_index)); }
-			else { stack_.push_back(*container_ptr); }
-			if (computed_index) { stack_.push_back(std::move(*computed_index)); }
-			else { stack_.push_back(script_value(raw_index, engine_)); }
-			for (size_t i = chain_pos; i < chain.size(); ++i) {
-				const fused_binary_proto& sp = f.code->fused_binary_protos[chain[i]];
-				if (sp.right.const_index != k_invalid_u32) {
-					stack_.push_back(materialize_constant(*f.code, sp.right.const_index));
-				} else {
-					std::optional<script_value> rs;
-					const script_value* resolved = fused_ident_value(f, sp.right, rs, SIZE_MAX);
-					if (!resolved) return op_status::failed;
-					stack_.push_back(*resolved);
-				}
-				const vm_instruction bin_ins{opcode::op_binary, static_cast<uint32_t>(sp.op), binary_shape_none, 0};
-				VM_TRY(exec_binary(f, bin_ins));
-				if (is_unwinding_) [[unlikely]] {
-					return {};   // pair parity: the partial stack stands, dispatch unwinds
-				}
-			}
-			const vm_instruction index_ins{opcode::op_index, flags, 0, 0};
-			if constexpr (SinkIsStack) {
-				return exec_index(f, index_ins);
-			} else {
-				VM_TRY(exec_index(f, index_ins));
-				if (is_unwinding_) [[unlikely]] { return {}; }   // pushed result stands (pair parity)
-				script_value replayed = std::move(stack_.back());
-				stack_.pop_back();
-				sink(std::move(replayed));
-				return {};
-			}
-		}
-	} else if (p.index.const_index != k_invalid_u32) {
-		index_ptr = &f.code->constants[p.index.const_index];
-	} else {
-		auto resolved = fused_ident_value(f, p.index, iscratch, f.ip * 3 + 1);
-		if (!resolved) return op_status::failed;
-		index_ptr = resolved;
 	}
+	const bool have_raw_index = idx.have_raw;
+	const script_int raw_index = idx.raw;
+	const script_value* index_ptr = idx.index;
 
 	const script_value& left = *container_ptr;      // fused_ident_value hands back deref'd storage
 	bool index_is_int = have_raw_index;
@@ -7396,7 +7205,7 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 	// String READ s[i]: exec_index's string branch for an in-bounds integer index (the char at that byte); a write, a non-int or
 	// out-of-bounds index replays for its text
 	if (left.raw_storage_index() == script_value::TYPEID_STRING && !(flags & index_flag_lvalue_write)) {
-		const script_value* iv = computed_index ? &*computed_index : (have_raw_index ? nullptr : &index_ptr->deref());
+		const script_value* iv = idx.computed ? &*idx.computed : (have_raw_index ? nullptr : &index_ptr->deref());
 		if (!iv || iv->raw_storage_index() == script_value::TYPEID_INT) {
 			const script_int index = iv ? iv->unchecked_as_int() : raw_index;
 			const script_string& str = left.unchecked_as_string();
@@ -7411,7 +7220,7 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 	// read); a reference key, a write or an entry reference replays
 	if (left.raw_storage_index() == script_value::TYPEID_MAP && !(flags & index_flag_lvalue_write) &&
 	    (!(flags & index_flag_lvalue_shape) || ((flags & index_flag_transient_read) != 0 && !has_custom_binary_ops_))) {
-		const script_value* key = computed_index ? &*computed_index : (have_raw_index ? nullptr : index_ptr);
+		const script_value* key = idx.computed ? &*idx.computed : (have_raw_index ? nullptr : index_ptr);
 		const size_t kk = key ? key->raw_storage_index() : script_value::TYPEID_INT;
 		if (kk == script_value::TYPEID_INT || kk == script_value::TYPEID_FLOAT || kk == script_value::TYPEID_STRING ||
 		    kk == script_value::TYPEID_BOOL || kk == script_value::TYPEID_CHAR) {
@@ -7434,7 +7243,7 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.container.const_index)); }
 	else { stack_.push_back(*container_ptr); }
 	if (have_raw_index) { stack_.push_back(script_value(raw_index, engine_)); }
-	else if (computed_index) { stack_.push_back(std::move(*computed_index)); }
+	else if (idx.computed) { stack_.push_back(std::move(*idx.computed)); }
 	else if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.index.const_index)); }
 	else { stack_.push_back(*index_ptr); }
 	const vm_instruction index_ins{opcode::op_index, flags, 0, 0};
@@ -7711,7 +7520,7 @@ void vm_backend::cfor_state_push(frame& f, const counted_for_proto& p) {
 		script_value* varPtr = resolve_local_or_env(f, p.var.slot, f.code->symbols[p.var.symbol]);
 		if (varPtr) {
 			script_value& target = varPtr->deref();
-			if (target.raw_storage_index() == script_value::TYPEID_INT && !target.is_cpp_bound()) { st.var = &target; } else { fast = false; }
+			if (target.raw_storage_index() == script_value::TYPEID_INT) { st.var = &target; } else { fast = false; }
 		} else {
 			fast = false;
 		}
@@ -7979,9 +7788,7 @@ op_status vm_backend::exec_cells_cfor_back(frame& f, const vm_instruction& ins) 
 	}
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
 	const counted_for_proto& p = f.code->counted_for_protos[loop.counted];
-	if (cfor_states_.empty()) {
-		return raise_(make_error_code(runtime_error_code::internal_error), "counted-for state stack underflow");
-	}
+	assert(!cfor_states_.empty());
 	counted_for_state& st = cfor_states_.back();
 	if (execution_limit_exhausted()) [[unlikely]] {
 		return raise_from(execution_limit_failure());
@@ -11736,7 +11543,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 			return {};
 		}
 	}
-	std::optional<script_value> cscratch, mscratch, iscratch, vscratch;
+	std::optional<script_value> cscratch, mscratch, vscratch;
 	const bool value_operand = p.store_value.const_index != k_invalid_u32 ||
 	                           p.store_value.symbol != k_invalid_u32;
 	const script_value* value_ptr = nullptr;
@@ -11781,106 +11588,19 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 			}
 		}
 	}
-	const script_value* index_ptr = nullptr;
-	std::optional<script_value> computed_index, csnap;
-	bool have_raw_index = false;
-	script_int raw_index = 0;
-	if (p.index_binary != k_invalid_u32) {
-		// Same purity/snapshot/raw-int/chain discipline as exec_index_fused (the value
-		// sits below on the stack; the boxed tail pushes above it)
-		const fused_binary_proto& bp = f.code->fused_binary_protos[p.index_binary];
-		const token_type bop = static_cast<token_type>(bp.op);
-		bool pure = false;
-		if (!has_custom_numeric_ops_ && is_numeric_binary_op(bop)) {
-			const script_value* pl = fused_cmp_operand(f, bp.left, f.ip * 3);
-			const script_value* pr = pl ? fused_cmp_operand(f, bp.right, f.ip * 3 + 1) : nullptr;
-			if (pr) {
-				const size_t li = pl->raw_storage_index(), ri = pr->raw_storage_index();
-				pure = (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-				       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT);
-				if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-					VM_TRY(raw_int_arith(bop, pl->unchecked_as_int(), pr->unchecked_as_int(),
-					                     raw_index, have_raw_index));
-				}
-			}
-		}
-		const auto& chain = p.index_chain_ext;
-		size_t chain_pos = 0;
-		if (have_raw_index && !chain.empty()) {
-			std::optional<script_value> rscratch;
-			while (chain_pos < chain.size()) {
-				const fused_binary_proto& sp = f.code->fused_binary_protos[chain[chain_pos]];
-				const script_value* rp2;
-				if (sp.right.const_index != k_invalid_u32) {
-					rp2 = &f.code->constants[sp.right.const_index];
-				} else {
-					rscratch.reset();
-					const script_value* resolved = fused_ident_value(f, sp.right, rscratch, SIZE_MAX);
-					if (!resolved) return op_status::failed;
-					rp2 = resolved;
-				}
-				if (rp2->raw_storage_index() != script_value::TYPEID_INT) break;
-				bool step_handled = false;
-				VM_TRY(raw_int_arith(static_cast<token_type>(sp.op), raw_index,
-				                     rp2->unchecked_as_int(), raw_index, step_handled));
-				if (!step_handled) break;
-				++chain_pos;
-			}
-		}
-		if (!have_raw_index) {
-			if (!pure) {
-				csnap.emplace(*container_ptr);
-				container_ptr = &*csnap;
-			}
-			VM_TRY(binary_fused_compute(f, p.index_binary,
-			                            [&](script_value&& v) { computed_index.emplace(std::move(v)); }));
-			if (is_unwinding_) [[unlikely]] {
-				if (value_operand) { stack_.push_back(*value_ptr); }
-				stack_.push_back(*container_ptr);
-				if (computed_index) {
-					stack_.push_back(std::move(*computed_index));
-				}
-				return {};
-			}
-			index_ptr = &*computed_index;
-		}
-		if (chain_pos < chain.size() || (!chain.empty() && !have_raw_index)) {
-			// Boxed chain tail above the pending value: [value, container, acc] then one
-			// op_binary per remaining step, finished by the real op_index_store
-			if (value_operand) { stack_.push_back(*value_ptr); }
-			if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.container.const_index)); }
-			else { stack_.push_back(*container_ptr); }
-			if (computed_index) { stack_.push_back(std::move(*computed_index)); }
-			else { stack_.push_back(script_value(raw_index, engine_)); }
-			for (size_t i = chain_pos; i < chain.size(); ++i) {
-				const fused_binary_proto& sp = f.code->fused_binary_protos[chain[i]];
-				if (sp.right.const_index != k_invalid_u32) {
-					stack_.push_back(materialize_constant(*f.code, sp.right.const_index));
-				} else {
-					std::optional<script_value> rs;
-					const script_value* resolved = fused_ident_value(f, sp.right, rs, SIZE_MAX);
-					if (!resolved) return op_status::failed;
-					stack_.push_back(*resolved);
-				}
-				const vm_instruction bin_ins{opcode::op_binary, static_cast<uint32_t>(sp.op), binary_shape_none, 0};
-				VM_TRY(exec_binary(f, bin_ins));
-				if (is_unwinding_) [[unlikely]] {
-					return {};
-				}
-			}
-			const vm_instruction store_ins{opcode::op_index_store, ins.b | (no_result ? index_flag_no_result : 0u), 0, p.string_target};
-			const op_status st = exec_index_store(f, store_ins);
-			if (st == op_status::failed) { return st; }
-			if (no_result && !is_unwinding_) { stack_.pop_back(); }
-			return st;
-		}
-	} else if (p.index.const_index != k_invalid_u32) {
-		index_ptr = &f.code->constants[p.index.const_index];
-	} else {
-		auto resolved = fused_ident_value(f, p.index, iscratch, f.ip * 3 + 1);
-		if (!resolved) return op_status::failed;
-		index_ptr = resolved;
+	fused_index_operand idx;
+	VM_TRY(resolve_fused_index_operand(f, p, container_ptr, value_operand ? value_ptr : nullptr, idx));
+	if (idx.outcome == fused_index_operand::settled) { return {}; }
+	if (idx.outcome == fused_index_operand::boxed) {
+		const vm_instruction store_ins{opcode::op_index_store, ins.b | (no_result ? index_flag_no_result : 0u), 0, p.string_target};
+		const op_status st = exec_index_store(f, store_ins);
+		if (st == op_status::failed) { return st; }
+		if (no_result && !is_unwinding_) { stack_.pop_back(); }
+		return st;
 	}
+	const bool have_raw_index = idx.have_raw;
+	const script_int raw_index = idx.raw;
+	const script_value* index_ptr = idx.index;
 
 	script_value& container = const_cast<script_value&>(*container_ptr);
 	bool index_is_int = have_raw_index;
@@ -11995,7 +11715,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 		const script_value& value_peek = value_operand ? *value_ptr : stack_.back();   // raw: a reference operand declines the lane
 		std::optional<script_value> made_key;
 		const script_value& key = have_raw_index ? made_key.emplace(raw_index, engine_)
-		                        : computed_index ? *computed_index
+		                        : idx.computed ? *idx.computed
 		                        : p.index.const_index != k_invalid_u32 ? made_key.emplace(materialize_constant(*f.code, p.index.const_index))   // a chunk constant is a template: the map keeps its own copy
 		                        : *index_ptr;   // borrowed: the map copies a key only into an entry it makes
 		bool handled = false;
@@ -12016,7 +11736,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.container.const_index)); }
 	else { stack_.push_back(*container_ptr); }
 	if (have_raw_index) { stack_.push_back(script_value(raw_index, engine_)); }
-	else if (computed_index) { stack_.push_back(std::move(*computed_index)); }
+	else if (idx.computed) { stack_.push_back(std::move(*idx.computed)); }
 	else if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.index.const_index)); }
 	else { stack_.push_back(*index_ptr); }
 	const vm_instruction store_ins{opcode::op_index_store, ins.b | (no_result ? index_flag_no_result : 0u), 0, p.string_target};
@@ -12430,9 +12150,8 @@ op_status vm_backend::bind_graft_parameter(frame& f, const variable_decl* decl) 
 }
 
 // The decl fast path as a head: a scalar or string whose storage index the declared type takes as it is lands in its slot (in place when
-// the slot holds that scalar kind), an int widens into a float declaration; the full executor (and the profile build) keeps everything else
+// the slot holds that scalar kind), an int widens into a float declaration; the full executor keeps everything else
 op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
-#ifndef JAISCRIPT_VM_PROFILE
 	const auto* decl = static_cast<const variable_decl*>(f.code->nodes[ins.a].get());
 	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
 	    ins.b != 0 && !decl->ref_escaping && decl->slot_index != SIZE_MAX && has_slots(f)) {
@@ -12457,6 +12176,13 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 			frame_slot_set(f, decl->slot_index, std::move(value));
 			return {};
 		}
+		if (variable_decl::widening_payload(vi, t)) {
+			script_value widened(static_cast<script_float>(seen->unchecked_as_int()), engine_);
+			stack_.pop_back();
+			widened.set_type_info(decl->type);
+			frame_slot_set(f, decl->slot_index, std::move(widened));
+			return {};
+		}
 	}
 	// a slot-resident shared_ptr<T> declaration from null or from a handle tagged T: the full path's null stamp, or its admission of a
 	// handle of the declared spelling, is the identity
@@ -12472,19 +12198,11 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 			return {};
 		}
 	}
-#endif
 	return exec_decl_var_full(f, ins);
 }
 
 JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruction& ins) {
-#ifdef JAISCRIPT_VM_PROFILE
-	uint64_t prof_d0 = __rdtsc();
-#define JAI_DECL_SUB(idx) { const uint64_t prof_d1 = __rdtsc(); profile_decl_sub_[idx] += prof_d1 - prof_d0; prof_d0 = prof_d1; }
-#else
-#define JAI_DECL_SUB(idx)
-#endif
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.a].get());
-	JAI_DECL_SUB(0);
 #ifdef JAISCRIPT_VM_PROFILE
 	if (f.ip > 0) { ++profile_decl_var_prev_[static_cast<size_t>(f.code->code[f.ip - 1].op)]; }
 	if (ins.b != 0 && !stack_.empty()) { const size_t k = stack_.back().deref().raw_storage_index(); ++profile_decl_var_kinds_[k < 16 ? k : 15]; }
@@ -12493,60 +12211,6 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 	const bool lvalue_init = ins.c != 0;
 	type_info_ptr effective_decl_type = decl->type;   // explicit, or inferred from a uniform literal
 
-	// Decl fast path (construction-stamped flags): a scalar or string payload whose
-	// storage index already matches the declared type stores straight into the slot -
-	// enforce/clone/homogeneity are provably identity there (a scalar clones as a copy,
-	// a string as its shared node, so lvalue_init is irrelevant). Anything else -
-	// references, mismatched payloads, env-resident decls, escape-boxed decls - falls
-	// through to the untouched full path below.
-	// (KEEP BYTE-PARALLEL with interpreter::visit_variable_decl)
-	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store &&
-	    has_init && !decl->ref_escaping &&
-	    decl->slot_index != SIZE_MAX && has_slots(f)) {
-		script_value& top = stack_.back();
-		size_t vi = top.raw_storage_index();
-		// Subscript-initialized decls (`float d = ch[ci]`) arrive as rhs-lvalue
-		// reference wrappers - the profiled DOMINANT shape (63% of GLOOM decls). The
-		// decl consumes the VALUE (the full path derefs identically), so a matching
-		// pointee takes the same identity store: copy out BEFORE the pop (the stack
-		// holder OWNS the deref target).
-		const script_value* seen = &top;
-		if (vi == script_value::TYPEID_REFERENCE) {
-			seen = &top.deref();
-			vi = seen->raw_storage_index();
-		}
-		if (variable_decl::identity_payload(vi, decl->type.get())) {
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_decl_paths_[0];
-#endif
-			JAI_DECL_SUB(1);
-			script_value value = seen == &top ? std::move(top) : script_value(*seen);
-			stack_.pop_back();
-			JAI_DECL_SUB(2);
-			if (decl->type) {
-				value.set_type_info(decl->type);
-			}
-			frame_slot_set(f, decl->slot_index, std::move(value));
-			JAI_DECL_SUB(3);
-			return {};
-		}
-		if (variable_decl::widening_payload(vi, decl->type.get())) {
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_decl_paths_[0];
-#endif
-			script_value widened(static_cast<script_float>(seen->unchecked_as_int()), engine_);
-			stack_.pop_back();
-			widened.set_type_info(decl->type);
-			frame_slot_set(f, decl->slot_index, std::move(widened));
-			return {};
-		}
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_decl_paths_[3];
-#endif
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	else { ++profile_decl_paths_[1]; }
-#endif
 	if (decl->site_kind == variable_decl::site_parameter && has_init) [[unlikely]] { return bind_graft_parameter(f, decl); }
 
 	const bool is_weak_ptr = decl->type && decl->type->base_type == script_value_type::jai_weak_ptr_type;
@@ -13303,9 +12967,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 		}
 	}
 	std::optional<script_value> scratch;
-	probe_callee_resolving_ = true;
-	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3, observed);
-	probe_callee_resolving_ = false;
+	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3, observed, true);
 	if (!resolved) return op_status::failed;
 	JAI_PROBE_SECTION(0);
 	if (scratch && &*scratch == resolved) { arm_sibling_method(f, site, *resolved); }
@@ -13528,14 +13190,14 @@ op_status vm_backend::capture_arg(frame& f, const vm_instruction& ins) {
 	const size_t below = stack_.size() >= k + 2 ? stack_.size() - k - 2 : SIZE_MAX;
 	detail::arg_binding b = detail::arg_binding::opaque;
 	switch ((ins.c >> 2) & 7) {
-		case capture_form_probe:
-			if (!pending_callees_.empty()) {
-				const pending_callee& pc = pending_callees_.back();
-				b = pc.fn ? detail::parameters_binding(pc.fn->parameters(), k)
-				    : pc.native() ? detail::function_binding(pc.native_fn(), k, false, f.code->call_sites[ins.a].arg_symbols.size())
-				    : detail::callee_binding(pc.value, k, false, f.code->call_sites[ins.a].arg_symbols.size());
-			}
+		case capture_form_probe: {
+			assert(!pending_callees_.empty());
+			const pending_callee& pc = pending_callees_.back();
+			b = pc.fn ? detail::parameters_binding(pc.fn->parameters(), k)
+			    : pc.native() ? detail::function_binding(pc.native_fn(), k, false, f.code->call_sites[ins.a].arg_symbols.size())
+			    : detail::callee_binding(pc.value, k, false, f.code->call_sites[ins.a].arg_symbols.size());
 			break;
+		}
 		case capture_form_stack:
 			if (below != SIZE_MAX) { b = detail::callee_binding(stack_[below], k, false, ins.a); }
 			break;
@@ -13644,17 +13306,12 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			auto* inst = holder->unchecked_instance();
 			class_definition* cd = inst->get_class_definition();
 			if (parallel_worker_) [[unlikely]] {
-				// Worker verdict (parallel-method-admission rule): the call op's text; a pin
-				// answers in unsafe mode too (no shared count or cache), unpinned is unsafe's business
-				const detail::parallel_method_pin* pin = parallel_method_pins_ && cd
-					? parallel_method_pins_->find(cd, member_id) : nullptr;
-				if (pin) { return {}; }
-				{
-					return raise_(make_error_code(runtime_error_code::unsupported_operation),
-						"method '{0}' was not admitted in this parallel body (admitted: single-overload "
-						"public methods of the element's class or its bases touching only element, local, or "
-						"captured-read state)", member_id);
-				}
+				// Worker verdict (parallel-method-admission rule): a pinned method answers, any other raises the call op's text
+				if (parallel_method_pins_ && cd && parallel_method_pins_->find(cd, member_id)) { return {}; }
+				return raise_(make_error_code(runtime_error_code::unsupported_operation),
+					"method '{0}' was not admitted in this parallel body (admitted: single-overload "
+					"public methods of the element's class or its bases touching only element, local, or "
+					"captured-read state)", member_id);
 			}
 			if (cached_global_env_ && cd) {
 				const uint64_t epoch = cd->method_epoch();
@@ -15644,7 +15301,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 	// shared method values out of class_definition::methods_ - a cross-worker count
 	// race on the non-atomic strong_ptr. Fields live on the (exclusively owned)
 	// instance, so read them directly; anything that is not a backing field would
-	// need method machinery - wall it (unsafe mode included: the count is the runtime's).
+	// need method machinery - wall it.
 	if (parallel_worker_) [[unlikely]] {
 		if (objectValue.parallel_object_borrow()) {
 			// a shared object: a script field as the worker's own copy, a host member on its view (KEEP BYTE-PARALLEL with
@@ -16525,24 +16182,23 @@ op_status vm_backend::fused_member_container(frame& f, size_t site, const script
 // the value op_get_member reads. A callee other than one parked script function (an overload set, a host callable, a default
 // window), or a place the resolver declines, reads the value, and the binding resolves it as before
 JAI_NOINLINE op_status vm_backend::exec_place_arg(frame& f, const vm_instruction& ins) {
-	if (!pending_callees_.empty()) {
-		const script_defined_function* fn = pending_callees_.back().fn;
-		if (fn && ins.c < fn->parameters().size() && fn->parameters()[ins.c].is_reference) {
-			const auto* m = static_cast<const member_expr*>(f.code->nodes[ins.a].get());
-			const uint64_t member_id = m->member_id != UINT64_MAX ? m->member_id : symbolizer_->intern(m->member);
-			if (const script_value* base = frame_slot(f, ins.b - 1)) {
-				if (class_instance* plain = detail::ref_plain_script_field(*base, m, symbolizer_)) {
-					if (auto ref = detail::plain_field_reference(*base, plain, m, member_id, engine_)) {
-						stack_.push_back(std::move(ref.value()));
-						return {};
-					}
+	assert(!pending_callees_.empty());
+	const script_defined_function* fn = pending_callees_.back().fn;
+	if (fn && ins.c < fn->parameters().size() && fn->parameters()[ins.c].is_reference) {
+		const auto* m = static_cast<const member_expr*>(f.code->nodes[ins.a].get());
+		const uint64_t member_id = m->member_id != UINT64_MAX ? m->member_id : symbolizer_->intern(m->member);
+		if (const script_value* base = frame_slot(f, ins.b - 1)) {
+			if (class_instance* plain = detail::ref_plain_script_field(*base, m, symbolizer_)) {
+				if (auto ref = detail::plain_field_reference(*base, plain, m, member_id, engine_)) {
+					stack_.push_back(std::move(ref.value()));
+					return {};
 				}
 			}
-			ensure_frame_member_scope(f, environment_.get());
-			if (auto resolved = detail::resolve_ref_lvalue(m, caller_view(&f), environment_.get(), engine_, symbolizer_)) {
-				stack_.push_back(std::move(resolved.value()));
-				return {};
-			}
+		}
+		ensure_frame_member_scope(f, environment_.get());
+		if (auto resolved = detail::resolve_ref_lvalue(m, caller_view(&f), environment_.get(), engine_, symbolizer_)) {
+			stack_.push_back(std::move(resolved.value()));
+			return {};
 		}
 	}
 	return exec_get_member(f, ins);
@@ -16684,7 +16340,7 @@ op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
 		stack_.push_back(make_null());
 	}
 	VM_TRY(exec_get_member(f, ins));
-	if (switch_to_) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "member temp across a frame switch"); }
+	assert(!switch_to_);
 	script_value out = std::move(stack_.back());
 	stack_.pop_back();
 	frame_slot_set(f, ins.b, std::move(out));
@@ -16777,7 +16433,7 @@ op_status vm_backend::exec_get_member_path(frame& f, const vm_instruction& ins) 
 				VM_TRY(member_access_value(f, object, static_cast<member_expr*>(const_cast<expression*>(links[k])), out));
 			}
 			if (is_unwinding_) { stack_.push_back(make_null()); return {}; }
-			if (switch_to_) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "member path across a frame switch"); }
+			assert(!switch_to_);
 			object = std::move(out);
 		}
 		stack_.push_back(std::move(object));
@@ -17140,7 +16796,7 @@ op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins)
 		value = std::move(stack_.back()); stack_.pop_back();
 	} else {
 		const script_value* vp = fast_operand(f, p.value, f.ip * 3);
-		if (!vp) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "member store: the value operand did not resolve"); }
+		assert(vp);
 		value = *vp;
 	}
 	script_value receiver = make_null();
@@ -17199,7 +16855,7 @@ op_status vm_backend::exec_velem_load(frame& f, const vm_instruction& ins) {
 	if (!elem) return op_status::failed;
 	script_value out = make_null();
 	VM_TRY(member_access_value(f, *elem, static_cast<member_expr*>(f.code->nodes[p.node].get()), out));
-	if (switch_to_) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "vector element read across a frame switch"); }
+	assert(!switch_to_);
 	frame_slot_set(f, ins.b, std::move(out));
 	return {};
 }
@@ -17215,7 +16871,7 @@ op_status vm_backend::exec_velem_store(frame& f, const vm_instruction& ins) {
 		value = std::move(stack_.back()); stack_.pop_back();
 	} else {
 		const script_value* vp = fast_operand(f, p.value, f.ip * 3);
-		if (!vp) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "vector element store: the value operand did not resolve"); }
+		assert(vp);
 		value = *vp;
 	}
 	size_t at = 0;
@@ -17269,7 +16925,7 @@ op_status vm_backend::exec_velem_store(frame& f, const vm_instruction& ins) {
 	stack_.push_back(std::move(current));
 	stack_.push_back(std::move(value));
 	VM_TRY(exec_member_compound(f, vm_instruction{opcode::op_member_compound, p.node, 0, p.kind & ~compound_flag_value_first}, ins_index));
-	if (switch_to_) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "vector element store across a frame switch"); }
+	assert(!switch_to_);
 	while (stack_.size() > depth) { stack_.pop_back(); }
 	return {};
 }
@@ -17645,8 +17301,6 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 	if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		rightValue = rightValue.bound_decoded_temp();
 
-	const size_t ci = currentValue.raw_storage_index();
-	const size_t ri = rightValue.raw_storage_index();
 	script_value resultValue = make_null();
 	const detail::compound_text text_pair = kind == compound_plus ? detail::compound_plus_text(currentValue, rightValue) : detail::compound_text::none;
 	if (text_pair == detail::compound_text::mismatch) { return raise_from(detail::compound_mismatch(0, currentValue, rightValue, engine_)); }
@@ -17665,96 +17319,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 			return {};
 		}
 	}
-	if (text_pair == detail::compound_text::append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the interpreter)
-		VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
-	} else if (detail::math::owns_arithmetic(ci, ri)) [[unlikely]] {   // a math field or component operand takes the math rows (KEEP BYTE-PARALLEL with the interpreter's member compound)
-		const detail::math::bop op = kind == compound_minus ? detail::math::bop::sub : kind == compound_star ? detail::math::bop::mul
-		                           : kind == compound_slash ? detail::math::bop::div : kind == compound_percent ? detail::math::bop::mod
-		                           : detail::math::bop::add;
-		auto math_result = detail::math::binary(op, currentValue, rightValue, engine_);
-		if (!math_result) {
-			return raise_from(math_result);
-		}
-		resultValue = std::move(math_result.value());
-	} else
-	switch (kind) {
-		case compound_plus: {
-			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-				script_int rr;
-				if (!ints::try_add(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '+='"));
-				resultValue = script_value(rr, engine_);
-			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-				script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-				resultValue = script_value(cf + rf, engine_);
-			} else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-				// engine::memory_cap chokepoint: deny the concat result before it exists
-				if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_as_string().size() + rightValue.unchecked_as_string().size())) [[unlikely]] {
-					return raise_from(detail::raise_memory_cap(*limits_));
-				}
-				resultValue = script_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string(), engine_);
-			} else if (detail::utf8_operands(ci, ri) && currentValue.is_text() && rightValue.is_text()) {
-				if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_text().size() + rightValue.unchecked_text().size())) [[unlikely]] {
-					return raise_from(detail::raise_memory_cap(*limits_));
-				}
-				resultValue = script_value::make_utf8(currentValue.unchecked_text() + rightValue.unchecked_text(), engine_);
-			} else {
-				return raise_from(detail::compound_mismatch(0, currentValue, rightValue, engine_));
-			}
-			break;
-		}
-		case compound_minus: {
-			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-				script_int rr;
-				if (!ints::try_sub(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '-='"));
-				resultValue = script_value(rr, engine_);
-			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-				script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-				resultValue = script_value(cf - rf, engine_);
-			} else {
-				return raise_from(detail::compound_mismatch(1, currentValue, rightValue, engine_));
-			}
-			break;
-		}
-		case compound_star: {
-			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-				script_int rr;
-				if (!ints::try_mul(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '*='"));
-				resultValue = script_value(rr, engine_);
-			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-				script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-				resultValue = script_value(cf * rf, engine_);
-			} else {
-				return raise_from(detail::compound_mismatch(2, currentValue, rightValue, engine_));
-			}
-			break;
-		}
-		case compound_slash: {
-			// the local's semantics: int / int divides as integers (C++), a zero divisor and the operand text come from the kernel
-			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
-			break;
-		}
-		case compound_percent: {
-			if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-				return raise_(make_error_code(runtime_error_code::modulo_by_zero),
-					"Modulo by zero");
-			}
-			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
-			break;
-		}
-		default:
-			if (!compound_kind_bitwise(kind)) {
-				return raise_(make_error_code(runtime_error_code::unsupported_operation),
-					"Unsupported compound assignment operator");
-			}
-			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, compound_kind_token(kind), rightValue, detail::compound_index(compound_kind_token(kind))));
-			break;
-	}
+	VM_TRY(member_compound_arith(kind, text_pair == detail::compound_text::append, currentValue, rightValue, resultValue));
 
 	if (member->is_static) {
 		script_value stored_static = make_null();
@@ -20499,18 +20064,14 @@ op_status vm_backend::exec_try_push(frame& f, const vm_instruction& ins) {
 }
 
 op_status vm_backend::exec_try_pop(frame&, const vm_instruction&) {
-	if (try_records_.empty()) {
-		return raise_(make_error_code(runtime_error_code::internal_error), "try record stack underflow");
-	}
+	assert(!try_records_.empty());
 	current_catch_var_id_ = try_records_.back().saved_catch_var_id;
 	pop_back_detached(try_records_);
 	return {};
 }
 
 op_status vm_backend::exec_catch_end(frame&, const vm_instruction&) {
-	if (try_records_.empty()) {
-		return raise_(make_error_code(runtime_error_code::internal_error), "try record stack underflow");
-	}
+	assert(!try_records_.empty());
 	try_record rec = std::move(try_records_.back());
 	try_records_.pop_back();
 	if (rec.catch_env_pushed) {
@@ -20821,9 +20382,7 @@ op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 
 op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 	const iter_proto& proto = f.code->iter_protos[ins.a];
-	if (iter_states_.empty()) {
-		return raise_(make_error_code(runtime_error_code::internal_error), "iteration state stack underflow");
-	}
+	assert(!iter_states_.empty());
 	iter_state& state = iter_states_.back();
 	if (state.is_map) {
 		return iter_next_map_entry(f, proto, state);
@@ -21479,26 +21038,12 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_this: return exec_this(f, ins);
 		case opcode::op_super: return exec_super(f, ins);
 		case opcode::op_from_this: return exec_from_this(f, ins);
-		case opcode::op_get_member: return exec_get_member(f, ins);
-		case opcode::op_get_member_this: return exec_get_member_this(f, ins);
-		case opcode::op_member_temp: return exec_member_temp(f, ins);
-		case opcode::op_get_member_path: return exec_get_member_path(f, ins);
-		case opcode::op_size_temp: return exec_size_temp(f, ins);
-		case opcode::op_velem_load: return exec_velem_load(f, ins);
-		case opcode::op_velem_store: return exec_velem_store(f, ins);
-		case opcode::op_set_member_fused: return exec_set_member_fused(f, ins);
-		case opcode::op_set_member_value: return exec_set_member_value(f, ins);
 		case opcode::op_get_static: return exec_get_static(f, ins);
-		case opcode::op_set_member: return exec_set_member(f, ins);
 		case opcode::op_set_static: return exec_set_static(f, ins);
 		case opcode::op_member_compound: return exec_member_compound(f, ins, static_cast<size_t>(&ins - f.code->code.data()));
-		case opcode::op_call_method: return exec_call_method(f, ins);
-		case opcode::op_call_builtin: return exec_call_builtin(f, ins);
-		case opcode::op_concat_append: return exec_concat_append(f, ins);
 		case opcode::op_concat_pending: return exec_concat_pending(f, ins);
 		case opcode::op_concat_operands: return exec_concat_operands(f, ins);
 		case opcode::op_concat_store: return exec_concat_store(f, ins);
-		case opcode::op_push_fused: return exec_push_fused(f, ins);
 		case opcode::op_new: return exec_new(f, ins);
 		case opcode::op_ctor_base: return exec_ctor_base(f, ins);
 		case opcode::op_ctor_delegate: return exec_ctor_delegate(f, ins);
@@ -21547,14 +21092,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_regex_constant: return exec_regex_constant(f, ins);
 		case opcode::op_index_store: return exec_index_store(f, ins);
 		case opcode::op_index_compound_fused: return exec_index_compound_fused(f, ins);
-		case opcode::op_math: return exec_math(f, ins);
 		case opcode::op_parallel_for: return exec_parallel_for(f, ins);
-		case opcode::op_binary_fused_decl: return exec_binary_fused_decl(f, ins);
-		case opcode::op_binary_fused_store: return exec_binary_fused_store(f, ins);
-		case opcode::op_index_fused: return exec_index_fused(f, ins);
-		case opcode::op_index_store_fused: return exec_index_store_fused(f, ins);
-		case opcode::op_index_compound_operand: return exec_index_compound_operand(f, ins);
-		case opcode::op_index_fused_decl: return exec_index_fused_decl<true>(f, ins);
 		case opcode::op_cast: return exec_cast(f, ins);
 		case opcode::op_take_temp: {
 			script_value* slot = frame_slot(f, ins.a);
@@ -21582,11 +21120,6 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 	{ if (vm_check((expr)) == op_status::failed) [[unlikely]] { \
 	      if (!handle_op_error(fp, records_base)) return op_status::failed; \
 	      continue; } }
-
-// Shared-slot variant for cases added after the frame-size ceiling was reached:
-// reuses one function-scope temp so run()'s Debug frame stays flat (see the
-// grouped exec_extended dispatch note below).
-#define VM_TRY_OP_SHARED(expr) VM_TRY_OP(expr)
 
 // Thin exception boundary: C++ exceptions thrown while in-loop frames are live get
 // converted to script unwinding AT the failing logical frame (the native path converts
@@ -22613,7 +22146,6 @@ op_status vm_backend::run_dispatch_profiled(frame*& fp, const size_t records_bas
 #else
 op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 #endif
-	checked_result<void> shared_op_result_;
 #ifdef JAISCRIPT_VM_PROFILE
 	// Self-time opcode histogram (diagnostic builds only; dumped by ~vm_backend).
 	// Elapsed cycles attribute to the PREVIOUS op at the next fetch, so call ops
@@ -22678,7 +22210,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				// implicit-return exit. Script unwinding latched by a bind-time conversion
 				// (a converting ctor that threw) falls to the loop bottom while the caller's
 				// try record is still live - `continue` would run its op_try_pop first
-				VM_TRY_OP_SHARED(fall_off_script_frame(fp));
+				VM_TRY_OP(fall_off_script_frame(fp));
 				if (is_unwinding_) [[unlikely]] { break; }
 				continue;
 
@@ -22689,7 +22221,8 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_true: stack_.push_back(script_value(true, engine_)); break;
 			case opcode::op_false: stack_.push_back(script_value(false, engine_)); break;
 			case opcode::op_pop: JAI_OP_LABEL(op_pop)
-				if (!stack_.empty()) { stack_.pop_back(); }
+				assert(!stack_.empty());
+				stack_.pop_back();
 				JAI_NEXT_OP();
 			case opcode::op_dup: stack_.push_back(stack_.back()); break;
 			case opcode::op_parallel_advance: {
@@ -22740,7 +22273,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				VM_TRY_OP(exec_store(f, ins));
 				JAI_NEXT_OP();
 			case opcode::op_compound_store: JAI_OP_LABEL(op_compound_store) VM_TRY_OP(exec_compound_store(f, ins)); JAI_NEXT_OP();
-			case opcode::op_compound_fused: VM_TRY_OP_SHARED(exec_compound_fused(f, ins)); break;
+			case opcode::op_compound_fused: VM_TRY_OP(exec_compound_fused(f, ins)); break;
 			case opcode::op_incdec: JAI_OP_LABEL(op_incdec)
 				VM_TRY_OP(exec_incdec(f, ins));
 				if (ins.c & incdec_flag_no_result) { stack_.pop_back(); }
@@ -22750,27 +22283,27 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_decl_ref_value: VM_TRY_OP(exec_decl_ref_value(f, ins)); break;
 			case opcode::op_destructure: VM_TRY_OP(exec_destructure(f, ins)); break;
 			case opcode::op_binary: VM_TRY_OP(exec_binary(f, ins)); break;
-			case opcode::op_binary_fused: JAI_OP_LABEL(op_binary_fused) VM_TRY_OP_SHARED(exec_binary_fused(f, ins)); JAI_NEXT_OP();
+			case opcode::op_binary_fused: JAI_OP_LABEL(op_binary_fused) VM_TRY_OP(exec_binary_fused(f, ins)); JAI_NEXT_OP();
 			case opcode::op_binary_fused_temp: JAI_OP_LABEL(op_binary_fused_temp) {
 				// Register-file producer: the fused kernel's result lands RAW in a
 				// compiler temp slot (inside the window; no store enforcement - temps
 				// are compiler-owned and consumed by the next fused operand read)
 				temp_lane_sink lane{this, f, ins.b};
-				VM_TRY_OP_SHARED(binary_fused_compute(f, ins.a, lane));
+				VM_TRY_OP(binary_fused_compute(f, ins.a, lane));
 				JAI_NEXT_OP();
 			}
 			// Typed scalar set: arithmetic lands in a temp, decl or store slot and may run
-			// the general kernel on a miss (which can enter a script frame: operator
-			// overloads), compare-jumps retarget ip, moves land or replay their pair
+			// the general kernel on a miss (an operator overload runs natively, never as an
+			// in-loop frame), compare-jumps retarget ip, moves land or replay their pair
 			case opcode::op_t_add_ii: JAI_OP_LABEL(op_t_add_ii) case opcode::op_t_sub_ii: JAI_OP_LABEL(op_t_sub_ii) case opcode::op_t_mul_ii: JAI_OP_LABEL(op_t_mul_ii) case opcode::op_t_div_ii: JAI_OP_LABEL(op_t_div_ii) case opcode::op_t_mod_ii: JAI_OP_LABEL(op_t_mod_ii)
 			case opcode::op_t_and_ii: JAI_OP_LABEL(op_t_and_ii) case opcode::op_t_or_ii: JAI_OP_LABEL(op_t_or_ii) case opcode::op_t_xor_ii: JAI_OP_LABEL(op_t_xor_ii) case opcode::op_t_shl_ii: JAI_OP_LABEL(op_t_shl_ii) case opcode::op_t_shr_ii: JAI_OP_LABEL(op_t_shr_ii)
 			case opcode::op_t_add_ff: JAI_OP_LABEL(op_t_add_ff) case opcode::op_t_sub_ff: JAI_OP_LABEL(op_t_sub_ff) case opcode::op_t_mul_ff: JAI_OP_LABEL(op_t_mul_ff) case opcode::op_t_div_ff: JAI_OP_LABEL(op_t_div_ff) case opcode::op_t_mod_ff: JAI_OP_LABEL(op_t_mod_ff)
-				VM_TRY_OP_SHARED(exec_typed_arith(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_typed_arith(f, ins));
+				assert(!switch_to_);
 				JAI_NEXT_OP();
 			case opcode::op_t_jlt_ii: JAI_OP_LABEL(op_t_jlt_ii) case opcode::op_t_jle_ii: JAI_OP_LABEL(op_t_jle_ii) case opcode::op_t_jgt_ii: JAI_OP_LABEL(op_t_jgt_ii) case opcode::op_t_jge_ii: JAI_OP_LABEL(op_t_jge_ii) case opcode::op_t_jeq_ii: JAI_OP_LABEL(op_t_jeq_ii) case opcode::op_t_jne_ii: JAI_OP_LABEL(op_t_jne_ii)
 			case opcode::op_t_jlt_ff: JAI_OP_LABEL(op_t_jlt_ff) case opcode::op_t_jle_ff: JAI_OP_LABEL(op_t_jle_ff) case opcode::op_t_jgt_ff: JAI_OP_LABEL(op_t_jgt_ff) case opcode::op_t_jge_ff: JAI_OP_LABEL(op_t_jge_ff) case opcode::op_t_jeq_ff: JAI_OP_LABEL(op_t_jeq_ff) case opcode::op_t_jne_ff: JAI_OP_LABEL(op_t_jne_ff)
-				VM_TRY_OP_SHARED(exec_typed_cmp_jump(f, ins));
+				VM_TRY_OP(exec_typed_cmp_jump(f, ins));
 				if (is_unwinding_) [[unlikely]] {
 					if (!handle_throw_unwind(fp, records_base)) {
 						return {};
@@ -22779,11 +22312,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				}
 				JAI_DISPATCH_HERE();
 			case opcode::op_d_add: JAI_OP_LABEL(op_d_add) case opcode::op_d_sub: JAI_OP_LABEL(op_d_sub) case opcode::op_d_mul: JAI_OP_LABEL(op_d_mul) case opcode::op_d_div: JAI_OP_LABEL(op_d_div) case opcode::op_d_mod: JAI_OP_LABEL(op_d_mod) case opcode::op_d_and: JAI_OP_LABEL(op_d_and) case opcode::op_d_or: JAI_OP_LABEL(op_d_or) case opcode::op_d_xor: JAI_OP_LABEL(op_d_xor) case opcode::op_d_shl: JAI_OP_LABEL(op_d_shl) case opcode::op_d_shr: JAI_OP_LABEL(op_d_shr)
-				VM_TRY_OP_SHARED(exec_dyn_arith(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_dyn_arith(f, ins));
+				assert(!switch_to_);
 				JAI_NEXT_OP();
 			case opcode::op_d_jlt: JAI_OP_LABEL(op_d_jlt) case opcode::op_d_jle: JAI_OP_LABEL(op_d_jle) case opcode::op_d_jgt: JAI_OP_LABEL(op_d_jgt) case opcode::op_d_jge: JAI_OP_LABEL(op_d_jge) case opcode::op_d_jeq: JAI_OP_LABEL(op_d_jeq) case opcode::op_d_jne: JAI_OP_LABEL(op_d_jne)
-				VM_TRY_OP_SHARED(exec_dyn_cmp_jump(f, ins));
+				VM_TRY_OP(exec_dyn_cmp_jump(f, ins));
 				if (is_unwinding_) [[unlikely]] {
 					if (!handle_throw_unwind(fp, records_base)) {
 						return {};
@@ -22791,32 +22324,32 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 					continue;
 				}
 				JAI_DISPATCH_HERE();
-			case opcode::op_t_decl_mov: JAI_OP_LABEL(op_t_decl_mov) VM_TRY_OP_SHARED(exec_typed_decl_mov(f, ins)); JAI_NEXT_OP();
-			case opcode::op_t_decl_const: JAI_OP_LABEL(op_t_decl_const) VM_TRY_OP_SHARED(exec_typed_decl_const(f, ins)); JAI_NEXT_OP();
-			case opcode::op_t_store_mov: JAI_OP_LABEL(op_t_store_mov) VM_TRY_OP_SHARED(exec_typed_store_mov(f, ins)); JAI_NEXT_OP();
-			case opcode::op_t_store_const: JAI_OP_LABEL(op_t_store_const) VM_TRY_OP_SHARED(exec_typed_store_const(f, ins)); JAI_NEXT_OP();
-			case opcode::op_operand_temp: VM_TRY_OP_SHARED(exec_operand_temp(f, ins)); break;
-			case opcode::op_call_temp: VM_TRY_OP_SHARED(exec_call_temp(f, ins)); break;
+			case opcode::op_t_decl_mov: JAI_OP_LABEL(op_t_decl_mov) VM_TRY_OP(exec_typed_decl_mov(f, ins)); JAI_NEXT_OP();
+			case opcode::op_t_decl_const: JAI_OP_LABEL(op_t_decl_const) VM_TRY_OP(exec_typed_decl_const(f, ins)); JAI_NEXT_OP();
+			case opcode::op_t_store_mov: JAI_OP_LABEL(op_t_store_mov) VM_TRY_OP(exec_typed_store_mov(f, ins)); JAI_NEXT_OP();
+			case opcode::op_t_store_const: JAI_OP_LABEL(op_t_store_const) VM_TRY_OP(exec_typed_store_const(f, ins)); JAI_NEXT_OP();
+			case opcode::op_operand_temp: VM_TRY_OP(exec_operand_temp(f, ins)); break;
+			case opcode::op_call_temp: VM_TRY_OP(exec_call_temp(f, ins)); break;
 			case opcode::op_math_temp: JAI_OP_LABEL(op_math_temp)
-				VM_TRY_OP_SHARED(exec_math_temp(f, ins));
+				VM_TRY_OP(exec_math_temp(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }   // a stdlib alias's real call entered a script frame
 				JAI_NEXT_OP();
-			case opcode::op_math_guard: VM_TRY_OP_SHARED(exec_math_guard(f, ins)); break;
-			case opcode::op_math: JAI_OP_LABEL(op_math) VM_TRY_OP_SHARED(exec_math(f, ins)); JAI_NEXT_OP();
-			case opcode::op_unary_temp: VM_TRY_OP_SHARED(exec_unary_temp(f, ins)); break;
+			case opcode::op_math_guard: VM_TRY_OP(exec_math_guard(f, ins)); break;
+			case opcode::op_math: JAI_OP_LABEL(op_math) VM_TRY_OP(exec_math(f, ins)); JAI_NEXT_OP();
+			case opcode::op_unary_temp: VM_TRY_OP(exec_unary_temp(f, ins)); break;
 
 			// Both always retarget f.ip
 			case opcode::op_cfor_prep:
-				VM_TRY_OP_SHARED(exec_cfor_prep(f, ins));
+				VM_TRY_OP(exec_cfor_prep(f, ins));
 				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }   // the block its entry ran made a call
 				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
 				continue;
-			case opcode::op_cfor_back: JAI_OP_LABEL(op_cfor_back) VM_TRY_OP_SHARED(exec_cfor_back(f, ins)); JAI_DISPATCH_HERE();
+			case opcode::op_cfor_back: JAI_OP_LABEL(op_cfor_back) VM_TRY_OP(exec_cfor_back(f, ins)); JAI_DISPATCH_HERE();
 
 			// Retargets f.ip on success; on script unwinding (custom comparison threw)
 			// ip stays parked here and the loop-bottom unwind handling is replicated
 			case opcode::op_fused_cmp_jump: JAI_OP_LABEL(op_fused_cmp_jump)
-				VM_TRY_OP_SHARED(exec_fused_cmp_jump(f, ins));
+				VM_TRY_OP(exec_fused_cmp_jump(f, ins));
 				if (is_unwinding_) [[unlikely]] {
 					if (!handle_throw_unwind(fp, records_base)) {
 						return {};
@@ -22825,25 +22358,26 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				}
 				JAI_DISPATCH_HERE();
 			case opcode::op_cfor_pop:
-				if (!cfor_states_.empty()) { cfor_states_.pop_back(); }
+				assert(!cfor_states_.empty());
+				cfor_states_.pop_back();
 				break;
 			case opcode::op_graft_depth: current_call_depth_ += ins.a ? 1 : -1; break;   // a raise unwinding out of the graft restores the depth at its handler or at the run's end
 			case opcode::op_index: VM_TRY_OP(exec_index(f, ins)); break;
 			case opcode::op_unary: VM_TRY_OP(exec_unary(f, ins)); break;
 			case opcode::op_inline_guard: VM_TRY_OP(exec_inline_guard(f, ins)); continue;   // the executor sets the ip: the next instruction, or the fallback
 			case opcode::op_probe_callee: JAI_OP_LABEL(op_probe_callee)
-				VM_TRY_OP_SHARED(exec_probe_callee(f, ins));
+				VM_TRY_OP(exec_probe_callee(f, ins));
 				break;
 			case opcode::op_probe_member:
-				VM_TRY_OP_SHARED(exec_probe_member(f, ins));
+				VM_TRY_OP(exec_probe_member(f, ins));
 				break;
 			case opcode::op_call_typed: JAI_OP_LABEL(op_call_typed)
-				VM_TRY_OP_SHARED(exec_call_from_scratch(f, ins));
+				VM_TRY_OP(exec_call_from_scratch(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (!is_unwinding_ && call_typed_land(f, stack_.back())) { stack_.pop_back(); ++f.ip; }   // a native callee's result: the consumer is skipped
 				break;
 			case opcode::op_call_from_scratch: JAI_OP_LABEL(op_call_from_scratch)
-				VM_TRY_OP_SHARED(exec_call_from_scratch(f, ins));
+				VM_TRY_OP(exec_call_from_scratch(f, ins));
 				if (switch_to_) {
 					// Enter the pushed callee; the suspended caller's ip parks on the
 					// call op (stack-trace parity with op_call)
@@ -22871,100 +22405,99 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_closure: VM_TRY_OP(exec_closure(f, ins)); break;
 			case opcode::op_bind_captures: VM_TRY_OP(exec_bind_captures(f, ins)); break;
 
-			// The five hottest fused ops (7.6M/200t on GLOOM) skip exec_extended's
-			// second switch: direct dispatch on the shared temp (frame stays flat),
-			// keeping the group's switch_to_ tail (operator replays may park callees).
+			// The five hottest fused ops (7.6M/200t on GLOOM) dispatch directly, outside
+			// the grouped exec_extended labels; none enters an in-loop frame.
 			// PLACED ABOVE the grouped labels — inserting them mid-group orphans the
 			// earlier labels onto the first direct body (caught by Debug's OOB assert)
 			case opcode::op_binary_fused_decl: JAI_OP_LABEL(op_binary_fused_decl)
-				VM_TRY_OP_SHARED(exec_binary_fused_decl(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_binary_fused_decl(f, ins));
+				assert(!switch_to_);
 				JAI_NEXT_OP();
 			case opcode::op_binary_fused_store: JAI_OP_LABEL(op_binary_fused_store)
-				VM_TRY_OP_SHARED(exec_binary_fused_store(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_binary_fused_store(f, ins));
+				assert(!switch_to_);
 				JAI_NEXT_OP();
 			case opcode::op_index_fused: JAI_OP_LABEL(op_index_fused)
-				VM_TRY_OP_SHARED(exec_index_fused(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_index_fused(f, ins));
+				assert(!switch_to_);
 				JAI_NEXT_OP();
 			case opcode::op_index_store_fused: JAI_OP_LABEL(op_index_store_fused)
-				VM_TRY_OP_SHARED(exec_index_store_fused(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_index_store_fused(f, ins));
+				assert(!switch_to_);
 				JAI_NEXT_OP();
 			case opcode::op_index_compound_operand:
-				VM_TRY_OP_SHARED(exec_index_compound_operand(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_index_compound_operand(f, ins));
+				assert(!switch_to_);
 				break;
 			case opcode::op_index_fused_decl: JAI_OP_LABEL(op_index_fused_decl)
-				VM_TRY_OP_SHARED(exec_index_fused_decl<true>(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_index_fused_decl<true>(f, ins));
+				assert(!switch_to_);
 				JAI_NEXT_OP();
 			// The member trio (GET_MEMBER 477k / CALL_METHOD 983k per 200 GLOOM ticks)
 			// dispatch directly too; statement-position stores and calls drop their
 			// dead result together with the pop that follows
 			case opcode::op_get_member: JAI_OP_LABEL(op_get_member)
-				VM_TRY_OP_SHARED(exec_get_member(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_get_member(f, ins));
+				assert(!switch_to_);
 				JAI_NEXT_OP();
 			case opcode::op_get_member_this: JAI_OP_LABEL(op_get_member_this)
-				VM_TRY_OP_SHARED(exec_get_member_this(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_get_member_this(f, ins));
+				assert(!switch_to_);
 				JAI_NEXT_OP();
 			case opcode::op_member_temp: JAI_OP_LABEL(op_member_temp)
-				VM_TRY_OP_SHARED(exec_member_temp(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_member_temp(f, ins));
+				assert(!switch_to_);
 				JAI_NEXT_OP();
 			case opcode::op_get_member_path:
-				VM_TRY_OP_SHARED(exec_get_member_path(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_get_member_path(f, ins));
+				assert(!switch_to_);
 				JAI_NEXT_OP();
 			case opcode::op_size_temp:
-				VM_TRY_OP_SHARED(exec_size_temp(f, ins));
+				VM_TRY_OP(exec_size_temp(f, ins));
 				break;
 			case opcode::op_set_member_fused:
-				VM_TRY_OP_SHARED(exec_set_member_fused(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_set_member_fused(f, ins));
+				assert(!switch_to_);
 				break;
 			case opcode::op_set_member_value: JAI_OP_LABEL(op_set_member_value)
-				VM_TRY_OP_SHARED(exec_set_member_value(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_set_member_value(f, ins));
+				assert(!switch_to_);
 				JAI_NEXT_OP();
 			case opcode::op_velem_load:
-				VM_TRY_OP_SHARED(exec_velem_load(f, ins));
+				VM_TRY_OP(exec_velem_load(f, ins));
 				break;
 			case opcode::op_velem_store:
-				VM_TRY_OP_SHARED(exec_velem_store(f, ins));
+				VM_TRY_OP(exec_velem_store(f, ins));
 				break;
 			case opcode::op_set_member:
-				VM_TRY_OP_SHARED(exec_set_member(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_set_member(f, ins));
+				assert(!switch_to_);
 				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
 				break;
 			case opcode::op_call_method: JAI_OP_LABEL(op_call_method)
-				VM_TRY_OP_SHARED(exec_call_method(f, ins));
+				VM_TRY_OP(exec_call_method(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
 				break;
 			case opcode::op_concat_append:
-				VM_TRY_OP_SHARED(exec_concat_append(f, ins));
+				VM_TRY_OP(exec_concat_append(f, ins));
 				break;
 			case opcode::op_call_builtin: JAI_OP_LABEL(op_call_builtin)
-				VM_TRY_OP_SHARED(exec_call_builtin(f, ins));
+				VM_TRY_OP(exec_call_builtin(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
 				break;
 			case opcode::op_push_fused:
-				VM_TRY_OP_SHARED(exec_push_fused(f, ins));
+				VM_TRY_OP(exec_push_fused(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				break;
 			case opcode::op_t_push:
-				VM_TRY_OP_SHARED(exec_typed_push(f, ins));
+				VM_TRY_OP(exec_typed_push(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				break;
 			case opcode::op_t_load: JAI_OP_LABEL(op_t_load)
-				VM_TRY_OP_SHARED(exec_typed_load(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				VM_TRY_OP(exec_typed_load(f, ins));
+				assert(!switch_to_);
 				JAI_NEXT_OP();
 
 			// One grouped dispatch: a VM_TRY_OP temp per case would bloat run()'s
@@ -23109,17 +22642,17 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_cells_back:
 			case opcode::op_cells_enter:
 			case opcode::op_cells_resume:
-				VM_TRY_OP_SHARED(exec_cells_back(f, ins));
+				VM_TRY_OP(exec_cells_back(f, ins));
 				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
 				continue;
 			case opcode::op_cells_cfor_back:
-				VM_TRY_OP_SHARED(exec_cells_cfor_back(f, ins));
+				VM_TRY_OP(exec_cells_cfor_back(f, ins));
 				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
 				continue;
 			case opcode::op_c_land:
-				VM_TRY_OP_SHARED(cells_resume(f, ins));
+				VM_TRY_OP(cells_resume(f, ins));
 				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
 				continue;
@@ -23131,10 +22664,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 						stack_.pop_back();
 						if (ins.c && !detail::return_value_plain(v)) { materialize_return(f, v, ins.c, k_invalid_u32); }
 					}
-					VM_TRY_OP_SHARED(entry_return_finish(f, std::move(v), ins.b));
+					VM_TRY_OP(entry_return_finish(f, std::move(v), ins.b));
 					return {};
 				}
-				VM_TRY_OP_SHARED(return_from_script_frame(fp, ins));
+				VM_TRY_OP(return_from_script_frame(fp, ins));
 				// A return conversion that set script unwinding falls to the loop bottom while
 				// the caller's try record is still live (see op_halt)
 				if (is_unwinding_) [[unlikely]] { break; }
@@ -23146,20 +22679,20 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			// set script unwinding falls to the loop bottom exactly like op_binary would.
 			case opcode::op_return_ident: JAI_OP_LABEL(op_return_ident) {
 				if (call_records_top_ == records_base) {
-					VM_TRY_OP_SHARED(exec_return_ident<true>(fp, ins));
+					VM_TRY_OP(exec_return_ident<true>(fp, ins));
 					return {};
 				}
-				VM_TRY_OP_SHARED(exec_return_ident<false>(fp, ins));
+				VM_TRY_OP(exec_return_ident<false>(fp, ins));
 				if (is_unwinding_) [[unlikely]] { break; }
 				continue;
 			}
 			case opcode::op_return_binary: JAI_OP_LABEL(op_return_binary) {
 				if (call_records_top_ == records_base) {
-					VM_TRY_OP_SHARED(exec_return_binary<true>(fp, ins));
+					VM_TRY_OP(exec_return_binary<true>(fp, ins));
 					if (is_unwinding_) [[unlikely]] { break; }
 					return {};
 				}
-				VM_TRY_OP_SHARED(exec_return_binary<false>(fp, ins));
+				VM_TRY_OP(exec_return_binary<false>(fp, ins));
 				if (is_unwinding_) [[unlikely]] { break; }
 				continue;
 			}
@@ -23224,7 +22757,6 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 #undef JAI_DISPATCH_AT
 #endif
 #undef VM_TRY_OP
-#undef VM_TRY_OP_SHARED
 
 // ============================================================
 // Execution entry points
@@ -23633,8 +23165,8 @@ std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
 	if (it != chunk_cache_.end()) {
 		return it->second.compiled;
 	}
-	// In-region compiles (unsafe-mode dispatch; admitted paths precompile at the
-	// barrier) serialize engine-wide: compilation copies AST literal strong_ptrs
+	// In-region compiles (a constructor compiles in the region; admitted methods precompile at
+	// the barrier) serialize engine-wide: compilation copies AST literal strong_ptrs
 	// whose counts are non-atomic
 	std::unique_lock<std::mutex> region_compile_guard;
 	if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
@@ -24863,14 +24395,8 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 			return finish(std::move(value));
 		}
 	}
-	fused_operand operand;
-	operand.slot = ins.a;
-	operand.symbol = ins.b;
-	operand.load_flags = ins.c;
-	operand.this_slot = this_field_slot_at(f);
-	operand.this_global = !operand.this_slot && f.ip < f.code->this_global_ips.size() && f.code->this_global_ips[f.ip] == ins.b + 1;
 	std::optional<script_value> scratch;
-	const script_value* resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
+	const script_value* resolved = fused_ident_value(f, ident_operand_at(f, ins), scratch, f.ip * 3);
 	if (!resolved) return op_status::failed;
 	if (scratch && resolved == &*scratch) {   // the resolution's own copy: the result takes it
 		script_value value(std::move(*scratch));

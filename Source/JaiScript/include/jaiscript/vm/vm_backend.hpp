@@ -864,18 +864,16 @@ namespace jai::vm {
         // guards — these assume a live locals home.
         // Statement-position results: a call/store op immediately followed by op_pop
         // discards its value, so the landing drops the value and skips the pop dispatch
-        // together (the compiler still emits the pop; every landing route honors it)
+        // together (the compiler still emits the pop; every landing route honors it); every chunk ends in op_halt, so the next
+        // instruction exists
         bool next_op_discards_result(const frame& f) const noexcept {
-            const auto& code = f.code->code;
-            return f.ip + 1 < code.size() && code[f.ip + 1].op == opcode::op_pop;
+            return f.code->code[f.ip + 1].op == opcode::op_pop;
         }
         // An assignment expression's value is consumed unless a POP follows (a statement) or the
         // top-level implicit return does: the host's convenience result stays the right-hand side
         // (no read-back copy, no extra getter call for a statement-shaped last line)
         bool assignment_result_used(const frame& f) const noexcept {
-            const auto& code = f.code->code;
-            if (f.ip + 1 >= code.size()) { return true; }
-            const opcode next = code[f.ip + 1].op;
+            const opcode next = f.code->code[f.ip + 1].op;
             return next != opcode::op_pop && next != opcode::op_implicit_return;
         }
         // every chunk ends in op_halt, so a call's next instruction exists
@@ -1442,6 +1440,7 @@ namespace jai::vm {
         // native-entry variants (the entry twins set return_value_ like op_return's
         // entry branch)
         template <bool Entry> op_status exec_return_ident(frame*& fp, const vm_instruction& ins);   // Entry: the entry frame's return door
+        static fused_operand ident_operand_at(const frame& f, const vm_instruction& ins) noexcept;
         template <bool Entry> op_status exec_return_binary(frame*& fp, const vm_instruction& ins);
         op_status fall_off_script_frame(frame*& fp);
         // Return-site conversion (op_return_convert inside try regions) and the
@@ -1612,7 +1611,6 @@ namespace jai::vm {
         op_status raise_method_value(const member_expr* expr, const script_value& object, bool bindable);   // obj.method without a call
         op_status raise_bare_method_value(uint64_t name_id, const script_value& self);   // a bare method name without a call
         std::optional<op_status> bare_method_reference(frame& f, uint64_t name_id);   // a reference to a bare method name
-        bool probe_callee_resolving_ = false;   // exec_probe_callee -> fused_ident_value: the bare name is being called
 
         struct member_target {
             strong_ptr<class_instance> instance;
@@ -1661,8 +1659,7 @@ namespace jai::vm {
         void exec_array(frame& f, const vm_instruction& ins);
         void exec_map(frame& f, const vm_instruction& ins);
 
-        script_value* resolve_local_or_env(frame& f, uint32_t slot, uint64_t symbol_id);
-        script_value* resolve_local_or_env_cached(frame& f, uint32_t slot, uint64_t symbol_id);
+        script_value* resolve_local_or_env(frame& f, uint32_t slot, uint64_t symbol_id, size_t cache_slot = SIZE_MAX);
         // The cell an identifier RECEIVER of a string builtin mutates: exec_load's ladder as
         // a pointer (:: door, slot, member scope, env). KEEP BYTE-PARALLEL with
         // interpreter::string_receiver_cell.
@@ -2331,6 +2328,8 @@ namespace jai::vm {
         op_status exec_incdec(frame& f, const vm_instruction& ins);
         op_status exec_decl_var(frame& f, const vm_instruction& ins);
         op_status exec_decl_var_full(frame& f, const vm_instruction& ins);
+        op_status member_compound_arith(uint32_t kind, bool text_append, const script_value& currentValue,
+                                        const script_value& rightValue, script_value& result);
         op_status bind_graft_parameter(frame& f, const variable_decl* decl);   // a graft's by-value parameter: bind_parameters's by-value lane over the popped argument
         bool graft_parameter_alias(frame& f, const variable_decl* decl, const script_value& value);   // the read-only alias the call would take
         op_status exec_decl_ref_ident(frame& f, const vm_instruction& ins);
@@ -2375,6 +2374,16 @@ namespace jai::vm {
         // variant lands in the declared slot.
         template <bool SinkIsStack, typename Sink>
         op_status index_fused_read(frame& f, const vm_instruction& ins, Sink&& sink, uint32_t extra_flags = 0);
+        struct fused_index_operand {
+            enum outcome_kind : uint8_t { operand, boxed, settled };
+            std::optional<script_value> computed, container_snapshot, index_scratch;
+            const script_value* index = nullptr;
+            script_int raw = 0;
+            bool have_raw = false;
+            outcome_kind outcome = operand;
+        };
+        op_status resolve_fused_index_operand(frame& f, const fused_index_proto& p, const script_value*& container_ptr,
+                                              const script_value* pending, fused_index_operand& out);
         // Typed element-read lane for the proven decl shape (fused_index_proto::typed_lane):
         // operands straight off the frame or the per-site cache, the int index folded raw,
         // the element landed in the declared slot by the decl lane's rules. false = a
@@ -2850,7 +2859,7 @@ namespace jai::vm {
         // return instead of a 56-byte checked_result per operand).
         const script_value* fused_ident_value(frame& f, const fused_operand& operand,
                                               std::optional<script_value>& scratch,
-                                              size_t cache_slot, bool* observed = nullptr);   // observed: the resolution ran a getter (a property reference, a bare C++ property)
+                                              size_t cache_slot, bool* observed = nullptr, bool resolving_callee = false);   // observed: the resolution ran a getter (a property reference, a bare C++ property); resolving_callee: the bare name is being called
         op_status exec_push_fused(frame& f, const vm_instruction& ins);
         op_status exec_index(frame& f, const vm_instruction& ins);
         op_status exec_index_impl(frame& f, const vm_instruction& ins);
